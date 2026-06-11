@@ -1,4 +1,4 @@
-/**
+﻿/**
  * This is a API server
  */
 
@@ -61,52 +61,53 @@ if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
     cert: fs.readFileSync(certPath),
   }
   server = https.createServer(sslOptions, app)
-  console.log('[HTTPS] ✅ 已加载 SSL 证书，HTTPS 模式启动')
+  console.log('[HTTPS] 已加载 SSL 证书，HTTPS 模式启动')
 } else {
   server = http.createServer(app)
-  console.log('[HTTP] ⚠️  未检测到 certs/ 目录下的证书，HTTP 模式启动')
-  console.log('[HTTP]    桌面通知功能需要 HTTPS，运行 node scripts/generate-cert.mjs 生成证书')
+  console.log('[HTTP] 未检测到 certs/ 目录下的证书，HTTP 模式启动')
+  console.log('[HTTP] 桌面通知功能需要 HTTPS，运行 node scripts/generate-cert.mjs 生成证书')
 }
+
 // Socket.io CORS 配置 - 与 Express 保持一致
 const socketAllowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
-  : ['http://localhost:5174', 'http://localhost:3001', 'http://127.0.0.1:5174'];
+  : ['http://localhost:5174', 'http://localhost:3001', 'http://127.0.0.1:5174']
 
 export const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
       // 允许无 origin 的请求（如 Postman、移动端）
-      if (!origin) return callback(null, true);
+      if (!origin) return callback(null, true)
       // 允许配置的来源
-      if (socketAllowedOrigins.includes(origin)) return callback(null, true);
+      if (socketAllowedOrigins.includes(origin)) return callback(null, true)
       // 允许局域网 IP
       if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?\/?$/.test(origin)) {
-        return callback(null, true);
+        return callback(null, true)
       }
-      callback(new Error('CORS not allowed'));
+      callback(new Error('CORS not allowed'))
     },
-    methods: ['GET', 'POST']
-  }
+    methods: ['GET', 'POST'],
+  },
 })
 
 // 局域网环境 CORS 限制
 const allowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
-  : ['http://localhost:5174', 'http://localhost:3001', 'http://127.0.0.1:5174'];
+  : ['http://localhost:5174', 'http://localhost:3001', 'http://127.0.0.1:5174']
 
 app.use(cors({
   origin: (origin, callback) => {
     // 允许无 origin 的请求（如 server-to-server、Postman）
-    if (!origin) return callback(null, true);
+    if (!origin) return callback(null, true)
     // 允许配置的来源
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true)
     // 允许局域网 IP（192.168.x.x, 10.x.x.x, 172.16-31.x.x）
     if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?\/?$/.test(origin)) {
-      return callback(null, true);
+      return callback(null, true)
     }
-    callback(new Error('CORS not allowed'));
+    callback(new Error('CORS not allowed'))
   },
-  credentials: true
+  credentials: true,
 }))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
@@ -118,11 +119,21 @@ app.use('/api/', apiLimiter)
 const distPath = path.join(__dirname, '..', 'dist')
 app.use(express.static(distPath, {
   setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript');
-    if (filePath.endsWith('.mjs')) res.setHeader('Content-Type', 'application/javascript');
-    if (filePath.endsWith('.css')) res.setHeader('Content-Type', 'text/css');
-    if (filePath.endsWith('.wasm')) res.setHeader('Content-Type', 'application/wasm');
-  }
+    const relativePath = path.relative(distPath, filePath).replace(/\\/g, '/')
+    const isHtmlEntry = relativePath === 'index.html'
+    const isHashedAsset = /^assets\/.+\.[a-z0-9]{8,}\.(js|mjs|css)$/i.test(relativePath)
+
+    if (isHtmlEntry) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    } else if (isHashedAsset) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    }
+
+    if (filePath.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript')
+    if (filePath.endsWith('.mjs')) res.setHeader('Content-Type', 'application/javascript')
+    if (filePath.endsWith('.css')) res.setHeader('Content-Type', 'text/css')
+    if (filePath.endsWith('.wasm')) res.setHeader('Content-Type', 'application/wasm')
+  },
 }))
 
 app.use('/api/auth', authRoutes)
@@ -172,14 +183,15 @@ app.use((req: Request, res: Response) => {
     })
   } else if (req.path.match(/\.(js|mjs|css|wasm|png|jpg|svg|ico|woff2?)$/)) {
     // 资源文件请求但未找到，返回 404 而不是 SPA fallback
-    res.status(404).end();
+    res.status(404).end()
   } else {
     // SPA 路由：所有非 API 请求返回 index.html
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
     res.sendFile(path.join(distPath, 'index.html'))
   }
 })
 
-setSocketIO(io);
+setSocketIO(io)
 
 io.on('connection', (socket) => {
   socket.on('subscribe', (userId) => {
@@ -205,30 +217,30 @@ io.on('connection', (socket) => {
 
 export async function startServer() {
   await initDatabase()
-  
+
   // 启动时自动备份一次
   try {
-    const name = createBackup();
-    console.log(`[Backup] 启动备份: ${name}`);
-    cleanOldBackups();
+    const name = createBackup()
+    console.log(`[Backup] 启动备份: ${name}`)
+    cleanOldBackups()
   } catch (e) {
-    console.warn('[Backup] 启动备份失败:', e);
+    console.warn('[Backup] 启动备份失败:', e)
   }
-  
+
   // 每天凌晨3点自动备份
   setInterval(() => {
-    const now = new Date();
+    const now = new Date()
     if (now.getHours() === 3 && now.getMinutes() === 0) {
       try {
-        const name = createBackup();
-        console.log(`[Backup] 定时备份: ${name}`);
-        cleanOldBackups();
+        const name = createBackup()
+        console.log(`[Backup] 定时备份: ${name}`)
+        cleanOldBackups()
       } catch (e) {
-        console.warn('[Backup] 定时备份失败:', e);
+        console.warn('[Backup] 定时备份失败:', e)
       }
     }
-  }, 60 * 1000);
-  
+  }, 60 * 1000)
+
   const PORT = process.env.PORT || 3001
   const isHttps = server instanceof https.Server
   server.listen(PORT, () => {
@@ -236,7 +248,7 @@ export async function startServer() {
     console.log(`Server ready on ${protocol}://0.0.0.0:${PORT}`)
     if (isHttps) {
       console.log(`[HTTPS] 局域网访问: https://192.168.1.9:${PORT}`)
-      console.log('[HTTPS] 首次访问浏览器会提示不安全，点"高级"→"继续访问"即可')
+      console.log('[HTTPS] 首次访问浏览器会提示不安全，点"高级"继续访问即可')
     }
   })
 }

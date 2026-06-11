@@ -4,42 +4,75 @@ import Layout from "@/components/Layout";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import RealtimeToast from "@/components/RealtimeToast";
 
-// 懒加载页面组件
-const Login = lazy(() => import("@/pages/Login"));
-const Home = lazy(() => import("@/pages/Home"));
-const Topics = lazy(() => import("@/pages/Topics"));
-const TopicDetail = lazy(() => import("@/pages/TopicDetail"));
-const AddTopic = lazy(() => import("@/pages/AddTopic"));
-const Production = lazy(() => import("@/pages/Production"));
-const ProductionDetail = lazy(() => import("@/pages/ProductionDetail"));
-const Shooting = lazy(() => import("@/pages/Shooting"));
-const ShootingDetail = lazy(() => import("@/pages/ShootingDetail"));
-const Publishing = lazy(() => import("@/pages/Publishing"));
-const PublishingDetail = lazy(() => import("@/pages/PublishingDetail"));
-const Analytics = lazy(() => import("@/pages/Analytics"));
-const Users = lazy(() => import("@/pages/Users"));
-const Resources = lazy(() => import("@/pages/Resources"));
-const Messages = lazy(() => import("@/pages/Messages"));
-const Kanban = lazy(() => import("@/pages/Kanban"));
-const CalendarPage = lazy(() => import("@/pages/Calendar"));
-const Inspirations = lazy(() => import("@/pages/Inspirations"));
-const Achievements = lazy(() => import("@/pages/Achievements"));
-const ActivityLog = lazy(() => import("@/pages/ActivityLog"));
-const DouyinAnalytics = lazy(() => import("@/pages/DouyinAnalytics"));
-const PermissionManagement = lazy(() => import("@/pages/PermissionManagement"));
-const WorkflowDesigner = lazy(() => import("@/pages/WorkflowDesigner"));
-const NotificationSettings = lazy(() => import("@/pages/NotificationSettings"));
-const ExportPage = lazy(() => import("@/pages/ExportPage"));
-const PomodoroPage = lazy(() => import("@/pages/PomodoroPage"));
-const BackupPage = lazy(() => import("@/pages/BackupPage"));
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  importer: () => Promise<{ default: T }>,
+  chunkName: string,
+) {
+  return lazy(async () => {
+    const retryKey = `xmt:lazy-retry:${chunkName}`;
 
-// 加载中占位
+    try {
+      const module = await importer();
+      sessionStorage.removeItem(retryKey);
+      return module;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isChunkLoadError =
+        /Failed to fetch dynamically imported module/i.test(message) ||
+        /Importing a module script failed/i.test(message) ||
+        /error loading dynamically imported module/i.test(message);
+
+      if (isChunkLoadError && typeof window !== 'undefined') {
+        const hasRetried = sessionStorage.getItem(retryKey) === '1';
+
+        if (!hasRetried) {
+          sessionStorage.setItem(retryKey, '1');
+          window.location.reload();
+          return new Promise<never>(() => {});
+        }
+
+        sessionStorage.removeItem(retryKey);
+      }
+
+      throw error;
+    }
+  });
+}
+
+const Login = lazyWithRetry(() => import("@/pages/Login"), "Login");
+const Home = lazyWithRetry(() => import("@/pages/Home"), "Home");
+const Topics = lazyWithRetry(() => import("@/pages/Topics"), "Topics");
+const TopicDetail = lazyWithRetry(() => import("@/pages/TopicDetail"), "TopicDetail");
+const AddTopic = lazyWithRetry(() => import("@/pages/AddTopic"), "AddTopic");
+const Production = lazyWithRetry(() => import("@/pages/Production"), "Production");
+const ProductionDetail = lazyWithRetry(() => import("@/pages/ProductionDetail"), "ProductionDetail");
+const Shooting = lazyWithRetry(() => import("@/pages/Shooting"), "Shooting");
+const ShootingDetail = lazyWithRetry(() => import("@/pages/ShootingDetail"), "ShootingDetail");
+const Publishing = lazyWithRetry(() => import("@/pages/Publishing"), "Publishing");
+const PublishingDetail = lazyWithRetry(() => import("@/pages/PublishingDetail"), "PublishingDetail");
+const Analytics = lazyWithRetry(() => import("@/pages/Analytics"), "Analytics");
+const Users = lazyWithRetry(() => import("@/pages/Users"), "Users");
+const Resources = lazyWithRetry(() => import("@/pages/Resources"), "Resources");
+const Messages = lazyWithRetry(() => import("@/pages/Messages"), "Messages");
+const Kanban = lazyWithRetry(() => import("@/pages/Kanban"), "Kanban");
+const CalendarPage = lazyWithRetry(() => import("@/pages/Calendar"), "CalendarPage");
+const Inspirations = lazyWithRetry(() => import("@/pages/Inspirations"), "Inspirations");
+const Achievements = lazyWithRetry(() => import("@/pages/Achievements"), "Achievements");
+const ActivityLog = lazyWithRetry(() => import("@/pages/ActivityLog"), "ActivityLog");
+const DouyinAnalytics = lazyWithRetry(() => import("@/pages/DouyinAnalytics"), "DouyinAnalytics");
+const PermissionManagement = lazyWithRetry(() => import("@/pages/PermissionManagement"), "PermissionManagement");
+const WorkflowDesigner = lazyWithRetry(() => import("@/pages/WorkflowDesigner"), "WorkflowDesigner");
+const NotificationSettings = lazyWithRetry(() => import("@/pages/NotificationSettings"), "NotificationSettings");
+const ExportPage = lazyWithRetry(() => import("@/pages/ExportPage"), "ExportPage");
+const PomodoroPage = lazyWithRetry(() => import("@/pages/PomodoroPage"), "PomodoroPage");
+const BackupPage = lazyWithRetry(() => import("@/pages/BackupPage"), "BackupPage");
+
 function PageLoading() {
   return (
-    <div className="flex items-center justify-center h-64">
+    <div className="flex h-64 items-center justify-center">
       <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 border-[3px] border-[#5c7cfa]/20 border-t-[#5c7cfa] rounded-full animate-spin"></div>
-        <p className="text-xs text-[#636983] font-medium">加载中...</p>
+        <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#5c7cfa]/20 border-t-[#5c7cfa]"></div>
+        <p className="text-xs font-medium text-[#636983]">������...</p>
       </div>
     </div>
   );
@@ -50,6 +83,7 @@ export default function App() {
     const savedTheme = (localStorage.getItem('xmt_theme') as 'light' | 'dark') || 'dark';
     document.documentElement.className = savedTheme;
   }, []);
+
   return (
     <ErrorBoundary>
       <RealtimeToast />

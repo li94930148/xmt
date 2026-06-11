@@ -1,6 +1,6 @@
-﻿import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Clapperboard, Eye, EyeOff, Mountain, Play, Sparkles } from 'lucide-react';
+﻿import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { ArrowRight, Clapperboard, Eye, EyeOff, Play } from 'lucide-react';
 import { changePassword, login } from '../api';
 import EnterpriseLoginLayout from '../components/login/EnterpriseLoginLayout';
 import { useAppStore, useAuthStore } from '../store';
@@ -28,12 +28,6 @@ const defaultSettings: Required<LoginPageSettings> = {
   loginLayout: 'style1',
 };
 
-const companyFacts = [
-  '聚焦文旅内容与新媒体传播',
-  '围绕城市文化、文旅项目与品牌叙事持续创作',
-  '内容策划、拍摄制作、分发复盘全链路协同',
-];
-
 const styleOptions: Record<LoginLayoutMode, { title: string; subtitle: string }> = {
   style1: {
     title: '样式一',
@@ -48,6 +42,23 @@ const styleOptions: Record<LoginLayoutMode, { title: string; subtitle: string }>
     subtitle: '影视飓风首页风格',
   },
 };
+
+function resolveRedirectTarget(state: unknown) {
+  if (
+    state &&
+    typeof state === 'object' &&
+    'from' in state &&
+    state.from &&
+    typeof state.from === 'object' &&
+    'pathname' in state.from &&
+    typeof state.from.pathname === 'string'
+  ) {
+    const from = state.from as { pathname: string; search?: string; hash?: string };
+    return `${from.pathname}${from.search || ''}${from.hash || ''}`;
+  }
+
+  return '/';
+}
 
 function loadLoginSettings(): Required<LoginPageSettings> {
   try {
@@ -284,6 +295,7 @@ function StyleShell({ children }: { children: ReactNode }) {
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const authStore = useAuthStore();
   const appStore = useAppStore();
   const remembered = loadRememberedAccount();
@@ -316,7 +328,19 @@ export default function Login() {
     document.title = settings.systemName;
   }, [settings.systemName]);
 
-  const handleSubmit = async (event: FormEvent) => {
+  useEffect(() => {
+    if (!authStore.token || showChangePassword) {
+      return;
+    }
+
+    const nextPath = authStore.user?.force_change_password
+      ? '/notification-settings'
+      : resolveRedirectTarget(location.state);
+
+    navigate(nextPath, { replace: true });
+  }, [authStore.token, authStore.user?.force_change_password, location.state, navigate, showChangePassword]);
+
+  const handleSubmit = useCallback(async (event: FormEvent) => {
     event.preventDefault();
     setErrorMessage('');
 
@@ -342,7 +366,7 @@ export default function Login() {
       }
 
       appStore.addNotification({ title: '登录成功', message: `欢迎回来，${result.user.name}`, type: 'success' });
-      navigate('/');
+      navigate(resolveRedirectTarget(location.state), { replace: true });
     } catch (error) {
       const message = (error as Error).message || '账号或密码错误';
       setErrorMessage(message);
@@ -350,15 +374,15 @@ export default function Login() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [appStore, authStore, location.state, navigate, password, remember, username]);
 
-  const handleForgotPassword = () => {
+  const handleForgotPassword = useCallback(() => {
     appStore.addNotification({
       title: '忘记密码',
       message: '当前系统未接入找回密码流程，请联系管理员重置密码。',
       type: 'info',
     });
-  };
+  }, [appStore]);
 
   const handleChangePassword = async () => {
     if (newPwd.length < 6) {
@@ -392,21 +416,24 @@ export default function Login() {
   const layout = settings.loginLayout || 'style1';
   const theme: LoginTheme = layout === 'style2' ? 'light' : layout === 'style3' ? 'cinematic' : 'dark';
 
-  const sharedForm = (
-    <LoginForm
-      username={username}
-      password={password}
-      showPassword={showPassword}
-      remember={remember}
-      loading={loading}
-      theme={theme}
-      systemName={settings.systemName}
-      onUsernameChange={setUsername}
-      onPasswordChange={setPassword}
-      onTogglePassword={() => setShowPassword((prev) => !prev)}
-      onRememberChange={setRemember}
-      onSubmit={handleSubmit}
-    />
+  const sharedForm = useMemo(
+    () => (
+      <LoginForm
+        username={username}
+        password={password}
+        showPassword={showPassword}
+        remember={remember}
+        loading={loading}
+        theme={theme}
+        systemName={settings.systemName}
+        onUsernameChange={setUsername}
+        onPasswordChange={setPassword}
+        onTogglePassword={() => setShowPassword((prev) => !prev)}
+        onRememberChange={setRemember}
+        onSubmit={handleSubmit}
+      />
+    ),
+    [handleSubmit, loading, password, remember, settings.systemName, showPassword, theme, username],
   );
 
   const layoutNode = useMemo(() => {
@@ -690,7 +717,7 @@ export default function Login() {
         </div>
       </StyleShell>
     );
-  }, [layout, mounted, settings, sharedForm]);
+  }, [errorMessage, handleForgotPassword, handleSubmit, layout, loading, mounted, password, remember, settings, sharedForm, showPassword, username]);
 
   return (
     <>
@@ -713,3 +740,10 @@ export default function Login() {
     </>
   );
 }
+
+
+
+
+
+
+

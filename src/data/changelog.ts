@@ -15,6 +15,37 @@ export interface ChangelogEntry {
 // 更新日志 - 按版本倒序排列（最新版本在最上面）
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.0.1',
+    date: '2026-06-11',
+    title: '稳定性与安全修复',
+    changes: [
+      {
+        type: 'fix',
+        description: '修复 api/routes/resources.ts 更新 SQL 缺少 ? 占位符的问题。',
+      },
+      {
+        type: 'fix',
+        description: 'api/routes/calendar.ts 更新 SQL 缺少 ? 占位符及日历查询异常字符串问题。',
+      },
+      {
+        type: 'security',
+        description: '检查其他动态 UPDATE SQL 是否存在同类错误，并只修复明确缺陷。',
+      },
+      {
+        type: 'improvement',
+        description: '调整数据库工具的异常处理，避免 SQL 失败后接口仍返回操作成功。',
+      },
+      {
+        type: 'security',
+        description: '为 Socket.IO 握手增加 JWT 鉴权',
+      },
+      {
+        type: 'fix',
+        description: '统一修复选题列表分页响应与前端读取方式不一致的问题。',
+      },
+    ],
+  },
+  {
     version: '2.0.0',
     date: '2026-06-05',
     title: '文档编辑器全新升级',

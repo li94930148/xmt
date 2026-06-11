@@ -3,33 +3,33 @@ import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 
 const router = express.Router();
+type CalendarListItem = { event_date: string };
 
-// GET / - 获取日历事件（支持月份筛选 year, month），同时合并 topics 的 deadline 作为事件返回
 router.get('/', authenticate, async (req, res) => {
   try {
     const { year, month } = req.query;
 
-    let dateFilter = '';
-    const params: any[] = [];
+    let eventDateFilter = '';
+    const eventParams: string[] = [];
 
     if (year && month) {
-      dateFilter = `AND strftime('%Y', event_date) = ? AND strftime('%m', event_date) = ?`;
-      params.push(year as string, (month as string).padStart(2, '0'));
+      eventDateFilter = `AND strftime('%Y', ce.event_date) = ? AND strftime('%m', ce.event_date) = ?`;
+      eventParams.push(String(year), String(month).padStart(2, '0'));
     } else if (year) {
-      dateFilter = `AND strftime('%Y', event_date) = ?`;
-      params.push(year as string);
+      eventDateFilter = `AND strftime('%Y', ce.event_date) = ?`;
+      eventParams.push(String(year));
     }
 
-    const events = await queryAll(`
+    const events = await queryAll<CalendarListItem>(`
       SELECT ce.*, u.name as creator_name, 'event' as source_type
       FROM calendar_events ce
       LEFT JOIN users u ON ce.creator_id = u.id
-      WHERE 1=1 ${dateFilter}
+      WHERE 1=1 ${eventDateFilter}
       ORDER BY ce.event_date ASC
-    `, params);
+    `, eventParams);
 
     let topicsQuery = `
-      SELECT 
+      SELECT
         t.id,
         t.title,
         t.description,
@@ -41,22 +41,22 @@ router.get('/', authenticate, async (req, res) => {
         'topic' as source_type
       FROM topics t
       LEFT JOIN users u ON t.creator_id = u.id
-      WHERE t.deadline IS NOT NULL AND t.deadline != '
+      WHERE t.deadline IS NOT NULL AND t.deadline != ''
     `;
 
-    const topicParams: any[] = [];
+    const topicParams: string[] = [];
     if (year && month) {
       topicsQuery += ` AND strftime('%Y', t.deadline) = ? AND strftime('%m', t.deadline) = ?`;
-      topicParams.push(year as string, (month as string).padStart(2, '0'));
+      topicParams.push(String(year), String(month).padStart(2, '0'));
     } else if (year) {
       topicsQuery += ` AND strftime('%Y', t.deadline) = ?`;
-      topicParams.push(year as string);
+      topicParams.push(String(year));
     }
 
     topicsQuery += ` ORDER BY t.deadline ASC`;
-    const topics = await queryAll(topicsQuery, topicParams);
+    const topics = await queryAll<CalendarListItem>(topicsQuery, topicParams);
 
-    const allEvents = [...events, ...topics].sort((a: any, b: any) => {
+    const allEvents = [...events, ...topics].sort((a: CalendarListItem, b: CalendarListItem) => {
       return new Date(a.event_date).getTime() - new Date(b.event_date).getTime();
     });
 
@@ -66,7 +66,6 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// POST / - 创建日历事件
 router.post('/', authenticate, async (req, res) => {
   try {
     const { title, description, event_date, event_type, topic_id } = req.body;
@@ -88,7 +87,6 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
-// PUT /:id - 更新事件
 router.put('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -100,19 +98,18 @@ router.put('/:id', authenticate, async (req, res) => {
     }
 
     const updates: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
 
-    if (title) { updates.push('title = '); params.push(title); }
-    if (description !== undefined) { updates.push('description = '); params.push(description); }
-    if (event_date) { updates.push('event_date = '); params.push(event_date); }
-    if (event_type) { updates.push('event_type = '); params.push(event_type); }
+    if (title !== undefined) { updates.push('title = ?'); params.push(title); }
+    if (description !== undefined) { updates.push('description = ?'); params.push(description); }
+    if (event_date !== undefined) { updates.push('event_date = ?'); params.push(event_date); }
+    if (event_type !== undefined) { updates.push('event_type = ?'); params.push(event_type); }
 
     if (updates.length === 0) {
       return res.status(400).json({ message: '没有需要更新的字段' });
     }
 
     params.push(id);
-
     await execute(`UPDATE calendar_events SET ${updates.join(', ')} WHERE id = ?`, params);
 
     res.json({ message: '日历事件更新成功' });
@@ -121,7 +118,6 @@ router.put('/:id', authenticate, async (req, res) => {
   }
 });
 
-// DELETE /:id - 删除事件
 router.delete('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;

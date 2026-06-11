@@ -8,13 +8,37 @@ function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export async function getTopics(params?: { status?: string; search?: string; page?: number; limit?: number }): Promise<{ data: Topic[]; total: number; page: number; limit: number }> {
+type TopicsListResponse = {
+  data: Topic[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export async function getTopics(params?: { status?: string; search?: string; page?: number; limit?: number }): Promise<TopicsListResponse> {
   const query = new URLSearchParams(params as Record<string, string>);
   const response = await fetch(`${BASE_URL}/topics?${query}`, {
     headers: getAuthHeader()
   });
   if (!response.ok) throw new Error('获取选题列表失败');
-  return response.json();
+
+  const result = await response.json();
+
+  if (result?.success) {
+    return {
+      data: result.data || [],
+      total: result.pagination?.total || 0,
+      page: result.pagination?.page || params?.page || 1,
+      limit: result.pagination?.limit || params?.limit || 10,
+    };
+  }
+
+  return {
+    data: result?.data || [],
+    total: result?.total || 0,
+    page: result?.page || params?.page || 1,
+    limit: result?.limit || params?.limit || 10,
+  };
 }
 
 export async function getTopic(id: number): Promise<Topic> {

@@ -2,7 +2,8 @@ import { beijingNow, execute } from '../database/utils';
 import { pushMessage } from './socket';
 
 /**
- * 创建消息并推送实时通知
+ * 创建消息并推送实时通知。
+ * 消息写入失败时只记录日志，避免影响主业务流程。
  */
 export function createMessage(
   userId: number,
@@ -11,20 +12,22 @@ export function createMessage(
   type: 'info' | 'success' | 'warning' | 'error' = 'info',
   link?: string
 ) {
-  // 确保 link 为有效字符串，undefined/null 不写入
   const safeLink = link || null;
-  
-  execute(
+
+  void execute(
     `INSERT INTO messages (user_id, title, content, type, link, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
     [userId, title, content, type, safeLink, beijingNow()]
-  );
-  
-  // 推送实时通知（包含 link）
-  pushMessage(userId, {
-    id: Date.now(), // 临时 ID，前端会重新查询
-    title,
-    content,
-    type,
-    link: safeLink
-  });
+  )
+    .then(() => {
+      pushMessage(userId, {
+        id: Date.now(),
+        title,
+        content,
+        type,
+        link: safeLink,
+      });
+    })
+    .catch((error) => {
+      console.warn('[Message] 创建消息失败:', error);
+    });
 }

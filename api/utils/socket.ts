@@ -2,6 +2,16 @@ import { Server } from 'socket.io';
 
 let ioInstance: Server | null = null;
 
+export const PUBLIC_SOCKET_ROOMS = new Set([
+  'topics',
+  'inspirations',
+  'production',
+  'shooting',
+  'publishing',
+]);
+
+export const ADMIN_SOCKET_ROOM = 'admin_channel';
+
 export function setSocketIO(io: Server) {
   ioInstance = io;
 }

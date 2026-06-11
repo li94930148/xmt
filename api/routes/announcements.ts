@@ -55,9 +55,9 @@ router.put('/:id', authenticate, requireRole(['admin', 'director']), async (req,
     const updates: string[] = [];
     const params: any[] = [];
 
-    if (content) { updates.push('content = '); params.push(content); }
-    if (type) { updates.push('type = '); params.push(type); }
-    if (pinned !== undefined) { updates.push('pinned = '); params.push(pinned ? 1 : 0); }
+    if (content) { updates.push('content = ?'); params.push(content); }
+    if (type) { updates.push('type = ?'); params.push(type); }
+    if (pinned !== undefined) { updates.push('pinned = ?'); params.push(pinned ? 1 : 0); }
 
     if (updates.length === 0) {
       return res.status(400).json({ message: '没有需要更新的字段' });

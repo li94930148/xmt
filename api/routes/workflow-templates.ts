@@ -1,11 +1,10 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
-import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
+import { queryOne, queryAll, runInTransaction } from '../database/utils';
 
 const router = Router();
 
-// 获取所有审批流模板
 router.get('/', authenticate, async (req, res) => {
   try {
     const templates = await queryAll(`
@@ -24,7 +23,6 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// 获取单个审批流模板（含节点）
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const template = await queryOne(`
@@ -34,7 +32,9 @@ router.get('/:id', authenticate, async (req, res) => {
       WHERE wt.id = ?
     `, [req.params.id]);
 
-    if (!template) return res.status(404).json({ message: '审批流模板不存在' });
+    if (!template) {
+      return res.status(404).json({ message: '审批流模板不存在' });
+    }
 
     const nodes = await queryAll(`
       SELECT * FROM workflow_nodes
@@ -48,7 +48,6 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-// 创建审批流模板
 router.post('/', authenticate, requirePermission('system:template'), async (req, res) => {
   try {
     const { name, description, nodes } = req.body;
@@ -58,21 +57,24 @@ router.post('/', authenticate, requirePermission('system:template'), async (req,
       return res.status(400).json({ message: '模板名称必填' });
     }
 
-    const templateId = await executeInsert(
-      `INSERT INTO workflow_templates (name, description, creator_id) VALUES (?, ?, ?)`,
-      [name, description || '', userId]
-    );
+    const templateId = await runInTransaction(async (tx) => {
+      const createdTemplateId = await tx.executeInsert(
+        `INSERT INTO workflow_templates (name, description, creator_id) VALUES (?, ?, ?)`,
+        [name, description || '', userId]
+      );
 
-    // 创建审批节点
-    if (nodes && Array.isArray(nodes)) {
-      for (let i = 0; i < nodes.length; i++) {
-        const node = nodes[i];
-        await execute(
-          `INSERT INTO workflow_nodes (template_id, name, node_order, status_from, status_to, approver_type, approver_value, is_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [templateId, node.name, i + 1, node.status_from, node.status_to, node.approver_type || 'role', node.approver_value || '', node.is_required !== false ? 1 : 0]
-        );
+      if (nodes && Array.isArray(nodes)) {
+        for (let i = 0; i < nodes.length; i++) {
+          const node = nodes[i];
+          await tx.execute(
+            `INSERT INTO workflow_nodes (template_id, name, node_order, status_from, status_to, approver_type, approver_value, is_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [createdTemplateId, node.name, i + 1, node.status_from, node.status_to, node.approver_type || 'role', node.approver_value || '', node.is_required !== false ? 1 : 0]
+          );
+        }
       }
-    }
+
+      return createdTemplateId;
+    });
 
     res.json({ message: '审批流模板创建成功', id: templateId });
   } catch (error) {
@@ -80,36 +82,36 @@ router.post('/', authenticate, requirePermission('system:template'), async (req,
   }
 });
 
-// 更新审批流模板
 router.put('/:id', authenticate, requirePermission('system:template'), async (req, res) => {
   try {
     const { name, description, nodes } = req.body;
     const templateId = req.params.id;
 
     const template = await queryOne(`SELECT * FROM workflow_templates WHERE id = ?`, [templateId]);
-    if (!template) return res.status(404).json({ message: '审批流模板不存在' });
-
-    if (name) {
-      await execute(
-        `UPDATE workflow_templates SET name = ?, description = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-        [name, description || '', templateId]
-      );
+    if (!template) {
+      return res.status(404).json({ message: '审批流模板不存在' });
     }
 
-    // 更新节点
-    if (nodes && Array.isArray(nodes)) {
-      // 删除旧节点
-      await execute(`DELETE FROM workflow_nodes WHERE template_id = ?`, [templateId]);
-
-      // 创建新节点
-      for (let i = 0; i < nodes.length; i++) {
-        const node = nodes[i];
-        await execute(
-          `INSERT INTO workflow_nodes (template_id, name, node_order, status_from, status_to, approver_type, approver_value, is_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [templateId, node.name, i + 1, node.status_from, node.status_to, node.approver_type || 'role', node.approver_value || '', node.is_required !== false ? 1 : 0]
+    await runInTransaction(async (tx) => {
+      if (name) {
+        await tx.execute(
+          `UPDATE workflow_templates SET name = ?, description = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
+          [name, description || '', templateId]
         );
       }
-    }
+
+      if (nodes && Array.isArray(nodes)) {
+        await tx.execute(`DELETE FROM workflow_nodes WHERE template_id = ?`, [templateId]);
+
+        for (let i = 0; i < nodes.length; i++) {
+          const node = nodes[i];
+          await tx.execute(
+            `INSERT INTO workflow_nodes (template_id, name, node_order, status_from, status_to, approver_type, approver_value, is_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [templateId, node.name, i + 1, node.status_from, node.status_to, node.approver_type || 'role', node.approver_value || '', node.is_required !== false ? 1 : 0]
+          );
+        }
+      }
+    });
 
     res.json({ message: '审批流模板更新成功' });
   } catch (error) {
@@ -117,26 +119,28 @@ router.put('/:id', authenticate, requirePermission('system:template'), async (re
   }
 });
 
-// 删除审批流模板
 router.delete('/:id', authenticate, requirePermission('system:template'), async (req, res) => {
   try {
     const templateId = req.params.id;
 
     const template = await queryOne(`SELECT * FROM workflow_templates WHERE id = ?`, [templateId]);
-    if (!template) return res.status(404).json({ message: '审批流模板不存在' });
+    if (!template) {
+      return res.status(404).json({ message: '审批流模板不存在' });
+    }
 
-    if (template.is_default) {
+    if ((template as Record<string, unknown>).is_default) {
       return res.status(400).json({ message: '默认审批流模板不可删除' });
     }
 
-    // 检查是否有选题使用此模板
     const topicCount = await queryOne(`SELECT COUNT(*) as count FROM topics WHERE workflow_template_id = ?`, [templateId]);
-    if (topicCount && Number(topicCount.count) > 0) {
-      return res.status(400).json({ message: `该模板被 ${topicCount.count} 个选题使用，请先移除` });
+    if (topicCount && Number((topicCount as Record<string, unknown>).count) > 0) {
+      return res.status(400).json({ message: `该模板被 ${(topicCount as Record<string, unknown>).count} 个选题使用，请先移除` });
     }
 
-    await execute(`DELETE FROM workflow_nodes WHERE template_id = ?`, [templateId]);
-    await execute(`DELETE FROM workflow_templates WHERE id = ?`, [templateId]);
+    await runInTransaction(async (tx) => {
+      await tx.execute(`DELETE FROM workflow_nodes WHERE template_id = ?`, [templateId]);
+      await tx.execute(`DELETE FROM workflow_templates WHERE id = ?`, [templateId]);
+    });
 
     res.json({ message: '审批流模板删除成功' });
   } catch (error) {
@@ -144,7 +148,6 @@ router.delete('/:id', authenticate, requirePermission('system:template'), async 
   }
 });
 
-// 获取选题的审批记录
 router.get('/topic/:topicId/records', authenticate, async (req, res) => {
   try {
     const records = await queryAll(`
@@ -162,7 +165,6 @@ router.get('/topic/:topicId/records', authenticate, async (req, res) => {
   }
 });
 
-// 提交审批
 router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
   try {
     const { node_id, status, comment } = req.body;
@@ -173,23 +175,25 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
       return res.status(400).json({ message: '节点ID和状态必填' });
     }
 
-    // 验证节点存在
     const node = await queryOne(`SELECT * FROM workflow_nodes WHERE id = ?`, [node_id]);
-    if (!node) return res.status(404).json({ message: '审批节点不存在' });
-
-    // 记录审批
-    await execute(
-      `INSERT INTO approval_records (topic_id, node_id, approver_id, status, comment) VALUES (?, ?, ?, ?, ?)`,
-      [topicId, node_id, approverId, status, comment || '']
-    );
-
-    // 如果审批通过，更新选题状态
-    if (status === 'approved') {
-      await execute(
-        `UPDATE topics SET status = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-        [node.status_to, topicId]
-      );
+    if (!node) {
+      return res.status(404).json({ message: '审批节点不存在' });
     }
+
+    await runInTransaction(async (tx) => {
+      await tx.execute(
+        `INSERT INTO approval_records (topic_id, node_id, approver_id, status, comment) VALUES (?, ?, ?, ?, ?)`,
+        [topicId, node_id, approverId, status, comment || '']
+      );
+
+      if (status === 'approved') {
+        const nodeRecord = node as Record<string, unknown>;
+        await tx.execute(
+          `UPDATE topics SET status = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
+          [nodeRecord.status_to, topicId]
+        );
+      }
+    });
 
     res.json({ message: '审批操作成功' });
   } catch (error) {

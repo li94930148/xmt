@@ -16,7 +16,9 @@ import https from 'https'
 import fs from 'fs'
 import { Server } from 'socket.io'
 import { initDatabase, closeDatabase } from './database/db.js'
-import { setSocketIO } from './utils/socket.js'
+import { queryOne } from './database/utils.js'
+import { verifyToken } from './utils/jwt.js'
+import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/socket.js'
 import { apiLimiter } from './middleware/rateLimit.js'
 import authRoutes from './routes/auth.js'
 import topicsRoutes from './routes/topics.js'
@@ -159,7 +161,7 @@ app.use('/api/notifications', notificationsRoutes)
 
 app.use(
   '/api/health',
-  (req: Request, res: Response, next: NextFunction): void => {
+  (req: Request, res: Response): void => {
     res.status(200).json({
       success: true,
       message: 'ok',
@@ -168,6 +170,8 @@ app.use(
 )
 
 app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
+  void error
+  void next
   res.status(500).json({
     success: false,
     error: 'Server internal error',
@@ -193,22 +197,75 @@ app.use((req: Request, res: Response) => {
 
 setSocketIO(io)
 
+io.use(async (socket, next) => {
+  try {
+    const token =
+      typeof socket.handshake.auth?.token === 'string'
+        ? socket.handshake.auth.token
+        : typeof socket.handshake.headers.authorization === 'string'
+          ? socket.handshake.headers.authorization.replace(/^Bearer\s+/i, '')
+          : null
+
+    if (!token) {
+      return next(new Error('Authentication required'))
+    }
+
+    const payload = verifyToken(token)
+    if (!payload) {
+      return next(new Error('Invalid token'))
+    }
+
+    const user = await queryOne(`SELECT id, username, role, name, enabled FROM users WHERE id = ?`, [payload.userId])
+    if (!user) {
+      return next(new Error('User not found'))
+    }
+
+    const record = user as Record<string, unknown>
+    if (Number(record.enabled) !== 1) {
+      return next(new Error('User disabled'))
+    }
+
+    socket.data.user = {
+      id: Number(record.id),
+      username: String(record.username),
+      role: String(record.role),
+      name: String(record.name),
+    }
+
+    next()
+  } catch {
+    next(new Error('Authentication failed'))
+  }
+})
+
 io.on('connection', (socket) => {
-  socket.on('subscribe', (userId) => {
-    socket.join(`user_${userId}`)
-  })
+  const socketUser = socket.data.user as { id: number; role: string } | undefined
+
+  if (!socketUser) {
+    socket.disconnect(true)
+    return
+  }
+
+  socket.join(`user_${socketUser.id}`)
+
+  if (socketUser.role === 'admin' || socketUser.role === 'director') {
+    socket.join(ADMIN_SOCKET_ROOM)
+  }
 
   socket.on('new_topic', (data) => {
-    io.to('admin_channel').emit('new_topic', data)
+    io.to(ADMIN_SOCKET_ROOM).emit('new_topic', data)
   })
 
-  // 实时协作：加入/离开房间
   socket.on('join', (room: string) => {
-    socket.join(room)
+    if (PUBLIC_SOCKET_ROOMS.has(room)) {
+      socket.join(room)
+    }
   })
 
   socket.on('leave', (room: string) => {
-    socket.leave(room)
+    if (PUBLIC_SOCKET_ROOMS.has(room)) {
+      socket.leave(room)
+    }
   })
 
   socket.on('disconnect', () => {

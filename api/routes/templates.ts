@@ -58,15 +58,15 @@ router.put('/:id', authenticate, requireRole(['admin', 'director']), async (req,
     const updates: string[] = [];
     const params: any[] = [];
 
-    if (name) { updates.push('name = '); params.push(name); }
-    if (platform !== undefined) { updates.push('platform = '); params.push(platform); }
-    if (description !== undefined) { updates.push('description = '); params.push(description); }
+    if (name) { updates.push('name = ?'); params.push(name); }
+    if (platform !== undefined) { updates.push('platform = ?'); params.push(platform); }
+    if (description !== undefined) { updates.push('description = ?'); params.push(description); }
     if (template_data !== undefined) {
       const templateDataStr = typeof template_data === 'object' ? JSON.stringify(template_data) : template_data;
-      updates.push('template_data = ');
+      updates.push('template_data = ?');
       params.push(templateDataStr);
     }
-    if (is_default !== undefined) { updates.push('is_default = '); params.push(is_default ? 1 : 0); }
+    if (is_default !== undefined) { updates.push('is_default = ?'); params.push(is_default ? 1 : 0); }
 
     if (updates.length === 0) {
       return res.status(400).json({ message: '没有需要更新的字段' });

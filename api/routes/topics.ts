@@ -1,7 +1,7 @@
 ﻿﻿﻿﻿import express from 'express';
-import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
+import { queryOne, queryAll, execute, runInTransaction } from '../database/utils';
 import { authenticate, requireRole } from '../middleware/auth';
-import { Topic, TopicStatus } from '../types';
+import { TopicStatus } from '../types';
 import { isValidTransition, isValidAuditAction, STATUS_TEXT, getTransitionText } from '../utils/workflow';
 import { createMessage } from '../utils/messageHelper';
 import { broadcastToRoom } from '../utils/socket';
@@ -77,16 +77,20 @@ router.post('/', authenticate, async (req, res) => {
       return sendError(res, '选题标题不能为空');
     }
 
-    const topicId = await executeInsert(`INSERT INTO topics (title, description, outline, outline_markdown, outline_json, platform, deadline, creator_id, assignee_id, status, submitted_at)
+    const topicId = await runInTransaction(async (tx) => {
+      const createdTopicId = await tx.executeInsert(`INSERT INTO topics (title, description, outline, outline_markdown, outline_json, platform, deadline, creator_id, assignee_id, status, submitted_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))`, [title, description, outline || null, req.body.outlineMarkdown || outline || null, req.body.outlineJson || outline || null, platform, deadline, req.user?.id, assignee_id || null, 'pending']);
 
-    await execute(`INSERT INTO topic_history (topic_id, action, comment, operator_id) VALUES (?, ?, ?, ?)`, [
-      topicId, 'created', '创建选题', req.user?.id
-    ]);
+      await tx.execute(`INSERT INTO topic_history (topic_id, action, comment, operator_id) VALUES (?, ?, ?, ?)`, [
+        createdTopicId, 'created', '创建选题', req.user?.id
+      ]);
 
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
-      req.user?.id, 'create', 'topic', `创建选题: ${title}`
-    ]);
+      await tx.execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
+        req.user?.id, 'create', 'topic', `创建选题: ${title}`
+      ]);
+
+      return createdTopicId;
+    });
 
     createMessage(
       req.user!.id,
@@ -201,21 +205,40 @@ router.post('/:id/audit', authenticate, requireRole(['admin', 'director']), asyn
       return sendError(res, `当前状态「${STATUS_TEXT[oldStatus]}」不允许执行审核操作`);
     }
 
-    await execute(`UPDATE topics SET status = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [status, id]);
-
-    if (assignee_id) {
-      await execute(`UPDATE topics SET assignee_id = ? WHERE id = ?`, [assignee_id, id]);
-    }
-
-    await execute(`INSERT INTO topic_history (topic_id, action, comment, operator_id) VALUES (?, ?, ?, ?)`, [
-      id, status === 'approved' ? 'approved' : 'rejected', comment, req.user?.id
-    ]);
-
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
-      req.user?.id, 'audit', 'topic', `审核选题 ${id}: ${status === 'approved' ? '通过' : '驳回'}`
-    ]);
-
     const statusText = status === 'approved' ? '审核通过' : '审核驳回';
+
+    await runInTransaction(async (tx) => {
+      const topicUpdateFields = [`status = ?`, `updated_at = datetime('now', '+8 hours')`];
+      const topicUpdateParams: unknown[] = [status];
+
+      if (assignee_id) {
+        topicUpdateFields.push(`assignee_id = ?`);
+        topicUpdateParams.push(assignee_id);
+      }
+
+      topicUpdateParams.push(id);
+      await tx.execute(`UPDATE topics SET ${topicUpdateFields.join(', ')} WHERE id = ?`, topicUpdateParams);
+
+      await tx.execute(`INSERT INTO topic_history (topic_id, action, comment, operator_id) VALUES (?, ?, ?, ?)`, [
+        id, status === 'approved' ? 'approved' : 'rejected', comment, req.user?.id
+      ]);
+
+      await tx.execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
+        req.user?.id, 'audit', 'topic', `审核选题 ${id}: ${status === 'approved' ? '通过' : '驳回'}`
+      ]);
+
+      if (status === 'approved') {
+        const existingProduction = await tx.queryOne(`SELECT id FROM production WHERE topic_id = ?`, [id]);
+        if (!existingProduction) {
+          const creatorId = assignee_id || topic.creator_id;
+          const initialContent = String(topic.outline || '');
+          const initialContentMarkdown = String(topic.outline_markdown || topic.outline || '');
+          const initialContentJson = String(topic.outline_json || topic.outline || '');
+          await tx.execute(`INSERT INTO production (topic_id, version, content, content_markdown, content_json, status, operator_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`, [id, 'v1.0', initialContent, initialContentMarkdown, initialContentJson, 'draft', creatorId]);
+        }
+      }
+    });
 
     createMessage(
       Number(topic.creator_id),
@@ -227,19 +250,6 @@ router.post('/:id/audit', authenticate, requireRole(['admin', 'director']), asyn
 
     if (assignee_id) {
       createMessage(assignee_id, '新任务指派', `您被指派负责选题「${topic.title}」`, 'info', `/topics/${id}`);
-    }
-
-    if (status === 'approved') {
-      // 检查是否已有该选题的创作记录，避免重复创建
-      const existingProduction = await queryOne(`SELECT id FROM production WHERE topic_id = ?`, [id]);
-      if (!existingProduction) {
-        const creatorId = assignee_id || topic.creator_id;
-        const initialContent = String(topic.outline || '');
-        const initialContentMarkdown = String(topic.outline_markdown || topic.outline || '');
-        const initialContentJson = String(topic.outline_json || topic.outline || '');
-        await execute(`INSERT INTO production (topic_id, version, content, content_markdown, content_json, status, operator_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)`, [id, 'v1.0', initialContent, initialContentMarkdown, initialContentJson, 'draft', creatorId]);
-      }
     }
 
     const auditedTopic = await queryOne('SELECT * FROM topics WHERE id = ?', [id]);
@@ -265,47 +275,48 @@ router.post('/:id/status', authenticate, async (req, res) => {
       return sendError(res, `不允许从「${STATUS_TEXT[topic.status as TopicStatus]}」变更为「${STATUS_TEXT[status]}」`);
     }
 
-    await execute(`UPDATE topics SET status = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [status, id]);
-
-    await execute(`INSERT INTO topic_history (topic_id, action, comment, operator_id) VALUES (?, ?, ?, ?)`, [
-      id, `status_${status}`, getTransitionText(topic.status as TopicStatus, status), req.user?.id
-    ]);
-
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
-      req.user?.id, 'status_change', 'topic', `选题 ${id} 状态变更为 ${status}`
-    ]);
-
     const operatorId = req.user?.id;
+    await runInTransaction(async (tx) => {
+      await tx.execute(`UPDATE topics SET status = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [status, id]);
 
-    if (status === 'production') {
-      const existingProduction = await queryOne(`SELECT id FROM production WHERE topic_id = ?`, [id]);
-      if (!existingProduction) {
-        const initialContent = String(topic.outline || '');
-        const initialContentMarkdown = String(topic.outline_markdown || topic.outline || '');
-        const initialContentJson = String(topic.outline_json || topic.outline || '');
-        await execute(`INSERT INTO production (topic_id, version, content, content_markdown, content_json, status, operator_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
-          id, 'v1.0', initialContent, initialContentMarkdown, initialContentJson, 'draft', operatorId
-        ]);
-      }
-    }
+      await tx.execute(`INSERT INTO topic_history (topic_id, action, comment, operator_id) VALUES (?, ?, ?, ?)`, [
+        id, `status_${status}`, getTransitionText(topic.status as TopicStatus, status), req.user?.id
+      ]);
 
-    if (status === 'shooting') {
-      const existingShooting = await queryOne(`SELECT id FROM shooting WHERE topic_id = ?`, [id]);
-      if (!existingShooting) {
-        await execute(`INSERT INTO shooting (topic_id, plan_date, location, equipment, status, operator_id) VALUES (?, ?, ?, ?, ?, ?)`, [
-          id, null, null, null, 'planned', operatorId
-        ]);
-      }
-    }
+      await tx.execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
+        req.user?.id, 'status_change', 'topic', `选题 ${id} 状态变更为 ${status}`
+      ]);
 
-    if (status === 'publishing') {
-      const existingPublishing = await queryOne(`SELECT id FROM publishing WHERE topic_id = ?`, [id]);
-      if (!existingPublishing) {
-        await execute(`INSERT INTO publishing (topic_id, platform, url, status, publish_time, operator_id) VALUES (?, ?, ?, ?, ?, ?)`, [
-          id, '', '', 'pending', null, operatorId
-        ]);
+      if (status === 'production') {
+        const existingProduction = await tx.queryOne(`SELECT id FROM production WHERE topic_id = ?`, [id]);
+        if (!existingProduction) {
+          const initialContent = String(topic.outline || '');
+          const initialContentMarkdown = String(topic.outline_markdown || topic.outline || '');
+          const initialContentJson = String(topic.outline_json || topic.outline || '');
+          await tx.execute(`INSERT INTO production (topic_id, version, content, content_markdown, content_json, status, operator_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+            id, 'v1.0', initialContent, initialContentMarkdown, initialContentJson, 'draft', operatorId
+          ]);
+        }
       }
-    }
+
+      if (status === 'shooting') {
+        const existingShooting = await tx.queryOne(`SELECT id FROM shooting WHERE topic_id = ?`, [id]);
+        if (!existingShooting) {
+          await tx.execute(`INSERT INTO shooting (topic_id, plan_date, location, equipment, status, operator_id) VALUES (?, ?, ?, ?, ?, ?)`, [
+            id, null, null, null, 'planned', operatorId
+          ]);
+        }
+      }
+
+      if (status === 'publishing') {
+        const existingPublishing = await tx.queryOne(`SELECT id FROM publishing WHERE topic_id = ?`, [id]);
+        if (!existingPublishing) {
+          await tx.execute(`INSERT INTO publishing (topic_id, platform, url, status, publish_time, operator_id) VALUES (?, ?, ?, ?, ?, ?)`, [
+            id, '', '', 'pending', null, operatorId
+          ]);
+        }
+      }
+    });
 
     const assignees = await queryAll(`SELECT id FROM users WHERE id = ? OR id = ?`, [topic.creator_id, topic.assignee_id]);
     for (const user of assignees) {

@@ -177,11 +177,11 @@ router.put('/:id', authenticate, async (req, res) => {
     const updateFields: string[] = [];
     const params: any[] = [];
     
-    if (name !== undefined) { updateFields.push('name = '); params.push(name); }
-    if (type !== undefined) { updateFields.push('type = '); params.push(type); }
-    if (file_path !== undefined) { updateFields.push('file_path = '); params.push(file_path); }
-    if (category !== undefined) { updateFields.push('category = '); params.push(category); }
-    if (content !== undefined) { updateFields.push('content = '); params.push(content); }
+    if (name !== undefined) { updateFields.push('name = ?'); params.push(name); }
+    if (type !== undefined) { updateFields.push('type = ?'); params.push(type); }
+    if (file_path !== undefined) { updateFields.push('file_path = ?'); params.push(file_path); }
+    if (category !== undefined) { updateFields.push('category = ?'); params.push(category); }
+    if (content !== undefined) { updateFields.push('content = ?'); params.push(content); }
     
     if (updateFields.length === 0) {
       return res.status(400).json({ message: '没有需要更新的字段' });

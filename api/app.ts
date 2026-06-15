@@ -49,6 +49,69 @@ dotenv.config()
 
 const app: express.Application = express()
 
+const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:5173']
+
+function parseConfiguredOrigins(value?: string) {
+  if (!value) {
+    return new Set(DEFAULT_ALLOWED_ORIGINS.map((origin) => origin.toLowerCase()))
+  }
+
+  return new Set(
+    value
+      .split(',')
+      .map((origin) => origin.trim().toLowerCase())
+      .filter(Boolean),
+  )
+}
+
+function isPrivateNetworkHost(hostname: string) {
+  const normalized = hostname.toLowerCase()
+
+  if (normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1') {
+    return true
+  }
+
+  const parts = normalized.split('.').map((part) => Number(part))
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+    return false
+  }
+
+  const [first, second] = parts
+  if (first === 10 || first === 127) return true
+  if (first === 192 && second === 168) return true
+  if (first === 172 && second >= 16 && second <= 31) return true
+  return false
+}
+
+function normalizeOrigin(origin: string) {
+  try {
+    const url = new URL(origin)
+    if (!/^https?:$/i.test(url.protocol)) {
+      return null
+    }
+
+    return {
+      origin: url.origin.toLowerCase(),
+      hostname: url.hostname.toLowerCase(),
+    }
+  } catch {
+    return null
+  }
+}
+
+function normalizeHostHeader(hostHeader?: string) {
+  if (!hostHeader) return null
+  const trimmed = hostHeader.trim().toLowerCase()
+  if (!trimmed) return null
+
+  try {
+    const url = new URL(`http://${trimmed}`)
+    return url.host.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
 // 信任反向代理（nginx等），使 req.ip 获取真实客户端 IP
 app.set('trust proxy', 1)
 
@@ -70,55 +133,47 @@ if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
   console.log('[HTTP] 桌面通知功能需要 HTTPS，运行 node scripts/generate-cert.mjs 生成证书')
 }
 
-// Socket.io CORS 配置 - 与 Express 保持一致
-const socketAllowedOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
-  : ['http://localhost:5174', 'http://localhost:3001', 'http://127.0.0.1:5174']
+const allowedOrigins = parseConfiguredOrigins(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGINS)
 
-function isExplicitAllowedOrigin(origin: string) {
-  if (socketAllowedOrigins.includes(origin)) return true
-  return /^https?:\/\/.+/i.test(origin)
-}
+function isAllowedRequestOrigin(origin?: string, hostHeader?: string) {
+  if (!origin) return true
 
-function isSameOriginRequest(origin: string, hostHeader?: string) {
-  if (!hostHeader) return false
+  const normalizedOrigin = normalizeOrigin(origin)
+  if (!normalizedOrigin) return false
 
-  try {
-    const { host } = new URL(origin)
-    return host.toLowerCase() === hostHeader.toLowerCase()
-  } catch {
-    return false
+  if (allowedOrigins.has(normalizedOrigin.origin)) {
+    return true
   }
+
+  const normalizedHost = normalizeHostHeader(hostHeader)
+  if (normalizedHost && normalizedOrigin.origin === `http://${normalizedHost}`) {
+    return true
+  }
+  if (normalizedHost && normalizedOrigin.origin === `https://${normalizedHost}`) {
+    return true
+  }
+
+  return isPrivateNetworkHost(normalizedOrigin.hostname)
 }
 
 export const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      // 允许无 origin 的请求（如 Postman、移动端）
-      if (!origin) return callback(null, true)
-      // 允许任意 http/https 来源，支持公网域名访问
-      if (isExplicitAllowedOrigin(origin)) return callback(null, true)
+      if (isAllowedRequestOrigin(origin)) return callback(null, true)
       callback(new Error('CORS not allowed'))
     },
     methods: ['GET', 'POST'],
+    credentials: true,
+  },
+  allowRequest: (req, callback) => {
+    callback(null, isAllowedRequestOrigin(req.headers.origin, req.headers.host))
   },
 })
-
-// 仅对 API 启用 CORS，避免静态资源请求因隧道域名的 Origin 被误拦截
-const allowedOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
-  : ['http://localhost:5174', 'http://localhost:3001', 'http://127.0.0.1:5174']
 
 const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
   callback(null, {
     origin: (origin, allow) => {
-      // 允许无 origin 的请求（如 server-to-server、Postman）
-      if (!origin) return allow(null, true)
-      // 允许与当前请求 Host 相同的同源请求（如花生壳/隧道公网域名）
-      if (isSameOriginRequest(origin, req.headers.host)) return allow(null, true)
-      // 允许任意 http/https 来源，支持公网域名访问
-      if (allowedOrigins.includes(origin)) return allow(null, true)
-      if (isExplicitAllowedOrigin(origin)) return allow(null, true)
+      if (isAllowedRequestOrigin(origin, req.headers.host)) return allow(null, true)
       allow(new Error('CORS not allowed'))
     },
     credentials: true,
@@ -266,10 +321,6 @@ io.on('connection', (socket) => {
   if (socketUser.role === 'admin' || socketUser.role === 'director') {
     socket.join(ADMIN_SOCKET_ROOM)
   }
-
-  socket.on('new_topic', (data) => {
-    io.to(ADMIN_SOCKET_ROOM).emit('new_topic', data)
-  })
 
   socket.on('join', (room: string) => {
     if (PUBLIC_SOCKET_ROOMS.has(room)) {

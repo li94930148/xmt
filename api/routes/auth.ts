@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import { queryOne, execute } from '../database/utils';
 import { User } from '../types';
 import { signToken } from '../utils/jwt';
+import { authenticate } from '../middleware/auth';
 import { loginLimiter, passwordChangeLimiter } from '../middleware/rateLimit';
 
 const router = express.Router();
@@ -66,36 +67,30 @@ router.post('/login', loginLimiter, async (req, res) => {
         username: user.username,
         name: user.name,
         email: user.email,
-        role: user.role
+        role: user.role,
+        force_change_password: forceChange,
       },
       token,
       forceChangePassword: forceChange
     });
-  } catch (error) {
-    res.status(500).json({ message: '登录失败', error });
+  } catch {
+    res.status(500).json({ message: '登录失败' });
   }
 });
 
-router.post('/logout', async (req, res) => {
+router.post('/logout', authenticate, async (req, res) => {
   res.json({ message: '登出成功' });
 });
 
-router.get('/me', async (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  
-  if (!token) {
-    return res.status(401).json({ message: '未登录' });
-  }
-  
+router.get('/me', authenticate, async (req, res) => {
   try {
-    const { verifyToken } = await import('../utils/jwt');
-    const payload = verifyToken(token);
-    
-    if (!payload) {
-      return res.status(401).json({ message: '登录已过期，请重新登录' });
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ message: '未登录' });
     }
     
-    const result = await queryOne(`SELECT id, username, name, email, role, enabled, created_at, updated_at FROM users WHERE id = ?`, [payload.userId]);
+    const result = await queryOne(`SELECT id, username, name, email, role, enabled, force_change_password, created_at, updated_at FROM users WHERE id = ?`, [userId]);
     
     if (!result) {
       return res.status(401).json({ message: '用户不存在' });
@@ -113,22 +108,19 @@ router.get('/me', async (req, res) => {
       email: resultRecord.email,
       role: resultRecord.role,
       enabled: true,
+      force_change_password: Number(resultRecord.force_change_password ?? 0) === 1,
       created_at: resultRecord.created_at,
       updated_at: resultRecord.updated_at
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ message: '获取用户信息失败' });
   }
 });
 
-router.post('/change-password', passwordChangeLimiter, async (req, res) => {
+router.post('/change-password', passwordChangeLimiter, authenticate, async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) return res.status(401).json({ message: '未登录' });
-    
-    const { verifyToken } = await import('../utils/jwt');
-    const payload = verifyToken(token);
-    if (!payload) return res.status(401).json({ message: '登录已过期' });
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ message: '未登录' });
     
     const { oldPassword, newPassword } = req.body;
     if (!oldPassword || !newPassword) {
@@ -138,7 +130,7 @@ router.post('/change-password', passwordChangeLimiter, async (req, res) => {
       return res.status(400).json({ message: '新密码至少6位' });
     }
     
-    const result = await queryOne(`SELECT * FROM users WHERE id = ?`, [payload.userId]);
+    const result = await queryOne(`SELECT * FROM users WHERE id = ?`, [userId]);
     if (!result) return res.status(404).json({ message: '用户不存在' });
     
     const resultRecord = result as Record<string, unknown>;
@@ -146,14 +138,14 @@ router.post('/change-password', passwordChangeLimiter, async (req, res) => {
     if (!isValid) return res.status(401).json({ message: '旧密码错误' });
     
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await execute(`UPDATE users SET password = ?, force_change_password = 0, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [hashedPassword, payload.userId]);
+    await execute(`UPDATE users SET password = ?, force_change_password = 0, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [hashedPassword, userId]);
     
     await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
-      payload.userId, 'change_password', 'auth', '用户修改了密码'
+      userId, 'change_password', 'auth', '用户修改了密码'
     ]);
     
     res.json({ message: '密码修改成功' });
-  } catch (error) {
+  } catch {
     res.status(500).json({ message: '修改密码失败' });
   }
 });

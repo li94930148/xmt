@@ -9,15 +9,34 @@ let isRedirecting = false;
 // 包装 fetch，自动处理 401
 const originalFetch = window.fetch;
 
+function resolveRequestUrl(input: Parameters<typeof fetch>[0]) {
+  if (typeof input === 'string') {
+    return input;
+  }
+
+  if (input instanceof URL) {
+    return input.toString();
+  }
+
+  return input.url;
+}
+
+function isAuthRedirectCandidate(url: string) {
+  return !url.includes('/api/auth/login');
+}
+
 window.fetch = async function (...args: Parameters<typeof fetch>): Promise<Response> {
   try {
     const response = await originalFetch.apply(this, args);
+    const requestUrl = resolveRequestUrl(args[0]);
 
     // Token 过期或未授权，跳转登录
-    if (response.status === 401 && !isRedirecting) {
+    if (response.status === 401 && !isRedirecting && isAuthRedirectCandidate(requestUrl)) {
       isRedirecting = true;
       localStorage.removeItem('xmt_token');
       localStorage.removeItem('xmt_user');
+      sessionStorage.removeItem('xmt_token');
+      sessionStorage.removeItem('xmt_user');
       // 通知用户
       const event = new CustomEvent('xmt-auth-expired', { detail: { message: '登录已过期，请重新登录' } });
       window.dispatchEvent(event);

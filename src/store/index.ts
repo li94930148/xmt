@@ -1,39 +1,67 @@
 import { create } from 'zustand';
-import { User, Topic, Message, TopicStatus } from '../types';
+import { User, Topic, Message } from '../types';
+
+export type AuthPersistence = 'local' | 'session';
+
+const AUTH_USER_KEY = 'xmt_user';
+const AUTH_TOKEN_KEY = 'xmt_token';
 
 interface AuthState {
   user: User | null;
   token: string | null;
   isLoggedIn: boolean;
-  login: (user: User, token: string) => void;
+  persistence: AuthPersistence;
+  login: (user: User, token: string, options?: { persist?: AuthPersistence }) => void;
   logout: () => void;
 }
 
 const loadFromStorage = () => {
   try {
-    const userStr = localStorage.getItem('xmt_user');
-    const token = localStorage.getItem('xmt_token');
+    const sessionUser = sessionStorage.getItem(AUTH_USER_KEY);
+    const sessionToken = sessionStorage.getItem(AUTH_TOKEN_KEY);
+    if (sessionToken) {
+      return {
+        user: sessionUser ? JSON.parse(sessionUser) : null,
+        token: sessionToken,
+        isLoggedIn: true,
+        persistence: 'session' as AuthPersistence,
+      };
+    }
+
+    const userStr = localStorage.getItem(AUTH_USER_KEY);
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
     return {
       user: userStr ? JSON.parse(userStr) : null,
       token: token || null,
       isLoggedIn: !!token,
+      persistence: token ? ('local' as AuthPersistence) : ('session' as AuthPersistence),
     };
   } catch {
-    return { user: null, token: null, isLoggedIn: false };
+    return { user: null, token: null, isLoggedIn: false, persistence: 'session' as AuthPersistence };
   }
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   ...loadFromStorage(),
-  login: (user, token) => {
-    localStorage.setItem('xmt_user', JSON.stringify(user));
-    localStorage.setItem('xmt_token', token);
-    set({ user, token, isLoggedIn: true });
+  login: (user, token, options) => {
+    const persist = options?.persist ?? get().persistence;
+    const storage = persist === 'local' ? localStorage : sessionStorage;
+
+    localStorage.removeItem(AUTH_USER_KEY);
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    sessionStorage.removeItem(AUTH_USER_KEY);
+    sessionStorage.removeItem(AUTH_TOKEN_KEY);
+
+    storage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+    storage.setItem(AUTH_TOKEN_KEY, token);
+    set({ user, token, isLoggedIn: true, persistence: persist });
   },
   logout: () => {
-    localStorage.removeItem('xmt_user');
-    localStorage.removeItem('xmt_token');
-    set({ user: null, token: null, isLoggedIn: false });
+    localStorage.removeItem(AUTH_USER_KEY);
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    sessionStorage.removeItem(AUTH_USER_KEY);
+    sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    set({ user: null, token: null, isLoggedIn: false, persistence: 'session' });
   },
 }));
 

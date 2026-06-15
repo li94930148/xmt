@@ -3,6 +3,7 @@ import { queryOne } from '../database/utils';
 import { verifyToken } from '../utils/jwt';
 import { User } from '../types';
 
+/* eslint-disable @typescript-eslint/no-namespace */
 declare global {
   namespace Express {
     interface Request {
@@ -11,8 +12,17 @@ declare global {
   }
 }
 
+export function extractBearerToken(authorizationHeader?: string) {
+  if (!authorizationHeader) {
+    return null;
+  }
+
+  const match = authorizationHeader.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
 export async function authenticate(req: Request, res: Response, next: NextFunction) {
-  const token = req.headers.authorization?.split(' ')[1];
+  const token = extractBearerToken(req.headers.authorization);
   
   if (!token) {
     return res.status(401).json({ message: '未登录' });
@@ -35,11 +45,12 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     const user: User = {
       id: Number(resultRecord.id),
       username: String(resultRecord.username),
-      password: String(resultRecord.password),
-      email: String(resultRecord.email),
+      password: '',
+      email: String(resultRecord.email ?? ''),
       role: String(resultRecord.role) as User['role'],
-      name: String(resultRecord.name),
+      name: String(resultRecord.name ?? ''),
       enabled: Number(resultRecord.enabled) === 1,
+      force_change_password: Number(resultRecord.force_change_password ?? 0) === 1,
       created_at: String(resultRecord.created_at),
       updated_at: String(resultRecord.updated_at)
     };
@@ -50,8 +61,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     
     req.user = user;
     next();
-  } catch (error) {
-    return res.status(500).json({ message: '验证失败' });
+  } catch {
+    return res.status(401).json({ message: '登录已过期，请重新登录' });
   }
 }
 

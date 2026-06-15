@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, login } from '../api';
 import { useAppStore, useAuthStore } from '../store';
+import { loadRememberedCredentials, persistRememberedCredentials } from '../utils/rememberedCredentials';
 
 type LoginLayoutMode = 'style1' | 'style2' | 'style3';
 
@@ -14,9 +15,6 @@ type LoginPageSettings = {
 };
 
 const SETTINGS_KEY = 'xmt_system_settings';
-const REMEMBER_KEY = 'xmt_login_remember';
-const USERNAME_KEY = 'xmt_login_username';
-const PASSWORD_KEY = 'xmt_login_password';
 
 const defaultSettings: Required<LoginPageSettings> = {
   systemName: '山东岚曜信息科技有限公司',
@@ -49,32 +47,6 @@ function loadLoginSettings(): Required<LoginPageSettings> {
   } catch {
     return defaultSettings;
   }
-}
-
-function loadRememberedAccount() {
-  try {
-    const remember = localStorage.getItem(REMEMBER_KEY) === 'true';
-    return {
-      remember,
-      username: remember ? localStorage.getItem(USERNAME_KEY) || '' : '',
-      password: remember ? localStorage.getItem(PASSWORD_KEY) || '' : '',
-    };
-  } catch {
-    return { remember: false, username: '', password: '' };
-  }
-}
-
-function persistRememberedAccount(remember: boolean, username: string, password: string) {
-  if (remember) {
-    localStorage.setItem(REMEMBER_KEY, 'true');
-    localStorage.setItem(USERNAME_KEY, username);
-    localStorage.setItem(PASSWORD_KEY, password);
-    return;
-  }
-
-  localStorage.removeItem(REMEMBER_KEY);
-  localStorage.removeItem(USERNAME_KEY);
-  localStorage.removeItem(PASSWORD_KEY);
 }
 
 function ChangePasswordModal({
@@ -157,13 +129,12 @@ export default function Login() {
   const location = useLocation();
   const authStore = useAuthStore();
   const appStore = useAppStore();
-  const remembered = loadRememberedAccount();
 
   const [settings, setSettings] = useState<Required<LoginPageSettings>>(loadLoginSettings);
   const [mounted, setMounted] = useState(false);
-  const [username, setUsername] = useState(remembered.username);
-  const [password, setPassword] = useState(remembered.password);
-  const [remember, setRemember] = useState(remembered.remember);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -175,6 +146,27 @@ export default function Login() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateRememberedCredentials() {
+      const remembered = await loadRememberedCredentials();
+      if (cancelled) {
+        return;
+      }
+
+      setRemember(remembered.remember);
+      setUsername(remembered.username);
+      setPassword(remembered.password);
+    }
+
+    void hydrateRememberedCredentials();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -213,8 +205,8 @@ export default function Login() {
     setLoading(true);
     try {
       const result = await login(username.trim(), password);
-      authStore.login(result.user, result.token);
-      persistRememberedAccount(remember, username.trim(), password);
+      authStore.login(result.user, result.token, { persist: remember ? 'local' : 'session' });
+      await persistRememberedCredentials(remember, username.trim(), password);
 
       if (result.user.force_change_password || result.forceChangePassword) {
         setOldPwd(password);
@@ -257,14 +249,14 @@ export default function Login() {
     setChangePwdLoading(true);
     try {
       await changePassword(oldPwd, newPwd);
+      await persistRememberedCredentials(remember, username.trim(), newPwd);
       appStore.addNotification({ title: '修改成功', message: '密码已更新，请重新登录', type: 'success' });
       authStore.logout();
       setShowChangePassword(false);
-      setPassword('');
+      setPassword(newPwd);
       setOldPwd('');
       setNewPwd('');
       setConfirmPwd('');
-      persistRememberedAccount(remember, username.trim(), '');
     } catch (error) {
       appStore.addNotification({ title: '修改失败', message: (error as Error).message, type: 'error' });
     } finally {
@@ -805,7 +797,6 @@ export default function Login() {
     </>
   );
 }
-
 
 
 

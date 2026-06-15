@@ -75,42 +75,57 @@ const socketAllowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
   : ['http://localhost:5174', 'http://localhost:3001', 'http://127.0.0.1:5174']
 
+function isExplicitAllowedOrigin(origin: string) {
+  if (socketAllowedOrigins.includes(origin)) return true
+  return /^https?:\/\/.+/i.test(origin)
+}
+
+function isSameOriginRequest(origin: string, hostHeader?: string) {
+  if (!hostHeader) return false
+
+  try {
+    const { host } = new URL(origin)
+    return host.toLowerCase() === hostHeader.toLowerCase()
+  } catch {
+    return false
+  }
+}
+
 export const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
       // 允许无 origin 的请求（如 Postman、移动端）
       if (!origin) return callback(null, true)
-      // 允许配置的来源
-      if (socketAllowedOrigins.includes(origin)) return callback(null, true)
-      // 允许局域网 IP
-      if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?\/?$/.test(origin)) {
-        return callback(null, true)
-      }
+      // 允许任意 http/https 来源，支持公网域名访问
+      if (isExplicitAllowedOrigin(origin)) return callback(null, true)
       callback(new Error('CORS not allowed'))
     },
     methods: ['GET', 'POST'],
   },
 })
 
-// 局域网环境 CORS 限制
+// 仅对 API 启用 CORS，避免静态资源请求因隧道域名的 Origin 被误拦截
 const allowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
   : ['http://localhost:5174', 'http://localhost:3001', 'http://127.0.0.1:5174']
 
-app.use(cors({
-  origin: (origin, callback) => {
-    // 允许无 origin 的请求（如 server-to-server、Postman）
-    if (!origin) return callback(null, true)
-    // 允许配置的来源
-    if (allowedOrigins.includes(origin)) return callback(null, true)
-    // 允许局域网 IP（192.168.x.x, 10.x.x.x, 172.16-31.x.x）
-    if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?\/?$/.test(origin)) {
-      return callback(null, true)
-    }
-    callback(new Error('CORS not allowed'))
-  },
-  credentials: true,
-}))
+const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
+  callback(null, {
+    origin: (origin, allow) => {
+      // 允许无 origin 的请求（如 server-to-server、Postman）
+      if (!origin) return allow(null, true)
+      // 允许与当前请求 Host 相同的同源请求（如花生壳/隧道公网域名）
+      if (isSameOriginRequest(origin, req.headers.host)) return allow(null, true)
+      // 允许任意 http/https 来源，支持公网域名访问
+      if (allowedOrigins.includes(origin)) return allow(null, true)
+      if (isExplicitAllowedOrigin(origin)) return allow(null, true)
+      allow(new Error('CORS not allowed'))
+    },
+    credentials: true,
+  })
+}
+
+app.use('/api', cors(corsOptions))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 

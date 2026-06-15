@@ -5,55 +5,9 @@ import { db } from '../database/db';
 
 const router = express.Router();
 
-// 初始化抖音相关表
-async function ensureTables() {
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS douyin_accounts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      profile_url TEXT NOT NULL,
-      douyin_id TEXT,
-      created_at DATETIME DEFAULT datetime('now', '+8 hours')
-    )
-  `);
-
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS douyin_snapshots (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      account_id INTEGER NOT NULL,
-      username TEXT,
-      followers INTEGER DEFAULT 0,
-      likes INTEGER DEFAULT 0,
-      following_count INTEGER DEFAULT 0,
-      ip_location TEXT,
-      bio TEXT,
-      video_count INTEGER DEFAULT 0,
-      raw_data TEXT,
-      scraped_at DATETIME NOT NULL,
-      created_at DATETIME DEFAULT datetime('now', '+8 hours'),
-      FOREIGN KEY (account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE
-    )
-  `);
-
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS douyin_videos (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      snapshot_id INTEGER NOT NULL,
-      title TEXT,
-      likes INTEGER DEFAULT 0,
-      comments INTEGER DEFAULT 0,
-      shares INTEGER DEFAULT 0,
-      is_pinned BOOLEAN DEFAULT 0,
-      created_at DATETIME DEFAULT datetime('now', '+8 hours'),
-      FOREIGN KEY (snapshot_id) REFERENCES douyin_snapshots(id) ON DELETE CASCADE
-    )
-  `);
-}
-
 // GET /api/douyin/accounts - 获取已添加的账号列表
 router.get('/accounts', authenticate, async (req, res) => {
   try {
-    await ensureTables();
     const result = await db.execute(`SELECT * FROM douyin_accounts ORDER BY created_at DESC`);
     res.json(result.rows);
   } catch (error) {
@@ -64,7 +18,6 @@ router.get('/accounts', authenticate, async (req, res) => {
 // POST /api/douyin/accounts - 添加抖音账号
 router.post('/accounts', authenticate, requireRole(['admin', 'director']), async (req, res) => {
   try {
-    await ensureTables();
     const { name, profileUrl } = req.body;
     if (!name || !profileUrl) {
       return res.status(400).json({ message: '账号名称和主页链接不能为空' });
@@ -82,7 +35,6 @@ router.post('/accounts', authenticate, requireRole(['admin', 'director']), async
 // DELETE /api/douyin/accounts/:id - 删除账号
 router.delete('/accounts/:id', authenticate, requireRole(['admin']), async (req, res) => {
   try {
-    await ensureTables();
     const { id } = req.params;
     await db.execute({ sql: `DELETE FROM douyin_videos WHERE snapshot_id IN (SELECT id FROM douyin_snapshots WHERE account_id = ?)`, args: [id] });
     await db.execute({ sql: `DELETE FROM douyin_snapshots WHERE account_id = ?`, args: [id] });
@@ -96,7 +48,6 @@ router.delete('/accounts/:id', authenticate, requireRole(['admin']), async (req,
 // POST /api/douyin/scrape/:accountId - 抓取指定账号数据
 router.post('/scrape/:accountId', authenticate, requireRole(['admin', 'director']), async (req, res) => {
   try {
-    await ensureTables();
     const { accountId } = req.params;
 
     const accountResult = await db.execute({
@@ -148,7 +99,6 @@ router.post('/scrape/:accountId', authenticate, requireRole(['admin', 'director'
 // GET /api/douyin/snapshots/:accountId - 获取某账号的历史快照
 router.get('/snapshots/:accountId', authenticate, async (req, res) => {
   try {
-    await ensureTables();
     const { accountId } = req.params;
     const { limit = 30 } = req.query;
 
@@ -166,7 +116,6 @@ router.get('/snapshots/:accountId', authenticate, async (req, res) => {
 // GET /api/douyin/snapshot/:snapshotId/videos - 获取某次快照的视频列表
 router.get('/snapshot/:snapshotId/videos', authenticate, async (req, res) => {
   try {
-    await ensureTables();
     const { snapshotId } = req.params;
 
     const videos = await db.execute({
@@ -183,7 +132,6 @@ router.get('/snapshot/:snapshotId/videos', authenticate, async (req, res) => {
 // GET /api/douyin/trend/:accountId - 获取涨粉趋势数据
 router.get('/trend/:accountId', authenticate, async (req, res) => {
   try {
-    await ensureTables();
     const { accountId } = req.params;
     const { days = 30 } = req.query;
 

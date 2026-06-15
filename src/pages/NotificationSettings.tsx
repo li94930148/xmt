@@ -99,8 +99,8 @@ function loadSystemSettings(): SystemSettings {
 }
 
 function styleLabel(layout: LoginLayoutMode) {
-  if (layout === 'style2') return '样式二（Apple 风格）';
-  if (layout === 'style3') return '样式三（影视飓风首页风格）';
+  if (layout === 'style2') return '样式二（极光玻璃风格）';
+  if (layout === 'style3') return '样式三（双栏对比风格）';
   return '样式一（当前经典版式）';
 }
 
@@ -677,8 +677,8 @@ export default function NotificationSettings() {
                   <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>默认登录页版式</label>
                   <select value={systemSettings.loginLayout} onChange={(event) => setSystemSettings((current) => ({ ...current, loginLayout: event.target.value as LoginLayoutMode }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
                     <option value="style1">样式一（当前经典版式）</option>
-                    <option value="style2">样式二（Apple 风格）</option>
-                    <option value="style3">样式三（影视飓风首页风格）</option>
+                    <option value="style2">样式二（极光玻璃风格）</option>
+                    <option value="style3">样式三（双栏对比风格）</option>
                   </select>
                 </div>
                 <div>

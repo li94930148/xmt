@@ -10,6 +10,10 @@ export const db = createClient({
   url: `file:${dbPath}`,
 });
 
+function getDbErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function initDatabase() {
   // 确保 data 目录存在
   if (!fs.existsSync(dbDir)) {
@@ -324,6 +328,56 @@ async function initTables() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  // 抖音账号与快照
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    profile_url TEXT NOT NULL,
+    douyin_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    username TEXT,
+    followers INTEGER DEFAULT 0,
+    likes INTEGER DEFAULT 0,
+    following_count INTEGER DEFAULT 0,
+    ip_location TEXT,
+    bio TEXT,
+    video_count INTEGER DEFAULT 0,
+    raw_data TEXT,
+    scraped_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_videos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL,
+    title TEXT,
+    likes INTEGER DEFAULT 0,
+    comments INTEGER DEFAULT 0,
+    shares INTEGER DEFAULT 0,
+    is_pinned BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (snapshot_id) REFERENCES douyin_snapshots(id) ON DELETE CASCADE
+  )`);
+
+  // 历史遗留的剪辑/编辑表，需保留以兼容现有数据
+  await db.execute(`CREATE TABLE IF NOT EXISTS editing (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id INTEGER,
+    version TEXT,
+    status TEXT DEFAULT 'pending',
+    file_path TEXT,
+    feedback TEXT,
+    operator_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   // === 权限系统表 ===
 
   // 角色表
@@ -628,6 +682,13 @@ async function initTables() {
 }
 
 async function runTimeMigrations() {
+  try {
+    await db.execute(`DROP INDEX IF EXISTS idx_calendar_events_user`);
+    await db.execute(`DROP INDEX IF EXISTS idx_calendar_events_date`);
+  } catch (error) {
+    console.warn('[DB] 清理旧 calendar_events 索引失败:', getDbErrorMessage(error));
+  }
+
   const migrated = await db.execute({
     sql: `SELECT value FROM app_meta WHERE key = ?`,
     args: ['tz_migration_20260611'],
@@ -793,8 +854,16 @@ async function createIndexes() {
     'CREATE INDEX IF NOT EXISTS idx_user_achievements_user ON user_achievements(user_id)',
 
     // calendar_events 表索引
-    'CREATE INDEX IF NOT EXISTS idx_calendar_events_user ON calendar_events(user_id)',
-    'CREATE INDEX IF NOT EXISTS idx_calendar_events_date ON calendar_events(start_time)',
+    'CREATE INDEX IF NOT EXISTS idx_calendar_events_creator ON calendar_events(creator_id)',
+    'CREATE INDEX IF NOT EXISTS idx_calendar_events_date ON calendar_events(event_date)',
+
+    // douyin 表索引
+    'CREATE INDEX IF NOT EXISTS idx_douyin_snapshots_account ON douyin_snapshots(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_douyin_snapshots_scraped_at ON douyin_snapshots(scraped_at)',
+    'CREATE INDEX IF NOT EXISTS idx_douyin_videos_snapshot ON douyin_videos(snapshot_id)',
+
+    // editing 表索引
+    'CREATE INDEX IF NOT EXISTS idx_editing_topic ON editing(topic_id)',
 
     // pomodoro_sessions 表索引
     'CREATE INDEX IF NOT EXISTS idx_pomodoro_user ON pomodoro_sessions(user_id)',
@@ -806,8 +875,9 @@ async function createIndexes() {
   for (const sql of indexes) {
     try {
       await db.execute(sql);
-    } catch (e) {
-      // 索引可能已存在，忽略错误
+    } catch (error) {
+      console.warn(`[DB] 索引创建失败: ${sql}`);
+      console.warn(`[DB] 原因: ${getDbErrorMessage(error)}`);
     }
   }
 

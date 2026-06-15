@@ -83,5 +83,21 @@
     "typescript-eslint": "^8.30.1",
     "vite": "^6.3.5",
     "vite-tsconfig-paths": "^5.1.4"
-  }
+  },
+  "description": "",
+  "main": "eslint.config.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://li94930148: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@github.com/li94930148/xmt.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/li94930148/xmt/issues"
+  },
+  "homepage": "https://github.com/li94930148/xmt#readme"
 }

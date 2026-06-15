@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>岚曜新媒体平台项目领导汇报美化版</title>
+  <style>
+    @page { size: A4; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(37,99,235,0.10), transparent 25%),
+        linear-gradient(180deg, #edf4fb 0%, #f7fafc 100%);
+      color: #1f2937;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto 18px;
+      padding: 18mm 16mm 16mm;
+      background: #fff;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 16px 60px rgba(15, 23, 42, 0.08);
+    }
+    .page::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 12mm;
+      background: linear-gradient(90deg, #2563eb 0%, #1d4ed8 45%, #0f766e 100%);
+    }
+    .page::after {
+      content: "";
+      position: absolute;
+      right: -80px;
+      top: 36px;
+      width: 220px;
+      height: 220px;
+      background: radial-gradient(circle, rgba(37,99,235,0.10), transparent 68%);
+      pointer-events: none;
+    }
+    .page-top {
+      position: relative;
+      z-index: 1;
+      padding-top: 8mm;
+      margin-bottom: 16px;
+    }
+    .eyebrow {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #e0ecff;
+      color: #1d4ed8;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+    .page-title {
+      margin: 10px 0 0;
+      font-size: 28px;
+      color: #12337b;
+      letter-spacing: 0.3px;
+    }
+    .content {
+      position: relative;
+      z-index: 1;
+    }
+    .lead {
+      margin: 0 0 12px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+      border: 1px solid #dbeafe;
+      font-size: 14px;
+      line-height: 1.9;
+      color: #1e293b;
+    }
+    .meta-line {
+      margin: 8px 0;
+      font-size: 13px;
+      line-height: 1.8;
+      color: #475569;
+    }
+    .note-line {
+      margin: 10px 0 12px;
+      padding: 12px 14px;
+      border-left: 4px solid #f59e0b;
+      background: #fffbeb;
+      color: #92400e;
+      font-size: 13px;
+      line-height: 1.85;
+    }
+    .body-text {
+      margin: 8px 0 10px;
+      font-size: 13px;
+      line-height: 1.9;
+      color: #334155;
+    }
+    .bullet-list {
+      margin: 8px 0 12px;
+      padding: 0;
+      list-style: none;
+    }
+    .bullet-list li {
+      margin: 0 0 10px;
+      padding: 14px 16px 14px 44px;
+      position: relative;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      font-size: 13px;
+      line-height: 1.9;
+      color: #334155;
+    }
+    .bullet-list li::before {
+      content: "";
+      position: absolute;
+      left: 16px;
+      top: 19px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%);
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
+    }
+    .figure {
+      margin: 14px 0 16px;
+      border-radius: 20px;
+      overflow: hidden;
+      border: 1px solid #dbe3ef;
+      background: #f8fafc;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+    }
+    .figure img {
+      display: block;
+      width: 100%;
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 16px;
+      font-size: 12px;
+      line-height: 1.8;
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 0 0 1px #dbe3ef inset;
+    }
+    .data-table th,
+    .data-table td {
+      border: 1px solid #dbe3ef;
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    .data-table th {
+      background: linear-gradient(180deg, #eaf2ff 0%, #dceaff 100%);
+      color: #12337b;
+      font-weight: 700;
+    }
+    .data-table tr:nth-child(even) td {
+      background: #fbfdff;
+    }
+    .warn-table th {
+      background: linear-gradient(180deg, #fef3c7 0%, #fde68a 100%);
+      color: #92400e;
+    }
+    .roadmap-intro {
+      margin: 4px 0 16px;
+      font-size: 13px;
+      line-height: 1.9;
+      color: #475569;
+    }
+    .roadmap-title {
+      margin: 18px 0 14px;
+      padding-left: 12px;
+      border-left: 4px solid #1d4ed8;
+      font-size: 18px;
+      font-weight: 700;
+      color: #12337b;
+    }
+    .timeline {
+      position: relative;
+      margin: 8px 0 28px 16px;
+      padding-left: 28px;
+    }
+    .timeline::before {
+      content: "";
+      position: absolute;
+      left: 6px;
+      top: 10px;
+      bottom: 10px;
+      width: 2px;
+      background: linear-gradient(180deg, rgba(37,99,235,0.22) 0%, rgba(37,99,235,0.45) 100%);
+    }
+    .timeline-item {
+      position: relative;
+      padding: 2px 0 18px;
+    }
+    .timeline-item:last-child {
+      padding-bottom: 0;
+    }
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      left: -32px;
+      top: 9px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #0f766e;
+      box-shadow: 0 0 0 4px rgba(15,118,110,0.12);
+    }
+    .timeline-item h4 {
+      margin: 0 0 6px;
+      font-size: 14px;
+      color: #0f172a;
+    }
+    .timeline-item p {
+      margin: 0;
+      font-size: 12.5px;
+      line-height: 1.9;
+      color: #334155;
+    }
+    .biz-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 10px;
+    }
+    .biz-card {
+      min-height: 118px;
+      padding: 16px 16px 14px;
+      border-radius: 18px;
+      border: 1px solid #d8e3f3;
+      background: linear-gradient(180deg, #ffffff 0%, #f6faff 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+    }
+    .biz-card h4 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      color: #0f172a;
+    }
+    .biz-card p {
+      margin: 0;
+      font-size: 12.5px;
+      line-height: 1.9;
+      color: #334155;
+    }
+    .footer {
+      position: absolute;
+      left: 16mm;
+      right: 16mm;
+      bottom: 8mm;
+      text-align: center;
+      color: #64748b;
+      font-size: 10px;
+    }
+  </style>
+</head>
+<body>
+  
+            <section class="page">
+              <div class="page-top">
+                
+                <h1 class="page-title">一、为什么要做这个项目</h1>
+              </div>
+              <div class="content"><ul class="bullet-list"><li>内容生产链路长、协作角色多，如果没有统一系统，信息很容易分散在聊天记录、表格和口头沟通中。</li><li>选题、脚本、执行、发布、复盘由不同角色接力完成，一旦缺少统一状态和责任归属，就会出现遗漏、重复确认和推进不透明。</li><li>很多团队最缺的不是单点工具，而是一套能把“计划 - 执行 - 结果”连起来的管理底座。</li><li>当前实际使用反馈已经说明，这套系统能明显减少反复沟通、整理思路、重复提交选题文档以及来回修改等低效率动作。</li></ul></div>
+              <div class="footer"></div>
+            </section>
+            
+            <section class="page">
+              <div class="page-top">
+                
+                <h1 class="page-title">二、这个项目整体是什么</h1>
+              </div>
+              <div class="content"><ul class="bullet-list"><li>它不是单一页面，也不是单一表单，而是一套完整的前后端系统。</li><li>前端负责日常操作入口和协同界面，后端负责业务规则、权限、消息、数据存储与接口能力。</li><li>系统当前已具备内容流程模块、效率工具模块、数据管理模块和平台支撑能力。</li></ul><figure class="figure"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/docx_media/image1.png" alt="图表" /></figure><figure class="figure"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/docx_media/image2.png" alt="图表" /></figure><figure class="figure"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/docx_media/image3.png" alt="图表" /></figure><figure class="figure"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/docx_media/image4.png" alt="图表" /></figure><figure class="figure"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/docx_media/image5.png" alt="图表" /></figure><figure class="figure"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/docx_media/image6.png" alt="图表" /></figure></div>
+              <div class="footer"></div>
+            </section>
+            
+            <section class="page">
+              <div class="page-top">
+                
+                <h1 class="page-title">三、项目是怎么运作的</h1>
+              </div>
+              <div class="content"><ul class="bullet-list"><li>系统主线以“选题”为起点，通过审核后进入后续创作、执行、发布和复盘环节。</li><li>各环节之间不是孤立跳转，而是通过统一状态、数据记录和权限机制实现接续。</li><li>团队不需要反复手工同步“进行到哪一步了”，系统本身就承担了流程连接器的角色。</li><li>“泰安的十大名人墓葬”这一选题已经验证了平台具备支撑完整业务闭环的能力。</li></ul><figure class="figure"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/docx_media/image7.png" alt="图表" /></figure></div>
+              <div class="footer"></div>
+            </section>
+            
+            <section class="page">
+              <div class="page-top">
+                
+                <h1 class="page-title">四、这个项目的核心优点</h1>
+              </div>
+              <div class="content"><ul class="bullet-list"><li>全链路闭环：把内容生产全过程放在同一套系统里，减少中间断层。</li><li>标准化管理：通过状态流转、审批设计、权限控制，把经验变成制度化动作。</li><li>实时协同：消息、通知、日志、实时同步机制增强团队协作效率。</li><li>数据沉淀：系统不只记录结果，还能把前置过程沉淀下来，为复盘和优化提供依据。</li><li>可控部署：当前采用 Express + SQLite 的轻量部署方式，适合内部快速落地和持续迭代。</li><li>实际价值已初步体现：目前反馈可减少约 80% 沟通成本，并减少整理思路、反复提报和重复修改等动作。</li></ul></div>
+              <div class="footer"></div>
+            </section>
+            
+            <section class="page">
+              <div class="page-top">
+                
+                <h1 class="page-title">五、对团队和公司的不可替代优势</h1>
+              </div>
+              <div class="content"><table class="data-table"><tbody><tr><th>维度</th><th>当前优势</th><th>为什么难以替代</th></tr><tr><td>流程闭环</td><td>从选题到复盘贯穿在同一系统内</td><td>不是单点工具，而是把前后环节接起来，替代零散协作方式</td></tr><tr><td>管理可视化</td><td>每个状态、责任和进度都有记录</td><td>领导和负责人可以随时看到推进情况，减少口头追踪</td></tr><tr><td>经验沉淀</td><td>脚本、灵感、资源、审批方式都能留下来</td><td>团队能力不再只依赖个人记忆，便于复制和交接</td></tr><tr><td>协同效率</td><td>消息、通知、权限、日历、看板形成联动</td><td>减少跨群确认、重复问进度、版本不一致等管理成本</td></tr><tr><td>数据回连</td><td>复盘数据能回到前面的选题与执行过程</td><td>不仅看结果，也能分析为什么做成或没做成</td></tr></tbody></table></div>
+              <div class="footer"></div>
+            </section>
+            
+            <section class="page">
+              <div class="page-top">
+                
+                <h1 class="page-title">六、未来愿景：从内部系统走向通用产品</h1>
+              </div>
+              
+<div class="content">
+  <p class="roadmap-intro">在内部验证成熟后，具备向通用产品演进的潜力。以下是我们规划的发展路径。</p>
+  <h3 class="roadmap-title">产品化路径</h3>
+  <div class="timeline">
+    <div class="timeline-item">
+      <h4>第一阶段：内部深化（当前）</h4>
+      <p>持续优化现有功能，深化在团队内部的使用，积累更多业务场景和用户反馈。</p>
+    </div>
+    <div class="timeline-item">
+      <h4>第二阶段：通用化改造</h4>
+      <p>将业务规则抽象为可配置模板，支持不同行业、不同规模团队的定制化需求。核心方向：审批流模板化、角色权限配置化、功能模块可插拔。</p>
+    </div>
+    <div class="timeline-item">
+      <h4>第三阶段：商业化探索</h4>
+      <p>探索私有化部署交付、行业版本授权、SaaS 服务等多种盈利模式，将内部系统转化为公司新的业务增长点。</p>
+    </div>
+  </div>
+  <h3 class="roadmap-title">商业化方向</h3>
+  <div class="biz-grid">
+    <div class="biz-card">
+      <h4>私有化部署</h4>
+      <p>为有数据安全要求的客户提供本地部署方案，收取实施费和维护费。</p>
+    </div>
+    <div class="biz-card">
+      <h4>行业版本</h4>
+      <p>针对 MCN、广告公司、媒体机构等不同行业推出定制版本。</p>
+    </div>
+    <div class="biz-card">
+      <h4>SaaS 服务</h4>
+      <p>提供云端托管服务，按团队规模收取订阅费。</p>
+    </div>
+  </div>
+</div>
+
+              <div class="footer"></div>
+            </section>
+            
+</body>
+</html>

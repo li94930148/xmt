@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>岚曜新媒体平台项目领导汇报初稿</title>
+  <style>
+    @page { size: A4; margin: 14mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; background: #f3f7fb; color: #1f2937; }
+    .page { width: 210mm; min-height: 297mm; margin: 0 auto 16px; background: white; padding: 18mm 16mm; position: relative; overflow: hidden; }
+    .page:last-child { margin-bottom: 0; }
+    .top-band { margin: -18mm -16mm 14px; padding: 16px 16mm 12px; background: linear-gradient(90deg, #2563eb 0%, #1d4ed8 55%, #0f766e 100%); color: white; }
+    .top-band h2 { margin: 0 0 6px; font-size: 24px; }
+    .top-band p { margin: 0; font-size: 12px; color: rgba(255,255,255,0.88); }
+    .section-title { margin: 0 0 10px; font-size: 18px; color: #1e3a8a; }
+    .lead { font-size: 14px; line-height: 1.85; color: #334155; margin: 0 0 10px; }
+    .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .card { border: 1px solid #dbeafe; border-radius: 16px; padding: 12px 14px; background: #f8fbff; }
+    .card h4 { margin: 0 0 6px; font-size: 13px; color: #1d4ed8; }
+    .card p { margin: 0; font-size: 12px; line-height: 1.75; color: #334155; }
+    ul { margin: 8px 0 0 18px; padding: 0; line-height: 1.8; color: #334155; font-size: 13px; }
+    li { margin-bottom: 4px; }
+    .image { width: 100%; border: 1px solid #e2e8f0; border-radius: 16px; margin: 12px 0 0; overflow: hidden; background: #f8fafc; }
+    .image img { width: 100%; display: block; }
+    .metric-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 12px 0; }
+    .metric { background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%); border: 1px solid #dbeafe; border-radius: 16px; padding: 12px 10px; text-align: center; }
+    .metric strong { display: block; font-size: 24px; color: #1d4ed8; margin-bottom: 4px; }
+    .metric span { font-size: 11px; color: #475569; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; line-height: 1.7; }
+    th, td { border: 1px solid #dbe3ef; padding: 9px 10px; vertical-align: top; text-align: left; }
+    th { background: #eaf2ff; color: #1e3a8a; }
+    .warn th { background: #fef3c7; color: #92400e; }
+    .footer-note { position: absolute; left: 16mm; right: 16mm; bottom: 10mm; text-align: center; color: #64748b; font-size: 10px; }
+  </style>
+</head>
+<body>
+  <section class="page">
+    <div class="top-band">
+      <h2>一、项目摘要</h2>
+      <p>先让领导在最短时间内知道：这是什么、为什么值得继续投入</p>
+    </div>
+    <p class="lead"><strong>一句话定义：</strong>岚曜新媒体平台是一套面向新媒体内容团队的全流程协作管理系统，用来把选题、审核、创作、拍摄、发布和复盘放进同一条业务链路。</p>
+    <div class="summary-grid">
+      <div class="card"><h4>项目名称</h4><p>岚曜新媒体平台</p></div>
+      <div class="card"><h4>项目定位</h4><p>不是单一表单或单一页面，而是一套贯穿内容生产全过程的协同系统。</p></div>
+      <div class="card"><h4>当前使用角色</h4><p>文案、摄影、剪辑已经在实际使用。</p></div>
+      <div class="card"><h4>阶段成果</h4><p>“泰安的十大名人墓葬”选题已在平台内完成全流程跑通。</p></div>
+      <div class="card"><h4>已体现价值</h4><p>减少约 80% 沟通成本，减少整理思路、重复提交选题文档、重复修改等动作。</p></div>
+      <div class="card"><h4>未来方向</h4><p>继续优化整体架构并统一风格，面向需要多环节协同的新媒体公司整体打包出售。</p></div>
+    </div>
+    <div class="footer-note">内部汇报初稿｜基于代码库、架构文档与已确认业务信息整理</div>
+  </section>
+
+  <section class="page">
+    <div class="top-band">
+      <h2>二、为什么要做这个项目</h2>
+      <p>从管理痛点切入，比直接讲技术更容易让领导理解项目必要性</p>
+    </div>
+    <ul>
+      <li>内容生产链路长、协作角色多，如果没有统一系统，信息很容易分散在聊天记录、表格和口头沟通中。</li>
+      <li>选题、脚本、执行、发布、复盘由不同角色接力完成，一旦缺少统一状态和责任归属，就会出现遗漏、重复确认和推进不透明。</li>
+      <li>很多团队最缺的不是单点工具，而是一套能把“计划 - 执行 - 结果”连起来的管理底座。</li>
+      <li>当前实际使用反馈已经说明，这套系统能明显减少反复沟通、整理思路、重复提交选题文档以及来回修改等低效率动作。</li>
+    </ul>
+    <h3 class="section-title">这个项目整体是什么</h3>
+    <ul>
+      <li>它不是单一页面，也不是单一表单，而是一套完整的前后端系统。</li>
+      <li>前端负责日常操作入口和协同界面，后端负责业务规则、权限、消息、数据存储与接口能力。</li>
+      <li>系统当前已具备内容流程模块、效率工具模块、数据管理模块和平台支撑能力。</li>
+    </ul>
+    <div class="image"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/assets/architecture.png" alt="系统整体结构图" /></div>
+    <div class="footer-note">内部汇报初稿｜基于代码库、架构文档与已确认业务信息整理</div>
+  </section>
+
+  <section class="page">
+    <div class="top-band">
+      <h2>三、当前系统建设范围</h2>
+      <p>用事实说明：这已经不是一个概念原型，而是具备完整度的平台雏形</p>
+    </div>
+    <div class="metric-row">
+      <div class="metric"><strong>28</strong><span>前端页面模块</span></div>
+      <div class="metric"><strong>20</strong><span>后端业务路由</span></div>
+      <div class="metric"><strong>30</strong><span>通用组件</span></div>
+      <div class="metric"><strong>18</strong><span>前端 API 封装</span></div>
+      <div class="metric"><strong>14</strong><span>自定义 Hook</span></div>
+    </div>
+    <p class="lead">以上数量仅用于说明建设覆盖范围，不代表业务价值本身。但它能反映出：当前系统已经形成页面层、接口层、组件层、能力层的基础平台结构。</p>
+    <div class="image"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/assets/scope_chart.png" alt="当前系统建设范围" /></div>
+    <div class="footer-note">内部汇报初稿｜基于代码库、架构文档与已确认业务信息整理</div>
+  </section>
+
+  <section class="page">
+    <div class="top-band">
+      <h2>四、项目是怎么运作的</h2>
+      <p>把“流程闭环”讲明白，是领导判断项目价值的关键</p>
+    </div>
+    <ul>
+      <li>系统主线以“选题”为起点，通过审核后进入后续创作、执行、发布和复盘环节。</li>
+      <li>各环节之间不是孤立跳转，而是通过统一状态、数据记录和权限机制实现接续。</li>
+      <li>团队不需要反复手工同步“进行到哪一步了”，系统本身就承担了流程连接器的角色。</li>
+      <li>“泰安的十大名人墓葬”这一选题已经验证了平台具备支撑完整业务闭环的能力。</li>
+    </ul>
+    <div class="image"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/assets/workflow.png" alt="项目运作流程图" /></div>
+    <div class="footer-note">内部汇报初稿｜基于代码库、架构文档与已确认业务信息整理</div>
+  </section>
+
+  <section class="page">
+    <div class="top-band">
+      <h2>五、这个项目的核心优点</h2>
+      <p>重点不在“功能多”，而在于“能不能形成组织能力”</p>
+    </div>
+    <ul>
+      <li>全链路闭环：把内容生产全过程放在同一套系统里，减少中间断层。</li>
+      <li>标准化管理：通过状态流转、审批设计、权限控制，把经验变成制度化动作。</li>
+      <li>实时协同：消息、通知、日志、实时同步机制增强团队协作效率。</li>
+      <li>数据沉淀：系统不只记录结果，还能把前置过程沉淀下来，为复盘和优化提供依据。</li>
+      <li>可控部署：当前采用 Express + SQLite 的轻量部署方式，适合内部快速落地和持续迭代。</li>
+      <li>实际价值已初步体现：目前反馈可减少约 80% 沟通成本，并减少整理思路、反复提报和重复修改等动作。</li>
+    </ul>
+    <h3 class="section-title">对团队和公司的不可替代优势</h3>
+    <table>
+      <thead>
+        <tr><th>维度</th><th>当前优势</th><th>为什么难以替代</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>流程闭环</td><td>从选题到复盘贯穿在同一系统内</td><td>不是单点工具，而是把前后环节接起来，替代零散协作方式</td></tr>
+        <tr><td>管理可视化</td><td>每个状态、责任和进度都有记录</td><td>领导和负责人可以随时看到推进情况，减少口头追踪</td></tr>
+        <tr><td>经验沉淀</td><td>脚本、灵感、资源、审批方式都能留下来</td><td>团队能力不再只依赖个人记忆，便于复制和交接</td></tr>
+        <tr><td>协同效率</td><td>消息、通知、权限、日历、看板形成联动</td><td>减少跨群确认、重复问进度、版本不一致等管理成本</td></tr>
+        <tr><td>数据回连</td><td>复盘数据能回到前面的选题与执行过程</td><td>不仅看结果，也能分析为什么做成或没做成</td></tr>
+      </tbody>
+    </table>
+    <div class="footer-note">内部汇报初稿｜基于代码库、架构文档与已确认业务信息整理</div>
+  </section>
+
+  <section class="page">
+    <div class="top-band">
+      <h2>六、未来愿景：从内部系统走向通用产品</h2>
+      <p>先说明这套系统为什么值得继续做，再说明未来为什么有商业化潜力</p>
+    </div>
+    <ul>
+      <li>如果继续沿着“可配置、可复制、可部署”的方向改造，这套系统有机会从团队专用工具演进成通用系统。</li>
+      <li>通用化的关键，不是简单增加功能，而是把当前团队经验抽象成模板化、参数化、角色化能力。</li>
+      <li>当前最值得继续投入的方向，是进一步优化整体系统架构、整合各模块，并统一系统风格。</li>
+      <li>更适合的目标客户，是新媒体等需要多环节协同合作的公司，未来可考虑以整体打包方案出售。</li>
+    </ul>
+    <div class="image"><img src="file:///E:/houtai/xmt/reports/output/leadership_report_v1/assets/roadmap.png" alt="未来愿景与产品化路径" /></div>
+    <h3 class="section-title">给领导汇报时建议重点强调的结论</h3>
+    <ul>
+      <li>这不是一个零散工具集合，而是一套已经具备平台雏形的业务系统。</li>
+      <li>它最大的价值不是“多了一个系统”，而是把团队经验、流程规则和协同方式沉淀下来。</li>
+      <li>对团队来说，它提升的是执行效率和管理透明度；对公司来说，它沉淀的是未来可复制、可扩展、可盈利的数字化能力。</li>
+      <li>从当前使用反馈看，这个项目已经有继续打磨和扩大应用范围的基础。</li>
+    </ul>
+    <div class="footer-note">内部汇报初稿｜基于代码库、架构文档与已确认业务信息整理</div>
+  </section>
+
+  <section class="page">
+    <div class="top-band">
+      <h2>七、当前已确认的关键事实</h2>
+      <p>这部分已经可以作为正式汇报口径使用</p>
+    </div>
+    <table class="warn">
+      <thead>
+        <tr><th>已确认信息</th><th>当前内容</th><th>汇报用途</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>落地范围</td><td>文案、摄影、剪辑已在使用</td><td>证明项目已进入实际落地阶段</td></tr>
+        <tr><td>效率改善</td><td>减少约 80% 沟通成本</td><td>让领导直观看到投入产出比</td></tr>
+        <tr><td>典型案例</td><td>“泰安的十大名人墓葬”已全流程跑通</td><td>证明系统可以支撑真实业务闭环</td></tr>
+        <tr><td>当前重点</td><td>优化整体系统架构、整合模块、统一风格</td><td>为下一阶段资源投入提供方向</td></tr>
+      </tbody>
+    </table>
+    <div class="footer-note">内部汇报初稿｜基于代码库、架构文档与已确认业务信息整理</div>
+  </section>
+</body>
+</html>

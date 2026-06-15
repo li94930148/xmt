@@ -39,7 +39,6 @@ COPY --from=base /app/dist ./dist
 COPY --from=base /app/api ./api
 COPY --from=base /app/shared ./shared
 COPY --from=base /app/tsconfig.json ./
-COPY --from=base /app/tsconfig.node.json ./
 
 # 创建数据目录
 RUN mkdir -p data backups

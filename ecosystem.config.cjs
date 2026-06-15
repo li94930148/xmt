@@ -1,10 +1,14 @@
+const path = require('path');
+
+const rootDir = __dirname;
+
 module.exports = {
   apps: [{
     name: 'xmt-server',
     script: 'api/server.ts',
     interpreter: 'node',
-    node_args: '--import tsx/esm --import dotenv/config',
-    cwd: 'E:\\houtai\\xmt',
+    node_args: '--import tsx --import dotenv/config',
+    cwd: rootDir,
     instances: 1,
     exec_mode: 'fork',
     autorestart: true,
@@ -15,8 +19,8 @@ module.exports = {
       PORT: 3001,
     },
     // 日志
-    error_file: 'E:\\houtai\\xmt\\logs\\error.log',
-    out_file: 'E:\\houtai\\xmt\\logs\\out.log',
+    error_file: path.join(rootDir, 'logs', 'error.log'),
+    out_file: path.join(rootDir, 'logs', 'out.log'),
     log_date_format: 'YYYY-MM-DD HH:mm:ss',
     merge_logs: true,
   }]

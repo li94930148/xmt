@@ -1,0 +1,17 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+dist
+logs
+*.log
+data
+backups
+certs
+certs-disabled
+reports
+.claude
+.compose
+.mimocode

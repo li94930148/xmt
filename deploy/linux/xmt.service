@@ -1,0 +1,30 @@
+[Unit]
+Description=XMT collaboration system
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xmt
+Group=xmt
+WorkingDirectory=/opt/xmt
+EnvironmentFile=/etc/xmt/xmt.env
+ExecStart=/usr/local/bin/node --import tsx api/server.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+UMask=0027
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/xmt/data /opt/xmt/logs
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=xmt
+
+[Install]
+WantedBy=multi-user.target

@@ -364,11 +364,15 @@ export async function startServer() {
     }
   }, 60 * 1000)
 
-  const PORT = process.env.PORT || 3001
+  const PORT = Number.parseInt(process.env.PORT || '3001', 10)
+  const HOST = process.env.HOST || '0.0.0.0'
+  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+    throw new Error(`Invalid PORT value: ${process.env.PORT}`)
+  }
   const isHttps = server instanceof https.Server
-  server.listen(PORT, () => {
+  server.listen(PORT, HOST, () => {
     const protocol = isHttps ? 'https' : 'http'
-    console.log(`Server ready on ${protocol}://0.0.0.0:${PORT}`)
+    console.log(`Server ready on ${protocol}://${HOST}:${PORT}`)
     if (isHttps) {
       console.log(`[HTTPS] 局域网访问: https://192.168.1.9:${PORT}`)
       console.log('[HTTPS] 首次访问浏览器会提示不安全，点"高级"继续访问即可')

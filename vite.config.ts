@@ -15,6 +15,12 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'src'),
+      '@shared': path.resolve(__dirname, 'shared'),
+    },
+  },
   plugins: [
     react({
       babel: {

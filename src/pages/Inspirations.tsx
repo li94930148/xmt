@@ -11,6 +11,7 @@ import {
 } from '../api';
 import type { Inspiration, InspirationComment } from '../api/inspirations';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { usePermission } from '../hooks/usePermission';
 import { useDebounce } from '../hooks/useDebounce';
 import { useSocket } from '../hooks/useSocket';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
@@ -62,6 +63,9 @@ export default function Inspirations() {
   const appStore = useAppStore();
   const authStore = useAuthStore();
   const styles = useThemeStyles();
+  const { hasPermission } = usePermission();
+  const canDeleteAnyInspiration = hasPermission('inspiration:delete');
+  const canPromoteInspiration = hasPermission('inspiration:promote');
   const debouncedSearch = useDebounce(searchTerm, 400);
   const socket = useSocket();
   const newItemIdsRef = useRef(new Set<number>());
@@ -454,7 +458,7 @@ export default function Inspirations() {
                     <span className={`text-[10px] ${styles.textMuted}`}>
                       {inspiration.creator_name || '匿名'}
                     </span>
-                    {!isPromoted && (
+                    {!isPromoted && canPromoteInspiration && (
                       <button
                         type="button"
                         onClick={(event) => {
@@ -472,8 +476,7 @@ export default function Inspirations() {
                         转为选题
                       </button>
                     )}
-                    {(authStore.user?.role === 'admin' ||
-                      authStore.user?.id === inspiration.creator_id) && (
+                    {(canDeleteAnyInspiration || authStore.user?.id === inspiration.creator_id) && (
                       <button
                         type="button"
                         onClick={(event) => {

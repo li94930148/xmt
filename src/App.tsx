@@ -4,6 +4,7 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import RealtimeToast from '@/components/RealtimeToast';
+import RoleGuard from '@/components/RoleGuard';
 import NotFound from '@/pages/NotFound';
 
 function lazyWithRetry<T extends React.ComponentType<object>>(
@@ -102,26 +103,46 @@ export default function App() {
                 <Route path="/topics/:id" element={<TopicDetail />} />
                 <Route path="/production" element={<Production />} />
                 <Route path="/production/:id" element={<ProductionDetail />} />
-                <Route path="/shooting" element={<Shooting />} />
                 <Route path="/shooting/:id" element={<ShootingDetail />} />
-                <Route path="/publishing" element={<Publishing />} />
                 <Route path="/publishing/:id" element={<PublishingDetail />} />
-                <Route path="/analytics" element={<Analytics />} />
-                <Route path="/users" element={<Users />} />
                 <Route path="/resources" element={<Resources />} />
                 <Route path="/messages" element={<Messages />} />
                 <Route path="/kanban" element={<Kanban />} />
                 <Route path="/calendar" element={<CalendarPage />} />
                 <Route path="/inspirations" element={<Inspirations />} />
                 <Route path="/achievements" element={<Achievements />} />
-                <Route path="/activity" element={<ActivityLog />} />
-                <Route path="/douyin" element={<DouyinAnalytics />} />
-                <Route path="/permissions" element={<PermissionManagement />} />
-                <Route path="/workflow-designer" element={<WorkflowDesigner />} />
                 <Route path="/notification-settings" element={<NotificationSettings />} />
-                <Route path="/export" element={<ExportPage />} />
                 <Route path="/pomodoro" element={<PomodoroPage />} />
-                <Route path="/backup" element={<BackupPage />} />
+                <Route element={<RoleGuard permissions={['workflow:shooting']} />}>
+                  <Route path="/shooting" element={<Shooting />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['workflow:publishing']} />}>
+                  <Route path="/publishing" element={<Publishing />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['analytics:view']} />}>
+                  <Route path="/analytics" element={<Analytics />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['user:logs']} />}>
+                  <Route path="/activity" element={<ActivityLog />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['system:douyin']} />}>
+                  <Route path="/douyin" element={<DouyinAnalytics />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['system:template']} />}>
+                  <Route path="/workflow-designer" element={<WorkflowDesigner />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['export:data']} />}>
+                  <Route path="/export" element={<ExportPage />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['user:view']} />}>
+                  <Route path="/users" element={<Users />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['system:role', 'system:permission']} requireAll />}>
+                  <Route path="/permissions" element={<PermissionManagement />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['system:backup']} />}>
+                  <Route path="/backup" element={<BackupPage />} />
+                </Route>
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Route>

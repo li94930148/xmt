@@ -453,6 +453,10 @@ async function initTables() {
       ['analytics:view', '查看数据分析', 'analytics'],
       ['analytics:create', '创建分析数据', 'analytics'],
       ['export:data', '导出数据', 'export'],
+      ['production:delete', '删除创作记录', 'production'],
+      ['comment:delete', '删除流程评论', 'workflow'],
+      ['inspiration:delete', '删除灵感', 'inspiration'],
+      ['inspiration:promote', '灵感转选题', 'inspiration'],
       // 系统模块
       ['system:backup', '系统备份', 'system'],
       ['system:announcement', '管理公告', 'system'],
@@ -461,6 +465,7 @@ async function initTables() {
       ['system:douyin', '管理抖音数据', 'system'],
       ['system:role', '管理角色', 'system'],
       ['system:permission', '管理权限', 'system'],
+      ['system:settings', '管理系统设置', 'system'],
     ];
 
     for (const [code, name, module] of permissions) {
@@ -487,7 +492,7 @@ async function initTables() {
     // member 拥有基础权限
     const memberRole = await db.execute(`SELECT id FROM roles WHERE code = 'member'`);
     const memberRoleId = memberRole.rows[0].id;
-    const memberPerms = await db.execute(`SELECT id FROM permissions WHERE code IN ('topic:create', 'topic:view', 'topic:update', 'workflow:comment', 'analytics:view', 'export:data')`);
+    const memberPerms = await db.execute(`SELECT id FROM permissions WHERE code IN ('topic:create', 'topic:view', 'topic:update', 'workflow:comment')`);
     for (const perm of memberPerms.rows) {
       await db.execute({ sql: `INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, args: [memberRoleId, perm.id] });
     }
@@ -495,7 +500,7 @@ async function initTables() {
     // editor 拥有内容编辑相关权限
     const editorRole = await db.execute(`SELECT id FROM roles WHERE code = 'editor'`);
     const editorRoleId = editorRole.rows[0].id;
-    const editorPerms = await db.execute(`SELECT id FROM permissions WHERE code IN ('topic:view', 'topic:update', 'workflow:production', 'workflow:comment', 'analytics:view')`);
+    const editorPerms = await db.execute(`SELECT id FROM permissions WHERE code IN ('topic:view', 'topic:update', 'workflow:production', 'workflow:comment')`);
     for (const perm of editorPerms.rows) {
       await db.execute({ sql: `INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, args: [editorRoleId, perm.id] });
     }
@@ -689,32 +694,195 @@ async function runTimeMigrations() {
     console.warn('[DB] 清理旧 calendar_events 索引失败:', getDbErrorMessage(error));
   }
 
-  const migrated = await db.execute({
+  const tzMigrated = await db.execute({
     sql: `SELECT value FROM app_meta WHERE key = ?`,
     args: ['tz_migration_20260611'],
   });
 
-  if (migrated.rows.length > 0) {
-    return;
+  if (tzMigrated.rows.length === 0) {
+    // 历史上部分表依赖 CURRENT_TIMESTAMP，SQLite 默认会写入 UTC。
+    // 这里把用户最敏感的几类数据统一平移到北京时间，避免前后显示规则混杂。
+    const migrationStatements = [
+      `UPDATE messages SET created_at = datetime(created_at, '+8 hours') WHERE created_at IS NOT NULL`,
+      `UPDATE inspirations SET created_at = datetime(created_at, '+8 hours'), updated_at = datetime(updated_at, '+8 hours') WHERE created_at IS NOT NULL`,
+      `UPDATE inspiration_comments SET created_at = datetime(created_at, '+8 hours') WHERE created_at IS NOT NULL`,
+      `UPDATE announcements SET created_at = datetime(created_at, '+8 hours'), updated_at = datetime(updated_at, '+8 hours') WHERE created_at IS NOT NULL`,
+    ];
+
+    for (const sql of migrationStatements) {
+      await db.execute(sql);
+    }
+
+    await db.execute({
+      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
+      args: ['tz_migration_20260611', 'done'],
+    });
   }
 
-  // 历史上部分表依赖 CURRENT_TIMESTAMP，SQLite 默认会写入 UTC。
-  // 这里把用户最敏感的几类数据统一平移到北京时间，避免前后显示规则混杂。
-  const migrationStatements = [
-    `UPDATE messages SET created_at = datetime(created_at, '+8 hours') WHERE created_at IS NOT NULL`,
-    `UPDATE inspirations SET created_at = datetime(created_at, '+8 hours'), updated_at = datetime(updated_at, '+8 hours') WHERE created_at IS NOT NULL`,
-    `UPDATE inspiration_comments SET created_at = datetime(created_at, '+8 hours') WHERE created_at IS NOT NULL`,
-    `UPDATE announcements SET created_at = datetime(created_at, '+8 hours'), updated_at = datetime(updated_at, '+8 hours') WHERE created_at IS NOT NULL`,
-  ];
-
-  for (const sql of migrationStatements) {
-    await db.execute(sql);
-  }
-
-  await db.execute({
-    sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
-    args: ['tz_migration_20260611', 'done'],
+  const rolePermissionSyncKey = 'role_perm_sync_20260616_member_editor_scope';
+  const rolePermissionSync = await db.execute({
+    sql: `SELECT value FROM app_meta WHERE key = ?`,
+    args: [rolePermissionSyncKey],
   });
+
+  if (rolePermissionSync.rows.length === 0) {
+    const roles = await db.execute(
+      `SELECT id, code FROM roles WHERE code IN ('member', 'editor')`
+    );
+    const permissions = await db.execute(
+      `SELECT id, code FROM permissions WHERE code IN ('analytics:view', 'export:data')`
+    );
+
+    const roleIdByCode = new Map<string, number>();
+    for (const row of roles.rows) {
+      const roleId = Number((row as Record<string, unknown>).id);
+      const roleCode = String((row as Record<string, unknown>).code ?? '');
+      if (!roleId || !roleCode) {
+        continue;
+      }
+      roleIdByCode.set(roleCode, roleId);
+    }
+
+    const permissionIdByCode = new Map<string, number>();
+    for (const row of permissions.rows) {
+      const permissionId = Number((row as Record<string, unknown>).id);
+      const permissionCode = String((row as Record<string, unknown>).code ?? '');
+      if (!permissionId || !permissionCode) {
+        continue;
+      }
+      permissionIdByCode.set(permissionCode, permissionId);
+    }
+
+    const staleBindings: Array<[string, string]> = [
+      ['member', 'analytics:view'],
+      ['member', 'export:data'],
+      ['editor', 'analytics:view'],
+    ];
+
+    for (const [roleCode, permissionCode] of staleBindings) {
+      const roleId = roleIdByCode.get(roleCode);
+      const permissionId = permissionIdByCode.get(permissionCode);
+      if (!roleId || !permissionId) {
+        continue;
+      }
+
+      await db.execute({
+        sql: `DELETE FROM role_permissions WHERE role_id = ? AND permission_id = ?`,
+        args: [roleId, permissionId],
+      });
+    }
+
+    await db.execute({
+      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
+      args: [rolePermissionSyncKey, 'done'],
+    });
+  }
+
+  const permissionSeedSyncKey = 'permission_seed_sync_20260616_followup';
+  const permissionSeedSync = await db.execute({
+    sql: `SELECT value FROM app_meta WHERE key = ?`,
+    args: [permissionSeedSyncKey],
+  });
+
+  if (permissionSeedSync.rows.length === 0) {
+    const supplementalPermissions: Array<[string, string, string]> = [
+      ['production:delete', '删除创作记录', 'production'],
+      ['comment:delete', '删除流程评论', 'workflow'],
+      ['inspiration:delete', '删除灵感', 'inspiration'],
+      ['inspiration:promote', '灵感转选题', 'inspiration'],
+    ];
+
+    for (const [code, name, module] of supplementalPermissions) {
+      await db.execute({
+        sql: `INSERT OR IGNORE INTO permissions (code, name, module) VALUES (?, ?, ?)`,
+        args: [code, name, module],
+      });
+    }
+
+    const roles = await db.execute(
+      `SELECT id, code FROM roles WHERE code IN ('admin', 'director')`
+    );
+    const permissions = await db.execute(
+      `SELECT id, code FROM permissions WHERE code IN ('production:delete', 'comment:delete', 'inspiration:delete', 'inspiration:promote')`
+    );
+
+    const roleIdByCode = new Map<string, number>();
+    for (const row of roles.rows) {
+      const roleId = Number((row as Record<string, unknown>).id);
+      const roleCode = String((row as Record<string, unknown>).code ?? '');
+      if (!roleId || !roleCode) {
+        continue;
+      }
+      roleIdByCode.set(roleCode, roleId);
+    }
+
+    const permissionIdByCode = new Map<string, number>();
+    for (const row of permissions.rows) {
+      const permissionId = Number((row as Record<string, unknown>).id);
+      const permissionCode = String((row as Record<string, unknown>).code ?? '');
+      if (!permissionId || !permissionCode) {
+        continue;
+      }
+      permissionIdByCode.set(permissionCode, permissionId);
+    }
+
+    for (const roleCode of ['admin', 'director']) {
+      const roleId = roleIdByCode.get(roleCode);
+      if (!roleId) {
+        continue;
+      }
+
+      for (const permissionCode of ['production:delete', 'comment:delete', 'inspiration:delete', 'inspiration:promote']) {
+        const permissionId = permissionIdByCode.get(permissionCode);
+        if (!permissionId) {
+          continue;
+        }
+
+        await db.execute({
+          sql: `INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)`,
+          args: [roleId, permissionId],
+        });
+      }
+    }
+
+    await db.execute({
+      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
+      args: [permissionSeedSyncKey, 'done'],
+    });
+  }
+
+  const systemSettingsSeedSyncKey = 'permission_seed_sync_20260616_system_settings';
+  const systemSettingsSeedSync = await db.execute({
+    sql: `SELECT value FROM app_meta WHERE key = ?`,
+    args: [systemSettingsSeedSyncKey],
+  });
+
+  if (systemSettingsSeedSync.rows.length === 0) {
+    await db.execute({
+      sql: `INSERT OR IGNORE INTO permissions (code, name, module) VALUES (?, ?, ?)`,
+      args: ['system:settings', '管理系统设置', 'system'],
+    });
+
+    const adminRole = await db.execute(`SELECT id FROM roles WHERE code = 'admin'`);
+    const systemSettingsPermission = await db.execute(
+      `SELECT id FROM permissions WHERE code = 'system:settings'`,
+    );
+
+    const adminRoleId = Number(adminRole.rows[0]?.id || 0);
+    const permissionId = Number(systemSettingsPermission.rows[0]?.id || 0);
+
+    if (adminRoleId && permissionId) {
+      await db.execute({
+        sql: `INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)`,
+        args: [adminRoleId, permissionId],
+      });
+    }
+
+    await db.execute({
+      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
+      args: [systemSettingsSeedSyncKey, 'done'],
+    });
+  }
 }
 
 // 数据迁移：将现有 HTML content 转为 markdown 存入 content_markdown

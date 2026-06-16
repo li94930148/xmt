@@ -7,7 +7,7 @@
 
 export type TopicStatus = 'pending' | 'approved' | 'rejected' | 'production' | 'shooting' | 'publishing' | 'completed';
 
-export type UserRole = 'admin' | 'director' | 'member';
+export type UserRole = string;
 
 export type MessageType = 'info' | 'success' | 'warning' | 'error';
 

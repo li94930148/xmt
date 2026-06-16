@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Menu, Moon, Search, Settings, Sun, User, LogOut, ChevronRight } from 'lucide-react';
-import { getMe, getUnreadCount } from '../api';
+import { getMe, getPublicSystemSettings, getUnreadCount } from '../api';
 import { useAuthStore, useAppStore, useMessageStore } from '../store';
 import { buildBreadcrumbs } from '../config/navigation';
 import Sidebar from './Sidebar';
@@ -10,6 +10,9 @@ import KeyboardHelp from './KeyboardHelp';
 import UpdateNotification from './UpdateNotification';
 import { useSocket } from '../hooks/useSocket';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { usePermission } from '../hooks/usePermission';
+import { getRoleDisplayName } from '../lib/roles';
+import { applyDocumentBranding } from '@/lib/systemSettings';
 
 declare const __APP_VERSION__: string;
 
@@ -111,6 +114,8 @@ export default function Layout() {
   const theme = useAppStore((state) => state.theme);
   const toggleTheme = useAppStore((state) => state.toggleTheme);
   const fontSize = useAppStore((state) => state.fontSize);
+  const setSystemSettings = useAppStore((state) => state.setSystemSettings);
+  const { hasPermission } = usePermission();
 
   const unreadCount = useMessageStore((state) => state.unreadCount);
   const setUnreadCount = useMessageStore((state) => state.setUnreadCount);
@@ -132,6 +137,37 @@ export default function Layout() {
     document.documentElement.style.setProperty('--system-font-size', `${fontSize}px`);
     document.documentElement.style.fontSize = `${fontSize}px`;
   }, [fontSize]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateSystemSettings = async () => {
+      try {
+        const settings = await getPublicSystemSettings();
+        if (cancelled) {
+          return;
+        }
+
+        setSystemSettings(settings);
+        applyDocumentBranding(settings);
+      } catch {
+        // Public branding fetch failure should not block app rendering.
+      }
+    };
+
+    void hydrateSystemSettings();
+
+    const handleSystemSettingsChanged = () => {
+      void hydrateSystemSettings();
+    };
+
+    window.addEventListener('xmt-settings-changed', handleSystemSettingsChanged);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('xmt-settings-changed', handleSystemSettingsChanged);
+    };
+  }, [setSystemSettings]);
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -240,6 +276,8 @@ export default function Layout() {
     logout();
     navigate('/login', { replace: true });
   }, [logout, navigate]);
+
+  const settingsMenuLabel = hasPermission('system:settings') ? '设置中心' : '个人设置';
 
   if (loading) {
     return (
@@ -362,7 +400,7 @@ export default function Layout() {
                     {user?.name}
                   </p>
                   <p className={`text-[11px] ${theme === 'dark' ? 'text-[#636983]' : 'text-[#9aa0b0]'}`}>
-                    {user?.role === 'admin' ? '管理员' : user?.role === 'director' ? '编导' : '成员'}
+                    {getRoleDisplayName(user?.role)}
                   </p>
                 </div>
               </button>
@@ -381,7 +419,7 @@ export default function Layout() {
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-theme-text-secondary transition hover:bg-theme-hover hover:text-theme-text"
                   >
                     <Settings className="h-4 w-4" />
-                    系统设置
+                    {settingsMenuLabel}
                   </button>
                   <button
                     onClick={handleLogout}

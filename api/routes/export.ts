@@ -1,6 +1,7 @@
 import express from 'express';
-import { beijingNow, beijingToday, queryOne, queryAll, execute } from '../database/utils';
-import { authenticate, requireRole } from '../middleware/auth';
+import { beijingNow, beijingToday, queryOne, queryAll } from '../database/utils';
+import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 
 const router = express.Router();
 
@@ -13,13 +14,12 @@ function queryDateDaysAgo(days: number): string {
   return `${year}-${month}-${day}`;
 }
 
-// GET /topics - 导出选题数据为 JSON（前端转 Excel）
-router.get('/topics', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.get('/topics', authenticate, requirePermission('export:data'), async (req, res) => {
   try {
     const { status, start_date, end_date } = req.query;
 
     let query = `
-      SELECT 
+      SELECT
         t.id,
         t.title,
         t.description,
@@ -41,26 +41,22 @@ router.get('/topics', authenticate, requireRole(['admin', 'director']), async (r
       query += ` AND t.status = ?`;
       params.push(status);
     }
-
     if (start_date) {
       query += ` AND t.created_at >= ?`;
       params.push(start_date);
     }
-
     if (end_date) {
       query += ` AND t.created_at <= ?`;
       params.push(end_date);
     }
 
     query += ` ORDER BY t.created_at DESC`;
-
     const topics = await queryAll(query, params);
 
-    // 添加统计信息
     const stats = {
       total: topics.length,
       byStatus: {} as Record<string, number>,
-      byPlatform: {} as Record<string, number>
+      byPlatform: {} as Record<string, number>,
     };
 
     topics.forEach((topic: any) => {
@@ -70,22 +66,16 @@ router.get('/topics', authenticate, requireRole(['admin', 'director']), async (r
       }
     });
 
-    res.json({
-      data: topics,
-      stats,
-      exportTime: beijingNow()
-    });
+    res.json({ data: topics, stats, exportTime: beijingNow() });
   } catch (error) {
     res.status(500).json({ message: '导出选题数据失败', error });
   }
 });
 
-// GET /analytics - 导出数据分析为 JSON
-router.get('/analytics', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.get('/analytics', authenticate, requirePermission('export:data'), async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
 
-    // 选题统计
     let topicQuery = `SELECT status, COUNT(*) as count FROM topics WHERE 1=1`;
     const topicParams: any[] = [];
 
@@ -101,9 +91,8 @@ router.get('/analytics', authenticate, requireRole(['admin', 'director']), async
     topicQuery += ` GROUP BY status`;
     const topicStats = await queryAll(topicQuery, topicParams);
 
-    // 用户活跃度
     const userActivity = await queryAll(`
-      SELECT 
+      SELECT
         u.id,
         u.name,
         COUNT(DISTINCT t.id) as topics_created,
@@ -116,9 +105,8 @@ router.get('/analytics', authenticate, requireRole(['admin', 'director']), async
       ORDER BY topics_created DESC
     `);
 
-    // 每日趋势（最近30天）
     const dailyTrend = await queryAll(`
-      SELECT 
+      SELECT
         DATE(created_at) as date,
         COUNT(*) as topics_created
       FROM topics
@@ -127,7 +115,6 @@ router.get('/analytics', authenticate, requireRole(['admin', 'director']), async
       ORDER BY date ASC
     `);
 
-    // 平台分布
     const platformDist = await queryAll(`
       SELECT platform, COUNT(*) as count
       FROM topics
@@ -141,37 +128,33 @@ router.get('/analytics', authenticate, requireRole(['admin', 'director']), async
       userActivity,
       dailyTrend,
       platformDistribution: platformDist,
-      exportTime: beijingNow()
+      exportTime: beijingNow(),
     });
   } catch (error) {
     res.status(500).json({ message: '导出分析数据失败', error });
   }
 });
 
-// GET /weekly-report - 自动生成周报摘要 JSON
-router.get('/weekly-report', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.get('/weekly-report', authenticate, requirePermission('export:data'), async (req, res) => {
   try {
-    // 本周完成的选题
     const completedTopics = await queryAll(`
       SELECT t.*, u.name as creator_name
       FROM topics t
       LEFT JOIN users u ON t.creator_id = u.id
       WHERE t.status = 'completed'
-      AND t.updated_at >= datetime('now', 'weekday 0', '-7 days')
+        AND t.updated_at >= datetime('now', 'weekday 0', '-7 days')
       ORDER BY t.updated_at DESC
     `);
 
-    // 本周发布的视频（publishing 表）
     const publishedVideos = await queryAll(`
       SELECT p.*, t.title as topic_title
       FROM publishing p
       LEFT JOIN topics t ON p.topic_id = t.id
       WHERE p.status = 'published'
-      AND p.publish_time >= datetime('now', 'weekday 0', '-7 days')
+        AND p.publish_time >= datetime('now', 'weekday 0', '-7 days')
       ORDER BY p.publish_time DESC
     `);
 
-    // 本周新增选题
     const newTopics = await queryAll(`
       SELECT t.*, u.name as creator_name
       FROM topics t
@@ -180,9 +163,8 @@ router.get('/weekly-report', authenticate, requireRole(['admin', 'director']), a
       ORDER BY t.created_at DESC
     `);
 
-    // 本周播放量统计
     const analyticsResult = await queryOne(`
-      SELECT 
+      SELECT
         COALESCE(SUM(views), 0) as total_views,
         COALESCE(SUM(likes), 0) as total_likes,
         COALESCE(SUM(shares), 0) as total_shares,
@@ -191,17 +173,15 @@ router.get('/weekly-report', authenticate, requireRole(['admin', 'director']), a
       WHERE data_date >= date('now', 'weekday 0', '-7 days')
     `);
 
-    // 本周番茄钟统计
     const pomodoroStats = await queryOne(`
-      SELECT 
+      SELECT
         COUNT(*) as total_sessions,
         COALESCE(SUM(duration), 0) as total_minutes
       FROM pomodoro_sessions
       WHERE completed = 1
-      AND ended_at >= datetime('now', 'weekday 0', '-7 days')
+        AND ended_at >= datetime('now', 'weekday 0', '-7 days')
     `);
 
-    // 本周新灵感
     const newInspirations = await queryAll(`
       SELECT i.*, u.name as creator_name
       FROM inspirations i
@@ -211,10 +191,10 @@ router.get('/weekly-report', authenticate, requireRole(['admin', 'director']), a
       LIMIT 5
     `);
 
-    const report = {
+    res.json({
       period: {
         start: queryDateDaysAgo(7),
-        end: beijingToday()
+        end: beijingToday(),
       },
       summary: {
         completedTopics: completedTopics.length,
@@ -225,18 +205,16 @@ router.get('/weekly-report', authenticate, requireRole(['admin', 'director']), a
         totalShares: analyticsResult?.total_shares || 0,
         totalComments: analyticsResult?.total_comments || 0,
         pomodoroSessions: pomodoroStats?.total_sessions || 0,
-        focusMinutes: pomodoroStats?.total_minutes || 0
+        focusMinutes: pomodoroStats?.total_minutes || 0,
       },
       details: {
         completedTopics,
         publishedVideos,
         newTopics,
-        topInspirations: newInspirations
+        topInspirations: newInspirations,
       },
-      generatedAt: beijingNow()
-    };
-
-    res.json(report);
+      generatedAt: beijingNow(),
+    });
   } catch (error) {
     res.status(500).json({ message: '生成周报失败', error });
   }

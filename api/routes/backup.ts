@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -30,7 +31,7 @@ function createBackup(): string {
 }
 
 // 手动创建备份
-router.post('/create', authenticate, requireRole(['admin']), (req, res) => {
+router.post('/create', authenticate, requirePermission('system:backup'), (req, res) => {
   try {
     const name = createBackup();
     res.json({ message: '备份创建成功', name });
@@ -40,7 +41,7 @@ router.post('/create', authenticate, requireRole(['admin']), (req, res) => {
 });
 
 // 获取备份列表
-router.get('/list', authenticate, requireRole(['admin']), (req, res) => {
+router.get('/list', authenticate, requirePermission('system:backup'), (req, res) => {
   try {
     ensureBackupDir();
     const files = fs.readdirSync(BACKUP_DIR)
@@ -61,7 +62,7 @@ router.get('/list', authenticate, requireRole(['admin']), (req, res) => {
 });
 
 // 下载备份
-router.get('/download/:name', authenticate, requireRole(['admin']), (req, res) => {
+router.get('/download/:name', authenticate, requirePermission('system:backup'), (req, res) => {
   try {
     const filePath = path.join(BACKUP_DIR, req.params.name);
     if (!fs.existsSync(filePath)) {
@@ -74,7 +75,7 @@ router.get('/download/:name', authenticate, requireRole(['admin']), (req, res) =
 });
 
 // 删除备份
-router.delete('/:name', authenticate, requireRole(['admin']), (req, res) => {
+router.delete('/:name', authenticate, requirePermission('system:backup'), (req, res) => {
   try {
     const filePath = path.join(BACKUP_DIR, req.params.name);
     if (!fs.existsSync(filePath)) {

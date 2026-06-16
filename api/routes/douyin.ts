@@ -1,12 +1,13 @@
 ﻿import express from 'express';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { scrapeDouyinProfile, parseDouyinNumber, closeBrowser } from '../services/douyin';
 import { db } from '../database/db';
 
 const router = express.Router();
 
 // GET /api/douyin/accounts - 获取已添加的账号列表
-router.get('/accounts', authenticate, async (req, res) => {
+router.get('/accounts', authenticate, requirePermission('system:douyin'), async (req, res) => {
   try {
     const result = await db.execute(`SELECT * FROM douyin_accounts ORDER BY created_at DESC`);
     res.json(result.rows);
@@ -16,7 +17,7 @@ router.get('/accounts', authenticate, async (req, res) => {
 });
 
 // POST /api/douyin/accounts - 添加抖音账号
-router.post('/accounts', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.post('/accounts', authenticate, requirePermission('system:douyin'), async (req, res) => {
   try {
     const { name, profileUrl } = req.body;
     if (!name || !profileUrl) {
@@ -33,7 +34,7 @@ router.post('/accounts', authenticate, requireRole(['admin', 'director']), async
 });
 
 // DELETE /api/douyin/accounts/:id - 删除账号
-router.delete('/accounts/:id', authenticate, requireRole(['admin']), async (req, res) => {
+router.delete('/accounts/:id', authenticate, requirePermission('system:douyin'), async (req, res) => {
   try {
     const { id } = req.params;
     await db.execute({ sql: `DELETE FROM douyin_videos WHERE snapshot_id IN (SELECT id FROM douyin_snapshots WHERE account_id = ?)`, args: [id] });
@@ -46,7 +47,7 @@ router.delete('/accounts/:id', authenticate, requireRole(['admin']), async (req,
 });
 
 // POST /api/douyin/scrape/:accountId - 抓取指定账号数据
-router.post('/scrape/:accountId', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.post('/scrape/:accountId', authenticate, requirePermission('system:douyin'), async (req, res) => {
   try {
     const { accountId } = req.params;
 
@@ -97,7 +98,7 @@ router.post('/scrape/:accountId', authenticate, requireRole(['admin', 'director'
 });
 
 // GET /api/douyin/snapshots/:accountId - 获取某账号的历史快照
-router.get('/snapshots/:accountId', authenticate, async (req, res) => {
+router.get('/snapshots/:accountId', authenticate, requirePermission('system:douyin'), async (req, res) => {
   try {
     const { accountId } = req.params;
     const { limit = 30 } = req.query;
@@ -114,7 +115,7 @@ router.get('/snapshots/:accountId', authenticate, async (req, res) => {
 });
 
 // GET /api/douyin/snapshot/:snapshotId/videos - 获取某次快照的视频列表
-router.get('/snapshot/:snapshotId/videos', authenticate, async (req, res) => {
+router.get('/snapshot/:snapshotId/videos', authenticate, requirePermission('system:douyin'), async (req, res) => {
   try {
     const { snapshotId } = req.params;
 
@@ -130,7 +131,7 @@ router.get('/snapshot/:snapshotId/videos', authenticate, async (req, res) => {
 });
 
 // GET /api/douyin/trend/:accountId - 获取涨粉趋势数据
-router.get('/trend/:accountId', authenticate, async (req, res) => {
+router.get('/trend/:accountId', authenticate, requirePermission('system:douyin'), async (req, res) => {
   try {
     const { accountId } = req.params;
     const { days = 30 } = req.query;
@@ -150,7 +151,7 @@ router.get('/trend/:accountId', authenticate, async (req, res) => {
 });
 
 // POST /api/douyin/close-browser - 关闭浏览器实例（释放资源）
-router.post('/close-browser', authenticate, requireRole(['admin']), async (req, res) => {
+router.post('/close-browser', authenticate, requirePermission('system:douyin'), async (req, res) => {
   try {
     await closeBrowser();
     res.json({ message: '浏览器已关闭' });

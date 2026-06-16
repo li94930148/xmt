@@ -1,12 +1,29 @@
 ﻿﻿import express from 'express';
 import bcrypt from 'bcrypt';
 import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { User } from '../types';
 
 const router = express.Router();
 
-router.get('/', authenticate, async (req, res) => {
+async function getRoleByCode(roleCode: string) {
+  return queryOne(`SELECT id, code, name FROM roles WHERE code = ?`, [roleCode]);
+}
+
+async function syncUserPrimaryRole(userId: number, roleCode: string) {
+  const role = await getRoleByCode(roleCode);
+  if (!role) {
+    return false;
+  }
+
+  await execute(`DELETE FROM user_roles WHERE user_id = ?`, [userId]);
+  await execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [userId, role.id]);
+  await execute(`UPDATE users SET role = ? WHERE id = ?`, [roleCode, userId]);
+  return true;
+}
+
+router.get('/', authenticate, requirePermission('user:view'), async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     
@@ -28,7 +45,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // 注意：这些固定路由必须放在?/:id 之前，否则?Express 会把 logs/activity-logs 当成 id
-router.get('/logs', authenticate, requireRole(['admin']), async (req, res) => {
+router.get('/logs', authenticate, requirePermission('user:logs'), async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     
@@ -50,7 +67,7 @@ router.get('/logs', authenticate, requireRole(['admin']), async (req, res) => {
   }
 });
 
-router.get('/activity-logs', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.get('/activity-logs', authenticate, requirePermission('user:logs'), async (req, res) => {
   try {
     const { page = 1, limit = 20, user_id } = req.query;
     const limitNum = parseInt(limit as string);
@@ -87,7 +104,7 @@ router.get('/activity-logs', authenticate, requireRole(['admin', 'director']), a
   }
 });
 
-router.get('/:id', authenticate, requireRole(['admin']), async (req, res) => {
+router.get('/:id', authenticate, requirePermission('user:view'), async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -104,7 +121,7 @@ router.get('/:id', authenticate, requireRole(['admin']), async (req, res) => {
   }
 });
 
-router.post('/', authenticate, requireRole(['admin']), async (req, res) => {
+router.post('/', authenticate, requirePermission('user:create'), async (req, res) => {
   try {
     const { username, password, email, role = 'member', name } = req.body;
     
@@ -116,11 +133,18 @@ router.post('/', authenticate, requireRole(['admin']), async (req, res) => {
     if (Number(exists?.count) > 0) {
       return res.status(400).json({ message: '用户名已存在' });
     }
+
+    const targetRole = await getRoleByCode(role);
+    if (!targetRole) {
+      return res.status(400).json({ message: '所选角色不存在' });
+    }
     
     const hashedPassword = await bcrypt.hash(password, 10);
     
     const userId = await executeInsert(`INSERT INTO users (username, password, email, role, name, enabled) 
             VALUES (?, ?, ?, ?, ?, ?)`, [username, hashedPassword, email, role, name, 1]);
+
+    await execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [userId, targetRole.id]);
     
     await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
       req.user?.id, 'create', 'user', `创建用户: ${username}`
@@ -132,7 +156,7 @@ router.post('/', authenticate, requireRole(['admin']), async (req, res) => {
   }
 });
 
-router.put('/:id', authenticate, requireRole(['admin']), async (req, res) => {
+router.put('/:id', authenticate, requirePermission('user:update'), async (req, res) => {
   try {
     const { id } = req.params;
     const { password, email, role, name, enabled } = req.body;
@@ -140,6 +164,13 @@ router.put('/:id', authenticate, requireRole(['admin']), async (req, res) => {
     const user = await queryOne(`SELECT * FROM users WHERE id = ?`, [id]);
     if (!user) {
       return res.status(404).json({ message: '用户不存在' });
+    }
+
+    if (role) {
+      const targetRole = await getRoleByCode(role);
+      if (!targetRole) {
+        return res.status(400).json({ message: '所选角色不存在' });
+      }
     }
     
     const updates: string[] = [];
@@ -163,6 +194,10 @@ router.put('/:id', authenticate, requireRole(['admin']), async (req, res) => {
     params.push(id);
     
     await execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+
+    if (role) {
+      await syncUserPrimaryRole(Number(id), role);
+    }
     
     await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
       req.user?.id, 'update', 'user', `更新用户: ${user.username}`
@@ -174,7 +209,7 @@ router.put('/:id', authenticate, requireRole(['admin']), async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticate, requireRole(['admin']), async (req, res) => {
+router.delete('/:id', authenticate, requirePermission('user:delete'), async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -186,6 +221,8 @@ router.delete('/:id', authenticate, requireRole(['admin']), async (req, res) => 
     if (!user) {
       return res.status(404).json({ message: '用户不存在' });
     }
+
+    await execute(`DELETE FROM user_roles WHERE user_id = ?`, [id]);
     
     await execute(`DELETE FROM users WHERE id = ?`, [id]);
     

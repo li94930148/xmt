@@ -1,10 +1,10 @@
-﻿import express from 'express';
+import express from 'express';
 import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 
 const router = express.Router();
 
-// GET / - 获取模板列表
 router.get('/', authenticate, async (req, res) => {
   try {
     const templates = await queryAll(`
@@ -20,8 +20,7 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// POST / - 创建模板
-router.post('/', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.post('/', authenticate, requirePermission('system:template'), async (req, res) => {
   try {
     const { name, platform, description, template_data, is_default } = req.body;
     const userId = req.user?.id;
@@ -44,8 +43,7 @@ router.post('/', authenticate, requireRole(['admin', 'director']), async (req, r
   }
 });
 
-// PUT /:id - 更新模板
-router.put('/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.put('/:id', authenticate, requirePermission('system:template'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, platform, description, template_data, is_default } = req.body;
@@ -58,15 +56,27 @@ router.put('/:id', authenticate, requireRole(['admin', 'director']), async (req,
     const updates: string[] = [];
     const params: any[] = [];
 
-    if (name) { updates.push('name = ?'); params.push(name); }
-    if (platform !== undefined) { updates.push('platform = ?'); params.push(platform); }
-    if (description !== undefined) { updates.push('description = ?'); params.push(description); }
+    if (name) {
+      updates.push('name = ?');
+      params.push(name);
+    }
+    if (platform !== undefined) {
+      updates.push('platform = ?');
+      params.push(platform);
+    }
+    if (description !== undefined) {
+      updates.push('description = ?');
+      params.push(description);
+    }
     if (template_data !== undefined) {
       const templateDataStr = typeof template_data === 'object' ? JSON.stringify(template_data) : template_data;
       updates.push('template_data = ?');
       params.push(templateDataStr);
     }
-    if (is_default !== undefined) { updates.push('is_default = ?'); params.push(is_default ? 1 : 0); }
+    if (is_default !== undefined) {
+      updates.push('is_default = ?');
+      params.push(is_default ? 1 : 0);
+    }
 
     if (updates.length === 0) {
       return res.status(400).json({ message: '没有需要更新的字段' });
@@ -76,25 +86,22 @@ router.put('/:id', authenticate, requireRole(['admin', 'director']), async (req,
     params.push(id);
 
     await execute(`UPDATE topic_templates SET ${updates.join(', ')} WHERE id = ?`, params);
-
     res.json({ message: '模板更新成功' });
   } catch (error) {
     res.status(500).json({ message: '更新模板失败', error });
   }
 });
 
-// DELETE /:id - 删除模板
-router.delete('/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.delete('/:id', authenticate, requirePermission('system:template'), async (req, res) => {
   try {
     const { id } = req.params;
-
     const template = await queryOne(`SELECT * FROM topic_templates WHERE id = ?`, [id]);
+
     if (!template) {
       return res.status(404).json({ message: '模板不存在' });
     }
 
     await execute(`DELETE FROM topic_templates WHERE id = ?`, [id]);
-
     res.json({ message: '模板删除成功' });
   } catch (error) {
     res.status(500).json({ message: '删除模板失败', error });

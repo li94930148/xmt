@@ -1,6 +1,7 @@
 ﻿﻿import express from 'express';
 import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
 import { authenticate } from '../middleware/auth';
+import { canManageOwnedResource, isPrivilegedUser } from '../utils/access';
 
 const router = express.Router();
 
@@ -15,6 +16,11 @@ router.get('/', authenticate, async (req, res) => {
     if (category) {
       query += ` AND r.category = ?`;
       params.push(category);
+    }
+
+    if (!isPrivilegedUser(req.user)) {
+      query += ` AND r.uploader_id = ?`;
+      params.push(req.user?.id);
     }
     
     query += ` ORDER BY r.created_at DESC LIMIT ? OFFSET ?`;
@@ -49,6 +55,11 @@ router.get('/archives', authenticate, async (req, res) => {
     if (search) {
       query += ` AND r.name LIKE ?`;
       params.push(`%${search}%`);
+    }
+
+    if (!isPrivilegedUser(req.user)) {
+      query += ` AND r.uploader_id = ?`;
+      params.push(req.user?.id);
     }
     
     const countResult = await queryOne(`SELECT COUNT(*) as total FROM (${query})`, params);
@@ -99,6 +110,9 @@ router.get('/archives/:id', authenticate, async (req, res) => {
     if (!resource) {
       return res.status(404).json({ message: '归档不存在' });
     }
+    if (!canManageOwnedResource(req.user, resource as Record<string, unknown>)) {
+      return res.status(403).json({ message: '无权限查看该归档' });
+    }
     
     const record = resource as Record<string, unknown>;
     let archiveData = {};
@@ -122,7 +136,10 @@ router.get('/archives/:id', authenticate, async (req, res) => {
 
 router.get('/categories', authenticate, async (req, res) => {
   try {
-    const categories = await queryAll(`SELECT DISTINCT category FROM resources WHERE category IS NOT NULL`);
+    const categories = await queryAll(
+      `SELECT DISTINCT category FROM resources WHERE category IS NOT NULL${isPrivilegedUser(req.user) ? '' : ' AND uploader_id = ?'}`,
+      isPrivilegedUser(req.user) ? [] : [req.user?.id],
+    );
     
     res.json(categories.map((c: any) => c.category));
   } catch (error) {
@@ -139,6 +156,9 @@ router.get('/:id', authenticate, async (req, res) => {
     
     if (!resource) {
       return res.status(404).json({ message: '资源不存在' });
+    }
+    if (!canManageOwnedResource(req.user, resource as Record<string, unknown>)) {
+      return res.status(403).json({ message: '无权限查看该资源' });
     }
     
     res.json(resource);
@@ -173,6 +193,9 @@ router.put('/:id', authenticate, async (req, res) => {
     if (!resource) {
       return res.status(404).json({ message: '资源不存在' });
     }
+    if (!canManageOwnedResource(req.user, resource as Record<string, unknown>)) {
+      return res.status(403).json({ message: '无权限修改该资源' });
+    }
     
     const updateFields: string[] = [];
     const params: any[] = [];
@@ -204,6 +227,9 @@ router.delete('/:id', authenticate, async (req, res) => {
     const resource = await queryOne(`SELECT * FROM resources WHERE id = ?`, [id]);
     if (!resource) {
       return res.status(404).json({ message: '资源不存在' });
+    }
+    if (!canManageOwnedResource(req.user, resource as Record<string, unknown>)) {
+      return res.status(403).json({ message: '无权限删除该资源' });
     }
     
     await execute(`DELETE FROM resources WHERE id = ?`, [id]);

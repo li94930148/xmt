@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useAppStore, useAuthStore } from '../store';
+﻿import { useState, useEffect, useMemo } from 'react';
+import { useAppStore } from '../store';
 import {
   getAchievements, getMyAchievements, getAchievementProgress,
   getAchievementStats, getLeaderboard, getRecentAchievements,
@@ -7,8 +7,9 @@ import {
 } from '../api';
 import type { Achievement, AchievementStats, AchievementProgress, LeaderboardEntry, RecentAchievement } from '../api/achievements';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { usePermission } from '../hooks/usePermission';
 import { StatusBadge, RarityBadge, PointBadge } from '../components/Badge';
-import { ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_RARITIES, ACHIEVEMENT_LEVELS, ROLE_MAP } from '../constants';
+import { ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_RARITIES, ACHIEVEMENT_LEVELS } from '../constants';
 import { formatBeijingDate } from '../lib/utils';
 import {
   Trophy, Award, Star, Sparkles, Lock, CheckCircle, RefreshCw,
@@ -33,9 +34,9 @@ export default function Achievements() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [rarityFilter, setRarityFilter] = useState('all');
   const appStore = useAppStore();
-  const authStore = useAuthStore();
   const styles = useThemeStyles();
-  const isAdmin = authStore.user?.role === 'admin';
+  const { hasPermission } = usePermission();
+  const canManageAchievements = hasPermission('system:achievement');
 
   const fetchData = async () => {
     setLoading(true);
@@ -143,7 +144,7 @@ export default function Achievements() {
           <p className={`${styles.subtitle} mt-1`}>完成任务解锁成就，展示你的工作成果</p>
         </div>
         <div className="flex items-center gap-2">
-          {isAdmin && allAchievements.length === 0 && (
+          {canManageAchievements && allAchievements.length === 0 && (
             <button
               onClick={handleSeed}
               disabled={seeding}

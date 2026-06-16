@@ -15,6 +15,31 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined;
+          }
+
+          if (id.includes('prosemirror')) {
+            return 'prosemirror';
+          }
+
+          if (id.includes('@tiptap/')) {
+            return 'tiptap';
+          }
+
+          if (id.includes('lowlight')) {
+            return 'editor-lowlight';
+          }
+
+          return undefined;
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),

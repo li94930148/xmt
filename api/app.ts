@@ -41,6 +41,7 @@ import rolesRoutes from './routes/roles.js'
 import permissionsRoutes from './routes/permissions.js'
 import workflowTemplatesRoutes from './routes/workflow-templates.js'
 import notificationsRoutes from './routes/notifications.js'
+import systemSettingsRoutes from './routes/system-settings.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -228,6 +229,7 @@ app.use('/api/roles', rolesRoutes)
 app.use('/api/permissions', permissionsRoutes)
 app.use('/api/workflow-templates', workflowTemplatesRoutes)
 app.use('/api/notifications', notificationsRoutes)
+app.use('/api/system-settings', systemSettingsRoutes)
 
 app.use(
   '/api/health',

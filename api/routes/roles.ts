@@ -141,7 +141,7 @@ router.delete('/:id', authenticate, requirePermission('system:role'), async (req
 });
 
 // 获取用户的角色列表
-router.get('/user/:userId', authenticate, async (req, res) => {
+router.get('/user/:userId', authenticate, requirePermission('system:role'), async (req, res) => {
   try {
     const roles = await queryAll(`
       SELECT r.* FROM roles r

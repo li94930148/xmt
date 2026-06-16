@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { queryOne, queryAll, runInTransaction } from '../database/utils';
+import { canAccessTopic, canApproveWorkflowNode, getTopicScopeById, getWorkflowNodeById, isPrivilegedUser } from '../utils/access';
 
 const router = Router();
 
@@ -150,6 +151,14 @@ router.delete('/:id', authenticate, requirePermission('system:template'), async 
 
 router.get('/topic/:topicId/records', authenticate, async (req, res) => {
   try {
+    const topic = await getTopicScopeById(req.params.topicId);
+    if (!topic) {
+      return res.status(404).json({ message: '选题不存在' });
+    }
+    if (!canAccessTopic(req.user, topic)) {
+      return res.status(403).json({ message: '无权限查看该审批记录' });
+    }
+
     const records = await queryAll(`
       SELECT ar.*, wn.name as node_name, u.name as approver_name
       FROM approval_records ar
@@ -175,9 +184,31 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
       return res.status(400).json({ message: '节点ID和状态必填' });
     }
 
-    const node = await queryOne(`SELECT * FROM workflow_nodes WHERE id = ?`, [node_id]);
+    const topic = await getTopicScopeById(topicId);
+    if (!topic) {
+      return res.status(404).json({ message: '选题不存在' });
+    }
+
+    const node = await getWorkflowNodeById(node_id);
     if (!node) {
       return res.status(404).json({ message: '审批节点不存在' });
+    }
+
+    if (!isPrivilegedUser(req.user) && !canAccessTopic(req.user, topic)) {
+      return res.status(403).json({ message: '无权限审批该选题' });
+    }
+
+    const canApprove = await canApproveWorkflowNode(req.user, topicId, node_id);
+    if (!canApprove) {
+      return res.status(403).json({ message: '当前用户不是该节点的合法审批人' });
+    }
+
+    if (topic.workflow_template_id && node.template_id && Number(topic.workflow_template_id) !== Number(node.template_id)) {
+      return res.status(400).json({ message: '审批节点不属于当前选题绑定的审批流模板' });
+    }
+
+    if (node.status_from && node.status_from !== String(topic.status || '')) {
+      return res.status(400).json({ message: '当前选题状态与审批节点不匹配' });
     }
 
     await runInTransaction(async (tx) => {

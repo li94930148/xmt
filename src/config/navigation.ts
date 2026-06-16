@@ -4,28 +4,28 @@ import {
   Archive,
   BarChart3,
   Calendar,
+  Camera,
   FileText,
   GitBranch,
   Kanban,
   LayoutDashboard,
   Lightbulb,
   Settings,
-  Shield,
   Send,
+  Shield,
   TrendingUp,
   Trophy,
   Users,
   Video,
-  Camera,
 } from 'lucide-react';
-import type { UserRole } from '../types';
 
 export interface NavigationItem {
   id: string;
   label: string;
   icon: LucideIcon;
   path: string;
-  roles?: UserRole[];
+  permissions?: string[];
+  requireAllPermissions?: boolean;
 }
 
 export interface NavigationSection {
@@ -36,18 +36,16 @@ export interface NavigationSection {
 export const navigationSections: NavigationSection[] = [
   {
     label: '总览',
-    items: [
-      { id: 'home', label: '首页仪表盘', icon: LayoutDashboard, path: '/' },
-    ],
+    items: [{ id: 'home', label: '首页仪表盘', icon: LayoutDashboard, path: '/' }],
   },
   {
     label: '内容流程',
     items: [
       { id: 'topics', label: '选题管理', icon: FileText, path: '/topics' },
       { id: 'production', label: '创作管理', icon: Video, path: '/production' },
-      { id: 'shooting', label: '成片制作', icon: Camera, path: '/shooting' },
-      { id: 'publishing', label: '发布管理', icon: Send, path: '/publishing' },
-      { id: 'workflow-designer', label: '审批流设计', icon: GitBranch, path: '/workflow-designer', roles: ['admin'] },
+      { id: 'shooting', label: '成片制作', icon: Camera, path: '/shooting', permissions: ['workflow:shooting'] },
+      { id: 'publishing', label: '发布管理', icon: Send, path: '/publishing', permissions: ['workflow:publishing'] },
+      { id: 'workflow-designer', label: '审批流设计', icon: GitBranch, path: '/workflow-designer', permissions: ['system:template'] },
     ],
   },
   {
@@ -61,26 +59,41 @@ export const navigationSections: NavigationSection[] = [
   {
     label: '数据与管理',
     items: [
-      { id: 'analytics', label: '数据复盘', icon: BarChart3, path: '/analytics' },
+      { id: 'analytics', label: '数据复盘', icon: BarChart3, path: '/analytics', permissions: ['analytics:view'] },
       { id: 'achievements', label: '成就系统', icon: Trophy, path: '/achievements' },
-      { id: 'users', label: '人员管理', icon: Users, path: '/users', roles: ['admin'] },
+      { id: 'users', label: '人员管理', icon: Users, path: '/users', permissions: ['user:view'] },
       { id: 'resources', label: '资源库', icon: Archive, path: '/resources' },
-      { id: 'activity', label: '活动日志', icon: Activity, path: '/activity', roles: ['admin', 'director'] },
-      { id: 'douyin', label: '抖音数据', icon: TrendingUp, path: '/douyin' },
-      { id: 'permissions', label: '角色权限', icon: Shield, path: '/permissions', roles: ['admin'] },
-      { id: 'notification-settings', label: '系统设置', icon: Settings, path: '/notification-settings' },
+      { id: 'activity', label: '活动日志', icon: Activity, path: '/activity', permissions: ['user:logs'] },
+      { id: 'douyin', label: '抖音数据', icon: TrendingUp, path: '/douyin', permissions: ['system:douyin'] },
+      {
+        id: 'permissions',
+        label: '角色权限',
+        icon: Shield,
+        path: '/permissions',
+        permissions: ['system:role', 'system:permission'],
+        requireAllPermissions: true,
+      },
+      { id: 'notification-settings', label: '设置中心', icon: Settings, path: '/notification-settings' },
     ],
   },
 ];
 
 export const allNavigationItems = navigationSections.flatMap((section) => section.items);
 
-export function canAccessNavigationItem(role: UserRole | undefined, roles?: UserRole[]) {
-  if (!roles || roles.length === 0) {
+export function canAccessNavigationItem(
+  item: NavigationItem,
+  helpers: {
+    hasAnyPermission: (codes: string[]) => boolean;
+    hasAllPermissions: (codes: string[]) => boolean;
+  },
+) {
+  if (!item.permissions || item.permissions.length === 0) {
     return true;
   }
 
-  return role ? roles.includes(role) : false;
+  return item.requireAllPermissions
+    ? helpers.hasAllPermissions(item.permissions)
+    : helpers.hasAnyPermission(item.permissions);
 }
 
 export function isNavigationItemActive(pathname: string, itemPath: string) {
@@ -96,9 +109,7 @@ export function findNavigationItem(pathname: string) {
 }
 
 export function buildBreadcrumbs(pathname: string) {
-  const crumbs: Array<{ label: string; path?: string }> = [
-    { label: '工作台', path: '/' },
-  ];
+  const crumbs: Array<{ label: string; path?: string }> = [{ label: '工作台', path: '/' }];
 
   if (pathname === '/') {
     return crumbs;
@@ -114,11 +125,7 @@ export function buildBreadcrumbs(pathname: string) {
 
   if (segments.length >= 2) {
     const secondSegment = segments[1];
-    if (secondSegment === 'add') {
-      crumbs.push({ label: '新建' });
-    } else {
-      crumbs.push({ label: '详情' });
-    }
+    crumbs.push({ label: secondSegment === 'add' ? '新建' : '详情' });
   }
 
   return crumbs;

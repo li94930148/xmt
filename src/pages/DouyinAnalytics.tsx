@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../store';
-import { useAuthStore } from '../store';
 import {
   getDouyinAccounts, addDouyinAccount, deleteDouyinAccount,
   scrapeDouyin, getDouyinSnapshots, getDouyinVideos, getDouyinTrend,
 } from '../api';
 import type { DouyinAccount, DouyinSnapshot, DouyinVideo } from '../api';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime } from '../lib/utils';
 import {
   Plus, RefreshCw, Trash2, TrendingUp, Users, Heart, Video,
@@ -25,9 +25,9 @@ export default function DouyinAnalytics() {
   const [newAccount, setNewAccount] = useState({ name: '', profileUrl: '' });
   const [expandedSnapshot, setExpandedSnapshot] = useState<number | null>(null);
   const appStore = useAppStore();
-  const authStore = useAuthStore();
   const styles = useThemeStyles();
-  const isAdmin = authStore.user?.role === 'admin' || authStore.user?.role === 'director';
+  const { hasPermission } = usePermission();
+  const canManageDouyin = hasPermission('system:douyin');
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -140,7 +140,7 @@ export default function DouyinAnalytics() {
           <p className={`${styles.subtitle} mt-1`}>追踪账号数据变化，分析内容表现</p>
         </div>
         <div className="flex gap-2">
-          {isAdmin && (
+          {canManageDouyin && (
             <button
               onClick={() => setShowAddModal(true)}
               className={`flex items-center gap-2 px-4 py-2.5 ${styles.buttonSecondary} rounded-xl text-sm`}
@@ -180,7 +180,7 @@ export default function DouyinAnalytics() {
               }`}
             >
               {account.name}
-              {isAdmin && (
+              {canManageDouyin && (
                 <Trash2
                   className="w-3.5 h-3.5 opacity-50 hover:opacity-100"
                   onClick={(e) => { e.stopPropagation(); handleDeleteAccount(Number(account.id)); }}

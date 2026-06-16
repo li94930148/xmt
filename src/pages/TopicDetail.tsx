@@ -7,6 +7,7 @@ import { Topic, User } from '../types';
 import { ChevronLeft, Clock, User as UserIcon, Calendar, FileText, CheckCircle, XCircle, ArrowRight, Save, AlertTriangle, Camera, Scissors, Send, List, FileText as FileIcon } from 'lucide-react';
 import Editor from '../components/editor/Editor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { usePermission } from '../hooks/usePermission';
 import { STATUS_COLORS, STATUS_TEXT } from '../constants';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
 
@@ -32,6 +33,7 @@ export default function TopicDetail() {
   const authStore = useAuthStore();
   const appStore = useAppStore();
   const styles = useThemeStyles();
+  const { hasPermission } = usePermission();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -187,7 +189,7 @@ export default function TopicDetail() {
     completed: 'completed',
   };
 
-  const canAudit = authStore.user?.role === 'admin' || authStore.user?.role === 'director';
+  const canAudit = hasPermission('topic:audit');
   const isOverdue = topic?.deadline && new Date(topic.deadline) < new Date() && topic.status !== 'completed' && topic.status !== 'rejected';
 
   if (loading) {

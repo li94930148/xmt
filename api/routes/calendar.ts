@@ -1,6 +1,7 @@
 import express from 'express';
 import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
 import { authenticate } from '../middleware/auth';
+import { canAccessTopic, canManageCalendarEvent, getTopicScopeById, isPrivilegedUser } from '../utils/access';
 
 const router = express.Router();
 type CalendarListItem = { event_date: string };
@@ -18,6 +19,11 @@ router.get('/', authenticate, async (req, res) => {
     } else if (year) {
       eventDateFilter = `AND strftime('%Y', ce.event_date) = ?`;
       eventParams.push(String(year));
+    }
+
+    if (!isPrivilegedUser(req.user)) {
+      eventDateFilter += ` AND ce.creator_id = ?`;
+      eventParams.push(String(req.user?.id));
     }
 
     const events = await queryAll<CalendarListItem>(`
@@ -53,6 +59,11 @@ router.get('/', authenticate, async (req, res) => {
       topicParams.push(String(year));
     }
 
+    if (!isPrivilegedUser(req.user)) {
+      topicsQuery += ` AND (t.creator_id = ? OR t.assignee_id = ?)`;
+      topicParams.push(String(req.user?.id), String(req.user?.id));
+    }
+
     topicsQuery += ` ORDER BY t.deadline ASC`;
     const topics = await queryAll<CalendarListItem>(topicsQuery, topicParams);
 
@@ -75,6 +86,16 @@ router.post('/', authenticate, async (req, res) => {
       return res.status(400).json({ message: '标题和日期不能为空' });
     }
 
+    if (topic_id) {
+      const topic = await getTopicScopeById(topic_id);
+      if (!topic) {
+        return res.status(404).json({ message: '关联选题不存在' });
+      }
+      if (!canAccessTopic(req.user, topic)) {
+        return res.status(403).json({ message: '无权限为该选题创建日历事件' });
+      }
+    }
+
     const eventId = await executeInsert(
       `INSERT INTO calendar_events (title, description, event_date, event_type, topic_id, creator_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -95,6 +116,9 @@ router.put('/:id', authenticate, async (req, res) => {
     const event = await queryOne(`SELECT * FROM calendar_events WHERE id = ?`, [id]);
     if (!event) {
       return res.status(404).json({ message: '日历事件不存在' });
+    }
+    if (!canManageCalendarEvent(req.user, event as Record<string, unknown>)) {
+      return res.status(403).json({ message: '无权限更新该日历事件' });
     }
 
     const updates: string[] = [];
@@ -125,6 +149,9 @@ router.delete('/:id', authenticate, async (req, res) => {
     const event = await queryOne(`SELECT * FROM calendar_events WHERE id = ?`, [id]);
     if (!event) {
       return res.status(404).json({ message: '日历事件不存在' });
+    }
+    if (!canManageCalendarEvent(req.user, event as Record<string, unknown>)) {
+      return res.status(403).json({ message: '无权限删除该日历事件' });
     }
 
     await execute(`DELETE FROM calendar_events WHERE id = ?`, [id]);

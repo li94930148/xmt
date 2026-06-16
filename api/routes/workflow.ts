@@ -1,6 +1,8 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿import express from 'express';
 import { beijingNow, beijingToday, queryOne, queryAll, execute, executeInsert } from '../database/utils';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
+import { canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, isPrivilegedUser, resolveCommentTopicScope } from '../utils/access';
 import { broadcastToRoom } from '../utils/socket';
 
 const router = express.Router();
@@ -37,7 +39,11 @@ router.get('/production', authenticate, async (req, res) => {
                  LEFT JOIN topics t ON p.topic_id = t.id WHERE 1=1`;
     const params: any[] = [];
     if (topic_id) { query += ` AND p.topic_id = ?`; params.push(topic_id); }
-    if (req.user?.role === 'member') { query += ` AND (t.creator_id = ? OR t.assignee_id = ?)`; params.push(req.user.id, req.user.id); }
+    if (!isPrivilegedUser(req.user)) {
+      const userId = req.user!.id;
+      query += ` AND (t.creator_id = ? OR t.assignee_id = ?)`;
+      params.push(userId, userId);
+    }
     query += ` ORDER BY p.created_at DESC`;
     const productions = await queryAll(query, params);
     res.json(productions);
@@ -50,6 +56,9 @@ router.post('/production', authenticate, async (req, res) => {
   try {
     const { topic_id, version, content, status = 'draft' } = req.body;
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
+    const topic = await getTopicScopeById(topic_id);
+    if (!topic) return res.status(404).json({ message: '选题不存在' });
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限操作该选题的创作记录' });
     const contentMarkdown = req.body.contentMarkdown || content;
     const contentJson = req.body.contentJson || content;
     const productionId = await executeInsert(`INSERT INTO production (topic_id, version, content, content_markdown, content_json, status, operator_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [topic_id, version, content, contentMarkdown, contentJson, status, req.user?.id]);
@@ -65,6 +74,8 @@ router.get('/production/:id', authenticate, async (req, res) => {
   try {
     const production = await queryOne(`SELECT p.*, COALESCE(p.content_markdown, p.content) as contentMarkdown, COALESCE(p.content_json, p.content) as contentJson, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id WHERE p.id = ?`, [req.params.id]);
     if (!production) return res.status(404).json({ message: '创作记录不存在' });
+    const topic = await getTopicScopeByProductionId(req.params.id);
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该创作记录' });
     res.json(production);
   } catch (error) {
     res.status(500).json({ message: '获取创作详情失败', error });
@@ -85,6 +96,11 @@ router.put('/production/:id', authenticate, async (req, res) => {
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
     const existingProduction = await queryOne(`SELECT * FROM production WHERE id = ?`, [id]);
     if (!existingProduction) return res.status(404).json({ message: '创作记录不存在' });
+    const originalTopic = await getTopicScopeByProductionId(id);
+    if (!canAccessTopic(req.user, originalTopic)) return res.status(403).json({ message: '无权限修改该创作记录' });
+    const nextTopic = await getTopicScopeById(topic_id);
+    if (!nextTopic) return res.status(404).json({ message: '选题不存在' });
+    if (!canAccessTopic(req.user, nextTopic)) return res.status(403).json({ message: '无权限关联到目标选题' });
 
     const currentVersion = String(existingProduction.version || version || 'v1.0');
     const resolvedVersionAction: VersionAction =
@@ -151,7 +167,7 @@ router.put('/production/:id', authenticate, async (req, res) => {
   }
 });
 
-router.delete('/production/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.delete('/production/:id', authenticate, requirePermission('production:delete'), async (req, res) => {
   try {
     await execute(`DELETE FROM production WHERE id = ?`, [req.params.id]);
     await execute(`DELETE FROM production_history WHERE production_id = ?`, [req.params.id]);
@@ -164,6 +180,8 @@ router.delete('/production/:id', authenticate, requireRole(['admin', 'director']
 
 router.get('/production/:id/history', authenticate, async (req, res) => {
   try {
+    const topic = await getTopicScopeByProductionId(req.params.id);
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该创作记录历史' });
     const history = await queryAll(`SELECT ph.*, u.name as operator_name FROM production_history ph LEFT JOIN users u ON ph.operator_id = u.id WHERE ph.production_id = ? ORDER BY ph.created_at DESC`, [req.params.id]);
     res.json(history);
   } catch (error) {
@@ -171,7 +189,7 @@ router.get('/production/:id/history', authenticate, async (req, res) => {
   }
 });
 
-router.get('/shooting', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.get('/shooting', authenticate, requirePermission('workflow:shooting'), async (req, res) => {
   try {
     const { topic_id } = req.query;
     let query = `SELECT s.*, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM shooting s LEFT JOIN users u ON s.operator_id = u.id LEFT JOIN topics t ON s.topic_id = t.id WHERE 1=1`;
@@ -188,6 +206,8 @@ router.get('/shooting/:id', authenticate, async (req, res) => {
   try {
     const shooting = await queryOne(`SELECT s.*, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM shooting s LEFT JOIN users u ON s.operator_id = u.id LEFT JOIN topics t ON s.topic_id = t.id WHERE s.id = ?`, [req.params.id]);
     if (!shooting) return res.status(404).json({ message: '成片制作记录不存在' });
+    const topic = await getTopicScopeByShootingId(req.params.id);
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该成片制作记录' });
 
     // 获取关联的已通过审核的创作记录
     const production = await queryOne(`SELECT p.id, p.version, p.content, p.content_markdown, p.status, u.name as operator_name FROM production p LEFT JOIN users u ON p.operator_id = u.id WHERE p.topic_id = ? AND p.status = 'approved' ORDER BY p.updated_at DESC LIMIT 1`, [(shooting as any).topic_id]);
@@ -201,7 +221,7 @@ router.get('/shooting/:id', authenticate, async (req, res) => {
   }
 });
 
-router.put('/shooting/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.put('/shooting/:id', authenticate, requirePermission('workflow:shooting'), async (req, res) => {
   try {
     const { id } = req.params;
     const { topic_id, plan_date, location, equipment, status, script_content } = req.body;
@@ -244,7 +264,7 @@ router.put('/shooting/:id', authenticate, requireRole(['admin', 'director']), as
   }
 });
 
-router.delete('/shooting/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.delete('/shooting/:id', authenticate, requirePermission('workflow:shooting'), async (req, res) => {
   try {
     const shooting = await queryOne(`SELECT * FROM shooting WHERE id = ?`, [req.params.id]);
     if (!shooting) return res.status(404).json({ message: '成片制作记录不存在' });
@@ -255,7 +275,7 @@ router.delete('/shooting/:id', authenticate, requireRole(['admin', 'director']),
   }
 });
 
-router.post('/shooting', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.post('/shooting', authenticate, requirePermission('workflow:shooting'), async (req, res) => {
   try {
     const { topic_id, plan_date, location, equipment, status = 'planned' } = req.body;
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
@@ -272,6 +292,8 @@ router.get('/publishing/:id', authenticate, async (req, res) => {
   try {
     const publishing = await queryOne(`SELECT p.*, u.name as operator_name, t.title as topic_title, t.description as topic_description, t.platform as topic_platform, t.deadline as topic_deadline, t.status as topic_status FROM publishing p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id WHERE p.id = ?`, [req.params.id]);
     if (!publishing) return res.status(404).json({ message: '发布记录不存在' });
+    const topic = await getTopicScopeByPublishingId(req.params.id);
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该发布记录' });
 
     // 获取关联的创作记录（已通过审核的）
     const production = await queryOne(`SELECT p.id, p.version, p.content, p.content_markdown, p.status, p.created_at, u.name as operator_name FROM production p LEFT JOIN users u ON p.operator_id = u.id WHERE p.topic_id = ? AND p.status = 'approved' ORDER BY p.updated_at DESC LIMIT 1`, [(publishing as any).topic_id]);
@@ -293,7 +315,7 @@ router.get('/publishing/:id', authenticate, async (req, res) => {
   }
 });
 
-router.get('/publishing', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.get('/publishing', authenticate, requirePermission('workflow:publishing'), async (req, res) => {
   try {
     const { topic_id } = req.query;
     let query = `SELECT p.*, u.name as operator_name, t.title as topic_title, COALESCE(a.views, 0) as views, COALESCE(a.likes, 0) as likes, COALESCE(a.shares, 0) as shares, COALESCE(a.comments, 0) as comments FROM publishing p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id LEFT JOIN analytics a ON t.id = a.topic_id WHERE 1=1`;
@@ -306,7 +328,7 @@ router.get('/publishing', authenticate, requireRole(['admin', 'director']), asyn
   }
 });
 
-router.post('/publishing', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.post('/publishing', authenticate, requirePermission('workflow:publishing'), async (req, res) => {
   try {
     const { topic_id, platform, url, status = 'pending', publish_time, views = 0, likes = 0, shares = 0, comments = 0 } = req.body;
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
@@ -333,7 +355,7 @@ router.post('/publishing', authenticate, requireRole(['admin', 'director']), asy
   }
 });
 
-router.put('/publishing/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.put('/publishing/:id', authenticate, requirePermission('workflow:publishing'), async (req, res) => {
   try {
     const { id } = req.params;
     const { platform, url, status, publish_time, script_content } = req.body;
@@ -358,7 +380,7 @@ router.put('/publishing/:id', authenticate, requireRole(['admin', 'director']), 
   }
 });
 
-router.delete('/publishing/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.delete('/publishing/:id', authenticate, requirePermission('workflow:publishing'), async (req, res) => {
   try {
     const publishing = await queryOne(`SELECT topic_id FROM publishing WHERE id = ?`, [req.params.id]);
     if (publishing) await execute(`DELETE FROM publishing WHERE id = ?`, [req.params.id]);
@@ -372,6 +394,9 @@ router.get('/comments', authenticate, async (req, res) => {
   try {
     const { target_type, target_id } = req.query;
     if (!target_type || !target_id) return res.status(400).json({ message: '缺少必要参数' });
+    const topic = await resolveCommentTopicScope(target_type, target_id);
+    if (!topic) return res.status(404).json({ message: '评论目标不存在或暂不支持' });
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该评论' });
     const comments = await queryAll(`SELECT c.*, u.name as operator_name FROM comments c LEFT JOIN users u ON c.operator_id = u.id WHERE c.target_type = ? AND c.target_id = ? ORDER BY c.created_at DESC`, [target_type, target_id]);
     res.json(comments);
   } catch (error) {
@@ -383,6 +408,9 @@ router.post('/comments', authenticate, async (req, res) => {
   try {
     const { target_type, target_id, content } = req.body;
     if (!target_type || !target_id || !content) return res.status(400).json({ message: '缺少必要参数' });
+    const topic = await resolveCommentTopicScope(target_type, target_id);
+    if (!topic) return res.status(404).json({ message: '评论目标不存在或暂不支持' });
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限评论该对象' });
     const commentId = await executeInsert(`INSERT INTO comments (target_type, target_id, content, operator_id) VALUES (?, ?, ?, ?)`, [target_type, target_id, content, req.user?.id]);
     res.json({ message: '评论添加成功', commentId });
   } catch (error) {
@@ -390,7 +418,7 @@ router.post('/comments', authenticate, async (req, res) => {
   }
 });
 
-router.delete('/comments/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.delete('/comments/:id', authenticate, requirePermission('comment:delete'), async (req, res) => {
   try {
     await execute(`DELETE FROM comments WHERE id = ?`, [req.params.id]);
     res.json({ message: '评论删除成功' });

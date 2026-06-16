@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { User, Topic, Message } from '../types';
+import { defaultSystemSettings, ManagedSystemSettings } from '@/lib/systemSettings';
 
 export type AuthPersistence = 'local' | 'session';
 
@@ -119,6 +120,8 @@ interface AppState {
   toggleTheme: () => void;
   fontSize: number;
   setFontSize: (size: number) => void;
+  systemSettings: ManagedSystemSettings;
+  setSystemSettings: (settings: ManagedSystemSettings) => void;
 }
 
 const loadTheme = (): 'light' | 'dark' => {
@@ -161,4 +164,6 @@ export const useAppStore = create<AppState>((set) => ({
     localStorage.setItem('xmt_fontSize', size.toString());
     set({ fontSize: size });
   },
+  systemSettings: defaultSystemSettings,
+  setSystemSettings: (systemSettings) => set({ systemSettings }),
 }));

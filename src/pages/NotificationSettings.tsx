@@ -1,12 +1,26 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { useAuthStore, useAppStore } from '../store';
-import { changePassword, updateUser } from '../api';
-import { createBackup, getBackupList, downloadBackup, deleteBackup, BackupFile } from '../api/backup';
+import { changePassword, updateUser, getSystemSettings, updateSystemSettings } from '../api';
+import {
+  createBackup,
+  getBackupList,
+  downloadBackup,
+  deleteBackup,
+  BackupFile,
+} from '../api/backup';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime } from '../lib/utils';
+import { getRoleDisplayName } from '../lib/roles';
 import { useDesktopNotification } from '../hooks/useDesktopNotification';
 import { isSecureContext } from '../utils/notification';
 import { changelog, getChangeTypeLabel, getChangeTypeColor } from '../data/changelog';
+import {
+  applyDocumentBranding,
+  defaultSystemSettings,
+  emitSystemSettingsChanged,
+  ManagedSystemSettings,
+} from '@/lib/systemSettings';
 import {
   Bell,
   BellOff,
@@ -28,6 +42,7 @@ import {
   Shield,
   Sparkles,
   Sun,
+  Tag,
   Trash2,
   User,
   Volume2,
@@ -56,53 +71,20 @@ type EventType = {
   description: string;
 };
 
-type LoginLayoutMode = 'style1' | 'style2' | 'style3';
-
-type SystemSettings = {
-  systemName: string;
-  systemIcon: string;
-  systemLogo: string;
-  defaultTheme: 'light' | 'dark';
-  defaultFontSize: number;
-  loginLayout: LoginLayoutMode;
-};
-
-const defaultSystemSettings: SystemSettings = {
-  systemName: 'XMT 新媒体台',
-  systemIcon: '📺',
-  systemLogo: '',
-  defaultTheme: 'dark',
-  defaultFontSize: 18,
-  loginLayout: 'style1',
-};
-
 const tabMeta = {
-  notifications: { label: '通知设置', icon: Bell },
-  profile: { label: '个人信息', icon: User },
-  password: { label: '修改密码', icon: Lock },
-  appearance: { label: '外观设置', icon: Palette },
+  notifications: { label: '通知偏好', icon: Bell },
+  profile: { label: '个人资料', icon: User },
+  password: { label: '账号安全', icon: Lock },
+  appearance: { label: '个人偏好', icon: Palette },
   system: { label: '系统设置', icon: Monitor },
-  database: { label: '数据管理', icon: Database },
+  branding: { label: '品牌设置', icon: Tag },
+  login: { label: '登录页设置', icon: Sparkles },
+  database: { label: '数据与备份', icon: Database },
   changelog: { label: '系统更新说明', icon: History },
   about: { label: '关于系统', icon: Info },
 } as const;
 
 type TabKey = keyof typeof tabMeta;
-
-function loadSystemSettings(): SystemSettings {
-  try {
-    const saved = localStorage.getItem('xmt_system_settings');
-    return saved ? { ...defaultSystemSettings, ...JSON.parse(saved) } : defaultSystemSettings;
-  } catch {
-    return defaultSystemSettings;
-  }
-}
-
-function styleLabel(layout: LoginLayoutMode) {
-  if (layout === 'style2') return '样式二（极光玻璃风格）';
-  if (layout === 'style3') return '样式三（双栏对比风格）';
-  return '样式一（当前经典版式）';
-}
 
 export default function NotificationSettings() {
   const styles = useThemeStyles();
@@ -110,7 +92,10 @@ export default function NotificationSettings() {
   const appStore = useAppStore();
   const desktopNotify = useDesktopNotification();
   const token = authStore.token;
-  const isAdmin = authStore.user?.role === 'admin';
+  const { hasPermission } = usePermission();
+  const canManageDatabase = hasPermission('system:backup');
+  const canManageSystem = hasPermission('system:settings');
+  const setGlobalSystemSettings = useAppStore((state) => state.setSystemSettings);
 
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     if (sessionStorage.getItem('xmt_show_changelog') === 'true') {
@@ -138,8 +123,11 @@ export default function NotificationSettings() {
   const [showConfirmPwd, setShowConfirmPwd] = useState(false);
   const [pwdSaving, setPwdSaving] = useState(false);
 
-  const [systemSettings, setSystemSettings] = useState<SystemSettings>(loadSystemSettings);
+  const [systemSettings, setSystemSettings] = useState<ManagedSystemSettings>(defaultSystemSettings);
+  const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
+  const [systemSettingsSaving, setSystemSettingsSaving] = useState(false);
   const [fontSize, setFontSize] = useState(appStore.fontSize);
+  const [appearanceTheme, setAppearanceTheme] = useState<'light' | 'dark'>(appStore.theme);
 
   const [backupList, setBackupList] = useState<BackupFile[]>([]);
   const [backupLoading, setBackupLoading] = useState(false);
@@ -147,41 +135,43 @@ export default function NotificationSettings() {
 
   const tabs = useMemo(() => {
     const base: TabKey[] = ['notifications', 'profile', 'password', 'appearance'];
-    if (isAdmin) {
-      base.push('system', 'database');
+    if (canManageSystem) {
+      base.push('system', 'branding', 'login');
+    }
+    if (canManageDatabase) {
+      base.push('database');
     }
     base.push('changelog', 'about');
     return base;
-  }, [isAdmin]);
+  }, [canManageDatabase, canManageSystem]);
 
   useEffect(() => {
     void fetchNotificationData();
   }, []);
 
   useEffect(() => {
-    document.title = systemSettings.systemName;
-    const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
-    if (!link) {
+    setProfileName(authStore.user?.name || '');
+    setProfileEmail(authStore.user?.email || '');
+  }, [authStore.user?.email, authStore.user?.name]);
+
+  useEffect(() => {
+    setAppearanceTheme(appStore.theme);
+    setFontSize(appStore.fontSize);
+  }, [appStore.fontSize, appStore.theme]);
+
+  useEffect(() => {
+    if (!canManageSystem) {
       return;
     }
 
-    if (systemSettings.systemLogo) {
-      link.href = systemSettings.systemLogo;
-      return;
-    }
+    void fetchSystemSettings();
+  }, [canManageSystem]);
 
-    const canvas = document.createElement('canvas');
-    canvas.height = 64;
-    canvas.width = 64;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.font = '56px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(systemSettings.systemIcon, 32, 36);
-      link.href = canvas.toDataURL();
+  useEffect(() => {
+    if (activeTab === 'database' && canManageDatabase) {
+      void loadBackupItems();
     }
-  }, [systemSettings.systemIcon, systemSettings.systemLogo, systemSettings.systemName]);
+  }, [activeTab, canManageDatabase]);
 
   async function fetchNotificationData() {
     if (!token) {
@@ -212,6 +202,24 @@ export default function NotificationSettings() {
     }
   }
 
+  async function fetchSystemSettings() {
+    setSystemSettingsLoading(true);
+    try {
+      const settings = await getSystemSettings();
+      setSystemSettings(settings);
+      setGlobalSystemSettings(settings);
+      applyDocumentBranding(settings);
+    } catch (error) {
+      appStore.addNotification({
+        title: '加载失败',
+        message: (error as Error).message,
+        type: 'error',
+      });
+    } finally {
+      setSystemSettingsLoading(false);
+    }
+  }
+
   function isEnabled(channelId: string, eventId: string) {
     const pref = preferences.find((item) => item.channel === channelId && item.event_type === eventId);
     return pref ? pref.enabled : false;
@@ -224,11 +232,11 @@ export default function NotificationSettings() {
         return [...current, { channel: channelId, event_type: eventId, enabled: true }];
       }
 
-      return current.map((item) => (
+      return current.map((item) =>
         item.channel === channelId && item.event_type === eventId
           ? { ...item, enabled: !item.enabled }
-          : item
-      ));
+          : item,
+      );
     });
   }
 
@@ -267,7 +275,7 @@ export default function NotificationSettings() {
     try {
       await updateUser(authStore.user.id, { name: profileName, email: profileEmail });
       authStore.login({ ...authStore.user, name: profileName, email: profileEmail }, authStore.token!);
-      appStore.addNotification({ title: '保存成功', message: '个人信息已更新', type: 'success' });
+      appStore.addNotification({ title: '保存成功', message: '个人资料已更新', type: 'success' });
     } catch (error) {
       appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
     } finally {
@@ -306,10 +314,20 @@ export default function NotificationSettings() {
     }
   }
 
-  function handleSaveSystemSettings() {
-    localStorage.setItem('xmt_system_settings', JSON.stringify(systemSettings));
-    window.dispatchEvent(new Event('xmt-settings-changed'));
-    appStore.addNotification({ title: '保存成功', message: '系统设置已更新', type: 'success' });
+  async function handleSaveSystemSection(patch: Partial<ManagedSystemSettings>, successMessage: string) {
+    setSystemSettingsSaving(true);
+    try {
+      const next = await updateSystemSettings(patch);
+      setSystemSettings(next);
+      setGlobalSystemSettings(next);
+      applyDocumentBranding(next);
+      emitSystemSettingsChanged();
+      appStore.addNotification({ title: '保存成功', message: successMessage, type: 'success' });
+    } catch (error) {
+      appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+    } finally {
+      setSystemSettingsSaving(false);
+    }
   }
 
   function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -328,18 +346,25 @@ export default function NotificationSettings() {
 
     const reader = new FileReader();
     reader.onload = () => {
-      setSystemSettings((current) => ({ ...current, systemLogo: String(reader.result || '') }));
-      appStore.addNotification({ title: '上传成功', message: 'Logo 已选择，请保存系统设置', type: 'success' });
+      setSystemSettings((current) => ({
+        ...current,
+        branding: { ...current.branding, logo: String(reader.result || '') },
+      }));
+      appStore.addNotification({ title: '上传成功', message: 'Logo 已选择，请保存品牌设置', type: 'success' });
     };
     reader.readAsDataURL(file);
   }
 
   function handleSaveAppearance() {
     appStore.setFontSize(fontSize);
-    if (systemSettings.defaultTheme !== appStore.theme) {
+    if (appearanceTheme !== appStore.theme) {
       appStore.toggleTheme();
     }
-    appStore.addNotification({ title: '保存成功', message: `界面字号已更新为 ${fontSize}px`, type: 'success' });
+    appStore.addNotification({
+      title: '保存成功',
+      message: `个人偏好已更新，当前字号 ${fontSize}px`,
+      type: 'success',
+    });
   }
 
   async function loadBackupItems() {
@@ -385,7 +410,13 @@ export default function NotificationSettings() {
     }
   }
 
-  function renderInput(label: string, value: string, onChange: (value: string) => void, type = 'text') {
+  function renderInput(
+    label: string,
+    value: string,
+    onChange: (value: string) => void,
+    type = 'text',
+    placeholder?: string,
+  ) {
     return (
       <div>
         <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>{label}</label>
@@ -393,6 +424,7 @@ export default function NotificationSettings() {
           type={type}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
           className={`w-full px-4 py-2.5 ${styles.input}`}
         />
       </div>
@@ -402,24 +434,23 @@ export default function NotificationSettings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className={styles.pageTitle}>系统设置</h1>
-        <p className={styles.subtitle}>{isAdmin ? '管理系统配置和个人偏好' : '管理你的个人偏好'}</p>
+        <h1 className={styles.pageTitle}>设置中心</h1>
+        <p className={styles.subtitle}>
+          {canManageSystem || canManageDatabase
+            ? '统一管理系统配置、个人偏好与运维项'
+            : '管理你的个人偏好与通知设置'}
+        </p>
       </div>
 
       <div className="flex gap-6">
-        <div className={`w-56 flex-shrink-0 ${styles.card} p-2 self-start`}>
+        <div className={`w-56 flex-shrink-0 self-start ${styles.card} p-2`}>
           {tabs.map((key) => {
             const meta = tabMeta[key];
             const Icon = meta.icon;
             return (
               <button
                 key={key}
-                onClick={() => {
-                  setActiveTab(key);
-                  if (key === 'database') {
-                    void loadBackupItems();
-                  }
-                }}
+                onClick={() => setActiveTab(key)}
                 className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${
                   activeTab === key ? 'bg-blue-500/10 text-blue-400' : `${styles.textSecondary} ${styles.hoverBg}`
                 }`}
@@ -437,10 +468,14 @@ export default function NotificationSettings() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>通知设置</h2>
-                  <p className={`mt-1 text-sm ${styles.textMuted}`}>管理消息推送方式与桌面提醒体验。</p>
+                  <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>通知偏好</h2>
+                  <p className={`mt-1 text-sm ${styles.textMuted}`}>管理消息提醒方式、桌面通知与测试提醒。</p>
                 </div>
-                <button onClick={handleSaveNotifications} disabled={notifySaving} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>
+                <button
+                  onClick={handleSaveNotifications}
+                  disabled={notifySaving}
+                  className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
+                >
                   {notifySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   {notifySaving ? '保存中...' : '保存设置'}
                 </button>
@@ -450,10 +485,16 @@ export default function NotificationSettings() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h3 className={`font-medium ${styles.textPrimary}`}>桌面通知与提示音</h3>
-                    <p className={`mt-1 text-sm ${styles.textMuted}`}>当前浏览器环境：{isSecureContext() ? '安全上下文，可申请系统通知权限' : '非安全上下文，桌面通知不可用'}</p>
+                    <p className={`mt-1 text-sm ${styles.textMuted}`}>
+                      当前浏览器环境：
+                      {isSecureContext() ? '安全上下文，可申请系统通知权限' : '非安全上下文，桌面通知不可用'}
+                    </p>
                   </div>
                   {desktopNotify.supported && desktopNotify.permission !== 'granted' && (
-                    <button onClick={() => void desktopNotify.requestPermission()} className={`rounded-lg px-3 py-2 text-sm ${styles.buttonSecondary}`}>
+                    <button
+                      onClick={() => void desktopNotify.requestPermission()}
+                      className={`rounded-lg px-3 py-2 text-sm ${styles.buttonSecondary}`}
+                    >
                       申请权限
                     </button>
                   )}
@@ -474,7 +515,13 @@ export default function NotificationSettings() {
                       <p className={`text-xs ${styles.textMuted}`}>{desktopNotify.soundEnabled ? '已开启' : '已关闭'}</p>
                     </div>
                   </button>
-                  <button onClick={() => { desktopNotify.testSound(); desktopNotify.notify({ title: '测试通知', body: '这是一条测试通知。' }); }} className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left ${styles.border} ${styles.hoverBg}`}>
+                  <button
+                    onClick={() => {
+                      desktopNotify.testSound();
+                      desktopNotify.notify({ title: '测试通知', body: '这是一条测试通知。' });
+                    }}
+                    className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left ${styles.border} ${styles.hoverBg}`}
+                  >
                     <Sparkles className="h-5 w-5 text-yellow-400" />
                     <div>
                       <p className={`text-sm font-medium ${styles.textPrimary}`}>发送测试</p>
@@ -491,31 +538,35 @@ export default function NotificationSettings() {
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className={styles.tableHeader}>
-                          <th className={`px-6 py-4 text-left text-sm font-medium ${styles.textSecondary}`}>事件类型</th>
+                    <table className="min-w-full divide-y divide-white/5">
+                      <thead className={styles.bgTertiary}>
+                        <tr>
+                          <th className={`px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>事件</th>
                           {channels.map((channel) => (
-                            <th key={channel.id} className={`px-6 py-4 text-center text-sm font-medium ${styles.textSecondary}`}>
+                            <th key={channel.id} className={`px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
                               {channel.name}
                             </th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody className="divide-y divide-white/5">
                         {events.map((event) => (
-                          <tr key={event.id} className={`border-t ${styles.tableRow}`}>
+                          <tr key={event.id}>
                             <td className="px-6 py-4">
-                              <p className={`text-sm font-medium ${styles.textPrimary}`}>{event.name}</p>
-                              <p className={`text-xs ${styles.textMuted}`}>{event.description}</p>
+                              <p className={`font-medium ${styles.textPrimary}`}>{event.name}</p>
+                              <p className={`mt-1 text-xs ${styles.textMuted}`}>{event.description}</p>
                             </td>
                             {channels.map((channel) => (
-                              <td key={channel.id} className="px-6 py-4 text-center">
+                              <td key={`${event.id}-${channel.id}`} className="px-6 py-4">
                                 <button
                                   onClick={() => handleTogglePreference(channel.id, event.id)}
-                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isEnabled(channel.id, event.id) ? 'bg-brand-500' : styles.bgTertiary}`}
+                                  className={`rounded-full px-3 py-1 text-xs font-medium ${
+                                    isEnabled(channel.id, event.id)
+                                      ? 'bg-green-500/10 text-green-400'
+                                      : `${styles.bgTertiary} ${styles.textMuted}`
+                                  }`}
                                 >
-                                  <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${isEnabled(channel.id, event.id) ? 'translate-x-6' : 'translate-x-1'}`} />
+                                  {isEnabled(channel.id, event.id) ? '已启用' : '已关闭'}
                                 </button>
                               </td>
                             ))}
@@ -532,16 +583,22 @@ export default function NotificationSettings() {
           {activeTab === 'profile' && (
             <div className="space-y-6">
               <div>
-                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>个人信息</h2>
-                <p className={`mt-1 text-sm ${styles.textMuted}`}>维护你的展示姓名与联系邮箱。</p>
+                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>个人资料</h2>
+                <p className={`mt-1 text-sm ${styles.textMuted}`}>更新你的姓名和邮箱信息。</p>
               </div>
-              <div className="grid gap-6 md:grid-cols-2">
+
+              <div className="grid gap-5 md:max-w-xl">
                 {renderInput('姓名', profileName, setProfileName)}
                 {renderInput('邮箱', profileEmail, setProfileEmail, 'email')}
               </div>
-              <button onClick={handleSaveProfile} disabled={profileSaving} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>
+
+              <button
+                onClick={handleSaveProfile}
+                disabled={profileSaving}
+                className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
+              >
                 {profileSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {profileSaving ? '保存中...' : '保存个人信息'}
+                {profileSaving ? '保存中...' : '保存个人资料'}
               </button>
             </div>
           )}
@@ -549,9 +606,10 @@ export default function NotificationSettings() {
           {activeTab === 'password' && (
             <div className="space-y-6">
               <div>
-                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>修改密码</h2>
+                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>账号安全</h2>
                 <p className={`mt-1 text-sm ${styles.textMuted}`}>建议定期更新密码，并保证至少 6 位。</p>
               </div>
+
               <div className="grid gap-5 md:max-w-xl">
                 <div>
                   <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>当前密码</label>
@@ -581,7 +639,12 @@ export default function NotificationSettings() {
                   </div>
                 </div>
               </div>
-              <button onClick={handleChangePassword} disabled={pwdSaving} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>
+
+              <button
+                onClick={handleChangePassword}
+                disabled={pwdSaving}
+                className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
+              >
                 {pwdSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
                 {pwdSaving ? '提交中...' : '更新密码'}
               </button>
@@ -591,14 +654,14 @@ export default function NotificationSettings() {
           {activeTab === 'appearance' && (
             <div className="space-y-6">
               <div>
-                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>外观设置</h2>
-                <p className={`mt-1 text-sm ${styles.textMuted}`}>调整默认主题、当前界面主题和全局字号。</p>
+                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>个人偏好</h2>
+                <p className={`mt-1 text-sm ${styles.textMuted}`}>这些设置仅保存在当前浏览器，不会影响其他管理员设备。</p>
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
                 <div>
-                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>默认主题</label>
-                  <select value={systemSettings.defaultTheme} onChange={(event) => setSystemSettings((current) => ({ ...current, defaultTheme: event.target.value as 'light' | 'dark' }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
+                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>主题</label>
+                  <select value={appearanceTheme} onChange={(event) => setAppearanceTheme(event.target.value as 'light' | 'dark')} className={`w-full px-4 py-2.5 ${styles.input}`}>
                     <option value="dark">深色模式</option>
                     <option value="light">浅色模式</option>
                   </select>
@@ -614,48 +677,79 @@ export default function NotificationSettings() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <button onClick={() => appStore.theme !== 'light' && appStore.toggleTheme()} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${styles.border} ${styles.hoverBg}`}>
+                <button onClick={() => setAppearanceTheme('light')} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${styles.border} ${styles.hoverBg}`}>
                   <Sun className="h-5 w-5 text-amber-400" />
                   <div className="text-left">
-                    <p className={`text-sm font-medium ${styles.textPrimary}`}>切换到浅色</p>
+                    <p className={`text-sm font-medium ${styles.textPrimary}`}>浅色模式</p>
                     <p className={`text-xs ${styles.textMuted}`}>适合明亮办公环境</p>
                   </div>
                 </button>
-                <button onClick={() => appStore.theme !== 'dark' && appStore.toggleTheme()} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${styles.border} ${styles.hoverBg}`}>
+                <button onClick={() => setAppearanceTheme('dark')} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${styles.border} ${styles.hoverBg}`}>
                   <Moon className="h-5 w-5 text-blue-400" />
                   <div className="text-left">
-                    <p className={`text-sm font-medium ${styles.textPrimary}`}>切换到深色</p>
+                    <p className={`text-sm font-medium ${styles.textPrimary}`}>深色模式</p>
                     <p className={`text-xs ${styles.textMuted}`}>适合长时间创作</p>
                   </div>
                 </button>
               </div>
 
               <button onClick={handleSaveAppearance} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary}`}>
-                <Save className="h-4 w-4" /> 保存外观设置
+                <Save className="h-4 w-4" /> 保存个人偏好
               </button>
             </div>
           )}
 
-          {activeTab === 'system' && isAdmin && (
+          {activeTab === 'system' && canManageSystem && (
             <div className="space-y-6">
-              <div>
-                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>系统设置</h2>
-                <p className={`mt-1 text-sm ${styles.textMuted}`}>维护系统名称、Logo 与登录页版式。</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>系统设置</h2>
+                  <p className={`mt-1 text-sm ${styles.textMuted}`}>后端统一管理系统名称、标题和系统简介。</p>
+                </div>
+                {systemSettingsLoading && <Loader2 className={`h-5 w-5 animate-spin ${styles.textMuted}`} />}
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
-                {renderInput('系统名称', systemSettings.systemName, (value) => setSystemSettings((current) => ({ ...current, systemName: value })))}
-                {renderInput('系统图标（Emoji 或单字）', systemSettings.systemIcon, (value) => setSystemSettings((current) => ({ ...current, systemIcon: value })))}
+                {renderInput('系统名称', systemSettings.system.name, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, name: value } })))}
+                {renderInput('页签标题', systemSettings.system.browserTitle, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, browserTitle: value } })))}
+              </div>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                {renderInput('系统图标（单字或 Emoji）', systemSettings.system.icon, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, icon: value } })))}
+                {renderInput('系统简介', systemSettings.system.description, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, description: value } })))}
+              </div>
+
+              <button
+                onClick={() => void handleSaveSystemSection({ system: systemSettings.system }, '系统设置已更新')}
+                disabled={systemSettingsSaving}
+                className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
+              >
+                {systemSettingsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                保存系统设置
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'branding' && canManageSystem && (
+            <div className="space-y-6">
+              <div>
+                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>品牌设置</h2>
+                <p className={`mt-1 text-sm ${styles.textMuted}`}>统一管理品牌名称、Logo 和展示文案。</p>
+              </div>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                {renderInput('品牌名称', systemSettings.branding.brandName, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandName: value } })))}
+                {renderInput('品牌展示文案', systemSettings.branding.brandDescription, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandDescription: value } })))}
               </div>
 
               <div>
-                <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>系统 Logo</label>
+                <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>品牌 Logo</label>
                 <div className="flex items-center gap-4">
-                  <div className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed ${systemSettings.systemLogo ? 'border-blue-500' : `${styles.border} ${styles.bgTertiary}`}`}>
-                    {systemSettings.systemLogo ? (
-                      <img src={systemSettings.systemLogo} alt="系统 Logo" className="h-full w-full object-contain" />
+                  <div className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed ${systemSettings.branding.logo ? 'border-blue-500' : `${styles.border} ${styles.bgTertiary}`}`}>
+                    {systemSettings.branding.logo ? (
+                      <img src={systemSettings.branding.logo} alt="系统 Logo" className="h-full w-full object-contain" />
                     ) : (
-                      <span className="text-2xl">{systemSettings.systemIcon}</span>
+                      <span className="text-2xl">{systemSettings.system.icon}</span>
                     )}
                   </div>
                   <div className="flex gap-2">
@@ -663,8 +757,11 @@ export default function NotificationSettings() {
                       选择图片
                       <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
                     </label>
-                    {systemSettings.systemLogo && (
-                      <button onClick={() => setSystemSettings((current) => ({ ...current, systemLogo: '' }))} className="rounded-lg border border-red-500/30 px-4 py-2 text-red-400 hover:bg-red-500/10">
+                    {systemSettings.branding.logo && (
+                      <button
+                        onClick={() => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, logo: '' } }))}
+                        className="rounded-lg border border-red-500/30 px-4 py-2 text-red-400 hover:bg-red-500/10"
+                      >
                         移除 Logo
                       </button>
                     )}
@@ -672,36 +769,56 @@ export default function NotificationSettings() {
                 </div>
               </div>
 
-              <div className="grid gap-6 md:grid-cols-2">
-                <div>
-                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>默认登录页版式</label>
-                  <select value={systemSettings.loginLayout} onChange={(event) => setSystemSettings((current) => ({ ...current, loginLayout: event.target.value as LoginLayoutMode }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
-                    <option value="style1">样式一（当前经典版式）</option>
-                    <option value="style2">样式二（极光玻璃风格）</option>
-                    <option value="style3">样式三（双栏对比风格）</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>默认字号</label>
-                  <select value={systemSettings.defaultFontSize} onChange={(event) => setSystemSettings((current) => ({ ...current, defaultFontSize: parseInt(event.target.value, 10) }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
-                    {[14, 16, 18, 20, 22, 24].map((size) => (
-                      <option key={size} value={size}>{size}px</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <button onClick={handleSaveSystemSettings} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary}`}>
-                <Save className="h-4 w-4" /> 保存系统设置
+              <button
+                onClick={() => void handleSaveSystemSection({ branding: systemSettings.branding }, '品牌设置已更新')}
+                disabled={systemSettingsSaving}
+                className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
+              >
+                {systemSettingsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                保存品牌设置
               </button>
             </div>
           )}
 
-          {activeTab === 'database' && isAdmin && (
+          {activeTab === 'login' && canManageSystem && (
+            <div className="space-y-6">
+              <div>
+                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>登录页设置</h2>
+                <p className={`mt-1 text-sm ${styles.textMuted}`}>统一管理登录页布局、欢迎语和登录说明。</p>
+              </div>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <div>
+                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>登录页布局</label>
+                  <select value={systemSettings.login.layout} onChange={(event) => setSystemSettings((current) => ({ ...current, login: { ...current.login, layout: event.target.value as ManagedSystemSettings['login']['layout'] } }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
+                    <option value="style1">样式一（暗色经典）</option>
+                    <option value="style2">样式二（金色聚焦）</option>
+                    <option value="style3">样式三（双栏对比）</option>
+                  </select>
+                </div>
+                {renderInput('欢迎标题', systemSettings.login.welcomeTitle, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeTitle: value } })))}
+              </div>
+
+              <div className="grid gap-6">
+                {renderInput('欢迎说明', systemSettings.login.welcomeMessage, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeMessage: value } })))}
+              </div>
+
+              <button
+                onClick={() => void handleSaveSystemSection({ login: systemSettings.login }, '登录页设置已更新')}
+                disabled={systemSettingsSaving}
+                className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
+              >
+                {systemSettingsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                保存登录页设置
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'database' && canManageDatabase && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>数据管理</h2>
+                  <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>数据与备份</h2>
                   <p className={`mt-1 text-sm ${styles.textMuted}`}>创建、下载和清理系统备份。</p>
                 </div>
                 <div className="flex gap-3">
@@ -715,7 +832,7 @@ export default function NotificationSettings() {
               </div>
 
               <div className={`rounded-2xl ${styles.bgTertiary} p-5`}>
-                <div className="grid gap-4 md:grid-cols-4 text-sm">
+                <div className="grid gap-4 text-sm md:grid-cols-4">
                   <div>
                     <p className={styles.textMuted}>存储方式</p>
                     <p className={styles.textPrimary}>SQLite (libsql)</p>
@@ -805,15 +922,15 @@ export default function NotificationSettings() {
             <div className="space-y-6">
               <div>
                 <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>关于系统</h2>
-                <p className={`mt-1 text-sm ${styles.textMuted}`}>视频内容创作全流程管理系统。</p>
+                <p className={`mt-1 text-sm ${styles.textMuted}`}>视频内容创作全流程协作与管理平台。</p>
               </div>
 
               <div className="flex items-center gap-4">
                 <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-500 text-3xl text-white">
-                  {systemSettings.systemLogo ? <img src={systemSettings.systemLogo} alt="Logo" className="h-full w-full object-contain" /> : systemSettings.systemIcon}
+                  {systemSettings.branding.logo ? <img src={systemSettings.branding.logo} alt="Logo" className="h-full w-full object-contain" /> : systemSettings.system.icon}
                 </div>
                 <div>
-                  <h3 className={`text-xl font-bold ${styles.textPrimary}`}>{systemSettings.systemName}</h3>
+                  <h3 className={`text-xl font-bold ${styles.textPrimary}`}>{systemSettings.system.name}</h3>
                   <p className={`text-sm ${styles.textSecondary}`}>版本 v{__APP_VERSION__}</p>
                 </div>
               </div>
@@ -824,8 +941,8 @@ export default function NotificationSettings() {
                   { label: 'UI 框架', value: 'Tailwind CSS' },
                   { label: '后端服务', value: 'Express + SQLite' },
                   { label: '实时通信', value: 'Socket.IO' },
-                  { label: '默认登录页', value: styleLabel(systemSettings.loginLayout) },
-                  { label: '当前用户角色', value: authStore.user?.role === 'admin' ? '管理员' : authStore.user?.role === 'director' ? '编导' : '成员' },
+                  { label: '默认登录页', value: systemSettings.login.layout },
+                  { label: '当前用户角色', value: getRoleDisplayName(authStore.user?.role) },
                 ].map((item) => (
                   <div key={item.label} className={`flex items-center justify-between rounded-xl p-4 ${styles.bgTertiary}`}>
                     <span className={`text-sm ${styles.textSecondary}`}>{item.label}</span>
@@ -837,7 +954,7 @@ export default function NotificationSettings() {
               <div className={`rounded-2xl ${styles.bgTertiary} p-5`}>
                 <h3 className={`mb-3 font-medium ${styles.textPrimary}`}>当前启用模块</h3>
                 <div className="grid gap-2 md:grid-cols-3">
-                  {['选题管理', '创作管理', '成片制作', '发布管理', '数据复盘', '灵感池', '消息中心', '系统设置', '权限管理'].map((item) => (
+                  {['选题管理', '创作管理', '拍摄管理', '发布管理', '数据分析', '资源库', '消息中心', '权限管理', '系统设置'].map((item) => (
                     <div key={item} className={`flex items-center gap-2 text-sm ${styles.textSecondary}`}>
                       <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
                       {item}

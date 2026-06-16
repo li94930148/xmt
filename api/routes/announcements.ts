@@ -1,6 +1,7 @@
 ﻿import express from 'express';
 import { beijingNow, queryOne, queryAll, execute, executeInsert } from '../database/utils';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // POST / - 创建公告
-router.post('/', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.post('/', authenticate, requirePermission('system:announcement'), async (req, res) => {
   try {
     const { content, type, pinned } = req.body;
     const userId = req.user?.id;
@@ -42,7 +43,7 @@ router.post('/', authenticate, requireRole(['admin', 'director']), async (req, r
 });
 
 // PUT /:id - 更新公告
-router.put('/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.put('/:id', authenticate, requirePermission('system:announcement'), async (req, res) => {
   try {
     const { id } = req.params;
     const { content, type, pinned } = req.body;
@@ -75,7 +76,7 @@ router.put('/:id', authenticate, requireRole(['admin', 'director']), async (req,
 });
 
 // DELETE /:id - 删除公告
-router.delete('/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.delete('/:id', authenticate, requirePermission('system:announcement'), async (req, res) => {
   try {
     const { id } = req.params;
 

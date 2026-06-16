@@ -1,7 +1,3 @@
-// 系统更新日志
-// 每次更新时在此文件顶部添加新版本记录
-// 版本号会自动从 package.json 读取
-
 export interface ChangelogEntry {
   version: string;
   date: string;
@@ -12,87 +8,64 @@ export interface ChangelogEntry {
   }[];
 }
 
-// 更新日志 - 按版本倒序排列（最新版本在最上面）
 export const changelog: ChangelogEntry[] = [
+  {
+    version: '2.1.0',
+    date: '2026-06-16',
+    title: '系统设置后端统一化',
+    changes: [
+      {
+        type: 'feature',
+        description: '新增系统设置后端接口，统一管理系统名称、页签标题、Logo、品牌文案与登录页配置。',
+      },
+      {
+        type: 'security',
+        description: '新增 system:settings 权限点，系统配置修改必须通过登录认证与权限校验。',
+      },
+      {
+        type: 'improvement',
+        description: '设置中心拆分为系统设置、品牌设置、登录页设置与个人偏好，避免全局配置和本地偏好混放。',
+      },
+      {
+        type: 'improvement',
+        description: '登录页、侧边栏与应用品牌展示改为读取统一配置来源，管理员设备间的系统展示保持一致。',
+      },
+      {
+        type: 'fix',
+        description: '移除对 localStorage 中 xmt_system_settings 的全局依赖，修复不同浏览器配置不一致的问题。',
+      },
+      {
+        type: 'fix',
+        description: '系统更新说明文件改为 UTF-8 干净内容，修复历史乱码导致的阅读与维护问题。',
+      },
+    ],
+  },
   {
     version: '2.0.1',
     date: '2026-06-11',
     title: '稳定性与安全修复',
     changes: [
-      {
-        type: 'fix',
-        description: '修复 api/routes/resources.ts 更新 SQL 缺少 ? 占位符的问题。',
-      },
-      {
-        type: 'fix',
-        description: 'api/routes/calendar.ts 更新 SQL 缺少 ? 占位符及日历查询异常字符串问题。',
-      },
-      {
-        type: 'security',
-        description: '检查其他动态 UPDATE SQL 是否存在同类错误，并只修复明确缺陷。',
-      },
-      {
-        type: 'improvement',
-        description: '调整数据库工具的异常处理，避免 SQL 失败后接口仍返回操作成功。',
-      },
-      {
-        type: 'security',
-        description: '为 Socket.IO 握手增加 JWT 鉴权',
-      },
-      {
-        type: 'fix',
-        description: '统一修复选题列表分页响应与前端读取方式不一致的问题。',
-      },
+      { type: 'fix', description: '修复资源与日历相关 SQL 更新异常。' },
+      { type: 'security', description: 'Socket.IO 握手增加 JWT 认证。' },
+      { type: 'improvement', description: '补充接口异常处理，避免数据库失败后误报成功。' },
     ],
   },
   {
     version: '2.0.0',
     date: '2026-06-05',
-    title: '文档编辑器全新升级',
+    title: '文档编辑器升级',
     changes: [
-      {
-        type: 'improvement',
-        description: '标题下拉菜单：正文/H1-H2-H3-H4 一键切换',
-      },
-      {
-        type: 'feature',
-        description: '🎨 8色高亮 + 8色文字颜色：选择器带预览色块',
-      },
-      {
-        type: 'feature',
-        description: '📋 右键菜单：替换浏览器默认，含批注增删改',
-      },
-      {
-        type: 'feature',
-        description: '📑 目录实时高亮：滚动自动检测当前位置，蓝色边框标识',
-      },
-      {
-        type: 'feature',
-        description: '🖨️ 打印优化：A4 纸，仅打印编辑器内容',
-      },
+      { type: 'feature', description: '编辑器支持标题级别切换、颜色、右键菜单与目录高亮。' },
+      { type: 'improvement', description: '打印与编辑体验优化。' },
     ],
   },
   {
     version: '1.2.0',
     date: '2026-06-05',
-    title: '登录页面记住密码',
+    title: '登录体验优化',
     changes: [
-      {
-        type: 'fix',
-        description: '打印按钮仅打印编辑器内容',
-      },
-      {
-        type: 'improvement',
-        description: '编辑器无感自动保存',
-      },
-      {
-        type: 'fix',
-        description: '人员管理更新 Bug 修复',
-      },
-      {
-        type: 'feature',
-        description: '选题管理增加提交时间列',
-      },
+      { type: 'feature', description: '新增记住密码与快速登录体验。' },
+      { type: 'fix', description: '修复人员管理与选题提报的相关问题。' },
     ],
   },
   {
@@ -100,177 +73,30 @@ export const changelog: ChangelogEntry[] = [
     date: '2026-06-05',
     title: '编辑器迁移完成',
     changes: [
-      {
-        type: 'improvement',
-        description: '数据库迁移',
-      },
-      {
-        type: 'feature',
-        description: '新编辑器组件 src/components/editor',
-      },
-      {
-        type: 'feature',
-        description: 'Markdown 双向转换',
-      },
-      {
-        type: 'improvement',
-        description: '类型定义更新',
-      },
-      {
-        type: 'improvement',
-        description: '服务端路由兼容',
-      },
-      {
-        type: 'improvement',
-        description: '客户端 API 更新',
-      },
-      {
-        type: 'improvement',
-        description: '页面组件替换（TopicDetail + ProductionDetail）',
-      },
-      {
-        type: 'feature',
-        description: '协作预留接口 src/collaboration/',
-      },
-    ],
-  },
-  {
-    version: '1.0.3',
-    date: '2026-06-04',
-    title: '选题管理内容缺失',
-    changes: [
-      {
-        type: 'fix',
-        description: 'src/api/topics.ts 的 getTopic 函数',
-      },
-    ],
-  },
-  {
-    version: '1.0.2',
-    date: '2026-06-04',
-    title: '页面布局更新',
-    changes: [
-      {
-        type: 'improvement',
-        description: '1. 重写 NotificationSettings.tsx',
-      },
-      {
-        type: 'improvement',
-        description: '修改 App.tsx',
-      },
-      {
-        type: 'fix',
-        description: '修改 Layout.tsx',
-      },
-      {
-        type: 'fix',
-        description: '4. 修改 Sidebar.tsx',
-      },
-      {
-        type: 'security',
-        description: '修改 CommandPalette.tsx',
-      },
-      {
-        type: 'fix',
-        description: '删除 Settings.tsx',
-      },
-    ],
-  },
-  {
-    version: '1.0.1',
-    date: '2026-06-04',
-    title: '新增系统更新说明功能',
-    changes: [
-      {
-        type: 'feature',
-        description: '新增系统更新说明页面，查看完整更新历史',
-      },
-      {
-        type: 'feature',
-        description: '新增版本更新提示弹窗，登录时自动显示新版本信息',
-      },
-      {
-        type: 'improvement',
-        description: '版本号自动管理，从 package.json 读取',
-      },
+      { type: 'feature', description: '引入新的编辑器组件与 Markdown 双向转换。' },
+      { type: 'improvement', description: '同步更新服务端接口和页面适配。' },
     ],
   },
   {
     version: '1.0.0',
     date: '2026-06-04',
-    title: '系统架构优化与安全性增强',
+    title: '系统基础架构优化',
     changes: [
-      {
-        type: 'security',
-        description: 'JWT Secret 强制检查，移除硬编码默认值',
-      },
-      {
-        type: 'security',
-        description: '添加登录频率限制，防止暴力破解',
-      },
-      {
-        type: 'security',
-        description: 'Socket.io CORS 限制为具体来源',
-      },
-      {
-        type: 'improvement',
-        description: '统一 API 响应格式，提升前后端协作效率',
-      },
-      {
-        type: 'improvement',
-        description: '数据库添加索引，提升查询性能',
-      },
-      {
-        type: 'improvement',
-        description: '启用数据库外键约束，保障数据完整性',
-      },
-      {
-        type: 'improvement',
-        description: '移除未读消息轮询，完全依赖 Socket.io 实时推送',
-      },
-      {
-        type: 'feature',
-        description: '新增 Docker 容器化部署支持',
-      },
-      {
-        type: 'feature',
-        description: '新增 PM2 进程管理配置',
-      },
-      {
-        type: 'feature',
-        description: '引入 React Query 数据缓存',
-      },
-      {
-        type: 'feature',
-        description: '系统设置整合为统一入口',
-      },
-      {
-        type: 'feature',
-        description: '系统界面字体大小可调节',
-      },
-      {
-        type: 'fix',
-        description: '修复选题提报时负责人不显示的问题',
-      },
-      {
-        type: 'fix',
-        description: '修复版本号硬编码问题',
-      },
+      { type: 'security', description: '加强 JWT、登录频率限制与 Socket.IO 来源控制。' },
+      { type: 'improvement', description: '统一 API 响应与数据库索引策略。' },
+      { type: 'feature', description: '补充 Docker、PM2 与系统设置入口。' },
     ],
   },
 ];
 
-// 获取最新版本信息
 export function getLatestVersion(): ChangelogEntry {
   return changelog[0];
 }
 
-// 获取指定版本信息
 export function getVersion(version: string): ChangelogEntry | undefined {
   return changelog.find((entry) => entry.version === version);
 }
 
-// 获取变更类型标签
 export function getChangeTypeLabel(type: string): string {
   const labels: Record<string, string> = {
     feature: '新增',
@@ -281,7 +107,6 @@ export function getChangeTypeLabel(type: string): string {
   return labels[type] || type;
 }
 
-// 获取变更类型颜色
 export function getChangeTypeColor(type: string): string {
   const colors: Record<string, string> = {
     feature: 'bg-green-500/20 text-green-400 border-green-500/30',

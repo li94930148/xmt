@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
 import { Bell, ChevronLeft, ChevronRight, LogOut, Search, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { navigationSections, canAccessNavigationItem, isNavigationItemActive } from '@/config/navigation';
-import { useAuthStore, useMessageStore } from '../store';
+import { useAppStore, useAuthStore, useMessageStore } from '../store';
+import { usePermission } from '../hooks/usePermission';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -11,23 +11,6 @@ interface SidebarProps {
   onOpenCommandPalette?: () => void;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
-}
-
-function getInitialSettings() {
-  try {
-    const saved = localStorage.getItem('xmt_system_settings');
-    if (saved) {
-      const settings = JSON.parse(saved);
-      return {
-        logo: settings.systemLogo || '',
-        name: settings.systemName || '新媒体协作管理系统',
-      };
-    }
-  } catch {
-    // Ignore invalid local settings and fall back to defaults.
-  }
-
-  return { logo: '', name: '新媒体协作管理系统' };
 }
 
 export default function Sidebar({
@@ -40,27 +23,10 @@ export default function Sidebar({
 }: SidebarProps) {
   const authStore = useAuthStore();
   const messageStore = useMessageStore();
+  const systemSettings = useAppStore((state) => state.systemSettings);
+  const { loading: permissionLoading, hasAnyPermission, hasAllPermissions } = usePermission();
   const navigate = useNavigate();
   const location = useLocation();
-  const initial = getInitialSettings();
-  const [systemLogo, setSystemLogo] = useState(initial.logo);
-  const [systemName, setSystemName] = useState(initial.name);
-
-  useEffect(() => {
-    const loadSettings = () => {
-      const next = getInitialSettings();
-      setSystemLogo(next.logo);
-      setSystemName(next.name);
-    };
-
-    window.addEventListener('storage', loadSettings);
-    window.addEventListener('xmt-settings-changed', loadSettings);
-
-    return () => {
-      window.removeEventListener('storage', loadSettings);
-      window.removeEventListener('xmt-settings-changed', loadSettings);
-    };
-  }, []);
 
   const handleNavigate = (path: string) => {
     navigate(path);
@@ -73,11 +39,17 @@ export default function Sidebar({
     navigate('/login');
   };
 
-  const role = authStore.user?.role;
   const visibleSections = navigationSections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => canAccessNavigationItem(role, item.roles)),
+      items: permissionLoading
+        ? []
+        : section.items.filter((item) =>
+            canAccessNavigationItem(item, {
+              hasAnyPermission,
+              hasAllPermissions,
+            }),
+          ),
     }))
     .filter((section) => section.items.length > 0);
 
@@ -101,13 +73,17 @@ export default function Sidebar({
               : 'bg-gradient-to-br from-[#4263eb]/10 to-[#5c7cfa]/10'
           }`}
         >
-          <img src={systemLogo || '/logo.png'} alt="Logo" className="h-8 w-8 object-contain" />
+          <img
+            src={systemSettings.branding.logo || '/logo.png'}
+            alt="Logo"
+            className="h-8 w-8 object-contain"
+          />
         </div>
 
         {(!collapsed || isMobile) && (
           <div className="min-w-0 flex-1">
             <h1 className={`truncate text-sm font-bold tracking-tight ${theme === 'dark' ? 'text-[#e8eaed]' : 'text-[#1a1d2e]'}`}>
-              {systemName}
+              {systemSettings.system.name}
             </h1>
             <p className={`text-[10px] font-medium uppercase tracking-wider ${theme === 'dark' ? 'text-[#636983]' : 'text-[#9aa0b0]'}`}>
               Management

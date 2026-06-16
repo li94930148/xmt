@@ -1,6 +1,7 @@
 import express from 'express';
 import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { createMessage } from '../utils/messageHelper';
 
 const router = express.Router();
@@ -219,7 +220,7 @@ router.get('/recent', authenticate, async (req, res) => {
 });
 
 // POST / - 创建成就定义（管理员）
-router.post('/', authenticate, requireRole(['admin']), async (req, res) => {
+router.post('/', authenticate, requirePermission('system:achievement'), async (req, res) => {
   try {
     const { name, description, icon, condition_type, condition_value, points, category, rarity, sort_order } = req.body;
 
@@ -240,7 +241,7 @@ router.post('/', authenticate, requireRole(['admin']), async (req, res) => {
 });
 
 // PUT /:id - 更新成就定义（管理员）
-router.put('/:id', authenticate, requireRole(['admin']), async (req, res) => {
+router.put('/:id', authenticate, requirePermission('system:achievement'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, description, icon, condition_type, condition_value, points, category, rarity, sort_order } = req.body;
@@ -265,7 +266,7 @@ router.put('/:id', authenticate, requireRole(['admin']), async (req, res) => {
 });
 
 // DELETE /:id - 删除成就（管理员）
-router.delete('/:id', authenticate, requireRole(['admin']), async (req, res) => {
+router.delete('/:id', authenticate, requirePermission('system:achievement'), async (req, res) => {
   try {
     const { id } = req.params;
     await execute(`DELETE FROM user_achievements WHERE achievement_id = ?`, [id]);
@@ -381,7 +382,7 @@ router.post('/check', authenticate, async (req, res) => {
 });
 
 // POST /seed - 初始化预设成就（管理员）
-router.post('/seed', authenticate, requireRole(['admin']), async (req, res) => {
+router.post('/seed', authenticate, requirePermission('system:achievement'), async (req, res) => {
   try {
     const existing: any = await queryOne(`SELECT COUNT(*) as count FROM achievements`);
     if (existing && existing.count > 0) {

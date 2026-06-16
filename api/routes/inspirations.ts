@@ -1,10 +1,24 @@
 import express from 'express';
 import { beijingNow, queryOne, queryAll, execute, executeInsert } from '../database/utils';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { createMessage } from '../utils/messageHelper';
 import { broadcastToRoom } from '../utils/socket';
 
 const router = express.Router();
+
+async function hasUserPermission(userId: number, permissionCode: string) {
+  const result = await queryOne(
+    `SELECT COUNT(*) as count
+     FROM permissions p
+     JOIN role_permissions rp ON p.id = rp.permission_id
+     JOIN user_roles ur ON rp.role_id = ur.role_id
+     WHERE ur.user_id = ? AND p.code = ?`,
+    [userId, permissionCode]
+  );
+
+  return Number(result?.count) > 0;
+}
 
 const inspirationSelect = `
   SELECT
@@ -261,14 +275,13 @@ router.delete('/:id', authenticate, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const userId = Number(req.user?.id);
-    const userRole = req.user?.role;
-
     const inspiration = await queryOne(`SELECT * FROM inspirations WHERE id = ?`, [id]);
     if (!inspiration) {
       return res.status(404).json({ message: '灵感不存在' });
     }
 
-    if (Number(inspiration.creator_id) !== userId && userRole !== 'admin') {
+    const canDeleteAnyInspiration = await hasUserPermission(userId, 'inspiration:delete');
+    if (Number(inspiration.creator_id) !== userId && !canDeleteAnyInspiration) {
       return res.status(403).json({ message: '无权限删除此灵感' });
     }
 
@@ -284,7 +297,7 @@ router.delete('/:id', authenticate, async (req, res) => {
 });
 
 // POST /:id/promote - 将灵感转为正式选题
-router.post('/:id/promote', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.post('/:id/promote', authenticate, requirePermission('inspiration:promote'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const userId = Number(req.user?.id);

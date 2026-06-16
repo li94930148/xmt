@@ -1,8 +1,10 @@
 ﻿﻿﻿﻿import express from 'express';
 import { queryOne, queryAll, execute, runInTransaction } from '../database/utils';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { TopicStatus } from '../types';
 import { isValidTransition, isValidAuditAction, STATUS_TEXT, getTransitionText } from '../utils/workflow';
+import { canAccessTopic, isPrivilegedUser } from '../utils/access';
 import { createMessage } from '../utils/messageHelper';
 import { broadcastToRoom } from '../utils/socket';
 import { sendSuccess, sendSuccessWithPagination, sendError, sendNotFound, sendServerError } from '../utils/response';
@@ -28,9 +30,10 @@ router.get('/', authenticate, async (req, res) => {
       params.push(`%${search}%`, `%${search}%`);
     }
 
-    if (req.user?.role === 'member') {
+    if (!isPrivilegedUser(req.user)) {
+      const userId = req.user!.id;
       query += ` AND (t.creator_id = ? OR t.assignee_id = ?)`;
-      params.push(req.user.id, req.user.id);
+      params.push(userId, userId);
     }
 
     query += ` ORDER BY t.created_at DESC LIMIT ? OFFSET ?`;
@@ -57,6 +60,10 @@ router.get('/:id', authenticate, async (req, res) => {
 
     if (!topic) {
       return sendNotFound(res, '选题不存在');
+    }
+
+    if (!canAccessTopic(req.user, topic as { creator_id: number | null; assignee_id: number | null })) {
+      return sendError(res, '无权限查看此选题', 403);
     }
 
     const history = await queryAll(`SELECT th.*, u.name as operator_name FROM topic_history th
@@ -132,7 +139,7 @@ router.put('/:id', authenticate, async (req, res) => {
       return sendNotFound(res, '选题不存在');
     }
 
-    if (req.user?.role === 'member' && topic.creator_id !== req.user.id && topic.assignee_id !== req.user.id) {
+    if (!canAccessTopic(req.user, topic as { creator_id: number | null; assignee_id: number | null })) {
       return sendError(res, '无权限修改此选题', 403);
     }
 
@@ -165,7 +172,7 @@ router.put('/:id', authenticate, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.delete('/:id', authenticate, requirePermission('topic:delete'), async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -189,7 +196,7 @@ router.delete('/:id', authenticate, requireRole(['admin', 'director']), async (r
   }
 });
 
-router.post('/:id/audit', authenticate, requireRole(['admin', 'director']), async (req, res) => {
+router.post('/:id/audit', authenticate, requirePermission('topic:audit'), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, comment, assignee_id } = req.body;
@@ -269,6 +276,10 @@ router.post('/:id/status', authenticate, async (req, res) => {
     const topic = await queryOne(`SELECT * FROM topics WHERE id = ?`, [id]);
     if (!topic) {
       return sendNotFound(res, '选题不存在');
+    }
+
+    if (!canAccessTopic(req.user, topic as { creator_id: number | null; assignee_id: number | null })) {
+      return sendError(res, '无权限修改此选题状态', 403);
     }
 
     if (!isValidTransition(topic.status as TopicStatus, status)) {

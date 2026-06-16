@@ -25,6 +25,7 @@ import type { Production as ProductionType, ProductionHistory, Topic } from '../
 import { getTopic } from '../api';
 import Editor from '../components/editor/Editor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { usePermission } from '../hooks/usePermission';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -95,6 +96,7 @@ export default function ProductionDetail() {
   const appStore = useAppStore();
   const authStore = useAuthStore();
   const styles = useThemeStyles();
+  const { hasPermission } = usePermission();
 
   const [production, setProduction] = useState<ProductionType | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null);
@@ -109,7 +111,7 @@ export default function ProductionDetail() {
   });
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
 
-  const canDelete = authStore.user?.role === 'admin' || authStore.user?.role === 'director';
+  const canDelete = hasPermission('production:delete');
 
   const fetchData = async () => {
     if (!id) return;

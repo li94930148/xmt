@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>XMT 新媒体协作管理系统 — 项目汇报</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", sans-serif;
+      color: #1a1a2e;
+      background: #f0f2f5;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto 20px;
+      background: #fff;
+      position: relative;
+      overflow: hidden;
+      page-break-after: always;
+    }
+    .page:last-child { margin-bottom: 0; }
+
+    /* ===== 封面 ===== */
+    .cover {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 40%, #0f766e 100%);
+      color: #fff;
+      padding: 40mm 25mm;
+    }
+    .cover-logo {
+      width: 72px;
+      height: 72px;
+      margin-bottom: 32px;
+      opacity: 0.95;
+    }
+    .cover h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      margin-bottom: 12px;
+    }
+    .cover .subtitle {
+      font-size: 16px;
+      font-weight: 400;
+      color: rgba(255,255,255,0.75);
+      margin-bottom: 48px;
+    }
+    .cover-meta {
+      display: flex;
+      gap: 40px;
+      font-size: 13px;
+      color: rgba(255,255,255,0.6);
+    }
+    .cover-meta span { display: flex; align-items: center; gap: 6px; }
+    .cover-divider {
+      width: 60px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #5eead4, transparent);
+      margin: 32px 0;
+    }
+
+    /* ===== 内页通用 ===== */
+    .page-inner { padding: 18mm 22mm 22mm; }
+    .page-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .page-num {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #0f766e, #14b8a6);
+      color: #fff;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .page-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .page-subtitle {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 2px;
+    }
+
+    /* ===== 内容组件 ===== */
+    .intro-text {
+      font-size: 14px;
+      color: #334155;
+      margin-bottom: 18px;
+      line-height: 1.85;
+    }
+    .highlight-box {
+      background: linear-gradient(135deg, #f0fdfa, #e0f2fe);
+      border-left: 4px solid #0f766e;
+      border-radius: 0 12px 12px 0;
+      padding: 16px 20px;
+      margin: 16px 0;
+    }
+    .highlight-box p {
+      font-size: 15px;
+      color: #0f172a;
+      font-weight: 500;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin: 16px 0;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+      margin: 16px 0;
+    }
+    .card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .card-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #0f766e, #14b8a6);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 10px;
+      color: #fff;
+      font-size: 16px;
+    }
+    .card h4 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+      margin-bottom: 6px;
+    }
+    .card p {
+      font-size: 12px;
+      color: #475569;
+      line-height: 1.7;
+    }
+    .section-heading {
+      font-size: 16px;
+      font-weight: 600;
+      color: #0f172a;
+      margin: 20px 0 12px;
+      padding-left: 12px;
+      border-left: 3px solid #0f766e;
+    }
+    .metric-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .metric {
+      background: linear-gradient(180deg, #f0fdfa, #e0f2fe);
+      border: 1px solid #ccfbf1;
+      border-radius: 12px;
+      padding: 16px 12px;
+      text-align: center;
+    }
+    .metric strong {
+      display: block;
+      font-size: 28px;
+      color: #0f766e;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .metric span {
+      font-size: 11px;
+      color: #475569;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #e2e8f0;
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f5f9;
+      color: #0f172a;
+      font-weight: 600;
+    }
+    td { color: #334155; }
+    ul, ol {
+      margin: 10px 0 10px 20px;
+      font-size: 13px;
+      color: #334155;
+    }
+    li { margin-bottom: 6px; line-height: 1.75; }
+    .flow-diagram {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      margin: 20px 0;
+      flex-wrap: nowrap;
+    }
+    .flow-step {
+      background: linear-gradient(135deg, #0f766e, #14b8a6);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      text-align: center;
+      min-width: 72px;
+    }
+    .flow-arrow {
+      color: #94a3b8;
+      font-size: 18px;
+      margin: 0 4px;
+      flex-shrink: 0;
+    }
+    .advantage-table td:first-child {
+      font-weight: 600;
+      color: #0f172a;
+      width: 100px;
+    }
+    .quote-box {
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin: 14px 0;
+      font-style: italic;
+      color: #475569;
+      font-size: 13px;
+    }
+    .timeline {
+      position: relative;
+      margin: 20px 0 20px 20px;
+      padding-left: 24px;
+      border-left: 2px solid #e2e8f0;
+    }
+    .timeline-item {
+      position: relative;
+      margin-bottom: 20px;
+    }
+    .timeline-item::before {
+      content: '';
+      position: absolute;
+      left: -31px;
+      top: 4px;
+      width: 12px;
+      height: 12px;
+      background: #0f766e;
+      border-radius: 50%;
+      border: 2px solid #fff;
+    }
+    .timeline-item h4 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .timeline-item p {
+      font-size: 12px;
+      color: #475569;
+      line-height: 1.7;
+    }
+    .footer {
+      position: absolute;
+      left: 22mm;
+      right: 22mm;
+      bottom: 12mm;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      color: #94a3b8;
+      border-top: 1px solid #f1f5f9;
+      padding-top: 8px;
+    }
+    .tag {
+      display: inline-block;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      margin: 2px;
+    }
+    .vs-block {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 16px;
+      align-items: start;
+      margin: 16px 0;
+    }
+    .vs-block .col h4 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #0f172a;
+      margin-bottom: 8px;
+    }
+    .vs-block .col ul { margin-left: 16px; font-size: 12px; }
+    .vs-divider {
+      width: 1px;
+      background: #e2e8f0;
+      align-self: stretch;
+    }
+    .cta-box {
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      color: #fff;
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 16px 0;
+    }
+    .cta-box h4 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: #5eead4;
+    }
+    .cta-box p {
+      font-size: 13px;
+      color: rgba(255,255,255,0.85);
+      line-height: 1.8;
+    }
+    .page-break { page-break-before: always; }
+  </style>
+</head>
+<body>
+
+<!-- ==================== 第1页：封面 ==================== -->
+<section class="page cover">
+  <img class="cover-logo" src="file:///E:/houtai/xmt/public/logo.png" alt="logo" />
+  <h1>XMT 新媒体协作管理系统</h1>
+  <p class="subtitle">项目整体介绍与发展规划汇报</p>
+  <div class="cover-divider"></div>
+  <div class="cover-meta">
+    <span>汇报日期：2026年6月</span>
+    <span>文档性质：内部汇报</span>
+    <span>版本：V1.0</span>
+  </div>
+</section>
+
+<!-- ==================== 第2页：项目背景 ==================== -->
+<section class="page page-inner">
+  <div class="page-header">
+    <div class="page-num">01</div>
+    <div>
+      <div class="page-title">项目背景</div>
+      <div class="page-subtitle">为什么需要建设这套系统</div>
+    </div>
+  </div>
+
+  <p class="intro-text">新媒体内容创作是一个高度协作的业务过程，涉及选题策划、内容创作、拍摄执行、发布运营和数据复盘等多个环节。随着团队规模和产出要求的增长，传统的协作方式逐渐暴露出效率瓶颈。</p>
+
+  <div class="section-heading">当前团队面临的核心挑战</div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-icon">📋</div>
+      <h4>信息分散</h4>
+      <p>选题、脚本、排期等关键信息散落在聊天群、表格、文档等多个地方，查找和同步成本高。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">🔄</div>
+      <h4>流程不透明</h4>
+      <p>选题审核、内容修改、发布确认等环节缺乏统一的状态记录，推进情况依赖口头沟通。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">📊</div>
+      <h4>数据难沉淀</h4>
+      <p>发布后的效果数据与前期选题、执行过程割裂，难以系统性复盘和优化。</p>
+    </div>
+    <div class="card">
+      <div class="card-icon">👥</div>
+      <h4>协作成本高</h4>
+      <p>角色分工、权限控制、任务分配缺少系统化支撑，跨角色沟通效率低。</p>
+    </div>
+  </div>
+
+  <div class="quote-box">
+    核心问题：团队需要的不是一个又一个单点工具，而是一套能把"计划—执行—结果"串起来的协同管理底座。
+  </div>
+
+  <div class="footer">
+    <span>XMT 新媒体协作管理系统 — 项目汇报</span>
+    <span>第 1 页</span>
+  </div>
+</section>
+
+<!-- ==================== 第3页：项目概述 ==================== -->
+<section class="page page-inner">
+  <div class="page-header">
+    <div class="page-num">02</div>
+    <div>
+      <div class="page-title">项目概述</div>
+      <div class="page-subtitle">XMT 是什么、解决什么问题</div>
+    </div>
+  </div>
+
+  <div class="highlight-box">
+    <p>一句话定义：XMT 是一套面向新媒体内容团队的全流程协作管理系统，覆盖从选题策划、剧本创作、拍摄执行、成片制作、发布管理到数据复盘的完整业务闭环。</p>
+  </div>
+
+  <div class="section-heading">系统定位</div>
+  <table>
+    <tr><th style="width:120px">维度</th><th>说明</th></tr>
+    <tr><td>目标用户</td><td>新媒体内容团队（管理员、编导、创作成员、执行成员）</td></tr>
+    <tr><td>核心场景</td><td>选题管理、内容创作、拍摄排期、发布运营、数据复盘</td></tr>
+    <tr><td>系统形态</td><td>完整的前后端系统，支持局域网私有化部署</td></tr>
+    <tr><td>技术架构</td><td>React + Express + SQLite，轻量可控，适合快速迭代</td></tr>
+  </table>
+
+  <div class="section-heading">核心目标</div>
+  <div class="grid-3">
+    <div class="card">
+      <h4>统一平台</h4>
+      <p>把分散在各处的信息收拢到同一系统，减少信息断层。</p>
+    </div>
+    <div class="card">
+      <h4>流程驱动</h4>
+      <p>用系统状态流转替代人工催促，让流程自己跑起来。</p>
+    </div>
+    <div class="card">
+      <h4>数据闭环</h4>
+      <p>从选题到发布全程留痕，支撑复盘和持续优化。</p>
+    </div>
+  </div>
+
+  <div class="section-heading">系统覆盖范围</div>
+  <div class="metric-row">
+    <div class="metric"><strong>28</strong><span>前端页面模块</span></div>
+    <div class="metric"><strong>20</strong><span>后端业务路由</span></div>
+    <div class="metric"><strong>30</strong><span>通用组件</span></div>
+    <div class="metric"><strong>18</strong><span>API 接口封装</span></div>
+  </div>
+
+  <div class="footer">
+    <span>XMT 新媒体协作管理系统 — 项目汇报</span>
+    <span>第 2 页</span>
+  </div>
+</section>
+
+<!-- ==================== 第4页：核心功能与优势（上） ==================== -->
+<section class="page page-inner">
+  <div class="page-header">
+    <div class="page-num">03</div>
+    <div>
+      <div class="page-title">核心功能与优势</div>
+      <div class="page-subtitle">系统能做什么、为什么值得用</div>
+    </div>
+  </div>
+
+  <div class="section-heading">全链路内容管理</div>
+  <p class="intro-text">系统以"选题"为核心起点，贯穿创作、拍摄、发布、复盘全流程，每个环节都有明确的状态记录和责任归属。</p>
+
+  <div class="flow-diagram">
+    <div class="flow-step">选题策划</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">审核确认</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">剧本创作</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">拍摄执行</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">内容发布</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step">数据复盘</div>
+  </div>
+
+  <div class="section-heading">五大核心优势</div>
+  <table class="advantage-table">
+    <tr><th>优势</th><th>具体体现</th><th>解决的问题</th></tr>
+    <tr>
+      <td>流程闭环</td>
+      <td>选题到复盘在同一系统内完成，状态自动流转</td>
+      <td>信息断裂、流程脱节</td>
+    </tr>
+    <tr>
+      <td>标准化管理</td>
+      <td>审批流模板、权限控制、状态机校验</td>
+      <td>管理靠人、标准不一</td>
+    </tr>
+    <tr>
+      <td>实时协同</td>
+      <td>Socket.IO 实时推送、站内消息、通知中心</td>
+      <td>沟通延迟、信息遗漏</td>
+    </tr>
+    <tr>
+      <td>数据沉淀</td>
+      <td>全流程数据记录、多维分析、趋势追踪</td>
+      <td>复盘困难、经验流失</td>
+    </tr>
+    <tr>
+      <td>灵活部署</td>
+      <td>单机私有化部署，支持局域网访问</td>
+      <td>数据安全、网络依赖</td>
+    </tr>
+  </table>
+
+  <div class="footer">
+    <span>XMT 新媒体协作管理系统 — 项目汇报</span>
+    <span>第 3 页</span>
+  </div>
+</section>
+
+<!-- ==================== 第5页：核心功能与优势（下） ==================== -->
+<section class="page page-inner">
+  <div class="page-header">
+    <div class="page-num">04</div>
+    <div>
+      <div class="page-title">功能模块详解</div>
+      <div class="page-subtitle">系统提供的具体能力</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h4>选题管理</h4>
+      <p>创建、审核、状态流转、大纲编辑。支持多状态流转（待审核→已通过→创作中→拍摄中→发布中→已完成），每次状态变更自动记录历史。</p>
+    </div>
+    <div class="card">
+      <h4>创作管理</h4>
+      <p>基于 Tiptap 富文本编辑器，支持剧本编辑、版本管理、批注评论。内容同时存储 HTML、JSON、Markdown 三种格式。</p>
+    </div>
+    <div class="card">
+      <h4>审批流设计</h4>
+      <p>可自定义审批流程模板，配置审批节点、审批人、状态转换规则，适应不同团队的管理需求。</p>
+    </div>
+    <div class="card">
+      <h4>权限系统</h4>
+      <p>基于 RBAC 模型，预设管理员、编导、成员、编辑四种角色，支持 25 项细粒度权限控制。</p>
+    </div>
+    <div class="card">
+      <h4>数据分析</h4>
+      <p>团队/个人/月度多维数据统计，支持抖音数据采集，发布效果与选题过程关联分析。</p>
+    </div>
+    <div class="card">
+      <h4>效率工具</h4>
+      <p>看板视图、排期日历、番茄钟、灵感池、成就系统，提升团队协作体验和工作积极性。</p>
+    </div>
+    <div class="card">
+      <h4>消息与通知</h4>
+      <p>站内消息、桌面通知、实时推送三位一体，确保重要信息及时送达，减少沟通遗漏。</p>
+    </div>
+    <div class="card">
+      <h4>数据安全</h4>
+      <p>JWT 认证、API 限流、自动备份、数据导出，保障系统和数据安全。</p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>XMT 新媒体协作管理系统 — 项目汇报</span>
+    <span>第 4 页</span>
+  </div>
+</section>
+
+<!-- ==================== 第6页：运作流程 ==================== -->
+<section class="page page-inner">
+  <div class="page-header">
+    <div class="page-num">05</div>
+    <div>
+      <div class="page-title">运作流程</div>
+      <div class="page-subtitle">一个选题从创建到复盘的完整旅程</div>
+    </div>
+  </div>
+
+  <p class="intro-text">系统的核心价值在于将内容生产的各个环节串联成一条完整的业务链路。以下以一个选题的完整生命周期为例，说明系统如何支撑日常工作。</p>
+
+  <div class="section-heading">选题全生命周期</div>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <h4>1. 创建选题</h4>
+      <p>团队成员在系统中提交选题，填写标题、描述、目标平台、截止日期等信息。选题自动进入"待审核"状态。</p>
+    </div>
+    <div class="timeline-item">
+      <h4>2. 审核确认</h4>
+      <p>管理员或编导对选题进行审核，通过后自动进入"已通过"状态，系统同时创建关联的创作记录。</p>
+    </div>
+    <div class="timeline-item">
+      <h4>3. 剧本创作</h4>
+      <p>编导或成员使用内置富文本编辑器完成剧本撰写，支持版本管理和批注评论，所有修改自动留痕。</p>
+    </div>
+    <div class="timeline-item">
+      <h4>4. 拍摄执行</h4>
+      <p>进入拍摄阶段后，系统自动创建拍摄记录，可录入拍摄日期、地点、设备等信息，剧本内容同步关联。</p>
+    </div>
+    <div class="timeline-item">
+      <h4>5. 内容发布</h4>
+      <p>拍摄完成后进入发布环节，记录发布平台、链接、时间等信息，支持录入初始数据指标。</p>
+    </div>
+    <div class="timeline-item">
+      <h4>6. 数据复盘</h4>
+      <p>系统持续追踪发布数据（播放量、点赞、评论等），支持按日记录和趋势分析，为后续优化提供依据。</p>
+    </div>
+  </div>
+
+  <div class="section-heading">管理价值</div>
+  <div class="grid-3">
+    <div class="card">
+      <h4>责任清晰</h4>
+      <p>每个环节有明确的责任主体，避免推诿和遗漏。</p>
+    </div>
+    <div class="card">
+      <h4>进度可视</h4>
+      <p>状态实时更新，管理者随时掌握推进情况。</p>
+    </div>
+    <div class="card">
+      <h4>经验留存</h4>
+      <p>全流程数据沉淀，不因人员变动而流失。</p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>XMT 新媒体协作管理系统 — 项目汇报</span>
+    <span>第 5 页</span>
+  </div>
+</section>
+
+<!-- ==================== 第7页：技术架构 ==================== -->
+<section class="page page-inner">
+  <div class="page-header">
+    <div class="page-num">06</div>
+    <div>
+      <div class="page-title">技术架构</div>
+      <div class="page-subtitle">系统的技术选型与架构设计</div>
+    </div>
+  </div>
+
+  <p class="intro-text">系统采用前后端分离架构，前端负责用户交互，后端处理业务逻辑和数据存储，通过标准化 API 进行通信。</p>
+
+  <div class="section-heading">技术栈</div>
+  <div class="grid-2">
+    <div class="card">
+      <h4>前端技术</h4>
+      <p>
+        <span class="tag">React 18</span>
+        <span class="tag">TypeScript</span>
+        <span class="tag">Vite 6</span>
+        <span class="tag">Tailwind CSS</span>
+        <span class="tag">Zustand</span>
+        <span class="tag">Tiptap 编辑器</span>
+        <span class="tag">Socket.IO</span>
+      </p>
+    </div>
+    <div class="card">
+      <h4>后端技术</h4>
+      <p>
+        <span class="tag">Express 4</span>
+        <span class="tag">TypeScript</span>
+        <span class="tag">SQLite</span>
+        <span class="tag">Socket.IO</span>
+        <span class="tag">JWT 认证</span>
+        <span class="tag">RBAC 权限</span>
+      </p>
+    </div>
+  </div>
+
+  <div class="section-heading">架构特点</div>
+  <table>
+    <tr><th>特点</th><th>说明</th><th>价值</th></tr>
+    <tr><td>轻量部署</td><td>Express + SQLite 单机部署</td><td>无需复杂运维，快速落地</td></tr>
+    <tr><td>实时通信</td><td>Socket.IO WebSocket 推送</td><td>消息即时送达，减少延迟</td></tr>
+    <tr><td>前后端分离</td><td>标准化 RESTful API</td><td>便于维护和扩展</td></tr>
+    <tr><td>类型安全</td><td>全栈 TypeScript</td><td>减少运行时错误，提升代码质量</td></tr>
+    <tr><td>共享层</td><td>前后端共用类型定义</td><td>接口一致，减少对接成本</td></tr>
+  </table>
+
+  <div class="section-heading">安全设计</div>
+  <div class="grid-2">
+    <div class="card">
+      <h4>认证与授权</h4>
+      <p>JWT Token 认证 + RBAC 权限模型，支持 25 项细粒度权限控制，管理员可自定义角色和权限分配。</p>
+    </div>
+    <div class="card">
+      <h4>数据保护</h4>
+      <p>API 限流防止滥用，自动备份保障数据安全，支持数据导出和手动备份管理。</p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>XMT 新媒体协作管理系统 — 项目汇报</span>
+    <span>第 6 页</span>
+  </div>
+</section>
+
+<!-- ==================== 第8页：不可替代优势 ==================== -->
+<section class="page page-inner">
+  <div class="page-header">
+    <div class="page-num">07</div>
+    <div>
+      <div class="page-title">对团队与公司的价值</div>
+      <div class="page-subtitle">为什么这套系统难以被替代</div>
+    </div>
+  </div>
+
+  <p class="intro-text">XMT 不仅仅是一个工具，更是一套沉淀了团队管理经验和业务流程的数字化资产。以下从多个维度说明其不可替代性。</p>
+
+  <div class="section-heading">核心价值对比</div>
+  <div class="vs-block">
+    <div class="col">
+      <h4 style="color: #dc2626;">没有系统时</h4>
+      <ul>
+        <li>信息散落在聊天群、表格、文档中</li>
+        <li>选题审核靠口头沟通，容易遗漏</li>
+        <li>版本混乱，找不到最新稿</li>
+        <li>复盘时数据缺失，难以归因</li>
+        <li>新人上手慢，经验难复制</li>
+      </ul>
+    </div>
+    <div class="vs-divider"></div>
+    <div class="col">
+      <h4 style="color: #0f766e;">使用 XMT 后</h4>
+      <ul>
+        <li>所有信息集中在同一平台</li>
+        <li>审核流程标准化，状态实时可见</li>
+        <li>版本自动管理，历史可追溯</li>
+        <li>全流程数据沉淀，支撑精准复盘</li>
+        <li>流程制度化，便于新人快速上手</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="section-heading">不可替代性分析</div>
+  <table>
+    <tr><th>维度</th><th>价值体现</th><th>为什么难以替代</th></tr>
+    <tr>
+      <td>流程资产</td>
+      <td>业务规则、审批流程、角色权限已系统化沉淀</td>
+      <td>不是买个通用工具就能获得的，需要深度业务理解</td>
+    </tr>
+    <tr>
+      <td>数据资产</td>
+      <td>选题、创作、发布全流程数据积累</td>
+      <td>历史数据不可迁移，换系统意味着数据断层</td>
+    </tr>
+    <tr>
+      <td>管理能力</td>
+      <td>管理可视化、责任可追溯、经验可复制</td>
+      <td>这是组织能力的数字化，不是简单工具替换</td>
+    </tr>
+    <tr>
+      <td>定制适配</td>
+      <td>完全基于自身业务需求设计</td>
+      <td>通用产品难以100%匹配特定团队的工作方式</td>
+    </tr>
+  </table>
+
+  <div class="footer">
+    <span>XMT 新媒体协作管理系统 — 项目汇报</span>
+    <span>第 7 页</span>
+  </div>
+</section>
+
+<!-- ==================== 第9页：未来愿景 ==================== -->
+<section class="page page-inner">
+  <div class="page-header">
+    <div class="page-num">08</div>
+    <div>
+      <div class="page-title">未来愿景</div>
+      <div class="page-subtitle">从内部工具到通用产品的演进路径</div>
+    </div>
+  </div>
+
+  <p class="intro-text">XMT 在内部验证成熟后，具备向通用产品演进的潜力。以下是我们规划的发展路径。</p>
+
+  <div class="section-heading">产品化路径</div>
+  <div class="timeline">
+    <div class="timeline-item">
+      <h4>第一阶段：内部深化（当前）</h4>
+      <p>持续优化现有功能，深化在团队内部的使用，积累更多业务场景和用户反馈。</p>
+    </div>
+    <div class="timeline-item">
+      <h4>第二阶段：通用化改造</h4>
+      <p>将业务规则抽象为可配置模板，支持不同行业、不同规模团队的定制化需求。核心方向：审批流模板化、角色权限配置化、功能模块可插拔。</p>
+    </div>
+    <div class="timeline-item">
+      <h4>第三阶段：商业化探索</h4>
+      <p>探索私有化部署交付、行业版本授权、SaaS 服务等多种盈利模式，将内部系统转化为公司新的业务增长点。</p>
+    </div>
+  </div>
+
+  <div class="section-heading">商业化方向</div>
+  <div class="grid-3">
+    <div class="card">
+      <h4>私有化部署</h4>
+      <p>为有数据安全要求的客户提供本地部署方案，收取实施费和维护费。</p>
+    </div>
+    <div class="card">
+      <h4>行业版本</h4>
+      <p>针对MCN、广告公司、媒体机构等不同行业推出定制版本。</p>
+    </div>
+    <div class="card">
+      <h4>SaaS 服务</h4>
+      <p>提供云端托管服务，按团队规模收取订阅费。</p>
+    </div>
+  </div>
+
+  <div class="cta-box">
+    <h4>核心结论</h4>
+    <p>XMT 不只是一个内部提效工具，而是一套经过业务验证的、具备产品化潜力的协作管理平台。它沉淀的是团队的管理经验和业务流程，这些都是可以通过产品化产生商业价值的数字化资产。</p>
+  </div>
+
+  <div class="footer">
+    <span>XMT 新媒体协作管理系统 — 项目汇报</span>
+    <span>第 8 页</span>
+  </div>
+</section>
+
+<!-- ==================== 第10页：总结与建议 ==================== -->
+<section class="page page-inner">
+  <div class="page-header">
+    <div class="page-num">09</div>
+    <div>
+      <div class="page-title">总结与建议</div>
+      <div class="page-subtitle">核心结论与下一步行动</div>
+    </div>
+  </div>
+
+  <div class="section-heading">核心结论</div>
+  <div class="grid-2">
+    <div class="card">
+      <h4>系统完整度高</h4>
+      <p>已建成包含 28 个页面模块、20 个后端路由、30 个通用组件的完整系统，覆盖内容生产全流程。</p>
+    </div>
+    <div class="card">
+      <h4>业务价值明确</h4>
+      <p>解决了信息分散、流程不透明、数据难沉淀等核心痛点，提升了团队协作效率和管理透明度。</p>
+    </div>
+    <div class="card">
+      <h4>技术架构成熟</h4>
+      <p>采用前后端分离、实时通信、RBAC 权限等成熟技术方案，具备良好的可维护性和扩展性。</p>
+    </div>
+    <div class="card">
+      <h4>产品化潜力大</h4>
+      <p>系统架构和业务逻辑具备通用化基础，经过适当改造可探索商业化方向。</p>
+    </div>
+  </div>
+
+  <div class="section-heading">下一步建议</div>
+  <table>
+    <tr><th>方向</th><th>具体行动</th><th>预期成果</th></tr>
+    <tr>
+      <td>持续优化</td>
+      <td>根据使用反馈迭代功能，完善用户体验</td>
+      <td>提升系统易用性和用户满意度</td>
+    </tr>
+    <tr>
+      <td>数据积累</td>
+      <td>鼓励团队全面使用，积累更多业务数据</td>
+      <td>为复盘分析和产品化提供数据支撑</td>
+    </tr>
+    <tr>
+      <td>通用化改造</td>
+      <td>将业务规则抽象为可配置模板</td>
+      <td>为产品化奠定基础</td>
+    </tr>
+    <tr>
+      <td>商业化探索</td>
+      <td>调研市场需求，确定目标客户群体</td>
+      <td>验证商业可行性，制定盈利策略</td>
+    </tr>
+  </table>
+
+  <div class="section-heading">需要的支持</div>
+  <ul>
+    <li><strong>资源支持：</strong>继续保持开发投入，推进功能迭代和通用化改造。</li>
+    <li><strong>推广支持：</strong>在更多团队中试点使用，验证系统的通用性和稳定性。</li>
+    <li><strong>方向确认：</strong>明确产品化和商业化的优先级，以便制定更精准的开发计划。</li>
+  </ul>
+
+  <div class="highlight-box" style="margin-top: 24px;">
+    <p>感谢各位领导的关注与支持。XMT 是团队智慧的结晶，也是公司数字化能力的重要沉淀。我们有信心将其打造成为更具价值的产品。</p>
+  </div>
+
+  <div class="footer">
+    <span>XMT 新媒体协作管理系统 — 项目汇报</span>
+    <span>第 9 页</span>
+  </div>
+</section>
+
+</body>
+</html>

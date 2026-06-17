@@ -1,0 +1,398 @@
+﻿/**
+ * This is a API server
+ */
+
+import express, {
+  type Request,
+  type Response,
+  type NextFunction,
+} from 'express'
+import cors from 'cors'
+import path from 'path'
+import dotenv from 'dotenv'
+import { fileURLToPath } from 'url'
+import http from 'http'
+import https from 'https'
+import fs from 'fs'
+import { Server } from 'socket.io'
+import { initDatabase, closeDatabase } from './database/db.js'
+import { queryOne } from './database/utils.js'
+import { verifyToken } from './utils/jwt.js'
+import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/socket.js'
+import { apiLimiter } from './middleware/rateLimit.js'
+import authRoutes from './routes/auth.js'
+import topicsRoutes from './routes/topics.js'
+import usersRoutes from './routes/users.js'
+import messagesRoutes from './routes/messages.js'
+import analyticsRoutes from './routes/analytics.js'
+import resourcesRoutes from './routes/resources.js'
+import workflowRoutes from './routes/workflow.js'
+import inspirationsRoutes from './routes/inspirations.js'
+import templatesRoutes from './routes/templates.js'
+import achievementsRoutes from './routes/achievements.js'
+import announcementsRoutes from './routes/announcements.js'
+import pomodoroRoutes from './routes/pomodoro.js'
+import calendarRoutes from './routes/calendar.js'
+import exportRoutes from './routes/export.js'
+import douyinRoutes from './routes/douyin.js'
+import backupRoutes from './routes/backup.js'
+import { createBackup, cleanOldBackups } from './routes/backup.js'
+import rolesRoutes from './routes/roles.js'
+import permissionsRoutes from './routes/permissions.js'
+import workflowTemplatesRoutes from './routes/workflow-templates.js'
+import notificationsRoutes from './routes/notifications.js'
+import systemSettingsRoutes from './routes/system-settings.js'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+dotenv.config()
+
+const app: express.Application = express()
+
+const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:5173']
+
+function parseConfiguredOrigins(value?: string) {
+  if (!value) {
+    return new Set(DEFAULT_ALLOWED_ORIGINS.map((origin) => origin.toLowerCase()))
+  }
+
+  return new Set(
+    value
+      .split(',')
+      .map((origin) => origin.trim().toLowerCase())
+      .filter(Boolean),
+  )
+}
+
+function isPrivateNetworkHost(hostname: string) {
+  const normalized = hostname.toLowerCase()
+
+  if (normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1') {
+    return true
+  }
+
+  const parts = normalized.split('.').map((part) => Number(part))
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+    return false
+  }
+
+  const [first, second] = parts
+  if (first === 10 || first === 127) return true
+  if (first === 192 && second === 168) return true
+  if (first === 172 && second >= 16 && second <= 31) return true
+  return false
+}
+
+function normalizeOrigin(origin: string) {
+  try {
+    const url = new URL(origin)
+    if (!/^https?:$/i.test(url.protocol)) {
+      return null
+    }
+
+    return {
+      origin: url.origin.toLowerCase(),
+      hostname: url.hostname.toLowerCase(),
+    }
+  } catch {
+    return null
+  }
+}
+
+function normalizeHostHeader(hostHeader?: string) {
+  if (!hostHeader) return null
+  const trimmed = hostHeader.trim().toLowerCase()
+  if (!trimmed) return null
+
+  try {
+    const url = new URL(`http://${trimmed}`)
+    return url.host.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+// 信任反向代理（nginx等），使 req.ip 获取真实客户端 IP
+app.set('trust proxy', 1)
+
+// 自动检测 HTTPS 证书（局域网桌面通知需要 HTTPS）
+const certsDir = path.join(__dirname, '..', 'certs')
+const keyPath = path.join(certsDir, 'server.key')
+const certPath = path.join(certsDir, 'server.cert')
+let server: http.Server
+if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+  const sslOptions = {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath),
+  }
+  server = https.createServer(sslOptions, app)
+  console.log('[HTTPS] 已加载 SSL 证书，HTTPS 模式启动')
+} else {
+  server = http.createServer(app)
+  console.log('[HTTP] 未检测到 certs/ 目录下的证书，HTTP 模式启动')
+  console.log('[HTTP] 桌面通知功能需要 HTTPS，运行 node scripts/generate-cert.mjs 生成证书')
+}
+
+const allowedOrigins = parseConfiguredOrigins(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGINS)
+
+function isAllowedRequestOrigin(origin?: string, hostHeader?: string) {
+  if (!origin) return true
+
+  const normalizedOrigin = normalizeOrigin(origin)
+  if (!normalizedOrigin) return false
+
+  if (allowedOrigins.has(normalizedOrigin.origin)) {
+    return true
+  }
+
+  const normalizedHost = normalizeHostHeader(hostHeader)
+  if (normalizedHost && normalizedOrigin.origin === `http://${normalizedHost}`) {
+    return true
+  }
+  if (normalizedHost && normalizedOrigin.origin === `https://${normalizedHost}`) {
+    return true
+  }
+
+  return isPrivateNetworkHost(normalizedOrigin.hostname)
+}
+
+export const io = new Server(server, {
+  cors: {
+    origin: (origin, callback) => {
+      if (isAllowedRequestOrigin(origin)) return callback(null, true)
+      callback(new Error('CORS not allowed'))
+    },
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+  allowRequest: (req, callback) => {
+    callback(null, isAllowedRequestOrigin(req.headers.origin, req.headers.host))
+  },
+})
+
+const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
+  callback(null, {
+    origin: (origin, allow) => {
+      if (isAllowedRequestOrigin(origin, req.headers.host)) return allow(null, true)
+      allow(new Error('CORS not allowed'))
+    },
+    credentials: true,
+  })
+}
+
+app.use('/api', cors(corsOptions))
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+
+// 全局 API 限制
+app.use('/api/', apiLimiter)
+
+// 生产环境：服务前端静态文件
+const distPath = path.join(__dirname, '..', 'dist')
+app.use(express.static(distPath, {
+  setHeaders: (res, filePath) => {
+    const relativePath = path.relative(distPath, filePath).replace(/\\/g, '/')
+    const isHtmlEntry = relativePath === 'index.html'
+    const isHashedAsset = /^assets\/.+\.[a-z0-9]{8,}\.(js|mjs|css)$/i.test(relativePath)
+
+    if (isHtmlEntry) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    } else if (isHashedAsset) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    }
+
+    if (filePath.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript')
+    if (filePath.endsWith('.mjs')) res.setHeader('Content-Type', 'application/javascript')
+    if (filePath.endsWith('.css')) res.setHeader('Content-Type', 'text/css')
+    if (filePath.endsWith('.wasm')) res.setHeader('Content-Type', 'application/wasm')
+  },
+}))
+
+app.use('/api/auth', authRoutes)
+app.use('/api/topics', topicsRoutes)
+app.use('/api/users', usersRoutes)
+app.use('/api/messages', messagesRoutes)
+app.use('/api/analytics', analyticsRoutes)
+app.use('/api/resources', resourcesRoutes)
+app.use('/api/workflow', workflowRoutes)
+app.use('/api/inspirations', inspirationsRoutes)
+app.use('/api/templates', templatesRoutes)
+app.use('/api/achievements', achievementsRoutes)
+app.use('/api/announcements', announcementsRoutes)
+app.use('/api/pomodoro', pomodoroRoutes)
+app.use('/api/calendar', calendarRoutes)
+app.use('/api/export', exportRoutes)
+app.use('/api/douyin', douyinRoutes)
+app.use('/api/backup', backupRoutes)
+app.use('/api/roles', rolesRoutes)
+app.use('/api/permissions', permissionsRoutes)
+app.use('/api/workflow-templates', workflowTemplatesRoutes)
+app.use('/api/notifications', notificationsRoutes)
+app.use('/api/system-settings', systemSettingsRoutes)
+
+app.use(
+  '/api/health',
+  (req: Request, res: Response): void => {
+    res.status(200).json({
+      success: true,
+      message: 'ok',
+    })
+  },
+)
+
+app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
+  void error
+  void next
+  res.status(500).json({
+    success: false,
+    error: 'Server internal error',
+  })
+})
+
+// 404 处理：API 路由返回 JSON，其他返回前端 index.html
+app.use((req: Request, res: Response) => {
+  if (req.path.startsWith('/api/')) {
+    res.status(404).json({
+      success: false,
+      error: 'API not found',
+    })
+  } else if (req.path.match(/\.(js|mjs|css|wasm|png|jpg|svg|ico|woff2?)$/)) {
+    // 资源文件请求但未找到，返回 404 而不是 SPA fallback
+    res.status(404).end()
+  } else {
+    // SPA 路由：所有非 API 请求返回 index.html
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    res.sendFile(path.join(distPath, 'index.html'))
+  }
+})
+
+setSocketIO(io)
+
+io.use(async (socket, next) => {
+  try {
+    const token =
+      typeof socket.handshake.auth?.token === 'string'
+        ? socket.handshake.auth.token
+        : typeof socket.handshake.headers.authorization === 'string'
+          ? socket.handshake.headers.authorization.replace(/^Bearer\s+/i, '')
+          : null
+
+    if (!token) {
+      return next(new Error('Authentication required'))
+    }
+
+    const payload = verifyToken(token)
+    if (!payload) {
+      return next(new Error('Invalid token'))
+    }
+
+    const user = await queryOne(`SELECT id, username, role, name, enabled FROM users WHERE id = ?`, [payload.userId])
+    if (!user) {
+      return next(new Error('User not found'))
+    }
+
+    const record = user as Record<string, unknown>
+    if (Number(record.enabled) !== 1) {
+      return next(new Error('User disabled'))
+    }
+
+    socket.data.user = {
+      id: Number(record.id),
+      username: String(record.username),
+      role: String(record.role),
+      name: String(record.name),
+    }
+
+    next()
+  } catch {
+    next(new Error('Authentication failed'))
+  }
+})
+
+io.on('connection', (socket) => {
+  const socketUser = socket.data.user as { id: number; role: string } | undefined
+
+  if (!socketUser) {
+    socket.disconnect(true)
+    return
+  }
+
+  socket.join(`user_${socketUser.id}`)
+
+  if (socketUser.role === 'admin' || socketUser.role === 'director') {
+    socket.join(ADMIN_SOCKET_ROOM)
+  }
+
+  socket.on('join', (room: string) => {
+    if (PUBLIC_SOCKET_ROOMS.has(room)) {
+      socket.join(room)
+    }
+  })
+
+  socket.on('leave', (room: string) => {
+    if (PUBLIC_SOCKET_ROOMS.has(room)) {
+      socket.leave(room)
+    }
+  })
+
+  socket.on('disconnect', () => {
+  })
+})
+
+export async function startServer() {
+  await initDatabase()
+
+  // 启动时自动备份一次
+  try {
+    const name = createBackup()
+    console.log(`[Backup] 启动备份: ${name}`)
+    cleanOldBackups()
+  } catch (e) {
+    console.warn('[Backup] 启动备份失败:', e)
+  }
+
+  // 每天凌晨3点自动备份
+  setInterval(() => {
+    const now = new Date()
+    if (now.getHours() === 3 && now.getMinutes() === 0) {
+      try {
+        const name = createBackup()
+        console.log(`[Backup] 定时备份: ${name}`)
+        cleanOldBackups()
+      } catch (e) {
+        console.warn('[Backup] 定时备份失败:', e)
+      }
+    }
+  }, 60 * 1000)
+
+  const PORT = Number.parseInt(process.env.PORT || '3001', 10)
+  const HOST = process.env.HOST || '0.0.0.0'
+  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+    throw new Error(`Invalid PORT value: ${process.env.PORT}`)
+  }
+  const isHttps = server instanceof https.Server
+  server.listen(PORT, HOST, () => {
+    const protocol = isHttps ? 'https' : 'http'
+    console.log(`Server ready on ${protocol}://${HOST}:${PORT}`)
+    if (isHttps) {
+      console.log(`[HTTPS] 局域网访问: https://192.168.1.9:${PORT}`)
+      console.log('[HTTPS] 首次访问浏览器会提示不安全，点"高级"继续访问即可')
+    }
+  })
+}
+
+// 优雅关闭：进程退出前保存数据库
+process.on('SIGINT', () => {
+  console.log('[Server] 收到 SIGINT，正在保存数据库...')
+  closeDatabase()
+  process.exit(0)
+})
+
+process.on('SIGTERM', () => {
+  console.log('[Server] 收到 SIGTERM，正在保存数据库...')
+  closeDatabase()
+  process.exit(0)
+})
+
+export default app

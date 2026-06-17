@@ -1,0 +1,12 @@
+[Unit]
+Description=Back up the XMT SQLite database
+After=xmt.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/backup-xmt
+User=root
+Group=root
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

@@ -5,7 +5,7 @@ import { getTopic, auditTopic, updateTopicStatus, updateTopic } from '../api';
 import { getUsers } from '../api';
 import { Topic, User } from '../types';
 import { ChevronLeft, Clock, User as UserIcon, Calendar, FileText, CheckCircle, XCircle, ArrowRight, Save, AlertTriangle, Camera, Scissors, Send, List, FileText as FileIcon } from 'lucide-react';
-import Editor from '../components/editor/Editor';
+import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
 import { STATUS_COLORS, STATUS_TEXT } from '../constants';
@@ -377,9 +377,10 @@ export default function TopicDetail() {
             </div>
           </div>
           {editDescription ? (
-            <Editor
+            <ContentEditor
               value={scriptContent}
               onChange={setScriptContent}
+              mode="rich"
             />
           ) : (
             <div className={`tiptap ${styles.bgTertiary} rounded-lg p-6 ${styles.textPrimary} min-h-[200px] leading-relaxed`} dangerouslySetInnerHTML={{ __html: scriptContent || '暂无大纲内容' }}></div>

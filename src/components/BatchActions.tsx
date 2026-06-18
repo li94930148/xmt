@@ -20,7 +20,7 @@ export default function BatchActions({
 
   return (
     <div
-      className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] ${styles.modal} px-5 py-3 flex items-center gap-4 shadow-2xl animate-in slide-in-from-bottom-4 duration-200`}
+      className={`fixed bottom-6 left-1/2 z-[90] flex -translate-x-1/2 items-center gap-4 px-5 py-3 shadow-2xl animate-in slide-in-from-bottom-4 duration-200 ${styles.modal}`}
     >
       <div className="flex items-center gap-2">
         <CheckCircle className="w-4 h-4 text-[#5c7cfa]" />
@@ -29,40 +29,40 @@ export default function BatchActions({
         </span>
       </div>
 
-      <div className={`w-px h-5 ${styles.divider} border-l`} />
+      <div className={`w-px h-5 border-l ${styles.divider}`} />
 
-      {onBatchStatusChange && (
+      {onBatchStatusChange ? (
         <>
           <button
             onClick={() => onBatchStatusChange('approved')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg ${styles.buttonSuccess} transition-colors`}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${styles.buttonSuccess}`}
           >
             <CheckCircle className="w-3.5 h-3.5" />
             通过
           </button>
           <button
             onClick={() => onBatchStatusChange('rejected')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg ${styles.buttonDanger} transition-colors`}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${styles.buttonDanger}`}
           >
             <RotateCcw className="w-3.5 h-3.5" />
             驳回
           </button>
         </>
-      )}
+      ) : null}
 
-      {onBatchDelete && (
+      {onBatchDelete ? (
         <button
           onClick={onBatchDelete}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#ff6b6b]/10 text-[#ff6b6b] hover:bg-[#ff6b6b]/20 transition-colors`}
+          className="flex items-center gap-1.5 rounded-lg bg-[#ff6b6b]/10 px-3 py-1.5 text-xs font-medium text-[#ff6b6b] transition-colors hover:bg-[#ff6b6b]/20"
         >
           <Trash2 className="w-3.5 h-3.5" />
           删除
         </button>
-      )}
+      ) : null}
 
       <button
         onClick={onClearSelection}
-        className={`p-1.5 rounded-lg ${styles.hoverBg} transition-colors`}
+        className={`rounded-lg p-1.5 transition-colors ${styles.hoverBg}`}
         title="取消选择"
       >
         <X className={`w-4 h-4 ${styles.textMuted}`} />

@@ -23,7 +23,7 @@ import {
 } from '../api';
 import type { Production as ProductionType, ProductionHistory, Topic } from '../types';
 import { getTopic } from '../api';
-import Editor from '../components/editor/Editor';
+import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
@@ -577,9 +577,10 @@ export default function ProductionDetail() {
             <div className="flex-1 min-h-0 overflow-hidden">
               {editMode ? (
                 <div className="h-full min-h-0">
-                  <Editor
+                  <ContentEditor
                     value={editData.content}
                     onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
+                    mode="rich"
                   />
                 </div>
               ) : (

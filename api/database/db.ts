@@ -553,6 +553,18 @@ async function initTables() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  await db.execute(`CREATE TABLE IF NOT EXISTS workflow_shadow_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id INTEGER,
+    node_id INTEGER,
+    from_state TEXT,
+    to_state TEXT,
+    user_id INTEGER,
+    action TEXT,
+    reason TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   // 选题关联审批流（添加列）
   try {
     await db.execute(`ALTER TABLE topics ADD COLUMN workflow_template_id INTEGER`);

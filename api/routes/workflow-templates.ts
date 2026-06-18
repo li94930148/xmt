@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
-import { queryOne, queryAll, runInTransaction } from '../database/utils';
+import { execute, queryOne, queryAll, runInTransaction } from '../database/utils';
 import { canAccessTopic, canApproveWorkflowNode, getTopicScopeById, getWorkflowNodeById, isPrivilegedUser } from '../utils/access';
+import { WORKFLOW_ENGINE_MODE, getExplainability, runApprovalCheck } from '@shared/workflow/workflow_runtime';
 
 const router = Router();
 
@@ -211,6 +212,111 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
       return res.status(400).json({ message: '当前选题状态与审批节点不匹配' });
     }
 
+    const initialRuntimeApproval = runApprovalCheck({
+      from: String(topic.status || ''),
+      to: String(node.status_to || ''),
+      user: req.user,
+      source: 'runtime',
+      topic,
+      node,
+    });
+
+    const shadowReason = [
+      initialRuntimeApproval.transition.reason,
+      initialRuntimeApproval.approve.reason,
+    ].filter(Boolean).join(' | ');
+
+    try {
+      await execute(
+        `INSERT INTO workflow_shadow_logs (topic_id, node_id, from_state, to_state, user_id, action, reason) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          topicId,
+          node_id,
+          topic.status || null,
+          node.status_to || null,
+          approverId || null,
+          `${WORKFLOW_ENGINE_MODE}:${status}`,
+          shadowReason || null,
+        ],
+      );
+    } catch (shadowError) {
+      console.warn('[workflow-shadow] failed to persist shadow log:', shadowError);
+    }
+
+    const recentShadowLogs = await queryAll<{
+      node_id: number | null;
+      from_state: string | null;
+      to_state: string | null;
+      action: string | null;
+      reason: string | null;
+    }>(
+      `SELECT node_id, from_state, to_state, action, reason
+       FROM workflow_shadow_logs
+       ORDER BY created_at DESC
+       LIMIT 500`,
+    );
+    const runtimeApproval = runApprovalCheck({
+      from: String(topic.status || ''),
+      to: String(node.status_to || ''),
+      user: req.user,
+      source: 'runtime',
+      topic,
+      node,
+      logs: recentShadowLogs,
+    });
+    const explainability = getExplainability({
+      from: String(topic.status || ''),
+      to: String(node.status_to || ''),
+      user: req.user,
+      source: 'runtime',
+      topic,
+      node,
+      logs: recentShadowLogs,
+    });
+
+    if (!runtimeApproval.decision.allowed) {
+      console.warn('[workflow-decision]', {
+        mode: WORKFLOW_ENGINE_MODE,
+        topicId,
+        nodeId: node_id,
+        decision: runtimeApproval.decision,
+      });
+    }
+
+    if (WORKFLOW_ENGINE_MODE === 'v2_strict' && runtimeApproval.strictBlocked) {
+      const strictReason = runtimeApproval.reason;
+
+      try {
+        await execute(
+          `INSERT INTO workflow_shadow_logs (topic_id, node_id, from_state, to_state, user_id, action, reason) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            topicId,
+            node_id,
+            topic.status || null,
+            node.status_to || null,
+            approverId || null,
+            `${WORKFLOW_ENGINE_MODE}:blocked:${status}`,
+            strictReason || 'strict mode - blocked by workflow policy',
+          ],
+        );
+      } catch (shadowError) {
+        console.warn('[workflow-shadow] failed to persist strict decision log:', shadowError);
+      }
+
+      return res.status(400).json({
+        message: 'Workflow policy rejected this approval action',
+        workflowDecision: {
+          mode: WORKFLOW_ENGINE_MODE,
+          allowed: false,
+          reason: strictReason || 'strict mode - blocked by workflow policy',
+          transition: runtimeApproval.transition,
+          approve: runtimeApproval.approve,
+          decision: runtimeApproval.decision || null,
+        },
+        explainability,
+      });
+    }
+
     await runInTransaction(async (tx) => {
       await tx.execute(
         `INSERT INTO approval_records (topic_id, node_id, approver_id, status, comment) VALUES (?, ?, ?, ?, ?)`,
@@ -226,7 +332,18 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
       }
     });
 
-    res.json({ message: '审批操作成功' });
+    res.json({
+      message: '审批操作成功',
+      workflowDecision: runtimeApproval.decision.suggestedTransition && runtimeApproval.decision.confidence > 0.8
+        ? {
+            mode: WORKFLOW_ENGINE_MODE,
+            suggestedTransition: runtimeApproval.decision.suggestedTransition,
+            confidence: runtimeApproval.decision.confidence,
+            reason: runtimeApproval.decision.reason,
+          }
+        : undefined,
+      explainability,
+    });
   } catch (error) {
     res.status(500).json({ message: '审批操作失败', error });
   }

@@ -1,10 +1,32 @@
-import { useState, useEffect } from 'react';
-import { useAppStore } from '../store';
-import { getArchives, getArchiveDetail, deleteResource } from '../api';
+import { useEffect, useState } from 'react';
+import {
+  Archive,
+  Calendar,
+  ChevronLeft,
+  Eye,
+  ExternalLink,
+  FileText,
+  MessageSquare,
+  Search,
+  Send,
+  Trash2,
+  User,
+  Clock,
+  Camera,
+  BarChart3,
+} from 'lucide-react';
+import { getArchiveDetail, getArchives, deleteResource } from '../api';
+import EmptyState from '../components/EmptyState';
+import {
+  ConfirmModal,
+  LoadingState,
+  PageHeader,
+  PageToolbar,
+} from '../components/common';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useDebounce } from '../hooks/useDebounce';
-import { Search, Archive, Eye, ChevronLeft, FileText, Camera, Send, Calendar, User, BarChart3, MessageSquare, Clock, ExternalLink, Trash2 } from 'lucide-react';
-import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
+import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
+import { useAppStore } from '../store';
 
 interface ArchiveItem {
   id: number;
@@ -80,9 +102,25 @@ interface ArchiveDetail {
   };
 }
 
+function DetailTabEmptyState({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <EmptyState
+      icon={Archive}
+      title={title}
+      description={description}
+    />
+  );
+}
+
 export default function Resources() {
   const styles = useThemeStyles();
-  const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
   const [archives, setArchives] = useState<ArchiveItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -97,7 +135,7 @@ export default function Resources() {
   const debouncedSearch = useDebounce(searchTerm, 400);
 
   useEffect(() => {
-    fetchArchives();
+    void fetchArchives();
   }, [debouncedSearch, page]);
 
   const fetchArchives = async () => {
@@ -107,7 +145,11 @@ export default function Resources() {
       setArchives(result.data);
       setTotal(result.total);
     } catch (error) {
-      appStore.addNotification({ title: '获取归档失败', message: (error as Error).message, type: 'error' });
+      addNotification({
+        title: '获取归档失败',
+        message: (error as Error).message,
+        type: 'error',
+      });
     } finally {
       setLoading(false);
     }
@@ -120,29 +162,43 @@ export default function Resources() {
       setSelectedArchive(detail);
       setActiveTab('script');
     } catch (error) {
-      appStore.addNotification({ title: '获取详情失败', message: (error as Error).message, type: 'error' });
+      addNotification({
+        title: '获取详情失败',
+        message: (error as Error).message,
+        type: 'error',
+      });
     } finally {
       setDetailLoading(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!selectedArchive) return;
+    if (!selectedArchive) {
+      return;
+    }
+
     setDeleting(true);
     try {
       await deleteResource(selectedArchive.id);
-      appStore.addNotification({ title: '删除成功', message: '存档已删除', type: 'success' });
+      addNotification({
+        title: '删除成功',
+        message: '归档已删除',
+        type: 'success',
+      });
       setSelectedArchive(null);
       setShowDeleteModal(false);
-      fetchArchives();
+      void fetchArchives();
     } catch (error) {
-      appStore.addNotification({ title: '删除失败', message: (error as Error).message, type: 'error' });
+      addNotification({
+        title: '删除失败',
+        message: (error as Error).message,
+        type: 'error',
+      });
     } finally {
       setDeleting(false);
     }
   };
 
-  // 详情视图
   if (selectedArchive) {
     const archive = selectedArchive.archive;
     const topic = archive.topic;
@@ -153,104 +209,105 @@ export default function Resources() {
 
     return (
       <div className="space-y-6">
-        {/* 返回按钮 + 标题 */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <PageHeader
+          title={selectedArchive.name}
+          description={`归档于 ${formatBeijingTime(archive.archived_at) || '未知'}`}
+          backButton={{
+            onClick: () => setSelectedArchive(null),
+            label: '返回',
+          }}
+          actions={
             <button
-              onClick={() => setSelectedArchive(null)}
-              className={`p-2 rounded-lg transition-colors ${styles.hoverBg}`}
+              type="button"
+              onClick={() => setShowDeleteModal(true)}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 ${styles.buttonDanger} transition-colors`}
             >
-              <ChevronLeft className={`w-5 h-5 ${styles.textPrimary}`} />
+              <Trash2 className="h-4 w-4" />
+              <span className="text-sm font-medium">删除</span>
             </button>
-            <div>
-              <h1 className={styles.pageTitle}>{selectedArchive.name}</h1>
-              <p className={styles.subtitle}>
-                归档于 {formatBeijingTime(archive.archived_at) || '未知'}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setShowDeleteModal(true)}
-            className={`flex items-center gap-2 px-4 py-2 ${styles.buttonDanger} rounded-lg transition-colors`}
-          >
-            <Trash2 className="w-4 h-4" />
-            <span className="text-sm font-medium">删除</span>
-          </button>
-        </div>
+          }
+        />
 
-        {/* 选题概览卡片 */}
         <div className={`${styles.card} p-6`}>
-          <h2 className={`text-lg font-semibold mb-4 ${styles.textPrimary}`}>选题信息</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <h2 className={`mb-4 text-lg font-semibold ${styles.textPrimary}`}>选题信息</h2>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div>
-              <p className={`text-xs ${styles.textMuted} mb-1`}>平台</p>
+              <p className={`mb-1 text-xs ${styles.textMuted}`}>平台</p>
               <p className={styles.textPrimary}>{topic?.platform || '-'}</p>
             </div>
             <div>
-              <p className={`text-xs ${styles.textMuted} mb-1`}>截止日期</p>
+              <p className={`mb-1 text-xs ${styles.textMuted}`}>截止日期</p>
               <p className={styles.textPrimary}>{topic?.deadline || '-'}</p>
             </div>
             <div>
-              <p className={`text-xs ${styles.textMuted} mb-1`}>发布时间</p>
+              <p className={`mb-1 text-xs ${styles.textMuted}`}>发布时间</p>
               <p className={styles.textPrimary}>{publishing?.publish_time || '-'}</p>
             </div>
             <div>
-              <p className={`text-xs ${styles.textMuted} mb-1`}>发布链接</p>
+              <p className={`mb-1 text-xs ${styles.textMuted}`}>发布链接</p>
               {publishing?.url ? (
-                <a href={publishing.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                  查看 <ExternalLink className="w-3 h-3" />
+                <a
+                  href={publishing.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-blue-400 hover:text-blue-300"
+                >
+                  查看
+                  <ExternalLink className="h-3 w-3" />
                 </a>
-              ) : <p className={styles.textPrimary}>-</p>}
+              ) : (
+                <p className={styles.textPrimary}>-</p>
+              )}
             </div>
           </div>
-          {topic?.description && (
+          {topic?.description ? (
             <div className="mt-4">
-              <p className={`text-xs ${styles.textMuted} mb-1`}>选题描述</p>
+              <p className={`mb-1 text-xs ${styles.textMuted}`}>选题描述</p>
               <p className={`text-sm ${styles.textSecondary}`}>{topic.description}</p>
             </div>
-          )}
+          ) : null}
         </div>
 
-        {/* 数据统计 */}
-        {analytics && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {analytics ? (
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             {[
               { label: '播放量', value: analytics.views, icon: BarChart3 },
-              { label: '点赞数', value: analytics.likes, icon: '👍' },
-              { label: '分享数', value: analytics.shares, icon: '🔄' },
+              { label: '点赞数', value: analytics.likes, icon: BarChart3 },
+              { label: '分享数', value: analytics.shares, icon: BarChart3 },
               { label: '评论数', value: analytics.comments, icon: MessageSquare },
             ].map((stat) => (
               <div key={stat.label} className={`${styles.card} p-4`}>
-                <p className={`text-xs ${styles.textMuted} mb-1`}>{stat.label}</p>
+                <p className={`mb-1 text-xs ${styles.textMuted}`}>{stat.label}</p>
                 <p className={`text-2xl font-bold ${styles.textPrimary}`}>
                   {typeof stat.value === 'number' ? stat.value.toLocaleString() : 0}
                 </p>
               </div>
             ))}
           </div>
-        )}
+        ) : null}
 
-        {/* Tab 切换 */}
         <div className={`${styles.card} overflow-hidden`}>
           <div className={`flex border-b ${styles.border}`}>
             {[
               { key: 'script', label: '剧本', icon: FileText },
-              { key: 'shooting', label: '成片批注', icon: Camera },
+              { key: 'shooting', label: '拍摄批注', icon: Camera },
               { key: 'publishing', label: '发布信息', icon: Send },
               { key: 'history', label: '流程记录', icon: Clock },
             ].map((tab) => {
               const Icon = tab.icon;
+
               return (
                 <button
                   key={tab.key}
+                  type="button"
                   onClick={() => setActiveTab(tab.key as typeof activeTab)}
-                  className={`flex items-center gap-2 px-6 py-3 text-sm font-medium transition-colors border-b-2 ${
+                  className={`flex items-center gap-2 border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
                     activeTab === tab.key
-                      ? 'border-blue-500 text-blue-400 bg-blue-500/10'
+                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
                       : `border-transparent ${styles.textSecondary} ${styles.hoverBg}`
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="h-4 w-4" />
                   {tab.label}
                 </button>
               );
@@ -258,255 +315,276 @@ export default function Resources() {
           </div>
 
           <div className="p-6">
-            {/* 剧本 Tab */}
-            {activeTab === 'script' && (
+            {activeTab === 'script' ? (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className={`font-semibold ${styles.textPrimary}`}>
                     剧本内容
-                    {script?.version && <span className={`ml-2 text-xs ${styles.textMuted}`}>版本: {script.version}</span>}
+                    {script?.version ? (
+                      <span className={`ml-2 text-xs ${styles.textMuted}`}>版本：{script.version}</span>
+                    ) : null}
                   </h3>
                 </div>
+
                 {script?.content ? (
                   <div
                     className={`prose prose-sm max-w-none ${styles.isDark ? 'prose-invert' : ''}`}
                     dangerouslySetInnerHTML={{ __html: script.content }}
                   />
                 ) : (
-                  <p className={styles.textMuted}>暂无剧本内容</p>
+                  <DetailTabEmptyState
+                    title="暂无剧本内容"
+                    description="当前归档中还没有可展示的剧本内容。"
+                  />
                 )}
 
-                {/* 剧本版本历史 */}
-                {script?.history && script.history.length > 0 && (
+                {script?.history && script.history.length > 0 ? (
                   <div className="mt-6">
-                    <h4 className={`font-medium mb-3 ${styles.textPrimary}`}>版本历史</h4>
+                    <h4 className={`mb-3 font-medium ${styles.textPrimary}`}>版本历史</h4>
                     <div className="space-y-2">
-                      {script.history.map((h, i) => (
-                        <div key={i} className={`flex items-center gap-3 text-sm p-2 rounded ${styles.hoverBgLight}`}>
-                          <span className="text-blue-400 font-mono">{h.version}</span>
-                          <span className={styles.textSecondary}>{h.change_type === 'major' ? '大版本' : '小版本'}</span>
-                          {h.comment && <span className={styles.textMuted}>— {h.comment}</span>}
-                          <span className={`ml-auto ${styles.textMuted}`}>{formatBeijingTime(h.created_at)}</span>
-                          <span className={styles.textMuted}>{h.operator_name}</span>
+                      {script.history.map((history, index) => (
+                        <div
+                          key={index}
+                          className={`flex items-center gap-3 rounded p-2 text-sm ${styles.hoverBgLight}`}
+                        >
+                          <span className="font-mono text-blue-400">{history.version}</span>
+                          <span className={styles.textSecondary}>
+                            {history.change_type === 'major' ? '大版本' : '小版本'}
+                          </span>
+                          {history.comment ? (
+                            <span className={styles.textMuted}>· {history.comment}</span>
+                          ) : null}
+                          <span className={`ml-auto ${styles.textMuted}`}>
+                            {formatBeijingTime(history.created_at)}
+                          </span>
+                          <span className={styles.textMuted}>{history.operator_name}</span>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
 
-            {/* 成片批注 Tab */}
-            {activeTab === 'shooting' && (
+            {activeTab === 'shooting' ? (
               <div className="space-y-4">
-                <h3 className={`font-semibold ${styles.textPrimary}`}>成片制作批注</h3>
+                <h3 className={`font-semibold ${styles.textPrimary}`}>拍摄制作批注</h3>
                 {shooting?.comments && shooting.comments.length > 0 ? (
                   <div className="space-y-3">
-                    {shooting.comments.map((c, i) => (
-                      <div key={i} className={`${styles.card} p-4`}>
-                        <p className={`text-sm ${styles.textPrimary}`}>{c.content}</p>
-                        <div className={`flex items-center gap-3 mt-2 text-xs ${styles.textMuted}`}>
-                          <User className="w-3 h-3" />
-                          <span>{c.operator_name}</span>
-                          <span>{formatBeijingTime(c.created_at)}</span>
+                    {shooting.comments.map((comment, index) => (
+                      <div key={index} className={`${styles.card} p-4`}>
+                        <p className={`text-sm ${styles.textPrimary}`}>{comment.content}</p>
+                        <div className={`mt-2 flex items-center gap-3 text-xs ${styles.textMuted}`}>
+                          <User className="h-3 w-3" />
+                          <span>{comment.operator_name}</span>
+                          <span>{formatBeijingTime(comment.created_at)}</span>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className={styles.textMuted}>暂无批注</p>
+                  <DetailTabEmptyState
+                    title="暂无拍摄批注"
+                    description="当前归档中还没有拍摄环节的批注记录。"
+                  />
                 )}
               </div>
-            )}
+            ) : null}
 
-            {/* 发布信息 Tab */}
-            {activeTab === 'publishing' && (
+            {activeTab === 'publishing' ? (
               <div className="space-y-4">
                 <h3 className={`font-semibold ${styles.textPrimary}`}>发布详情</h3>
                 {publishing ? (
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <p className={`text-xs ${styles.textMuted} mb-1`}>发布平台</p>
+                      <p className={`mb-1 text-xs ${styles.textMuted}`}>发布平台</p>
                       <p className={styles.textPrimary}>{publishing.platform || '-'}</p>
                     </div>
                     <div>
-                      <p className={`text-xs ${styles.textMuted} mb-1`}>发布时间</p>
+                      <p className={`mb-1 text-xs ${styles.textMuted}`}>发布时间</p>
                       <p className={styles.textPrimary}>{publishing.publish_time || '-'}</p>
                     </div>
                     <div>
-                      <p className={`text-xs ${styles.textMuted} mb-1`}>发布状态</p>
+                      <p className={`mb-1 text-xs ${styles.textMuted}`}>发布状态</p>
                       <p className={styles.textPrimary}>{publishing.status || '-'}</p>
                     </div>
                     <div>
-                      <p className={`text-xs ${styles.textMuted} mb-1`}>发布链接</p>
+                      <p className={`mb-1 text-xs ${styles.textMuted}`}>发布链接</p>
                       {publishing.url ? (
-                        <a href={publishing.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                          查看 <ExternalLink className="w-3 h-3" />
+                        <a
+                          href={publishing.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-blue-400 hover:text-blue-300"
+                        >
+                          查看
+                          <ExternalLink className="h-3 w-3" />
                         </a>
-                      ) : <p className={styles.textPrimary}>-</p>}
+                      ) : (
+                        <p className={styles.textPrimary}>-</p>
+                      )}
                     </div>
                   </div>
                 ) : (
-                  <p className={styles.textMuted}>暂无发布信息</p>
+                  <DetailTabEmptyState
+                    title="暂无发布信息"
+                    description="当前归档中还没有发布阶段的详细信息。"
+                  />
                 )}
               </div>
-            )}
+            ) : null}
 
-            {/* 流程记录 Tab */}
-            {activeTab === 'history' && (
+            {activeTab === 'history' ? (
               <div className="space-y-4">
                 <h3 className={`font-semibold ${styles.textPrimary}`}>选题流转记录</h3>
                 {archive.topicHistory && archive.topicHistory.length > 0 ? (
                   <div className="space-y-0">
-                    {archive.topicHistory.map((h, i) => (
-                      <div key={i} className="flex gap-4">
-                        {/* 时间线 */}
+                    {archive.topicHistory.map((history, index) => (
+                      <div key={index} className="flex gap-4">
                         <div className="flex flex-col items-center">
-                          <div className={`w-3 h-3 rounded-full ${i === 0 ? 'bg-blue-500' : 'bg-gray-500'} mt-1.5`} />
-                          {i < archive.topicHistory!.length - 1 && <div className={`w-px flex-1 ${styles.border} my-1`} />}
+                          <div
+                            className={`mt-1.5 h-3 w-3 rounded-full ${
+                              index === 0 ? 'bg-blue-500' : 'bg-gray-500'
+                            }`}
+                          />
+                          {index < (archive.topicHistory?.length ?? 0) - 1 ? (
+                            <div className={`my-1 w-px flex-1 ${styles.border}`} />
+                          ) : null}
                         </div>
-                        {/* 内容 */}
-                        <div className="pb-4 flex-1">
-                          <p className={`text-sm font-medium ${styles.textPrimary}`}>{h.comment || h.action}</p>
-                          <div className={`flex items-center gap-2 text-xs ${styles.textMuted} mt-1`}>
-                            <span>{h.operator_name}</span>
-                            <span>{formatBeijingTime(h.created_at)}</span>
+                        <div className="flex-1 pb-4">
+                          <p className={`text-sm font-medium ${styles.textPrimary}`}>
+                            {history.comment || history.action}
+                          </p>
+                          <div className={`mt-1 flex items-center gap-2 text-xs ${styles.textMuted}`}>
+                            <span>{history.operator_name}</span>
+                            <span>{formatBeijingTime(history.created_at)}</span>
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className={styles.textMuted}>暂无流转记录</p>
+                  <DetailTabEmptyState
+                    title="暂无流程记录"
+                    description="当前归档中还没有可展示的流转记录。"
+                  />
                 )}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 
-        {/* 删除确认弹窗 */}
-        {showDeleteModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className={`${styles.card} p-6 w-full max-w-md mx-4 border ${styles.border}`}>
-              <h2 className={`text-xl font-bold ${styles.textPrimary} mb-2`}>确认删除</h2>
-              <p className={`${styles.textSecondary} mb-6`}>
-                确定要删除存档「{selectedArchive.name}」吗？此操作不可撤销，所有相关的剧本、批注和发布数据将被永久删除。
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowDeleteModal(false)}
-                  className={`flex-1 px-4 py-2.5 rounded-xl text-sm ${styles.buttonSecondary} transition-colors`}
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
-                >
-                  {deleting ? '删除中...' : '确认删除'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <ConfirmModal
+          open={showDeleteModal}
+          onCancel={() => setShowDeleteModal(false)}
+          onConfirm={handleDelete}
+          loading={deleting}
+          variant="danger"
+          title="确认删除"
+          confirmText="确认删除"
+          cancelText="取消"
+          description={
+            <>
+              确定要删除归档“{selectedArchive.name}”吗？此操作不可撤销，相关剧本、批注和发布数据将一起删除。
+            </>
+          }
+        />
       </div>
     );
   }
 
-  // 列表视图
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className={styles.pageTitle}>选题存档</h1>
-          <p className={styles.subtitle}>已完成发布的选题归档，包含剧本、批注和发布数据</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Archive className={`w-5 h-5 ${styles.textMuted}`} />
-          <span className={`text-sm ${styles.textSecondary}`}>共 {total} 个存档</span>
-        </div>
-      </div>
+      <PageHeader
+        title="选题存档"
+        description="已完成发布的选题归档，包含剧本、批注和发布数据"
+        actions={(
+          <div className="flex items-center gap-2">
+            <Archive className={`h-5 w-5 ${styles.textMuted}`} />
+            <span className={`text-sm ${styles.textSecondary}`}>共 {total} 个存档</span>
+          </div>
+        )}
+      />
 
-      {/* 搜索 */}
-      <div className="flex gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${styles.textMuted}`} />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
-            placeholder="搜索选题名称..."
-            className={`w-full pl-10 pr-4 py-2.5 ${styles.input}`}
-          />
-        </div>
-      </div>
+      <PageToolbar
+        search={(
+          <div className="relative max-w-md">
+            <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${styles.textMuted}`} />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(event) => {
+                setSearchTerm(event.target.value);
+                setPage(1);
+              }}
+              placeholder="搜索选题名称..."
+              className={`w-full py-2.5 pl-10 pr-4 ${styles.input}`}
+            />
+          </div>
+        )}
+      />
 
-      {/* 归档列表 */}
-      {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className={`w-8 h-8 border-4 border-t-transparent rounded-full animate-spin ${styles.spinner}`}></div>
-        </div>
+      {loading || detailLoading ? (
+        <LoadingState type="section" text="正在加载资源归档..." />
       ) : archives.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 text-center">
-          <Archive className={`w-12 h-12 ${styles.textMuted} mb-4`} />
-          <p className={`text-lg ${styles.textSecondary}`}>暂无存档</p>
-          <p className={`text-sm ${styles.textMuted}`}>选题发布完成后会自动归档到这里</p>
-        </div>
+        <EmptyState
+          icon={Archive}
+          title="暂无存档"
+          description="选题发布完成后会自动归档到这里。"
+        />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {archives.map((item) => (
             <div
               key={item.id}
-              className={`${styles.card} p-5 hover:shadow-lg transition-shadow cursor-pointer group`}
-              onClick={() => handleViewDetail(item.id)}
+              className={`${styles.card} group cursor-pointer p-5 transition-shadow hover:shadow-lg`}
+              onClick={() => void handleViewDetail(item.id)}
             >
-              <div className="flex items-start justify-between mb-3">
-                <h3 className={`font-semibold text-base ${styles.textPrimary} group-hover:text-blue-400 transition-colors line-clamp-2`}>
+              <div className="mb-3 flex items-start justify-between">
+                <h3
+                  className={`line-clamp-2 text-base font-semibold ${styles.textPrimary} transition-colors group-hover:text-blue-400`}
+                >
                   {item.name}
                 </h3>
-                <Eye className={`w-4 h-4 ${styles.textMuted} group-hover:text-blue-400 transition-colors flex-shrink-0 ml-2`} />
+                <Eye
+                  className={`ml-2 h-4 w-4 flex-shrink-0 ${styles.textMuted} transition-colors group-hover:text-blue-400`}
+                />
               </div>
 
               <div className="space-y-2">
-                {item.platform && (
+                {item.platform ? (
                   <div className={`flex items-center gap-2 text-xs ${styles.textSecondary}`}>
-                    <Send className="w-3 h-3" />
+                    <Send className="h-3 w-3" />
                     <span>{item.platform}</span>
                   </div>
-                )}
-                {item.scriptVersion && (
+                ) : null}
+                {item.scriptVersion ? (
                   <div className={`flex items-center gap-2 text-xs ${styles.textSecondary}`}>
-                    <FileText className="w-3 h-3" />
+                    <FileText className="h-3 w-3" />
                     <span>剧本 {item.scriptVersion}</span>
                   </div>
-                )}
-                {item.shootingCommentCount > 0 && (
+                ) : null}
+                {item.shootingCommentCount > 0 ? (
                   <div className={`flex items-center gap-2 text-xs ${styles.textSecondary}`}>
-                    <MessageSquare className="w-3 h-3" />
+                    <MessageSquare className="h-3 w-3" />
                     <span>{item.shootingCommentCount} 条批注</span>
                   </div>
-                )}
+                ) : null}
               </div>
 
-              {/* 数据预览 */}
-              {(item.views > 0 || item.likes > 0) && (
-                <div className={`flex items-center gap-4 mt-3 pt-3 border-t ${styles.borderLight}`}>
-                  {item.views > 0 && (
-                    <span className={`text-xs ${styles.textMuted}`}>
-                      👁 {item.views.toLocaleString()}
-                    </span>
-                  )}
-                  {item.likes > 0 && (
-                    <span className={`text-xs ${styles.textMuted}`}>
-                      👍 {item.likes.toLocaleString()}
-                    </span>
-                  )}
+              {item.views > 0 || item.likes > 0 ? (
+                <div className={`mt-3 flex items-center gap-4 border-t pt-3 ${styles.borderLight}`}>
+                  {item.views > 0 ? (
+                    <span className={`text-xs ${styles.textMuted}`}>播放 {item.views.toLocaleString()}</span>
+                  ) : null}
+                  {item.likes > 0 ? (
+                    <span className={`text-xs ${styles.textMuted}`}>点赞 {item.likes.toLocaleString()}</span>
+                  ) : null}
                 </div>
-              )}
+              ) : null}
 
-              <div className={`flex items-center gap-2 mt-3 text-xs ${styles.textMuted}`}>
-                <Calendar className="w-3 h-3" />
+              <div className={`mt-3 flex items-center gap-2 text-xs ${styles.textMuted}`}>
+                <Calendar className="h-3 w-3" />
                 <span>归档于 {formatBeijingDate(item.updated_at)}</span>
               </div>
             </div>
@@ -514,13 +592,13 @@ export default function Resources() {
         </div>
       )}
 
-      {/* 分页 */}
-      {total > 12 && (
+      {total > 12 ? (
         <div className="flex items-center justify-center gap-2">
           <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
+            type="button"
+            onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
             disabled={page === 1}
-            className={`px-4 py-2 rounded-lg ${styles.buttonSecondary} disabled:opacity-50`}
+            className={`rounded-lg px-4 py-2 ${styles.buttonSecondary} disabled:opacity-50`}
           >
             上一页
           </button>
@@ -528,14 +606,15 @@ export default function Resources() {
             {page} / {Math.ceil(total / 12)}
           </span>
           <button
-            onClick={() => setPage(p => p + 1)}
+            type="button"
+            onClick={() => setPage((currentPage) => currentPage + 1)}
             disabled={page >= Math.ceil(total / 12)}
-            className={`px-4 py-2 rounded-lg ${styles.buttonSecondary} disabled:opacity-50`}
+            className={`rounded-lg px-4 py-2 ${styles.buttonSecondary} disabled:opacity-50`}
           >
             下一页
           </button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

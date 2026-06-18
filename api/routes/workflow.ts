@@ -4,6 +4,7 @@ import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, isPrivilegedUser, resolveCommentTopicScope } from '../utils/access';
 import { syncPublishedArchive } from '../services/publishedArchive';
+import { buildWorkflowRuntimeContext } from '@shared/workflow/workflow_runtime';
 import { broadcastToRoom } from '../utils/socket';
 
 const router = express.Router();
@@ -31,6 +32,166 @@ function getNextVersion(currentVersion: string | undefined, versionAction: Versi
 
   return normalized.startsWith('v') ? normalized : `v${normalized}`;
 }
+
+router.get('/shadow-logs', authenticate, async (req, res) => {
+  try {
+    const { topic_id, user_id, node_id } = req.query;
+    let sql = `SELECT * FROM workflow_shadow_logs WHERE 1=1`;
+    const params: unknown[] = [];
+
+    if (topic_id) {
+      sql += ` AND topic_id = ?`;
+      params.push(topic_id);
+    }
+
+    if (user_id) {
+      sql += ` AND user_id = ?`;
+      params.push(user_id);
+    }
+
+    if (node_id) {
+      sql += ` AND node_id = ?`;
+      params.push(node_id);
+    }
+
+    sql += ` ORDER BY created_at DESC LIMIT 100`;
+
+    res.json(await queryAll(sql, params));
+  } catch (error) {
+    res.status(500).json({ message: '获取 Workflow Shadow 日志失败', error });
+  }
+});
+
+router.get('/shadow-analytics', authenticate, async (req, res) => {
+  try {
+    const transitions = await queryAll<{
+      from_state: string | null;
+      to_state: string | null;
+      count: number;
+    }>(
+      `SELECT from_state, to_state, COUNT(*) as count
+       FROM workflow_shadow_logs
+       GROUP BY from_state, to_state
+       ORDER BY count DESC`,
+    );
+
+    const nodeActivity = await queryAll<{
+      node_id: number | null;
+      count: number;
+    }>(
+      `SELECT node_id, COUNT(*) as count
+       FROM workflow_shadow_logs
+       WHERE node_id IS NOT NULL
+       GROUP BY node_id
+       ORDER BY count DESC`,
+    );
+
+    const approverDistribution = await queryAll<{
+      user_id: number | null;
+      count: number;
+    }>(
+      `SELECT user_id, COUNT(*) as count
+       FROM workflow_shadow_logs
+       WHERE user_id IS NOT NULL
+       GROUP BY user_id
+       ORDER BY count DESC`,
+    );
+
+    const nodeRiskRows = await queryAll<{
+      node_id: number | null;
+      transition_count: number;
+      rejection_count: number;
+      abnormal_pattern_count: number;
+    }>(
+      `SELECT
+         node_id,
+         COUNT(*) as transition_count,
+         SUM(CASE WHEN action LIKE '%rejected%' THEN 1 ELSE 0 END) as rejection_count,
+         SUM(CASE WHEN reason IS NOT NULL AND reason != '' AND reason NOT LIKE '%shadow mode - no enforcement%' THEN 1 ELSE 0 END) as abnormal_pattern_count
+       FROM workflow_shadow_logs
+       WHERE node_id IS NOT NULL
+       GROUP BY node_id
+       ORDER BY abnormal_pattern_count DESC, rejection_count DESC, transition_count DESC`,
+    );
+
+    const invalidPatterns = await queryAll<{
+      reason: string | null;
+      count: number;
+    }>(
+      `SELECT reason, COUNT(*) as count
+       FROM workflow_shadow_logs
+       WHERE reason IS NOT NULL
+         AND reason != ''
+         AND reason NOT LIKE '%shadow mode - no enforcement%'
+       GROUP BY reason
+       ORDER BY count DESC`,
+    );
+
+    res.json({
+      transitionFrequency: transitions,
+      heatmap: transitions.map((row) => ({
+        from: row.from_state || 'unknown',
+        to: row.to_state || 'unknown',
+        count: Number(row.count || 0),
+      })),
+      nodeActivityRanking: nodeActivity,
+      approverDistribution,
+      mostFrequentTransitions: transitions.slice(0, 10),
+      mostInvalidPatterns: invalidPatterns,
+      nodeRiskScore: nodeRiskRows.map((row) => ({
+        node_id: row.node_id,
+        transition_count: Number(row.transition_count || 0),
+        rejection_count: Number(row.rejection_count || 0),
+        abnormal_pattern_count: Number(row.abnormal_pattern_count || 0),
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ message: '获取 Workflow Shadow 分析失败', error });
+  }
+});
+
+router.get('/shadow-decisions', authenticate, async (req, res) => {
+  try {
+    const logs = await queryAll<{
+      node_id: number | null;
+      from_state: string | null;
+      to_state: string | null;
+      action: string | null;
+      reason: string | null;
+    }>(
+      `SELECT node_id, from_state, to_state, action, reason
+       FROM workflow_shadow_logs
+       ORDER BY created_at DESC
+       LIMIT 500`,
+    );
+
+    res.json({
+      decisions: logs.map((log) => {
+        const runtimeContext = buildWorkflowRuntimeContext({
+          from: log.from_state,
+          to: log.to_state,
+          node: { id: log.node_id || undefined, status_from: log.from_state, status_to: log.to_state },
+          logs,
+          source: 'runtime',
+        });
+
+        return {
+          node_id: log.node_id,
+          from_state: log.from_state || 'unknown',
+          to_state: log.to_state || 'unknown',
+          allowed: runtimeContext.allowed,
+          shouldBlock: runtimeContext.strictBlocked,
+          shouldWarn: runtimeContext.risk !== 'low',
+          suggestedTransition: runtimeContext.suggestedTransition,
+          confidence: runtimeContext.confidence,
+          reason: runtimeContext.reason,
+        };
+      }),
+    });
+  } catch (error) {
+    res.status(500).json({ message: '获取 Workflow Shadow 决策建议失败', error });
+  }
+});
 
 router.get('/production', authenticate, async (req, res) => {
   try {

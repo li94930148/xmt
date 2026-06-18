@@ -1,3 +1,73 @@
+日常更新流程
+1. 本地发布
+cd E:\houtai\xmt
+
+npm run check
+npm run build
+pm2 restart xmt-server
+
+git add .
+git commit -m "服务器升级推送"
+git push origin main
+
+
+
+cd /opt/xmt
+systemctl start xmt-backup.service
+git pull --ff-only origin main
+npm ci
+npm run check
+npm run build
+npm prune --omit=dev
+systemctl restart xmt
+curl -fsS http://127.0.0.1:3001/api/health
+
+
+2. 云服务器更新
+cd /opt/xmt
+
+# 先备份数据库
+systemctl start xmt-backup.service
+
+# 拉取代码
+git pull --ff-only origin main
+
+# 安装锁定版本的依赖
+npm ci
+
+# 检查并构建
+npm run check
+npm run build
+
+# 确保 Playwright 浏览器可用
+PLAYWRIGHT_BROWSERS_PATH=/opt/xmt/.playwright \
+  npx playwright install chromium
+
+# 重启应用
+systemctl restart xmt
+
+# 验证
+systemctl status xmt --no-pager
+curl -fsS http://127.0.0.1:3001/api/health
+成功应返回类似：
+{"success":true,"message":"ok"}
+
+
+回滚代码但保留数据库：
+systemctl stop xmt
+git checkout <之前正常的提交ID>
+npm ci
+npm run build
+systemctl start xmt
+恢复最新版：
+git checkout main
+git pull --ff-only origin main
+始终不要提交这些内容：
+.env
+data/xmt.db*
+certs/
+backups/
+
 # XMT 部署到阿里云 Ubuntu 22.04 ECS
 
 

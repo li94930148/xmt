@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
 import { getPublishingById, updatePublishing } from '../api';
 import { ChevronLeft, FileText, Camera, Send, Calendar, User as UserIcon, Clock, Save, CheckCircle, ArrowRight, MapPin, ExternalLink } from 'lucide-react';
-import Editor from '../components/editor/Editor';
+import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
 
@@ -386,10 +386,11 @@ export default function PublishingDetail() {
         <div className="p-0">
           {editMode ? (
             <div style={{ height: '500px' }}>
-              <Editor
+              <ContentEditor
                 value={scriptContent}
                 onChange={setScriptContent}
                 onSave={handleSaveScript}
+                mode="rich"
               />
             </div>
           ) : (

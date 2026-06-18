@@ -12,6 +12,7 @@ import {
 import CollaborationHeatmap from '../components/CollaborationHeatmap';
 import DataExport from '../components/DataExport';
 import WeeklyReport from '../components/WeeklyReport';
+import { FormModal, PageHeader, PageToolbar } from '../components/common';
 import type { TeamStats, MonthlyStats, UserStats, Topic, Analytics as AnalyticsType } from '../types';
 import {
   BarChart3,
@@ -186,15 +187,17 @@ export default function Analytics() {
 
   return (
     <div className="space-y-6">
-      <div className={`flex items-center gap-1 p-1 ${styles.bgTertiary} rounded-xl w-fit`}>
+      <div className={`flex items-center gap-1 rounded-xl p-1 ${styles.bgTertiary} w-fit`}>
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                activeTab === tab.id ? `${styles.bgSecondary} ${styles.textPrimary} shadow-sm` : `${styles.textMuted} ${styles.hoverBg}`
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 ${
+                activeTab === tab.id
+                  ? `${styles.bgSecondary} ${styles.textPrimary} shadow-sm`
+                  : `${styles.textMuted} ${styles.hoverBg}`
               }`}
             >
               <Icon className="w-4 h-4" />
@@ -204,23 +207,42 @@ export default function Analytics() {
         })}
       </div>
 
-      {activeTab === 'export' && <DataExport />}
-      {activeTab === 'report' && <WeeklyReport />}
+      {activeTab === 'export' ? <DataExport /> : null}
+      {activeTab === 'report' ? <WeeklyReport /> : null}
 
-      {activeTab === 'overview' && (
+      {activeTab === 'overview' ? (
         <>
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className={`text-2xl font-bold ${styles.textPrimary}`}>数据复盘</h1>
-              <p className={`${styles.textSecondary} mt-1`}>查看团队和个人在当前周期内的数据表现</p>
-            </div>
-            <div className="flex items-center gap-3">
+          <PageHeader
+            title="数据复盘"
+            description="查看团队和个人在当前周期内的数据表现"
+            actions={
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleExport}
+                  className={`flex items-center gap-2 rounded-xl px-4 py-2.5 ${styles.buttonSecondary} transition-all duration-200`}
+                >
+                  <Download className="w-4 h-4" />
+                  <span className="text-sm font-medium">导出报表</span>
+                </button>
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className={`flex items-center gap-2 rounded-xl px-5 py-2.5 ${styles.buttonPrimary} transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]`}
+                >
+                  <Plus className="w-4 h-4" />
+                  <span className="text-sm font-medium">录入数据</span>
+                </button>
+              </div>
+            }
+          />
+
+          <PageToolbar
+            left={
               <div className={`flex items-center gap-2 ${styles.card} p-2`}>
                 <Calendar className={`w-4 h-4 ${styles.textSecondary}`} />
                 <select
                   value={year}
                   onChange={(event) => setYear(parseInt(event.target.value, 10))}
-                  className={`px-3 py-1 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} text-sm ${styles.focusRing}`}
+                  className={`rounded-lg px-3 py-1 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
                 >
                   {years.map((item) => (
                     <option key={item.value} value={item.value}>
@@ -231,7 +253,7 @@ export default function Analytics() {
                 <select
                   value={month}
                   onChange={(event) => setMonth(parseInt(event.target.value, 10))}
-                  className={`px-3 py-1 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} text-sm ${styles.focusRing}`}
+                  className={`rounded-lg px-3 py-1 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
                 >
                   {months.map((item) => (
                     <option key={item.value} value={item.value}>
@@ -240,24 +262,10 @@ export default function Analytics() {
                   ))}
                 </select>
               </div>
-              <button
-                onClick={handleExport}
-                className={`flex items-center gap-2 px-4 py-2.5 ${styles.buttonSecondary} rounded-xl transition-all duration-200`}
-              >
-                <Download className="w-4 h-4" />
-                <span className="text-sm font-medium">导出报表</span>
-              </button>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className={`flex items-center gap-2 px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]`}
-              >
-                <Plus className="w-4 h-4" />
-                <span className="text-sm font-medium">录入数据</span>
-              </button>
-            </div>
-          </div>
+            }
+          />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
             {statCards.map((card, index) => {
               const Icon = card.icon;
               return (
@@ -268,13 +276,13 @@ export default function Analytics() {
                   <div className="flex items-start justify-between">
                     <div>
                       <p className={`${styles.textMuted} text-xs font-semibold uppercase tracking-wider`}>{card.title}</p>
-                      <p className={`text-3xl font-bold tracking-tight ${styles.textPrimary} mt-3`}>{card.value}</p>
-                      <p className="text-xs mt-1" style={{ color: card.color }}>
+                      <p className={`mt-3 text-3xl font-bold tracking-tight ${styles.textPrimary}`}>{card.value}</p>
+                      <p className="mt-1 text-xs" style={{ color: card.color }}>
                         {card.unit}
                       </p>
                     </div>
                     <div
-                      className="w-12 h-12 rounded-xl flex items-center justify-center transition-transform duration-200 group-hover:scale-110"
+                      className="flex h-12 w-12 items-center justify-center rounded-xl transition-transform duration-200 group-hover:scale-110"
                       style={{ backgroundColor: `${card.color}15` }}
                     >
                       <Icon className="w-6 h-6" style={{ color: card.color }} />
@@ -285,15 +293,15 @@ export default function Analytics() {
             })}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div className={`${styles.bgSecondary} rounded-xl p-6 ${styles.border}`}>
-              <h3 className={`text-lg font-semibold ${styles.textPrimary} mb-4`}>数据概览</h3>
+              <h3 className={`mb-4 text-lg font-semibold ${styles.textPrimary}`}>数据概览</h3>
               <div className="grid grid-cols-2 gap-4">
                 {metricCards.map((item) => {
                   const Icon = item.icon;
                   return (
                     <div key={item.label} className={`${styles.bgTertiary} rounded-lg p-4`}>
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="mb-2 flex items-center gap-2">
                         <Icon className={`w-5 h-5 ${item.color}`} />
                         <span className={`${styles.textSecondary} text-sm`}>{item.label}</span>
                       </div>
@@ -305,12 +313,12 @@ export default function Analytics() {
             </div>
 
             <div className={`${styles.bgSecondary} rounded-xl p-6 ${styles.border}`}>
-              <h3 className={`text-lg font-semibold ${styles.textPrimary} mb-4`}>选题数据趋势</h3>
+              <h3 className={`mb-4 text-lg font-semibold ${styles.textPrimary}`}>选题数据趋势</h3>
               <div className="space-y-3">
                 <select
                   value={selectedTopic}
                   onChange={(event) => setSelectedTopic(event.target.value)}
-                  className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing}`}
+                  className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
                 >
                   <option value="">选择一个已完成选题</option>
                   {topics.map((topic) => (
@@ -324,8 +332,8 @@ export default function Analytics() {
                   <div className="space-y-2">
                     {topicAnalytics.map((item) => (
                       <div key={item.id} className={`${styles.bgTertiary} rounded-lg p-4`}>
-                        <p className={`text-sm ${styles.textPrimary} font-medium`}>{item.data_date}</p>
-                        <div className="grid grid-cols-2 gap-3 mt-3 text-sm">
+                        <p className={`text-sm font-medium ${styles.textPrimary}`}>{item.data_date}</p>
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                           <span className={styles.textSecondary}>播放：{item.views.toLocaleString()}</span>
                           <span className={styles.textSecondary}>点赞：{item.likes.toLocaleString()}</span>
                           <span className={styles.textSecondary}>分享：{item.shares.toLocaleString()}</span>
@@ -335,23 +343,23 @@ export default function Analytics() {
                     ))}
                   </div>
                 ) : (
-                  <p className={`${styles.textSecondary} text-center py-8`}>选择选题后查看数据明细</p>
+                  <p className={`${styles.textSecondary} py-8 text-center`}>选择选题后查看数据明细</p>
                 )}
               </div>
             </div>
           </div>
 
           <div className={`${styles.bgSecondary} rounded-xl p-6 ${styles.border}`}>
-            <h3 className={`text-lg font-semibold ${styles.textPrimary} mb-4`}>个人统计排行</h3>
+            <h3 className={`mb-4 text-lg font-semibold ${styles.textPrimary}`}>个人统计排行</h3>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className={styles.tableHeader}>
-                    <th className={`text-left px-6 py-3 ${styles.textSecondary} text-sm font-medium`}>排名</th>
-                    <th className={`text-left px-6 py-3 ${styles.textSecondary} text-sm font-medium`}>姓名</th>
-                    <th className={`text-left px-6 py-3 ${styles.textSecondary} text-sm font-medium`}>完成选题数</th>
-                    <th className={`text-left px-6 py-3 ${styles.textSecondary} text-sm font-medium`}>总播放量</th>
-                    <th className={`text-left px-6 py-3 ${styles.textSecondary} text-sm font-medium`}>总点赞量</th>
+                    <th className={`px-6 py-3 text-left text-sm font-medium ${styles.textSecondary}`}>排名</th>
+                    <th className={`px-6 py-3 text-left text-sm font-medium ${styles.textSecondary}`}>姓名</th>
+                    <th className={`px-6 py-3 text-left text-sm font-medium ${styles.textSecondary}`}>完成选题数</th>
+                    <th className={`px-6 py-3 text-left text-sm font-medium ${styles.textSecondary}`}>总播放量</th>
+                    <th className={`px-6 py-3 text-left text-sm font-medium ${styles.textSecondary}`}>总点赞量</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -360,7 +368,7 @@ export default function Analytics() {
                       <tr key={user.user_id} className={`border-t ${styles.tableRow} ${styles.tableHover}`}>
                         <td className="px-6 py-4">
                           <span
-                            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                            className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
                               index === 0
                                 ? 'bg-yellow-500 text-white'
                                 : index === 1
@@ -373,10 +381,14 @@ export default function Analytics() {
                             {index + 1}
                           </span>
                         </td>
-                        <td className={`px-6 py-4 ${styles.textPrimary} font-medium`}>{user.user_name}</td>
+                        <td className={`px-6 py-4 font-medium ${styles.textPrimary}`}>{user.user_name}</td>
                         <td className={`px-6 py-4 ${styles.textSecondary}`}>{user.topic_count}</td>
-                        <td className={`px-6 py-4 ${styles.textSecondary}`}>{user.total_views ? user.total_views.toLocaleString() : 0}</td>
-                        <td className={`px-6 py-4 ${styles.textSecondary}`}>{user.total_likes ? user.total_likes.toLocaleString() : 0}</td>
+                        <td className={`px-6 py-4 ${styles.textSecondary}`}>
+                          {user.total_views ? user.total_views.toLocaleString() : 0}
+                        </td>
+                        <td className={`px-6 py-4 ${styles.textSecondary}`}>
+                          {user.total_likes ? user.total_likes.toLocaleString() : 0}
+                        </td>
                       </tr>
                     ))
                   ) : (
@@ -393,106 +405,88 @@ export default function Analytics() {
 
           <CollaborationHeatmap topics={allTopics} />
 
-          {showCreateModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className={`${styles.bgSecondary} rounded-xl p-6 w-full max-w-lg mx-4 ${styles.border}`}>
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className={`text-xl font-bold ${styles.textPrimary}`}>录入数据</h2>
-                  <button onClick={() => setShowCreateModal(false)} className={styles.buttonSecondary}>
-                    <span className="text-2xl">&times;</span>
-                  </button>
+          <FormModal
+            open={showCreateModal}
+            onCancel={() => setShowCreateModal(false)}
+            onSubmit={() => void handleCreate()}
+            title="录入数据"
+            submitText="保存"
+            cancelText="取消"
+            size="lg"
+          >
+            <div className="space-y-4">
+              <div>
+                <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>关联选题 *</label>
+                <select
+                  value={formData.topic_id}
+                  onChange={(event) => setFormData({ ...formData, topic_id: event.target.value })}
+                  className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
+                >
+                  <option value="">请选择选题</option>
+                  {topics.map((topic) => (
+                    <option key={topic.id} value={topic.id}>
+                      {topic.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>播放量</label>
+                  <input
+                    type="number"
+                    value={formData.views}
+                    onChange={(event) => setFormData({ ...formData, views: event.target.value })}
+                    className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} ${styles.focusRing}`}
+                    placeholder="0"
+                  />
                 </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>关联选题 *</label>
-                    <select
-                      value={formData.topic_id}
-                      onChange={(event) => setFormData({ ...formData, topic_id: event.target.value })}
-                      className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing}`}
-                    >
-                      <option value="">请选择选题</option>
-                      {topics.map((topic) => (
-                        <option key={topic.id} value={topic.id}>
-                          {topic.title}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>播放量</label>
-                      <input
-                        type="number"
-                        value={formData.views}
-                        onChange={(event) => setFormData({ ...formData, views: event.target.value })}
-                        className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.textPlaceholder} ${styles.focusRing}`}
-                        placeholder="0"
-                      />
-                    </div>
-                    <div>
-                      <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>点赞量</label>
-                      <input
-                        type="number"
-                        value={formData.likes}
-                        onChange={(event) => setFormData({ ...formData, likes: event.target.value })}
-                        className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.textPlaceholder} ${styles.focusRing}`}
-                        placeholder="0"
-                      />
-                    </div>
-                    <div>
-                      <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>分享量</label>
-                      <input
-                        type="number"
-                        value={formData.shares}
-                        onChange={(event) => setFormData({ ...formData, shares: event.target.value })}
-                        className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.textPlaceholder} ${styles.focusRing}`}
-                        placeholder="0"
-                      />
-                    </div>
-                    <div>
-                      <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>评论量</label>
-                      <input
-                        type="number"
-                        value={formData.comments}
-                        onChange={(event) => setFormData({ ...formData, comments: event.target.value })}
-                        className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.textPlaceholder} ${styles.focusRing}`}
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className={`block ${styles.textSecondary} text-sm font-medium mb-2`}>数据日期</label>
-                    <input
-                      type="date"
-                      value={formData.data_date}
-                      onChange={(event) => setFormData({ ...formData, data_date: event.target.value })}
-                      className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing}`}
-                    />
-                  </div>
-
-                  <div className="flex gap-3 mt-6">
-                    <button
-                      onClick={() => setShowCreateModal(false)}
-                      className={`flex-1 px-4 py-2 ${styles.buttonSecondary} rounded-lg transition-colors`}
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={() => void handleCreate()}
-                      className={`flex-1 px-4 py-2 ${styles.buttonPrimary} rounded-lg transition-colors`}
-                    >
-                      保存
-                    </button>
-                  </div>
+                <div>
+                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>点赞量</label>
+                  <input
+                    type="number"
+                    value={formData.likes}
+                    onChange={(event) => setFormData({ ...formData, likes: event.target.value })}
+                    className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} ${styles.focusRing}`}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>分享量</label>
+                  <input
+                    type="number"
+                    value={formData.shares}
+                    onChange={(event) => setFormData({ ...formData, shares: event.target.value })}
+                    className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} ${styles.focusRing}`}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>评论量</label>
+                  <input
+                    type="number"
+                    value={formData.comments}
+                    onChange={(event) => setFormData({ ...formData, comments: event.target.value })}
+                    className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} ${styles.focusRing}`}
+                    placeholder="0"
+                  />
                 </div>
               </div>
+
+              <div>
+                <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>数据日期</label>
+                <input
+                  type="date"
+                  value={formData.data_date}
+                  onChange={(event) => setFormData({ ...formData, data_date: event.target.value })}
+                  className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
+                />
+              </div>
             </div>
-          )}
+          </FormModal>
         </>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useAppStore } from '../store';
 import { getShootingById, updateShooting, getTopics } from '../api';
 import { Shooting as ShootingType, Topic } from '../types';
 import { ChevronLeft, Calendar, MapPin, Camera, User as UserIcon, CheckCircle, AlertCircle, Clock, Save, FileText, ArrowRight } from 'lucide-react';
-import Editor from '../components/editor/Editor';
+import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
 
@@ -428,10 +428,11 @@ export default function ShootingDetail() {
         <div className="p-0">
           {scriptEditMode ? (
             <div style={{ height: '500px' }}>
-              <Editor
+              <ContentEditor
                 value={scriptContent}
                 onChange={setScriptContent}
                 onSave={handleSaveScript}
+                mode="rich"
               />
             </div>
           ) : (

@@ -10,6 +10,29 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.3.0',
+    date: '2026-06-17',
+    title: '编辑器统一入口与低风险页面接入',
+    changes: [
+      {
+        type: 'feature',
+        description: '新增 ContentEditor 统一编辑器入口，统一 rich、legacy、readonly 三种模式，为业务页面后续收敛编辑器引用提供稳定入口。',
+      },
+      {
+        type: 'improvement',
+        description: 'Topics 创建弹窗与 AddTopic 大纲编辑区已接入 ContentEditor legacy 模式，保持原 HTML 内容字段和保存流程不变。',
+      },
+      {
+        type: 'improvement',
+        description: '完成 RichTextEditor 直接业务页面引用核对，旧编辑器进入 legacy 兼容期，后续新页面应优先通过 ContentEditor 使用编辑器能力。',
+      },
+      {
+        type: 'improvement',
+        description: '补充组件规范、重构规划和系统架构中的编辑器路线治理说明，明确 Tiptap Editor 为长期主线、协同编辑作为后续专项推进。',
+      },
+    ],
+  },
+  {
     version: '2.2.0',
     date: '2026-06-17',
     title: '权限细化与前端基础框架试点',

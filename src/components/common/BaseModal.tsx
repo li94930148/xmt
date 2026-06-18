@@ -55,7 +55,7 @@ export default function BaseModal({
       }}
     >
       <div className={`w-full ${sizeClassMap[size]} ${styles.modal} ${className}`.trim()}>
-        {(title || description || showCloseButton) ? (
+        {title || description || showCloseButton ? (
           <div className={`flex items-start justify-between gap-4 border-b px-6 py-5 ${styles.border}`}>
             <div className="min-w-0 flex-1">
               {title ? <h2 className={`text-xl font-bold ${styles.textPrimary}`}>{title}</h2> : null}

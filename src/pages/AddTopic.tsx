@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
 import { createTopic, getUsers } from '../api';
-import RichTextEditor from '../components/RichTextEditor';
+import ContentEditor from '../components/ContentEditor';
 import { ChevronLeft, FileText, List, Calendar, User as UserIcon, Send, Save, Eye, EyeOff } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingDate } from '../lib/utils';
@@ -239,10 +239,11 @@ export default function AddTopic() {
               {showPreview ? (
                 <div className={`${styles.bgTertiary} rounded-lg p-6 min-h-[400px] ${styles.textPrimary}`} dangerouslySetInnerHTML={{ __html: formData.outline }}></div>
               ) : (
-                <RichTextEditor
+                <ContentEditor
                   value={formData.outline}
                   onChange={(value) => setFormData({ ...formData, outline: value })}
                   placeholder="请填写大纲内容..."
+                  mode="legacy"
                 />
               )}
             </div>

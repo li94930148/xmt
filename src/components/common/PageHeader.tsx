@@ -61,7 +61,7 @@ export default function PageHeader({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
-            {resolvedBackButton && (
+            {resolvedBackButton ? (
               <button
                 type="button"
                 onClick={handleBack}
@@ -70,7 +70,7 @@ export default function PageHeader({
                 <ArrowLeft className="h-4 w-4" />
                 <span>{resolvedBackButton.label || '返回'}</span>
               </button>
-            )}
+            ) : null}
             <div className="min-w-0">
               <h1 className={styles.pageTitle}>{title}</h1>
               {description ? <p className={`${styles.subtitle} mt-1`}>{description}</p> : null}

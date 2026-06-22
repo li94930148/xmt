@@ -56,6 +56,10 @@ const PublishingDetail = lazyWithRetry(() => import('@/pages/PublishingDetail'),
 const Analytics = lazyWithRetry(() => import('@/pages/Analytics'), 'Analytics');
 const CollaborationDashboard = lazyWithRetry(() => import('@/pages/CollaborationDashboard'), 'CollaborationDashboard');
 const CollaborationUX = lazyWithRetry(() => import('@/pages/CollaborationUX'), 'CollaborationUX');
+const ContentTimelineView = lazyWithRetry(() => import('@/pages/ContentTimelineView'), 'ContentTimelineView');
+const ContentIntelligenceDashboard = lazyWithRetry(() => import('@/pages/ContentIntelligenceDashboard'), 'ContentIntelligenceDashboard');
+const ContentGenerationDashboard = lazyWithRetry(() => import('@/pages/ContentGenerationDashboard'), 'ContentGenerationDashboard');
+const ContentOSDashboard = lazyWithRetry(() => import('@/pages/ContentOSDashboard'), 'ContentOSDashboard');
 const Users = lazyWithRetry(() => import('@/pages/Users'), 'Users');
 const Resources = lazyWithRetry(() => import('@/pages/Resources'), 'Resources');
 const Messages = lazyWithRetry(() => import('@/pages/Messages'), 'Messages');
@@ -129,6 +133,18 @@ export default function App() {
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/collaboration-ux" element={<CollaborationUX />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['analytics:view']} />}>
+                  <Route path="/content-timeline" element={<ContentTimelineView />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['analytics:view']} />}>
+                  <Route path="/content-intelligence" element={<ContentIntelligenceDashboard />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['analytics:view']} />}>
+                  <Route path="/content-generation" element={<ContentGenerationDashboard />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['analytics:view']} />}>
+                  <Route path="/content-os" element={<ContentOSDashboard />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['user:logs']} />}>
                   <Route path="/activity" element={<ActivityLog />} />

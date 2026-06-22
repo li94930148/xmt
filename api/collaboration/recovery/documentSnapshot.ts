@@ -6,6 +6,7 @@ import {
 } from '../yjs/documentStore.js';
 import { createEvent } from '../protocol/collaborationProtocol.js';
 import { appendEvent } from '../protocol/eventStream.js';
+import { syncToYjs } from '../../../src/collaboration/core/writeConsistency.js';
 
 export interface DocumentSnapshot {
   id: string;
@@ -57,7 +58,7 @@ export function restoreSnapshot(docId: string, snapshotId: string) {
 
   record.doc.destroy();
   record.doc = new Y.Doc();
-  Y.applyUpdate(record.doc, Uint8Array.from(snapshot.state));
+  syncToYjs({ snapshotUpdate: snapshot.state, targetDoc: record.doc });
   record.version = snapshot.version;
   record.lastActive = Date.now();
   return snapshot;

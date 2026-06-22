@@ -44,6 +44,9 @@ import notificationsRoutes from './routes/notifications.js'
 import systemSettingsRoutes from './routes/system-settings.js'
 import collaborationDashboardRoutes from './routes/collaboration-dashboard.js'
 import collaborationUxRoutes from './routes/collaboration-ux.js'
+import contentIntelligenceRoutes from './routes/content-intelligence.js'
+import contentGenerationRoutes from './routes/content-generation.js'
+import contentOrchestratorRoutes from './routes/content-orchestrator.js'
 import { COLLABORATION_EVENTS } from '../src/collaboration/core/events.js'
 import {
   handleAwarenessUpdate,
@@ -248,6 +251,9 @@ app.use('/api/notifications', notificationsRoutes)
 app.use('/api/system-settings', systemSettingsRoutes)
 app.use('/api/collaboration', collaborationDashboardRoutes)
 app.use('/api/collaboration/ux', collaborationUxRoutes)
+app.use('/api/content/intelligence', contentIntelligenceRoutes)
+app.use('/api/content/generation', contentGenerationRoutes)
+app.use('/api/content/os', contentOrchestratorRoutes)
 
 app.use(
   '/api/health',

@@ -2,17 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowRight,
-  Calendar,
   ChevronLeft,
   Clock,
   FileText,
-  History,
   PanelRight,
   PanelRightClose,
   Save,
-  Tag,
   Trash2,
-  User as UserIcon,
 } from 'lucide-react';
 import { useAppStore, useAuthStore } from '../store';
 import {
@@ -25,9 +21,11 @@ import type { Production as ProductionType, ProductionHistory, Topic } from '../
 import { getTopic } from '../api';
 import ContentEditor from '../components/ContentEditor';
 import { getCollaborationRoomId } from '../collaboration/core/events';
+import { cancelDatabaseSync, syncToDatabase } from '../collaboration/core/writeConsistency';
+import { getTimelineView } from '../editor/timeline/unifiedContentTimeline';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
-import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
+import { formatBeijingTime } from '../lib/utils';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
@@ -42,13 +40,6 @@ const STATUS_TEXT: Record<string, string> = {
   approved: '已通过',
   rejected: '已驳回',
 };
-
-const WORKFLOW_STEPS = [
-  { key: 'draft', label: '草稿' },
-  { key: 'review', label: '审核中' },
-  { key: 'approved', label: '已通过' },
-  { key: 'shooting', label: '成片制作' },
-];
 
 const NEXT_STATUSES: Record<string, string> = {
   draft: 'review',
@@ -104,14 +95,14 @@ export default function ProductionDetail() {
   const [history, setHistory] = useState<HistoryVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [editMode, setEditMode] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [editMode, setEditMode] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error'>('synced');
   const [editData, setEditData] = useState({
     content: '',
     status: 'draft',
   });
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
-  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAutoSavedContentRef = useRef('');
 
   const canDelete = hasPermission('production:delete');
@@ -129,6 +120,7 @@ export default function ProductionDetail() {
         status: productionData.status,
       });
       lastAutoSavedContentRef.current = productionData.content || '';
+      setSyncStatus('synced');
 
       const [topicData, historyData] = await Promise.all([
         getTopic(productionData.topic_id),
@@ -191,6 +183,20 @@ export default function ProductionDetail() {
 
   const selectedVersion =
     versionEntries.find((entry) => entry.id === selectedVersionId) || versionEntries[0] || null;
+  const timelineView = useMemo(() => {
+    if (!production) return getTimelineView('production:unknown');
+    return getTimelineView(getCollaborationRoomId('production', production.id), {
+      versionEvents: versionEntries.map((entry) => ({
+        id: entry.id,
+        timestamp: new Date(entry.createdAt).getTime(),
+        version: entry.version,
+        changeType: entry.changeType,
+        operatorName: entry.operatorName,
+        status: entry.status,
+        label: entry.isCurrent ? '当前版本' : '历史版本',
+      })),
+    });
+  }, [production, versionEntries]);
 
   const majorVersionEntries = useMemo(() => {
     const latestByMajor = new Map<number, VersionEntry>();
@@ -225,58 +231,44 @@ export default function ProductionDetail() {
     });
   }, [versionEntries]);
 
-  const currentStepIndex = WORKFLOW_STEPS.findIndex((step) => step.key === production?.status);
-
   const startEditing = () => {
     if (!production) return;
-
     setSelectedVersionId('current');
-    setShowSidebar(true);
     setEditData({
-      content: production.content || '',
+      content: production.content || editData.content || '',
       status: production.status,
     });
-    lastAutoSavedContentRef.current = production.content || '';
     setEditMode(true);
   };
 
-  const handleCancel = () => {
-    if (!production) return;
-
-    setEditData({
-      content: production.content || '',
-      status: production.status,
-    });
-    lastAutoSavedContentRef.current = production.content || '';
-    setSelectedVersionId('current');
-    setEditMode(false);
-  };
-
   useEffect(() => {
-    if (!editMode || !production) return;
+    if (!production || selectedVersionId !== 'current') return;
     if (editData.content === lastAutoSavedContentRef.current) return;
 
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(() => {
-      updateProduction(production.id, {
+    syncToDatabase({
+      docId: getCollaborationRoomId('production', production.id),
+      content: editData.content,
+      previousContent: lastAutoSavedContentRef.current,
+      persist: (content) => updateProduction(production.id, {
         topic_id: production.topic_id,
         version: production.version,
-        content: editData.content,
+        content,
         status: editData.status,
         version_action: 'none',
-      })
-        .then(() => {
-          lastAutoSavedContentRef.current = editData.content;
-        })
-        .catch(() => {
-          // 手动保存仍会展示完整错误提示，这里保持静默避免多人输入时打断。
-        });
-    }, 2500);
+      }).then(() => undefined),
+      onStatusChange: setSyncStatus,
+      onSynced: (content) => {
+        lastAutoSavedContentRef.current = content;
+      },
+      onError: () => {
+        // 手动保存仍会展示完整错误提示，这里保持静默避免多人输入时打断。
+      },
+    });
 
     return () => {
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+      cancelDatabaseSync(getCollaborationRoomId('production', production.id));
     };
-  }, [editData.content, editData.status, editMode, production]);
+  }, [editData.content, editData.status, production, selectedVersionId]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
     if (!production) return;
@@ -297,7 +289,7 @@ export default function ProductionDetail() {
         type: 'success',
       });
 
-      setEditMode(false);
+      setEditMode(true);
       await fetchData();
     } catch (error) {
       appStore.addNotification({
@@ -326,7 +318,7 @@ export default function ProductionDetail() {
         type: 'success',
       });
 
-      setEditMode(false);
+      setEditMode(true);
       await fetchData();
     } catch (error) {
       appStore.addNotification({
@@ -414,8 +406,8 @@ export default function ProductionDetail() {
         .production-preview mark[data-color="cyan"] { background-color: ${styles.isDark ? '#155e75' : '#a5f3fc'}; }
         .production-preview mark:not([data-color]) { background-color: ${styles.isDark ? '#713f12' : '#fef08a'}; }
       `}</style>
-      <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl px-4 py-3 shrink-0`}>
-        <div className="flex items-center justify-between gap-4 mb-3">
+      <div className={`shrink-0 border-b ${styles.border} px-3 py-2`}>
+        <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => navigate('/production')}
@@ -424,14 +416,25 @@ export default function ProductionDetail() {
               <ChevronLeft className={`w-5 h-5 ${styles.textSecondary}`} />
             </button>
             <div className="min-w-0">
-              <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>创作管理</p>
-              <div className="flex items-center gap-3 min-w-0">
-                <h1 className={`text-lg font-bold truncate ${styles.textPrimary}`}>
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                <h1 className={`text-base font-semibold truncate ${styles.textPrimary}`}>
                   {production.topic_title || '创作详情'}
                 </h1>
+                <span className={`text-xs ${styles.textMuted}`}>{production.version || 'v1.0'}</span>
+                <button
+                  onClick={() => navigate(`/topics/${production.topic_id}`)}
+                  className="max-w-[220px] truncate text-xs text-blue-400 hover:text-blue-300"
+                >
+                  {topic?.title || production.topic_title || '关联选题'}
+                </button>
+                <span className={`text-xs ${styles.textMuted}`}>{formatBeijingTime(production.updated_at)}</span>
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${STATUS_COLORS[production.status]}`}>
                   {STATUS_TEXT[production.status] || production.status}
                 </span>
+                <span className={`text-xs ${syncStatus === 'error' ? 'text-red-400' : syncStatus === 'saving' ? 'text-blue-400' : styles.textMuted}`}>
+                  {syncStatus === 'saving' ? '正在保存...' : syncStatus === 'error' ? '同步失败' : '已同步'}
+                </span>
+                <span className={`text-xs ${styles.textMuted}`}>时间轴 {timelineView.timeline.length} 个节点</span>
               </div>
             </div>
           </div>
@@ -449,19 +452,17 @@ export default function ProductionDetail() {
               )}
             </button>
 
-            {!editMode && (
-              <button
-                onClick={startEditing}
-                className={`px-3 py-2 rounded-lg text-sm ${styles.buttonPrimary} transition-colors`}
-              >
-                编辑当前版本
-              </button>
-            )}
+            <button
+              onClick={startEditing}
+              className={`px-3 py-1.5 rounded-lg text-xs ${selectedVersionId === 'current' ? styles.buttonSecondary : styles.buttonPrimary}`}
+            >
+              编辑当前版本
+            </button>
 
-            {!editMode && production.status !== 'approved' && (
+            {production.status !== 'approved' && (
               <button
                 onClick={() => handleStatusUpdate(NEXT_STATUSES[production.status])}
-                className="px-3 py-2 rounded-lg text-sm bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-medium hover:opacity-90 transition-opacity flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors flex items-center gap-1.5"
               >
                 <ArrowRight className="w-4 h-4" />
                 {production.status === 'draft'
@@ -475,14 +476,14 @@ export default function ProductionDetail() {
             {production.status === 'approved' && (
               <button
                 onClick={() => navigate('/shooting')}
-                className="px-3 py-2 rounded-lg text-sm bg-gradient-to-r from-purple-600 to-pink-600 text-white font-medium hover:opacity-90 transition-opacity flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded-lg text-xs bg-purple-600 text-white font-medium hover:bg-purple-700 transition-colors flex items-center gap-1.5"
               >
                 <ArrowRight className="w-4 h-4" />
                 进入成片制作
               </button>
             )}
 
-            {canDelete && !editMode && (
+            {canDelete && (
               <button
                 onClick={() => setShowDeleteModal(true)}
                 className={`p-2 rounded-lg ${styles.buttonDanger} transition-colors`}
@@ -494,57 +495,14 @@ export default function ProductionDetail() {
           </div>
         </div>
 
-        <div className="flex items-center gap-1 px-1">
-          {WORKFLOW_STEPS.map((step, index) => {
-            const isCompleted = currentStepIndex > index;
-            const isCurrent = step.key === production.status;
-
-            return (
-              <div key={step.key} className="flex items-center flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                  <div
-                    className={`w-2 h-2 rounded-full shrink-0 ${
-                      isCurrent
-                        ? 'bg-blue-500 ring-2 ring-blue-500/30'
-                        : isCompleted
-                          ? 'bg-green-500'
-                          : styles.pendingStep
-                    }`}
-                  />
-                  <span
-                    className={`text-[11px] truncate ${
-                      isCurrent
-                        ? 'text-blue-400 font-medium'
-                        : isCompleted
-                          ? styles.textPrimary
-                          : styles.textMuted
-                    }`}
-                  >
-                    {step.label}
-                  </span>
-                </div>
-                {index < WORKFLOW_STEPS.length - 1 && (
-                  <div
-                    className={`h-px flex-1 mx-1 max-w-[24px] ${
-                      isCompleted ? 'bg-green-500' : styles.pendingStep
-                    }`}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
       </div>
 
       <div className="flex-1 min-h-0 flex gap-3">
-        <div className="flex-1 min-h-0 flex flex-col gap-4">
-          <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl flex flex-col flex-1 min-h-0 overflow-hidden`}>
-            <div className={`px-5 py-3 border-b ${styles.border} flex flex-col gap-3`}>
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className={`px-6 py-2 border-b ${styles.border} flex items-center justify-between gap-3`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>
-                    {selectedVersion?.isCurrent ? '当前版本' : '历史版本'}
-                  </p>
                   <div className="flex flex-wrap items-center gap-2 mt-1">
                     <span className={`text-base font-semibold ${styles.textPrimary}`}>
                       {selectedVersion?.version || production.version}
@@ -568,13 +526,13 @@ export default function ProductionDetail() {
                     )}
                     {!selectedVersion?.isCurrent && (
                       <span className={`text-xs ${styles.textMuted}`}>
-                        点击右侧版本历史可继续切换
+                        历史版本只读预览
                       </span>
                     )}
                   </div>
                 </div>
 
-                {!selectedVersion?.isCurrent && !editMode && (
+                {!selectedVersion?.isCurrent && (
                   <button
                     onClick={() => setSelectedVersionId('current')}
                     className={`px-3 py-1.5 rounded-lg text-sm ${styles.buttonSecondary}`}
@@ -584,36 +542,18 @@ export default function ProductionDetail() {
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => navigate(`/topics/${production.topic_id}`)}
-                  className={`inline-flex items-center gap-1.5 max-w-full rounded-full px-3 py-1.5 text-xs ${styles.bgTertiary} ${styles.hoverBg} transition-colors`}
-                >
-                  <FileText className={`w-3.5 h-3.5 shrink-0 ${styles.textMuted}`} />
-                  <span className={`${styles.textMuted}`}>关联选题</span>
-                  <span className={`truncate font-medium text-blue-400`}>{topic?.title || production.topic_title || '-'}</span>
-                </button>
-                <div className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs ${styles.bgTertiary}`}>
-                  <Tag className={`w-3.5 h-3.5 ${styles.textMuted}`} />
-                  <span className={`${styles.textMuted}`}>当前版本</span>
-                  <span className={`font-medium ${styles.textPrimary}`}>{production.version || 'v1.0'}</span>
-                </div>
-                <div className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs ${styles.bgTertiary}`}>
-                  <Clock className={`w-3.5 h-3.5 ${styles.textMuted}`} />
-                  <span className={`${styles.textMuted}`}>最近更新</span>
-                  <span className={`font-medium ${styles.textPrimary}`}>{formatBeijingTime(production.updated_at)}</span>
-                </div>
-              </div>
             </div>
 
             <div className="flex-1 min-h-0 overflow-hidden">
-              {editMode ? (
+              {selectedVersion?.isCurrent ? (
                 <div className="h-full min-h-0">
                   <ContentEditor
                     value={editData.content}
                     onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
                     mode="rich"
                     collaborationKey={getCollaborationRoomId('production', production.id)}
+                    persistenceStatus={syncStatus === 'error' ? 'error' : syncStatus === 'saving' ? 'saving' : 'synced'}
+                    immersive
                   />
                 </div>
               ) : (
@@ -661,7 +601,7 @@ export default function ProductionDetail() {
                   版本历史
                 </p>
                 <span className={`text-[11px] ${styles.textMuted}`}>
-                  仅保留各大版本最新稿
+                  版本已纳入统一时间轴
                 </span>
               </div>
               <div className="space-y-2">
@@ -669,9 +609,6 @@ export default function ProductionDetail() {
                   <button
                     key={entry.id}
                     onClick={() => {
-                      if (editMode) {
-                        setEditMode(false);
-                      }
                       setSelectedVersionId(entry.id);
                     }}
                     className={`w-full text-left rounded-xl border px-3 py-3 transition-colors ${
@@ -714,43 +651,56 @@ export default function ProductionDetail() {
                 )}
               </div>
 
-              {editMode && (
-                <div className={`pt-4 border-t ${styles.border} space-y-2`}>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={handleCancel}
-                      className={`px-3 py-2 rounded-lg text-xs ${styles.buttonSecondary}`}
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={() => handleVersionedSave('minor')}
-                      className="px-3 py-2 rounded-lg text-xs bg-blue-600 hover:bg-blue-700 text-white transition-colors inline-flex items-center justify-center gap-1.5"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      小修改保存
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2">
-                    <button
-                      onClick={() => handleVersionedSave('major')}
-                      className="px-3 py-2 rounded-lg text-xs bg-purple-600 hover:bg-purple-700 text-white transition-colors inline-flex items-center justify-center gap-1.5"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      另开新版
-                    </button>
-                    {editData.status === 'draft' && (
-                      <button
-                        onClick={handleSubmitReview}
-                        className="px-3 py-2 rounded-lg text-xs bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-medium hover:opacity-90 transition-opacity inline-flex items-center justify-center gap-1.5"
-                      >
-                        <ArrowRight className="w-3.5 h-3.5" />
-                        提交审核
-                      </button>
-                    )}
-                  </div>
+              <div className={`pt-4 border-t ${styles.border} space-y-2`}>
+                <p className={`text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>版本操作</p>
+                <button
+                  onClick={startEditing}
+                  className={`w-full px-3 py-2 rounded-lg text-xs ${styles.buttonSecondary}`}
+                >
+                  当前版本查看 / 编辑
+                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => handleVersionedSave('minor')}
+                    className="px-3 py-2 rounded-lg text-xs bg-blue-600 hover:bg-blue-700 text-white transition-colors inline-flex items-center justify-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    小修改保存
+                  </button>
+                  <button
+                    onClick={() => handleVersionedSave('major')}
+                    className="px-3 py-2 rounded-lg text-xs bg-purple-600 hover:bg-purple-700 text-white transition-colors inline-flex items-center justify-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    另开新版
+                  </button>
                 </div>
-              )}
+                {editData.status === 'draft' && (
+                  <button
+                    onClick={handleSubmitReview}
+                    className="w-full px-3 py-2 rounded-lg text-xs bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-medium hover:opacity-90 transition-opacity inline-flex items-center justify-center gap-1.5"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                    提交审核
+                  </button>
+                )}
+              </div>
+
+              <div className={`pt-4 border-t ${styles.border} space-y-3`}>
+                <div>
+                  <p className={`text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>关联选题</p>
+                  <button
+                    onClick={() => navigate(`/topics/${production.topic_id}`)}
+                    className="mt-2 text-left text-sm text-blue-400 hover:text-blue-300"
+                  >
+                    {topic?.title || production.topic_title || '-'}
+                  </button>
+                </div>
+                <div>
+                  <p className={`text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>审核状态</p>
+                  <p className={`mt-2 text-sm ${styles.textSecondary}`}>{STATUS_TEXT[production.status] || production.status}</p>
+                </div>
+              </div>
             </div>
           </aside>
         )}

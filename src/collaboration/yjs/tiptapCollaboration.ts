@@ -2,6 +2,7 @@ import { Extension } from '@tiptap/core';
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin } from 'y-prosemirror';
 import type { Awareness } from 'y-protocols/awareness';
 import type * as Y from 'yjs';
+export { editorExtensions } from '../../components/editor/extensions/editorExtensions';
 
 export interface TiptapCollaborationOptions {
   fragment: Y.XmlFragment;

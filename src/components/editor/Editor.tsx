@@ -4,25 +4,12 @@
  * CommentExtension, 多色高亮, 自动保存, 全屏, 打印, 导出
  */
 import { useEffect, useCallback, useRef, useState } from 'react';
+import { getSchema } from '@tiptap/core';
+import { generateJSON } from '@tiptap/html';
 import { useEditor, EditorContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import { Table } from '@tiptap/extension-table';
-import { TableRow } from '@tiptap/extension-table-row';
-import { TableCell } from '@tiptap/extension-table-cell';
-import { TableHeader } from '@tiptap/extension-table-header';
-import { Image } from '@tiptap/extension-image';
-import { TaskList } from '@tiptap/extension-task-list';
-import { TaskItem } from '@tiptap/extension-task-item';
-import { Link } from '@tiptap/extension-link';
-import { Placeholder } from '@tiptap/extension-placeholder';
-import { Underline } from '@tiptap/extension-underline';
-import { Highlight } from '@tiptap/extension-highlight';
-import { Typography } from '@tiptap/extension-typography';
-import { TextAlign } from '@tiptap/extension-text-align';
-import { TextStyle } from '@tiptap/extension-text-style';
-import { Color } from '@tiptap/extension-color';
 import { useAppStore } from '../../store';
 import { markdownToHtml } from '../../utils/markdown';
+import { syncToYjs } from '../../collaboration/core/writeConsistency';
 import { TiptapCollaboration } from '../../collaboration/yjs/tiptapCollaboration';
 import type { SocketYjsProvider } from '../../collaboration/yjs/SocketYjsProvider';
 import type { CollaborationUserPresence } from '../../collaboration/core/events';
@@ -31,7 +18,7 @@ import BubbleMenuBar from './BubbleMenu';
 
 import EditorContextMenu from './ContextMenu';
 import TableOfContents from './TableOfContents';
-import { CommentExtension } from './extensions/CommentExtension';
+import { createEditorExtensions } from './extensions/editorExtensions';
 
 interface EditorProps {
   value: string;
@@ -44,6 +31,7 @@ interface EditorProps {
     users: CollaborationUserPresence[];
     connected: boolean;
   };
+  immersive?: boolean;
 }
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -55,6 +43,7 @@ export default function Editor({
   readOnly = false,
   placeholder = '开始编写...',
   collaboration,
+  immersive = false,
 }: EditorProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const lastValueRef = useRef(value);
@@ -106,51 +95,35 @@ export default function Editor({
     }
   }, [onSave, value]);
 
+  const baseExtensions = createEditorExtensions(placeholder);
+
+  if (collaboration?.provider && value?.trim()) {
+    const initialContent = value.includes('<') ? value : markdownToHtml(value);
+    try {
+      syncToYjs({
+        provider: collaboration.provider,
+        contentJson: generateJSON(initialContent, baseExtensions),
+        schema: getSchema(baseExtensions),
+      });
+    } catch {
+      // 如果历史内容中存在当前 schema 不支持的节点，保持 Yjs 原状态，避免覆盖已有协作文档。
+    }
+  }
+
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3, 4, 5, 6] },
-      }),
+      ...baseExtensions.slice(0, 1),
       ...(collaboration?.provider
         ? [
             TiptapCollaboration.configure({
-              fragment: collaboration.provider.doc.getXmlFragment('content'),
+              fragment: collaboration.provider.fragment,
               awareness: collaboration.provider.awareness,
             }),
           ]
         : []),
-      Table.configure({ resizable: true }),
-      TableRow,
-      TableCell,
-      TableHeader,
-      Image,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Link.configure({ openOnClick: false }),
-      Placeholder.configure({ placeholder }),
-      Underline,
-      Highlight.extend({
-        addAttributes() {
-          if (!this.options.multicolor) return {};
-          return {
-            color: {
-              default: null,
-              parseHTML: (el) => el.getAttribute('data-color'),
-              renderHTML: (attrs) => {
-                if (!attrs.color) return {};
-                return { 'data-color': attrs.color };
-              },
-            },
-          };
-        },
-      }).configure({ multicolor: true }),
-      Typography,
-      TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      TextStyle,
-      Color,
-      CommentExtension,
+      ...baseExtensions.slice(1),
     ],
-    content: value || '',
+    content: collaboration?.provider ? '' : value || '',
     editable: !readOnly,
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
@@ -168,7 +141,7 @@ export default function Editor({
     },
     editorProps: {
       attributes: {
-        class: `prose max-w-none px-10 py-8 min-h-[300px] outline-none ${isDark ? 'prose-invert' : ''}`,
+        class: `prose max-w-none ${immersive ? 'px-4 sm:px-8 lg:px-16 py-8 lg:py-12' : 'px-10 py-8'} min-h-[300px] outline-none ${isDark ? 'prose-invert' : ''}`,
       },
       handleKeyDown: (view, event) => {
         if ((event.ctrlKey || event.metaKey) && event.key === 's') {
@@ -437,15 +410,21 @@ export default function Editor({
 
   const containerClass = isFullscreen
     ? 'fixed inset-0 z-[100] flex flex-col rounded-none h-screen min-h-0'
-    : 'rounded-xl border flex flex-col h-full min-h-0';
+    : immersive
+      ? 'flex flex-col h-full min-h-0'
+      : 'rounded-xl border flex flex-col h-full min-h-0';
 
   return (
     <div
       ref={containerRef}
       className={`${containerClass} ${
-        isDark
-          ? 'bg-gray-800 border-gray-700 shadow-lg shadow-black/20'
-          : 'bg-white border-gray-200 shadow-md'
+        immersive
+          ? isDark
+            ? 'bg-gray-900'
+            : 'bg-white'
+          : isDark
+            ? 'bg-gray-800 border-gray-700 shadow-lg shadow-black/20'
+            : 'bg-white border-gray-200 shadow-md'
       }`}
       style={{
         height: isFullscreen ? '100vh' : '100%',
@@ -455,7 +434,7 @@ export default function Editor({
       {/* 工具栏 - overflow-visible 确保下拉菜单不被裁剪 */}
       <div
         className={`flex items-center justify-between shrink-0 relative z-30 sticky top-0 ${
-          isDark ? 'bg-gray-800' : 'bg-white'
+          isDark ? (immersive ? 'bg-gray-900/95' : 'bg-gray-800') : 'bg-white/95'
         }`}
       >
         <div className="flex-1">
@@ -550,8 +529,8 @@ export default function Editor({
       <div
         className={`shrink-0 px-4 py-2 border-t text-xs flex items-center justify-end ${
           isDark
-            ? 'border-gray-700 bg-gray-800 text-gray-400'
-            : 'border-gray-200 bg-gray-50 text-gray-500'
+            ? `${immersive ? 'border-gray-800 bg-gray-900' : 'border-gray-700 bg-gray-800'} text-gray-400`
+            : `${immersive ? 'border-gray-100 bg-white' : 'border-gray-200 bg-gray-50'} text-gray-500`
         }`}
       >
         字数 {wordCount}

@@ -4,6 +4,7 @@ import {
   COLLABORATION_EVENTS,
   type CollaborationUserPresence,
 } from '../core/events';
+import { defineWriteSource } from '../core/writeConsistency';
 import { SocketYjsProvider } from './SocketYjsProvider';
 
 const USER_COLORS = [
@@ -36,6 +37,7 @@ export function useCollaborativeDocument({
 }: CollaborativeDocumentOptions) {
   const [provider, setProvider] = useState<SocketYjsProvider | null>(null);
   const [users, setUsers] = useState<CollaborationUserPresence[]>([]);
+  const [synced, setSynced] = useState(false);
 
   const presence = useMemo<CollaborationUserPresence | null>(() => {
     if (!user) return null;
@@ -51,13 +53,16 @@ export function useCollaborativeDocument({
     if (!enabled || !roomId || !socket || !presence) {
       setProvider(null);
       setUsers([]);
+      setSynced(false);
       return;
     }
 
+    setSynced(false);
     const nextProvider = new SocketYjsProvider({
       socket,
       roomId,
       user: presence,
+      onSynced: () => setSynced(true),
     });
 
     const handleUsers = (payload: { roomId: string; users: CollaborationUserPresence[] }) => {
@@ -73,12 +78,20 @@ export function useCollaborativeDocument({
       nextProvider.destroy();
       setProvider(null);
       setUsers([]);
+      setSynced(false);
     };
   }, [enabled, presence, roomId, socket]);
 
   return {
-    provider,
+    provider: synced ? provider : null,
+    initializing: Boolean(enabled && roomId && socket && presence && !synced),
+    writeSource: defineWriteSource({
+      docId: roomId || '',
+      hasYjsState: Boolean(provider && synced && !provider.isEmpty),
+      hasDatabaseContent: Boolean(provider && synced && provider.isEmpty),
+      hasSnapshotState: false,
+    }),
     users,
-    connected: Boolean(provider && socket?.connected),
+    connected: Boolean(provider && synced && socket?.connected),
   };
 }

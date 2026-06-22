@@ -1,5 +1,7 @@
 import type { Socket } from 'socket.io-client';
+import type { Schema } from '@tiptap/pm/model';
 import * as Y from 'yjs';
+import { prosemirrorJSONToYXmlFragment } from 'y-prosemirror';
 import {
   Awareness,
   applyAwarenessUpdate,
@@ -18,6 +20,7 @@ export interface SocketYjsProviderOptions {
   socket: Socket;
   roomId: string;
   user: CollaborationUserPresence;
+  onSynced?: () => void;
 }
 
 export class SocketYjsProvider {
@@ -27,16 +30,45 @@ export class SocketYjsProvider {
   private readonly socket: Socket;
   private readonly roomId: string;
   private readonly user: CollaborationUserPresence;
+  private readonly onSynced?: () => void;
   private readonly unsubscribers: Unsubscribe[] = [];
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
+  private synced = false;
+  hasInitializedContent = false;
 
-  constructor({ socket, roomId, user }: SocketYjsProviderOptions) {
+  constructor({ socket, roomId, user, onSynced }: SocketYjsProviderOptions) {
     this.socket = socket;
     this.roomId = roomId;
     this.user = user;
+    this.onSynced = onSynced;
     this.bind();
     this.connect();
+  }
+
+  get fragment() {
+    return this.doc.getXmlFragment('content');
+  }
+
+  get isEmpty() {
+    return this.fragment.length === 0;
+  }
+
+  get hasSynced() {
+    return this.synced;
+  }
+
+  applyInitialContentOnce(contentJson: Record<string, unknown>, schema: Schema) {
+    if (this.destroyed || this.hasInitializedContent || !this.isEmpty) {
+      return false;
+    }
+
+    this.doc.transact(() => {
+      prosemirrorJSONToYXmlFragment(schema, contentJson, this.fragment);
+    }, 'initial-content');
+
+    this.hasInitializedContent = true;
+    return true;
   }
 
   setTyping(typing: boolean) {
@@ -74,9 +106,24 @@ export class SocketYjsProvider {
       this.socket.emit(COLLABORATION_EVENTS.UPDATE, payload);
     };
 
-    const handleRemoteUpdate = (payload: CollaborationUpdatePayload) => {
+    const applyRemoteUpdate = (payload: CollaborationUpdatePayload) => {
       if (payload.roomId !== this.roomId || !Array.isArray(payload.update)) return;
       Y.applyUpdate(this.doc, Uint8Array.from(payload.update), this);
+    };
+
+    const handleSyncUpdate = (payload: CollaborationUpdatePayload) => {
+      applyRemoteUpdate(payload);
+      if (!this.synced) {
+        this.synced = true;
+        if (!this.isEmpty) {
+          this.hasInitializedContent = true;
+        }
+        this.onSynced?.();
+      }
+    };
+
+    const handleRemoteUpdate = (payload: CollaborationUpdatePayload) => {
+      applyRemoteUpdate(payload);
     };
 
     const handleAwarenessUpdate = (payload: CollaborationUpdatePayload) => {
@@ -113,7 +160,7 @@ export class SocketYjsProvider {
 
     this.doc.on('update', sendUpdate);
     this.awareness.on('update', sendAwarenessUpdate);
-    this.socket.on(COLLABORATION_EVENTS.SYNC, handleRemoteUpdate);
+    this.socket.on(COLLABORATION_EVENTS.SYNC, handleSyncUpdate);
     this.socket.on(COLLABORATION_EVENTS.UPDATE, handleRemoteUpdate);
     this.socket.on(COLLABORATION_EVENTS.AWARENESS_UPDATE, handleAwarenessUpdate);
     this.socket.on(COLLABORATION_EVENTS.DOC_LOCKED, handleDocumentLocked);
@@ -122,7 +169,7 @@ export class SocketYjsProvider {
 
     this.unsubscribers.push(() => this.doc.off('update', sendUpdate));
     this.unsubscribers.push(() => this.awareness.off('update', sendAwarenessUpdate));
-    this.unsubscribers.push(() => this.socket.off(COLLABORATION_EVENTS.SYNC, handleRemoteUpdate));
+    this.unsubscribers.push(() => this.socket.off(COLLABORATION_EVENTS.SYNC, handleSyncUpdate));
     this.unsubscribers.push(() => this.socket.off(COLLABORATION_EVENTS.UPDATE, handleRemoteUpdate));
     this.unsubscribers.push(() => this.socket.off(COLLABORATION_EVENTS.AWARENESS_UPDATE, handleAwarenessUpdate));
     this.unsubscribers.push(() => this.socket.off(COLLABORATION_EVENTS.DOC_LOCKED, handleDocumentLocked));

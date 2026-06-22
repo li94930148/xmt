@@ -66,3 +66,30 @@ export type {
   CollaborationExplanation,
   CollaborationNarrativeItem,
 } from './collaborationDashboard';
+export {
+  getContentEvolution,
+  getContentImpact,
+  getContentQuality,
+} from './contentIntelligence';
+export type {
+  ContentEvolutionResponse,
+  CollaborationImpactResponse,
+  ContentQualityResponse,
+} from './contentIntelligence';
+export {
+  getGeneratedSummary,
+  getGeneratedTitle,
+  getGeneratedStructure,
+  getGeneratedSuggestions,
+} from './contentGeneration';
+export type {
+  GeneratedSummaryResponse,
+  GeneratedTitleResponse,
+  GeneratedStructureResponse,
+  GeneratedSuggestionsResponse,
+} from './contentGeneration';
+export {
+  getContentOSContext,
+  getContentOSInsight,
+  getContentOSState,
+} from './contentOrchestrator';

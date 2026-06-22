@@ -1,5 +1,8 @@
 import Editor from './editor/Editor';
 import RichTextEditor from './RichTextEditor';
+import { useAuthStore } from '../store';
+import { useSocket } from '../hooks/useSocket';
+import { useCollaborativeDocument } from '../collaboration/yjs/useCollaborativeDocument';
 
 export type ContentEditorMode = 'rich' | 'legacy' | 'readonly';
 
@@ -12,6 +15,8 @@ export interface ContentEditorProps {
   mode?: ContentEditorMode;
   minHeight?: string | number;
   className?: string;
+  collaborationKey?: string;
+  collaborationEnabled?: boolean;
 }
 
 const noop = () => {};
@@ -25,9 +30,26 @@ export default function ContentEditor({
   mode = 'rich',
   minHeight,
   className = '',
+  collaborationKey,
+  collaborationEnabled = Boolean(collaborationKey),
 }: ContentEditorProps) {
   const resolvedReadOnly = readOnly || mode === 'readonly';
   const wrapperStyle = minHeight === undefined ? undefined : { minHeight };
+  const socket = useSocket();
+  const user = useAuthStore((state) => state.user);
+  const collaboration = useCollaborativeDocument({
+    enabled: mode === 'rich' && collaborationEnabled && !resolvedReadOnly,
+    roomId: collaborationKey,
+    socket,
+    user,
+  });
+  const editorCollaboration = collaboration.provider
+    ? {
+        provider: collaboration.provider,
+        users: collaboration.users,
+        connected: collaboration.connected,
+      }
+    : undefined;
 
   if (mode === 'legacy') {
     return (
@@ -50,6 +72,7 @@ export default function ContentEditor({
         onSave={onSave ? () => onSave(value) : undefined}
         readOnly={resolvedReadOnly}
         placeholder={placeholder}
+        collaboration={editorCollaboration}
       />
     </div>
   );

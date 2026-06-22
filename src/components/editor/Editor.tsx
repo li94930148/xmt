@@ -23,6 +23,9 @@ import { TextStyle } from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import { useAppStore } from '../../store';
 import { markdownToHtml } from '../../utils/markdown';
+import { TiptapCollaboration } from '../../collaboration/yjs/tiptapCollaboration';
+import type { SocketYjsProvider } from '../../collaboration/yjs/SocketYjsProvider';
+import type { CollaborationUserPresence } from '../../collaboration/core/events';
 import Toolbar from './Toolbar';
 import BubbleMenuBar from './BubbleMenu';
 
@@ -36,6 +39,11 @@ interface EditorProps {
   onSave?: () => void;
   readOnly?: boolean;
   placeholder?: string;
+  collaboration?: {
+    provider: SocketYjsProvider;
+    users: CollaborationUserPresence[];
+    connected: boolean;
+  };
 }
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -46,6 +54,7 @@ export default function Editor({
   onSave,
   readOnly = false,
   placeholder = '开始编写...',
+  collaboration,
 }: EditorProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const lastValueRef = useRef(value);
@@ -73,6 +82,7 @@ export default function Editor({
     height: number;
   }>>([]);
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -101,6 +111,14 @@ export default function Editor({
       StarterKit.configure({
         heading: { levels: [1, 2, 3, 4, 5, 6] },
       }),
+      ...(collaboration?.provider
+        ? [
+            TiptapCollaboration.configure({
+              fragment: collaboration.provider.doc.getXmlFragment('content'),
+              awareness: collaboration.provider.awareness,
+            }),
+          ]
+        : []),
       Table.configure({ resizable: true }),
       TableRow,
       TableCell,
@@ -140,6 +158,13 @@ export default function Editor({
       lastValueRef.current = html;
       setWordCount(editor.getText().replace(/\s+/g, '').length);
       onChange(html);
+      if (collaboration?.provider) {
+        collaboration.provider.setTyping(true);
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+          collaboration.provider.setTyping(false);
+        }, 1200);
+      }
     },
     editorProps: {
       attributes: {
@@ -191,11 +216,12 @@ export default function Editor({
         return false;
       },
     },
-  }, [readOnly]);
+  }, [readOnly, collaboration?.provider]);
 
   // 外部 value 变化时同步
   useEffect(() => {
     if (!editor) return;
+    if (collaboration?.provider) return;
     if (savingRef.current) return;
     if (value === lastValueRef.current) return;
 
@@ -218,7 +244,7 @@ export default function Editor({
     }
 
     setWordCount(editor.getText().replace(/\s+/g, '').length);
-  }, [editor, value]);
+  }, [editor, value, collaboration?.provider]);
 
   useEffect(() => {
     if (!editor) return;
@@ -229,6 +255,7 @@ export default function Editor({
   useEffect(() => {
     return () => {
       if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
   }, []);
 
@@ -444,6 +471,33 @@ export default function Editor({
           )}
         </div>
         <div className="flex items-center gap-2 px-3 shrink-0">
+          {collaboration && (
+            <div className="flex items-center gap-2">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  collaboration.connected ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+                title={collaboration.connected ? '协作已连接' : '协作重连中'}
+              />
+              <div className="flex -space-x-1">
+                {collaboration.users.slice(0, 5).map((user) => (
+                  <span
+                    key={user.socketId || `${user.id}-${user.name}`}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/50 text-[10px] font-semibold text-white"
+                    style={{ backgroundColor: user.color }}
+                    title={`${user.name}${user.typing ? ' 正在输入' : ''}`}
+                  >
+                    {(user.name || '?').slice(0, 1)}
+                  </span>
+                ))}
+              </div>
+              {collaboration.users.some((user) => user.typing) && (
+                <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  正在输入...
+                </span>
+              )}
+            </div>
+          )}
           {statusIndicator()}
         </div>
       </div>
@@ -843,6 +897,28 @@ export default function Editor({
           background-color: ${isDark ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.2)'};
           border-radius: 2px;
           mix-blend-mode: normal;
+        }
+        .xmt-collaboration-cursor {
+          position: relative;
+          border-left: 2px solid;
+          border-right: 2px solid;
+          margin-left: -1px;
+          margin-right: -1px;
+          pointer-events: none;
+          word-break: normal;
+        }
+        .xmt-collaboration-cursor-label {
+          position: absolute;
+          top: -1.45rem;
+          left: -2px;
+          border-radius: 4px 4px 4px 0;
+          color: #fff;
+          font-size: 11px;
+          font-weight: 600;
+          line-height: 1;
+          padding: 4px 6px;
+          white-space: nowrap;
+          user-select: none;
         }
       `}</style>
     </div>

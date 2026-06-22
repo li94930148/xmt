@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
 import { getShootingById, updateShooting, getTopics } from '../api';
 import { Shooting as ShootingType, Topic } from '../types';
 import { ChevronLeft, Calendar, MapPin, Camera, User as UserIcon, CheckCircle, AlertCircle, Clock, Save, FileText, ArrowRight } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
+import { getCollaborationRoomId } from '../collaboration/core/events';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
 
@@ -49,6 +50,8 @@ export default function ShootingDetail() {
   const [scriptEditMode, setScriptEditMode] = useState(false);
   const [scriptContent, setScriptContent] = useState('');
   const [scriptSaving, setScriptSaving] = useState(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAutoSavedScriptRef = useRef('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -67,6 +70,7 @@ export default function ShootingDetail() {
         // 初始化剧本内容：优先使用本地编辑版，其次使用创作管理审核通过的内容
         const content = result.script_content || result.production?.content || result.production?.content_markdown || '';
         setScriptContent(content);
+        lastAutoSavedScriptRef.current = content;
 
         const topicList = await getTopics();
         setTopics(topicList.data.filter(t => t.status === 'approved' || t.status === 'production' || t.status === 'shooting'));
@@ -105,6 +109,7 @@ export default function ShootingDetail() {
     try {
       await updateShooting(shooting.id, { script_content: scriptContent });
       setShooting({ ...shooting, script_content: scriptContent });
+      lastAutoSavedScriptRef.current = scriptContent;
       setScriptEditMode(false);
       appStore.addNotification({ title: '保存成功', message: '剧本内容已保存（仅在成片制作及后续流程中生效）', type: 'success' });
     } catch (error) {
@@ -118,9 +123,30 @@ export default function ShootingDetail() {
     if (shooting) {
       const content = shooting.script_content || shooting.production?.content || shooting.production?.content_markdown || '';
       setScriptContent(content);
+      lastAutoSavedScriptRef.current = content;
     }
     setScriptEditMode(false);
   };
+
+  useEffect(() => {
+    if (!scriptEditMode || !shooting) return;
+    if (scriptContent === lastAutoSavedScriptRef.current) return;
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      updateShooting(shooting.id, { script_content: scriptContent })
+        .then(() => {
+          lastAutoSavedScriptRef.current = scriptContent;
+        })
+        .catch(() => {
+          // 保持静默，手动保存会给出明确反馈。
+        });
+    }, 2500);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [scriptContent, scriptEditMode, shooting]);
 
   const handleStatusChange = async (newStatus: string) => {
     try {
@@ -433,6 +459,7 @@ export default function ShootingDetail() {
                 onChange={setScriptContent}
                 onSave={handleSaveScript}
                 mode="rich"
+                collaborationKey={getCollaborationRoomId('shooting', shooting.id)}
               />
             </div>
           ) : (

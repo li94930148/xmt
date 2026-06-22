@@ -54,6 +54,8 @@ const ShootingDetail = lazyWithRetry(() => import('@/pages/ShootingDetail'), 'Sh
 const Publishing = lazyWithRetry(() => import('@/pages/Publishing'), 'Publishing');
 const PublishingDetail = lazyWithRetry(() => import('@/pages/PublishingDetail'), 'PublishingDetail');
 const Analytics = lazyWithRetry(() => import('@/pages/Analytics'), 'Analytics');
+const CollaborationDashboard = lazyWithRetry(() => import('@/pages/CollaborationDashboard'), 'CollaborationDashboard');
+const CollaborationUX = lazyWithRetry(() => import('@/pages/CollaborationUX'), 'CollaborationUX');
 const Users = lazyWithRetry(() => import('@/pages/Users'), 'Users');
 const Resources = lazyWithRetry(() => import('@/pages/Resources'), 'Resources');
 const Messages = lazyWithRetry(() => import('@/pages/Messages'), 'Messages');
@@ -121,6 +123,12 @@ export default function App() {
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/analytics" element={<Analytics />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['analytics:view']} />}>
+                  <Route path="/collaboration-dashboard" element={<CollaborationDashboard />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['analytics:view']} />}>
+                  <Route path="/collaboration-ux" element={<CollaborationUX />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['user:logs']} />}>
                   <Route path="/activity" element={<ActivityLog />} />

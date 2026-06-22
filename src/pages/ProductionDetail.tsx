@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowRight,
@@ -24,6 +24,7 @@ import {
 import type { Production as ProductionType, ProductionHistory, Topic } from '../types';
 import { getTopic } from '../api';
 import ContentEditor from '../components/ContentEditor';
+import { getCollaborationRoomId } from '../collaboration/core/events';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
@@ -110,6 +111,8 @@ export default function ProductionDetail() {
     status: 'draft',
   });
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAutoSavedContentRef = useRef('');
 
   const canDelete = hasPermission('production:delete');
 
@@ -125,6 +128,7 @@ export default function ProductionDetail() {
         content: productionData.content || '',
         status: productionData.status,
       });
+      lastAutoSavedContentRef.current = productionData.content || '';
 
       const [topicData, historyData] = await Promise.all([
         getTopic(productionData.topic_id),
@@ -232,6 +236,7 @@ export default function ProductionDetail() {
       content: production.content || '',
       status: production.status,
     });
+    lastAutoSavedContentRef.current = production.content || '';
     setEditMode(true);
   };
 
@@ -242,9 +247,36 @@ export default function ProductionDetail() {
       content: production.content || '',
       status: production.status,
     });
+    lastAutoSavedContentRef.current = production.content || '';
     setSelectedVersionId('current');
     setEditMode(false);
   };
+
+  useEffect(() => {
+    if (!editMode || !production) return;
+    if (editData.content === lastAutoSavedContentRef.current) return;
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      updateProduction(production.id, {
+        topic_id: production.topic_id,
+        version: production.version,
+        content: editData.content,
+        status: editData.status,
+        version_action: 'none',
+      })
+        .then(() => {
+          lastAutoSavedContentRef.current = editData.content;
+        })
+        .catch(() => {
+          // 手动保存仍会展示完整错误提示，这里保持静默避免多人输入时打断。
+        });
+    }, 2500);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [editData.content, editData.status, editMode, production]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
     if (!production) return;
@@ -581,6 +613,7 @@ export default function ProductionDetail() {
                     value={editData.content}
                     onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
                     mode="rich"
+                    collaborationKey={getCollaborationRoomId('production', production.id)}
                   />
                 </div>
               ) : (

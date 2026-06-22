@@ -6,6 +6,8 @@ import {
   Calendar,
   Camera,
   FileText,
+  GitFork,
+  GitMerge,
   GitBranch,
   Kanban,
   LayoutDashboard,
@@ -60,6 +62,8 @@ export const navigationSections: NavigationSection[] = [
     label: '数据与管理',
     items: [
       { id: 'analytics', label: '数据复盘', icon: BarChart3, path: '/analytics', permissions: ['analytics:view'] },
+      { id: 'collaboration-dashboard', label: '协作控制台', icon: GitFork, path: '/collaboration-dashboard', permissions: ['analytics:view'] },
+      { id: 'collaboration-ux', label: '协作故事线', icon: GitMerge, path: '/collaboration-ux', permissions: ['analytics:view'] },
       { id: 'achievements', label: '成就系统', icon: Trophy, path: '/achievements' },
       { id: 'users', label: '人员管理', icon: Users, path: '/users', permissions: ['user:view'] },
       { id: 'resources', label: '资源库', icon: Archive, path: '/resources' },

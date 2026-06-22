@@ -11,7 +11,7 @@ import {
   buildWorkflowDecisions,
   type WorkflowDecision,
   type WorkflowShadowLogInput,
-} from '../../api/services/workflow_decision_engine';
+} from './workflow_decision_core';
 
 export type WorkflowRiskLevel = 'low' | 'medium' | 'high';
 

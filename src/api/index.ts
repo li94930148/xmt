@@ -50,3 +50,19 @@ export {
   getPermissions, getMyPermissions, createPermission, deletePermission
 } from './permissions';
 export { getPublicSystemSettings, getSystemSettings, updateSystemSettings } from './systemSettings';
+export {
+  getCollaborationTimeline,
+  getCollaborationStats,
+  getCollaborationReplay,
+  getCollaborationExplanation,
+  getCollaborationNarrative,
+} from './collaborationDashboard';
+export type {
+  CollaborationTimelineEvent,
+  CollaborationSnapshotSummary,
+  CollaborationStats,
+  UserContribution,
+  CollaborationReplayResponse,
+  CollaborationExplanation,
+  CollaborationNarrativeItem,
+} from './collaborationDashboard';

@@ -42,6 +42,22 @@ import permissionsRoutes from './routes/permissions.js'
 import workflowTemplatesRoutes from './routes/workflow-templates.js'
 import notificationsRoutes from './routes/notifications.js'
 import systemSettingsRoutes from './routes/system-settings.js'
+import collaborationDashboardRoutes from './routes/collaboration-dashboard.js'
+import collaborationUxRoutes from './routes/collaboration-ux.js'
+import { COLLABORATION_EVENTS } from '../src/collaboration/core/events.js'
+import {
+  handleAwarenessUpdate,
+  handleDocumentUpdate,
+  handleTyping,
+  heartbeat,
+  joinRoom as joinCollaborationRoom,
+  leaveAllRooms,
+  leaveRoom as leaveCollaborationRoom,
+  lockRoom as lockCollaborationRoom,
+  unlockRoom as unlockCollaborationRoom,
+} from './collaboration/core/roomManager.js'
+import { autoSnapshot } from './collaboration/recovery/documentSnapshot.js'
+import { cleanupInactiveRooms } from './collaboration/yjs/documentStore.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -230,6 +246,8 @@ app.use('/api/permissions', permissionsRoutes)
 app.use('/api/workflow-templates', workflowTemplatesRoutes)
 app.use('/api/notifications', notificationsRoutes)
 app.use('/api/system-settings', systemSettingsRoutes)
+app.use('/api/collaboration', collaborationDashboardRoutes)
+app.use('/api/collaboration/ux', collaborationUxRoutes)
 
 app.use(
   '/api/health',
@@ -336,12 +354,68 @@ io.on('connection', (socket) => {
     }
   })
 
+  socket.on(COLLABORATION_EVENTS.JOIN, (payload) => {
+    joinCollaborationRoom(io, socket, payload)
+  })
+
+  socket.on(COLLABORATION_EVENTS.LEAVE, (payload) => {
+    const roomId = typeof payload === 'string' ? payload : String(payload?.roomId || '')
+    leaveCollaborationRoom(io, socket, roomId)
+  })
+
+  socket.on(COLLABORATION_EVENTS.HEARTBEAT, (payload) => {
+    const roomId = typeof payload === 'string' ? payload : String(payload?.roomId || '')
+    heartbeat(io, socket, roomId)
+  })
+
+  socket.on(COLLABORATION_EVENTS.UPDATE, (payload) => {
+    handleDocumentUpdate(io, socket, payload)
+  })
+
+  socket.on(COLLABORATION_EVENTS.AWARENESS_UPDATE, (payload) => {
+    handleAwarenessUpdate(socket, payload)
+  })
+
+  socket.on(COLLABORATION_EVENTS.TYPING, (payload) => {
+    handleTyping(io, socket, payload)
+  })
+
+  socket.on(COLLABORATION_EVENTS.DOC_LOCKED, (payload) => {
+    const socketUser = socket.data.user as { id?: number; role?: string } | undefined
+    if (socketUser?.role !== 'admin' && socketUser?.role !== 'director') return
+    const roomId = String(payload?.roomId || payload?.docId || '')
+    if (!roomId) return
+    lockCollaborationRoom(io, roomId, String(payload?.reason || 'Document locked'), String(socketUser.id || 'system'))
+  })
+
+  socket.on(COLLABORATION_EVENTS.DOC_UNLOCKED, (payload) => {
+    const socketUser = socket.data.user as { id?: number; role?: string } | undefined
+    if (socketUser?.role !== 'admin' && socketUser?.role !== 'director') return
+    const roomId = String(payload?.roomId || payload?.docId || '')
+    if (!roomId) return
+    unlockCollaborationRoom(io, roomId, String(socketUser.id || 'system'))
+  })
+
   socket.on('disconnect', () => {
+    leaveAllRooms(io, socket)
   })
 })
 
 export async function startServer() {
   await initDatabase()
+
+  autoSnapshot(30000, (snapshot) => {
+    io.to(snapshot.docId).emit(COLLABORATION_EVENTS.SNAPSHOT_CREATED, {
+      docId: snapshot.docId,
+      snapshotId: snapshot.id,
+      version: snapshot.version,
+      createdAt: snapshot.createdAt,
+    })
+  })
+
+  setInterval(() => {
+    cleanupInactiveRooms()
+  }, 60 * 1000)
 
   // 启动时自动备份一次
   try {

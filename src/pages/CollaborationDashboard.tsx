@@ -24,6 +24,7 @@ import {
 } from '../api';
 import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
 
 function formatTime(timestamp?: number | null) {
   if (!timestamp) return '-';
@@ -42,10 +43,17 @@ function eventColor(type: CollaborationTimelineEvent['type']) {
   return colors[type];
 }
 
+function diffSummary(diff?: unknown) {
+  if (!diff) return '';
+  if (Array.isArray(diff)) return `包含 ${diff.length} 条差异信息`;
+  if (typeof diff === 'object') return `包含 ${Object.keys(diff as Record<string, unknown>).length} 项差异信息`;
+  return '包含差异信息';
+}
+
 export default function CollaborationDashboard() {
   const styles = useThemeStyles();
   const appStore = useAppStore();
-  const [docId, setDocId] = useState('production:1');
+  const [docId, setDocId] = useState('创作:1');
   const [activeDocId, setActiveDocId] = useState('production:1');
   const [events, setEvents] = useState<CollaborationTimelineEvent[]>([]);
   const [snapshots, setSnapshots] = useState<CollaborationSnapshotSummary[]>([]);
@@ -60,7 +68,7 @@ export default function CollaborationDashboard() {
   const conflicts = useMemo(() => events.filter((event) => event.type === 'conflict'), [events]);
 
   const loadData = async (targetDocId = activeDocId) => {
-    const normalizedDocId = targetDocId.trim();
+    const normalizedDocId = normalizeDocId(targetDocId);
     if (!normalizedDocId) return;
     setLoading(true);
 
@@ -101,7 +109,7 @@ export default function CollaborationDashboard() {
       <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>Collaboration Console</p>
+            <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>协作控制台</p>
             <h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>协作控制台</h1>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
@@ -109,7 +117,7 @@ export default function CollaborationDashboard() {
               value={docId}
               onChange={(event) => setDocId(event.target.value)}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder="production:1 或 shooting:1"
+              placeholder={docIdPlaceholder()}
             />
             <button
               onClick={() => void loadData(docId)}
@@ -126,7 +134,7 @@ export default function CollaborationDashboard() {
       <div className={`${styles.bgSecondary} border ${styles.border} rounded-xl px-4 py-3`}>
         <label className="flex items-center justify-between gap-4">
           <span>
-            <span className={`block text-sm font-medium ${styles.textPrimary}`}>Human readable mode</span>
+            <span className={`block text-sm font-medium ${styles.textPrimary}`}>人类可读模式</span>
             <span className={`text-xs ${styles.textMuted}`}>将协作事件切换为面向用户的故事线与解释面板。</span>
           </span>
           <input
@@ -140,10 +148,10 @@ export default function CollaborationDashboard() {
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: 'Total edits', value: stats?.totalEdits ?? 0, icon: Activity },
-          { label: 'Active users', value: stats?.activeUsers ?? 0, icon: Users },
-          { label: 'Conflicts', value: stats?.conflictCount ?? 0, icon: AlertTriangle },
-          { label: 'Diff sequence', value: diffCount, icon: GitBranch },
+          { label: '编辑次数', value: stats?.totalEdits ?? 0, icon: Activity },
+          { label: '在线用户', value: stats?.activeUsers ?? 0, icon: Users },
+          { label: '冲突次数', value: stats?.conflictCount ?? 0, icon: AlertTriangle },
+          { label: '差异序列', value: diffCount, icon: GitBranch },
         ].map((item) => {
           const Icon = item.icon;
           return (
@@ -164,10 +172,10 @@ export default function CollaborationDashboard() {
             <div className="flex items-center gap-2">
               <History className="h-5 w-5 text-blue-400" />
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>
-                {humanReadableMode ? 'Narrative view' : 'Timeline'}
+                {humanReadableMode ? '叙事视图' : '时间轴'}
               </h2>
             </div>
-            <span className={`text-xs ${styles.textMuted}`}>{activeDocId}</span>
+            <span className={`text-xs ${styles.textMuted}`}>{displayDocId(activeDocId)}</span>
           </div>
           <div className="max-h-[560px] overflow-y-auto p-5">
             {humanReadableMode ? (
@@ -187,7 +195,7 @@ export default function CollaborationDashboard() {
                         </span>
                       </div>
                       <p className={`mt-2 text-xs ${styles.textMuted}`}>
-                        {item.userId} · {item.type}
+                        {item.userId} · {item.type === 'join' ? '加入' : item.type === 'leave' ? '离开' : item.type === 'update' ? '更新' : item.type === 'snapshot' ? '快照' : item.type === 'lock' ? '锁定' : item.type === 'conflict' ? '冲突' : '协作事件'}
                       </p>
                     </div>
                   ))}
@@ -195,7 +203,7 @@ export default function CollaborationDashboard() {
               )
             ) : events.length === 0 ? (
               <div className={`rounded-xl ${styles.bgTertiary} p-6 text-center text-sm ${styles.textMuted}`}>
-                暂无 runtime 事件
+                暂无运行时事件
               </div>
             ) : (
               <div className="space-y-3">
@@ -204,7 +212,7 @@ export default function CollaborationDashboard() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
                         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${eventColor(event.type)}`}>
-                          {event.type}
+                        {event.type === 'join' ? '加入' : event.type === 'leave' ? '离开' : event.type === 'update' ? '更新' : event.type === 'snapshot' ? '快照' : event.type === 'lock' ? '锁定' : '冲突'}
                         </span>
                         <span className={`text-sm font-medium ${styles.textPrimary}`}>{event.userId}</span>
                       </div>
@@ -215,9 +223,9 @@ export default function CollaborationDashboard() {
                     </div>
                     {event.snapshotId && <p className="mt-2 truncate text-xs text-purple-400">{event.snapshotId}</p>}
                     {event.diff && (
-                      <pre className={`mt-3 overflow-x-auto rounded-lg p-3 text-xs ${styles.bgSecondary} ${styles.textSecondary}`}>
-                        {JSON.stringify(event.diff, null, 2)}
-                      </pre>
+                      <p className={`mt-3 rounded-lg p-3 text-xs ${styles.bgSecondary} ${styles.textSecondary}`}>
+                        {diffSummary(event.diff)}
+                      </p>
                     )}
                   </div>
                 ))}
@@ -230,7 +238,7 @@ export default function CollaborationDashboard() {
           {humanReadableMode && (
             <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
               <div className={`border-b ${styles.border} px-5 py-4`}>
-                <h2 className={`text-base font-semibold ${styles.textPrimary}`}>Explanation panel</h2>
+                <h2 className={`text-base font-semibold ${styles.textPrimary}`}>解释面板</h2>
               </div>
               <div className="space-y-4 p-5">
                 <p className={`text-sm leading-6 ${styles.textSecondary}`}>
@@ -241,7 +249,7 @@ export default function CollaborationDashboard() {
                   <p className="mt-2">热点区域：{explanation?.highlights.mostEditedSection ?? '-'}</p>
                 </div>
                 <div>
-                  <p className={`mb-2 text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>Conflict hotspots</p>
+                  <p className={`mb-2 text-xs tracking-[0.18em] ${styles.textMuted}`}>冲突热点</p>
                   {explanation?.highlights.conflictHotspots.length ? (
                     <div className="flex flex-wrap gap-2">
                       {explanation.highlights.conflictHotspots.map((hotspot) => (
@@ -261,7 +269,7 @@ export default function CollaborationDashboard() {
           <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
             <div className={`flex items-center gap-2 border-b ${styles.border} px-5 py-4`}>
               <BarChart3 className="h-5 w-5 text-emerald-400" />
-              <h2 className={`text-base font-semibold ${styles.textPrimary}`}>User contribution</h2>
+              <h2 className={`text-base font-semibold ${styles.textPrimary}`}>用户贡献</h2>
             </div>
             <div className="p-5">
               {contributions.length === 0 ? (
@@ -286,7 +294,7 @@ export default function CollaborationDashboard() {
 
           <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
             <div className={`border-b ${styles.border} px-5 py-4`}>
-              <h2 className={`text-base font-semibold ${styles.textPrimary}`}>Snapshots</h2>
+              <h2 className={`text-base font-semibold ${styles.textPrimary}`}>快照</h2>
             </div>
             <div className="max-h-64 overflow-y-auto p-5">
               {snapshots.length === 0 ? (
@@ -297,7 +305,7 @@ export default function CollaborationDashboard() {
                     <div key={snapshot.id} className={`rounded-lg ${styles.bgTertiary} p-3`}>
                       <p className={`truncate text-xs font-medium ${styles.textPrimary}`}>{snapshot.id}</p>
                       <p className={`mt-1 text-xs ${styles.textMuted}`}>
-                        v{snapshot.version} · {snapshot.bytes} bytes · {formatTime(snapshot.createdAt)}
+                        第 {snapshot.version} 版 · {snapshot.bytes} 字节 · {formatTime(snapshot.createdAt)}
                       </p>
                     </div>
                   ))}
@@ -308,7 +316,7 @@ export default function CollaborationDashboard() {
 
           <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
             <div className={`border-b ${styles.border} px-5 py-4`}>
-              <h2 className={`text-base font-semibold ${styles.textPrimary}`}>Conflict log</h2>
+              <h2 className={`text-base font-semibold ${styles.textPrimary}`}>冲突记录</h2>
             </div>
             <div className="p-5">
               {conflicts.length === 0 ? (

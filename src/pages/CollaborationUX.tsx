@@ -8,6 +8,7 @@ import {
 } from '../api';
 import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
 
 function formatTime(timestamp?: number | null) {
   if (!timestamp) return '-';
@@ -17,23 +18,24 @@ function formatTime(timestamp?: number | null) {
 export default function CollaborationUX() {
   const styles = useThemeStyles();
   const appStore = useAppStore();
-  const [docId, setDocId] = useState('production:1');
+  const [docId, setDocId] = useState('创作:1');
   const [activeDocId, setActiveDocId] = useState('production:1');
   const [explanation, setExplanation] = useState<CollaborationExplanation | null>(null);
   const [narrative, setNarrative] = useState<CollaborationNarrativeItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   const loadData = async (targetDocId = activeDocId) => {
-    if (!targetDocId.trim()) return;
+    const normalizedDocId = normalizeDocId(targetDocId);
+    if (!normalizedDocId) return;
     setLoading(true);
     try {
       const [explainResult, narrativeResult] = await Promise.all([
-        getCollaborationExplanation(targetDocId.trim()),
-        getCollaborationNarrative(targetDocId.trim()),
+        getCollaborationExplanation(normalizedDocId),
+        getCollaborationNarrative(normalizedDocId),
       ]);
       setExplanation(explainResult.explanation);
       setNarrative(narrativeResult.narrative);
-      setActiveDocId(targetDocId.trim());
+      setActiveDocId(normalizedDocId);
     } catch (error) {
       appStore.addNotification({
         title: '协作体验层加载失败',
@@ -54,7 +56,7 @@ export default function CollaborationUX() {
       <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>Collaboration UX</p>
+            <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>协作故事线</p>
             <h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>协作故事线</h1>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
@@ -62,7 +64,7 @@ export default function CollaborationUX() {
               value={docId}
               onChange={(event) => setDocId(event.target.value)}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder="production:1 或 shooting:1"
+              placeholder={docIdPlaceholder()}
             />
             <button
               onClick={() => void loadData(docId)}
@@ -80,7 +82,7 @@ export default function CollaborationUX() {
         <div className="flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-blue-400" />
           <h2 className={`text-base font-semibold ${styles.textPrimary}`}>解释摘要</h2>
-          <span className={`ml-auto text-xs ${styles.textMuted}`}>{activeDocId}</span>
+          <span className={`ml-auto text-xs ${styles.textMuted}`}>{displayDocId(activeDocId)}</span>
         </div>
         <p className={`mt-4 text-sm leading-6 ${styles.textSecondary}`}>
           {explanation?.summary || '暂无可解释的协作事件。'}
@@ -106,7 +108,9 @@ export default function CollaborationUX() {
                       <span className={`text-sm font-medium ${styles.textPrimary}`}>{item.text}</span>
                       <span className={`text-xs ${styles.textMuted}`}>{formatTime(item.timestamp)}</span>
                     </div>
-                    <p className={`mt-2 text-xs ${styles.textMuted}`}>user {item.userId} · {item.type}</p>
+                    <p className={`mt-2 text-xs ${styles.textMuted}`}>
+                      用户 {item.userId} · {item.type === 'join' ? '加入' : item.type === 'leave' ? '离开' : item.type === 'update' ? '更新' : item.type === 'snapshot' ? '快照' : item.type === 'lock' ? '锁定' : item.type === 'conflict' ? '冲突' : '协作事件'}
+                    </p>
                   </div>
                 ))}
               </div>

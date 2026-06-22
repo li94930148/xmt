@@ -12,6 +12,7 @@ import {
 } from '../api';
 import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
 
 function priorityClass(priority: string) {
   if (priority === 'high') return 'bg-red-500/10 text-red-400';
@@ -19,10 +20,23 @@ function priorityClass(priority: string) {
   return 'bg-emerald-500/10 text-emerald-400';
 }
 
+function priorityLabel(priority: string) {
+  if (priority === 'high') return '高优先级';
+  if (priority === 'medium') return '中优先级';
+  return '低优先级';
+}
+
+function suggestionTypeLabel(type: string) {
+  if (type === 'paragraph') return '段落优化';
+  if (type === 'redundancy') return '冗余检测';
+  if (type === 'logic') return '逻辑结构';
+  return '协作影响';
+}
+
 export default function ContentGenerationDashboard() {
   const styles = useThemeStyles();
   const appStore = useAppStore();
-  const [docId, setDocId] = useState('production:1');
+  const [docId, setDocId] = useState('创作:1');
   const [activeDocId, setActiveDocId] = useState('production:1');
   const [summary, setSummary] = useState<GeneratedSummaryResponse | null>(null);
   const [title, setTitle] = useState<GeneratedTitleResponse | null>(null);
@@ -31,7 +45,7 @@ export default function ContentGenerationDashboard() {
   const [loading, setLoading] = useState(false);
 
   const loadData = async (targetDocId = activeDocId) => {
-    const normalizedDocId = targetDocId.trim();
+    const normalizedDocId = normalizeDocId(targetDocId);
     if (!normalizedDocId) return;
     setLoading(true);
 
@@ -67,7 +81,7 @@ export default function ContentGenerationDashboard() {
       <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>Content Generation</p>
+            <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>内容生成助手</p>
             <h1 className={`mt-1 flex items-center gap-2 text-2xl font-bold ${styles.textPrimary}`}>
               <Sparkles className="h-6 w-6 text-blue-400" />
               内容生成助手
@@ -78,7 +92,7 @@ export default function ContentGenerationDashboard() {
               value={docId}
               onChange={(event) => setDocId(event.target.value)}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder="production:1 或 shooting:1"
+              placeholder={docIdPlaceholder()}
             />
             <button
               onClick={() => void loadData(docId)}
@@ -95,7 +109,7 @@ export default function ContentGenerationDashboard() {
       <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
         <div className={`border-b ${styles.border} px-5 py-4`}>
           <h2 className={`text-base font-semibold ${styles.textPrimary}`}>自动生成标题</h2>
-          <p className={`mt-1 text-xs ${styles.textMuted}`}>{activeDocId}</p>
+          <p className={`mt-1 text-xs ${styles.textMuted}`}>{displayDocId(activeDocId)}</p>
         </div>
         <div className="space-y-4 p-5">
           <div className={`rounded-xl ${styles.bgTertiary} p-5`}>
@@ -168,15 +182,15 @@ export default function ContentGenerationDashboard() {
 
       <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
         <div className={`border-b ${styles.border} px-5 py-4`}>
-          <h2 className={`text-base font-semibold ${styles.textPrimary}`}>AI 编辑建议列表</h2>
+          <h2 className={`text-base font-semibold ${styles.textPrimary}`}>智能编辑建议列表</h2>
         </div>
         <div className="grid grid-cols-1 gap-5 p-5 xl:grid-cols-[1fr_0.8fr]">
           <div className="space-y-3">
             {(suggestions?.suggestions || []).map((item) => (
               <div key={`${item.type}-${item.message}`} className={`rounded-xl ${styles.bgTertiary} p-4`}>
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <span className={`text-sm font-medium ${styles.textPrimary}`}>{item.type}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-xs ${priorityClass(item.priority)}`}>{item.priority}</span>
+                  <span className={`text-sm font-medium ${styles.textPrimary}`}>{suggestionTypeLabel(item.type)}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${priorityClass(item.priority)}`}>{priorityLabel(item.priority)}</span>
                 </div>
                 <p className={`text-sm ${styles.textSecondary}`}>{item.message}</p>
               </div>

@@ -3,6 +3,7 @@ import { Clock, GitCommit, RefreshCw } from 'lucide-react';
 import { getFullHistory, jumpToTimestamp, compareTimeline } from '../editor/timeline/editorHistoryController';
 import type { UnifiedTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
 
 function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
@@ -30,9 +31,21 @@ function typeClass(type: UnifiedTimelineEvent['type']) {
   return classes[type];
 }
 
+function sourceLabel(source: UnifiedTimelineEvent['source']) {
+  if (source === 'realtime') return '实时协作';
+  if (source === 'db') return '持久保存';
+  return '版本系统';
+}
+
+function payloadSummary(payload?: Record<string, unknown>) {
+  if (!payload || Object.keys(payload).length === 0) return '暂无额外节点信息';
+  if (typeof payload.version === 'string' || typeof payload.version === 'number') return `关联版本：${payload.version}`;
+  return `包含 ${Object.keys(payload).length} 项节点信息`;
+}
+
 export default function ContentTimelineView() {
   const styles = useThemeStyles();
-  const [docId, setDocId] = useState('production:1');
+  const [docId, setDocId] = useState('创作:1');
   const [activeDocId, setActiveDocId] = useState('production:1');
   const [selected, setSelected] = useState<UnifiedTimelineEvent | null>(null);
 
@@ -45,7 +58,7 @@ export default function ContentTimelineView() {
       <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>Unified Content Timeline</p>
+            <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>统一内容时间轴</p>
             <h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>内容统一时间轴</h1>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
@@ -53,11 +66,11 @@ export default function ContentTimelineView() {
               value={docId}
               onChange={(event) => setDocId(event.target.value)}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder="production:1 或 shooting:1"
+              placeholder={docIdPlaceholder()}
             />
             <button
               onClick={() => {
-                setActiveDocId(docId.trim() || 'production:1');
+                setActiveDocId(normalizeDocId(docId) || 'production:1');
                 setSelected(null);
               }}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
@@ -98,7 +111,7 @@ export default function ContentTimelineView() {
                         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${typeClass(event.type)}`}>
                           {typeLabel(event.type)}
                         </span>
-                        <span className={`text-sm ${styles.textPrimary}`}>{event.payload?.version ? `版本 ${event.payload.version}` : event.source}</span>
+                        <span className={`text-sm ${styles.textPrimary}`}>{event.payload?.version ? `版本 ${event.payload.version}` : sourceLabel(event.source)}</span>
                       </div>
                       <span className={`inline-flex items-center gap-1 text-xs ${styles.textMuted}`}>
                         <Clock className="h-3.5 w-3.5" />
@@ -123,11 +136,11 @@ export default function ContentTimelineView() {
                 <div className={`rounded-xl ${styles.bgTertiary} p-4`}>
                   <p className={`text-sm font-medium ${styles.textPrimary}`}>{typeLabel(selected.type)}节点</p>
                   <p className={`mt-2 text-xs ${styles.textMuted}`}>{formatTime(selected.timestamp)}</p>
-                  <p className={`mt-2 text-xs ${styles.textMuted}`}>来源：{selected.source}</p>
+                  <p className={`mt-2 text-xs ${styles.textMuted}`}>来源：{sourceLabel(selected.source)}</p>
                 </div>
-                <pre className={`max-h-72 overflow-auto rounded-xl p-4 text-xs ${styles.bgTertiary} ${styles.textSecondary}`}>
-                  {JSON.stringify(selected.payload || {}, null, 2)}
-                </pre>
+                <div className={`rounded-xl p-4 text-sm ${styles.bgTertiary} ${styles.textSecondary}`}>
+                  {payloadSummary(selected.payload)}
+                </div>
                 <div className={`rounded-xl ${styles.bgTertiary} p-4 text-sm ${styles.textSecondary}`}>
                   <p>只读跳转：{jumpResult?.currentEvent ? '可定位到该时间点' : '暂无可定位节点'}</p>
                   <p className="mt-2">与下一节点差异：{comparison?.changed ? '存在变化' : '无变化'}</p>

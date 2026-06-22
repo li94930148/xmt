@@ -390,7 +390,7 @@ export default function ProductionDetail() {
   }
 
   return (
-    <div className="flex flex-col gap-4" style={{ height: 'calc(100vh - 96px)' }}>
+    <div className="flex min-h-[calc(100vh-8rem)] flex-col gap-4">
       <style>{`
         .production-preview mark {
           border-radius: 2px;
@@ -406,7 +406,7 @@ export default function ProductionDetail() {
         .production-preview mark[data-color="cyan"] { background-color: ${styles.isDark ? '#155e75' : '#a5f3fc'}; }
         .production-preview mark:not([data-color]) { background-color: ${styles.isDark ? '#713f12' : '#fef08a'}; }
       `}</style>
-      <div className={`shrink-0 border-b ${styles.border} px-3 py-2`}>
+      <div className={`sticky top-16 z-30 shrink-0 border-b ${styles.border} px-3 py-2 ${styles.bgPrimary} backdrop-blur`}>
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -497,10 +497,10 @@ export default function ProductionDetail() {
 
       </div>
 
-      <div className="flex-1 min-h-0 flex gap-3">
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-            <div className={`px-6 py-2 border-b ${styles.border} flex items-center justify-between gap-3`}>
+      <div className="flex min-h-0 flex-1 gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-h-0 flex-col">
+            <div className={`sticky top-[calc(4rem+53px)] z-20 px-6 py-2 border-b ${styles.border} ${styles.bgPrimary} flex items-center justify-between gap-3 backdrop-blur`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mt-1">
@@ -544,9 +544,9 @@ export default function ProductionDetail() {
 
             </div>
 
-            <div className="flex-1 min-h-0 overflow-hidden">
+            <div className="min-h-0">
               {selectedVersion?.isCurrent ? (
-                <div className="h-full min-h-0">
+                <div className="min-h-[calc(100vh-13rem)]">
                   <ContentEditor
                     value={editData.content}
                     onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
@@ -557,7 +557,7 @@ export default function ProductionDetail() {
                   />
                 </div>
               ) : (
-                <div className="h-full overflow-y-auto p-6 lg:p-8">
+                <div className="p-6 lg:p-8">
                   <div
                     className={`production-preview tiptap max-w-none ${styles.textPrimary} leading-relaxed prose ${styles.isDark ? 'prose-invert' : ''}`}
                     dangerouslySetInnerHTML={{

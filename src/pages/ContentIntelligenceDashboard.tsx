@@ -10,6 +10,7 @@ import {
 } from '../api';
 import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
 
 function phaseLabel(phase: string) {
   const labels: Record<string, string> = {
@@ -30,7 +31,7 @@ function trendLabel(trend?: string) {
 export default function ContentIntelligenceDashboard() {
   const styles = useThemeStyles();
   const appStore = useAppStore();
-  const [docId, setDocId] = useState('production:1');
+  const [docId, setDocId] = useState('创作:1');
   const [activeDocId, setActiveDocId] = useState('production:1');
   const [evolution, setEvolution] = useState<ContentEvolutionResponse | null>(null);
   const [impact, setImpact] = useState<CollaborationImpactResponse | null>(null);
@@ -38,7 +39,7 @@ export default function ContentIntelligenceDashboard() {
   const [loading, setLoading] = useState(false);
 
   const loadData = async (targetDocId = activeDocId) => {
-    const normalizedDocId = targetDocId.trim();
+    const normalizedDocId = normalizeDocId(targetDocId);
     if (!normalizedDocId) return;
     setLoading(true);
 
@@ -72,7 +73,7 @@ export default function ContentIntelligenceDashboard() {
       <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>Content Intelligence</p>
+            <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>内容智能理解</p>
             <h1 className={`mt-1 flex items-center gap-2 text-2xl font-bold ${styles.textPrimary}`}>
               <Brain className="h-6 w-6 text-blue-400" />
               内容智能理解
@@ -83,7 +84,7 @@ export default function ContentIntelligenceDashboard() {
               value={docId}
               onChange={(event) => setDocId(event.target.value)}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder="production:1 或 shooting:1"
+              placeholder={docIdPlaceholder()}
             />
             <button
               onClick={() => void loadData(docId)}
@@ -120,7 +121,7 @@ export default function ContentIntelligenceDashboard() {
         <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
           <div className={`border-b ${styles.border} px-5 py-4`}>
             <h2 className={`text-base font-semibold ${styles.textPrimary}`}>内容演化阶段</h2>
-            <p className={`mt-1 text-xs ${styles.textMuted}`}>{activeDocId}</p>
+            <p className={`mt-1 text-xs ${styles.textMuted}`}>{displayDocId(activeDocId)}</p>
           </div>
           <div className="space-y-4 p-5">
             <p className={`text-sm leading-6 ${styles.textSecondary}`}>

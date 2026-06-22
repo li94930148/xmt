@@ -411,7 +411,7 @@ export default function Editor({
   const containerClass = isFullscreen
     ? 'fixed inset-0 z-[100] flex flex-col rounded-none h-screen min-h-0'
     : immersive
-      ? 'flex flex-col h-full min-h-0'
+      ? 'flex flex-col min-h-[calc(100vh-13rem)]'
       : 'rounded-xl border flex flex-col h-full min-h-0';
 
   return (
@@ -427,7 +427,7 @@ export default function Editor({
             : 'bg-white border-gray-200 shadow-md'
       }`}
       style={{
-        height: isFullscreen ? '100vh' : '100%',
+        height: isFullscreen ? '100vh' : immersive ? 'auto' : '100%',
         minHeight: isFullscreen ? '100vh' : '0',
       }}
     >
@@ -482,10 +482,10 @@ export default function Editor({
       </div>
 
       {/* 编辑区域 + 目录侧栏 */}
-      <div className="flex flex-1 min-h-0 h-0 overflow-hidden relative">
+      <div className={`flex flex-1 min-h-0 relative ${immersive ? 'overflow-visible' : 'h-0 overflow-hidden'}`}>
         <div
           ref={scrollAreaRef}
-          className="flex-1 min-h-0 h-full overflow-y-auto overscroll-contain relative"
+          className={`flex-1 min-h-0 relative ${immersive ? 'overflow-visible' : 'h-full overflow-y-auto overscroll-contain'}`}
         >
           {/* BubbleMenu */}
           {editor && !readOnly && (

@@ -139,6 +139,23 @@ export default function ShootingDetail() {
     return 'pending';
   };
 
+  const timelineView = useMemo(() => {
+    if (!shooting) {
+      return getTimelineView(getCollaborationRoomId('shooting', 0), { versionEvents: [] });
+    }
+
+    return getTimelineView(getCollaborationRoomId('shooting', shooting.id), {
+      versionEvents: shooting.production ? [{
+        id: `production-version-${shooting.production.id}`,
+        timestamp: new Date(shooting.updated_at || shooting.created_at).getTime(),
+        version: shooting.production.version,
+        status: shooting.production.status,
+        operatorName: shooting.production.operator_name,
+        label: '关联创作版本',
+      }] : [],
+    });
+  }, [shooting]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -156,16 +173,6 @@ export default function ShootingDetail() {
   }
 
   const hasLocalScriptEdit = shooting.script_content !== null && shooting.script_content !== undefined;
-  const timelineView = useMemo(() => getTimelineView(getCollaborationRoomId('shooting', shooting.id), {
-    versionEvents: shooting.production ? [{
-      id: `production-version-${shooting.production.id}`,
-      timestamp: new Date(shooting.updated_at || shooting.created_at).getTime(),
-      version: shooting.production.version,
-      status: shooting.production.status,
-      operatorName: shooting.production.operator_name,
-      label: '关联创作版本',
-    }] : [],
-  }), [shooting]);
 
   return (
     <div className="flex flex-col gap-3" style={{ height: 'calc(100vh - 96px)' }}>

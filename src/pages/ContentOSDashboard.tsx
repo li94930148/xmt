@@ -7,6 +7,7 @@ import {
 import type { ContentOSContext, ContentOSInsight } from '../content/orchestrator/types';
 import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
 
 function stateLabel(state?: string) {
   const labels: Record<string, string> = {
@@ -18,6 +19,47 @@ function stateLabel(state?: string) {
   return labels[state || ''] || '-';
 }
 
+function uxStateLabel(state?: string) {
+  const labels: Record<string, string> = {
+    idle: '空闲',
+    editing: '编辑中',
+    syncing: '同步中',
+    saving: '保存中',
+    conflicted: '存在冲突',
+  };
+  return labels[state || ''] || '-';
+}
+
+function suggestionTypeLabel(type?: string) {
+  const labels: Record<string, string> = {
+    paragraph: '段落优化',
+    redundancy: '冗余检测',
+    logic: '逻辑结构',
+    collaboration: '协作影响',
+  };
+  return labels[type || ''] || '优化建议';
+}
+
+function timelineTypeLabel(type?: string) {
+  const labels: Record<string, string> = {
+    edit: '编辑',
+    save: '保存',
+    version: '版本',
+    snapshot: '快照',
+    conflict: '冲突',
+  };
+  return labels[type || ''] || '事件';
+}
+
+function timelineSourceLabel(source?: string) {
+  const labels: Record<string, string> = {
+    realtime: '实时协作',
+    db: '持久保存',
+    version: '版本系统',
+  };
+  return labels[source || ''] || '系统';
+}
+
 function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
 }
@@ -25,14 +67,14 @@ function formatTime(timestamp: number) {
 export default function ContentOSDashboard() {
   const styles = useThemeStyles();
   const appStore = useAppStore();
-  const [docId, setDocId] = useState('production:1');
+  const [docId, setDocId] = useState('创作:1');
   const [activeDocId, setActiveDocId] = useState('production:1');
   const [context, setContext] = useState<ContentOSContext | null>(null);
   const [insight, setInsight] = useState<ContentOSInsight | null>(null);
   const [loading, setLoading] = useState(false);
 
   const loadData = async (targetDocId = activeDocId) => {
-    const normalizedDocId = targetDocId.trim();
+    const normalizedDocId = normalizeDocId(targetDocId);
     if (!normalizedDocId) return;
     setLoading(true);
 
@@ -46,7 +88,7 @@ export default function ContentOSDashboard() {
       setActiveDocId(normalizedDocId);
     } catch (error) {
       appStore.addNotification({
-        title: '内容 OS 加载失败',
+        title: '内容操作系统加载失败',
         message: (error as Error).message,
         type: 'error',
       });
@@ -64,7 +106,7 @@ export default function ContentOSDashboard() {
       <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>Content OS</p>
+            <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>内容操作系统</p>
             <h1 className={`mt-1 flex items-center gap-2 text-2xl font-bold ${styles.textPrimary}`}>
               <BrainCircuit className="h-6 w-6 text-blue-400" />
               内容操作系统
@@ -75,7 +117,7 @@ export default function ContentOSDashboard() {
               value={docId}
               onChange={(event) => setDocId(event.target.value)}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder="production:1 或 shooting:1"
+              placeholder={docIdPlaceholder()}
             />
             <button
               onClick={() => void loadData(docId)}
@@ -92,7 +134,7 @@ export default function ContentOSDashboard() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         {[
           { label: '系统状态', value: stateLabel(context?.state), icon: Activity },
-          { label: '编辑状态', value: context?.uxState || '-', icon: Clock },
+          { label: '编辑状态', value: uxStateLabel(context?.uxState), icon: Clock },
           { label: '协作人数', value: context?.presence.activeUserCount ?? 0, icon: Users },
           { label: '质量评分', value: context?.intelligence.quality.score ?? 0, icon: Sparkles },
         ].map((item) => {
@@ -112,7 +154,7 @@ export default function ContentOSDashboard() {
       <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
         <div className={`border-b ${styles.border} px-5 py-4`}>
           <h2 className={`text-base font-semibold ${styles.textPrimary}`}>系统洞察</h2>
-          <p className={`mt-1 text-xs ${styles.textMuted}`}>{activeDocId}</p>
+          <p className={`mt-1 text-xs ${styles.textMuted}`}>{displayDocId(activeDocId)}</p>
         </div>
         <div className="space-y-4 p-5">
           <p className={`text-lg font-semibold ${styles.textPrimary}`}>{insight?.headline || '暂无洞察'}</p>
@@ -129,12 +171,12 @@ export default function ContentOSDashboard() {
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_1fr]">
         <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
           <div className={`border-b ${styles.border} px-5 py-4`}>
-            <h2 className={`text-base font-semibold ${styles.textPrimary}`}>AI 生成建议</h2>
+            <h2 className={`text-base font-semibold ${styles.textPrimary}`}>智能生成建议</h2>
           </div>
           <div className="space-y-3 p-5">
             {(context?.generation.suggestions || []).slice(0, 5).map((suggestion) => (
               <div key={`${suggestion.type}-${suggestion.message}`} className={`rounded-xl ${styles.bgTertiary} p-4`}>
-                <p className={`text-sm font-medium ${styles.textPrimary}`}>{suggestion.type}</p>
+                <p className={`text-sm font-medium ${styles.textPrimary}`}>{suggestionTypeLabel(suggestion.type)}</p>
                 <p className={`mt-2 text-sm ${styles.textSecondary}`}>{suggestion.message}</p>
               </div>
             ))}
@@ -150,10 +192,10 @@ export default function ContentOSDashboard() {
               {(context?.timeline.events || []).slice(-8).reverse().map((event) => (
                 <div key={event.id} className={`rounded-xl ${styles.bgTertiary} p-4`}>
                   <div className="flex items-center justify-between gap-3">
-                    <span className={`text-sm font-medium ${styles.textPrimary}`}>{event.type}</span>
+                    <span className={`text-sm font-medium ${styles.textPrimary}`}>{timelineTypeLabel(event.type)}</span>
                     <span className={`text-xs ${styles.textMuted}`}>{formatTime(event.timestamp)}</span>
                   </div>
-                  <p className={`mt-2 text-xs ${styles.textMuted}`}>{event.source}</p>
+                  <p className={`mt-2 text-xs ${styles.textMuted}`}>{timelineSourceLabel(event.source)}</p>
                 </div>
               ))}
               {(!context || context.timeline.events.length === 0) && (

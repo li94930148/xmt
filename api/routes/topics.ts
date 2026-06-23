@@ -76,7 +76,7 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-router.post('/', authenticate, async (req, res) => {
+router.post('/', authenticate, requirePermission('topic:create'), async (req, res) => {
   try {
     const { title, description, outline, platform, deadline, assignee_id } = req.body;
 

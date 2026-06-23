@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Clock, GitCommit, RefreshCw } from 'lucide-react';
-import { getFullHistory, jumpToTimestamp, compareTimeline } from '../editor/timeline/editorHistoryController';
 import type { UnifiedTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
+import { useContentOSContext } from '../content/orchestrator/useContentOSContext';
+import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import ContentDocumentPicker from '../components/ContentDocumentPicker';
 
 function formatTime(timestamp: number) {
   return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
@@ -45,13 +46,26 @@ function payloadSummary(payload?: Record<string, unknown>) {
 
 export default function ContentTimelineView() {
   const styles = useThemeStyles();
-  const [docId, setDocId] = useState('创作:1');
-  const [activeDocId, setActiveDocId] = useState('production:1');
+  const initialDocument = getCurrentContentDocument();
+  const [docId, setDocId] = useState(initialDocument.label);
+  const [activeDocId, setActiveDocId] = useState(initialDocument.docId);
   const [selected, setSelected] = useState<UnifiedTimelineEvent | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const context = useContentOSContext(activeDocId, refreshKey);
+  const selectedIndex = useMemo(
+    () => selected ? context.timeline.events.findIndex((event) => event.id === selected.id) : -1,
+    [context.timeline.events, selected],
+  );
+  const nextEvent = selectedIndex >= 0 ? context.timeline.events[selectedIndex + 1] || null : null;
+  const hasNextChange = Boolean(selected && nextEvent && selected.id !== nextEvent.id);
 
-  const history = useMemo(() => getFullHistory(activeDocId), [activeDocId]);
-  const jumpResult = selected ? jumpToTimestamp(activeDocId, selected.timestamp) : null;
-  const comparison = selected ? compareTimeline(jumpResult?.currentEvent || null, jumpResult?.nextEvent || null) : null;
+  const pickDocument = (pickedDocId: string, pickedTitle: string) => {
+    const current = setCurrentContentDocument(pickedDocId, pickedTitle);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
+    setSelected(null);
+  };
 
   return (
     <div className="space-y-5">
@@ -62,15 +76,20 @@ export default function ContentTimelineView() {
             <h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>内容统一时间轴</h1>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
-            <input
+            <ContentDocumentPicker
               value={docId}
-              onChange={(event) => setDocId(event.target.value)}
+              onChange={setDocId}
+              onPick={pickDocument}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder={docIdPlaceholder()}
             />
             <button
               onClick={() => {
-                setActiveDocId(normalizeDocId(docId) || 'production:1');
+                const resolved = resolveContentDocument(docId);
+                if (!resolved) return;
+                const current = setCurrentContentDocument(resolved.docId, resolved.title);
+                setDocId(current.title);
+                setActiveDocId(current.docId);
+                setRefreshKey((value) => value + 1);
                 setSelected(null);
               }}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
@@ -89,16 +108,16 @@ export default function ContentTimelineView() {
               <GitCommit className="h-5 w-5 text-blue-400" />
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>时间轴节点</h2>
             </div>
-            <span className={`text-xs ${styles.textMuted}`}>{history.timeline.length} 个节点</span>
+            <span className={`text-xs ${styles.textMuted}`}>{context.timeline.events.length} 个节点</span>
           </div>
           <div className="max-h-[620px] overflow-y-auto p-5">
-            {history.timeline.length === 0 ? (
+            {context.timeline.events.length === 0 ? (
               <div className={`rounded-xl ${styles.bgTertiary} p-6 text-center text-sm ${styles.textMuted}`}>
                 暂无编辑、保存或版本节点
               </div>
             ) : (
               <div className="space-y-3">
-                {history.timeline.map((event) => (
+                {context.timeline.events.map((event) => (
                   <button
                     key={event.id}
                     onClick={() => setSelected(event)}
@@ -142,8 +161,8 @@ export default function ContentTimelineView() {
                   {payloadSummary(selected.payload)}
                 </div>
                 <div className={`rounded-xl ${styles.bgTertiary} p-4 text-sm ${styles.textSecondary}`}>
-                  <p>只读跳转：{jumpResult?.currentEvent ? '可定位到该时间点' : '暂无可定位节点'}</p>
-                  <p className="mt-2">与下一节点差异：{comparison?.changed ? '存在变化' : '无变化'}</p>
+                  <p>只读跳转：{selectedIndex >= 0 ? '可定位到该时间点' : '暂无可定位节点'}</p>
+                  <p className="mt-2">与下一节点差异：{hasNextChange ? '存在变化' : '无变化'}</p>
                 </div>
               </>
             ) : (

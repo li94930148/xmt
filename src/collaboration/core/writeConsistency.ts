@@ -1,6 +1,8 @@
 import type { Schema } from '@tiptap/pm/model';
 import * as Y from 'yjs';
 import type { SocketYjsProvider } from '../yjs/SocketYjsProvider';
+import type { EditorPersistenceState } from '../../editor/state/editorStateManager';
+import { emitEditorState } from '../../editor/state/editorStateEventBus';
 
 export type CollaborationWriteSource = 'yjs-runtime' | 'database-persistence' | 'snapshot-recovery' | 'empty';
 export type CollaborationDocKind = 'production' | 'shooting';
@@ -19,7 +21,7 @@ export interface SyncToDatabaseOptions {
   previousContent: string;
   persist: (content: string) => Promise<void>;
   delay?: number;
-  onStatusChange?: (status: 'saving' | 'synced' | 'error') => void;
+  onStatusChange?: (status: Extract<EditorPersistenceState, 'saving' | 'synced' | 'conflicted'>) => void;
   onSynced?: (content: string) => void;
   onError?: (error: unknown) => void;
 }
@@ -30,6 +32,7 @@ export interface SyncToYjsOptions {
   schema?: Schema;
   snapshotUpdate?: number[] | Uint8Array;
   targetDoc?: Y.Doc;
+  docId?: string;
 }
 
 const databaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -64,11 +67,13 @@ export function syncToDatabase({
   onError,
 }: SyncToDatabaseOptions) {
   if (content === previousContent) {
+    emitEditorState('writeConsistency:saved', docId, { reason: 'unchanged' });
     onStatusChange?.('synced');
     return;
   }
 
   cancelDatabaseSync(docId);
+  emitEditorState('writeConsistency:save', docId, { reason: 'debounce' });
   onStatusChange?.('saving');
 
   const timer = setTimeout(() => {
@@ -76,11 +81,13 @@ export function syncToDatabase({
     persist(content)
       .then(() => {
         onSynced?.(content);
+        emitEditorState('writeConsistency:saved', docId);
         onStatusChange?.('synced');
       })
       .catch((error) => {
         onError?.(error);
-        onStatusChange?.('error');
+        emitEditorState('conflict:event', docId, { reason: 'save failed' });
+        onStatusChange?.('conflicted');
       });
   }, delay);
 
@@ -93,6 +100,7 @@ export function syncToYjs({
   schema,
   snapshotUpdate,
   targetDoc,
+  docId,
 }: SyncToYjsOptions) {
   if (snapshotUpdate && targetDoc) {
     Y.applyUpdate(targetDoc, snapshotUpdate instanceof Uint8Array ? snapshotUpdate : Uint8Array.from(snapshotUpdate));
@@ -103,5 +111,7 @@ export function syncToYjs({
     return false;
   }
 
-  return provider.applyInitialContentOnce(contentJson, schema);
+  const applied = provider.applyInitialContentOnce(contentJson, schema);
+  if (applied && docId) emitEditorState('yjs:update', docId, { reason: 'initial content' });
+  return applied;
 }

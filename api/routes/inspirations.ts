@@ -2,23 +2,11 @@ import express from 'express';
 import { beijingNow, queryOne, queryAll, execute, executeInsert } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
+import { canOwnerOrPermission } from '../utils/access';
 import { createMessage } from '../utils/messageHelper';
 import { broadcastToRoom } from '../utils/socket';
 
 const router = express.Router();
-
-async function hasUserPermission(userId: number, permissionCode: string) {
-  const result = await queryOne(
-    `SELECT COUNT(*) as count
-     FROM permissions p
-     JOIN role_permissions rp ON p.id = rp.permission_id
-     JOIN user_roles ur ON rp.role_id = ur.role_id
-     WHERE ur.user_id = ? AND p.code = ?`,
-    [userId, permissionCode]
-  );
-
-  return Number(result?.count) > 0;
-}
 
 const inspirationSelect = `
   SELECT
@@ -274,14 +262,13 @@ router.post('/:id/vote', authenticate, async (req, res) => {
 router.delete('/:id', authenticate, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const userId = Number(req.user?.id);
     const inspiration = await queryOne(`SELECT * FROM inspirations WHERE id = ?`, [id]);
     if (!inspiration) {
       return res.status(404).json({ message: '灵感不存在' });
     }
 
-    const canDeleteAnyInspiration = await hasUserPermission(userId, 'inspiration:delete');
-    if (Number(inspiration.creator_id) !== userId && !canDeleteAnyInspiration) {
+    const canDeleteInspiration = await canOwnerOrPermission(req.user, inspiration.creator_id, 'inspiration:delete');
+    if (!canDeleteInspiration) {
       return res.status(403).json({ message: '无权限删除此灵感' });
     }
 

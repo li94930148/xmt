@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { getEventStream } from '../collaboration/protocol/eventStream';
 import {
   generateStructureSuggestion,
@@ -19,7 +20,7 @@ function timelineSources(docId: string) {
   };
 }
 
-router.get('/summary/:docId', authenticate, (req, res) => {
+router.get('/summary/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   res.json({
     docId,
@@ -27,7 +28,7 @@ router.get('/summary/:docId', authenticate, (req, res) => {
   });
 });
 
-router.get('/title/:docId', authenticate, (req, res) => {
+router.get('/title/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   res.json({
     docId,
@@ -35,7 +36,7 @@ router.get('/title/:docId', authenticate, (req, res) => {
   });
 });
 
-router.get('/structure/:docId', authenticate, (req, res) => {
+router.get('/structure/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   res.json({
     docId,
@@ -43,7 +44,7 @@ router.get('/structure/:docId', authenticate, (req, res) => {
   });
 });
 
-router.get('/suggestions/:docId', authenticate, (req, res) => {
+router.get('/suggestions/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   const sources = timelineSources(docId);
   res.json({

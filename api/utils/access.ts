@@ -50,6 +50,31 @@ export function canManageCalendarEvent(user: User | undefined, event: { creator_
   return isPrivilegedUser(user) || Number(event.creator_id) === user.id;
 }
 
+export async function canOwnerOrPermission(
+  user: User | undefined,
+  ownerId: unknown,
+  permissionCode: string,
+) {
+  if (!user) {
+    return false;
+  }
+
+  if (Number(ownerId) === user.id || user.role === 'admin') {
+    return true;
+  }
+
+  const permission = await queryOne<{ count: number }>(
+    `SELECT COUNT(*) as count
+     FROM permissions p
+     JOIN role_permissions rp ON p.id = rp.permission_id
+     JOIN user_roles ur ON rp.role_id = ur.role_id
+     WHERE ur.user_id = ? AND p.code = ?`,
+    [user.id, permissionCode],
+  );
+
+  return Number(permission?.count || 0) > 0;
+}
+
 export async function getTopicScopeById(topicId: number | string) {
   const topic = await queryOne<TopicScopeRecord>(
     `SELECT id, creator_id, assignee_id, workflow_template_id, status FROM topics WHERE id = ?`,

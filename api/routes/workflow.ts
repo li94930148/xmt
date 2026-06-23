@@ -33,7 +33,7 @@ function getNextVersion(currentVersion: string | undefined, versionAction: Versi
   return normalized.startsWith('v') ? normalized : `v${normalized}`;
 }
 
-router.get('/shadow-logs', authenticate, async (req, res) => {
+router.get('/shadow-logs', authenticate, requirePermission('system:template'), async (req, res) => {
   try {
     const { topic_id, user_id, node_id } = req.query;
     let sql = `SELECT * FROM workflow_shadow_logs WHERE 1=1`;
@@ -62,7 +62,7 @@ router.get('/shadow-logs', authenticate, async (req, res) => {
   }
 });
 
-router.get('/shadow-analytics', authenticate, async (req, res) => {
+router.get('/shadow-analytics', authenticate, requirePermission('system:template'), async (req, res) => {
   try {
     const transitions = await queryAll<{
       from_state: string | null;
@@ -150,7 +150,7 @@ router.get('/shadow-analytics', authenticate, async (req, res) => {
   }
 });
 
-router.get('/shadow-decisions', authenticate, async (req, res) => {
+router.get('/shadow-decisions', authenticate, requirePermission('system:template'), async (req, res) => {
   try {
     const logs = await queryAll<{
       node_id: number | null;
@@ -607,7 +607,7 @@ router.get('/comments', authenticate, async (req, res) => {
   }
 });
 
-router.post('/comments', authenticate, async (req, res) => {
+router.post('/comments', authenticate, requirePermission('workflow:comment'), async (req, res) => {
   try {
     const { target_type, target_id, content } = req.body;
     if (!target_type || !target_id || !content) return res.status(400).json({ message: '缺少必要参数' });

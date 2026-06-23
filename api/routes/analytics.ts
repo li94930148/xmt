@@ -168,7 +168,7 @@ router.post('/', authenticate, requirePermission('analytics:create'), async (req
   }
 });
 
-router.get('/topic/:topicId', authenticate, async (req, res) => {
+router.get('/topic/:topicId', authenticate, requirePermission('analytics:view'), async (req, res) => {
   try {
     const { topicId } = req.params;
     const topic = await getTopicScopeById(topicId);

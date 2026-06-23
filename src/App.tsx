@@ -105,7 +105,9 @@ export default function App() {
               <Route element={<Layout />}>
                 <Route path="/" element={<Home />} />
                 <Route path="/topics" element={<Topics />} />
-                <Route path="/topics/add" element={<AddTopic />} />
+                <Route element={<RoleGuard permissions={['topic:create']} />}>
+                  <Route path="/topics/add" element={<AddTopic />} />
+                </Route>
                 <Route path="/topics/:id" element={<TopicDetail />} />
                 <Route path="/production" element={<Production />} />
                 <Route path="/production/:id" element={<ProductionDetail />} />

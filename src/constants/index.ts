@@ -84,6 +84,7 @@ export const ACHIEVEMENT_LEVELS = [
 export const ROLE_MAP: Record<string, string> = {
   admin:    '管理员',
   director: '编导',
+  editor:   '编辑',
   member:   '成员',
 };
 

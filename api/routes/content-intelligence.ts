@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { getEventStream } from '../collaboration/protocol/eventStream';
 import {
   analyzeContentEvolution,
@@ -19,7 +20,7 @@ function timelineSources(docId: string) {
   };
 }
 
-router.get('/evolution/:docId', authenticate, (req, res) => {
+router.get('/evolution/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   const sources = timelineSources(docId);
   res.json({
@@ -29,7 +30,7 @@ router.get('/evolution/:docId', authenticate, (req, res) => {
   });
 });
 
-router.get('/impact/:docId', authenticate, (req, res) => {
+router.get('/impact/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   const sources = timelineSources(docId);
   res.json({
@@ -39,7 +40,7 @@ router.get('/impact/:docId', authenticate, (req, res) => {
   });
 });
 
-router.get('/quality/:docId', authenticate, (req, res) => {
+router.get('/quality/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   res.json({
     docId,

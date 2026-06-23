@@ -22,6 +22,8 @@ export interface RuntimeDocumentUpdate {
 
 const documents = new Map<string, RuntimeDocumentRecord>();
 const MAX_SNAPSHOTS_PER_DOC = 20;
+const MAX_UPDATE_SIZE = 500 * 1024;
+const MAX_UPDATES_PER_DOC = 1000;
 
 export function getRuntimeDocumentRecord(roomId: string) {
   let record = documents.get(roomId);
@@ -77,10 +79,80 @@ export function applyRuntimeDocumentUpdate(roomId: string, update: number[], met
       ...metadata,
     },
   }));
-  if (record.updates.length > 1000) {
-    record.updates.splice(0, record.updates.length - 1000);
+  const bufferedBytes = record.updates.reduce((total, item) => total + item.update.length, 0);
+  if (bufferedBytes > MAX_UPDATE_SIZE || record.updates.length > MAX_UPDATES_PER_DOC) {
+    compactUpdates(roomId);
   }
   return record.version;
+}
+
+function createCompactionSnapshot(roomId: string, record: RuntimeDocumentRecord) {
+  const state = Array.from(Y.encodeStateAsUpdate(record.doc));
+  const timestamp = Date.now();
+  const snapshot: DocumentSnapshot = {
+    id: `${roomId}:snapshot:compacted:${timestamp}`,
+    docId: roomId,
+    state,
+    version: record.version,
+    createdAt: timestamp,
+  };
+
+  registerRuntimeSnapshot(roomId, snapshot);
+  appendEvent(createEvent({
+    id: snapshot.id,
+    docId: roomId,
+    type: 'snapshot',
+    userId: 'system',
+    timestamp,
+    source: 'system',
+    payload: {
+      snapshotId: snapshot.id,
+      version: snapshot.version,
+      bytes: state.length,
+      state,
+      reason: 'update compaction',
+    },
+  }));
+
+  return snapshot;
+}
+
+export function compactUpdates(roomId?: string) {
+  const targetIds = roomId ? [roomId] : Array.from(documents.keys());
+  const results: Array<{ roomId: string; before: number; after: number; snapshotId?: string }> = [];
+
+  for (const targetId of targetIds) {
+    const record = documents.get(targetId);
+    if (!record || record.updates.length === 0) continue;
+
+    const before = record.updates.reduce((total, item) => total + item.update.length, 0);
+    const merged = Array.from(Y.mergeUpdates(record.updates.map((item) => Uint8Array.from(item.update))));
+    const snapshot = before > MAX_UPDATE_SIZE ? createCompactionSnapshot(targetId, record) : null;
+    const timestamp = Date.now();
+
+    record.updates = [{
+      id: `${targetId}:update:compacted:${record.version}:${timestamp}`,
+      docId: targetId,
+      version: record.version,
+      update: merged,
+      timestamp,
+      metadata: {
+        bytes: merged.length,
+        compacted: true,
+        previousBytes: before,
+        stateVector: Array.from(Y.encodeStateVector(record.doc)),
+      },
+    }];
+
+    results.push({
+      roomId: targetId,
+      before,
+      after: merged.length,
+      snapshotId: snapshot?.id,
+    });
+  }
+
+  return results;
 }
 
 export function registerRuntimeSnapshot(roomId: string, snapshot: DocumentSnapshot) {
@@ -130,6 +202,10 @@ export function cleanupInactiveRooms(maxIdleMs = 5 * 60 * 1000) {
   }
 
   return removed;
+}
+
+export function cleanupInactiveDocs(timeout = 5 * 60 * 1000) {
+  return cleanupInactiveRooms(timeout);
 }
 
 export function dropRuntimeDocument(roomId: string) {

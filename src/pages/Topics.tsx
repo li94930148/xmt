@@ -33,6 +33,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { useLoading } from '../hooks/useLoading';
 import { useSocket } from '../hooks/useSocket';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
+import { usePermission } from '../hooks/usePermission';
 import { showRealtimeToast } from '../components/RealtimeToast';
 import { STATUS_COLORS, STATUS_TEXT, WORKFLOW_STEPS } from '../constants';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
@@ -81,8 +82,10 @@ export default function Topics() {
   const styles = useThemeStyles();
   const debouncedSearch = useDebounce(searchTerm, 400);
   const socket = useSocket();
+  const { hasPermission } = usePermission();
   const [newTopicIds, setNewTopicIds] = useState<Set<number>>(new Set());
   const newTopicIdsRef = useRef(new Set<number>());
+  const canCreateTopic = hasPermission('topic:create');
 
   const sortedTopics = useMemo(() => {
     const sorted = [...topics].sort((a, b) => {
@@ -335,13 +338,15 @@ export default function Topics() {
         title="选题管理"
         description="管理所有选题的提报、审核和流转"
         actions={
-          <button
-            onClick={() => navigate('/topics/add')}
-            className={`flex items-center gap-2 px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]`}
-          >
-            <Plus className="w-4 h-4" />
-            <span className="font-medium text-sm">提报选题</span>
-          </button>
+          canCreateTopic ? (
+            <button
+              onClick={() => navigate('/topics/add')}
+              className={`flex items-center gap-2 px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]`}
+            >
+              <Plus className="w-4 h-4" />
+              <span className="font-medium text-sm">提报选题</span>
+            </button>
+          ) : null
         }
       />
 

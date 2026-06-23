@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { getEventStream } from '../collaboration/protocol/eventStream';
 import {
   computeSystemInsight,
@@ -15,17 +16,17 @@ function timelineSources(docId: string) {
   };
 }
 
-router.get('/context/:docId', authenticate, (req, res) => {
+router.get('/context/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   res.json(orchestrateDocContext(docId, timelineSources(docId)));
 });
 
-router.get('/insight/:docId', authenticate, (req, res) => {
+router.get('/insight/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   res.json(computeSystemInsight(docId, timelineSources(docId)));
 });
 
-router.get('/state/:docId', authenticate, (req, res) => {
+router.get('/state/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   res.json({
     docId,

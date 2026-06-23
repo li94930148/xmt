@@ -6,7 +6,8 @@ import { useSocket } from '../hooks/useSocket';
 import { useCollaborativeDocument } from '../collaboration/yjs/useCollaborativeDocument';
 import { explainAutoSave, explainChange } from '../editor/explain/editorExplain';
 import { getEditingRegions, setActiveUsers } from '../editor/collaboration/editorPresence';
-import { editorStateLabel, getEditorState } from '../editor/state/editorStateManager';
+import { editorStateLabel, getEditorState, normalizeEditorState, useEditorEventState, type EditorState } from '../editor/state/editorStateManager';
+import { emitEditorState } from '../editor/state/editorStateEventBus';
 import { recordEditorTelemetry } from '../editor/telemetry/editorTelemetry';
 
 export type ContentEditorMode = 'rich' | 'legacy' | 'readonly';
@@ -23,10 +24,33 @@ export interface ContentEditorProps {
   collaborationKey?: string;
   collaborationEnabled?: boolean;
   immersive?: boolean;
-  persistenceStatus?: 'synced' | 'saving' | 'syncing' | 'error';
+  persistenceStatus?: EditorState;
 }
 
 const noop = () => {};
+const LARGE_DOCUMENT_THRESHOLD = 120000;
+
+function chunkLargeHtml(value: string) {
+  if (value.length <= LARGE_DOCUMENT_THRESHOLD) return value;
+  const blocks = value.split(/(?<=<\/(?:p|div|section|h1|h2|h3|li)>)/i).filter(Boolean);
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const block of blocks) {
+    if (current.length + block.length > 40000 && current) {
+      chunks.push(current);
+      current = '';
+    }
+    current += block;
+  }
+
+  if (current) chunks.push(current);
+  if (chunks.length === 0) return value;
+
+  return chunks.map((chunk, index) => (
+    `<section data-editor-chunk="${index}">${chunk}</section>`
+  )).join('');
+}
 
 export default function ContentEditor({
   value,
@@ -63,14 +87,25 @@ export default function ContentEditor({
     : undefined;
   const shouldWaitForCollaboration =
     mode === 'rich' && collaborationEnabled && !resolvedReadOnly && collaboration.initializing;
-  const editorState = getEditorState({
-    isSyncing: shouldWaitForCollaboration || persistenceStatus === 'syncing',
-    isSaving: persistenceStatus === 'saving',
-    hasConflict: persistenceStatus === 'error',
-    isEditing: !resolvedReadOnly,
-  });
+  const normalizedPersistenceStatus = normalizeEditorState(persistenceStatus);
+  const eventState = useEditorEventState(collaborationKey);
+  const editorState = collaborationKey
+    ? eventState === 'idle' && normalizedPersistenceStatus === 'synced'
+      ? 'synced'
+      : eventState
+    : getEditorState({
+        isSyncing: shouldWaitForCollaboration || persistenceStatus === 'syncing',
+        isSaving: persistenceStatus === 'saving',
+        hasConflict: normalizedPersistenceStatus === 'conflicted',
+        isSynced: normalizedPersistenceStatus === 'synced',
+      });
   const editingRegions = useMemo(() => getEditingRegions(collaboration.users), [collaboration.users]);
+  const visibleEditingRegions = useMemo(() => editingRegions.slice(0, 2), [editingRegions]);
   const primaryHint = editingRegions[0]?.message || explainChange({ origin: 'system' }).message;
+  const previewHtml = useMemo(
+    () => chunkLargeHtml(value || `<p>${placeholder || '正在加载协作文档...'}</p>`),
+    [placeholder, value],
+  );
   const saveHint = persistenceStatus === 'saving'
     ? explainAutoSave('debounce')
     : editorStateLabel(editorState);
@@ -83,15 +118,26 @@ export default function ContentEditor({
   useEffect(() => {
     if (!collaborationKey) return;
     if (persistenceStatus === 'saving') {
+      emitEditorState('writeConsistency:save', collaborationKey, { source: 'ContentEditor' });
       recordEditorTelemetry('save trigger', { docId: collaborationKey, reason: 'debounce' });
     }
-    if (persistenceStatus === 'error') {
+    if (normalizedPersistenceStatus === 'synced') {
+      emitEditorState('writeConsistency:saved', collaborationKey, { source: 'ContentEditor' });
+    }
+    if (persistenceStatus === 'syncing' || shouldWaitForCollaboration) {
+      emitEditorState('yjs:update', collaborationKey, { source: 'ContentEditor' });
+    }
+    if (normalizedPersistenceStatus === 'conflicted') {
+      emitEditorState('conflict:event', collaborationKey, { source: 'ContentEditor' });
       recordEditorTelemetry('conflict event', { docId: collaborationKey, reason: 'save failed' });
     }
-  }, [collaborationKey, persistenceStatus]);
+  }, [collaborationKey, normalizedPersistenceStatus, persistenceStatus, shouldWaitForCollaboration]);
 
   useEffect(() => {
     if (!collaborationKey || editingRegions.length === 0) return;
+    emitEditorState('collaboration:remote-change', collaborationKey, {
+      users: editingRegions.map((region) => region.userName),
+    });
     recordEditorTelemetry('remote edit', {
       docId: collaborationKey,
       users: editingRegions.map((region) => region.userName),
@@ -101,6 +147,7 @@ export default function ContentEditor({
   useEffect(() => {
     if (!collaborationKey || value === previousValueRef.current) return;
     previousValueRef.current = value;
+    emitEditorState('editor:local-change', collaborationKey);
     recordEditorTelemetry('edit start', { docId: collaborationKey });
     if (editStopTimerRef.current) clearTimeout(editStopTimerRef.current);
     editStopTimerRef.current = setTimeout(() => {
@@ -141,7 +188,7 @@ export default function ContentEditor({
             {saveHint}
           </span>
           {editingRegions.length > 0 ? (
-            editingRegions.slice(0, 2).map((region) => (
+            visibleEditingRegions.map((region) => (
               <span key={`${region.userId}-${region.region}`} className="text-gray-500 dark:text-gray-400">
                 {region.message}
               </span>
@@ -158,7 +205,7 @@ export default function ContentEditor({
         >
           <div
             className="prose max-w-none px-4 py-8 sm:px-8 lg:px-16"
-            dangerouslySetInnerHTML={{ __html: value || `<p>${placeholder || '正在加载协作文档...'}</p>` }}
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
           />
         </div>
       ) : (
@@ -170,6 +217,7 @@ export default function ContentEditor({
           placeholder={placeholder}
           collaboration={editorCollaboration}
           immersive={immersive}
+          stateDocId={collaborationKey}
         />
       )}
     </div>

@@ -13,6 +13,9 @@ import { syncToYjs } from '../../collaboration/core/writeConsistency';
 import { TiptapCollaboration } from '../../collaboration/yjs/tiptapCollaboration';
 import type { SocketYjsProvider } from '../../collaboration/yjs/SocketYjsProvider';
 import type { CollaborationUserPresence } from '../../collaboration/core/events';
+import { editorStateLabel, useEditorEventState, type EditorState } from '../../editor/state/editorStateManager';
+import { emitEditorState } from '../../editor/state/editorStateEventBus';
+import { recordRenderFrame } from '../../editor/performance/editorPerformanceMonitor';
 import Toolbar from './Toolbar';
 import BubbleMenuBar from './BubbleMenu';
 
@@ -32,9 +35,8 @@ interface EditorProps {
     connected: boolean;
   };
   immersive?: boolean;
+  stateDocId?: string;
 }
-
-export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export default function Editor({
   value,
@@ -44,10 +46,12 @@ export default function Editor({
   placeholder = '开始编写...',
   collaboration,
   immersive = false,
+  stateDocId,
 }: EditorProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const lastValueRef = useRef(value);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [saveStatus, setSaveStatus] = useState<Extract<EditorState, 'idle' | 'saving' | 'synced' | 'conflicted'>>('idle');
+  const eventSaveStatus = useEditorEventState(stateDocId);
   const [showToc, setShowToc] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [commentState, setCommentState] = useState<{
@@ -72,6 +76,8 @@ export default function Editor({
   }>>([]);
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSelectionUpdateRef = useRef(0);
   const savingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -81,19 +87,22 @@ export default function Editor({
   const performSave = useCallback(() => {
     if (!onSave) return;
     savingRef.current = true;
-    setSaveStatus('saving');
+    if (stateDocId) emitEditorState('writeConsistency:save', stateDocId, { reason: 'manual save' });
+    else setSaveStatus('saving');
     try {
       onSave();
       lastValueRef.current = value;
-      setSaveStatus('saved');
+      if (stateDocId) emitEditorState('writeConsistency:saved', stateDocId, { reason: 'manual save' });
+      else setSaveStatus('synced');
       if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
       savedTimeoutRef.current = setTimeout(() => setSaveStatus('idle'), 2000);
     } catch {
-      setSaveStatus('error');
+      if (stateDocId) emitEditorState('conflict:event', stateDocId, { reason: 'manual save failed' });
+      else setSaveStatus('conflicted');
     } finally {
       savingRef.current = false;
     }
-  }, [onSave, value]);
+  }, [onSave, stateDocId, value]);
 
   const baseExtensions = createEditorExtensions(placeholder);
 
@@ -204,7 +213,8 @@ export default function Editor({
     }
 
     const { from, to } = editor.state.selection;
-    editor.commands.setContent(content || '');
+    const parsedDoc = editor.schema.nodeFromJSON(generateJSON(content || '<p></p>', createEditorExtensions(placeholder)));
+    editor.view.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.content.size, parsedDoc.content));
     lastValueRef.current = value;
 
     try {
@@ -237,6 +247,19 @@ export default function Editor({
     if (!editor) return;
 
     const updateSelection = () => {
+      const now = performance.now();
+      if (now - lastSelectionUpdateRef.current < 50) {
+        if (!selectionThrottleRef.current) {
+          selectionThrottleRef.current = setTimeout(() => {
+            selectionThrottleRef.current = null;
+            lastSelectionUpdateRef.current = performance.now();
+            updateSelection();
+          }, 50);
+        }
+        return;
+      }
+      lastSelectionUpdateRef.current = now;
+      if (stateDocId) recordRenderFrame(stateDocId);
       const selection = window.getSelection();
       if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
         setSelectionRects([]);
@@ -293,8 +316,9 @@ export default function Editor({
       document.removeEventListener('selectionchange', updateSelection);
       editor.off('selectionUpdate', updateSelection);
       editor.off('update', updateSelection);
+      if (selectionThrottleRef.current) clearTimeout(selectionThrottleRef.current);
     };
-  }, [editor]);
+  }, [editor, stateDocId]);
 
   // 隐藏浏览器原生选区高亮（用自定义覆盖层替代）
   useEffect(() => {
@@ -388,10 +412,11 @@ export default function Editor({
     const statusConfig = {
       idle: null,
       saving: { icon: '⟳', color: 'text-blue-500', label: '保存中...', animate: true },
-      saved: { icon: '✓', color: 'text-green-500', label: '已保存', animate: false },
-      error: { icon: '⚠', color: 'text-red-500', label: '保存失败', animate: false },
+      synced: { icon: '✓', color: 'text-green-500', label: editorStateLabel('synced'), animate: false },
+      conflicted: { icon: '⚠', color: 'text-red-500', label: editorStateLabel('conflicted'), animate: false },
     };
-    const config = statusConfig[saveStatus];
+    const status = stateDocId ? eventSaveStatus : saveStatus;
+    const config = statusConfig[status as keyof typeof statusConfig];
     if (!config) return null;
 
     return (

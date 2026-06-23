@@ -7,9 +7,11 @@ import { ChevronLeft, Calendar, MapPin, Camera, User as UserIcon, CheckCircle, C
 import ContentEditor from '../components/ContentEditor';
 import { getCollaborationRoomId } from '../collaboration/core/events';
 import { cancelDatabaseSync, syncToDatabase } from '../collaboration/core/writeConsistency';
-import { getTimelineView } from '../editor/timeline/unifiedContentTimeline';
+import { getTimelineView, recordTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
+import { setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 
 interface ShootingDetailData extends ShootingType {
   production: {
@@ -42,8 +44,9 @@ export default function ShootingDetail() {
   // 剧本编辑状态
   const [scriptContent, setScriptContent] = useState('');
   const [showSidebar, setShowSidebar] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error'>('synced');
   const lastAutoSavedScriptRef = useRef('');
+  const activeDocId = shooting ? getCollaborationRoomId('shooting', shooting.id) : undefined;
+  const syncStatus = useEditorEventState(activeDocId);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -51,12 +54,15 @@ export default function ShootingDetail() {
       try {
         const result = await getShootingById(parseInt(id!));
         setShooting(result);
+        setCurrentContentDocument(
+          getCollaborationRoomId('shooting', result.id),
+          result.topic_title || `成片 ${result.id}`,
+        );
 
         // 初始化剧本内容：优先使用本地编辑版，其次使用创作管理审核通过的内容
         const content = result.script_content || result.production?.content || result.production?.content_markdown || '';
         setScriptContent(content);
         lastAutoSavedScriptRef.current = content;
-        setSyncStatus('synced');
       } catch (error) {
         appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
       } finally {
@@ -76,7 +82,6 @@ export default function ShootingDetail() {
       content: scriptContent,
       previousContent: lastAutoSavedScriptRef.current,
       persist: (content) => updateShooting(shooting.id, { script_content: content }).then(() => undefined),
-      onStatusChange: setSyncStatus,
       onSynced: (content) => {
         lastAutoSavedScriptRef.current = content;
       },
@@ -156,6 +161,24 @@ export default function ShootingDetail() {
     });
   }, [shooting]);
 
+  useEffect(() => {
+    if (!shooting?.production) return;
+
+    recordTimelineEvent({
+      id: `shooting:${shooting.id}:production-version:${shooting.production.id}`,
+      docId: getCollaborationRoomId('shooting', shooting.id),
+      timestamp: new Date(shooting.updated_at || shooting.created_at).getTime(),
+      type: 'version',
+      source: 'version',
+      userId: shooting.production.operator_name,
+      payload: {
+        version: shooting.production.version,
+        status: shooting.production.status,
+        label: '关联创作版本',
+      },
+    });
+  }, [shooting]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -200,8 +223,8 @@ export default function ShootingDetail() {
               {hasLocalScriptEdit && (
                 <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-400">本地编辑版</span>
               )}
-              <span className={`text-xs ${syncStatus === 'error' ? 'text-red-400' : syncStatus === 'saving' ? 'text-blue-400' : styles.textMuted}`}>
-                {syncStatus === 'saving' ? '正在保存...' : syncStatus === 'error' ? '同步失败' : '已同步'}
+              <span className={`text-xs ${syncStatus === 'conflicted' ? 'text-red-400' : syncStatus === 'saving' ? 'text-blue-400' : styles.textMuted}`}>
+                {editorStateLabel(syncStatus)}
               </span>
               <span className={`text-xs ${styles.textMuted}`}>时间轴 {timelineView.timeline.length} 个节点</span>
             </div>
@@ -266,7 +289,7 @@ export default function ShootingDetail() {
             onChange={setScriptContent}
             mode="rich"
             collaborationKey={getCollaborationRoomId('shooting', shooting.id)}
-            persistenceStatus={syncStatus === 'error' ? 'error' : syncStatus === 'saving' ? 'saving' : 'synced'}
+            persistenceStatus={syncStatus}
             immersive
             className="h-full"
             placeholder="开始编写剧本..."

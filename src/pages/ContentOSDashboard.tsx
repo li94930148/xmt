@@ -1,13 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Activity, BrainCircuit, Clock, RefreshCw, Sparkles, Users } from 'lucide-react';
-import {
-  getContentOSContext,
-  getContentOSInsight,
-} from '../api';
-import type { ContentOSContext, ContentOSInsight } from '../content/orchestrator/types';
-import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
+import { displayDocId } from '../utils/docIdDisplay';
+import { useContentOSContext } from '../content/orchestrator/useContentOSContext';
+import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import ContentDocumentPicker from '../components/ContentDocumentPicker';
+import { editorStateLabel } from '../editor/state/editorStateManager';
 
 function stateLabel(state?: string) {
   const labels: Record<string, string> = {
@@ -15,17 +13,6 @@ function stateLabel(state?: string) {
     editing: '编辑中',
     stabilizing: '收敛中',
     finalized: '已定稿',
-  };
-  return labels[state || ''] || '-';
-}
-
-function uxStateLabel(state?: string) {
-  const labels: Record<string, string> = {
-    idle: '空闲',
-    editing: '编辑中',
-    syncing: '同步中',
-    saving: '保存中',
-    conflicted: '存在冲突',
   };
   return labels[state || ''] || '-';
 }
@@ -66,40 +53,46 @@ function formatTime(timestamp: number) {
 
 export default function ContentOSDashboard() {
   const styles = useThemeStyles();
-  const appStore = useAppStore();
-  const [docId, setDocId] = useState('创作:1');
-  const [activeDocId, setActiveDocId] = useState('production:1');
-  const [context, setContext] = useState<ContentOSContext | null>(null);
-  const [insight, setInsight] = useState<ContentOSInsight | null>(null);
-  const [loading, setLoading] = useState(false);
+  const initialDocument = getCurrentContentDocument();
+  const [docId, setDocId] = useState(initialDocument.label);
+  const [activeDocId, setActiveDocId] = useState(initialDocument.docId);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const context = useContentOSContext(activeDocId, refreshKey);
+  const insight = useMemo(() => {
+    const quality = context.intelligence.quality;
+    const topSuggestion = context.generation.suggestions[0]?.message || '继续沉淀内容时间轴后再生成更细建议。';
 
-  const loadData = async (targetDocId = activeDocId) => {
-    const normalizedDocId = normalizeDocId(targetDocId);
-    if (!normalizedDocId) return;
-    setLoading(true);
+    return {
+      headline: `${context.generation.title.title}，质量评分 ${quality.score}`,
+      keyInsights: [
+        context.intelligence.evolution.evolutionSummary,
+        context.intelligence.stability.reason,
+        context.intelligence.impact.length > 0
+          ? `当前最高影响用户为 ${context.intelligence.impact[0].userId}。`
+          : '暂无明确用户影响数据。',
+      ],
+      recommendedActions: [
+        topSuggestion,
+        ...context.generation.structure.logicOptimizationSuggestions.slice(0, 2),
+      ],
+    };
+  }, [context]);
 
-    try {
-      const [contextResult, insightResult] = await Promise.all([
-        getContentOSContext(normalizedDocId),
-        getContentOSInsight(normalizedDocId),
-      ]);
-      setContext(contextResult);
-      setInsight(insightResult);
-      setActiveDocId(normalizedDocId);
-    } catch (error) {
-      appStore.addNotification({
-        title: '内容操作系统加载失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
+  const loadData = (targetDocId = activeDocId) => {
+    const resolved = resolveContentDocument(targetDocId);
+    if (!resolved) return;
+    const current = setCurrentContentDocument(resolved.docId, resolved.title);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
   };
 
-  useEffect(() => {
-    void loadData(activeDocId);
-  }, []);
+  const pickDocument = (pickedDocId: string, pickedTitle: string) => {
+    const current = setCurrentContentDocument(pickedDocId, pickedTitle);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
+  };
 
   return (
     <div className="space-y-5">
@@ -113,18 +106,17 @@ export default function ContentOSDashboard() {
             </h1>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
-            <input
+            <ContentDocumentPicker
               value={docId}
-              onChange={(event) => setDocId(event.target.value)}
+              onChange={setDocId}
+              onPick={pickDocument}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder={docIdPlaceholder()}
             />
             <button
-              onClick={() => void loadData(docId)}
-              disabled={loading}
+              onClick={() => loadData(docId)}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className="h-4 w-4" />
               调度
             </button>
           </div>
@@ -133,10 +125,10 @@ export default function ContentOSDashboard() {
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         {[
-          { label: '系统状态', value: stateLabel(context?.state), icon: Activity },
-          { label: '编辑状态', value: uxStateLabel(context?.uxState), icon: Clock },
-          { label: '协作人数', value: context?.presence.activeUserCount ?? 0, icon: Users },
-          { label: '质量评分', value: context?.intelligence.quality.score ?? 0, icon: Sparkles },
+          { label: '系统状态', value: stateLabel(context.state), icon: Activity },
+          { label: '编辑状态', value: editorStateLabel(context.uxState), icon: Clock },
+          { label: '协作人数', value: context.presence.activeUserCount, icon: Users },
+          { label: '质量评分', value: context.intelligence.quality.score, icon: Sparkles },
         ].map((item) => {
           const Icon = item.icon;
           return (
@@ -157,9 +149,9 @@ export default function ContentOSDashboard() {
           <p className={`mt-1 text-xs ${styles.textMuted}`}>{displayDocId(activeDocId)}</p>
         </div>
         <div className="space-y-4 p-5">
-          <p className={`text-lg font-semibold ${styles.textPrimary}`}>{insight?.headline || '暂无洞察'}</p>
+          <p className={`text-lg font-semibold ${styles.textPrimary}`}>{insight.headline || '暂无洞察'}</p>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {(insight?.keyInsights || []).map((item) => (
+            {insight.keyInsights.map((item) => (
               <p key={item} className={`rounded-xl ${styles.bgTertiary} p-4 text-sm ${styles.textSecondary}`}>
                 {item}
               </p>
@@ -174,7 +166,7 @@ export default function ContentOSDashboard() {
             <h2 className={`text-base font-semibold ${styles.textPrimary}`}>智能生成建议</h2>
           </div>
           <div className="space-y-3 p-5">
-            {(context?.generation.suggestions || []).slice(0, 5).map((suggestion) => (
+            {context.generation.suggestions.slice(0, 5).map((suggestion) => (
               <div key={`${suggestion.type}-${suggestion.message}`} className={`rounded-xl ${styles.bgTertiary} p-4`}>
                 <p className={`text-sm font-medium ${styles.textPrimary}`}>{suggestionTypeLabel(suggestion.type)}</p>
                 <p className={`mt-2 text-sm ${styles.textSecondary}`}>{suggestion.message}</p>
@@ -189,7 +181,7 @@ export default function ContentOSDashboard() {
           </div>
           <div className="max-h-96 overflow-y-auto p-5">
             <div className="space-y-3">
-              {(context?.timeline.events || []).slice(-8).reverse().map((event) => (
+              {context.timeline.events.slice(-8).reverse().map((event) => (
                 <div key={event.id} className={`rounded-xl ${styles.bgTertiary} p-4`}>
                   <div className="flex items-center justify-between gap-3">
                     <span className={`text-sm font-medium ${styles.textPrimary}`}>{timelineTypeLabel(event.type)}</span>
@@ -198,7 +190,7 @@ export default function ContentOSDashboard() {
                   <p className={`mt-2 text-xs ${styles.textMuted}`}>{timelineSourceLabel(event.source)}</p>
                 </div>
               ))}
-              {(!context || context.timeline.events.length === 0) && (
+              {context.timeline.events.length === 0 && (
                 <p className={`text-sm ${styles.textMuted}`}>暂无时间轴节点</p>
               )}
             </div>
@@ -211,7 +203,7 @@ export default function ContentOSDashboard() {
           <h2 className={`text-base font-semibold ${styles.textPrimary}`}>推荐动作</h2>
         </div>
         <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-3">
-          {(insight?.recommendedActions || []).map((action) => (
+          {insight.recommendedActions.map((action) => (
             <p key={action} className={`rounded-xl ${styles.bgTertiary} p-4 text-sm ${styles.textSecondary}`}>
               {action}
             </p>

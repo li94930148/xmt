@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { getTimelineEvents } from '../collaboration/timeline/collaborationTimeline';
 import {
   generateDiffSequence,
@@ -13,7 +14,7 @@ import {
 
 const router = express.Router();
 
-router.get('/timeline/:docId', authenticate, (req, res) => {
+router.get('/timeline/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   res.json({
     docId,
@@ -30,7 +31,7 @@ router.get('/timeline/:docId', authenticate, (req, res) => {
   });
 });
 
-router.get('/replay/:docId', authenticate, (req, res) => {
+router.get('/replay/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   const from = req.query.from ? Number(req.query.from) : undefined;
   const to = req.query.to ? Number(req.query.to) : undefined;
@@ -43,7 +44,7 @@ router.get('/replay/:docId', authenticate, (req, res) => {
   });
 });
 
-router.get('/stats/:docId', authenticate, (req, res) => {
+router.get('/stats/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
   res.json({
     stats: getDocStats(docId),

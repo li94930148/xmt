@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -9,38 +9,35 @@ import {
   RefreshCw,
   Users,
 } from 'lucide-react';
-import {
-  getCollaborationExplanation,
-  getCollaborationNarrative,
-  getCollaborationReplay,
-  getCollaborationStats,
-  getCollaborationTimeline,
-  type CollaborationExplanation,
-  type CollaborationNarrativeItem,
-  type CollaborationSnapshotSummary,
-  type CollaborationStats,
-  type CollaborationTimelineEvent,
-  type UserContribution,
-} from '../api';
-import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
+import { displayDocId } from '../utils/docIdDisplay';
+import { useContentOSContext } from '../content/orchestrator/useContentOSContext';
+import type { UnifiedTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
+import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import ContentDocumentPicker from '../components/ContentDocumentPicker';
 
 function formatTime(timestamp?: number | null) {
   if (!timestamp) return '-';
   return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
 }
 
-function eventColor(type: CollaborationTimelineEvent['type']) {
-  const colors: Record<CollaborationTimelineEvent['type'], string> = {
-    join: 'bg-emerald-500/15 text-emerald-400',
-    leave: 'bg-slate-500/15 text-slate-300',
-    update: 'bg-blue-500/15 text-blue-400',
+function eventColor(type: UnifiedTimelineEvent['type']) {
+  const colors: Record<UnifiedTimelineEvent['type'], string> = {
+    edit: 'bg-blue-500/15 text-blue-400',
+    save: 'bg-emerald-500/15 text-emerald-400',
+    version: 'bg-purple-500/15 text-purple-400',
     snapshot: 'bg-purple-500/15 text-purple-400',
-    lock: 'bg-amber-500/15 text-amber-400',
     conflict: 'bg-red-500/15 text-red-400',
   };
   return colors[type];
+}
+
+function eventTypeLabel(type: UnifiedTimelineEvent['type']) {
+  if (type === 'edit') return '编辑';
+  if (type === 'save') return '保存';
+  if (type === 'version') return '版本';
+  if (type === 'snapshot') return '快照';
+  return '冲突';
 }
 
 function diffSummary(diff?: unknown) {
@@ -52,57 +49,43 @@ function diffSummary(diff?: unknown) {
 
 export default function CollaborationDashboard() {
   const styles = useThemeStyles();
-  const appStore = useAppStore();
-  const [docId, setDocId] = useState('创作:1');
-  const [activeDocId, setActiveDocId] = useState('production:1');
-  const [events, setEvents] = useState<CollaborationTimelineEvent[]>([]);
-  const [snapshots, setSnapshots] = useState<CollaborationSnapshotSummary[]>([]);
-  const [stats, setStats] = useState<CollaborationStats | null>(null);
-  const [contributions, setContributions] = useState<UserContribution[]>([]);
-  const [explanation, setExplanation] = useState<CollaborationExplanation | null>(null);
-  const [narrative, setNarrative] = useState<CollaborationNarrativeItem[]>([]);
-  const [diffCount, setDiffCount] = useState(0);
+  const initialDocument = getCurrentContentDocument();
+  const [docId, setDocId] = useState(initialDocument.label);
+  const [activeDocId, setActiveDocId] = useState(initialDocument.docId);
   const [humanReadableMode, setHumanReadableMode] = useState(false);
-  const [loading, setLoading] = useState(false);
-
+  const [refreshKey, setRefreshKey] = useState(0);
+  const context = useContentOSContext(activeDocId, refreshKey);
+  const events = context.timeline.events;
   const conflicts = useMemo(() => events.filter((event) => event.type === 'conflict'), [events]);
+  const snapshots = useMemo(() => events.filter((event) => event.type === 'snapshot'), [events]);
+  const totalEdits = useMemo(() => events.filter((event) => event.type === 'edit').length, [events]);
+  const diffCount = events.length;
+  const narrative = useMemo(
+    () => events.map((event) => ({
+      id: event.id,
+      text: `${event.userId || String(event.payload?.operatorName || event.payload?.userId || '系统')} 产生了${eventTypeLabel(event.type)}节点`,
+      timestamp: event.timestamp,
+      userId: event.userId || String(event.payload?.operatorName || event.payload?.userId || '系统'),
+      type: event.type,
+    })),
+    [events],
+  );
 
-  const loadData = async (targetDocId = activeDocId) => {
-    const normalizedDocId = normalizeDocId(targetDocId);
-    if (!normalizedDocId) return;
-    setLoading(true);
-
-    try {
-      const [timelineResult, statsResult, replayResult, explanationResult, narrativeResult] = await Promise.all([
-        getCollaborationTimeline(normalizedDocId),
-        getCollaborationStats(normalizedDocId),
-        getCollaborationReplay(normalizedDocId),
-        getCollaborationExplanation(normalizedDocId),
-        getCollaborationNarrative(normalizedDocId),
-      ]);
-
-      setEvents(timelineResult.events);
-      setSnapshots(timelineResult.snapshots);
-      setStats(statsResult.stats);
-      setContributions(statsResult.contributions);
-      setExplanation(explanationResult.explanation);
-      setNarrative(narrativeResult.narrative);
-      setDiffCount(replayResult.diffSequence.length);
-      setActiveDocId(normalizedDocId);
-    } catch (error) {
-      appStore.addNotification({
-        title: '协作控制台加载失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
+  const loadData = (targetDocId = activeDocId) => {
+    const resolved = resolveContentDocument(targetDocId);
+    if (!resolved) return;
+    const current = setCurrentContentDocument(resolved.docId, resolved.title);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
   };
 
-  useEffect(() => {
-    void loadData(activeDocId);
-  }, []);
+  const pickDocument = (pickedDocId: string, pickedTitle: string) => {
+    const current = setCurrentContentDocument(pickedDocId, pickedTitle);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
+  };
 
   return (
     <div className="space-y-5">
@@ -113,18 +96,17 @@ export default function CollaborationDashboard() {
             <h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>协作控制台</h1>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
-            <input
+            <ContentDocumentPicker
               value={docId}
-              onChange={(event) => setDocId(event.target.value)}
+              onChange={setDocId}
+              onPick={pickDocument}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder={docIdPlaceholder()}
             />
             <button
-              onClick={() => void loadData(docId)}
-              disabled={loading}
+              onClick={() => loadData(docId)}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className="h-4 w-4" />
               刷新
             </button>
           </div>
@@ -148,9 +130,9 @@ export default function CollaborationDashboard() {
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: '编辑次数', value: stats?.totalEdits ?? 0, icon: Activity },
-          { label: '在线用户', value: stats?.activeUsers ?? 0, icon: Users },
-          { label: '冲突次数', value: stats?.conflictCount ?? 0, icon: AlertTriangle },
+          { label: '编辑次数', value: totalEdits, icon: Activity },
+          { label: '在线用户', value: context.presence.activeUserCount, icon: Users },
+          { label: '冲突次数', value: conflicts.length, icon: AlertTriangle },
           { label: '差异序列', value: diffCount, icon: GitBranch },
         ].map((item) => {
           const Icon = item.icon;
@@ -195,7 +177,7 @@ export default function CollaborationDashboard() {
                         </span>
                       </div>
                       <p className={`mt-2 text-xs ${styles.textMuted}`}>
-                        {item.userId} · {item.type === 'join' ? '加入' : item.type === 'leave' ? '离开' : item.type === 'update' ? '更新' : item.type === 'snapshot' ? '快照' : item.type === 'lock' ? '锁定' : item.type === 'conflict' ? '冲突' : '协作事件'}
+                        {item.userId} · {eventTypeLabel(item.type)}
                       </p>
                     </div>
                   ))}
@@ -212,7 +194,7 @@ export default function CollaborationDashboard() {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
                         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${eventColor(event.type)}`}>
-                        {event.type === 'join' ? '加入' : event.type === 'leave' ? '离开' : event.type === 'update' ? '更新' : event.type === 'snapshot' ? '快照' : event.type === 'lock' ? '锁定' : '冲突'}
+                          {eventTypeLabel(event.type)}
                         </span>
                         <span className={`text-sm font-medium ${styles.textPrimary}`}>{event.userId}</span>
                       </div>
@@ -221,10 +203,10 @@ export default function CollaborationDashboard() {
                         {formatTime(event.timestamp)}
                       </span>
                     </div>
-                    {event.snapshotId && <p className="mt-2 truncate text-xs text-purple-400">{event.snapshotId}</p>}
-                    {event.diff && (
+                    {event.type === 'snapshot' && <p className="mt-2 truncate text-xs text-purple-400">{event.id}</p>}
+                    {event.payload && (
                       <p className={`mt-3 rounded-lg p-3 text-xs ${styles.bgSecondary} ${styles.textSecondary}`}>
-                        {diffSummary(event.diff)}
+                        {diffSummary(event.payload)}
                       </p>
                     )}
                   </div>
@@ -242,19 +224,19 @@ export default function CollaborationDashboard() {
               </div>
               <div className="space-y-4 p-5">
                 <p className={`text-sm leading-6 ${styles.textSecondary}`}>
-                  {explanation?.summary ?? '暂无协作解释摘要'}
+                  {events.length > 0 ? `当前统一上下文包含 ${events.length} 个时间轴节点。` : '暂无协作解释摘要'}
                 </p>
                 <div className={`rounded-xl ${styles.bgTertiary} p-4 text-sm ${styles.textSecondary}`}>
-                  <p>最活跃用户：{explanation?.highlights.mostActiveUser ?? '-'}</p>
-                  <p className="mt-2">热点区域：{explanation?.highlights.mostEditedSection ?? '-'}</p>
+                  <p>最活跃用户：{context.intelligence.impact[0]?.userId ?? '-'}</p>
+                  <p className="mt-2">热点区域：{context.intelligence.stability.reason ?? '-'}</p>
                 </div>
                 <div>
                   <p className={`mb-2 text-xs tracking-[0.18em] ${styles.textMuted}`}>冲突热点</p>
-                  {explanation?.highlights.conflictHotspots.length ? (
+                  {conflicts.length ? (
                     <div className="flex flex-wrap gap-2">
-                      {explanation.highlights.conflictHotspots.map((hotspot) => (
-                        <span key={hotspot} className="rounded-full bg-red-500/10 px-3 py-1 text-xs text-red-300">
-                          {hotspot}
+                      {conflicts.map((event) => (
+                        <span key={event.id} className="rounded-full bg-red-500/10 px-3 py-1 text-xs text-red-300">
+                          {event.payload?.label ? String(event.payload.label) : event.id}
                         </span>
                       ))}
                     </div>
@@ -272,18 +254,18 @@ export default function CollaborationDashboard() {
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>用户贡献</h2>
             </div>
             <div className="p-5">
-              {contributions.length === 0 ? (
+              {context.intelligence.impact.length === 0 ? (
                 <p className={`text-sm ${styles.textMuted}`}>暂无贡献数据</p>
               ) : (
                 <div className="space-y-3">
-                  {contributions.map((item) => (
+                  {context.intelligence.impact.map((item) => (
                     <div key={item.userId}>
                       <div className="mb-1 flex items-center justify-between text-sm">
                         <span className={styles.textPrimary}>{item.userId}</span>
-                        <span className={styles.textMuted}>{Math.round(item.ratio * 100)}%</span>
+                        <span className={styles.textMuted}>{item.impactScore}</span>
                       </div>
                       <div className={`h-2 rounded-full ${styles.bgTertiary}`}>
-                        <div className="h-2 rounded-full bg-blue-500" style={{ width: `${item.ratio * 100}%` }} />
+                        <div className="h-2 rounded-full bg-blue-500" style={{ width: `${Math.min(item.impactScore * 10, 100)}%` }} />
                       </div>
                     </div>
                   ))}
@@ -305,7 +287,7 @@ export default function CollaborationDashboard() {
                     <div key={snapshot.id} className={`rounded-lg ${styles.bgTertiary} p-3`}>
                       <p className={`truncate text-xs font-medium ${styles.textPrimary}`}>{snapshot.id}</p>
                       <p className={`mt-1 text-xs ${styles.textMuted}`}>
-                        第 {snapshot.version} 版 · {snapshot.bytes} 字节 · {formatTime(snapshot.createdAt)}
+                        统一时间轴快照 · {formatTime(snapshot.timestamp)}
                       </p>
                     </div>
                   ))}

@@ -1,5 +1,5 @@
 import { getActiveUsers } from '../../editor/collaboration/editorPresence';
-import { getEditorState } from '../../editor/state/editorStateManager';
+import { getEditorStateForDoc } from '../../editor/state/editorStateManager';
 import {
   getTimelineView,
   type BuildUnifiedTimelineSources,
@@ -56,12 +56,7 @@ export function orchestrateDocContext(docId: string, sources: BuildUnifiedTimeli
   const weakSections = detectWeakSections(docId, normalizedSources);
   const activeUsers = getActiveUsers(docId);
   const state = resolveSystemState(docId, normalizedSources);
-  const uxState = getEditorState({
-    hasConflict: timelineView.timeline.some((event) => event.type === 'conflict'),
-    isSaving: timelineView.timeline[timelineView.timeline.length - 1]?.type === 'save',
-    isEditing: state === 'editing',
-    isSyncing: activeUsers.some((user) => user.typing),
-  });
+  const uxState = getEditorStateForDoc(docId);
 
   return {
     docId,

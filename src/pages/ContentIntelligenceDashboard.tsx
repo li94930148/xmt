@@ -1,16 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Activity, BarChart3, Brain, RefreshCw, Users } from 'lucide-react';
-import {
-  getContentEvolution,
-  getContentImpact,
-  getContentQuality,
-  type CollaborationImpactResponse,
-  type ContentEvolutionResponse,
-  type ContentQualityResponse,
-} from '../api';
-import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
+import { displayDocId } from '../utils/docIdDisplay';
+import { useContentOSContext } from '../content/orchestrator/useContentOSContext';
+import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import ContentDocumentPicker from '../components/ContentDocumentPicker';
 
 function phaseLabel(phase: string) {
   const labels: Record<string, string> = {
@@ -30,43 +24,28 @@ function trendLabel(trend?: string) {
 
 export default function ContentIntelligenceDashboard() {
   const styles = useThemeStyles();
-  const appStore = useAppStore();
-  const [docId, setDocId] = useState('创作:1');
-  const [activeDocId, setActiveDocId] = useState('production:1');
-  const [evolution, setEvolution] = useState<ContentEvolutionResponse | null>(null);
-  const [impact, setImpact] = useState<CollaborationImpactResponse | null>(null);
-  const [quality, setQuality] = useState<ContentQualityResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const initialDocument = getCurrentContentDocument();
+  const [docId, setDocId] = useState(initialDocument.label);
+  const [activeDocId, setActiveDocId] = useState(initialDocument.docId);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const context = useContentOSContext(activeDocId, refreshKey);
+  const { evolution, stability, impact, quality } = context.intelligence;
 
-  const loadData = async (targetDocId = activeDocId) => {
-    const normalizedDocId = normalizeDocId(targetDocId);
-    if (!normalizedDocId) return;
-    setLoading(true);
-
-    try {
-      const [evolutionResult, impactResult, qualityResult] = await Promise.all([
-        getContentEvolution(normalizedDocId),
-        getContentImpact(normalizedDocId),
-        getContentQuality(normalizedDocId),
-      ]);
-      setEvolution(evolutionResult);
-      setImpact(impactResult);
-      setQuality(qualityResult);
-      setActiveDocId(normalizedDocId);
-    } catch (error) {
-      appStore.addNotification({
-        title: '内容智能分析失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
+  const loadData = (targetDocId = activeDocId) => {
+    const resolved = resolveContentDocument(targetDocId);
+    if (!resolved) return;
+    const current = setCurrentContentDocument(resolved.docId, resolved.title);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
   };
 
-  useEffect(() => {
-    void loadData(activeDocId);
-  }, []);
+  const pickDocument = (pickedDocId: string, pickedTitle: string) => {
+    const current = setCurrentContentDocument(pickedDocId, pickedTitle);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
+  };
 
   return (
     <div className="space-y-5">
@@ -80,18 +59,17 @@ export default function ContentIntelligenceDashboard() {
             </h1>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
-            <input
+            <ContentDocumentPicker
               value={docId}
-              onChange={(event) => setDocId(event.target.value)}
+              onChange={setDocId}
+              onPick={pickDocument}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder={docIdPlaceholder()}
             />
             <button
-              onClick={() => void loadData(docId)}
-              disabled={loading}
+              onClick={() => loadData(docId)}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className="h-4 w-4" />
               分析
             </button>
           </div>
@@ -100,9 +78,9 @@ export default function ContentIntelligenceDashboard() {
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         {[
-          { label: '质量评分', value: quality?.quality.score ?? 0, icon: BarChart3 },
-          { label: '参与用户', value: impact?.users.length ?? 0, icon: Users },
-          { label: '演化阶段', value: evolution?.evolution.phases.length ?? 0, icon: Activity },
+          { label: '质量评分', value: quality.score, icon: BarChart3 },
+          { label: '参与用户', value: impact.length, icon: Users },
+          { label: '演化阶段', value: evolution.phases.length, icon: Activity },
         ].map((item) => {
           const Icon = item.icon;
           return (
@@ -125,10 +103,10 @@ export default function ContentIntelligenceDashboard() {
           </div>
           <div className="space-y-4 p-5">
             <p className={`text-sm leading-6 ${styles.textSecondary}`}>
-              {evolution?.evolution.evolutionSummary || '暂无演化数据'}
+              {evolution.evolutionSummary || '暂无演化数据'}
             </p>
             <div className="space-y-3">
-              {evolution?.evolution.phases.map((phase, index) => (
+              {evolution.phases.map((phase, index) => (
                 <div key={`${phase.phase}-${phase.start}-${index}`} className={`rounded-xl ${styles.bgTertiary} p-4`}>
                   <div className="flex items-center justify-between gap-3">
                     <span className={`text-sm font-medium ${styles.textPrimary}`}>{phaseLabel(phase.phase)}</span>
@@ -140,7 +118,7 @@ export default function ContentIntelligenceDashboard() {
               ))}
             </div>
             <div className={`rounded-xl ${styles.bgTertiary} p-4 text-sm ${styles.textSecondary}`}>
-              {evolution?.stability.reason || '暂无稳定性判断'}
+              {stability.reason || '暂无稳定性判断'}
             </div>
           </div>
         </section>
@@ -153,11 +131,11 @@ export default function ContentIntelligenceDashboard() {
             <div className={`rounded-xl ${styles.bgTertiary} p-5`}>
               <p className={`text-sm ${styles.textMuted}`}>趋势</p>
               <p className={`mt-2 text-2xl font-semibold ${styles.textPrimary}`}>
-                {trendLabel(quality?.quality.trend)}
+                {trendLabel(quality.trend)}
               </p>
             </div>
             <div className="space-y-2">
-              {(quality?.quality.reasons || []).map((reason) => (
+              {quality.reasons.map((reason) => (
                 <p key={reason} className={`rounded-lg ${styles.bgTertiary} px-3 py-2 text-sm ${styles.textSecondary}`}>
                   {reason}
                 </p>
@@ -184,7 +162,7 @@ export default function ContentIntelligenceDashboard() {
               </tr>
             </thead>
             <tbody>
-              {(impact?.users || []).map((user) => (
+              {impact.map((user) => (
                 <tr key={user.userId} className={`border-b ${styles.border}`}>
                   <td className={`py-3 ${styles.textPrimary}`}>{user.userId}</td>
                   <td className={`py-3 ${styles.textSecondary}`}>{user.impactScore}</td>
@@ -194,7 +172,7 @@ export default function ContentIntelligenceDashboard() {
                   <td className={`py-3 ${styles.textSecondary}`}>{user.summary}</td>
                 </tr>
               ))}
-              {(!impact || impact.users.length === 0) && (
+              {impact.length === 0 && (
                 <tr>
                   <td colSpan={6} className={`py-6 text-center ${styles.textMuted}`}>暂无用户影响数据</td>
                 </tr>

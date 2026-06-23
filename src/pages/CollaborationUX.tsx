@@ -1,55 +1,72 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AlertTriangle, BookOpen, Flame, RefreshCw, Sparkles, User } from 'lucide-react';
-import {
-  getCollaborationExplanation,
-  getCollaborationNarrative,
-  type CollaborationExplanation,
-  type CollaborationNarrativeItem,
-} from '../api';
-import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
+import { displayDocId } from '../utils/docIdDisplay';
+import { useContentOSContext } from '../content/orchestrator/useContentOSContext';
+import type { UnifiedTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
+import { editorStateLabel } from '../editor/state/editorStateManager';
+import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import ContentDocumentPicker from '../components/ContentDocumentPicker';
 
 function formatTime(timestamp?: number | null) {
   if (!timestamp) return '-';
   return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
 }
 
+function eventText(event: UnifiedTimelineEvent) {
+  const actor = event.userId || String(event.payload?.operatorName || event.payload?.userId || '系统');
+  if (event.type === 'edit') return `${actor} 更新了内容`;
+  if (event.type === 'save') return `${actor} 触发了自动保存`;
+  if (event.type === 'version') return `${actor} 形成了版本节点`;
+  if (event.type === 'snapshot') return `${actor} 创建了恢复快照`;
+  return `${actor} 处理了一次协作冲突`;
+}
+
+function eventTypeLabel(type: UnifiedTimelineEvent['type']) {
+  if (type === 'edit') return '编辑';
+  if (type === 'save') return '保存';
+  if (type === 'version') return '版本';
+  if (type === 'snapshot') return '快照';
+  return '冲突';
+}
+
 export default function CollaborationUX() {
   const styles = useThemeStyles();
-  const appStore = useAppStore();
-  const [docId, setDocId] = useState('创作:1');
-  const [activeDocId, setActiveDocId] = useState('production:1');
-  const [explanation, setExplanation] = useState<CollaborationExplanation | null>(null);
-  const [narrative, setNarrative] = useState<CollaborationNarrativeItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const initialDocument = getCurrentContentDocument();
+  const [docId, setDocId] = useState(initialDocument.label);
+  const [activeDocId, setActiveDocId] = useState(initialDocument.docId);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const context = useContentOSContext(activeDocId, refreshKey);
+  const narrative = useMemo(
+    () => context.timeline.events.map((event) => ({
+      id: event.id,
+      text: eventText(event),
+      timestamp: event.timestamp,
+      userId: event.userId || String(event.payload?.operatorName || event.payload?.userId || '系统'),
+      type: event.type,
+    })),
+    [context.timeline.events],
+  );
+  const mostActiveUser = context.intelligence.impact[0]?.userId || context.presence.activeUsers[0]?.name || '-';
+  const conflictHotspots = context.timeline.events
+    .filter((event) => event.type === 'conflict')
+    .map((event) => String(event.payload?.label || event.id));
 
-  const loadData = async (targetDocId = activeDocId) => {
-    const normalizedDocId = normalizeDocId(targetDocId);
-    if (!normalizedDocId) return;
-    setLoading(true);
-    try {
-      const [explainResult, narrativeResult] = await Promise.all([
-        getCollaborationExplanation(normalizedDocId),
-        getCollaborationNarrative(normalizedDocId),
-      ]);
-      setExplanation(explainResult.explanation);
-      setNarrative(narrativeResult.narrative);
-      setActiveDocId(normalizedDocId);
-    } catch (error) {
-      appStore.addNotification({
-        title: '协作体验层加载失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
+  const loadData = (targetDocId = activeDocId) => {
+    const resolved = resolveContentDocument(targetDocId);
+    if (!resolved) return;
+    const current = setCurrentContentDocument(resolved.docId, resolved.title);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
   };
 
-  useEffect(() => {
-    void loadData(activeDocId);
-  }, []);
+  const pickDocument = (pickedDocId: string, pickedTitle: string) => {
+    const current = setCurrentContentDocument(pickedDocId, pickedTitle);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
+  };
 
   return (
     <div className="space-y-5">
@@ -60,18 +77,17 @@ export default function CollaborationUX() {
             <h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>协作故事线</h1>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
-            <input
+            <ContentDocumentPicker
               value={docId}
-              onChange={(event) => setDocId(event.target.value)}
+              onChange={setDocId}
+              onPick={pickDocument}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder={docIdPlaceholder()}
             />
             <button
-              onClick={() => void loadData(docId)}
-              disabled={loading}
+              onClick={() => loadData(docId)}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className="h-4 w-4" />
               生成
             </button>
           </div>
@@ -85,7 +101,9 @@ export default function CollaborationUX() {
           <span className={`ml-auto text-xs ${styles.textMuted}`}>{displayDocId(activeDocId)}</span>
         </div>
         <p className={`mt-4 text-sm leading-6 ${styles.textSecondary}`}>
-          {explanation?.summary || '暂无可解释的协作事件。'}
+          {context.timeline.events.length > 0
+            ? `当前文档共有 ${context.timeline.events.length} 个协作与内容演化节点，编辑状态为 ${editorStateLabel(context.uxState)}。`
+            : '暂无可解释的协作事件。'}
         </p>
       </section>
 
@@ -109,7 +127,7 @@ export default function CollaborationUX() {
                       <span className={`text-xs ${styles.textMuted}`}>{formatTime(item.timestamp)}</span>
                     </div>
                     <p className={`mt-2 text-xs ${styles.textMuted}`}>
-                      用户 {item.userId} · {item.type === 'join' ? '加入' : item.type === 'leave' ? '离开' : item.type === 'update' ? '更新' : item.type === 'snapshot' ? '快照' : item.type === 'lock' ? '锁定' : item.type === 'conflict' ? '冲突' : '协作事件'}
+                      用户 {item.userId} · {eventTypeLabel(item.type)}
                     </p>
                   </div>
                 ))}
@@ -125,7 +143,7 @@ export default function CollaborationUX() {
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>最活跃用户</h2>
             </div>
             <p className={`mt-4 text-2xl font-semibold ${styles.textPrimary}`}>
-              {explanation?.highlights.mostActiveUser || '-'}
+              {mostActiveUser}
             </p>
           </section>
 
@@ -135,7 +153,7 @@ export default function CollaborationUX() {
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>热点区域</h2>
             </div>
             <p className={`mt-4 text-sm ${styles.textSecondary}`}>
-              {explanation?.highlights.mostEditedSection || '暂无热点区域'}
+              {context.intelligence.structuralEditors[0]?.summary || context.intelligence.stability.reason || '暂无热点区域'}
             </p>
           </section>
 
@@ -144,9 +162,9 @@ export default function CollaborationUX() {
               <AlertTriangle className="h-5 w-5 text-red-400" />
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>冲突解释</h2>
             </div>
-            {explanation?.highlights.conflictHotspots.length ? (
+            {conflictHotspots.length ? (
               <div className="mt-4 space-y-2">
-                {explanation.highlights.conflictHotspots.map((hotspot) => (
+                {conflictHotspots.map((hotspot) => (
                   <div key={hotspot} className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                     {hotspot}
                   </div>

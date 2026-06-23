@@ -1,18 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { FilePenLine, Lightbulb, RefreshCw, Sparkles } from 'lucide-react';
-import {
-  getGeneratedStructure,
-  getGeneratedSuggestions,
-  getGeneratedSummary,
-  getGeneratedTitle,
-  type GeneratedStructureResponse,
-  type GeneratedSuggestionsResponse,
-  type GeneratedSummaryResponse,
-  type GeneratedTitleResponse,
-} from '../api';
-import { useAppStore } from '../store';
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { displayDocId, docIdPlaceholder, normalizeDocId } from '../utils/docIdDisplay';
+import { displayDocId } from '../utils/docIdDisplay';
+import { useContentOSContext } from '../content/orchestrator/useContentOSContext';
+import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import ContentDocumentPicker from '../components/ContentDocumentPicker';
 
 function priorityClass(priority: string) {
   if (priority === 'high') return 'bg-red-500/10 text-red-400';
@@ -35,46 +27,28 @@ function suggestionTypeLabel(type: string) {
 
 export default function ContentGenerationDashboard() {
   const styles = useThemeStyles();
-  const appStore = useAppStore();
-  const [docId, setDocId] = useState('创作:1');
-  const [activeDocId, setActiveDocId] = useState('production:1');
-  const [summary, setSummary] = useState<GeneratedSummaryResponse | null>(null);
-  const [title, setTitle] = useState<GeneratedTitleResponse | null>(null);
-  const [structure, setStructure] = useState<GeneratedStructureResponse | null>(null);
-  const [suggestions, setSuggestions] = useState<GeneratedSuggestionsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const initialDocument = getCurrentContentDocument();
+  const [docId, setDocId] = useState(initialDocument.label);
+  const [activeDocId, setActiveDocId] = useState(initialDocument.docId);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const context = useContentOSContext(activeDocId, refreshKey);
+  const { summary, title, structure, suggestions, weakSections } = context.generation;
 
-  const loadData = async (targetDocId = activeDocId) => {
-    const normalizedDocId = normalizeDocId(targetDocId);
-    if (!normalizedDocId) return;
-    setLoading(true);
-
-    try {
-      const [summaryResult, titleResult, structureResult, suggestionsResult] = await Promise.all([
-        getGeneratedSummary(normalizedDocId),
-        getGeneratedTitle(normalizedDocId),
-        getGeneratedStructure(normalizedDocId),
-        getGeneratedSuggestions(normalizedDocId),
-      ]);
-      setSummary(summaryResult);
-      setTitle(titleResult);
-      setStructure(structureResult);
-      setSuggestions(suggestionsResult);
-      setActiveDocId(normalizedDocId);
-    } catch (error) {
-      appStore.addNotification({
-        title: '内容生成失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
-    } finally {
-      setLoading(false);
-    }
+  const loadData = (targetDocId = activeDocId) => {
+    const resolved = resolveContentDocument(targetDocId);
+    if (!resolved) return;
+    const current = setCurrentContentDocument(resolved.docId, resolved.title);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
   };
 
-  useEffect(() => {
-    void loadData(activeDocId);
-  }, []);
+  const pickDocument = (pickedDocId: string, pickedTitle: string) => {
+    const current = setCurrentContentDocument(pickedDocId, pickedTitle);
+    setDocId(current.title);
+    setActiveDocId(current.docId);
+    setRefreshKey((value) => value + 1);
+  };
 
   return (
     <div className="space-y-5">
@@ -88,18 +62,17 @@ export default function ContentGenerationDashboard() {
             </h1>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
-            <input
+            <ContentDocumentPicker
               value={docId}
-              onChange={(event) => setDocId(event.target.value)}
+              onChange={setDocId}
+              onPick={pickDocument}
               className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-              placeholder={docIdPlaceholder()}
             />
             <button
-              onClick={() => void loadData(docId)}
-              disabled={loading}
+              onClick={() => loadData(docId)}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className="h-4 w-4" />
               生成
             </button>
           </div>
@@ -114,11 +87,11 @@ export default function ContentGenerationDashboard() {
         <div className="space-y-4 p-5">
           <div className={`rounded-xl ${styles.bgTertiary} p-5`}>
             <p className={`text-xl font-semibold ${styles.textPrimary}`}>
-              {title?.title.title || '暂无标题建议'}
+              {title.title || '暂无标题建议'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {(title?.title.alternatives || []).map((item) => (
+            {title.alternatives.map((item) => (
               <span key={item} className="rounded-full bg-blue-500/10 px-3 py-1 text-xs text-blue-400">
                 {item}
               </span>
@@ -135,17 +108,17 @@ export default function ContentGenerationDashboard() {
           </div>
           <div className="space-y-4 p-5">
             <p className={`text-sm leading-6 ${styles.textSecondary}`}>
-              {summary?.summary.summary || '暂无总结'}
+              {summary.summary || '暂无总结'}
             </p>
             <div className="space-y-2">
-              {(summary?.summary.keyPoints || []).map((point) => (
+              {summary.keyPoints.map((point) => (
                 <p key={point} className={`rounded-lg ${styles.bgTertiary} px-3 py-2 text-sm ${styles.textSecondary}`}>
                   {point}
                 </p>
               ))}
             </div>
             <p className={`rounded-xl ${styles.bgTertiary} p-4 text-sm ${styles.textSecondary}`}>
-              {summary?.summary.evolutionBasedSummary || '暂无演化总结'}
+              {summary.evolutionBasedSummary || '暂无演化总结'}
             </p>
           </div>
         </section>
@@ -159,7 +132,7 @@ export default function ContentGenerationDashboard() {
             <div>
               <p className={`mb-2 text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>推荐章节结构</p>
               <div className="space-y-2">
-                {(structure?.structure.recommendedSections || []).map((section) => (
+                {structure.recommendedSections.map((section) => (
                   <p key={section} className={`rounded-lg ${styles.bgTertiary} px-3 py-2 text-sm ${styles.textSecondary}`}>
                     {section}
                   </p>
@@ -169,7 +142,7 @@ export default function ContentGenerationDashboard() {
             <div>
               <p className={`mb-2 text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>内容重组建议</p>
               <div className="space-y-2">
-                {(structure?.structure.reorganizationSuggestions || []).map((item) => (
+                {structure.reorganizationSuggestions.map((item) => (
                   <p key={item} className={`rounded-lg ${styles.bgTertiary} px-3 py-2 text-sm ${styles.textSecondary}`}>
                     {item}
                   </p>
@@ -186,7 +159,7 @@ export default function ContentGenerationDashboard() {
         </div>
         <div className="grid grid-cols-1 gap-5 p-5 xl:grid-cols-[1fr_0.8fr]">
           <div className="space-y-3">
-            {(suggestions?.suggestions || []).map((item) => (
+            {suggestions.map((item) => (
               <div key={`${item.type}-${item.message}`} className={`rounded-xl ${styles.bgTertiary} p-4`}>
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <span className={`text-sm font-medium ${styles.textPrimary}`}>{suggestionTypeLabel(item.type)}</span>
@@ -198,7 +171,7 @@ export default function ContentGenerationDashboard() {
           </div>
           <div className="space-y-3">
             <p className={`text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>可重写区域</p>
-            {(suggestions?.weakSections || []).map((section) => (
+            {weakSections.map((section) => (
               <div key={section.section} className={`rounded-xl ${styles.bgTertiary} p-4`}>
                 <p className={`text-sm font-medium ${styles.textPrimary}`}>{section.section}</p>
                 <p className={`mt-2 text-sm ${styles.textSecondary}`}>{section.reason}</p>

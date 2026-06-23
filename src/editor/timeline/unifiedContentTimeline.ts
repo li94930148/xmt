@@ -28,6 +28,9 @@ export interface BuildUnifiedTimelineSources {
 
 const timelineRegistry: UnifiedTimelineEvent[] = [];
 const SESSION_GAP_MS = 5 * 60 * 1000;
+const TIMELINE_BATCH_WINDOW_MS = 100;
+const pendingTimelineEvents: UnifiedTimelineEvent[] = [];
+let timelineFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function eventId(prefix: string, docId: string, timestamp: number) {
   return `${docId}:${prefix}:${timestamp}:${Math.random().toString(36).slice(2, 8)}`;
@@ -78,14 +81,62 @@ export function recordTimelineEvent(event: Omit<UnifiedTimelineEvent, 'id'> & { 
     ...event,
     id: event.id || eventId(event.type, event.docId, event.timestamp),
   };
-  timelineRegistry.push(normalized);
-  if (timelineRegistry.length > 1000) {
-    timelineRegistry.splice(0, timelineRegistry.length - 1000);
+  pendingTimelineEvents.push(normalized);
+  if (!timelineFlushTimer) {
+    timelineFlushTimer = setTimeout(flushPendingTimelineEvents, TIMELINE_BATCH_WINDOW_MS);
   }
   return normalized;
 }
 
+function shouldMergeTimelineEvents(previous: UnifiedTimelineEvent, next: UnifiedTimelineEvent) {
+  return previous.docId === next.docId
+    && previous.type === next.type
+    && previous.source === next.source
+    && next.timestamp - previous.timestamp <= TIMELINE_BATCH_WINDOW_MS
+    && (next.type === 'edit' || next.type === 'save');
+}
+
+function mergeTimelineEvents(previous: UnifiedTimelineEvent, next: UnifiedTimelineEvent): UnifiedTimelineEvent {
+  return {
+    ...next,
+    id: previous.id,
+    timestamp: next.timestamp,
+    payload: {
+      ...previous.payload,
+      ...next.payload,
+      bytes: Number(previous.payload?.bytes || 0) + Number(next.payload?.bytes || 0),
+      merged: Number(previous.payload?.merged || 1) + 1,
+    },
+  };
+}
+
+export function flushPendingTimelineEvents() {
+  if (timelineFlushTimer) {
+    clearTimeout(timelineFlushTimer);
+    timelineFlushTimer = null;
+  }
+
+  if (pendingTimelineEvents.length === 0) return;
+
+  const sorted = pendingTimelineEvents.splice(0).sort((a, b) => a.timestamp - b.timestamp);
+
+  for (const event of sorted) {
+    const previous = timelineRegistry[timelineRegistry.length - 1];
+    if (previous && shouldMergeTimelineEvents(previous, event)) {
+      timelineRegistry[timelineRegistry.length - 1] = mergeTimelineEvents(previous, event);
+      continue;
+    }
+
+    timelineRegistry.push(event);
+  }
+
+  if (timelineRegistry.length > 1000) {
+    timelineRegistry.splice(0, timelineRegistry.length - 1000);
+  }
+}
+
 export function buildUnifiedTimeline(docId: string, sources: BuildUnifiedTimelineSources = {}) {
+  flushPendingTimelineEvents();
   const registered = timelineRegistry.filter((event) => event.docId === docId);
   const telemetry = getEditorTelemetry(docId).map((event) => normalizeTimelineEvent({
     id: `${docId}:telemetry:${event.type}:${event.timestamp}`,

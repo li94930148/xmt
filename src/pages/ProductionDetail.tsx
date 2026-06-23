@@ -22,10 +22,12 @@ import { getTopic } from '../api';
 import ContentEditor from '../components/ContentEditor';
 import { getCollaborationRoomId } from '../collaboration/core/events';
 import { cancelDatabaseSync, syncToDatabase } from '../collaboration/core/writeConsistency';
-import { getTimelineView } from '../editor/timeline/unifiedContentTimeline';
+import { getTimelineView, recordTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime } from '../lib/utils';
+import { setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
@@ -97,7 +99,6 @@ export default function ProductionDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [editMode, setEditMode] = useState(true);
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error'>('synced');
   const [editData, setEditData] = useState({
     content: '',
     status: 'draft',
@@ -106,6 +107,8 @@ export default function ProductionDetail() {
   const lastAutoSavedContentRef = useRef('');
 
   const canDelete = hasPermission('production:delete');
+  const activeDocId = production ? getCollaborationRoomId('production', production.id) : undefined;
+  const syncStatus = useEditorEventState(activeDocId);
 
   const fetchData = async () => {
     if (!id) return;
@@ -115,12 +118,15 @@ export default function ProductionDetail() {
     try {
       const productionData = await getProductionById(Number.parseInt(id, 10));
       setProduction(productionData);
+      setCurrentContentDocument(
+        getCollaborationRoomId('production', productionData.id),
+        productionData.topic_title || `创作 ${productionData.id}`,
+      );
       setEditData({
         content: productionData.content || '',
         status: productionData.status,
       });
       lastAutoSavedContentRef.current = productionData.content || '';
-      setSyncStatus('synced');
 
       const [topicData, historyData] = await Promise.all([
         getTopic(productionData.topic_id),
@@ -231,6 +237,28 @@ export default function ProductionDetail() {
     });
   }, [versionEntries]);
 
+  useEffect(() => {
+    if (!production) return;
+
+    const docId = getCollaborationRoomId('production', production.id);
+    for (const entry of versionEntries) {
+      recordTimelineEvent({
+        id: `production:${production.id}:version:${entry.id}`,
+        docId,
+        timestamp: new Date(entry.createdAt).getTime(),
+        type: 'version',
+        source: 'version',
+        userId: entry.operatorName,
+        payload: {
+          version: entry.version,
+          changeType: entry.changeType,
+          status: entry.status,
+          label: entry.isCurrent ? '当前版本' : '历史版本',
+        },
+      });
+    }
+  }, [production, versionEntries]);
+
   const startEditing = () => {
     if (!production) return;
     setSelectedVersionId('current');
@@ -256,7 +284,6 @@ export default function ProductionDetail() {
         status: editData.status,
         version_action: 'none',
       }).then(() => undefined),
-      onStatusChange: setSyncStatus,
       onSynced: (content) => {
         lastAutoSavedContentRef.current = content;
       },
@@ -431,8 +458,8 @@ export default function ProductionDetail() {
                 <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${STATUS_COLORS[production.status]}`}>
                   {STATUS_TEXT[production.status] || production.status}
                 </span>
-                <span className={`text-xs ${syncStatus === 'error' ? 'text-red-400' : syncStatus === 'saving' ? 'text-blue-400' : styles.textMuted}`}>
-                  {syncStatus === 'saving' ? '正在保存...' : syncStatus === 'error' ? '同步失败' : '已同步'}
+                <span className={`text-xs ${syncStatus === 'conflicted' ? 'text-red-400' : syncStatus === 'saving' ? 'text-blue-400' : styles.textMuted}`}>
+                  {editorStateLabel(syncStatus)}
                 </span>
                 <span className={`text-xs ${styles.textMuted}`}>时间轴 {timelineView.timeline.length} 个节点</span>
               </div>
@@ -552,7 +579,7 @@ export default function ProductionDetail() {
                     onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
                     mode="rich"
                     collaborationKey={getCollaborationRoomId('production', production.id)}
-                    persistenceStatus={syncStatus === 'error' ? 'error' : syncStatus === 'saving' ? 'saving' : 'synced'}
+                    persistenceStatus={syncStatus}
                     immersive
                   />
                 </div>

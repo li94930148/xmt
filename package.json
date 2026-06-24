@@ -7,13 +7,10 @@
     "client:dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview",
     "check": "tsc --noEmit",
     "server:dev": "nodemon",
     "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",
-    "start": "tsx api/server.ts",
-    "repair:published-archives": "tsx scripts/backfill-published-archives.ts",
-    "release": "node scripts/release.mjs"
+    "repair:published-archives": "tsx scripts/backfill-published-archives.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

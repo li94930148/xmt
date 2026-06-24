@@ -28,6 +28,7 @@ dist-ssr
 *.sln
 *.sw?
 .vite
+.compose/
 
 # HTTPS 证书（不要提交）
 certs/

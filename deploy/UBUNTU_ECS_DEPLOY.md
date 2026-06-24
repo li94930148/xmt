@@ -1,29 +1,42 @@
-日常更新流程
-1. 本地发布
+# XMT 阿里云 ECS 生产环境
+
+## 当前生产实例
+
+正式版已部署到阿里云 ECS。本地只保留开发环境，不再运行 Docker、PM2 或本地生产服务。
+
+| 项目 | 当前值 |
+| --- | --- |
+| 实例 ID | `i-m5e323zri0tcg3oyqv6z` |
+| 实例名称 | `launch-advisor-20260623` |
+| 地域/可用区 | 华北 1（青岛）C |
+| 状态 | 运行中 |
+| 规格 | `ecs.e-c1m2.xlarge` |
+| CPU / 内存 | 4 vCPU / 8 GiB |
+| 操作系统 | Ubuntu 24.04 64 位 |
+| 公网 IP | `47.104.77.65` |
+| 主私网 IP | `172.19.115.35` |
+| VPC | `vpc-m5e48txomjblq3nlclvkj` |
+| 虚拟交换机 | `vsw-m5e9xafmk33om06lxal3p` |
+| 安全组 | `sg-m5ef8ve0ie4drbmk4khe` |
+| 弹性网卡 | `eni-m5e323zri0tcg3ozz1bn` |
+| 公网带宽 | 20 Mbps 峰值 |
+| 到期时间 | 2027-06-23 23:59:59 |
+
+## 日常更新流程
+
+本地只做开发、检查、构建和提交，不在本机重启生产服务：
+
+```powershell
 cd E:\houtai\xmt
-
 npm run check
 npm run build
-pm2 restart xmt-server
-
 git add .
-git commit -m "服务器升级推送"
+git commit -m "功能迭代"
 git push origin main
+```
 
+云服务器更新：
 
-
-cd /opt/xmt
-systemctl start xmt-backup.service
-git pull --ff-only origin main
-npm ci
-npm run check
-npm run build
-npm prune --omit=dev
-systemctl restart xmt
-curl -fsS http://127.0.0.1:3001/api/health
-
-
-2. 云服务器更新
 cd /opt/xmt
 
 # 先备份数据库
@@ -68,17 +81,12 @@ data/xmt.db*
 certs/
 backups/
 
-# XMT 部署到阿里云 Ubuntu 22.04 ECS
-
-
-npm run build
-
- pm2 restart xmt-server
+# XMT 部署到阿里云 Ubuntu ECS
 
 适用环境：
 
-- Ubuntu 22.04 64 位
-- 2 vCPU / 4 GiB RAM / 40 GiB ESSD
+- Ubuntu 24.04 64 位（当前实例）
+- 4 vCPU / 8 GiB RAM
 - Node.js 24 LTS
 - systemd 管理 Node 服务
 - Caddy 提供反向代理和 HTTPS

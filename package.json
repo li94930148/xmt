@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "client:dev": "vite",
+    "start": "tsx api/server.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "check": "tsc --noEmit",

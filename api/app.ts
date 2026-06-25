@@ -1,4 +1,4 @@
-﻿/**
+/**
  * This is a API server
  */
 
@@ -257,11 +257,33 @@ app.use('/api/content/os', contentOrchestratorRoutes)
 
 app.use(
   '/api/health',
-  (req: Request, res: Response): void => {
-    res.status(200).json({
-      success: true,
-      message: 'ok',
-    })
+  async (req: Request, res: Response): Promise<void> => {
+    void req
+
+    try {
+      await queryOne('SELECT 1 as ok')
+      res.status(200).json({
+        success: true,
+        status: 'ok',
+        service: 'xmt-api',
+        environment: process.env.NODE_ENV || 'development',
+        time: new Date().toISOString(),
+        database: {
+          ok: true,
+        },
+      })
+    } catch {
+      res.status(503).json({
+        success: false,
+        status: 'degraded',
+        service: 'xmt-api',
+        environment: process.env.NODE_ENV || 'development',
+        time: new Date().toISOString(),
+        database: {
+          ok: false,
+        },
+      })
+    }
   },
 )
 

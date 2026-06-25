@@ -25,7 +25,7 @@ async function syncUserPrimaryRole(userId: number, roleCode: string) {
 
 router.get('/', authenticate, requirePermission('user:view'), async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 1000 } = req.query;
     
     const users = await queryAll(`SELECT id, username, name, email, role, enabled, created_at, updated_at 
                          FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,

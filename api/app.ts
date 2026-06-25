@@ -425,7 +425,7 @@ export async function startServer() {
 
   // 启动时自动备份一次
   try {
-    const name = createBackup()
+    const name = await createBackup()
     console.log(`[Backup] 启动备份: ${name}`)
     cleanOldBackups()
   } catch (e) {
@@ -434,16 +434,18 @@ export async function startServer() {
 
   // 每天凌晨3点自动备份
   setInterval(() => {
+    void (async () => {
     const now = new Date()
     if (now.getHours() === 3 && now.getMinutes() === 0) {
       try {
-        const name = createBackup()
+        const name = await createBackup()
         console.log(`[Backup] 定时备份: ${name}`)
         cleanOldBackups()
       } catch (e) {
         console.warn('[Backup] 定时备份失败:', e)
       }
     }
+    })()
   }, 60 * 1000)
 
   const PORT = Number.parseInt(process.env.PORT || '3001', 10)

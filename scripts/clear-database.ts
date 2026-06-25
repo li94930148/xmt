@@ -1,8 +1,8 @@
 import initSqlJs from 'sql.js';
 import fs from 'fs';
-import path from 'path';
+import { getDatabasePath } from '../api/database/path';
 
-const dbPath = path.join(process.cwd(), 'data', 'xmt.db');
+const dbPath = getDatabasePath();
 
 async function clearDatabase() {
   console.log('正在清空数据库...');

@@ -1,13 +1,14 @@
 ﻿﻿﻿﻿import { createClient } from '@libsql/client';
 import fs from 'fs';
 import path from 'path';
+import { getDatabasePath, getDatabaseUrl } from './path';
 
-const dbPath = path.join(process.cwd(), 'data', 'xmt.db');
+export const dbPath = getDatabasePath();
 const dbDir = path.dirname(dbPath);
 
 // libsql 客户端 - 直接读写 SQLite 文件，不需要手动持久化
 export const db = createClient({
-  url: `file:${dbPath}`,
+  url: getDatabaseUrl(),
 });
 
 function getDbErrorMessage(error: unknown) {
@@ -15,6 +16,8 @@ function getDbErrorMessage(error: unknown) {
 }
 
 export async function initDatabase() {
+  console.log(`[DB] SQLite path: ${dbPath}`);
+
   // 确保 data 目录存在
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });

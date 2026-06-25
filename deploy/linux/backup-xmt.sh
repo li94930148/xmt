@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_DIR="${PROJECT_DIR:-/opt/xmt}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/xmt}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
-DATABASE="$PROJECT_DIR/data/xmt.db"
+DATABASE="${XMT_DB_PATH:-$PROJECT_DIR/data/xmt.db}"
 
 if [[ ! -f "$DATABASE" ]]; then
   echo "Database not found: $DATABASE" >&2

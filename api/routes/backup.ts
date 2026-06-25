@@ -3,15 +3,14 @@ import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { beijingNow } from '../database/utils';
+import { getDatabasePath } from '../database/path';
+import { db } from '../database/db';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const router = Router();
 
-const DB_PATH = path.join(process.cwd(), 'data', 'xmt.db');
-const BACKUP_DIR = path.join(process.cwd(), 'data', 'backups');
+const DB_PATH = getDatabasePath();
+const BACKUP_DIR = path.join(path.dirname(DB_PATH), 'backups');
 
 // 确保备份目录存在
 function ensureBackupDir() {
@@ -21,19 +20,30 @@ function ensureBackupDir() {
 }
 
 // 创建备份
-function createBackup(): string {
+async function createBackup(): Promise<string> {
   ensureBackupDir();
   const dateStr = beijingNow().replace(/[: ]/g, '-');
   const backupName = `xmt-${dateStr}.db`;
   const backupPath = path.join(BACKUP_DIR, backupName);
-  fs.copyFileSync(DB_PATH, backupPath);
+  const temporaryPath = `${backupPath}.tmp`;
+
+  if (fs.existsSync(temporaryPath)) {
+    fs.unlinkSync(temporaryPath);
+  }
+
+  await db.execute({
+    sql: 'VACUUM INTO ?',
+    args: [temporaryPath],
+  });
+  fs.renameSync(temporaryPath, backupPath);
+
   return backupName;
 }
 
 // 手动创建备份
-router.post('/create', authenticate, requirePermission('system:backup'), (req, res) => {
+router.post('/create', authenticate, requirePermission('system:backup'), async (req, res) => {
   try {
-    const name = createBackup();
+    const name = await createBackup();
     res.json({ message: '备份创建成功', name });
   } catch (error) {
     res.status(500).json({ message: '备份创建失败', error: (error as Error).message });

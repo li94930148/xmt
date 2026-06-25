@@ -9,6 +9,7 @@ User=xmt
 Group=xmt
 WorkingDirectory=/opt/xmt
 EnvironmentFile=/etc/xmt/xmt.env
+Environment=XMT_DB_PATH=/opt/xmt/data/xmt.db
 ExecStart=/usr/local/bin/node --import tsx api/server.ts
 Restart=on-failure
 RestartSec=5

@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(Get-ChildItem -Path \"E:\\\\houtai\\\\xmt\\\\src\" -Recurse -Force | Where-Object { $_.FullName -notmatch 'node_modules' } | Format-Table FullName, Mode, Length -AutoSize)",
-      "PowerShell(Get-ChildItem -Path \"E:\\\\houtai\\\\xmt\\\\api\" -Recurse -Force | Where-Object { $_.FullName -notmatch 'node_modules' } | Format-Table FullName, Mode, Length -AutoSize)"
-    ]
-  }
-}

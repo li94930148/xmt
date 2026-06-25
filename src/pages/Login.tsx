@@ -2,6 +2,7 @@ import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, getPublicSystemSettings, login } from '../api';
+import { LoginError } from '../api/auth';
 import { useAppStore, useAuthStore } from '../store';
 import { loadRememberedCredentials, persistRememberedCredentials } from '../utils/rememberedCredentials';
 import {
@@ -10,6 +11,36 @@ import {
   ManagedSystemSettings,
 } from '@/lib/systemSettings';
 
+
+function formatRetryAfter(seconds?: number) {
+  if (!seconds || seconds <= 0) return '';
+
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `${minutes} 分钟后再试。`;
+}
+
+function resolveLoginErrorMessage(error: unknown) {
+  if (error instanceof LoginError) {
+    if (error.kind === 'rate_limited') {
+      const retryText = formatRetryAfter(error.retryAfterSeconds);
+      const remainingText = typeof error.remainingAttempts === 'number'
+        ? `还可以尝试 ${error.remainingAttempts} 次。`
+        : '';
+
+      if (retryText) {
+        return `试错次数过多，请在 ${retryText}`;
+      }
+      if (remainingText) {
+        return `登录失败次数较多，请谨慎重试。${remainingText}`;
+      }
+      return '登录失败次数较多，请稍后再试。';
+    }
+
+    return error.message;
+  }
+
+  return '当前服务暂时不可用，请稍后再试。';
+}
 function resolveRedirectTarget(state: unknown) {
   if (
     state &&
@@ -383,7 +414,7 @@ export default function Login() {
       });
       navigate(resolveRedirectTarget(location.state), { replace: true });
     } catch (error) {
-      const message = (error as Error).message || '账号或密码错误';
+      const message = resolveLoginErrorMessage(error);
       setErrorMessage(message);
       appStore.addNotification({ title: '登录失败', message, type: 'error' });
     } finally {

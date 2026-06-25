@@ -234,3 +234,16 @@ P1-001 已验证以下能力可以稳定推广：
 1. 页面外层统一优先
 2. 业务内核保守处理
 3. 先治理高频重复结构，再评估是否继续推广
+
+## P0-002 Login Error Feedback
+
+Login failure feedback must stay clear, friendly, and non-sensitive. The page should use inline form feedback or the existing notification system, not browser alerts and not a broad login page redesign.
+
+Rules:
+
+1. Invalid username or password: show a generic message such as `用户名或密码不正确，请检查后重试。` Do not reveal whether the account exists.
+2. Disabled or unavailable account: show `当前账号暂不可用，请联系管理员。` Do not reveal internal account state details.
+3. Login rate limit: show a rate-limit message. If `retryAfterSeconds` is returned, convert it to a user-readable minute message. If `remainingAttempts` is returned, it may be displayed. Do not invent remaining attempts when the backend does not return them.
+4. Network or server errors: show `当前服务暂时不可用，请稍后再试。` Do not show backend stack traces, database errors, internal rate-limit keys, or server paths.
+5. The submit button must keep a loading/disabled state while the login request is in flight to reduce duplicate login attempts.
+6. Successful login flow, token storage, user storage, forced password-change flow, and redirect behavior must not be changed by error-copy improvements.

@@ -1,5 +1,7 @@
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
 function normalizeLoginUsername(value: unknown) {
   if (typeof value !== 'string') return 'anonymous';
 
@@ -21,15 +23,19 @@ export const apiLimiter = rateLimit({
 
 // 登录接口限制：按 username + 客户端 IP 统计，避免反代后单 IP 误伤全站用户
 export const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: LOGIN_WINDOW_MS,
   max: 20,
   keyGenerator: (req) => {
     const username = normalizeLoginUsername(req.body?.username);
     return `${username}:${ipKeyGenerator(req.ip || '')}`;
   },
-  message: {
-    success: false,
-    error: '登录尝试次数过多，请 15 分钟后再试',
+  handler: (_req, res) => {
+    res.status(429).json({
+      success: false,
+      error: 'Too many login attempts',
+      message: '登录试错次数过多，请稍后再试',
+      retryAfterSeconds: Math.ceil(LOGIN_WINDOW_MS / 1000),
+    });
   },
   standardHeaders: true,
   legacyHeaders: false,

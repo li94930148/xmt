@@ -531,3 +531,37 @@ du -sh /opt/xmt /var/backups/xmt
 
 若出现 `502 Bad Gateway`，优先检查 `systemctl status xmt` 和 XMT 日志。若 HTTPS
 证书申请失败，检查域名解析、ICP备案状态以及安全组/UFW 的 80、443 端口。
+
+## P0-002 Safe Deploy Health Check Contract
+
+The production command remains:
+
+```bash
+ssh xmt-prod "sudo /usr/local/bin/xmt-safe-deploy"
+```
+
+The repository now includes `deploy/xmt-safe-deploy.sh` as a versioned template. The production script path is `/usr/local/bin/xmt-safe-deploy`; syncing or installing the template to that path requires root privileges on the server. The template must not include production secrets, `.env.production`, real `ecosystem.config.cjs`, database files, logs, or backup archives.
+
+Safe deploy requirements:
+
+1. Back up `/www/wwwroot/xmt/data/xmt.db` before updating code.
+2. Never delete, overwrite, or recreate `/www/wwwroot/xmt/data/` during deploy.
+3. Run `npm run check` and `npm run build` before restarting the API process.
+4. Restart or reload the PM2 process named `xmt-api`.
+5. Prefer `http://127.0.0.1:3001/api/health` for post-deploy health checks.
+6. Keep `http://127.0.0.1:3001/` only as a fallback signal; a successful home page curl must not hide a failed `/api/health` check.
+7. On health-check failure, print PM2 status, recent `xmt-api` logs, port listening information, and backend direct curl results, then exit with status 1.
+8. Do not print "deploy completed" after a failed health check.
+
+Production diagnostics should start with:
+
+```bash
+ssh xmt-prod "sudo /usr/local/bin/xmt-diag"
+```
+
+Diagnostic focus:
+
+1. Health endpoint: `http://127.0.0.1:3001/api/health`
+2. PM2 process: `xmt-api`
+3. Backend port: `127.0.0.1:3001`
+4. Caddy reverse proxy target: `127.0.0.1:3001`

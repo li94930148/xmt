@@ -2,8 +2,9 @@
 set -Eeuo pipefail
 
 # XMT safe deploy template.
-# Production path: /usr/local/bin/xmt-safe-deploy
-# Installing or syncing this script to production requires root privileges.
+# Repository template path: deploy/xmt-safe-deploy.sh
+# Production install path: /usr/local/bin/xmt-safe-deploy
+# Installation requires root privileges.
 # Keep production secrets, .env.production, ecosystem.config.cjs, and database backups out of Git.
 
 APP_DIR="${APP_DIR:-/www/wwwroot/xmt}"
@@ -26,20 +27,25 @@ fail() {
 
 print_diagnostics() {
   log "Diagnostics: PM2 status"
-  pm2 status "$PM2_APP" || true
+  pm2 status || true
 
   log "Diagnostics: recent PM2 logs"
   pm2 logs "$PM2_APP" --lines 80 --nostream || true
 
-  log "Diagnostics: port listening"
+  log "Diagnostics: port listening on $PORT"
   if command -v ss >/dev/null 2>&1; then
-    ss -lntp | grep ":$PORT" || true
+    ss -lntp || true
   else
-    netstat -lntp 2>/dev/null | grep ":$PORT" || true
+    netstat -lntp 2>/dev/null || true
   fi
 
-  log "Diagnostics: backend direct home fallback"
-  curl -fsS --max-time 5 "$HOME_URL" >/dev/null && log "Home fallback succeeded" || log "Home fallback failed"
+  log "Diagnostics: backend direct health result"
+  curl -i -sS --max-time 10 "$HEALTH_URL" || true
+  printf '\n'
+
+  log "Diagnostics: backend direct home result"
+  curl -i -sS --max-time 10 "$HOME_URL" || true
+  printf '\n'
 }
 
 require_command() {
@@ -76,10 +82,16 @@ check_health() {
   return 1
 }
 
+check_home_fallback() {
+  log "Checking backend home fallback: $HOME_URL"
+  curl -fsS --max-time 10 "$HOME_URL" >/dev/null
+}
+
 require_command git
 require_command npm
 require_command pm2
 require_command curl
+require_command systemctl
 
 [ "$(id -u)" -eq 0 ] || fail "Run as root so the production script can manage app files and PM2 safely"
 [ -d "$APP_DIR" ] || fail "APP_DIR does not exist: $APP_DIR"
@@ -102,13 +114,21 @@ npm run build
 
 log "Restarting PM2 app: $PM2_APP"
 pm2 describe "$PM2_APP" >/dev/null || fail "PM2 app not found: $PM2_APP"
-pm2 reload "$PM2_APP" --update-env || pm2 restart "$PM2_APP" --update-env
+pm2 restart "$PM2_APP" --update-env
+pm2 save
+
+log "Reloading Caddy"
+systemctl reload caddy
 
 log "Waiting for backend restart"
 sleep 3
 
 if ! check_health; then
   fail "Deploy failed because /api/health did not pass"
+fi
+
+if ! check_home_fallback; then
+  fail "Deploy failed because backend home fallback did not pass"
 fi
 
 log "Deploy completed successfully"

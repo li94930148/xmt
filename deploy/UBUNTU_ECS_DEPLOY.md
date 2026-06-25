@@ -565,3 +565,53 @@ Diagnostic focus:
 2. PM2 process: `xmt-api`
 3. Backend port: `127.0.0.1:3001`
 4. Caddy reverse proxy target: `127.0.0.1:3001`
+## P0-003 Versioned Operations Scripts
+
+P0-003 keeps production operations scripts auditable and reversible by storing templates in this repository. The repository templates are not automatically installed on the server.
+
+Versioned templates:
+
+1. `deploy/xmt-safe-deploy.sh` -> production install path `/usr/local/bin/xmt-safe-deploy`
+2. `deploy/xmt-diag.sh` -> production install path `/usr/local/bin/xmt-diag`
+
+Installation rules:
+
+1. Install or sync scripts as root on the server.
+2. Back up the currently installed scripts before replacing them.
+3. Do not copy `.env.production`, real `ecosystem.config.cjs`, database files, logs, or backup archives into Git.
+4. Make installed scripts executable with `chmod +x`.
+5. Run `xmt-diag` first after installation to verify that diagnostics are available.
+
+Example server-side installation after the new commit has been deployed to the checkout:
+
+```bash
+sudo cp -a /usr/local/bin/xmt-safe-deploy /usr/local/bin/xmt-safe-deploy.bak.$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+sudo cp -a /usr/local/bin/xmt-diag /usr/local/bin/xmt-diag.bak.$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+sudo install -m 0750 /www/wwwroot/xmt/deploy/xmt-safe-deploy.sh /usr/local/bin/xmt-safe-deploy
+sudo install -m 0750 /www/wwwroot/xmt/deploy/xmt-diag.sh /usr/local/bin/xmt-diag
+sudo /usr/local/bin/xmt-diag
+```
+
+Daily production deployment still uses only:
+
+```bash
+ssh xmt-prod "sudo /usr/local/bin/xmt-safe-deploy"
+```
+
+Production diagnostics still start with:
+
+```bash
+ssh xmt-prod "sudo /usr/local/bin/xmt-diag"
+```
+
+If an installed script is abnormal, restore the latest backup on the server:
+
+```bash
+sudo cp -a /usr/local/bin/xmt-safe-deploy.bak.YYYYMMDD-HHMMSS /usr/local/bin/xmt-safe-deploy
+sudo cp -a /usr/local/bin/xmt-diag.bak.YYYYMMDD-HHMMSS /usr/local/bin/xmt-diag
+sudo chmod 0750 /usr/local/bin/xmt-safe-deploy /usr/local/bin/xmt-diag
+```
+
+The safe deploy script must back up `/www/wwwroot/xmt/data/xmt.db` before updating code, run `git pull --ff-only`, `npm ci`, `npm run build`, restart `xmt-api` with PM2, save PM2 state, reload Caddy, then check `http://127.0.0.1:3001/api/health` before the home-page fallback. A failed `/api/health` check must print PM2 status, recent `xmt-api` logs, listening port information, direct backend curl results, and exit with status 1.
+
+The diagnostic script is read-only. It may print service, port, Git, health, Caddy, database-file metadata, and backup-list information, but must not modify code, restart services, print `.env.production`, dump database contents, or expose secrets.

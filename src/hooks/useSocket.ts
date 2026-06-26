@@ -31,9 +31,12 @@ export function useSocket() {
       globalSocket = null;
     }
 
+    // 当前 http://47.104.77.65 生产环境先使用 polling 稳定运行；
+    // 后续切换 https://lanyaomedia.com 后，再恢复 transports: ['polling', 'websocket'] 和 upgrade。
     const nextSocket = io(window.location.origin, {
       path: '/socket.io',
-      transports: ['polling', 'websocket'],
+      transports: ['polling'],
+      upgrade: false,
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: 5,

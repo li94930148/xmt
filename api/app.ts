@@ -2,6 +2,7 @@
  * This is a API server
  */
 
+import './config/env.js'
 import express, {
   type Request,
   type Response,
@@ -9,7 +10,6 @@ import express, {
 } from 'express'
 import cors from 'cors'
 import path from 'path'
-import dotenv from 'dotenv'
 import { fileURLToPath } from 'url'
 import http from 'http'
 import https from 'https'
@@ -64,8 +64,6 @@ import { cleanupInactiveRooms } from './collaboration/yjs/documentStore.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-
-dotenv.config()
 
 const app: express.Application = express()
 
@@ -188,6 +186,46 @@ export const io = new Server(server, {
   allowRequest: (req, callback) => {
     callback(null, isAllowedRequestOrigin(req.headers.origin, req.headers.host))
   },
+})
+
+type SocketHandshakeLike = {
+  headers?: {
+    origin?: string
+  }
+}
+
+function getSocketOrigin(socket: { handshake?: SocketHandshakeLike }) {
+  return socket.handshake?.headers?.origin || 'unknown'
+}
+
+function getSocketTransport(socket: { conn?: { transport?: { name?: string } } }) {
+  return socket.conn?.transport?.name || 'unknown'
+}
+
+function logSocketAuthFailed(
+  reason: string,
+  socket: { id?: string; handshake?: SocketHandshakeLike; conn?: { transport?: { name?: string } } },
+) {
+  console.warn('[Socket][auth failed]', {
+    reason,
+    socketId: socket.id,
+    origin: getSocketOrigin(socket),
+    transport: getSocketTransport(socket),
+  })
+}
+
+io.engine.on('connection_error', (error: Error & {
+  code?: number
+  context?: unknown
+  req?: http.IncomingMessage
+}) => {
+  console.warn('[Socket][engine connection_error]', {
+    code: error.code,
+    message: error.message,
+    context: error.context,
+    origin: error.req?.headers?.origin,
+    url: error.req?.url,
+  })
 })
 
 const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
@@ -325,21 +363,25 @@ io.use(async (socket, next) => {
           : null
 
     if (!token) {
+      logSocketAuthFailed('missing_token', socket)
       return next(new Error('Authentication required'))
     }
 
     const payload = verifyToken(token)
     if (!payload) {
+      logSocketAuthFailed('invalid_token', socket)
       return next(new Error('Invalid token'))
     }
 
     const user = await queryOne(`SELECT id, username, role, name, enabled FROM users WHERE id = ?`, [payload.userId])
     if (!user) {
+      logSocketAuthFailed('invalid_token', socket)
       return next(new Error('User not found'))
     }
 
     const record = user as Record<string, unknown>
     if (Number(record.enabled) !== 1) {
+      logSocketAuthFailed('user_disabled', socket)
       return next(new Error('User disabled'))
     }
 
@@ -352,6 +394,7 @@ io.use(async (socket, next) => {
 
     next()
   } catch {
+    logSocketAuthFailed('auth_exception', socket)
     next(new Error('Authentication failed'))
   }
 })
@@ -363,6 +406,13 @@ io.on('connection', (socket) => {
     socket.disconnect(true)
     return
   }
+
+  console.info('[Socket] connected', {
+    socketId: socket.id,
+    userId: socket.data.user?.id,
+    origin: socket.handshake.headers.origin,
+    transport: socket.conn.transport.name,
+  })
 
   socket.join(`user_${socketUser.id}`)
 
@@ -424,7 +474,12 @@ io.on('connection', (socket) => {
     unlockCollaborationRoom(io, roomId, String(socketUser.id || 'system'))
   })
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
+    console.info('[Socket] disconnected', {
+      socketId: socket.id,
+      userId: socket.data.user?.id,
+      reason,
+    })
     leaveAllRooms(io, socket)
   })
 })

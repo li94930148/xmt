@@ -2,7 +2,6 @@
  * This is a API server
  */
 
-import './config/env.js'
 import express, {
   type Request,
   type Response,

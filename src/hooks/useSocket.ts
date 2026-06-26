@@ -21,7 +21,7 @@ export function useSocket() {
       return;
     }
 
-    if (globalSocket && globalUserId === user.id && globalToken === token && globalSocket.connected) {
+    if (globalSocket && globalUserId === user.id && globalToken === token) {
       setSocket(globalSocket);
       return;
     }
@@ -32,7 +32,12 @@ export function useSocket() {
     }
 
     const nextSocket = io(window.location.origin, {
-      transports: ['websocket', 'polling'],
+      path: '/socket.io',
+      transports: ['polling', 'websocket'],
+      withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
       auth: {
         token,
       },
@@ -43,11 +48,17 @@ export function useSocket() {
     globalToken = token;
 
     nextSocket.on('connect', () => {
+      console.info('[Socket] connected:', nextSocket.id);
       setSocket(nextSocket);
     });
 
-    nextSocket.on('connect_error', () => {
+    nextSocket.on('connect_error', (error) => {
+      console.warn('[Socket] connect_error:', error.message);
       setSocket(null);
+    });
+
+    nextSocket.on('disconnect', (reason) => {
+      console.info('[Socket] disconnected:', reason);
     });
 
     nextSocket.on('new_message', (message) => {

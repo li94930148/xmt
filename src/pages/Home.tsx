@@ -256,7 +256,7 @@ export default function Home() {
               你好，{userName} 👋
             </h1>
             <p className="text-sm text-white/70 mt-1">
-              今天也要元气满满地创作呀！已坚持 {Math.floor(Math.random() * 30 + 1)} 天 ✨
+              今天也要元气满满地创作呀！继续保持创作节奏 ✨
             </p>
             <div className="flex items-center gap-3 mt-4">
               <button

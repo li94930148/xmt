@@ -3,7 +3,7 @@
  * 集成：Toolbar, BubbleMenu, FloatingMenu, ContextMenu, TableOfContents,
  * CommentExtension, 多色高亮, 自动保存, 全屏, 打印, 导出
  */
-import { useEffect, useCallback, useRef, useState } from 'react';
+import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { getSchema } from '@tiptap/core';
 import { generateJSON } from '@tiptap/html';
 import { useEditor, EditorContent } from '@tiptap/react';
@@ -15,7 +15,6 @@ import type { SocketYjsProvider } from '../../collaboration/yjs/SocketYjsProvide
 import type { CollaborationUserPresence } from '../../collaboration/core/events';
 import { editorStateLabel, useEditorEventState, type EditorState } from '../../editor/state/editorStateManager';
 import { emitEditorState } from '../../editor/state/editorStateEventBus';
-import { recordRenderFrame } from '../../editor/performance/editorPerformanceMonitor';
 import Toolbar from './Toolbar';
 import BubbleMenuBar from './BubbleMenu';
 
@@ -68,20 +67,13 @@ export default function Editor({
     x: number;
     y: number;
   } | null>(null);
-  const [selectionRects, setSelectionRects] = useState<Array<{
-    top: number;
-    left: number;
-    width: number;
-    height: number;
-  }>>([]);
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const selectionThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSelectionUpdateRef = useRef(0);
   const savingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [wordCount, setWordCount] = useState(0);
+  const baseExtensions = useMemo(() => createEditorExtensions(placeholder), [placeholder]);
 
   // 立即保存（仅 Ctrl+S 触发）
   const performSave = useCallback(() => {
@@ -104,20 +96,20 @@ export default function Editor({
     }
   }, [onSave, stateDocId, value]);
 
-  const baseExtensions = createEditorExtensions(placeholder);
-
-  if (collaboration?.provider && value?.trim()) {
+  useEffect(() => {
+    if (!collaboration?.provider || !value?.trim()) return;
     const initialContent = value.includes('<') ? value : markdownToHtml(value);
     try {
       syncToYjs({
         provider: collaboration.provider,
         contentJson: generateJSON(initialContent, baseExtensions),
         schema: getSchema(baseExtensions),
+        docId: stateDocId,
       });
     } catch {
       // 如果历史内容中存在当前 schema 不支持的节点，保持 Yjs 原状态，避免覆盖已有协作文档。
     }
-  }
+  }, [baseExtensions, collaboration?.provider, stateDocId, value]);
 
   const editor = useEditor({
     extensions: [
@@ -198,7 +190,7 @@ export default function Editor({
         return false;
       },
     },
-  }, [readOnly, collaboration?.provider]);
+  }, [readOnly, collaboration?.provider, baseExtensions]);
 
   // 外部 value 变化时同步
   useEffect(() => {
@@ -242,99 +234,7 @@ export default function Editor({
     };
   }, []);
 
-  // 自定义选区高亮层：解决跨背景色选区中断问题
-  useEffect(() => {
-    if (!editor) return;
-
-    const updateSelection = () => {
-      const now = performance.now();
-      if (now - lastSelectionUpdateRef.current < 50) {
-        if (!selectionThrottleRef.current) {
-          selectionThrottleRef.current = setTimeout(() => {
-            selectionThrottleRef.current = null;
-            lastSelectionUpdateRef.current = performance.now();
-            updateSelection();
-          }, 50);
-        }
-        return;
-      }
-      lastSelectionUpdateRef.current = now;
-      if (stateDocId) recordRenderFrame(stateDocId);
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-        setSelectionRects([]);
-        return;
-      }
-
-      const range = selection.getRangeAt(0);
-      const editorEl = editor.view.dom;
-      const editorRect = editorEl.getBoundingClientRect();
-
-      // 检查选区是否在编辑器内
-      const rangeRect = range.getBoundingClientRect();
-      if (
-        rangeRect.width === 0 && rangeRect.height === 0
-      ) {
-        setSelectionRects([]);
-        return;
-      }
-
-      // 获取选区覆盖的所有 client rects
-      const clientRects = range.getClientRects();
-      if (clientRects.length === 0) {
-        setSelectionRects([]);
-        return;
-      }
-
-      const rects: Array<{ top: number; left: number; width: number; height: number }> = [];
-      for (let i = 0; i < clientRects.length; i++) {
-        const rect = clientRects[i];
-        // 只保留编辑器内的矩形
-        if (
-          rect.top < editorRect.bottom &&
-          rect.bottom > editorRect.top &&
-          rect.width > 0
-        ) {
-          rects.push({
-            top: rect.top - editorRect.top + editorEl.scrollTop,
-            left: rect.left - editorRect.left,
-            width: rect.width,
-            height: rect.height,
-          });
-        }
-      }
-      setSelectionRects(rects);
-    };
-
-    // 选择变化时更新
-    document.addEventListener('selectionchange', updateSelection);
-    // 编辑器更新时也更新
-    editor.on('selectionUpdate', updateSelection);
-    editor.on('update', updateSelection);
-
-    return () => {
-      document.removeEventListener('selectionchange', updateSelection);
-      editor.off('selectionUpdate', updateSelection);
-      editor.off('update', updateSelection);
-      if (selectionThrottleRef.current) clearTimeout(selectionThrottleRef.current);
-    };
-  }, [editor, stateDocId]);
-
-  // 隐藏浏览器原生选区高亮（用自定义覆盖层替代）
-  useEffect(() => {
-    const style = document.createElement('style');
-    style.id = 'xmt-hide-native-selection';
-    style.textContent = `
-      .tiptap ::selection {
-        background-color: transparent !important;
-      }
-      .tiptap *::selection {
-        background-color: transparent !important;
-      }
-    `;
-    document.head.appendChild(style);
-    return () => { style.remove(); };
-  }, []);
+  // 选区变化非常高频，保持浏览器原生选区，避免拖选文字时写 React state 或触发协同同步重算。
 
   // 点击空白处关闭批注气泡
   useEffect(() => {
@@ -519,23 +419,6 @@ export default function Editor({
 
           <div className="relative min-h-full">
             <EditorContent editor={editor} />
-            {/* 自定义选区高亮层 */}
-            {selectionRects.length > 0 && (
-              <div className="xmt-selection-overlay">
-                {selectionRects.map((rect, i) => (
-                  <div
-                    key={i}
-                    className="xmt-selection-rect"
-                    style={{
-                      top: rect.top,
-                      left: rect.left,
-                      width: rect.width,
-                      height: rect.height,
-                    }}
-                  />
-                ))}
-              </div>
-            )}
           </div>
         </div>
 
@@ -885,22 +768,6 @@ export default function Editor({
             padding: 0 4pt;
             margin-left: 4pt;
           }
-        }
-        /* === 自定义选区高亮层（解决跨背景色选区中断） === */
-        .xmt-selection-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          pointer-events: none;
-          z-index: 10;
-        }
-        .xmt-selection-rect {
-          position: absolute;
-          background-color: ${isDark ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.2)'};
-          border-radius: 2px;
-          mix-blend-mode: normal;
         }
         .xmt-collaboration-cursor {
           position: relative;

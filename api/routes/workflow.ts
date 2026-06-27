@@ -11,26 +11,183 @@ const router = express.Router();
 
 type VersionAction = 'minor' | 'major' | 'none';
 
-function getNextVersion(currentVersion: string | undefined, versionAction: VersionAction): string {
-  const normalized = String(currentVersion || 'v1.0');
+type VersionParts = {
+  major: number;
+  minor: number;
+};
+
+type VersionRow = {
+  id?: number | string | null;
+  version?: string | null;
+  created_at?: string | null;
+};
+
+function parseVersionParts(version: string | undefined): VersionParts | null {
+  const normalized = String(version || 'v1.0');
   const match = normalized.match(/^v?(\d+)\.(\d+)$/);
 
   if (!match) {
-    return versionAction === 'major' ? 'v2.0' : 'v1.1';
+    return null;
   }
 
-  const major = Number.parseInt(match[1], 10);
-  const minor = Number.parseInt(match[2], 10);
+  return {
+    major: Number.parseInt(match[1], 10),
+    minor: Number.parseInt(match[2], 10),
+  };
+}
+
+function formatVersion(parts: VersionParts): string {
+  return `v${parts.major}.${parts.minor}`;
+}
+
+function isNewerVersionRow<T extends VersionRow>(
+  candidate: T,
+  candidateParts: VersionParts,
+  existing: T,
+  existingParts: VersionParts,
+): boolean {
+  if (candidateParts.minor !== existingParts.minor) {
+    return candidateParts.minor > existingParts.minor;
+  }
+
+  const candidateTime = candidate.created_at ? new Date(candidate.created_at).getTime() : 0;
+  const existingTime = existing.created_at ? new Date(existing.created_at).getTime() : 0;
+
+  if (candidateTime !== existingTime) {
+    return candidateTime > existingTime;
+  }
+
+  return Number(candidate.id || 0) > Number(existing.id || 0);
+}
+
+function getLatestHistoryRowsByMajor<T extends VersionRow>(
+  historyRows: T[],
+  currentVersion?: string,
+): T[] {
+  const latestByMajor = new Map<number, { row: T; parts: VersionParts }>();
+  const currentParts = parseVersionParts(currentVersion);
+
+  for (const row of historyRows) {
+    const parts = parseVersionParts(row.version || undefined);
+
+    if (!parts) {
+      continue;
+    }
+
+    if (currentParts?.major === parts.major && currentParts.minor >= parts.minor) {
+      continue;
+    }
+
+    const existing = latestByMajor.get(parts.major);
+
+    if (!existing || isNewerVersionRow(row, parts, existing.row, existing.parts)) {
+      latestByMajor.set(parts.major, { row, parts });
+    }
+  }
+
+  return Array.from(latestByMajor.values())
+    .sort((a, b) => {
+      if (a.parts.major !== b.parts.major) {
+        return b.parts.major - a.parts.major;
+      }
+
+      return b.parts.minor - a.parts.minor;
+    })
+    .map(({ row }) => row);
+}
+
+function getNextVersion(
+  currentVersion: string | undefined,
+  versionAction: VersionAction,
+  versions: Array<{ version?: string | null }>,
+): string {
+  const parsedVersions = versions
+    .map((row) => parseVersionParts(row.version || undefined))
+    .filter((parts): parts is VersionParts => Boolean(parts));
+  const currentParts = parseVersionParts(currentVersion) || { major: 1, minor: 0 };
+
+  if (versionAction === 'none') {
+    return formatVersion(currentParts);
+  }
 
   if (versionAction === 'major') {
-    return `v${major + 1}.0`;
+    const maxMajor = parsedVersions.reduce(
+      (max, parts) => Math.max(max, parts.major),
+      currentParts.major,
+    );
+    return formatVersion({ major: maxMajor + 1, minor: 0 });
   }
 
   if (versionAction === 'minor') {
-    return `v${major}.${minor + 1}`;
+    const maxMinorInCurrentMajor = parsedVersions.reduce(
+      (max, parts) => (parts.major === currentParts.major ? Math.max(max, parts.minor) : max),
+      currentParts.minor,
+    );
+    return formatVersion({ major: currentParts.major, minor: maxMinorInCurrentMajor + 1 });
   }
 
-  return normalized.startsWith('v') ? normalized : `v${normalized}`;
+  return formatVersion(currentParts);
+}
+
+async function cleanupProductionHistoryToLatestMinor(productionId: string | number, currentVersion: string) {
+  const historyRows = await queryAll<VersionRow>(
+    `SELECT id, version, created_at FROM production_history WHERE production_id = ?`,
+    [productionId],
+  );
+  const latestByMajor = new Map<number, { source: 'current' | 'history'; row?: VersionRow; parts: VersionParts }>();
+  const currentParts = parseVersionParts(currentVersion);
+
+  if (currentParts) {
+    latestByMajor.set(currentParts.major, { source: 'current', parts: currentParts });
+  }
+
+  for (const row of historyRows) {
+    const parts = parseVersionParts(row.version || undefined);
+
+    if (!parts) {
+      continue;
+    }
+
+    const existing = latestByMajor.get(parts.major);
+
+    if (!existing) {
+      latestByMajor.set(parts.major, { source: 'history', row, parts });
+      continue;
+    }
+
+    const currentRow = existing.row || {};
+    const shouldReplace =
+      parts.minor > existing.parts.minor ||
+      (parts.minor === existing.parts.minor &&
+        existing.source !== 'current' &&
+        isNewerVersionRow(row, parts, currentRow, existing.parts));
+
+    if (shouldReplace) {
+      latestByMajor.set(parts.major, { source: 'history', row, parts });
+    }
+  }
+
+  const deleteIds = historyRows
+    .filter((row) => {
+      const parts = parseVersionParts(row.version || undefined);
+      const latest = parts ? latestByMajor.get(parts.major) : null;
+
+      if (!parts || !latest) {
+        return false;
+      }
+
+      if (latest.source === 'current') {
+        return parts.minor <= latest.parts.minor;
+      }
+
+      return parts.minor < latest.parts.minor || row.id !== latest.row?.id;
+    })
+    .map((row) => row.id)
+    .filter((id): id is number | string => id !== null && id !== undefined);
+
+  for (const historyId of deleteIds) {
+    await execute(`DELETE FROM production_history WHERE id = ? AND production_id = ?`, [historyId, productionId]);
+  }
 }
 
 router.get('/shadow-logs', authenticate, requirePermission('system:template'), async (req, res) => {
@@ -277,8 +434,9 @@ router.put('/production/:id', authenticate, async (req, res) => {
             : 'minor';
 
     const shouldCreateHistory =
-      resolvedVersionAction !== 'none' &&
-      (
+      resolvedVersionAction !== 'none' && (
+        version_action === 'major' ||
+        version_action === 'minor' ||
         content !== existingProduction.content ||
         status !== existingProduction.status ||
         Number(topic_id) !== Number(existingProduction.topic_id)
@@ -300,14 +458,25 @@ router.put('/production/:id', authenticate, async (req, res) => {
       );
     }
 
+    const existingVersions = await queryAll<{ version: string | null }>(
+      `SELECT version FROM production_history WHERE production_id = ?`,
+      [id],
+    );
     const newVersion =
       resolvedVersionAction === 'none'
         ? currentVersion
-        : getNextVersion(currentVersion, resolvedVersionAction);
+        : getNextVersion(currentVersion, resolvedVersionAction, [
+            { version: currentVersion },
+            ...existingVersions,
+          ]);
 
     const contentMarkdown = req.body.contentMarkdown || content;
     const contentJson = req.body.contentJson || content;
     await execute(`UPDATE production SET topic_id = ?, version = ?, content = ?, content_markdown = ?, content_json = ?, status = ?, operator_id = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, id]);
+
+    if (resolvedVersionAction !== 'none') {
+      await cleanupProductionHistoryToLatestMinor(id, newVersion);
+    }
     
     if (status === 'approved') {
       await execute(`UPDATE topics SET status = 'shooting' WHERE id = ?`, [topic_id]);
@@ -344,8 +513,12 @@ router.get('/production/:id/history', authenticate, async (req, res) => {
   try {
     const topic = await getTopicScopeByProductionId(req.params.id);
     if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该创作记录历史' });
+    const production = await queryOne<{ version: string | null }>(
+      `SELECT version FROM production WHERE id = ?`,
+      [req.params.id],
+    );
     const history = await queryAll(`SELECT ph.*, u.name as operator_name FROM production_history ph LEFT JOIN users u ON ph.operator_id = u.id WHERE ph.production_id = ? ORDER BY ph.created_at DESC`, [req.params.id]);
-    res.json(history);
+    res.json(getLatestHistoryRowsByMajor(history, production?.version || undefined));
   } catch (error) {
     res.status(500).json({ message: '获取版本历史失败', error });
   }

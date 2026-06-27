@@ -204,7 +204,7 @@ export default function ProductionDetail() {
     });
   }, [production, versionEntries]);
 
-  const majorVersionEntries = useMemo(() => {
+  const sidebarVersionEntries = useMemo(() => {
     const latestByMajor = new Map<number, VersionEntry>();
 
     for (const entry of versionEntries) {
@@ -632,7 +632,7 @@ export default function ProductionDetail() {
                 </span>
               </div>
               <div className="space-y-2">
-                {majorVersionEntries.map((entry) => (
+                {sidebarVersionEntries.map((entry) => (
                   <button
                     key={entry.id}
                     onClick={() => {
@@ -671,7 +671,7 @@ export default function ProductionDetail() {
                     </p>
                   </button>
                 ))}
-                {majorVersionEntries.length === 0 && (
+                {sidebarVersionEntries.length === 0 && (
                   <div className={`rounded-xl ${styles.bgTertiary} px-3 py-3 text-sm ${styles.textMuted}`}>
                     暂无版本历史
                   </div>

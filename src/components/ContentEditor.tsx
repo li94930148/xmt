@@ -28,30 +28,6 @@ export interface ContentEditorProps {
 }
 
 const noop = () => {};
-const LARGE_DOCUMENT_THRESHOLD = 120000;
-
-function chunkLargeHtml(value: string) {
-  if (value.length <= LARGE_DOCUMENT_THRESHOLD) return value;
-  const blocks = value.split(/(?<=<\/(?:p|div|section|h1|h2|h3|li)>)/i).filter(Boolean);
-  const chunks: string[] = [];
-  let current = '';
-
-  for (const block of blocks) {
-    if (current.length + block.length > 40000 && current) {
-      chunks.push(current);
-      current = '';
-    }
-    current += block;
-  }
-
-  if (current) chunks.push(current);
-  if (chunks.length === 0) return value;
-
-  return chunks.map((chunk, index) => (
-    `<section data-editor-chunk="${index}">${chunk}</section>`
-  )).join('');
-}
-
 export default function ContentEditor({
   value,
   onChange = noop,
@@ -72,8 +48,10 @@ export default function ContentEditor({
   const user = useAuthStore((state) => state.user);
   const editStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousValueRef = useRef(value);
+  const collaborationRequested = mode === 'rich' && collaborationEnabled && !resolvedReadOnly;
+  const collaborationAvailable = collaborationRequested && Boolean(socket?.connected);
   const collaboration = useCollaborativeDocument({
-    enabled: mode === 'rich' && collaborationEnabled && !resolvedReadOnly,
+    enabled: collaborationAvailable,
     roomId: collaborationKey,
     socket,
     user,
@@ -85,8 +63,8 @@ export default function ContentEditor({
         connected: collaboration.connected,
       }
     : undefined;
-  const shouldWaitForCollaboration =
-    mode === 'rich' && collaborationEnabled && !resolvedReadOnly && collaboration.initializing;
+  const realtimeUnavailable = collaborationRequested && !socket?.connected;
+  const collaborationSyncing = collaborationAvailable && collaboration.initializing;
   const normalizedPersistenceStatus = normalizeEditorState(persistenceStatus);
   const eventState = useEditorEventState(collaborationKey);
   const editorState = collaborationKey
@@ -94,18 +72,16 @@ export default function ContentEditor({
       ? 'synced'
       : eventState
     : getEditorState({
-        isSyncing: shouldWaitForCollaboration || persistenceStatus === 'syncing',
+        isSyncing: collaborationSyncing || persistenceStatus === 'syncing',
         isSaving: persistenceStatus === 'saving',
         hasConflict: normalizedPersistenceStatus === 'conflicted',
         isSynced: normalizedPersistenceStatus === 'synced',
       });
   const editingRegions = useMemo(() => getEditingRegions(collaboration.users), [collaboration.users]);
   const visibleEditingRegions = useMemo(() => editingRegions.slice(0, 2), [editingRegions]);
-  const primaryHint = editingRegions[0]?.message || explainChange({ origin: 'system' }).message;
-  const previewHtml = useMemo(
-    () => chunkLargeHtml(value || `<p>${placeholder || '正在加载协作文档...'}</p>`),
-    [placeholder, value],
-  );
+  const primaryHint = realtimeUnavailable
+    ? '实时同步暂不可用，不影响普通编辑和保存。'
+    : editingRegions[0]?.message || explainChange({ origin: 'system' }).message;
   const saveHint = persistenceStatus === 'saving'
     ? explainAutoSave('debounce')
     : editorStateLabel(editorState);
@@ -124,14 +100,14 @@ export default function ContentEditor({
     if (normalizedPersistenceStatus === 'synced') {
       emitEditorState('writeConsistency:saved', collaborationKey, { source: 'ContentEditor' });
     }
-    if (persistenceStatus === 'syncing' || shouldWaitForCollaboration) {
+    if (persistenceStatus === 'syncing' || collaborationSyncing) {
       emitEditorState('yjs:update', collaborationKey, { source: 'ContentEditor' });
     }
     if (normalizedPersistenceStatus === 'conflicted') {
       emitEditorState('conflict:event', collaborationKey, { source: 'ContentEditor' });
       recordEditorTelemetry('conflict event', { docId: collaborationKey, reason: 'save failed' });
     }
-  }, [collaborationKey, normalizedPersistenceStatus, persistenceStatus, shouldWaitForCollaboration]);
+  }, [collaborationKey, collaborationSyncing, normalizedPersistenceStatus, persistenceStatus]);
 
   useEffect(() => {
     if (!collaborationKey || editingRegions.length === 0) return;
@@ -179,13 +155,15 @@ export default function ContentEditor({
       {mode === 'rich' && collaborationEnabled && (
         <div className="flex flex-wrap items-center gap-2 border-b border-gray-200/60 px-4 py-2 text-xs dark:border-gray-800/80">
           <span className={`rounded-full px-2 py-0.5 ${
-            editorState === 'conflicted'
+            realtimeUnavailable
+              ? 'bg-amber-500/10 text-amber-500'
+              : editorState === 'conflicted'
               ? 'bg-red-500/10 text-red-500'
               : editorState === 'saving' || editorState === 'syncing'
                 ? 'bg-blue-500/10 text-blue-500'
                 : 'bg-emerald-500/10 text-emerald-500'
           }`}>
-            {saveHint}
+            {realtimeUnavailable ? '实时同步离线' : saveHint}
           </span>
           {editingRegions.length > 0 ? (
             visibleEditingRegions.map((region) => (
@@ -198,28 +176,16 @@ export default function ContentEditor({
           )}
         </div>
       )}
-      {shouldWaitForCollaboration ? (
-        <div
-          className={`h-full overflow-y-auto ${immersive ? 'bg-white dark:bg-gray-900' : ''}`}
-          aria-busy="true"
-        >
-          <div
-            className="prose max-w-none px-4 py-8 sm:px-8 lg:px-16"
-            dangerouslySetInnerHTML={{ __html: previewHtml }}
-          />
-        </div>
-      ) : (
-        <Editor
-          value={value}
-          onChange={onChange}
-          onSave={onSave ? () => onSave(value) : undefined}
-          readOnly={resolvedReadOnly}
-          placeholder={placeholder}
-          collaboration={editorCollaboration}
-          immersive={immersive}
-          stateDocId={collaborationKey}
-        />
-      )}
+      <Editor
+        value={value}
+        onChange={onChange}
+        onSave={onSave ? () => onSave(value) : undefined}
+        readOnly={resolvedReadOnly}
+        placeholder={placeholder}
+        collaboration={editorCollaboration}
+        immersive={immersive}
+        stateDocId={collaborationKey}
+      />
     </div>
   );
 }

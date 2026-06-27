@@ -8,6 +8,14 @@ function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+async function getErrorMessage(response: Response, fallback: string) {
+  const payload = await response.json().catch(() => null);
+  if (payload && typeof payload === 'object' && 'message' in payload) {
+    return String((payload as { message: unknown }).message);
+  }
+  return fallback;
+}
+
 type TopicsListResponse = {
   data: Topic[];
   total: number;
@@ -66,7 +74,7 @@ export async function updateTopic(id: number, data: Partial<Topic>): Promise<{ m
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error('更新选题失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '更新选题失败'));
   return response.json();
 }
 

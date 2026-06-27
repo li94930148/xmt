@@ -9,6 +9,7 @@ let globalToken: string | null = null;
 
 export function useSocket() {
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [, setSocketRevision] = useState(0);
   const user = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
   const isLoggedIn = useAuthStore((state) => state.isLoggedIn);
@@ -49,19 +50,22 @@ export function useSocket() {
     globalSocket = nextSocket;
     globalUserId = user.id;
     globalToken = token;
+    setSocket(nextSocket);
 
     nextSocket.on('connect', () => {
       console.info('[Socket] connected:', nextSocket.id);
+      setSocketRevision((revision) => revision + 1);
       setSocket(nextSocket);
     });
 
     nextSocket.on('connect_error', (error) => {
       console.warn('[Socket] connect_error:', error.message);
-      setSocket(null);
+      setSocketRevision((revision) => revision + 1);
     });
 
     nextSocket.on('disconnect', (reason) => {
       console.info('[Socket] disconnected:', reason);
+      setSocketRevision((revision) => revision + 1);
     });
 
     nextSocket.on('new_message', (message) => {

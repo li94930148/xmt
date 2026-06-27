@@ -22,6 +22,7 @@ export default function TopicDetail() {
   const [editTitle, setEditTitle] = useState(false);
   const [editDetails, setEditDetails] = useState(false);
   const [editDescription, setEditDescription] = useState(false);
+  const [editOutline, setEditOutline] = useState(false);
   
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState({ assignee_id: 0, deadline: '', platform: '' });
@@ -33,7 +34,7 @@ export default function TopicDetail() {
   const authStore = useAuthStore();
   const appStore = useAppStore();
   const styles = useThemeStyles();
-  const { hasPermission } = usePermission();
+  const { hasPermission, loading: permissionsLoading } = usePermission();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -64,9 +65,7 @@ export default function TopicDetail() {
         setUsers(usersData.data);
 
         // 大纲内容从 topic 取
-        if (topicData.outline) {
-          setScriptContent(topicData.outline);
-        }
+        setScriptContent(topicData.outline || '');
       } catch (error) {
         appStore.addNotification({ title: '获取选题详情失败', message: (error as Error).message, type: 'error' });
       } finally {
@@ -125,11 +124,10 @@ export default function TopicDetail() {
       setEditTitle(false);
       setEditDetails(false);
       setEditDescription(false);
+      setEditOutline(false);
       const topicData = await getTopic(parseInt(id!));
       setTopic(topicData);
-      if (topicData.outline) {
-        setScriptContent(topicData.outline);
-      }
+      setScriptContent(topicData.outline || '');
     } catch (error) {
       appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
     }
@@ -149,6 +147,7 @@ export default function TopicDetail() {
     setEditTitle(false);
     setEditDetails(false);
     setEditDescription(false);
+    setEditOutline(false);
   };
 
   const statusColors: Record<string, string> = {
@@ -190,7 +189,24 @@ export default function TopicDetail() {
   };
 
   const canAudit = hasPermission('topic:audit');
+  const canEditTopic = hasPermission('topic:update');
   const isOverdue = topic?.deadline && new Date(topic.deadline) < new Date() && topic.status !== 'completed' && topic.status !== 'rejected';
+
+  const beginEditingTopic = () => {
+    if (!permissionsLoading && !canEditTopic) {
+      appStore.addNotification({
+        title: '无编辑权限',
+        message: '当前账号没有编辑选题的权限。',
+        type: 'warning',
+      });
+      return;
+    }
+
+    setEditTitle(true);
+    setEditDetails(true);
+    setEditDescription(true);
+    setEditOutline(true);
+  };
 
   if (loading) {
     return (
@@ -204,7 +220,7 @@ export default function TopicDetail() {
     return <p className="text-gray-400 text-center py-8">选题不存在</p>;
   }
 
-  const isEditing = editTitle || editDetails || editDescription;
+  const isEditing = editTitle || editDetails || editDescription || editOutline;
 
   return (
     <div className="space-y-6">
@@ -231,7 +247,12 @@ export default function TopicDetail() {
                   autoFocus
                 />
               ) : (
-                <h1 className={`text-2xl font-bold ${styles.textPrimary} cursor-pointer hover:text-blue-400 transition-colors`} onClick={() => setEditTitle(true)}>
+                <h1
+                  className={`text-2xl font-bold ${styles.textPrimary} cursor-pointer hover:text-blue-400 transition-colors`}
+                  onClick={() => {
+                    if (canEditTopic) setEditTitle(true);
+                  }}
+                >
                   {title}
                 </h1>
               )}
@@ -276,7 +297,12 @@ export default function TopicDetail() {
                 ))}
               </select>
             ) : (
-              <p className={`${styles.textPrimary} font-medium cursor-pointer hover:text-blue-400 transition-colors`} onClick={() => setEditDetails(true)}>
+              <p
+                className={`${styles.textPrimary} font-medium cursor-pointer hover:text-blue-400 transition-colors`}
+                onClick={() => {
+                  if (canEditTopic) setEditDetails(true);
+                }}
+              >
                 {details.assignee_id ? users.find(u => u.id === details.assignee_id)?.name || '未指派' : '未指派'}
               </p>
             )}
@@ -294,7 +320,12 @@ export default function TopicDetail() {
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             ) : (
-              <p className={`font-medium cursor-pointer transition-colors ${isOverdue ? 'text-red-400 hover:text-red-300' : `${styles.textPrimary} hover:text-blue-400`}`} onClick={() => setEditDetails(true)}>
+              <p
+                className={`font-medium cursor-pointer transition-colors ${isOverdue ? 'text-red-400 hover:text-red-300' : `${styles.textPrimary} hover:text-blue-400`}`}
+                onClick={() => {
+                  if (canEditTopic) setEditDetails(true);
+                }}
+              >
                 {formatBeijingDate(details.deadline)}
               </p>
             )}
@@ -313,7 +344,12 @@ export default function TopicDetail() {
                 placeholder="输入发布平台"
               />
             ) : (
-              <p className={`${styles.textPrimary} font-medium cursor-pointer hover:text-blue-400 transition-colors`} onClick={() => setEditDetails(true)}>
+              <p
+                className={`${styles.textPrimary} font-medium cursor-pointer hover:text-blue-400 transition-colors`}
+                onClick={() => {
+                  if (canEditTopic) setEditDetails(true);
+                }}
+              >
                 {details.platform || '-'}
               </p>
             )}
@@ -325,7 +361,7 @@ export default function TopicDetail() {
           <div className={`${styles.bgTertiary} rounded-lg p-4`}>
             <div className="flex items-center justify-between mb-2">
               <h3 className={`${styles.textSecondary} text-sm font-medium`}>项目背景</h3>
-              {isEditing && (
+              {canEditTopic && isEditing && (
                 <button onClick={() => setEditDescription(true)} className="text-xs text-blue-400 hover:text-blue-300">编辑</button>
               )}
             </div>
@@ -346,7 +382,7 @@ export default function TopicDetail() {
           <div className={`${styles.bgTertiary} rounded-lg p-4`}>
             <div className="flex items-center justify-between mb-2">
               <h3 className={`${styles.textSecondary} text-sm font-medium`}>目标受众</h3>
-              {isEditing && (
+              {canEditTopic && isEditing && (
                 <button onClick={() => setEditDescription(true)} className="text-xs text-blue-400 hover:text-blue-300">编辑</button>
               )}
             </div>
@@ -371,16 +407,17 @@ export default function TopicDetail() {
           <div className="flex items-center justify-between mb-2">
             <h3 className={`${styles.textSecondary} text-sm font-medium`}>剧本大纲</h3>
             <div className="flex items-center gap-2">
-              {!editDescription && isEditing && (
-                <button onClick={() => setEditDescription(true)} className="text-xs text-blue-400 hover:text-blue-300">编辑大纲</button>
+              {canEditTopic && !editOutline && isEditing && (
+                <button onClick={() => setEditOutline(true)} className="text-xs text-blue-400 hover:text-blue-300">编辑大纲</button>
               )}
             </div>
           </div>
-          {editDescription ? (
+          {editOutline ? (
             <ContentEditor
               value={scriptContent}
               onChange={setScriptContent}
               mode="rich"
+              collaborationEnabled={false}
             />
           ) : (
             <div className={`tiptap ${styles.bgTertiary} rounded-lg p-6 ${styles.textPrimary} min-h-[200px] leading-relaxed`} dangerouslySetInnerHTML={{ __html: scriptContent || '暂无大纲内容' }}></div>
@@ -451,13 +488,20 @@ export default function TopicDetail() {
               </button>
             )}
             {!isEditing && (
-              <button
-                onClick={() => { setEditTitle(true); setEditDetails(true); setEditDescription(true); }}
-                className={`px-4 py-2 ${styles.bgTertiary} ${styles.hoverBg} ${styles.textPrimary} rounded-lg transition-colors flex items-center gap-2`}
-              >
-                <FileText className="w-4 h-4" />
-                编辑选题
-              </button>
+              permissionsLoading || canEditTopic ? (
+                <button
+                  onClick={beginEditingTopic}
+                  className={`px-4 py-2 ${styles.bgTertiary} ${styles.hoverBg} ${styles.textPrimary} rounded-lg transition-colors flex items-center gap-2`}
+                >
+                  <FileText className="w-4 h-4" />
+                  编辑选题
+                </button>
+              ) : (
+                <span className={`px-4 py-2 ${styles.bgTertiary} ${styles.textSecondary} rounded-lg flex items-center gap-2`}>
+                  <FileText className="w-4 h-4" />
+                  无编辑权限
+                </span>
+              )
             )}
             {topic.status !== 'completed' && topic.status !== 'rejected' && (
               <button

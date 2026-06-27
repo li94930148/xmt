@@ -8,6 +8,14 @@ function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+async function getErrorMessage(response: Response, fallback: string) {
+  const payload = await response.json().catch(() => null);
+  if (payload && typeof payload === 'object' && 'message' in payload) {
+    return String((payload as { message: unknown }).message);
+  }
+  return fallback;
+}
+
 // Production
 export async function getProduction(params?: { topic_id?: number }): Promise<Production[]> {
   const query = new URLSearchParams(params as Record<string, string>);
@@ -42,7 +50,7 @@ export async function updateProduction(id: number, data: { topic_id: number; ver
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error('更新创作记录失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '更新创作记录失败'));
   return response.json();
 }
 

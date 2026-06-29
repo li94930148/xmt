@@ -294,18 +294,15 @@ export default function Layout() {
     );
   }
 
-  const contentOffsetClass = sidebarCollapsed ? 'md:ml-[76px]' : 'md:ml-60';
+  const sidebarWidth = sidebarCollapsed ? '72px' : '232px';
 
   return (
-    <AppShell>
+    <AppShell
+      className="md:grid md:transition-[grid-template-columns] md:duration-300"
+      style={{ gridTemplateColumns: `${sidebarWidth} minmax(0, 1fr)` }}
+    >
       <Sidebar
         collapsed={sidebarCollapsed}
-        onToggle={toggleSidebar}
-        theme={theme}
-        onOpenCommandPalette={() => setShowCmdPalette(true)}
-      />
-      <Sidebar
-        collapsed={false}
         onToggle={toggleSidebar}
         theme={theme}
         mobileOpen={mobileNavOpen}
@@ -316,7 +313,7 @@ export default function Layout() {
         }}
       />
 
-      <div className={`min-h-screen transition-[margin] duration-300 ${contentOffsetClass}`}>
+      <div className="min-h-screen min-w-0">
         <Topbar>
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <button

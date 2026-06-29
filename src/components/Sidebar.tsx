@@ -53,14 +53,14 @@ export default function Sidebar({
     }))
     .filter((section) => section.items.length > 0);
 
-  const desktopAsideClass = collapsed ? 'w-[76px]' : 'w-60';
+  const desktopAsideClass = collapsed ? 'w-[72px]' : 'w-[232px]';
   const shellClass =
     'border-studio-border-soft bg-studio-surface-glass text-studio-text-primary shadow-card backdrop-blur-2xl';
 
   const renderMenu = (isMobile: boolean) => (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className={`flex min-h-20 items-center border-b border-studio-border-soft px-4 py-3 ${collapsed && !isMobile ? 'justify-center' : 'gap-3'}`}>
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[16px] border border-studio-border-soft bg-white/[0.06] shadow-glow-primary">
+      <div className={`flex min-h-20 items-center border-b border-studio-border-soft py-3 ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-4'}`}>
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[16px] border border-studio-border-soft bg-white/[0.06] shadow-glow-primary">
           <img src={systemSettings.branding.logo || '/logo.png'} alt="XMT" className="h-8 w-8 object-contain" />
         </div>
 
@@ -84,7 +84,7 @@ export default function Sidebar({
         ) : null}
       </div>
 
-      <div className="px-3 py-3">
+      <div className={`${collapsed && !isMobile ? 'px-2' : 'px-3'} py-3`}>
         <button
           type="button"
           onClick={() => {
@@ -101,7 +101,7 @@ export default function Sidebar({
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 pb-3">
+      <nav className={`flex-1 overflow-y-auto pb-3 ${collapsed && !isMobile ? 'px-2' : 'px-3'}`}>
         {visibleSections.map((section, sectionIndex) => (
           <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}>
             {(!collapsed || isMobile) && (
@@ -124,9 +124,9 @@ export default function Sidebar({
                       type="button"
                       onClick={() => handleNavigate(item.path)}
                       title={item.label}
-                      className={`group relative flex w-full items-center gap-3 rounded-button px-3 py-2.5 text-left transition-all duration-200 ${
+                      className={`group relative flex w-full items-center gap-3 rounded-button py-2.5 text-left transition-all duration-200 ${
                         collapsed && !isMobile ? 'justify-center' : ''
-                      } ${
+                      } ${collapsed && !isMobile ? 'px-2' : 'px-3'} ${
                         isActive
                           ? 'border border-studio-border-active bg-studio-primary/14 text-studio-text-primary shadow-glow-primary'
                           : 'border border-transparent text-studio-text-secondary hover:border-studio-border-soft hover:bg-white/[0.055] hover:text-studio-text-primary'
@@ -155,13 +155,13 @@ export default function Sidebar({
         ))}
       </nav>
 
-      <div className="border-t border-studio-border-soft p-3">
+      <div className={`border-t border-studio-border-soft ${collapsed && !isMobile ? 'p-2' : 'p-3'}`}>
         <button
           type="button"
           onClick={handleLogout}
-          className={`group flex w-full items-center gap-3 rounded-button px-3 py-2.5 text-studio-text-muted transition-all duration-200 hover:bg-studio-coral/10 hover:text-studio-coral ${
+          className={`group flex w-full items-center gap-3 rounded-button py-2.5 text-studio-text-muted transition-all duration-200 hover:bg-studio-coral/10 hover:text-studio-coral ${
             collapsed && !isMobile ? 'justify-center' : ''
-          }`}
+          } ${collapsed && !isMobile ? 'px-2' : 'px-3'}`}
         >
           <LogOut className="h-[18px] w-[18px] shrink-0" />
           {(!collapsed || isMobile) && <span className="text-sm font-medium">退出登录</span>}
@@ -183,7 +183,7 @@ export default function Sidebar({
 
   return (
     <>
-      <aside className={`fixed left-0 top-0 z-40 hidden h-screen border-r transition-all duration-300 md:block ${desktopAsideClass} ${shellClass}`}>
+      <aside className={`relative z-30 hidden h-screen self-start border-r transition-[width] duration-300 md:block ${desktopAsideClass} ${shellClass}`}>
         {renderMenu(false)}
       </aside>
 

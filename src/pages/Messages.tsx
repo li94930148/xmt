@@ -171,7 +171,7 @@ export default function Messages() {
                   key={filter.key}
                   type="button"
                   onClick={() => setActiveFilter(filter.key)}
-                  className={`rounded-button border px-3 py-2 text-sm font-semibold transition ${
+                  className={`min-h-10 rounded-button border px-3 py-2 text-sm font-semibold leading-snug transition ${
                     activeFilter === filter.key
                       ? 'border-studio-border-active bg-studio-primary/14 text-studio-text-primary'
                       : 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary hover:border-studio-border-active hover:text-studio-text-primary'
@@ -225,11 +225,11 @@ export default function Messages() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-studio-text-primary">{message.title}</h3>
+                          <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug text-studio-text-primary">{message.title}</h3>
                           <StatusPill tone={message.read ? 'muted' : 'cyan'}>{message.read ? '已读' : '未读'}</StatusPill>
                           {message.link ? <ExternalLink className="h-4 w-4 text-studio-text-muted opacity-60 transition group-hover:opacity-100" /> : null}
                         </div>
-                        <p className="mt-1 line-clamp-2 text-sm leading-6 text-studio-text-secondary">{message.content}</p>
+                        <p className="mt-1 text-sm leading-6 text-studio-text-secondary">{message.content}</p>
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
                           <span>{formatBeijingTime(message.created_at)}</span>
                           <span>{meta.label}</span>

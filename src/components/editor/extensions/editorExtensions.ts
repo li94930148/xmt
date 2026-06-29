@@ -1,5 +1,6 @@
 import type { Extensions } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
+import { Paragraph } from '@tiptap/extension-paragraph';
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
@@ -17,13 +18,34 @@ import { TextStyle } from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import { CommentExtension } from './CommentExtension';
 
+const ParagraphWithIndent = Paragraph.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      textIndent: {
+        default: null,
+        parseHTML: (element) => {
+          const indent = (element as HTMLElement).style.textIndent;
+          return indent === '2em' ? '2em' : null;
+        },
+        renderHTML: (attributes) => {
+          if (attributes.textIndent !== '2em') return {};
+          return { style: 'text-indent: 2em;' };
+        },
+      },
+    };
+  },
+});
+
 export function createEditorExtensions(placeholder = '开始编写...'): Extensions {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3, 4, 5, 6] },
       link: false,
+      paragraph: false,
       underline: false,
     }),
+    ParagraphWithIndent,
     Table.configure({ resizable: true }),
     TableRow,
     TableCell,

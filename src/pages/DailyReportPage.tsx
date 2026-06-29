@@ -23,9 +23,9 @@ export default function DailyReportPage() {
         ].map((item) => (
           <GlassPanel key={item.label} className="p-5">
             <div className="flex items-start justify-between gap-4">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm text-studio-text-muted">{item.label}</p>
-                <p className="mt-3 text-3xl font-bold text-studio-text-primary">{item.value}</p>
+                <p className="mt-3 break-words text-3xl font-bold leading-tight text-studio-text-primary">{item.value}</p>
               </div>
               <div className="flex h-11 w-11 items-center justify-center rounded-[14px] border border-studio-border-soft bg-white/[0.05]">
                 <item.icon className="h-5 w-5 text-studio-cyan" />
@@ -36,12 +36,12 @@ export default function DailyReportPage() {
       </div>
 
       <GlassPanel className="p-6">
-        <div className="mb-5 flex items-center justify-between">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-studio-text-primary">日报规划</h2>
             <p className="mt-1 text-sm text-studio-text-muted">后续可承载个人进展、阻塞项、明日计划和管理者摘要。</p>
           </div>
-          <StatusPill tone="primary">Reserved</StatusPill>
+          <StatusPill tone="primary">规划中</StatusPill>
         </div>
         <EmptyState
           icon={FileClock}

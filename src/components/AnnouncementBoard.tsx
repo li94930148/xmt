@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useAppStore, useAuthStore } from '../store';
 import {
   Pin, Plus, Trash2, Megaphone, StickyNote, AlertTriangle, X,
 } from 'lucide-react';
 import type { Announcement } from '../types';
 import { formatBeijingDate, getCurrentBeijingDateTimeString } from '../lib/utils';
+import { GlassPanel } from './studio';
 
 // Mock API — replace with real endpoints
 async function getAnnouncements(): Promise<Announcement[]> {
@@ -62,7 +62,6 @@ const typeConfig: Record<string, { label: string; icon: typeof Pin; color: strin
 };
 
 export default function AnnouncementBoard() {
-  const styles = useThemeStyles();
   const appStore = useAppStore();
   const [items, setItems] = useState<Announcement[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -70,9 +69,11 @@ export default function AnnouncementBoard() {
   const [newType, setNewType] = useState<string>('note');
   const [newPinned, setNewPinned] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
   const fetchItems = async () => {
     try {
+      setLoading(true);
       const data = await getAnnouncements();
       setItems(data);
     } catch {
@@ -87,7 +88,8 @@ export default function AnnouncementBoard() {
   }, []);
 
   const handleCreate = async () => {
-    if (!newContent.trim()) return;
+    if (!newContent.trim() || submitting) return;
+    setSubmitting(true);
     try {
       const created = await createAnnouncement({
         content: newContent.trim(),
@@ -99,9 +101,12 @@ export default function AnnouncementBoard() {
       setNewType('note');
       setNewPinned(false);
       setShowForm(false);
+      await fetchItems();
       appStore.addNotification({ title: '创建成功', message: '公告已发布', type: 'success' });
     } catch (err) {
       appStore.addNotification({ title: '创建失败', message: (err as Error).message, type: 'error' });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -122,35 +127,31 @@ export default function AnnouncementBoard() {
   });
 
   return (
-    <div className={`${styles.card} p-5`}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+    <GlassPanel className="p-5">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-            styles.isDark ? 'bg-[#ffd43b]/10' : 'bg-[#f08c00]/10'
-          }`}>
-            <Megaphone className="w-4 h-4 text-[#ffd43b]" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-studio-amber/15 text-studio-amber">
+            <Megaphone className="h-4 w-4" />
           </div>
-          <h3 className={`text-base font-semibold ${styles.textPrimary}`}>公告板</h3>
+          <h3 className="text-base font-semibold text-studio-text-primary">公告板</h3>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
-          className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
+          className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-button border border-studio-border-soft bg-white/[0.04] text-studio-text-muted transition-colors hover:border-studio-border-active hover:text-studio-text-primary"
           title="添加公告"
         >
-          {showForm ? <X className={`w-4 h-4 ${styles.textMuted}`} /> : <Plus className={`w-4 h-4 ${styles.textMuted}`} />}
+          {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
         </button>
       </div>
 
-      {/* Create Form */}
       {showForm && (
-        <div className={`mb-4 p-4 rounded-xl border ${styles.border} ${styles.isDark ? 'bg-[#1e2030]' : 'bg-[#f8f9fa]'}`}>
+        <div className="mb-4 rounded-card border border-studio-border-soft bg-white/[0.04] p-4">
           <textarea
             value={newContent}
             onChange={(e) => setNewContent(e.target.value)}
             placeholder="输入公告内容..."
             rows={2}
-            className={`w-full px-3 py-2 text-sm ${styles.input} resize-none mb-3`}
+            className="mb-3 min-h-20 w-full resize-y rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm leading-6 text-studio-text-primary outline-none transition focus:border-studio-border-active"
           />
           <div className="flex items-center gap-2 flex-wrap">
             {(['note', 'announcement', 'important'] as const).map((t) => {
@@ -160,11 +161,12 @@ export default function AnnouncementBoard() {
                 <button
                   key={t}
                   onClick={() => setNewType(t)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  className={`inline-flex min-h-8 items-center gap-1.5 rounded-button border px-3 py-1.5 text-xs font-medium transition-colors ${
                     newType === t
-                      ? `${styles.isDark ? cfg.bgDark : cfg.bgLight} ${cfg.border} text-[${cfg.color}]`
-                      : `${styles.hoverBg} ${styles.border} ${styles.textMuted}`
+                      ? `${cfg.bgDark} ${cfg.border}`
+                      : 'border-studio-border-soft bg-white/[0.04] text-studio-text-muted hover:text-studio-text-primary'
                   }`}
+                  style={newType === t ? { color: cfg.color } : undefined}
                 >
                   <Icon className="w-3.5 h-3.5" />
                   {cfg.label}
@@ -173,10 +175,10 @@ export default function AnnouncementBoard() {
             })}
             <button
               onClick={() => setNewPinned(!newPinned)}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              className={`inline-flex min-h-8 items-center gap-1 rounded-button border px-3 py-1.5 text-xs font-medium transition-colors ${
                 newPinned
                   ? `bg-[#ffd43b]/10 border-[#ffd43b]/30 text-[#ffd43b]`
-                  : `${styles.hoverBg} ${styles.border} ${styles.textMuted}`
+                  : 'border-studio-border-soft bg-white/[0.04] text-studio-text-muted hover:text-studio-text-primary'
               }`}
             >
               <Pin className="w-3 h-3" />
@@ -185,28 +187,27 @@ export default function AnnouncementBoard() {
             <div className="flex-1" />
             <button
               onClick={handleCreate}
-              disabled={!newContent.trim()}
-              className={`px-4 py-1.5 rounded-lg text-xs font-medium ${styles.buttonPrimary} disabled:opacity-40 transition-all`}
+              disabled={!newContent.trim() || submitting}
+              className="inline-flex min-h-8 items-center justify-center rounded-button border border-studio-primary/40 bg-studio-primary px-4 py-1.5 text-xs font-semibold text-white transition-all hover:bg-[#6A91FF] disabled:pointer-events-none disabled:opacity-40"
             >
-              发布
+              {submitting ? '发布中...' : '发布'}
             </button>
           </div>
         </div>
       )}
 
-      {/* List */}
-      <div className="space-y-2 max-h-[300px] overflow-y-auto">
+      <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
         {loading ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
-              <div key={i} className={`p-3 rounded-xl ${styles.isDark ? 'bg-[#1e2030]' : 'bg-[#f8f9fa]'} animate-pulse`}>
-                <div className={`h-3 rounded ${styles.bgTertiary} w-3/4 mb-2`} />
-                <div className={`h-2 rounded ${styles.bgTertiary} w-1/2`} />
+              <div key={i} className="animate-pulse rounded-card border border-studio-border-soft bg-white/[0.04] p-3">
+                <div className="mb-2 h-3 w-3/4 rounded bg-white/[0.08]" />
+                <div className="h-2 w-1/2 rounded bg-white/[0.08]" />
               </div>
             ))}
           </div>
         ) : sortedItems.length === 0 ? (
-          <div className={`text-center py-6 text-sm ${styles.textMuted}`}>暂无公告</div>
+          <div className="rounded-card border border-dashed border-studio-border-soft py-6 text-center text-sm text-studio-text-muted">暂无公告</div>
         ) : (
           sortedItems.map((item) => {
             const cfg = typeConfig[item.type] || typeConfig.note;
@@ -214,28 +215,26 @@ export default function AnnouncementBoard() {
             return (
               <div
                 key={item.id}
-                className={`group p-3 rounded-xl border transition-all duration-200 hover:shadow-sm ${
-                  styles.isDark ? cfg.bgDark : cfg.bgLight
-                } ${cfg.border}`}
+                className={`group rounded-card border p-3 transition-all duration-200 hover:border-studio-border-active hover:bg-white/[0.07] ${cfg.bgDark} ${cfg.border}`}
               >
                 <div className="flex items-start gap-2.5">
                   <Icon className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: cfg.color }} />
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm ${styles.textPrimary} leading-relaxed`}>{item.content}</p>
-                    <div className="flex items-center gap-2 mt-1.5">
+                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-studio-text-primary">{item.content}</p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
                       {item.pinned && (
-                        <span className="flex items-center gap-0.5 text-[10px] text-[#ffd43b]">
+                        <span className="inline-flex items-center gap-0.5 text-[10px] text-[#ffd43b]">
                           <Pin className="w-2.5 h-2.5" /> 置顶
                         </span>
                       )}
-                      <span className={`text-[10px] ${styles.textMuted}`}>
-                        {item.creator_name} · {formatBeijingDate(item.created_at)}
+                      <span className="text-[10px] text-studio-text-muted">
+                        {item.creator_name || '系统'} · {formatBeijingDate(item.created_at)}
                       </span>
                     </div>
                   </div>
                   <button
                     onClick={() => handleDelete(item.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity"
+                    className="rounded p-1 opacity-0 transition-opacity hover:bg-studio-coral/10 group-hover:opacity-100"
                     title="删除"
                   >
                     <Trash2 className="w-3.5 h-3.5 text-[#ff6b6b]" />
@@ -246,6 +245,6 @@ export default function AnnouncementBoard() {
           })
         )}
       </div>
-    </div>
+    </GlassPanel>
   );
 }

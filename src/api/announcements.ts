@@ -15,7 +15,8 @@ export async function getAnnouncements(): Promise<Announcement[]> {
     headers: getAuthHeader()
   });
   if (!response.ok) throw new Error('获取公告列表失败');
-  return response.json();
+  const json = await response.json();
+  return Array.isArray(json) ? json : (json.data || []);
 }
 
 export async function createAnnouncement(data: { content: string; type?: string; pinned?: boolean }): Promise<{ message: string; id: number }> {

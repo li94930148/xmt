@@ -60,9 +60,9 @@ const statusTone: Record<TopicStatus, 'primary' | 'cyan' | 'violet' | 'coral' | 
 };
 
 const dailyQuotes = [
-  { text: '好的内容不是堆满信息，而是在正确的时间推动下一步。', author: 'XMT Studio' },
+  { text: '好的内容不是堆满信息，而是在正确的时间推动下一步。', author: '内容工作台' },
   { text: '今天先让生产链路流动起来，灵感会在协作里变清晰。', author: '内容节奏手记' },
-  { text: '选题、创作、发布、复盘，每一步都应该被看见。', author: 'Studio OS' },
+  { text: '选题、创作、发布、复盘，每一步都应该被看见。', author: '团队协作记录' },
   { text: '创意需要锋芒，执行需要秩序。', author: '新媒体工作台' },
 ];
 
@@ -169,7 +169,7 @@ export default function Home() {
                 {user?.name || '伙伴'}，今天优先让内容链路往前走。
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-studio-text-secondary">
-                从待审核、创作中到待发布，首页现在聚焦“今天该做什么”，减少装饰性信息，把下一步动作放到第一屏。
+                优先处理待审核与待发布内容，继续推进今天的内容节奏。
               </p>
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <ActionButton onClick={() => navigate('/topics')} variant="primary">
@@ -185,11 +185,11 @@ export default function Home() {
                 </span>
               </div>
             </div>
-            <div className="min-w-[220px] rounded-card border border-studio-border-soft bg-white/[0.05] p-4">
+            <div className="w-full rounded-card border border-studio-border-soft bg-white/[0.05] p-4 lg:max-w-[240px]">
               <p className="text-xs font-semibold text-studio-text-muted">今日主线</p>
               <div className="mt-4 space-y-3">
                 {rhythm.slice(0, 3).map((item) => (
-                  <button key={item.label} onClick={() => navigate(item.path)} className="flex w-full items-center justify-between rounded-button bg-white/[0.04] px-3 py-2 text-left transition hover:bg-white/[0.08]">
+                  <button key={item.label} onClick={() => navigate(item.path)} className="flex w-full items-center justify-between gap-3 rounded-button bg-white/[0.04] px-3 py-2 text-left transition hover:bg-white/[0.08]">
                     <span className="text-sm text-studio-text-secondary">{item.label}</span>
                     <span className="text-lg font-bold text-studio-text-primary">{item.value}</span>
                   </button>
@@ -208,7 +208,7 @@ export default function Home() {
             </div>
             <div>
               <h2 className="text-sm font-semibold text-studio-text-primary">每日一言</h2>
-              <p className="text-xs text-studio-text-muted">轻量保留，不抢主视觉</p>
+              <p className="text-xs text-studio-text-muted">开始前看一眼</p>
             </div>
           </div>
           <blockquote className="mt-5 text-sm leading-6 text-studio-text-secondary">“{dailyQuote.text}”</blockquote>
@@ -242,7 +242,7 @@ export default function Home() {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]">
         <GlassPanel className="p-5">
-          <div className="mb-5 flex items-center justify-between">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-studio-text-primary">今日待办</h2>
               <p className="mt-1 text-xs text-studio-text-muted">优先处理阻塞内容流的节点</p>
@@ -271,7 +271,7 @@ export default function Home() {
                       <span>{formatBeijingDate(topic.created_at)}</span>
                     </div>
                   </div>
-                  <StatusPill tone={statusTone[topic.status]}>{statusText[topic.status]}</StatusPill>
+                  <StatusPill className="shrink-0" tone={statusTone[topic.status]}>{statusText[topic.status]}</StatusPill>
                   <span className="translate-x-2 text-xs font-semibold text-studio-cyan opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100">
                     去审核
                   </span>
@@ -307,7 +307,7 @@ export default function Home() {
 
       <div className="grid gap-5 xl:grid-cols-3">
         <GlassPanel className="p-5 xl:col-span-2">
-          <div className="mb-5 flex items-center justify-between">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-studio-text-primary">最近内容流</h2>
               <p className="mt-1 text-xs text-studio-text-muted">快速判断每个选题当前卡在哪一步</p>
@@ -321,7 +321,7 @@ export default function Home() {
               <button key={topic.id} onClick={() => navigate(`/topics/${topic.id}`)} className="rounded-card border border-studio-border-soft bg-white/[0.035] p-4 text-left transition hover:border-studio-border-active hover:bg-white/[0.06]">
                 <div className="flex items-start justify-between gap-3">
                   <p className="line-clamp-2 text-sm font-semibold text-studio-text-primary">{topic.title}</p>
-                  <StatusPill tone={statusTone[topic.status]}>{statusText[topic.status]}</StatusPill>
+                  <StatusPill className="shrink-0" tone={statusTone[topic.status]}>{statusText[topic.status]}</StatusPill>
                 </div>
                 <div className="mt-4 flex items-center justify-between text-xs text-studio-text-muted">
                   <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />{topic.assignee_name || topic.creator_name || '待认领'}</span>

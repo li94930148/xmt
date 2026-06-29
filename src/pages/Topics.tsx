@@ -405,7 +405,7 @@ export default function Topics() {
                 setStatusFilter(event.target.value);
                 setPage(1);
               }}
-              className="h-10 w-full appearance-none rounded-button border border-studio-border-soft bg-white/[0.05] pl-9 pr-3 text-sm text-studio-text-primary outline-none transition focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
+              className="min-h-10 w-full appearance-none rounded-button border border-studio-border-soft bg-white/[0.05] py-2 pl-9 pr-3 text-sm leading-snug text-studio-text-primary outline-none transition focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             >
               {statusOptions.map((option) => (
                 <option key={option.value || 'all'} value={option.value} className="bg-studio-surface text-studio-text-primary">
@@ -521,7 +521,7 @@ export default function Topics() {
                         <button
                           type="button"
                           onClick={() => navigate(nextAction.path)}
-                          className="inline-flex items-center gap-1.5 rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+                          className="inline-flex min-h-8 items-center gap-1.5 rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-1.5 text-xs font-semibold leading-snug text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
                         >
                           {nextAction.label}
                           <ArrowRight className="h-3.5 w-3.5" />

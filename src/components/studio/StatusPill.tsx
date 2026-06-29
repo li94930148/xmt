@@ -14,7 +14,7 @@ const toneClass: Record<StatusTone, string> = {
 
 export default function StatusPill({ children, tone = 'muted', className = '' }: { children: React.ReactNode; tone?: StatusTone; className?: string }) {
   return (
-    <span className={twMerge('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold', toneClass[tone], className)}>
+    <span className={twMerge('inline-flex min-h-7 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold leading-snug', toneClass[tone], className)}>
       <span className="h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_10px_currentColor]" />
       {children}
     </span>

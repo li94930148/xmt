@@ -53,13 +53,13 @@ export default function Sidebar({
     }))
     .filter((section) => section.items.length > 0);
 
-  const desktopAsideClass = collapsed ? 'w-[76px]' : 'w-72';
+  const desktopAsideClass = collapsed ? 'w-[76px]' : 'w-60';
   const shellClass =
     'border-studio-border-soft bg-studio-surface-glass text-studio-text-primary shadow-card backdrop-blur-2xl';
 
   const renderMenu = (isMobile: boolean) => (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className={`flex h-20 items-center border-b border-studio-border-soft px-4 ${collapsed && !isMobile ? 'justify-center' : 'gap-3'}`}>
+      <div className={`flex min-h-20 items-center border-b border-studio-border-soft px-4 py-3 ${collapsed && !isMobile ? 'justify-center' : 'gap-3'}`}>
         <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[16px] border border-studio-border-soft bg-white/[0.06] shadow-glow-primary">
           <img src={systemSettings.branding.logo || '/logo.png'} alt="XMT" className="h-8 w-8 object-contain" />
         </div>
@@ -67,11 +67,8 @@ export default function Sidebar({
         {(!collapsed || isMobile) && (
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-sm font-bold tracking-normal text-studio-text-primary">
-              {systemSettings.system.name || 'XMT Studio OS'}
+              {systemSettings.system.name || '新媒体工作台'}
             </h1>
-            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-studio-cyan">
-              Media Studio OS
-            </p>
           </div>
         )}
 
@@ -94,6 +91,7 @@ export default function Sidebar({
             onOpenCommandPalette?.();
             onMobileClose?.();
           }}
+          title="搜索命令 / 内容"
           className={`flex w-full items-center rounded-button border border-studio-border-soft bg-white/[0.04] p-2.5 text-sm text-studio-text-muted transition-all duration-200 hover:border-studio-border-active hover:bg-white/[0.07] hover:text-studio-text-primary ${
             collapsed && !isMobile ? 'justify-center' : 'gap-3'
           }`}
@@ -125,6 +123,7 @@ export default function Sidebar({
                     <button
                       type="button"
                       onClick={() => handleNavigate(item.path)}
+                      title={item.label}
                       className={`group relative flex w-full items-center gap-3 rounded-button px-3 py-2.5 text-left transition-all duration-200 ${
                         collapsed && !isMobile ? 'justify-center' : ''
                       } ${

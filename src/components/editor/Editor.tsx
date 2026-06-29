@@ -560,6 +560,13 @@ export default function Editor({
           min-height: 100%;
           outline: none;
         }
+        .tiptap em,
+        .tiptap i {
+          font-style: italic;
+        }
+        .tiptap p[style*="text-indent"] {
+          text-indent: 2em;
+        }
         .tiptap .ProseMirror-selectednode {
           outline: 2px solid #3b82f6;
           border-radius: 4px;
@@ -724,6 +731,13 @@ export default function Editor({
           background-color: ${isDark ? '#422006' : '#fef3c7'} !important;
           border-bottom: 2px solid #f59e0b !important;
           cursor: help;
+        }
+        .production-preview em,
+        .production-preview i {
+          font-style: italic;
+        }
+        .production-preview p[style*="text-indent"] {
+          text-indent: 2em;
         }
         span[data-comment-id]::after {
           content: "【批注：" attr(data-comment-text) "】" !important;

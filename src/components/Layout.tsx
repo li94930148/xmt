@@ -294,7 +294,7 @@ export default function Layout() {
     );
   }
 
-  const contentOffsetClass = sidebarCollapsed ? 'md:ml-[76px]' : 'md:ml-72';
+  const contentOffsetClass = sidebarCollapsed ? 'md:ml-[76px]' : 'md:ml-60';
 
   return (
     <AppShell>
@@ -318,7 +318,7 @@ export default function Layout() {
 
       <div className={`min-h-screen transition-[margin] duration-300 ${contentOffsetClass}`}>
         <Topbar>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
               onClick={() => setMobileNavOpen(true)}
               className="inline-flex h-10 w-10 items-center justify-center rounded-button text-studio-text-secondary transition-colors hover:bg-white/[0.06] hover:text-studio-text-primary md:hidden"
@@ -327,10 +327,10 @@ export default function Layout() {
               <Menu className="h-5 w-5" />
             </button>
 
-            <button onClick={() => setShowCmdPalette(true)} className="relative hidden items-center md:flex">
+            <button onClick={() => setShowCmdPalette(true)} className="relative hidden min-w-0 items-center md:flex">
               <Search className="absolute left-3 h-4 w-4 text-studio-text-muted" />
               <div
-                className="w-72 rounded-button border border-studio-border-soft bg-white/[0.05] py-2 pl-9 pr-16 text-left text-sm text-studio-text-muted transition-all duration-200 hover:border-studio-border-active"
+                className="w-[min(18rem,34vw)] min-w-0 rounded-button border border-studio-border-soft bg-white/[0.05] py-2 pl-9 pr-16 text-left text-sm text-studio-text-muted transition-all duration-200 hover:border-studio-border-active"
               >
                 搜索选题、稿件、成员...
               </div>
@@ -342,7 +342,7 @@ export default function Layout() {
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <button
               onClick={() => navigate('/messages')}
               className={`relative rounded-xl p-2.5 transition-all duration-200 ${

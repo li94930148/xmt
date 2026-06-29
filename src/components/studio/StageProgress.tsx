@@ -7,7 +7,7 @@ export type StageItem = {
 
 export default function StageProgress({ stages, className = '' }: { stages: StageItem[]; className?: string }) {
   return (
-    <div className={twMerge('flex items-center gap-2', className)}>
+    <div className={twMerge('flex flex-wrap items-start gap-2', className)}>
       {stages.map((stage, index) => {
         const state = stage.state || 'pending';
         const dotClass =
@@ -23,7 +23,7 @@ export default function StageProgress({ stages, className = '' }: { stages: Stag
           <div key={`${stage.label}-${index}`} className="flex min-w-0 flex-1 items-center gap-2">
             <div className="flex min-w-0 flex-col items-center gap-1">
               <span className={twMerge('h-2.5 w-2.5 rounded-full ring-4 ring-white/[0.04]', dotClass)} />
-              <span className="max-w-16 truncate text-[10px] font-medium text-studio-text-muted">{stage.label}</span>
+              <span className="max-w-20 text-center text-[10px] font-medium leading-snug text-studio-text-muted">{stage.label}</span>
             </div>
             {index < stages.length - 1 ? <span className="h-px flex-1 bg-studio-border-soft" /> : null}
           </div>

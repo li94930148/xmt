@@ -4,7 +4,9 @@
  * 支持响应式折叠、dark mode、高亮/文字颜色选择器、导出
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
+import type { CommandProps } from '@tiptap/core';
 import { Editor } from '@tiptap/react';
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { useAppStore } from '../../store';
 import { htmlToMarkdown } from '../../utils/markdown';
 import {
@@ -18,7 +20,7 @@ import {
   ChevronDown, Maximize, Minimize,
   PanelRight, PanelRightClose,
   Download, FileText, FileCode, FileJson,
-  MoreHorizontal,
+  MoreHorizontal, IndentIncrease,
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -243,6 +245,51 @@ export default function Toolbar({
     setShowTextColorPicker(false);
   };
 
+  const getSelectedParagraphs = () => {
+    const { state } = editor;
+    const { from, to, $from } = state.selection;
+    const paragraphs: Array<{ pos: number; node: ProseMirrorNode }> = [];
+    const seen = new Set<number>();
+
+    state.doc.nodesBetween(from, to, (node, pos) => {
+      if (node.type.name !== 'paragraph' || seen.has(pos)) return;
+      seen.add(pos);
+      paragraphs.push({ pos, node });
+    });
+
+    if (paragraphs.length === 0) {
+      for (let depth = $from.depth; depth > 0; depth -= 1) {
+        const node = $from.node(depth);
+        if (node.type.name === 'paragraph') {
+          const pos = $from.before(depth);
+          paragraphs.push({ pos, node });
+          break;
+        }
+      }
+    }
+
+    return paragraphs;
+  };
+
+  const isTextIndentActive = () => getSelectedParagraphs().some(({ node }) => node.attrs.textIndent === '2em');
+
+  const toggleFirstLineIndent = () => {
+    const paragraphs = getSelectedParagraphs();
+    if (paragraphs.length === 0) return;
+    const shouldClear = paragraphs.every(({ node }) => node.attrs.textIndent === '2em');
+
+    editor.chain().focus().command(({ tr, dispatch }: CommandProps) => {
+      paragraphs.forEach(({ pos, node }) => {
+        tr.setNodeMarkup(pos, undefined, {
+          ...node.attrs,
+          textIndent: shouldClear ? null : '2em',
+        });
+      });
+      if (dispatch) dispatch(tr.scrollIntoView());
+      return true;
+    }).run();
+  };
+
   const dropdownClass = `absolute top-full left-0 mt-1 z-50 rounded-lg shadow-xl border py-1 ${
     isDark ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'
   }`;
@@ -441,6 +488,9 @@ export default function Toolbar({
         <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={btnClass(editor.isActive({ textAlign: 'justify' }))} title="两端对齐">
           <AlignJustify className="w-4 h-4" />
         </button>
+        <button onClick={toggleFirstLineIndent} className={btnClass(isTextIndentActive())} title="首行缩进">
+          <IndentIncrease className="w-4 h-4" />
+        </button>
       </div>
 
       {divider}
@@ -543,6 +593,9 @@ export default function Toolbar({
                 </button>
                 <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
                   <AlignJustify className="w-4 h-4" /> 两端对齐
+                </button>
+                <button onClick={() => { toggleFirstLineIndent(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isTextIndentActive() ? (isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-600') : (isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100')}`}>
+                  <IndentIncrease className="w-4 h-4" /> 首行缩进
                 </button>
                 <div className={`my-1 border-t ${isDark ? 'border-gray-700' : 'border-gray-200'}`} />
                 {/* 插入 */}

@@ -5,7 +5,7 @@ export default function GlassPanel({ children, className = '', ...props }: Compo
   return (
     <div
       className={twMerge(
-        'rounded-panel border border-studio-border-soft bg-studio-surface-glass shadow-card backdrop-blur-xl',
+        'min-w-0 rounded-panel border border-studio-border-soft bg-studio-surface-glass shadow-card backdrop-blur-xl',
         className,
       )}
       {...props}

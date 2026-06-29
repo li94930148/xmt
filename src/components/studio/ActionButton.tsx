@@ -16,7 +16,7 @@ export default function ActionButton({ children, className = '', variant = 'seco
   return (
     <button
       className={twMerge(
-        'inline-flex items-center justify-center gap-2 rounded-button border px-4 py-2.5 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex min-h-10 items-center justify-center gap-2 rounded-button border px-4 py-2.5 text-sm font-semibold leading-snug transition-all duration-200 hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-50',
         variants[variant],
         className,
       )}

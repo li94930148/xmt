@@ -73,7 +73,7 @@ export default function ExportPage() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center justify-center gap-2 rounded-button px-4 py-3 text-sm font-semibold transition-all duration-200 ${
+                className={`flex min-h-11 items-center justify-center gap-2 rounded-button px-4 py-3 text-sm font-semibold leading-snug transition-all duration-200 ${
                   isActive
                     ? 'bg-studio-primary text-white shadow-glow-primary'
                     : 'text-studio-text-secondary hover:bg-white/[0.06] hover:text-studio-text-primary'
@@ -89,7 +89,7 @@ export default function ExportPage() {
 
       {activeTab === 'daily' ? (
         <GlassPanel className="p-6">
-          <div className="mb-5 flex items-center justify-between">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-studio-text-primary">日报</h2>
               <p className="mt-1 text-sm text-studio-text-muted">预留个人日清、团队摘要、阻塞项和明日计划。</p>
@@ -102,7 +102,7 @@ export default function ExportPage() {
 
       {activeTab === 'weekly' ? (
         <GlassPanel className="p-6">
-          <div className="mb-5 flex items-center gap-3">
+          <div className="mb-5 flex flex-wrap items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-studio-violet/15 text-studio-violet">
               <FileBarChart className="h-5 w-5" />
             </div>
@@ -124,7 +124,7 @@ export default function ExportPage() {
                 { label: '总播放量', value: (weeklyReport.summary?.totalViews || 0).toLocaleString(), tone: 'text-studio-violet' },
               ].map((item) => (
                 <div key={item.label} className="rounded-card border border-studio-border-soft bg-white/[0.04] p-4 text-center">
-                  <p className={`text-2xl font-bold ${item.tone}`}>{item.value}</p>
+                  <p className={`break-words text-2xl font-bold leading-tight ${item.tone}`}>{item.value}</p>
                   <p className="mt-1 text-xs text-studio-text-muted">{item.label}</p>
                 </div>
               ))}

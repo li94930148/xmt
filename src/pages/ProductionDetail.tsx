@@ -454,9 +454,12 @@ export default function ProductionDetail() {
         .production-preview mark[data-color="orange"] { background-color: rgba(248, 184, 78, 0.28); }
         .production-preview mark[data-color="gray"] { background-color: rgba(148, 163, 184, 0.22); }
         .production-preview mark[data-color="cyan"] { background-color: rgba(34, 211, 238, 0.28); }
+        .production-preview em,
+        .production-preview i { font-style: italic; }
+        .production-preview p[style*="text-indent"] { text-indent: 2em; }
       `}</style>
 
-      <GlassPanel className="sticky top-20 z-30 overflow-hidden">
+      <GlassPanel className="overflow-hidden">
         <div className="flex flex-col gap-4 border-b border-studio-border-soft bg-white/[0.025] px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <button
@@ -469,7 +472,7 @@ export default function ProductionDetail() {
             </button>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="max-w-[48rem] truncate text-xl font-bold text-studio-text-primary">
+                <h1 className="max-w-[48rem] text-xl font-bold leading-snug text-studio-text-primary">
                   {production.topic_title || '稿件创作工作台'}
                 </h1>
                 <StatusPill tone={statusTone}>{statusLabel}</StatusPill>

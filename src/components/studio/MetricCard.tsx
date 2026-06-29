@@ -31,9 +31,9 @@ export default function MetricCard({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs font-semibold text-studio-text-muted">{title}</p>
-          <div className="mt-3 flex items-baseline gap-2">
-            <p className="text-3xl font-bold leading-none tracking-normal text-studio-text-primary">{value}</p>
-            {unit ? <span className="text-xs font-medium text-studio-text-muted">{unit}</span> : null}
+          <div className="mt-3 flex flex-wrap items-baseline gap-2">
+            <p className="break-words text-3xl font-bold leading-tight tracking-normal text-studio-text-primary">{value}</p>
+            {unit ? <span className="text-xs font-medium leading-snug text-studio-text-muted">{unit}</span> : null}
           </div>
           {trend ? (
             <div className="mt-3 flex items-center gap-1 text-xs font-medium text-studio-text-secondary">

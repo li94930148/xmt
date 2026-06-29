@@ -142,9 +142,21 @@ const loadFontSize = (): number => {
   }
 };
 
+const loadSidebarCollapsed = (): boolean => {
+  try {
+    return localStorage.getItem('xmt_sidebar_collapsed') === 'true';
+  } catch {
+    return false;
+  }
+};
+
 export const useAppStore = create<AppState>((set) => ({
-  sidebarCollapsed: false,
-  toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+  sidebarCollapsed: loadSidebarCollapsed(),
+  toggleSidebar: () => set((state) => {
+    const sidebarCollapsed = !state.sidebarCollapsed;
+    localStorage.setItem('xmt_sidebar_collapsed', String(sidebarCollapsed));
+    return { sidebarCollapsed };
+  }),
   notifications: [],
   addNotification: (notification) => set((state) => ({
     notifications: [...state.notifications, { ...notification, id: Date.now() }]

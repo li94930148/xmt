@@ -5,42 +5,41 @@ import {
   ChevronLeft,
   Clock,
   FileText,
+  GitBranch,
   PanelRight,
   PanelRightClose,
   Save,
   Trash2,
+  Users,
+  Wifi,
 } from 'lucide-react';
-import { useAppStore, useAuthStore } from '../store';
-import {
-  deleteProduction,
-  getProductionById,
-  getProductionHistory,
-  updateProduction,
-} from '../api';
+import { useAppStore } from '../store';
+import { deleteProduction, getProductionById, getProductionHistory, updateProduction } from '../api';
 import type { Production as ProductionType, ProductionHistory, Topic } from '../types';
 import { getTopic } from '../api';
 import ContentEditor from '../components/ContentEditor';
+import { ConfirmModal } from '../components/common';
+import { ActionButton, EmptyState, GlassPanel, PageShell, StatusPill, StudioSkeletonCard } from '../components/studio';
 import { getCollaborationRoomId } from '../collaboration/core/events';
 import { cancelDatabaseSync, syncToDatabase } from '../collaboration/core/writeConsistency';
 import { getTimelineView, recordTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
-import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime } from '../lib/utils';
 import { setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
-
-const STATUS_COLORS: Record<string, string> = {
-  draft: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  review: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  approved: 'bg-green-500/20 text-green-400 border-green-500/30',
-  rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
-};
 
 const STATUS_TEXT: Record<string, string> = {
   draft: '草稿',
   review: '审核中',
   approved: '已通过',
   rejected: '已驳回',
+};
+
+const STATUS_TONE: Record<string, 'amber' | 'cyan' | 'success' | 'coral' | 'muted'> = {
+  draft: 'amber',
+  review: 'cyan',
+  approved: 'success',
+  rejected: 'coral',
 };
 
 const NEXT_STATUSES: Record<string, string> = {
@@ -68,7 +67,7 @@ type VersionEntry = {
 };
 
 function normalizeVersionContent(contentMarkdown?: string, content?: string) {
-  return contentMarkdown || content || '<p class="text-gray-500">暂无内容</p>';
+  return contentMarkdown || content || '<p class="text-studio-text-muted">暂无内容</p>';
 }
 
 function parseVersionParts(version: string) {
@@ -84,12 +83,23 @@ function parseVersionParts(version: string) {
   };
 }
 
+function versionChangeLabel(changeType?: string) {
+  if (changeType === 'major') return '另开新版';
+  if (changeType === 'minor') return '小修保存';
+  return '当前生效';
+}
+
+function syncTone(syncStatus: string): 'cyan' | 'success' | 'coral' | 'muted' {
+  if (syncStatus === 'saving') return 'cyan';
+  if (syncStatus === 'saved') return 'success';
+  if (syncStatus === 'conflicted' || syncStatus === 'error') return 'coral';
+  return 'muted';
+}
+
 export default function ProductionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const appStore = useAppStore();
-  const authStore = useAuthStore();
-  const styles = useThemeStyles();
   const { hasPermission } = usePermission();
 
   const [production, setProduction] = useState<ProductionType | null>(null);
@@ -187,8 +197,8 @@ export default function ProductionDetail() {
     return [currentEntry, ...historyEntries];
   }, [history, production]);
 
-  const selectedVersion =
-    versionEntries.find((entry) => entry.id === selectedVersionId) || versionEntries[0] || null;
+  const selectedVersion = versionEntries.find((entry) => entry.id === selectedVersionId) || versionEntries[0] || null;
+
   const timelineView = useMemo(() => {
     if (!production) return getTimelineView('production:unknown');
     return getTimelineView(getCollaborationRoomId('production', production.id), {
@@ -288,7 +298,7 @@ export default function ProductionDetail() {
         lastAutoSavedContentRef.current = content;
       },
       onError: () => {
-        // 手动保存仍会展示完整错误提示，这里保持静默避免多人输入时打断。
+        // Manual save still surfaces full errors; keep autosave quiet during collaboration.
       },
     });
 
@@ -311,7 +321,7 @@ export default function ProductionDetail() {
       });
 
       appStore.addNotification({
-        title: versionAction === 'major' ? '已另开新版' : '小修改已保存',
+        title: versionAction === 'major' ? '已另开新版' : '小修已保存',
         message: `当前版本已更新为 ${result.version || production.version}`,
         type: 'success',
       });
@@ -406,357 +416,278 @@ export default function ProductionDetail() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-      </div>
+      <PageShell>
+        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+          <StudioSkeletonCard />
+          <StudioSkeletonCard />
+        </div>
+        <StudioSkeletonCard />
+      </PageShell>
     );
   }
 
   if (!production) {
-    return <p className="text-gray-400 text-center py-8">创作记录不存在</p>;
+    return (
+      <PageShell>
+        <EmptyState icon={FileText} title="创作记录不存在" description="该稿件可能已被删除或你暂时没有访问权限。" />
+      </PageShell>
+    );
   }
 
+  const statusTone = STATUS_TONE[production.status] || 'muted';
+  const statusLabel = STATUS_TEXT[production.status] || production.status;
+  const syncLabel = editorStateLabel(syncStatus);
+
   return (
-    <div className="flex min-h-[calc(100vh-8rem)] flex-col gap-4">
+    <PageShell className="space-y-4">
       <style>{`
         .production-preview mark {
           border-radius: 2px;
           padding: 0 2px;
         }
-        .production-preview mark[data-color="yellow"] { background-color: ${styles.isDark ? '#713f12' : '#fef08a'}; }
-        .production-preview mark[data-color="green"] { background-color: ${styles.isDark ? '#166534' : '#bbf7d0'}; }
-        .production-preview mark[data-color="blue"] { background-color: ${styles.isDark ? '#1e40af' : '#bfdbfe'}; }
-        .production-preview mark[data-color="red"] { background-color: ${styles.isDark ? '#991b1b' : '#fecaca'}; }
-        .production-preview mark[data-color="purple"] { background-color: ${styles.isDark ? '#6b21a8' : '#ddd6fe'}; }
-        .production-preview mark[data-color="orange"] { background-color: ${styles.isDark ? '#9a3412' : '#fed7aa'}; }
-        .production-preview mark[data-color="gray"] { background-color: ${styles.isDark ? '#4b5563' : '#e5e7eb'}; }
-        .production-preview mark[data-color="cyan"] { background-color: ${styles.isDark ? '#155e75' : '#a5f3fc'}; }
-        .production-preview mark:not([data-color]) { background-color: ${styles.isDark ? '#713f12' : '#fef08a'}; }
+        .production-preview mark[data-color="yellow"],
+        .production-preview mark:not([data-color]) { background-color: rgba(248, 184, 78, 0.35); }
+        .production-preview mark[data-color="green"] { background-color: rgba(32, 214, 155, 0.3); }
+        .production-preview mark[data-color="blue"] { background-color: rgba(79, 124, 255, 0.32); }
+        .production-preview mark[data-color="red"] { background-color: rgba(255, 95, 122, 0.3); }
+        .production-preview mark[data-color="purple"] { background-color: rgba(139, 92, 246, 0.32); }
+        .production-preview mark[data-color="orange"] { background-color: rgba(248, 184, 78, 0.28); }
+        .production-preview mark[data-color="gray"] { background-color: rgba(148, 163, 184, 0.22); }
+        .production-preview mark[data-color="cyan"] { background-color: rgba(34, 211, 238, 0.28); }
       `}</style>
-      <div className={`sticky top-16 z-30 shrink-0 border-b ${styles.border} px-3 py-2 ${styles.bgPrimary} backdrop-blur`}>
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
+
+      <GlassPanel className="sticky top-20 z-30 overflow-hidden">
+        <div className="flex flex-col gap-4 border-b border-studio-border-soft bg-white/[0.025] px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
             <button
+              type="button"
               onClick={() => navigate('/production')}
-              className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
+              className="mt-1 rounded-button border border-studio-border-soft bg-white/[0.04] p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+              title="返回创作管理"
             >
-              <ChevronLeft className={`w-5 h-5 ${styles.textSecondary}`} />
+              <ChevronLeft className="h-5 w-5" />
             </button>
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 min-w-0">
-                <h1 className={`text-base font-semibold truncate ${styles.textPrimary}`}>
-                  {production.topic_title || '创作详情'}
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="max-w-[48rem] truncate text-xl font-bold text-studio-text-primary">
+                  {production.topic_title || '稿件创作工作台'}
                 </h1>
-                <span className={`text-xs ${styles.textMuted}`}>{production.version || 'v1.0'}</span>
-                <button
-                  onClick={() => navigate(`/topics/${production.topic_id}`)}
-                  className="max-w-[220px] truncate text-xs text-blue-400 hover:text-blue-300"
-                >
+                <StatusPill tone={statusTone}>{statusLabel}</StatusPill>
+                <StatusPill tone={syncTone(syncStatus)}>
+                  <Wifi className="h-3.5 w-3.5" />
+                  {syncLabel}
+                </StatusPill>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
+                <span>{production.version || 'v1.0'}</span>
+                <button type="button" onClick={() => navigate(`/topics/${production.topic_id}`)} className="text-studio-cyan transition hover:text-white">
                   {topic?.title || production.topic_title || '关联选题'}
                 </button>
-                <span className={`text-xs ${styles.textMuted}`}>{formatBeijingTime(production.updated_at)}</span>
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${STATUS_COLORS[production.status]}`}>
-                  {STATUS_TEXT[production.status] || production.status}
+                <span className="inline-flex items-center gap-1">
+                  <Clock className="h-3.5 w-3.5" />
+                  {formatBeijingTime(production.updated_at)}
                 </span>
-                <span className={`text-xs ${syncStatus === 'conflicted' ? 'text-red-400' : syncStatus === 'saving' ? 'text-blue-400' : styles.textMuted}`}>
-                  {editorStateLabel(syncStatus)}
+                <span className="inline-flex items-center gap-1">
+                  <GitBranch className="h-3.5 w-3.5" />
+                  {timelineView.timeline.length} 个时间轴节点
                 </span>
-                <span className={`text-xs ${styles.textMuted}`}>时间轴 {timelineView.timeline.length} 个节点</span>
+                <span className="inline-flex items-center gap-1">
+                  <Users className="h-3.5 w-3.5" />
+                  {production.operator_name || '当前协作者'}
+                </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => setShowSidebar((prev) => !prev)}
-              className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
-              title={showSidebar ? '折叠版本历史' : '展开版本历史'}
-            >
-              {showSidebar ? (
-                <PanelRightClose className={`w-4 h-4 ${styles.textSecondary}`} />
-              ) : (
-                <PanelRight className={`w-4 h-4 ${styles.textSecondary}`} />
-              )}
-            </button>
-
-            <button
-              onClick={startEditing}
-              className={`px-3 py-1.5 rounded-lg text-xs ${selectedVersionId === 'current' ? styles.buttonSecondary : styles.buttonPrimary}`}
-            >
-              编辑当前版本
-            </button>
-
-            {production.status !== 'approved' && (
-              <button
-                onClick={() => handleStatusUpdate(NEXT_STATUSES[production.status])}
-                className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors flex items-center gap-1.5"
-              >
-                <ArrowRight className="w-4 h-4" />
-                {production.status === 'draft'
-                  ? '提交审核'
-                  : production.status === 'review'
-                    ? '审核通过'
-                    : '重新编辑'}
-              </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton onClick={() => setShowSidebar((prev) => !prev)} className="px-3 py-2" title={showSidebar ? '收起版本历史' : '展开版本历史'}>
+              {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
+              版本
+            </ActionButton>
+            <ActionButton onClick={startEditing} className="px-3 py-2">
+              <FileText className="h-4 w-4" />
+              当前稿件
+            </ActionButton>
+            {production.status !== 'approved' ? (
+              <ActionButton onClick={() => handleStatusUpdate(NEXT_STATUSES[production.status])} variant="primary" className="px-3 py-2">
+                <ArrowRight className="h-4 w-4" />
+                {production.status === 'draft' ? '提交审核' : production.status === 'review' ? '审核通过' : '重新编辑'}
+              </ActionButton>
+            ) : (
+              <ActionButton onClick={() => navigate('/shooting')} variant="primary" className="px-3 py-2">
+                <ArrowRight className="h-4 w-4" />
+                成片制作
+              </ActionButton>
             )}
-
-            {production.status === 'approved' && (
-              <button
-                onClick={() => navigate('/shooting')}
-                className="px-3 py-1.5 rounded-lg text-xs bg-purple-600 text-white font-medium hover:bg-purple-700 transition-colors flex items-center gap-1.5"
-              >
-                <ArrowRight className="w-4 h-4" />
-                进入成片制作
-              </button>
-            )}
-
-            {canDelete && (
-              <button
+            {canDelete ? (
+              <ActionButton
                 onClick={() => setShowDeleteModal(true)}
-                className={`p-2 rounded-lg ${styles.buttonDanger} transition-colors`}
+                className="px-3 py-2 border-studio-coral/35 text-[#FFC2CC] hover:bg-studio-coral/10"
                 title="删除创作记录"
               >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            )}
+                <Trash2 className="h-4 w-4" />
+              </ActionButton>
+            ) : null}
           </div>
         </div>
 
-      </div>
+        <div className="grid gap-3 px-4 py-3 text-xs text-studio-text-secondary md:grid-cols-4">
+          <div>
+            <p className="text-studio-text-muted">当前版本</p>
+            <p className="mt-1 font-semibold text-studio-text-primary">{selectedVersion?.version || production.version}</p>
+          </div>
+          <div>
+            <p className="text-studio-text-muted">版本状态</p>
+            <p className="mt-1 font-semibold text-studio-text-primary">{versionChangeLabel(selectedVersion?.changeType)}</p>
+          </div>
+          <div>
+            <p className="text-studio-text-muted">保存方式</p>
+            <p className="mt-1 font-semibold text-studio-text-primary">{selectedVersion?.isCurrent ? '协同自动同步' : '历史只读预览'}</p>
+          </div>
+          <div>
+            <p className="text-studio-text-muted">审核状态</p>
+            <p className="mt-1 font-semibold text-studio-text-primary">{statusLabel}</p>
+          </div>
+        </div>
+      </GlassPanel>
 
-      <div className="flex min-h-0 flex-1 gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex min-h-0 flex-col">
-            <div className={`sticky top-[calc(4rem+53px)] z-20 px-6 py-2 border-b ${styles.border} ${styles.bgPrimary} flex items-center justify-between gap-3 backdrop-blur`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mt-1">
-                    <span className={`text-base font-semibold ${styles.textPrimary}`}>
-                      {selectedVersion?.version || production.version}
-                    </span>
-                    {selectedVersion && (
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                          selectedVersion.changeType === 'major'
-                            ? 'bg-purple-500/20 text-purple-400'
-                            : selectedVersion.changeType === 'minor'
-                              ? 'bg-blue-500/20 text-blue-400'
-                              : 'bg-emerald-500/20 text-emerald-400'
-                        }`}
-                      >
-                        {selectedVersion.changeType === 'major'
-                          ? '另开新版'
-                          : selectedVersion.changeType === 'minor'
-                            ? '小修改'
-                            : '当前生效'}
-                      </span>
-                    )}
-                    {!selectedVersion?.isCurrent && (
-                      <span className={`text-xs ${styles.textMuted}`}>
-                        历史版本只读预览
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {!selectedVersion?.isCurrent && (
-                  <button
-                    onClick={() => setSelectedVersionId('current')}
-                    className={`px-3 py-1.5 rounded-lg text-sm ${styles.buttonSecondary}`}
-                  >
-                    回到当前版本
-                  </button>
-                )}
-              </div>
-
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <GlassPanel className="min-w-0 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft bg-white/[0.025] px-5 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-studio-text-primary">{selectedVersion?.version || production.version}</span>
+              <StatusPill tone={selectedVersion?.changeType === 'major' ? 'violet' : selectedVersion?.changeType === 'minor' ? 'primary' : 'success'}>
+                {versionChangeLabel(selectedVersion?.changeType)}
+              </StatusPill>
+              {!selectedVersion?.isCurrent ? <span className="text-xs text-studio-text-muted">历史版本只读预览</span> : null}
             </div>
-
-            <div className="min-h-0">
-              {selectedVersion?.isCurrent ? (
-                <div className="min-h-[calc(100vh-13rem)]">
-                  <ContentEditor
-                    value={editData.content}
-                    onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
-                    mode="rich"
-                    collaborationKey={getCollaborationRoomId('production', production.id)}
-                    persistenceStatus={syncStatus}
-                    immersive
-                  />
-                </div>
-              ) : (
-                <div className="p-6 lg:p-8">
-                  <div
-                    className={`production-preview tiptap max-w-none ${styles.textPrimary} leading-relaxed prose ${styles.isDark ? 'prose-invert' : ''}`}
-                    dangerouslySetInnerHTML={{
-                      __html:
-                        selectedVersion?.contentMarkdown ||
-                        normalizeVersionContent(
-                          (production as ProductionType & {
-                            contentMarkdown?: string;
-                            content_markdown?: string;
-                          }).contentMarkdown ||
-                            (production as ProductionType & { content_markdown?: string }).content_markdown,
-                          production.content,
-                        ),
-                    }}
-                  />
-                </div>
-              )}
-            </div>
+            {!selectedVersion?.isCurrent ? (
+              <ActionButton onClick={() => setSelectedVersionId('current')} className="px-3 py-2">
+                回到当前版本
+              </ActionButton>
+            ) : null}
           </div>
 
-        </div>
-
-        {showSidebar && (
-          <aside className={`${styles.bgSecondary} border ${styles.border} rounded-2xl w-80 shrink-0 hidden xl:flex xl:flex-col`}>
-            <div className={`px-5 py-4 border-b ${styles.border} flex items-center justify-between`}>
-              <div>
-                <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>版本历史</p>
-                <h2 className={`text-sm font-semibold mt-1 ${styles.textPrimary}`}>版本切换面板</h2>
-              </div>
-              <button
-                onClick={() => setShowSidebar(false)}
-                className={`p-2 rounded-lg ${styles.hoverBg}`}
-              >
-                <PanelRightClose className={`w-4 h-4 ${styles.textSecondary}`} />
-              </button>
+          {selectedVersion?.isCurrent ? (
+            <div className="min-h-[calc(100vh-22rem)] bg-[#0B1020]">
+              <ContentEditor
+                value={editData.content}
+                onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
+                mode="rich"
+                collaborationKey={getCollaborationRoomId('production', production.id)}
+                persistenceStatus={syncStatus}
+                immersive
+              />
             </div>
+          ) : (
+            <div className="min-h-[calc(100vh-22rem)] bg-[#0B1020] p-6 lg:p-8">
+              <div
+                className="production-preview tiptap prose prose-invert max-w-none leading-relaxed text-studio-text-primary"
+                dangerouslySetInnerHTML={{
+                  __html:
+                    selectedVersion?.contentMarkdown ||
+                    normalizeVersionContent(
+                      (production as ProductionType & {
+                        contentMarkdown?: string;
+                        content_markdown?: string;
+                      }).contentMarkdown ||
+                        (production as ProductionType & { content_markdown?: string }).content_markdown,
+                      production.content,
+                    ),
+                }}
+              />
+            </div>
+          )}
+        </GlassPanel>
 
-            <div className="p-5 space-y-4 overflow-y-auto">
-              <div className="flex items-center justify-between gap-2">
-                <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>
-                  版本历史
-                </p>
-                <span className={`text-[11px] ${styles.textMuted}`}>
-                  版本已纳入统一时间轴
-                </span>
-              </div>
-              <div className="space-y-2">
-                {sidebarVersionEntries.map((entry) => (
-                  <button
-                    key={entry.id}
-                    onClick={() => {
-                      setSelectedVersionId(entry.id);
-                    }}
-                    className={`w-full text-left rounded-xl border px-3 py-3 transition-colors ${
-                      selectedVersionId === entry.id
-                        ? 'border-blue-500 bg-blue-500/10'
-                        : `${styles.border} ${styles.bgTertiary} ${styles.hoverBg}`
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={`text-sm font-semibold ${
-                        selectedVersionId === entry.id ? 'text-blue-400' : styles.textPrimary
-                      }`}>
-                        {entry.version}
-                      </span>
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] ${
-                          entry.changeType === 'major'
-                            ? 'bg-purple-500/20 text-purple-400'
-                            : entry.changeType === 'minor'
-                              ? 'bg-blue-500/20 text-blue-400'
-                              : 'bg-emerald-500/20 text-emerald-400'
-                        }`}
-                      >
-                        {entry.changeType === 'major'
-                          ? '另开新版'
-                          : entry.changeType === 'minor'
-                            ? '小修改'
-                            : '当前'}
-                      </span>
-                    </div>
-                    <p className={`text-[11px] mt-2 ${styles.textMuted}`}>
-                      {formatBeijingTime(entry.createdAt)}
-                    </p>
-                  </button>
-                ))}
-                {sidebarVersionEntries.length === 0 && (
-                  <div className={`rounded-xl ${styles.bgTertiary} px-3 py-3 text-sm ${styles.textMuted}`}>
-                    暂无版本历史
-                  </div>
-                )}
-              </div>
+        <GlassPanel className={`${showSidebar ? 'flex' : 'hidden'} min-h-0 flex-col overflow-hidden xl:flex`}>
+          <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4">
+            <div>
+              <p className="text-xs font-semibold uppercase text-studio-text-muted">Version Rail</p>
+              <h2 className="mt-1 text-sm font-semibold text-studio-text-primary">版本与审核说明</h2>
+            </div>
+            <button type="button" onClick={() => setShowSidebar(false)} className="rounded-lg p-2 text-studio-text-muted transition hover:bg-white/[0.06] hover:text-studio-text-primary">
+              <PanelRightClose className="h-4 w-4" />
+            </button>
+          </div>
 
-              <div className={`pt-4 border-t ${styles.border} space-y-2`}>
-                <p className={`text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>版本操作</p>
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+            <div className="space-y-2">
+              {sidebarVersionEntries.map((entry) => (
                 <button
-                  onClick={startEditing}
-                  className={`w-full px-3 py-2 rounded-lg text-xs ${styles.buttonSecondary}`}
+                  key={entry.id}
+                  type="button"
+                  onClick={() => setSelectedVersionId(entry.id)}
+                  className={`w-full rounded-card border px-4 py-3 text-left transition ${
+                    selectedVersionId === entry.id
+                      ? 'border-studio-border-active bg-studio-primary/12 shadow-glow-primary'
+                      : 'border-studio-border-soft bg-white/[0.04] hover:border-studio-border-active hover:bg-white/[0.06]'
+                  }`}
                 >
-                  当前版本查看 / 编辑
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-studio-text-primary">{entry.version}</span>
+                    <StatusPill tone={entry.changeType === 'major' ? 'violet' : entry.changeType === 'minor' ? 'primary' : 'success'} className="px-2 py-0.5 text-[10px]">
+                      {versionChangeLabel(entry.changeType)}
+                    </StatusPill>
+                  </div>
+                  <p className="mt-2 text-xs text-studio-text-muted">{formatBeijingTime(entry.createdAt)}</p>
+                  <p className="mt-1 text-xs text-studio-text-secondary">{entry.operatorName || '系统记录'}</p>
                 </button>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => handleVersionedSave('minor')}
-                    className="px-3 py-2 rounded-lg text-xs bg-blue-600 hover:bg-blue-700 text-white transition-colors inline-flex items-center justify-center gap-1.5"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    小修改保存
-                  </button>
-                  <button
-                    onClick={() => handleVersionedSave('major')}
-                    className="px-3 py-2 rounded-lg text-xs bg-purple-600 hover:bg-purple-700 text-white transition-colors inline-flex items-center justify-center gap-1.5"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    另开新版
-                  </button>
-                </div>
-                {editData.status === 'draft' && (
-                  <button
-                    onClick={handleSubmitReview}
-                    className="w-full px-3 py-2 rounded-lg text-xs bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-medium hover:opacity-90 transition-opacity inline-flex items-center justify-center gap-1.5"
-                  >
-                    <ArrowRight className="w-3.5 h-3.5" />
-                    提交审核
-                  </button>
-                )}
-              </div>
-
-              <div className={`pt-4 border-t ${styles.border} space-y-3`}>
-                <div>
-                  <p className={`text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>关联选题</p>
-                  <button
-                    onClick={() => navigate(`/topics/${production.topic_id}`)}
-                    className="mt-2 text-left text-sm text-blue-400 hover:text-blue-300"
-                  >
-                    {topic?.title || production.topic_title || '-'}
-                  </button>
-                </div>
-                <div>
-                  <p className={`text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>审核状态</p>
-                  <p className={`mt-2 text-sm ${styles.textSecondary}`}>{STATUS_TEXT[production.status] || production.status}</p>
-                </div>
-              </div>
+              ))}
+              {sidebarVersionEntries.length === 0 ? <EmptyState title="暂无版本历史" description="保存版本后会在这里形成时间线。" /> : null}
             </div>
-          </aside>
-        )}
-      </div>
 
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className={`${styles.modal} p-6 w-full max-w-md mx-4`}>
-            <h2 className={`text-xl font-bold ${styles.textPrimary} mb-2`}>确认删除</h2>
-            <p className={`${styles.textSecondary} mb-6`}>
-              确定要删除这条创作记录吗？该操作会同时移除相关版本历史。
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className={`flex-1 px-4 py-2.5 rounded-xl text-sm ${styles.buttonSecondary}`}
-              >
-                取消
-              </button>
-              <button
-                onClick={handleDelete}
-                className="flex-1 px-4 py-2.5 rounded-xl text-sm bg-red-600 hover:bg-red-700 text-white transition-colors"
-              >
-                确认删除
-              </button>
+            <div className="space-y-3 border-t border-studio-border-soft pt-5">
+              <p className="text-xs font-semibold uppercase text-studio-text-muted">版本操作</p>
+              <ActionButton onClick={startEditing} className="w-full">
+                当前版本查看 / 编辑
+              </ActionButton>
+              <div className="grid grid-cols-2 gap-2">
+                <ActionButton onClick={() => handleVersionedSave('minor')} className="px-3 py-2">
+                  <Save className="h-4 w-4" />
+                  小修保存
+                </ActionButton>
+                <ActionButton onClick={() => handleVersionedSave('major')} className="px-3 py-2" variant="primary">
+                  <Save className="h-4 w-4" />
+                  另开新版
+                </ActionButton>
+              </div>
+              {editData.status === 'draft' ? (
+                <ActionButton onClick={handleSubmitReview} variant="primary" className="w-full">
+                  <ArrowRight className="h-4 w-4" />
+                  提交审核
+                </ActionButton>
+              ) : null}
+            </div>
+
+            <div className="space-y-3 border-t border-studio-border-soft pt-5">
+              <div>
+                <p className="text-xs font-semibold uppercase text-studio-text-muted">关联选题</p>
+                <button type="button" onClick={() => navigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan transition hover:text-white">
+                  {topic?.title || production.topic_title || '-'}
+                </button>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase text-studio-text-muted">审核说明</p>
+                <p className="mt-2 text-sm leading-6 text-studio-text-secondary">
+                  当前只调整外层工作台视觉，审核、保存、版本和协同同步仍沿用原有流程。
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        </GlassPanel>
+      </div>
+
+      <ConfirmModal
+        open={showDeleteModal}
+        title="确认删除"
+        description="确定要删除这条创作记录吗？该操作不会改变选题数据，但创作记录将被移除。"
+        confirmText="确认删除"
+        cancelText="取消"
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteModal(false)}
+      />
+    </PageShell>
   );
 }

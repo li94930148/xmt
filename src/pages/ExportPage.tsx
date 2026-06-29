@@ -1,30 +1,32 @@
-import { useState, useEffect } from 'react';
-import { useThemeStyles } from '../hooks/useThemeStyles';
-import { exportTopics, exportAnalytics, getWeeklyReport } from '../api';
+import { useEffect, useState } from 'react';
+import { BarChart3, Download, FileBarChart, FileClock, Loader2, CalendarRange } from 'lucide-react';
+import { exportAnalytics, exportTopics, getWeeklyReport } from '../api';
 import { useAppStore } from '../store';
-import {
-  Download,
-  FileText,
-  BarChart3,
-  FileBarChart,
-  ChevronLeft,
-  Loader2,
-  AlertCircle,
-} from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { getCurrentBeijingDateString } from '../lib/utils';
+import { ActionButton, EmptyState, GlassPanel, PageHeader, PageShell, StatusPill } from '../components/studio';
+
+type ReportTab = 'daily' | 'weekly' | 'monthly' | 'export';
+
+type WeeklyReport = {
+  period?: { start: string; end: string };
+  summary?: {
+    completedTopics?: number;
+    publishedVideos?: number;
+    newTopics?: number;
+    totalViews?: number;
+  };
+};
 
 export default function ExportPage() {
-  const styles = useThemeStyles();
   const appStore = useAppStore();
-  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<ReportTab>('daily');
   const [loading, setLoading] = useState<string | null>(null);
-  const [weeklyReport, setWeeklyReport] = useState<any>(null);
+  const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
 
   useEffect(() => {
     getWeeklyReport()
-      .then(setWeeklyReport)
+      .then((report) => setWeeklyReport(report as WeeklyReport))
       .catch(() => {})
       .finally(() => setReportLoading(false));
   }, []);
@@ -32,17 +34,8 @@ export default function ExportPage() {
   const handleExport = async (type: 'topics' | 'analytics') => {
     setLoading(type);
     try {
-      let data: any[];
-      let filename: string;
-
-      if (type === 'topics') {
-        data = await exportTopics();
-        filename = `选题数据_${getCurrentBeijingDateString()}.json`;
-      } else {
-        data = await exportAnalytics();
-        filename = `数据分析_${getCurrentBeijingDateString()}.json`;
-      }
-
+      const data = type === 'topics' ? await exportTopics() : await exportAnalytics();
+      const filename = `${type === 'topics' ? '选题数据' : '数据分析'}_${getCurrentBeijingDateString()}.json`;
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -59,115 +52,128 @@ export default function ExportPage() {
     }
   };
 
-  const exportCards = [
-    {
-      id: 'topics',
-      title: '导出选题数据',
-      description: '导出所有选题信息的 JSON 文件，便于备份和二次分析。',
-      icon: FileText,
-      gradient: 'from-blue-500 to-indigo-500',
-      onClick: () => handleExport('topics'),
-    },
-    {
-      id: 'analytics',
-      title: '导出分析数据',
-      description: '导出播放、点赞、分享、评论等数据分析结果。',
-      icon: BarChart3,
-      gradient: 'from-emerald-500 to-teal-500',
-      onClick: () => handleExport('analytics'),
-    },
+  const tabs = [
+    { id: 'daily' as const, label: '日报', icon: FileClock },
+    { id: 'weekly' as const, label: '周报', icon: FileBarChart },
+    { id: 'monthly' as const, label: '月报', icon: CalendarRange },
+    { id: 'export' as const, label: '导出', icon: Download },
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <button
-          onClick={() => navigate('/')}
-          className="flex items-center gap-2 text-theme-text-muted hover:text-theme-text transition-colors"
-        >
-          <ChevronLeft className="w-5 h-5" />
-          返回首页
-        </button>
-      </div>
+    <PageShell>
+      <PageHeader title="报告中心" description="统一承载日报、周报、月报与数据导出。本阶段先完成入口和视觉预留。" />
 
-      <div>
-        <h1 className="text-2xl font-bold text-theme-text">数据导出</h1>
-        <p className="text-sm text-theme-text-muted mt-1">导出项目数据用于备份、归档或复盘分析。</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {exportCards.map((card) => {
-          const Icon = card.icon;
-          const isLoading = loading === card.id;
-          return (
-            <div
-              key={card.id}
-              className="rounded-2xl bg-theme-secondary border border-theme-border p-6 hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5"
-            >
-              <div className="flex items-start gap-4">
-                <div
-                  className={`w-12 h-12 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center shadow-lg flex-shrink-0`}
-                >
-                  <Icon className="w-6 h-6 text-white" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-base font-semibold text-theme-text">{card.title}</h3>
-                  <p className="text-sm text-theme-text-muted mt-1">{card.description}</p>
-                  <button
-                    onClick={card.onClick}
-                    disabled={isLoading}
-                    className="mt-4 flex items-center gap-2 px-4 py-2 bg-theme-tertiary hover:bg-theme-elevated text-theme-text rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
-                  >
-                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    {isLoading ? '导出中...' : '导出 JSON'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="rounded-2xl bg-theme-secondary border border-theme-border p-6">
-        <div className="flex items-center gap-2.5 mb-6">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-md">
-            <FileBarChart className="w-4 h-4 text-white" />
-          </div>
-          <h3 className="text-base font-semibold text-theme-text">本周数据报告</h3>
+      <GlassPanel className="p-2">
+        <div className="grid gap-2 sm:grid-cols-4">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center justify-center gap-2 rounded-button px-4 py-3 text-sm font-semibold transition-all duration-200 ${
+                  isActive
+                    ? 'bg-studio-primary text-white shadow-glow-primary'
+                    : 'text-studio-text-secondary hover:bg-white/[0.06] hover:text-studio-text-primary'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
+      </GlassPanel>
 
-        {reportLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-6 h-6 animate-spin text-theme-text-muted" />
+      {activeTab === 'daily' ? (
+        <GlassPanel className="p-6">
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-studio-text-primary">日报</h2>
+              <p className="mt-1 text-sm text-studio-text-muted">预留个人日清、团队摘要、阻塞项和明日计划。</p>
+            </div>
+            <StatusPill tone="primary">规划中</StatusPill>
           </div>
-        ) : weeklyReport ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <EmptyState icon={FileClock} title="日报能力规划中" description="这里只做 UI 入口预留，不新增日报后端逻辑。" />
+        </GlassPanel>
+      ) : null}
+
+      {activeTab === 'weekly' ? (
+        <GlassPanel className="p-6">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-studio-violet/15 text-studio-violet">
+              <FileBarChart className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-studio-text-primary">本周数据报告</h2>
+              <p className="text-sm text-studio-text-muted">复用现有周报接口，仅调整呈现层级。</p>
+            </div>
+          </div>
+          {reportLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-studio-text-muted" />
+            </div>
+          ) : weeklyReport ? (
+            <div className="grid gap-3 sm:grid-cols-4">
               {[
-                { label: '完成选题', value: weeklyReport.summary?.completedTopics || 0, color: 'text-emerald-400' },
-                { label: '发布视频', value: weeklyReport.summary?.publishedVideos || 0, color: 'text-blue-400' },
-                { label: '新增选题', value: weeklyReport.summary?.newTopics || 0, color: 'text-amber-400' },
-                { label: '总播放量', value: (weeklyReport.summary?.totalViews || 0).toLocaleString(), color: 'text-purple-400' },
-              ].map((item, index) => (
-                <div key={index} className="rounded-xl bg-theme-tertiary/50 p-4 text-center">
-                  <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
-                  <p className="text-xs text-theme-text-muted mt-1">{item.label}</p>
+                { label: '完成选题', value: weeklyReport.summary?.completedTopics || 0, tone: 'text-studio-success' },
+                { label: '发布视频', value: weeklyReport.summary?.publishedVideos || 0, tone: 'text-studio-cyan' },
+                { label: '新增选题', value: weeklyReport.summary?.newTopics || 0, tone: 'text-studio-amber' },
+                { label: '总播放量', value: (weeklyReport.summary?.totalViews || 0).toLocaleString(), tone: 'text-studio-violet' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-card border border-studio-border-soft bg-white/[0.04] p-4 text-center">
+                  <p className={`text-2xl font-bold ${item.tone}`}>{item.value}</p>
+                  <p className="mt-1 text-xs text-studio-text-muted">{item.label}</p>
                 </div>
               ))}
             </div>
-            {weeklyReport.period && (
-              <p className="text-xs text-theme-text-muted text-center">
-                统计周期：{weeklyReport.period.start} ~ {weeklyReport.period.end}
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="text-center py-12">
-            <AlertCircle className="w-10 h-10 mx-auto mb-2 text-theme-text-muted" />
-            <p className="text-sm text-theme-text-muted">暂无周报数据</p>
-          </div>
-        )}
-      </div>
-    </div>
+          ) : (
+            <EmptyState icon={FileBarChart} title="暂无周报数据" description="当前没有可展示的本周复盘数据。" />
+          )}
+          {weeklyReport?.period ? (
+            <p className="mt-4 text-center text-xs text-studio-text-muted">
+              统计周期：{weeklyReport.period.start} ~ {weeklyReport.period.end}
+            </p>
+          ) : null}
+        </GlassPanel>
+      ) : null}
+
+      {activeTab === 'monthly' ? (
+        <GlassPanel className="p-6">
+          <EmptyState icon={CalendarRange} title="月报能力规划中" description="月报页签已预留，后续可接入月度内容产能、爆款复盘和平台趋势。" />
+        </GlassPanel>
+      ) : null}
+
+      {activeTab === 'export' ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {[
+            { id: 'topics' as const, title: '导出选题数据', description: '导出所有选题信息 JSON 文件，便于备份和二次分析。', icon: FileBarChart },
+            { id: 'analytics' as const, title: '导出分析数据', description: '导出播放、点赞、分享、评论等数据分析结果。', icon: BarChart3 },
+          ].map((card) => {
+            const Icon = card.icon;
+            const isLoading = loading === card.id;
+            return (
+              <GlassPanel key={card.id} className="p-6">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-studio-primary/15 text-studio-cyan">
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-base font-semibold text-studio-text-primary">{card.title}</h3>
+                    <p className="mt-1 text-sm text-studio-text-muted">{card.description}</p>
+                    <ActionButton type="button" onClick={() => void handleExport(card.id)} disabled={isLoading} className="mt-4">
+                      {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      {isLoading ? '导出中...' : '导出 JSON'}
+                    </ActionButton>
+                  </div>
+                </div>
+              </GlassPanel>
+            );
+          })}
+        </div>
+      ) : null}
+    </PageShell>
   );
 }

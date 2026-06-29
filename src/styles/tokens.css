@@ -1,0 +1,78 @@
+:root,
+html.dark {
+  --xmt-app-bg: #070A12;
+  --xmt-app-bg-soft: #0B1020;
+  --xmt-surface: #111827;
+  --xmt-surface-soft: #151B2E;
+  --xmt-surface-glass: rgba(17, 24, 39, 0.72);
+  --xmt-border-soft: rgba(148, 163, 184, 0.14);
+  --xmt-border-active: rgba(79, 124, 255, 0.55);
+  --xmt-text-primary: #F8FAFC;
+  --xmt-text-secondary: #A8B3C7;
+  --xmt-text-muted: #64748B;
+  --xmt-primary: #4F7CFF;
+  --xmt-cyan: #22D3EE;
+  --xmt-violet: #8B5CF6;
+  --xmt-coral: #FF5F7A;
+  --xmt-amber: #F8B84E;
+  --xmt-success: #20D69B;
+  --xmt-danger: #FF5F7A;
+  --xmt-warning: #F8B84E;
+  --xmt-glow-primary: 0 0 32px rgba(79, 124, 255, 0.28);
+  --xmt-glow-cyan: 0 0 28px rgba(34, 211, 238, 0.22);
+  --xmt-card-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  --xmt-radius-card: 20px;
+  --xmt-radius-panel: 24px;
+  --xmt-radius-button: 14px;
+
+  --color-bg-primary: var(--xmt-app-bg);
+  --color-bg-secondary: var(--xmt-surface);
+  --color-bg-tertiary: var(--xmt-surface-soft);
+  --color-bg-elevated: #1C2540;
+  --color-text-primary: var(--xmt-text-primary);
+  --color-text-secondary: var(--xmt-text-secondary);
+  --color-text-muted: var(--xmt-text-muted);
+  --color-border: var(--xmt-border-soft);
+  --color-border-light: rgba(148, 163, 184, 0.08);
+  --color-accent: var(--xmt-primary);
+  --color-accent-hover: #6A91FF;
+  --color-success: var(--xmt-success);
+  --color-warning: var(--xmt-amber);
+  --color-danger: var(--xmt-coral);
+}
+
+html.light {
+  --xmt-app-bg: #F5F7FB;
+  --xmt-app-bg-soft: #EEF3FF;
+  --xmt-surface: #FFFFFF;
+  --xmt-surface-soft: #F1F5FF;
+  --xmt-surface-glass: rgba(255, 255, 255, 0.78);
+  --xmt-border-soft: rgba(30, 41, 59, 0.12);
+  --xmt-border-active: rgba(79, 124, 255, 0.46);
+  --xmt-text-primary: #111827;
+  --xmt-text-secondary: #475569;
+  --xmt-text-muted: #64748B;
+
+  --color-bg-primary: var(--xmt-app-bg);
+  --color-bg-secondary: var(--xmt-surface);
+  --color-bg-tertiary: var(--xmt-surface-soft);
+  --color-bg-elevated: #E7EEFF;
+  --color-text-primary: var(--xmt-text-primary);
+  --color-text-secondary: var(--xmt-text-secondary);
+  --color-text-muted: var(--xmt-text-muted);
+  --color-border: var(--xmt-border-soft);
+  --color-border-light: rgba(30, 41, 59, 0.08);
+  --color-accent: var(--xmt-primary);
+  --color-accent-hover: #315FE6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}

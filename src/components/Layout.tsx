@@ -13,6 +13,7 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePermission } from '../hooks/usePermission';
 import { getRoleDisplayName } from '../lib/roles';
 import { applyDocumentBranding } from '@/lib/systemSettings';
+import { AnimatedPage, AppShell, Topbar } from '@/components/studio';
 
 declare const __APP_VERSION__: string;
 
@@ -281,22 +282,22 @@ export default function Layout() {
 
   if (loading) {
     return (
-      <div className={`flex min-h-screen items-center justify-center ${theme === 'dark' ? 'bg-[#0f1117]' : 'bg-[#f8f9fa]'}`}>
+      <AppShell className="flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div
-            className={`h-10 w-10 animate-spin rounded-full border-3 ${theme === 'dark' ? 'border-[#2a2d3e] border-t-[#5c7cfa]' : 'border-[#e5e7eb] border-t-[#4263eb]'}`}
+            className="h-10 w-10 animate-spin rounded-full border-3 border-studio-primary/20 border-t-studio-cyan"
             style={{ borderWidth: '3px' }}
           />
-          <p className={`text-sm font-medium ${theme === 'dark' ? 'text-[#636983]' : 'text-[#9aa0b0]'}`}>加载中...</p>
+          <p className="text-sm font-medium text-studio-text-muted">加载中...</p>
         </div>
-      </div>
+      </AppShell>
     );
   }
 
-  const contentOffsetClass = sidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-64';
+  const contentOffsetClass = sidebarCollapsed ? 'md:ml-[76px]' : 'md:ml-72';
 
   return (
-    <div className={theme === 'dark' ? 'min-h-screen bg-[#0f1117]' : 'min-h-screen bg-[#f8f9fa]'}>
+    <AppShell>
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={toggleSidebar}
@@ -316,39 +317,25 @@ export default function Layout() {
       />
 
       <div className={`min-h-screen transition-[margin] duration-300 ${contentOffsetClass}`}>
-        <header
-          className={`sticky top-0 z-40 flex h-16 items-center justify-between border-b px-4 sm:px-6 ${
-            theme === 'dark'
-              ? 'border-[#2a2d3e] bg-[#0f1117]/80 backdrop-blur-xl'
-              : 'border-[#e5e7eb] bg-white/80 backdrop-blur-xl'
-          }`}
-        >
+        <Topbar>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileNavOpen(true)}
-              className={`inline-flex h-10 w-10 items-center justify-center rounded-xl transition-colors md:hidden ${
-                theme === 'dark' ? 'text-[#9aa0b0] hover:bg-[#1e2030] hover:text-[#e8eaed]' : 'text-[#5f6672] hover:bg-[#f1f3f5] hover:text-[#1a1d2e]'
-              }`}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-button text-studio-text-secondary transition-colors hover:bg-white/[0.06] hover:text-studio-text-primary md:hidden"
               aria-label="打开导航菜单"
             >
               <Menu className="h-5 w-5" />
             </button>
 
             <button onClick={() => setShowCmdPalette(true)} className="relative hidden items-center md:flex">
-              <Search className={`absolute left-3 h-4 w-4 ${theme === 'dark' ? 'text-[#636983]' : 'text-[#9aa0b0]'}`} />
+              <Search className="absolute left-3 h-4 w-4 text-studio-text-muted" />
               <div
-                className={`w-64 rounded-xl border py-2 pl-9 pr-4 text-left text-sm transition-all duration-200 ${
-                  theme === 'dark'
-                    ? 'border-[#2a2d3e] bg-[#1e2030] text-[#636983]'
-                    : 'border-[#e5e7eb] bg-[#f8f9fa] text-[#9aa0b0]'
-                }`}
+                className="w-72 rounded-button border border-studio-border-soft bg-white/[0.05] py-2 pl-9 pr-16 text-left text-sm text-studio-text-muted transition-all duration-200 hover:border-studio-border-active"
               >
-                搜索...
+                搜索选题、稿件、成员...
               </div>
               <kbd
-                className={`absolute right-3 rounded border px-1.5 py-0.5 text-[10px] ${
-                  theme === 'dark' ? 'border-[#2a2d3e] text-[#636983]' : 'border-[#e5e7eb] text-[#9aa0b0]'
-                }`}
+                className="absolute right-3 rounded border border-studio-border-soft px-1.5 py-0.5 text-[10px] text-studio-text-muted"
               >
                 Ctrl K
               </kbd>
@@ -432,14 +419,14 @@ export default function Layout() {
               )}
             </div>
           </div>
-        </header>
+        </Topbar>
 
         <main className="px-4 py-4 sm:px-6 sm:py-6">
           <div className="mx-auto w-full max-w-7xl space-y-4">
             <Breadcrumbs />
-            <div className="min-h-[calc(100vh-8rem)]">
+            <AnimatedPage className="min-h-[calc(100vh-8rem)]">
               <Outlet />
-            </div>
+            </AnimatedPage>
           </div>
         </main>
       </div>
@@ -455,6 +442,6 @@ export default function Layout() {
         <UpdateNotification onClose={handleCloseUpdateNotification} onGoToChangelog={handleGoToChangelog} />
       )}
       <KeyboardHelp isOpen={showHelp} onClose={() => setShowHelp(false)} />
-    </div>
+    </AppShell>
   );
 }

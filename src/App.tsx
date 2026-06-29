@@ -75,13 +75,14 @@ const NotificationSettings = lazyWithRetry(() => import('@/pages/NotificationSet
 const ExportPage = lazyWithRetry(() => import('@/pages/ExportPage'), 'ExportPage');
 const PomodoroPage = lazyWithRetry(() => import('@/pages/PomodoroPage'), 'PomodoroPage');
 const BackupPage = lazyWithRetry(() => import('@/pages/BackupPage'), 'BackupPage');
+const DailyReportPage = lazyWithRetry(() => import('@/pages/DailyReportPage'), 'DailyReportPage');
 
 function PageLoading() {
   return (
     <div className="flex h-64 items-center justify-center">
       <div className="flex flex-col items-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#5c7cfa]/20 border-t-[#5c7cfa]" />
-        <p className="text-xs font-medium text-[#636983]">加载中...</p>
+        <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-studio-primary/20 border-t-studio-cyan" />
+        <p className="text-xs font-medium text-studio-text-muted">加载中...</p>
       </div>
     </div>
   );
@@ -160,6 +161,7 @@ export default function App() {
                 <Route element={<RoleGuard permissions={['export:data']} />}>
                   <Route path="/export" element={<ExportPage />} />
                 </Route>
+                <Route path="/daily-report" element={<DailyReportPage />} />
                 <Route element={<RoleGuard permissions={['user:view']} />}>
                   <Route path="/users" element={<Users />} />
                 </Route>

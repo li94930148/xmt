@@ -3,24 +3,20 @@ import {
   Activity,
   Archive,
   BarChart3,
-  Brain,
-  BrainCircuit,
+  Bell,
   Calendar,
   Camera,
+  FileBarChart,
+  FileClock,
   FileText,
-  GitFork,
-  GitMerge,
   GitBranch,
   History,
   Kanban,
   LayoutDashboard,
   Lightbulb,
-  Settings,
   Send,
+  Settings,
   Shield,
-  Sparkles,
-  TrendingUp,
-  Trophy,
   Users,
   Video,
 } from 'lucide-react';
@@ -41,11 +37,15 @@ export interface NavigationSection {
 
 export const navigationSections: NavigationSection[] = [
   {
-    label: '总览',
-    items: [{ id: 'home', label: '首页仪表盘', icon: LayoutDashboard, path: '/' }],
+    label: '工作台',
+    items: [
+      { id: 'home', label: '首页仪表盘', icon: LayoutDashboard, path: '/' },
+      { id: 'messages', label: '消息中心', icon: Bell, path: '/messages' },
+      { id: 'calendar', label: '排期日历', icon: Calendar, path: '/calendar' },
+    ],
   },
   {
-    label: '内容流程',
+    label: '内容生产',
     items: [
       { id: 'topics', label: '选题管理', icon: FileText, path: '/topics' },
       { id: 'production', label: '创作管理', icon: Video, path: '/production' },
@@ -55,28 +55,25 @@ export const navigationSections: NavigationSection[] = [
     ],
   },
   {
-    label: '效率工具',
+    label: '创意工具',
     items: [
       { id: 'kanban', label: '看板视图', icon: Kanban, path: '/kanban' },
-      { id: 'calendar', label: '排期日历', icon: Calendar, path: '/calendar' },
       { id: 'inspirations', label: '灵感池', icon: Lightbulb, path: '/inspirations' },
     ],
   },
   {
-    label: '数据与管理',
+    label: '数据与复盘',
     items: [
       { id: 'analytics', label: '数据复盘', icon: BarChart3, path: '/analytics', permissions: ['analytics:view'] },
-      { id: 'content-os', label: '内容操作系统', icon: BrainCircuit, path: '/content-os', permissions: ['analytics:view'] },
       { id: 'content-timeline', label: '内容时间轴', icon: History, path: '/content-timeline', permissions: ['analytics:view'] },
-      { id: 'collaboration-dashboard', label: '协作控制台', icon: GitFork, path: '/collaboration-dashboard', permissions: ['analytics:view'] },
-      { id: 'collaboration-ux', label: '协作故事线', icon: GitMerge, path: '/collaboration-ux', permissions: ['analytics:view'] },
-      { id: 'content-intelligence', label: '内容智能理解', icon: Brain, path: '/content-intelligence', permissions: ['analytics:view'] },
-      { id: 'content-generation', label: '内容生成助手', icon: Sparkles, path: '/content-generation', permissions: ['analytics:view'] },
-      { id: 'achievements', label: '成就系统', icon: Trophy, path: '/achievements' },
+      { id: 'export', label: '报告中心', icon: FileBarChart, path: '/export', permissions: ['export:data'] },
+      { id: 'daily-report', label: '日报中心', icon: FileClock, path: '/daily-report' },
+    ],
+  },
+  {
+    label: '系统治理',
+    items: [
       { id: 'users', label: '人员管理', icon: Users, path: '/users', permissions: ['user:view'] },
-      { id: 'resources', label: '资源库', icon: Archive, path: '/resources' },
-      { id: 'activity', label: '活动日志', icon: Activity, path: '/activity', permissions: ['user:logs'] },
-      { id: 'douyin', label: '抖音数据', icon: TrendingUp, path: '/douyin', permissions: ['system:douyin'] },
       {
         id: 'permissions',
         label: '角色权限',
@@ -85,7 +82,9 @@ export const navigationSections: NavigationSection[] = [
         permissions: ['system:role', 'system:permission'],
         requireAllPermissions: true,
       },
-      { id: 'notification-settings', label: '设置中心', icon: Settings, path: '/notification-settings' },
+      { id: 'notification-settings', label: '系统设置', icon: Settings, path: '/notification-settings' },
+      { id: 'backup', label: '备份与日志', icon: Archive, path: '/backup', permissions: ['system:backup'] },
+      { id: 'activity', label: '活动日志', icon: Activity, path: '/activity', permissions: ['user:logs'] },
     ],
   },
 ];

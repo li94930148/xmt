@@ -66,7 +66,12 @@ const __dirname = path.dirname(__filename)
 
 const app: express.Application = express()
 
-const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:5173']
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5174',
+]
 
 function parseConfiguredOrigins(value?: string) {
   if (!value) {
@@ -486,6 +491,26 @@ io.on('connection', (socket) => {
 export async function startServer() {
   await initDatabase()
 
+  const PORT = Number.parseInt(process.env.PORT || '3001', 10)
+  const HOST = process.env.HOST || '0.0.0.0'
+  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+    throw new Error(`Invalid PORT value: ${process.env.PORT}`)
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => {
+      reject(error)
+    }
+
+    server.once('error', onError)
+    server.listen(PORT, HOST, () => {
+      server.off('error', onError)
+      const protocol = server instanceof https.Server ? 'https' : 'http'
+      console.log(`Server ready on ${protocol}://${HOST}:${PORT}`)
+      resolve()
+    })
+  })
+
   autoSnapshot(30000, (snapshot) => {
     io.to(snapshot.docId).emit(COLLABORATION_EVENTS.SNAPSHOT_CREATED, {
       docId: snapshot.docId,
@@ -524,20 +549,6 @@ export async function startServer() {
     })()
   }, 60 * 1000)
 
-  const PORT = Number.parseInt(process.env.PORT || '3001', 10)
-  const HOST = process.env.HOST || '0.0.0.0'
-  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
-    throw new Error(`Invalid PORT value: ${process.env.PORT}`)
-  }
-  const isHttps = server instanceof https.Server
-  server.listen(PORT, HOST, () => {
-    const protocol = isHttps ? 'https' : 'http'
-    console.log(`Server ready on ${protocol}://${HOST}:${PORT}`)
-    if (isHttps) {
-      console.log(`[HTTPS] 局域网访问: https://192.168.1.9:${PORT}`)
-      console.log('[HTTPS] 首次访问浏览器会提示不安全，点"高级"继续访问即可')
-    }
-  })
 }
 
 // 优雅关闭：进程退出前保存数据库

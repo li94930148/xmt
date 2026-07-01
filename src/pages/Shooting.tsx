@@ -1,25 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Calendar,
-  CheckCircle,
-  Edit3,
-  FileText,
-  MapPin,
-  Plus,
-  Search,
-  Trash2,
-} from 'lucide-react';
+import { Calendar, CheckCircle, Clock3, FileText, MapPin, Plus, Trash2, UserRound, Video } from 'lucide-react';
 import { createShooting, getShooting, getTopics, updateShooting } from '../api';
-import EmptyState from '../components/EmptyState';
-import {
-  ConfirmModal,
-  FormModal,
-  LoadingState,
-  PageHeader,
-  PageToolbar,
-} from '../components/common';
-import { useThemeStyles } from '../hooks/useThemeStyles';
+import { ConfirmModal, FormModal, LoadingState } from '../components/common';
+import ActionButton from '../components/studio/ActionButton';
+import GlassPanel from '../components/studio/GlassPanel';
+import MetricCard from '../components/studio/MetricCard';
+import PageHeader from '../components/studio/PageHeader';
+import PageShell from '../components/studio/PageShell';
+import SearchBar from '../components/studio/SearchBar';
+import StageProgress, { type StageItem } from '../components/studio/StageProgress';
+import StatusPill, { type StatusTone } from '../components/studio/StatusPill';
+import StudioEmptyState from '../components/studio/EmptyState';
+import TaskFlowCard from '../components/studio/TaskFlowCard';
 import { formatBeijingDate } from '../lib/utils';
 import { useAppStore, useAuthStore } from '../store';
 import { Shooting as ShootingType, Topic } from '../types';
@@ -37,6 +30,54 @@ const initialFormData = {
   status: 'planned',
 };
 
+const shootingStatusText: Record<string, string> = {
+  planned: '计划中',
+  in_progress: '制作中',
+  completed: '已完成',
+  cancelled: '已取消',
+  pending: '计划中',
+};
+
+const shootingStatusTone: Record<string, StatusTone> = {
+  planned: 'amber',
+  in_progress: 'cyan',
+  completed: 'success',
+  cancelled: 'muted',
+  pending: 'amber',
+};
+
+const topicStatusText: Record<string, string> = {
+  pending: '待审核',
+  approved: '已通过',
+  rejected: '已驳回',
+  production: '创作中',
+  shooting: '成片制作',
+  publishing: '发布中',
+  completed: '已完成',
+};
+
+function buildStages(status: string): StageItem[] {
+  const current = status === 'completed' ? 3 : status === 'in_progress' ? 2 : status === 'cancelled' ? 1 : 1;
+  return [
+    { label: '排期', state: current > 1 ? 'done' : 'active' },
+    { label: '拍摄', state: current > 2 ? 'done' : current === 2 ? 'active' : 'pending' },
+    { label: '交付', state: current >= 3 ? 'done' : 'pending' },
+  ];
+}
+
+function getNextAction(status: string) {
+  if (status === 'completed') {
+    return '进入发布管理';
+  }
+  if (status === 'in_progress') {
+    return '确认素材交付';
+  }
+  if (status === 'cancelled') {
+    return '检查计划状态';
+  }
+  return '推进拍摄执行';
+}
+
 export default function Shooting() {
   const [shootings, setShootings] = useState<ShootingType[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -49,7 +90,6 @@ export default function Shooting() {
 
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
-  const styles = useThemeStyles();
 
   useEffect(() => {
     void fetchData();
@@ -101,7 +141,7 @@ export default function Shooting() {
       });
       addNotification({
         title: '创建成功',
-        message: '拍摄计划已添加',
+        message: '制作计划已添加',
         type: 'success',
       });
       setShowCreateModal(false);
@@ -135,7 +175,7 @@ export default function Shooting() {
 
       addNotification({
         title: '删除成功',
-        message: '拍摄计划已删除',
+        message: '制作计划已删除',
         type: 'success',
       });
 
@@ -158,7 +198,7 @@ export default function Shooting() {
       });
       addNotification({
         title: '完成成功',
-        message: '拍摄制作已完成，已流转到发布管理环节',
+        message: '成片制作已完成，已流转到发布管理环节',
         type: 'success',
       });
 
@@ -191,42 +231,6 @@ export default function Shooting() {
     }
   };
 
-  const topicStatusColors: Record<string, string> = {
-    pending: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    approved: 'bg-green-500/20 text-green-400 border-green-500/30',
-    rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
-    production: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    shooting: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-    publishing: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
-    completed: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
-  };
-
-  const topicStatusText: Record<string, string> = {
-    pending: '待审核',
-    approved: '已通过',
-    rejected: '已驳回',
-    production: '创作中',
-    shooting: '拍摄制作',
-    publishing: '发布中',
-    completed: '已完成',
-  };
-
-  const shootingStatusColors: Record<string, string> = {
-    planned: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    in_progress: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    completed: 'bg-green-500/20 text-green-400 border-green-500/30',
-    cancelled: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
-    pending: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  };
-
-  const shootingStatusText: Record<string, string> = {
-    planned: '计划中',
-    in_progress: '制作中',
-    completed: '已完成',
-    cancelled: '已取消',
-    pending: '计划中',
-  };
-
   const filteredShootings = useMemo(
     () =>
       shootings.filter(
@@ -237,201 +241,146 @@ export default function Shooting() {
     [searchTerm, shootings],
   );
 
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const metrics = useMemo(
+    () => ({
+      today: shootings.filter((item) => item.plan_date?.slice(0, 10) === todayKey).length,
+      active: shootings.filter((item) => item.status === 'in_progress').length,
+      handoff: shootings.filter((item) => item.status === 'planned' || item.status === 'pending').length,
+      done: shootings.filter((item) => item.status === 'completed').length,
+    }),
+    [shootings, todayKey],
+  );
+
   const confirmTitle = confirmAction?.type === 'delete' ? '确认删除' : '确认完成';
   const confirmText = confirmAction?.type === 'delete' ? '确认删除' : '确认完成';
   const confirmDescription =
     confirmAction?.type === 'delete'
-      ? `确定要删除“${confirmAction.topicTitle}”这条拍摄计划吗？此操作不可撤销。`
+      ? `确定要删除“${confirmAction.topicTitle}”这条制作计划吗？此操作不可撤销。`
       : confirmAction?.type === 'complete'
         ? `确定要将“${confirmAction.shooting.topic_title}”标记为完成吗？完成后将自动流转到发布管理环节。`
         : '';
 
   return (
-    <div className="space-y-6">
+    <PageShell>
       <PageHeader
-        title="拍摄制作"
-        description="管理拍摄制作计划和进度"
+        title="成片制作"
+        description="跟进拍摄计划、素材交付和制作状态，优先处理临近截止的内容。"
         actions={
-          <button
-            type="button"
-            onClick={() => setShowCreateModal(true)}
-            className={`flex items-center gap-2 rounded-xl px-5 py-2.5 ${styles.buttonPrimary} transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]`}
-          >
+          <ActionButton type="button" variant="primary" onClick={() => setShowCreateModal(true)}>
             <Plus className="h-4 w-4" />
-            <span className="text-sm font-medium">添加制作计划</span>
-          </button>
+            添加制作计划
+          </ActionButton>
         }
       />
 
-      <PageToolbar
-        search={
-          <div className="relative">
-            <Search className={`absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 ${styles.textMuted}`} />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="搜索选题标题或拍摄地点..."
-              className={`w-full py-2.5 pl-10 pr-4 text-sm ${styles.input}`}
-            />
-          </div>
-        }
-      />
-
-      <div className={`${styles.card} overflow-hidden`}>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className={styles.tableHeader}>
-                <th className={`px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
-                  关联选题
-                </th>
-                <th className={`px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
-                  计划日期
-                </th>
-                <th className={`px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
-                  拍摄地点
-                </th>
-                <th className={`px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
-                  设备
-                </th>
-                <th className={`px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
-                  选题状态
-                </th>
-                <th className={`px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
-                  制作状态
-                </th>
-                <th className={`px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
-                  操作人
-                </th>
-                <th className={`px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
-                  操作
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="px-6 py-12">
-                    <LoadingState type="inline" text="正在加载拍摄计划..." className="mx-auto flex" />
-                  </td>
-                </tr>
-              ) : filteredShootings.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-6 py-12">
-                    <EmptyState
-                      icon={FileText}
-                      title="暂无拍摄计划"
-                      description={
-                        searchTerm
-                          ? '没有匹配当前搜索条件的拍摄计划。'
-                          : '当前还没有拍摄计划，创建后会显示在这里。'
-                      }
-                    />
-                  </td>
-                </tr>
-              ) : (
-                filteredShootings.map((shooting) => (
-                  <tr key={shooting.id} className={`border-t ${styles.tableRow} ${styles.tableHover}`}>
-                    <td className="px-6 py-4">
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/shooting/${shooting.id}`)}
-                        className="flex items-center gap-2 text-blue-400 hover:text-blue-300"
-                        title="点击查看详情"
-                      >
-                        <FileText className="h-4 w-4" />
-                        <span className="font-medium">{shooting.topic_title}</span>
-                      </button>
-                    </td>
-                    <td className={`px-6 py-4 ${styles.textSecondary}`}>
-                      <span className="flex items-center gap-1">
-                        <Calendar className="h-4 w-4" />
-                        {formatBeijingDate(shooting.plan_date)}
-                      </span>
-                    </td>
-                    <td className={`px-6 py-4 ${styles.textSecondary}`}>
-                      <span className="flex items-center gap-1">
-                        <MapPin className="h-4 w-4" />
-                        {shooting.location || '-'}
-                      </span>
-                    </td>
-                    <td className={`px-6 py-4 ${styles.textSecondary}`}>{shooting.equipment || '-'}</td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs ${topicStatusColors[shooting.topic_status || 'shooting']}`}
-                      >
-                        {topicStatusText[shooting.topic_status || 'shooting']}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs ${shootingStatusColors[shooting.status]}`}
-                      >
-                        {shootingStatusText[shooting.status]}
-                      </span>
-                    </td>
-                    <td className={`px-6 py-4 ${styles.textSecondary}`}>{shooting.operator_name}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/shooting/${shooting.id}`)}
-                          className={`rounded-lg p-2 text-blue-400 transition-colors hover:text-blue-300 ${styles.hoverBg}`}
-                          title="查看详情"
-                        >
-                          <Edit3 className="h-5 w-5" />
-                        </button>
-                        {shooting.status !== 'completed' ? (
-                          <button
-                            type="button"
-                            onClick={() => setConfirmAction({ type: 'complete', shooting })}
-                            className={`rounded-lg p-2 text-green-400 transition-colors hover:text-green-300 ${styles.hoverBg}`}
-                            title="标记完成"
-                          >
-                            <CheckCircle className="h-5 w-5" />
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setConfirmAction({
-                              type: 'delete',
-                              shootingId: shooting.id,
-                              topicTitle: shooting.topic_title || '该拍摄计划',
-                            })
-                          }
-                          className={`rounded-lg p-2 text-red-400 transition-colors hover:text-red-300 ${styles.hoverBg}`}
-                          title="删除"
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard title="今日待拍" value={metrics.today} icon={Calendar} tone="cyan" />
+        <MetricCard title="制作中" value={metrics.active} icon={Video} tone="primary" />
+        <MetricCard title="待交付" value={metrics.handoff} icon={Clock3} tone="amber" />
+        <MetricCard title="已完成" value={metrics.done} icon={CheckCircle} tone="success" />
       </div>
+
+      <GlassPanel className="p-4">
+        <SearchBar
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="搜索选题标题或拍摄地点..."
+          className="max-w-xl"
+        />
+      </GlassPanel>
+
+      {loading ? (
+        <LoadingState type="section" text="正在加载制作计划..." />
+      ) : filteredShootings.length === 0 ? (
+        <StudioEmptyState
+          icon={FileText}
+          title="暂无制作计划"
+          description={searchTerm ? '没有匹配当前搜索条件的制作计划。' : '添加拍摄或制作任务后，会在这里形成进度控制台。'}
+          actionLabel="添加制作计划"
+          onAction={() => setShowCreateModal(true)}
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {filteredShootings.map((shooting) => (
+            <TaskFlowCard
+              key={shooting.id}
+              eyebrow={topicStatusText[shooting.topic_status || 'shooting'] || '成片制作'}
+              title={shooting.topic_title || '未命名制作任务'}
+              status={
+                <StatusPill tone={shootingStatusTone[shooting.status] || 'muted'}>
+                  {shootingStatusText[shooting.status] || shooting.status}
+                </StatusPill>
+              }
+              meta={
+                <>
+                  <span className="inline-flex items-center gap-1">
+                    <Calendar className="h-3.5 w-3.5" />
+                    {formatBeijingDate(shooting.plan_date)}
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <MapPin className="h-3.5 w-3.5" />
+                    {shooting.location || '待定地点'}
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <UserRound className="h-3.5 w-3.5" />
+                    {shooting.operator_name || '未分配'}
+                  </span>
+                </>
+              }
+              progress={<StageProgress stages={buildStages(shooting.status)} />}
+              action={
+                <div className="flex flex-wrap justify-end gap-2">
+                  <ActionButton type="button" variant="ghost" onClick={() => navigate(`/shooting/${shooting.id}`)}>
+                    查看
+                  </ActionButton>
+                  {shooting.status !== 'completed' ? (
+                    <ActionButton type="button" variant="secondary" onClick={() => setConfirmAction({ type: 'complete', shooting })}>
+                      完成
+                    </ActionButton>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfirmAction({
+                        type: 'delete',
+                        shootingId: shooting.id,
+                        topicTitle: shooting.topic_title || '该制作计划',
+                      })
+                    }
+                    className="inline-flex min-h-10 items-center justify-center rounded-button border border-studio-coral/30 bg-studio-coral/10 px-3 py-2 text-sm font-semibold text-[#FFC2CC] transition hover:bg-studio-coral/15"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              }
+            >
+              <div className="line-clamp-2">
+                <span className="text-studio-text-muted">设备：</span>
+                {shooting.equipment || '暂未填写设备清单'}
+              </div>
+              <div className="mt-2 text-studio-cyan">{getNextAction(shooting.status)}</div>
+            </TaskFlowCard>
+          ))}
+        </div>
+      )}
 
       <FormModal
         open={showCreateModal}
         onCancel={() => setShowCreateModal(false)}
         onSubmit={handleCreate}
-        title="添加拍摄计划"
+        title="添加制作计划"
         submitText="保存"
         cancelText="取消"
         size="lg"
       >
         <div className="space-y-4">
           <div>
-            <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>关联选题 *</label>
+            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">关联选题 *</label>
             <select
               value={formData.topic_id}
               onChange={(event) => setFormData({ ...formData, topic_id: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             >
               <option value="">请选择选题</option>
               {topics.map((topic) => (
@@ -443,46 +392,46 @@ export default function Shooting() {
           </div>
 
           <div>
-            <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>计划日期</label>
+            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">计划日期</label>
             <input
               type="date"
               value={formData.plan_date}
               onChange={(event) => setFormData({ ...formData, plan_date: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             />
           </div>
 
           <div>
-            <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>拍摄地点</label>
+            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">拍摄地点</label>
             <input
               type="text"
               value={formData.location}
               onChange={(event) => setFormData({ ...formData, location: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
               placeholder="请输入拍摄地点"
             />
           </div>
 
           <div>
-            <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>设备清单</label>
+            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">设备清单</label>
             <textarea
               value={formData.equipment}
               onChange={(event) => setFormData({ ...formData, equipment: event.target.value })}
               rows={2}
-              className={`w-full resize-none rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full resize-none rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
               placeholder="请输入设备清单"
             />
           </div>
 
           <div>
-            <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>状态</label>
+            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">状态</label>
             <select
               value={formData.status}
               onChange={(event) => setFormData({ ...formData, status: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             >
               <option value="planned">计划中</option>
-              <option value="in_progress">拍摄中</option>
+              <option value="in_progress">制作中</option>
               <option value="completed">已完成</option>
               <option value="cancelled">已取消</option>
             </select>
@@ -501,6 +450,6 @@ export default function Shooting() {
         cancelText="取消"
         description={confirmDescription}
       />
-    </div>
+    </PageShell>
   );
 }

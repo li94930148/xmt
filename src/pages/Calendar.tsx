@@ -1,13 +1,37 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store';
-import { getCalendarEvents, createCalendarEvent, getTopics } from '../api';
+import { createCalendarEvent, getCalendarEvents, getTopics } from '../api';
 import type { CalendarEvent } from '../api/calendar';
 import type { Topic } from '../types';
-import { useThemeStyles } from '../hooks/useThemeStyles';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
-import { FormModal, LoadingState, PageHeader, PageToolbar } from '../components/common';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock3, Plus, Send, Video, AlertTriangle } from 'lucide-react';
+import { FormModal, LoadingState } from '../components/common';
+import ActionButton from '../components/studio/ActionButton';
+import GlassPanel from '../components/studio/GlassPanel';
+import MetricCard from '../components/studio/MetricCard';
+import PageHeader from '../components/studio/PageHeader';
+import PageShell from '../components/studio/PageShell';
+import StatusPill, { type StatusTone } from '../components/studio/StatusPill';
+import TimelineCard from '../components/studio/TimelineCard';
 
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+
+const eventTypeText: Record<string, string> = {
+  deadline: '截止',
+  meeting: '会议',
+  review: '审核',
+  publish: '发布',
+  shooting: '拍摄',
+  other: '事项',
+};
+
+const eventTypeTone: Record<string, StatusTone> = {
+  deadline: 'coral',
+  meeting: 'primary',
+  review: 'amber',
+  publish: 'success',
+  shooting: 'cyan',
+  other: 'muted',
+};
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate();
@@ -18,13 +42,9 @@ function getFirstDayOfMonth(year: number, month: number) {
   return day === 0 ? 6 : day - 1;
 }
 
-const eventTypeColors: Record<string, string> = {
-  deadline: 'bg-red-500/20 text-red-400',
-  meeting: 'bg-blue-500/20 text-blue-400',
-  review: 'bg-yellow-500/20 text-yellow-400',
-  publish: 'bg-green-500/20 text-green-400',
-  other: 'bg-gray-500/20 text-gray-400',
-};
+function toDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
 
 export default function CalendarPage() {
   const today = new Date();
@@ -42,7 +62,6 @@ export default function CalendarPage() {
     topic_id: '',
   });
   const appStore = useAppStore();
-  const styles = useThemeStyles();
 
   const fetchEvents = async () => {
     setLoading(true);
@@ -71,6 +90,7 @@ export default function CalendarPage() {
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
   const prevMonthDays = getDaysInMonth(year, month === 1 ? 12 : month - 1);
+  const todayKey = toDateKey(today);
 
   const calendarDays = useMemo(() => {
     const days: { day: number; isCurrentMonth: boolean; date: string }[] = [];
@@ -128,7 +148,7 @@ export default function CalendarPage() {
         }
         map[dateKey].push({
           id: -topic.id,
-          title: `📍 ${topic.title}`,
+          title: `截止 ${topic.title}`,
           event_date: topic.deadline,
           event_type: 'deadline',
           topic_id: topic.id,
@@ -142,6 +162,21 @@ export default function CalendarPage() {
 
     return map;
   }, [events, topics]);
+
+  const monthEvents = useMemo(() => Object.values(eventsByDate).flat(), [eventsByDate]);
+  const todayEvents = eventsByDate[todayKey] || [];
+  const thisWeekPublishCount = monthEvents.filter((eventItem) => eventItem.event_type === 'publish').length;
+  const shootingCount = monthEvents.filter((eventItem) => eventItem.event_type === 'shooting').length;
+  const deadlineCount = monthEvents.filter((eventItem) => eventItem.event_type === 'deadline').length;
+
+  const upcomingEvents = useMemo(
+    () =>
+      monthEvents
+        .filter((eventItem) => eventItem.event_date?.slice(0, 10) >= todayKey)
+        .sort((a, b) => a.event_date.localeCompare(b.event_date))
+        .slice(0, 5),
+    [monthEvents, todayKey],
+  );
 
   const goToPrevMonth = () => {
     if (month === 1) {
@@ -201,97 +236,136 @@ export default function CalendarPage() {
     }
   };
 
-  const isToday = (date: string) => {
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
-      today.getDate(),
-    ).padStart(2, '0')}`;
-    return date === todayStr;
-  };
+  const isToday = (date: string) => date === todayKey;
 
   return (
-    <div className="space-y-6">
+    <PageShell>
       <PageHeader
         title="排期日历"
-        description="查看选题截止日期和团队日程"
-      />
-
-      <PageToolbar
-        left={
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={goToPrevMonth} className={`rounded-lg p-2 ${styles.buttonSecondary}`}>
+        description="查看近期待发布、待拍摄、待审核和截止内容，安排团队内容节奏。"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton type="button" variant="secondary" onClick={goToPrevMonth}>
               <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className={`min-w-[140px] text-center text-lg font-semibold ${styles.textPrimary}`}>
+              上月
+            </ActionButton>
+            <div className="rounded-button border border-studio-border-soft bg-white/[0.05] px-4 py-2 text-sm font-semibold text-studio-text-primary">
               {year}年{month}月
-            </span>
-            <button type="button" onClick={goToNextMonth} className={`rounded-lg p-2 ${styles.buttonSecondary}`}>
+            </div>
+            <ActionButton type="button" variant="secondary" onClick={goToNextMonth}>
+              下月
               <ChevronRight className="h-4 w-4" />
-            </button>
+            </ActionButton>
           </div>
         }
       />
 
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard title="今日事项" value={todayEvents.length} icon={Clock3} tone="cyan" />
+        <MetricCard title="本月发布" value={thisWeekPublishCount} icon={Send} tone="success" />
+        <MetricCard title="待拍摄" value={shootingCount} icon={Video} tone="primary" />
+        <MetricCard title="风险延期" value={deadlineCount} icon={AlertTriangle} tone="coral" />
+      </div>
+
       {loading ? (
         <LoadingState type="page" text="正在加载日历..." />
       ) : (
-        <div className={`${styles.card} overflow-hidden`}>
-          <div className={`grid grid-cols-7 border-b ${styles.border}`}>
-            {WEEKDAYS.map((day) => (
-              <div
-                key={day}
-                className={`px-3 py-2.5 text-center text-xs font-semibold ${styles.textMuted} ${styles.bgTertiary}`}
-              >
-                {day}
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-7">
-            {calendarDays.map((cell, index) => {
-              const cellEvents = eventsByDate[cell.date] || [];
-
-              return (
-                <div
-                  key={index}
-                  onClick={() => handleDateClick(cell.date)}
-                  className={`min-h-[100px] cursor-pointer border-b border-r p-2 transition-colors ${styles.border} ${
-                    !cell.isCurrentMonth ? styles.bgSecondary : ''
-                  } ${isToday(cell.date) ? 'bg-[#5c7cfa]/5' : ''} ${styles.hoverBg}`}
-                >
-                  <div className="mb-1 flex items-center justify-between">
-                    <span
-                      className={`text-sm font-medium ${
-                        isToday(cell.date)
-                          ? 'flex h-6 w-6 items-center justify-center rounded-full bg-[#5c7cfa] text-xs text-white'
-                          : cell.isCurrentMonth
-                            ? styles.textPrimary
-                            : styles.textMuted
-                      }`}
-                    >
-                      {cell.day}
-                    </span>
-                    {cellEvents.length > 0 && cell.isCurrentMonth ? (
-                      <span className={`text-[10px] ${styles.textMuted}`}>{cellEvents.length}</span>
-                    ) : null}
-                  </div>
-                  <div className="space-y-0.5">
-                    {cellEvents.slice(0, 3).map((eventItem, eventIndex) => (
-                      <div
-                        key={eventIndex}
-                        className={`truncate rounded px-1.5 py-0.5 text-[10px] ${
-                          eventTypeColors[eventItem.event_type || 'other'] || eventTypeColors.other
-                        }`}
-                      >
-                        {eventItem.title}
-                      </div>
-                    ))}
-                    {cellEvents.length > 3 ? (
-                      <div className={`text-center text-[10px] ${styles.textMuted}`}>+{cellEvents.length - 3}更多</div>
-                    ) : null}
-                  </div>
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <GlassPanel className="min-w-0 overflow-hidden">
+            <div className="min-w-0 overflow-x-auto">
+              <div className="min-w-[820px]">
+                <div className="grid grid-cols-7 border-b border-studio-border-soft bg-white/[0.03]">
+                  {WEEKDAYS.map((day) => (
+                    <div key={day} className="px-3 py-3 text-center text-xs font-semibold text-studio-text-muted">
+                      周{day}
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
+
+                <div className="grid grid-cols-7">
+                  {calendarDays.map((cell, index) => {
+                    const cellEvents = eventsByDate[cell.date] || [];
+
+                    return (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => handleDateClick(cell.date)}
+                        className={`min-h-[118px] border-b border-r border-studio-border-soft p-2 text-left transition hover:bg-white/[0.05] ${
+                          !cell.isCurrentMonth ? 'bg-white/[0.02] text-studio-text-muted' : 'text-studio-text-primary'
+                        } ${isToday(cell.date) ? 'bg-studio-primary/10' : ''}`}
+                      >
+                        <div className="mb-2 flex items-center justify-between">
+                          <span
+                            className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
+                              isToday(cell.date)
+                                ? 'bg-studio-primary text-white shadow-glow-primary'
+                                : cell.isCurrentMonth
+                                  ? 'text-studio-text-primary'
+                                  : 'text-studio-text-muted'
+                            }`}
+                          >
+                            {cell.day}
+                          </span>
+                          {cellEvents.length > 0 && cell.isCurrentMonth ? (
+                            <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] text-studio-text-muted">{cellEvents.length}</span>
+                          ) : null}
+                        </div>
+                        <div className="space-y-1">
+                          {cellEvents.slice(0, 3).map((eventItem, eventIndex) => (
+                            <div
+                              key={eventIndex}
+                              className={`truncate rounded-md border px-2 py-1 text-[11px] font-medium ${
+                                eventTypeTone[eventItem.event_type || 'other'] === 'coral'
+                                  ? 'border-studio-coral/30 bg-studio-coral/10 text-[#FFC2CC]'
+                                  : eventTypeTone[eventItem.event_type || 'other'] === 'success'
+                                    ? 'border-studio-success/30 bg-studio-success/10 text-[#B8F7E3]'
+                                    : eventTypeTone[eventItem.event_type || 'other'] === 'amber'
+                                      ? 'border-studio-amber/30 bg-studio-amber/10 text-[#FDE7B2]'
+                                      : eventTypeTone[eventItem.event_type || 'other'] === 'cyan'
+                                        ? 'border-studio-cyan/30 bg-studio-cyan/10 text-[#A5F3FC]'
+                                        : 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary'
+                              }`}
+                            >
+                              {eventItem.title}
+                            </div>
+                          ))}
+                          {cellEvents.length > 3 ? <div className="text-center text-[10px] text-studio-text-muted">+{cellEvents.length - 3} 更多</div> : null}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </GlassPanel>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-studio-text-primary">近期节点</h2>
+              <ActionButton type="button" variant="ghost" onClick={() => handleDateClick(todayKey)}>
+                <Plus className="h-4 w-4" />
+                新增
+              </ActionButton>
+            </div>
+            {upcomingEvents.length === 0 ? (
+              <GlassPanel className="p-5 text-sm text-studio-text-secondary">近期暂无排期事项。</GlassPanel>
+            ) : (
+              upcomingEvents.map((eventItem) => (
+                <TimelineCard
+                  key={`${eventItem.id}-${eventItem.event_date}`}
+                  title={eventItem.title}
+                  time={eventItem.event_date?.slice(0, 10)}
+                  status={
+                    <StatusPill tone={eventTypeTone[eventItem.event_type || 'other'] || 'muted'}>
+                      {eventTypeText[eventItem.event_type || 'other'] || '事项'}
+                    </StatusPill>
+                  }
+                >
+                  {eventItem.topic_title || eventItem.description || '未关联具体内容'}
+                </TimelineCard>
+              ))
+            )}
           </div>
         </div>
       )}
@@ -302,7 +376,7 @@ export default function CalendarPage() {
         onSubmit={handleCreate}
         title={
           <div className="flex items-center gap-2">
-            <CalendarIcon className="h-5 w-5 text-[#5c7cfa]" />
+            <CalendarIcon className="h-5 w-5 text-studio-cyan" />
             <span>创建事件</span>
           </div>
         }
@@ -313,45 +387,46 @@ export default function CalendarPage() {
       >
         <div className="space-y-4">
           <div>
-            <label className={`mb-1.5 block text-sm font-medium ${styles.textSecondary}`}>标题 *</label>
+            <label className="mb-1.5 block text-sm font-medium text-studio-text-secondary">标题 *</label>
             <input
               type="text"
               value={formData.title}
               onChange={(event) => setFormData({ ...formData, title: event.target.value })}
-              className={`w-full px-4 py-2.5 text-sm ${styles.input}`}
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
               placeholder="事件标题"
             />
           </div>
           <div>
-            <label className={`mb-1.5 block text-sm font-medium ${styles.textSecondary}`}>描述</label>
+            <label className="mb-1.5 block text-sm font-medium text-studio-text-secondary">描述</label>
             <textarea
               value={formData.description}
               onChange={(event) => setFormData({ ...formData, description: event.target.value })}
-              className={`w-full resize-none px-4 py-2.5 text-sm ${styles.input}`}
+              className="w-full resize-none rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
               rows={3}
               placeholder="事件描述（可选）"
             />
           </div>
           <div>
-            <label className={`mb-1.5 block text-sm font-medium ${styles.textSecondary}`}>类型</label>
+            <label className="mb-1.5 block text-sm font-medium text-studio-text-secondary">类型</label>
             <select
               value={formData.event_type}
               onChange={(event) => setFormData({ ...formData, event_type: event.target.value })}
-              className={`w-full px-4 py-2.5 text-sm ${styles.input}`}
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             >
               <option value="deadline">截止日期</option>
               <option value="meeting">会议</option>
-              <option value="review">评审</option>
+              <option value="review">审核</option>
               <option value="publish">发布</option>
+              <option value="shooting">拍摄</option>
               <option value="other">其他</option>
             </select>
           </div>
           <div>
-            <label className={`mb-1.5 block text-sm font-medium ${styles.textSecondary}`}>关联选题</label>
+            <label className="mb-1.5 block text-sm font-medium text-studio-text-secondary">关联选题</label>
             <select
               value={formData.topic_id}
               onChange={(event) => setFormData({ ...formData, topic_id: event.target.value })}
-              className={`w-full px-4 py-2.5 text-sm ${styles.input}`}
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             >
               <option value="">不关联</option>
               {topics.map((topic) => (
@@ -363,6 +438,6 @@ export default function CalendarPage() {
           </div>
         </div>
       </FormModal>
-    </div>
+    </PageShell>
   );
 }

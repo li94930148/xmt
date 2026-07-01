@@ -1,29 +1,31 @@
 import { useEffect, useState } from 'react';
 import {
   Archive,
+  BarChart3,
   Calendar,
-  ChevronLeft,
-  Eye,
+  Clock,
   ExternalLink,
+  Eye,
   FileText,
   MessageSquare,
+  Package,
   Search,
   Send,
   Trash2,
   User,
-  Clock,
-  Camera,
-  BarChart3,
 } from 'lucide-react';
-import { getArchiveDetail, getArchives, deleteResource } from '../api';
-import EmptyState from '../components/EmptyState';
-import {
-  ConfirmModal,
-  LoadingState,
-  PageHeader,
-  PageToolbar,
-} from '../components/common';
-import { useThemeStyles } from '../hooks/useThemeStyles';
+import { deleteResource, getArchiveDetail, getArchives } from '../api';
+import { ConfirmModal, LoadingState } from '../components/common';
+import ActionButton from '../components/studio/ActionButton';
+import GlassPanel from '../components/studio/GlassPanel';
+import MetricCard from '../components/studio/MetricCard';
+import PageHeader from '../components/studio/PageHeader';
+import PageShell from '../components/studio/PageShell';
+import PlatformBadge from '../components/studio/PlatformBadge';
+import ResourceTypeBadge from '../components/studio/ResourceTypeBadge';
+import SearchBar from '../components/studio/SearchBar';
+import StatusPill from '../components/studio/StatusPill';
+import StudioEmptyState from '../components/studio/EmptyState';
 import { useDebounce } from '../hooks/useDebounce';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 import { useAppStore } from '../store';
@@ -109,17 +111,10 @@ function DetailTabEmptyState({
   title: string;
   description: string;
 }) {
-  return (
-    <EmptyState
-      icon={Archive}
-      title={title}
-      description={description}
-    />
-  );
+  return <StudioEmptyState icon={Archive} title={title} description={description} />;
 }
 
 export default function Resources() {
-  const styles = useThemeStyles();
   const addNotification = useAppStore((state) => state.addNotification);
   const [archives, setArchives] = useState<ArchiveItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -208,89 +203,75 @@ export default function Resources() {
     const analytics = archive.analytics;
 
     return (
-      <div className="space-y-6">
+      <PageShell>
         <PageHeader
           title={selectedArchive.name}
-          description={`归档于 ${formatBeijingTime(archive.archived_at) || '未知'}`}
-          backButton={{
-            onClick: () => setSelectedArchive(null),
-            label: '返回',
-          }}
+          description={`归档于 ${formatBeijingTime(archive.archived_at) || '未知时间'}`}
           actions={
-            <button
-              type="button"
-              onClick={() => setShowDeleteModal(true)}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2 ${styles.buttonDanger} transition-colors`}
-            >
-              <Trash2 className="h-4 w-4" />
-              <span className="text-sm font-medium">删除</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <ActionButton type="button" variant="secondary" onClick={() => setSelectedArchive(null)}>
+                返回资产库
+              </ActionButton>
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(true)}
+                className="inline-flex min-h-10 items-center gap-2 rounded-button border border-studio-coral/30 bg-studio-coral/10 px-4 py-2.5 text-sm font-semibold text-[#FFC2CC] transition hover:bg-studio-coral/15"
+              >
+                <Trash2 className="h-4 w-4" />
+                删除
+              </button>
+            </div>
           }
         />
 
-        <div className={`${styles.card} p-6`}>
-          <h2 className={`mb-4 text-lg font-semibold ${styles.textPrimary}`}>选题信息</h2>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <GlassPanel className="p-5">
+          <div className="flex flex-wrap items-center gap-3">
+            <ResourceTypeBadge type="文档" />
+            <PlatformBadge platform={topic?.platform || publishing?.platform} />
+            <StatusPill tone="success">已归档</StatusPill>
+          </div>
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
-              <p className={`mb-1 text-xs ${styles.textMuted}`}>平台</p>
-              <p className={styles.textPrimary}>{topic?.platform || '-'}</p>
+              <p className="mb-1 text-xs text-studio-text-muted">截止日期</p>
+              <p className="text-sm font-medium text-studio-text-primary">{topic?.deadline || '-'}</p>
             </div>
             <div>
-              <p className={`mb-1 text-xs ${styles.textMuted}`}>截止日期</p>
-              <p className={styles.textPrimary}>{topic?.deadline || '-'}</p>
+              <p className="mb-1 text-xs text-studio-text-muted">发布时间</p>
+              <p className="text-sm font-medium text-studio-text-primary">{publishing?.publish_time || '-'}</p>
             </div>
             <div>
-              <p className={`mb-1 text-xs ${styles.textMuted}`}>发布时间</p>
-              <p className={styles.textPrimary}>{publishing?.publish_time || '-'}</p>
-            </div>
-            <div>
-              <p className={`mb-1 text-xs ${styles.textMuted}`}>发布链接</p>
+              <p className="mb-1 text-xs text-studio-text-muted">发布链接</p>
               {publishing?.url ? (
-                <a
-                  href={publishing.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-blue-400 hover:text-blue-300"
-                >
+                <a href={publishing.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-studio-cyan">
                   查看
-                  <ExternalLink className="h-3 w-3" />
+                  <ExternalLink className="h-3.5 w-3.5" />
                 </a>
               ) : (
-                <p className={styles.textPrimary}>-</p>
+                <p className="text-sm font-medium text-studio-text-primary">-</p>
               )}
             </div>
-          </div>
-          {topic?.description ? (
-            <div className="mt-4">
-              <p className={`mb-1 text-xs ${styles.textMuted}`}>选题描述</p>
-              <p className={`text-sm ${styles.textSecondary}`}>{topic.description}</p>
+            <div>
+              <p className="mb-1 text-xs text-studio-text-muted">创建人</p>
+              <p className="text-sm font-medium text-studio-text-primary">{selectedArchive.uploader_name || '-'}</p>
             </div>
-          ) : null}
-        </div>
+          </div>
+          {topic?.description ? <p className="mt-5 text-sm leading-6 text-studio-text-secondary">{topic.description}</p> : null}
+        </GlassPanel>
 
         {analytics ? (
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            {[
-              { label: '播放量', value: analytics.views, icon: BarChart3 },
-              { label: '点赞数', value: analytics.likes, icon: BarChart3 },
-              { label: '分享数', value: analytics.shares, icon: BarChart3 },
-              { label: '评论数', value: analytics.comments, icon: MessageSquare },
-            ].map((stat) => (
-              <div key={stat.label} className={`${styles.card} p-4`}>
-                <p className={`mb-1 text-xs ${styles.textMuted}`}>{stat.label}</p>
-                <p className={`text-2xl font-bold ${styles.textPrimary}`}>
-                  {typeof stat.value === 'number' ? stat.value.toLocaleString() : 0}
-                </p>
-              </div>
-            ))}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricCard title="播放量" value={analytics.views.toLocaleString()} icon={BarChart3} tone="cyan" />
+            <MetricCard title="点赞数" value={analytics.likes.toLocaleString()} icon={BarChart3} tone="coral" />
+            <MetricCard title="分享数" value={analytics.shares.toLocaleString()} icon={Send} tone="success" />
+            <MetricCard title="评论数" value={analytics.comments.toLocaleString()} icon={MessageSquare} tone="violet" />
           </div>
         ) : null}
 
-        <div className={`${styles.card} overflow-hidden`}>
-          <div className={`flex border-b ${styles.border}`}>
+        <GlassPanel className="overflow-hidden">
+          <div className="flex min-w-0 overflow-x-auto border-b border-studio-border-soft">
             {[
-              { key: 'script', label: '剧本', icon: FileText },
-              { key: 'shooting', label: '拍摄批注', icon: Camera },
+              { key: 'script', label: '稿件', icon: FileText },
+              { key: 'shooting', label: '制作批注', icon: Package },
               { key: 'publishing', label: '发布信息', icon: Send },
               { key: 'history', label: '流程记录', icon: Clock },
             ].map((tab) => {
@@ -301,10 +282,10 @@ export default function Resources() {
                   key={tab.key}
                   type="button"
                   onClick={() => setActiveTab(tab.key as typeof activeTab)}
-                  className={`flex items-center gap-2 border-b-2 px-6 py-3 text-sm font-medium transition-colors ${
+                  className={`flex min-h-12 shrink-0 items-center gap-2 border-b-2 px-5 text-sm font-semibold transition ${
                     activeTab === tab.key
-                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                      : `border-transparent ${styles.textSecondary} ${styles.hoverBg}`
+                      ? 'border-studio-cyan bg-studio-cyan/10 text-studio-cyan'
+                      : 'border-transparent text-studio-text-secondary hover:bg-white/[0.04] hover:text-studio-text-primary'
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -314,53 +295,35 @@ export default function Resources() {
             })}
           </div>
 
-          <div className="p-6">
+          <div className="p-5">
             {activeTab === 'script' ? (
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className={`font-semibold ${styles.textPrimary}`}>
-                    剧本内容
-                    {script?.version ? (
-                      <span className={`ml-2 text-xs ${styles.textMuted}`}>版本：{script.version}</span>
-                    ) : null}
-                  </h3>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="font-semibold text-studio-text-primary">稿件内容</h3>
+                  {script?.version ? <StatusPill tone="primary">版本 {script.version}</StatusPill> : null}
                 </div>
 
                 {script?.content ? (
                   <div
-                    className={`prose prose-sm max-w-none ${styles.isDark ? 'prose-invert' : ''}`}
+                    className="prose prose-invert prose-sm max-w-none rounded-card border border-studio-border-soft bg-white/[0.03] p-5 text-studio-text-secondary"
                     dangerouslySetInnerHTML={{ __html: script.content }}
                   />
                 ) : (
-                  <DetailTabEmptyState
-                    title="暂无剧本内容"
-                    description="当前归档中还没有可展示的剧本内容。"
-                  />
+                  <DetailTabEmptyState title="暂无稿件内容" description="当前归档中还没有可展示的稿件内容。" />
                 )}
 
                 {script?.history && script.history.length > 0 ? (
-                  <div className="mt-6">
-                    <h4 className={`mb-3 font-medium ${styles.textPrimary}`}>版本历史</h4>
-                    <div className="space-y-2">
-                      {script.history.map((history, index) => (
-                        <div
-                          key={index}
-                          className={`flex items-center gap-3 rounded p-2 text-sm ${styles.hoverBgLight}`}
-                        >
-                          <span className="font-mono text-blue-400">{history.version}</span>
-                          <span className={styles.textSecondary}>
-                            {history.change_type === 'major' ? '大版本' : '小版本'}
-                          </span>
-                          {history.comment ? (
-                            <span className={styles.textMuted}>· {history.comment}</span>
-                          ) : null}
-                          <span className={`ml-auto ${styles.textMuted}`}>
-                            {formatBeijingTime(history.created_at)}
-                          </span>
-                          <span className={styles.textMuted}>{history.operator_name}</span>
-                        </div>
-                      ))}
-                    </div>
+                  <div className="space-y-2">
+                    <h4 className="font-medium text-studio-text-primary">版本历史</h4>
+                    {script.history.map((history, index) => (
+                      <div key={index} className="flex flex-wrap items-center gap-3 rounded-card border border-studio-border-soft bg-white/[0.03] p-3 text-sm">
+                        <span className="font-mono text-studio-cyan">{history.version}</span>
+                        <span className="text-studio-text-secondary">{history.change_type === 'major' ? '大版本' : '小版本'}</span>
+                        {history.comment ? <span className="text-studio-text-muted">· {history.comment}</span> : null}
+                        <span className="ml-auto text-studio-text-muted">{formatBeijingTime(history.created_at)}</span>
+                        <span className="text-studio-text-muted">{history.operator_name}</span>
+                      </div>
+                    ))}
                   </div>
                 ) : null}
               </div>
@@ -368,94 +331,75 @@ export default function Resources() {
 
             {activeTab === 'shooting' ? (
               <div className="space-y-4">
-                <h3 className={`font-semibold ${styles.textPrimary}`}>拍摄制作批注</h3>
+                <h3 className="font-semibold text-studio-text-primary">制作批注</h3>
                 {shooting?.comments && shooting.comments.length > 0 ? (
                   <div className="space-y-3">
                     {shooting.comments.map((comment, index) => (
-                      <div key={index} className={`${styles.card} p-4`}>
-                        <p className={`text-sm ${styles.textPrimary}`}>{comment.content}</p>
-                        <div className={`mt-2 flex items-center gap-3 text-xs ${styles.textMuted}`}>
-                          <User className="h-3 w-3" />
+                      <GlassPanel key={index} className="p-4">
+                        <p className="text-sm text-studio-text-primary">{comment.content}</p>
+                        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
+                          <User className="h-3.5 w-3.5" />
                           <span>{comment.operator_name}</span>
                           <span>{formatBeijingTime(comment.created_at)}</span>
                         </div>
-                      </div>
+                      </GlassPanel>
                     ))}
                   </div>
                 ) : (
-                  <DetailTabEmptyState
-                    title="暂无拍摄批注"
-                    description="当前归档中还没有拍摄环节的批注记录。"
-                  />
+                  <DetailTabEmptyState title="暂无制作批注" description="当前归档中还没有制作环节的批注记录。" />
                 )}
               </div>
             ) : null}
 
             {activeTab === 'publishing' ? (
               <div className="space-y-4">
-                <h3 className={`font-semibold ${styles.textPrimary}`}>发布详情</h3>
+                <h3 className="font-semibold text-studio-text-primary">发布详情</h3>
                 {publishing ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className={`mb-1 text-xs ${styles.textMuted}`}>发布平台</p>
-                      <p className={styles.textPrimary}>{publishing.platform || '-'}</p>
-                    </div>
-                    <div>
-                      <p className={`mb-1 text-xs ${styles.textMuted}`}>发布时间</p>
-                      <p className={styles.textPrimary}>{publishing.publish_time || '-'}</p>
-                    </div>
-                    <div>
-                      <p className={`mb-1 text-xs ${styles.textMuted}`}>发布状态</p>
-                      <p className={styles.textPrimary}>{publishing.status || '-'}</p>
-                    </div>
-                    <div>
-                      <p className={`mb-1 text-xs ${styles.textMuted}`}>发布链接</p>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <GlassPanel className="p-4">
+                      <p className="mb-2 text-xs text-studio-text-muted">发布平台</p>
+                      <PlatformBadge platform={publishing.platform} />
+                    </GlassPanel>
+                    <GlassPanel className="p-4">
+                      <p className="mb-2 text-xs text-studio-text-muted">发布时间</p>
+                      <p className="text-sm font-medium text-studio-text-primary">{publishing.publish_time || '-'}</p>
+                    </GlassPanel>
+                    <GlassPanel className="p-4">
+                      <p className="mb-2 text-xs text-studio-text-muted">发布状态</p>
+                      <StatusPill tone={publishing.status === 'published' ? 'success' : 'amber'}>{publishing.status || '-'}</StatusPill>
+                    </GlassPanel>
+                    <GlassPanel className="p-4">
+                      <p className="mb-2 text-xs text-studio-text-muted">发布链接</p>
                       {publishing.url ? (
-                        <a
-                          href={publishing.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-blue-400 hover:text-blue-300"
-                        >
+                        <a href={publishing.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-studio-cyan">
                           查看
-                          <ExternalLink className="h-3 w-3" />
+                          <ExternalLink className="h-3.5 w-3.5" />
                         </a>
                       ) : (
-                        <p className={styles.textPrimary}>-</p>
+                        <p className="text-sm font-medium text-studio-text-primary">-</p>
                       )}
-                    </div>
+                    </GlassPanel>
                   </div>
                 ) : (
-                  <DetailTabEmptyState
-                    title="暂无发布信息"
-                    description="当前归档中还没有发布阶段的详细信息。"
-                  />
+                  <DetailTabEmptyState title="暂无发布信息" description="当前归档中还没有发布阶段的详细信息。" />
                 )}
               </div>
             ) : null}
 
             {activeTab === 'history' ? (
               <div className="space-y-4">
-                <h3 className={`font-semibold ${styles.textPrimary}`}>选题流转记录</h3>
+                <h3 className="font-semibold text-studio-text-primary">流程记录</h3>
                 {archive.topicHistory && archive.topicHistory.length > 0 ? (
                   <div className="space-y-0">
                     {archive.topicHistory.map((history, index) => (
                       <div key={index} className="flex gap-4">
                         <div className="flex flex-col items-center">
-                          <div
-                            className={`mt-1.5 h-3 w-3 rounded-full ${
-                              index === 0 ? 'bg-blue-500' : 'bg-gray-500'
-                            }`}
-                          />
-                          {index < (archive.topicHistory?.length ?? 0) - 1 ? (
-                            <div className={`my-1 w-px flex-1 ${styles.border}`} />
-                          ) : null}
+                          <div className={`mt-1.5 h-3 w-3 rounded-full ${index === 0 ? 'bg-studio-cyan shadow-glow-cyan' : 'bg-slate-600'}`} />
+                          {index < (archive.topicHistory?.length ?? 0) - 1 ? <div className="my-1 w-px flex-1 bg-studio-border-soft" /> : null}
                         </div>
                         <div className="flex-1 pb-4">
-                          <p className={`text-sm font-medium ${styles.textPrimary}`}>
-                            {history.comment || history.action}
-                          </p>
-                          <div className={`mt-1 flex items-center gap-2 text-xs ${styles.textMuted}`}>
+                          <p className="text-sm font-medium text-studio-text-primary">{history.comment || history.action}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-studio-text-muted">
                             <span>{history.operator_name}</span>
                             <span>{formatBeijingTime(history.created_at)}</span>
                           </div>
@@ -464,15 +408,12 @@ export default function Resources() {
                     ))}
                   </div>
                 ) : (
-                  <DetailTabEmptyState
-                    title="暂无流程记录"
-                    description="当前归档中还没有可展示的流转记录。"
-                  />
+                  <DetailTabEmptyState title="暂无流程记录" description="当前归档中还没有可展示的流转记录。" />
                 )}
               </div>
             ) : null}
           </div>
-        </div>
+        </GlassPanel>
 
         <ConfirmModal
           open={showDeleteModal}
@@ -483,138 +424,117 @@ export default function Resources() {
           title="确认删除"
           confirmText="确认删除"
           cancelText="取消"
-          description={
-            <>
-              确定要删除归档“{selectedArchive.name}”吗？此操作不可撤销，相关剧本、批注和发布数据将一起删除。
-            </>
-          }
+          description={`确定要删除归档“${selectedArchive.name}”吗？此操作不可撤销，相关稿件、批注和发布数据将一起删除。`}
         />
-      </div>
+      </PageShell>
     );
   }
 
+  const linkedCount = archives.filter((item) => item.platform || item.scriptVersion || item.publishedAt).length;
+
   return (
-    <div className="space-y-6">
+    <PageShell>
       <PageHeader
-        title="选题存档"
-        description="已完成发布的选题归档，包含剧本、批注和发布数据"
-        actions={(
-          <div className="flex items-center gap-2">
-            <Archive className={`h-5 w-5 ${styles.textMuted}`} />
-            <span className={`text-sm ${styles.textSecondary}`}>共 {total} 个存档</span>
+        title="资源管理"
+        description="沉淀已发布内容、稿件版本、制作批注和发布数据，方便团队复用素材资产。"
+        actions={
+          <div className="flex items-center gap-2 rounded-button border border-studio-border-soft bg-white/[0.05] px-3 py-2 text-sm text-studio-text-secondary">
+            <Archive className="h-4 w-4 text-studio-cyan" />
+            共 {total} 个存档
           </div>
-        )}
+        }
       />
 
-      <PageToolbar
-        search={(
-          <div className="relative max-w-md">
-            <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${styles.textMuted}`} />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(event) => {
-                setSearchTerm(event.target.value);
-                setPage(1);
-              }}
-              placeholder="搜索选题名称..."
-              className={`w-full py-2.5 pl-10 pr-4 ${styles.input}`}
-            />
-          </div>
-        )}
-      />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard title="总资源" value={total} icon={Archive} tone="primary" />
+        <MetricCard title="今日新增" value={archives.filter((item) => item.created_at?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length} icon={Calendar} tone="cyan" />
+        <MetricCard title="待整理" value={archives.filter((item) => !item.platform && !item.scriptVersion).length} icon={Package} tone="amber" />
+        <MetricCard title="已关联内容" value={linkedCount} icon={FileText} tone="success" />
+      </div>
+
+      <GlassPanel className="p-4">
+        <SearchBar
+          value={searchTerm}
+          onChange={(event) => {
+            setSearchTerm(event.target.value);
+            setPage(1);
+          }}
+          placeholder="搜索资源名称..."
+          className="max-w-xl"
+        />
+      </GlassPanel>
 
       {loading || detailLoading ? (
         <LoadingState type="section" text="正在加载资源归档..." />
       ) : archives.length === 0 ? (
-        <EmptyState
+        <StudioEmptyState
           icon={Archive}
-          title="暂无存档"
-          description="选题发布完成后会自动归档到这里。"
+          title="暂无资源归档"
+          description="内容发布完成后会自动沉淀到这里，形成可复用的素材资产库。"
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {archives.map((item) => (
-            <div
+            <button
               key={item.id}
-              className={`${styles.card} group cursor-pointer p-5 transition-shadow hover:shadow-lg`}
+              type="button"
+              className="group min-w-0 rounded-card border border-studio-border-soft bg-studio-surface-glass p-5 text-left shadow-card backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-studio-border-active hover:shadow-glow-primary"
               onClick={() => void handleViewDetail(item.id)}
             >
-              <div className="mb-3 flex items-start justify-between">
-                <h3
-                  className={`line-clamp-2 text-base font-semibold ${styles.textPrimary} transition-colors group-hover:text-blue-400`}
-                >
-                  {item.name}
-                </h3>
-                <Eye
-                  className={`ml-2 h-4 w-4 flex-shrink-0 ${styles.textMuted} transition-colors group-hover:text-blue-400`}
-                />
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="line-clamp-2 text-base font-semibold text-studio-text-primary group-hover:text-studio-cyan">{item.name}</h3>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <ResourceTypeBadge type="文档" />
+                    {item.platform ? <PlatformBadge platform={item.platform} /> : null}
+                  </div>
+                </div>
+                <Eye className="h-4 w-4 shrink-0 text-studio-text-muted group-hover:text-studio-cyan" />
               </div>
 
-              <div className="space-y-2">
-                {item.platform ? (
-                  <div className={`flex items-center gap-2 text-xs ${styles.textSecondary}`}>
-                    <Send className="h-3 w-3" />
-                    <span>{item.platform}</span>
-                  </div>
-                ) : null}
+              <div className="space-y-2 text-xs text-studio-text-secondary">
                 {item.scriptVersion ? (
-                  <div className={`flex items-center gap-2 text-xs ${styles.textSecondary}`}>
-                    <FileText className="h-3 w-3" />
-                    <span>剧本 {item.scriptVersion}</span>
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-3.5 w-3.5 text-studio-text-muted" />
+                    <span>稿件 {item.scriptVersion}</span>
                   </div>
                 ) : null}
                 {item.shootingCommentCount > 0 ? (
-                  <div className={`flex items-center gap-2 text-xs ${styles.textSecondary}`}>
-                    <MessageSquare className="h-3 w-3" />
-                    <span>{item.shootingCommentCount} 条批注</span>
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-3.5 w-3.5 text-studio-text-muted" />
+                    <span>{item.shootingCommentCount} 条制作批注</span>
                   </div>
                 ) : null}
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-3.5 w-3.5 text-studio-text-muted" />
+                  <span>更新于 {formatBeijingDate(item.updated_at)}</span>
+                </div>
               </div>
 
               {item.views > 0 || item.likes > 0 ? (
-                <div className={`mt-3 flex items-center gap-4 border-t pt-3 ${styles.borderLight}`}>
-                  {item.views > 0 ? (
-                    <span className={`text-xs ${styles.textMuted}`}>播放 {item.views.toLocaleString()}</span>
-                  ) : null}
-                  {item.likes > 0 ? (
-                    <span className={`text-xs ${styles.textMuted}`}>点赞 {item.likes.toLocaleString()}</span>
-                  ) : null}
+                <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-studio-border-soft pt-4 text-xs text-studio-text-muted">
+                  {item.views > 0 ? <span>播放 {item.views.toLocaleString()}</span> : null}
+                  {item.likes > 0 ? <span>点赞 {item.likes.toLocaleString()}</span> : null}
                 </div>
               ) : null}
-
-              <div className={`mt-3 flex items-center gap-2 text-xs ${styles.textMuted}`}>
-                <Calendar className="h-3 w-3" />
-                <span>归档于 {formatBeijingDate(item.updated_at)}</span>
-              </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
 
       {total > 12 ? (
         <div className="flex items-center justify-center gap-2">
-          <button
-            type="button"
-            onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
-            disabled={page === 1}
-            className={`rounded-lg px-4 py-2 ${styles.buttonSecondary} disabled:opacity-50`}
-          >
+          <ActionButton type="button" variant="secondary" onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))} disabled={page === 1}>
             上一页
-          </button>
-          <span className={`text-sm ${styles.textSecondary}`}>
+          </ActionButton>
+          <span className="text-sm text-studio-text-secondary">
             {page} / {Math.ceil(total / 12)}
           </span>
-          <button
-            type="button"
-            onClick={() => setPage((currentPage) => currentPage + 1)}
-            disabled={page >= Math.ceil(total / 12)}
-            className={`rounded-lg px-4 py-2 ${styles.buttonSecondary} disabled:opacity-50`}
-          >
+          <ActionButton type="button" variant="secondary" onClick={() => setPage((currentPage) => currentPage + 1)} disabled={page >= Math.ceil(total / 12)}>
             下一页
-          </button>
+          </ActionButton>
         </div>
       ) : null}
-    </div>
+    </PageShell>
   );
 }

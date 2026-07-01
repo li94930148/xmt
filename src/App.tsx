@@ -105,6 +105,7 @@ export default function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<Layout />}>
                 <Route path="/" element={<Home />} />
+                <Route path="/home" element={<Home />} />
                 <Route path="/topics" element={<Topics />} />
                 <Route element={<RoleGuard permissions={['topic:create']} />}>
                   <Route path="/topics/add" element={<AddTopic />} />

@@ -3,7 +3,7 @@
  * 分组布局：文件 | 编辑 | 标题 | 文字 | 颜色 | 段落 | 插入 | 高级
  * 支持响应式折叠、dark mode、高亮/文字颜色选择器、导出
  */
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { CommandProps } from '@tiptap/core';
 import { Editor } from '@tiptap/react';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
@@ -12,7 +12,7 @@ import { htmlToMarkdown } from '../../utils/markdown';
 import {
   Bold, Italic, Underline, Strikethrough,
   Heading1, Heading2, Heading3, Heading4, Type,
-  Quote, Code, List, ListOrdered,
+  Quote, Code,
   CheckSquare, Link as LinkIcon, Image as ImageIcon,
   Table as TableIcon, Minus, Undo, Redo,
   Highlighter, Printer, MessageSquare,

@@ -44,7 +44,7 @@ interface WorkflowShadowLog {
 
 const STATUS_OPTIONS = [
   { value: 'pending', label: '待审核' },
-  { value: 'approved', label: '宸查€氳繃' },
+  { value: 'approved', label: '已通过' },
   { value: 'rejected', label: '已驳回' },
   { value: 'production', label: '创作中' },
   { value: 'shooting', label: '拍摄中' },
@@ -53,8 +53,8 @@ const STATUS_OPTIONS = [
 ];
 
 const APPROVER_TYPES = [
-  { value: 'role', label: '瑙掕壊' },
-  { value: 'user', label: '鎸囧畾鐢ㄦ埛' },
+  { value: 'role', label: '角色' },
+  { value: 'user', label: '指定用户' },
   { value: 'creator', label: '创建者' },
 ];
 
@@ -93,7 +93,7 @@ export default function WorkflowDesigner() {
         setTemplates(data);
       }
     } catch (error) {
-      console.error('鑾峰彇瀹℃壒娴佹ā鏉垮け璐?', error);
+      console.error('获取审批流模板失败:', error);
     } finally {
       setLoading(false);
     }
@@ -110,7 +110,7 @@ export default function WorkflowDesigner() {
         return data;
       }
     } catch (error) {
-      console.error('鑾峰彇妯℃澘璇︽儏澶辫触:', error);
+      console.error('获取模板详情失败:', error);
     }
     return null;
   };
@@ -126,7 +126,7 @@ export default function WorkflowDesigner() {
         setShadowLogs(data);
       }
     } catch (error) {
-      console.error('鑾峰彇 Workflow Shadow 鏃ュ織澶辫触:', error);
+      console.error('获取 Workflow Shadow 日志失败:', error);
     }
   };
 
@@ -138,7 +138,7 @@ export default function WorkflowDesigner() {
   const handleCreate = async () => {
     const invalidNode = getFirstInvalidNode();
     if (invalidNode) {
-      appStore.addNotification({ title: '娴佺▼閰嶇疆涓嶅彲淇濆瓨', message: invalidNode.reason, type: 'error' });
+      appStore.addNotification({ title: '流程配置不可保存', message: invalidNode.reason, type: 'error' });
       return;
     }
 
@@ -150,16 +150,16 @@ export default function WorkflowDesigner() {
       });
 
       if (response.ok) {
-        appStore.addNotification({ title: '鍒涘缓鎴愬姛', message: '瀹℃壒娴佹ā鏉垮凡鍒涘缓', type: 'success' });
+        appStore.addNotification({ title: '创建成功', message: '审批流模板已创建', type: 'success' });
         resetEditorState();
         setFormData({ name: '', description: '', nodes: [] });
         void fetchTemplates();
       } else {
         const data = await response.json();
-        appStore.addNotification({ title: '鍒涘缓澶辫触', message: data.message, type: 'error' });
+        appStore.addNotification({ title: '创建失败', message: data.message, type: 'error' });
       }
     } catch (error) {
-      appStore.addNotification({ title: '鍒涘缓澶辫触', message: '缃戠粶閿欒', type: 'error' });
+      appStore.addNotification({ title: '创建失败', message: '网络错误', type: 'error' });
     }
   };
 
@@ -168,7 +168,7 @@ export default function WorkflowDesigner() {
 
     const invalidNode = getFirstInvalidNode();
     if (invalidNode) {
-      appStore.addNotification({ title: '娴佺▼閰嶇疆涓嶅彲淇濆瓨', message: invalidNode.reason, type: 'error' });
+      appStore.addNotification({ title: '流程配置不可保存', message: invalidNode.reason, type: 'error' });
       return;
     }
 
@@ -180,16 +180,16 @@ export default function WorkflowDesigner() {
       });
 
       if (response.ok) {
-        appStore.addNotification({ title: '鏇存柊鎴愬姛', message: '瀹℃壒娴佹ā鏉垮凡鏇存柊', type: 'success' });
+        appStore.addNotification({ title: '更新成功', message: '审批流模板已更新', type: 'success' });
         resetEditorState();
         setFormData({ name: '', description: '', nodes: [] });
         void fetchTemplates();
       } else {
         const data = await response.json();
-        appStore.addNotification({ title: '鏇存柊澶辫触', message: data.message, type: 'error' });
+        appStore.addNotification({ title: '更新失败', message: data.message, type: 'error' });
       }
     } catch (error) {
-      appStore.addNotification({ title: '鏇存柊澶辫触', message: '缃戠粶閿欒', type: 'error' });
+      appStore.addNotification({ title: '更新失败', message: '网络错误', type: 'error' });
     }
   };
 
@@ -201,14 +201,14 @@ export default function WorkflowDesigner() {
       });
 
       if (response.ok) {
-        appStore.addNotification({ title: '鍒犻櫎鎴愬姛', message: '瀹℃壒娴佹ā鏉垮凡鍒犻櫎', type: 'success' });
+        appStore.addNotification({ title: '删除成功', message: '审批流模板已删除', type: 'success' });
         void fetchTemplates();
       } else {
         const data = await response.json();
-        appStore.addNotification({ title: '鍒犻櫎澶辫触', message: data.message, type: 'error' });
+        appStore.addNotification({ title: '删除失败', message: data.message, type: 'error' });
       }
     } catch (error) {
-      appStore.addNotification({ title: '鍒犻櫎澶辫触', message: '缃戠粶閿欒', type: 'error' });
+      appStore.addNotification({ title: '删除失败', message: '网络错误', type: 'error' });
     }
   };
 
@@ -358,7 +358,7 @@ export default function WorkflowDesigner() {
   const showEditor = showCreateForm || Boolean(editingTemplate);
 
   if (loading) {
-    return <LoadingState type="page" text="姝ｅ湪鍔犺浇瀹℃壒娴佹ā鏉?.." />;
+    return <LoadingState type="page" text="正在加载审批流模板..." />;
   }
 
   return (
@@ -409,7 +409,7 @@ export default function WorkflowDesigner() {
                       <span className={`font-medium ${styles.textPrimary}`}>{template.name}</span>
                       {template.is_default ? (
                         <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-xs text-brand-500">
-                          榛樿
+                          默认
                         </span>
                       ) : null}
                     </div>
@@ -419,14 +419,14 @@ export default function WorkflowDesigner() {
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-4 text-sm">
                     <span className={styles.textMuted}>{template.node_count} 个节点</span>
-                    <span className={styles.textMuted}>{template.topic_count} 涓€夐浣跨敤</span>
+                    <span className={styles.textMuted}>{template.topic_count} 个选题使用</span>
                   </div>
                   {hasPermission('system:template') ? (
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => void startEdit(template)}
                         className={`rounded-lg p-2 ${styles.hoverBg} ${styles.textMuted}`}
-                        title="缂栬緫"
+                        title="编辑"
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -434,7 +434,7 @@ export default function WorkflowDesigner() {
                         <button
                           onClick={() => setDeleteTarget(template)}
                           className="rounded-lg p-2 text-red-400 hover:bg-red-500/10"
-                          title="鍒犻櫎"
+                          title="删除"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -453,43 +453,43 @@ export default function WorkflowDesigner() {
         onCancel={resetEditorState}
         onSubmit={editingTemplate ? handleUpdate : handleCreate}
         title={editingTemplate ? '编辑审批流' : '新建审批流'}
-        submitText={editingTemplate ? '淇濆瓨' : '鍒涘缓'}
-        cancelText="鍙栨秷"
+        submitText={editingTemplate ? '保存' : '创建'}
+        cancelText="取消"
         size="xl"
       >
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>妯℃澘鍚嶇О</label>
+              <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>模板名称</label>
               <input
                 type="text"
                 value={formData.name}
                 onChange={(event) => setFormData((prev) => ({ ...prev, name: event.target.value }))}
                 className={`w-full rounded-xl px-4 py-2 ${styles.input}`}
-                placeholder="濡傦細鏍囧噯閫夐娴佺▼"
+                placeholder="例如：标准选题流程"
               />
             </div>
             <div>
-              <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>鎻忚堪</label>
+              <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>描述</label>
               <input
                 type="text"
                 value={formData.description}
                 onChange={(event) => setFormData((prev) => ({ ...prev, description: event.target.value }))}
                 className={`w-full rounded-xl px-4 py-2 ${styles.input}`}
-                placeholder="娴佺▼鎻忚堪"
+                placeholder="流程描述"
               />
             </div>
           </div>
 
           <div>
             <div className="mb-3 flex items-center justify-between">
-              <label className={`text-sm font-medium ${styles.textSecondary}`}>瀹℃壒鑺傜偣</label>
+              <label className={`text-sm font-medium ${styles.textSecondary}`}>审批节点</label>
               <button
                 onClick={addNode}
                 className={`flex items-center gap-1 rounded-lg px-3 py-1 text-sm ${styles.buttonSecondary}`}
               >
                 <Plus className="w-4 h-4" />
-                娣诲姞鑺傜偣
+                添加节点
               </button>
             </div>
 
@@ -503,7 +503,7 @@ export default function WorkflowDesigner() {
                 >
                   <div className="mb-3 flex items-center justify-between">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className={`text-sm font-medium ${styles.textPrimary}`}>鑺傜偣 {index + 1}</span>
+                      <span className={`text-sm font-medium ${styles.textPrimary}`}>节点 {index + 1}</span>
                       {(() => {
                         const policyResult = getNodePolicyResult(node);
                         const runtimeContext = getNodeRuntimeContext(node);
@@ -518,7 +518,7 @@ export default function WorkflowDesigner() {
                               {uiState.risk} 路 {Math.round(runtimeContext.confidence * 100)}%
                             </span>
                             {uiState.status === 'warning' ? (
-                              <span className={`text-[11px] ${uiState.risk === 'high' ? 'text-red-400' : 'text-amber-400'}`}>寤鸿澶嶆牳</span>
+                              <span className={`text-[11px] ${uiState.risk === 'high' ? 'text-red-400' : 'text-amber-400'}`}>建议复核</span>
                             ) : null}
                             {!policyResult.allowed || uiState.status === 'blocked' ? (
                               <span className="text-[11px] text-red-400">必须修复：{explainability.blockExplain.blockedReason}</span>
@@ -546,17 +546,17 @@ export default function WorkflowDesigner() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className={`mb-1 block text-xs ${styles.textMuted}`}>鑺傜偣鍚嶇О</label>
+                      <label className={`mb-1 block text-xs ${styles.textMuted}`}>节点名称</label>
                       <input
                         type="text"
                         value={node.name}
                         onChange={(event) => updateNode(index, 'name', event.target.value)}
                         className={`w-full rounded-lg px-3 py-1.5 text-sm ${styles.input}`}
-                        placeholder="濡傦細鍐呭瀹℃牳"
+                        placeholder="例如：内容审核"
                       />
                     </div>
                     <div>
-                      <label className={`mb-1 block text-xs ${styles.textMuted}`}>瀹℃壒绫诲瀷</label>
+                      <label className={`mb-1 block text-xs ${styles.textMuted}`}>审批类型</label>
                       <select
                         value={node.approver_type}
                         onChange={(event) => updateNode(index, 'approver_type', event.target.value)}
@@ -604,7 +604,7 @@ export default function WorkflowDesigner() {
                         value={node.approver_value}
                         onChange={(event) => updateNode(index, 'approver_value', event.target.value)}
                         className={`w-full rounded-lg px-3 py-1.5 text-sm ${styles.input}`}
-                        placeholder="瑙掕壊鐮佹垨鐢ㄦ埛ID"
+                        placeholder="角色码或用户 ID"
                       />
                     </div>
                     <div className="flex items-center">
@@ -615,7 +615,7 @@ export default function WorkflowDesigner() {
                           onChange={(event) => updateNode(index, 'is_required', event.target.checked)}
                           className="rounded border-gray-300"
                         />
-                        蹇呴』瀹℃壒
+                        必须审批
                       </label>
                     </div>
                   </div>

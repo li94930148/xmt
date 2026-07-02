@@ -93,3 +93,23 @@ export {
   getContentOSInsight,
   getContentOSState,
 } from './contentOrchestrator';
+export {
+  generateDailyReportDraft,
+  getDailyReportArchive,
+  getMyDailyReport,
+  getTeamDailyReports,
+  reviewDailyReport,
+  saveDailyReportDraft,
+  submitDailyReport,
+} from './dailyReports';
+export type {
+  DailyReport,
+  DailyReportArchiveResponse,
+  DailyReportItem,
+  DailyReportRiskLevel,
+  DailyReportStatus,
+  GenerateDraftResponse,
+  MyDailyReportResponse,
+  SaveDailyReportDraftPayload,
+  TeamDailyReportResponse,
+} from './dailyReports';

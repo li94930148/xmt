@@ -10,6 +10,14 @@
   line-height: 1.6;
   font-weight: 400;
   letter-spacing: 0;
+  --editor-fg: #111827;
+  --editor-muted: #6b7280;
+  --editor-bg: #ffffff;
+  --editor-panel: #ffffff;
+  --editor-border: #e5e7eb;
+  --editor-soft: #f9fafb;
+  --editor-hover: #f3f4f6;
+  --editor-code-bg: #eef2f7;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -33,6 +41,14 @@
     --color-success: #51cf66;
     --color-warning: #ffd43b;
     --color-danger: #ff6b6b;
+    --editor-fg: #e5e7eb;
+    --editor-muted: #9ca3af;
+    --editor-bg: #111827;
+    --editor-panel: #1f2937;
+    --editor-border: #374151;
+    --editor-soft: #0f172a;
+    --editor-hover: #374151;
+    --editor-code-bg: #0b1220;
   }
 
   html.light {
@@ -50,6 +66,14 @@
     --color-success: #37b24d;
     --color-warning: #f08c00;
     --color-danger: #e03131;
+    --editor-fg: #111827;
+    --editor-muted: #6b7280;
+    --editor-bg: #ffffff;
+    --editor-panel: #ffffff;
+    --editor-border: #e5e7eb;
+    --editor-soft: #f9fafb;
+    --editor-hover: #f3f4f6;
+    --editor-code-bg: #eef2f7;
   }
 }
 
@@ -189,6 +213,78 @@ body {
 .rich-text-editor {
   -webkit-user-select: text;
   user-select: text;
+  background: var(--editor-bg);
+  color: var(--editor-fg);
+}
+
+.editor-content,
+.editor-content-preview,
+.production-preview {
+  color: var(--editor-fg);
+}
+
+.editor-content .ProseMirror {
+  background: var(--editor-bg);
+  color: var(--editor-fg);
+}
+
+.editor-content-preview,
+.production-preview {
+  background: transparent;
+}
+
+.editor-content-preview :where(p, li, blockquote, td, th, span, div),
+.production-preview :where(p, li, blockquote, td, th, span, div),
+.rich-text-editor :where(p, li, blockquote, td, th, span, div) {
+  color: inherit;
+}
+
+.dark .editor-content [style*="color: #000"],
+.dark .editor-content [style*="color:#000"],
+.dark .editor-content [style*="color: rgb(0, 0, 0)"],
+.dark .editor-content [style*="color: rgb(51, 51, 51)"],
+.dark .editor-content [style*="color: #333"],
+.dark .editor-content-preview [style*="color: #000"],
+.dark .editor-content-preview [style*="color:#000"],
+.dark .editor-content-preview [style*="color: rgb(0, 0, 0)"],
+.dark .editor-content-preview [style*="color: rgb(51, 51, 51)"],
+.dark .editor-content-preview [style*="color: #333"],
+.dark .production-preview [style*="color: #000"],
+.dark .production-preview [style*="color:#000"],
+.dark .production-preview [style*="color: rgb(0, 0, 0)"],
+.dark .production-preview [style*="color: rgb(51, 51, 51)"],
+.dark .production-preview [style*="color: #333"],
+.dark .rich-text-editor [style*="color: #000"],
+.dark .rich-text-editor [style*="color:#000"],
+.dark .rich-text-editor [style*="color: rgb(0, 0, 0)"],
+.dark .rich-text-editor [style*="color: rgb(51, 51, 51)"],
+.dark .rich-text-editor [style*="color: #333"] {
+  color: var(--editor-fg) !important;
+}
+
+.editor-content-preview blockquote,
+.production-preview blockquote,
+.rich-text-editor blockquote {
+  border-left: 3px solid var(--color-accent);
+  color: var(--editor-muted);
+}
+
+.editor-content-preview table,
+.production-preview table,
+.rich-text-editor table {
+  border-collapse: collapse;
+}
+
+.editor-content-preview :where(td, th),
+.production-preview :where(td, th),
+.rich-text-editor :where(td, th) {
+  border: 1px solid var(--editor-border);
+}
+
+.editor-content-preview :where(pre, code),
+.production-preview :where(pre, code),
+.rich-text-editor :where(pre, code) {
+  background: var(--editor-code-bg);
 }
 
 .rich-text-editor::selection,

@@ -11,7 +11,9 @@
     "check": "tsc --noEmit",
     "server:dev": "nodemon",
     "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",
-    "repair:published-archives": "tsx scripts/backfill-published-archives.ts"
+    "repair:published-archives": "tsx scripts/backfill-published-archives.ts",
+    "test:daily-reports": "node scripts/smoke-daily-reports.mjs",
+    "test:retrospectives": "node scripts/smoke-retrospectives.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

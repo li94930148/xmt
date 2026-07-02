@@ -29,6 +29,7 @@ import StudioEmptyState from '../components/studio/EmptyState';
 import { useDebounce } from '../hooks/useDebounce';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 import { useAppStore } from '../store';
+import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 
 interface ArchiveItem {
   id: number;
@@ -305,8 +306,8 @@ export default function Resources() {
 
                 {script?.content ? (
                   <div
-                    className="prose prose-invert prose-sm max-w-none rounded-card border border-studio-border-soft bg-white/[0.03] p-5 text-studio-text-secondary"
-                    dangerouslySetInnerHTML={{ __html: script.content }}
+                    className="editor-content-preview prose prose-invert prose-sm max-w-none rounded-card border border-studio-border-soft bg-white/[0.03] p-5 text-studio-text-secondary"
+                    dangerouslySetInnerHTML={{ __html: normalizeLegacyEditorHtmlTheme(script.content) }}
                   />
                 ) : (
                   <DetailTabEmptyState title="暂无稿件内容" description="当前归档中还没有可展示的稿件内容。" />

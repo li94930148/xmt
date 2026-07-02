@@ -183,7 +183,7 @@ export default function Sidebar({
 
   return (
     <>
-      <aside className={`relative z-30 hidden h-screen self-start border-r transition-[width] duration-300 md:block ${desktopAsideClass} ${shellClass}`}>
+      <aside className={`sticky top-0 z-30 hidden h-screen self-start border-r transition-[width] duration-300 md:block ${desktopAsideClass} ${shellClass}`}>
         {renderMenu(false)}
       </aside>
 

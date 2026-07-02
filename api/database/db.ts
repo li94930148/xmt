@@ -381,6 +381,168 @@ async function initTables() {
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  // === 日报系统 MVP 表 ===
+  await db.execute(`CREATE TABLE IF NOT EXISTS daily_report_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    sections_json TEXT NOT NULL,
+    is_default BOOLEAN DEFAULT 0,
+    active BOOLEAN DEFAULT 1,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS daily_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    report_date TEXT NOT NULL,
+    team_id INTEGER,
+    template_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'draft',
+    manual_summary_md TEXT,
+    auto_summary_json TEXT,
+    risk_level TEXT DEFAULT 'normal',
+    version INTEGER NOT NULL DEFAULT 1,
+    submitted_at DATETIME,
+    reviewed_at DATETIME,
+    reviewed_by INTEGER,
+    review_comment TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, report_date),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (template_id) REFERENCES daily_report_templates(id),
+    FOREIGN KEY (reviewed_by) REFERENCES users(id)
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS daily_report_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER NOT NULL,
+    section_key TEXT NOT NULL,
+    title TEXT,
+    content_md TEXT,
+    source_type TEXT,
+    source_id INTEGER,
+    sort_order INTEGER DEFAULT 0,
+    meta_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (report_id) REFERENCES daily_reports(id) ON DELETE CASCADE
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS daily_report_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subscriber_id INTEGER NOT NULL,
+    target_user_id INTEGER,
+    team_id INTEGER,
+    active BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (subscriber_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE(subscriber_id, target_user_id, team_id)
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS daily_report_audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER,
+    user_id INTEGER,
+    action TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT,
+    comment TEXT,
+    payload_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (report_id) REFERENCES daily_reports(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  )`);
+
+  // === 数据复盘系统 MVP 表 ===
+  await db.execute(`CREATE TABLE IF NOT EXISTS retro_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'custom',
+    description TEXT,
+    schema_json TEXT,
+    metric_bindings_json TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS retrospectives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id INTEGER,
+    title TEXT NOT NULL,
+    scope_type TEXT NOT NULL DEFAULT 'custom',
+    scope_id INTEGER,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    summary_md TEXT,
+    owner_id INTEGER,
+    published_at DATETIME,
+    archived_at DATETIME,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    version INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY (template_id) REFERENCES retro_templates(id),
+    FOREIGN KEY (owner_id) REFERENCES users(id),
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS retro_metric_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    retro_id INTEGER NOT NULL,
+    metric_key TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    value_num REAL,
+    value_text TEXT,
+    compare_value_num REAL,
+    dimension_json TEXT,
+    source_ref_json TEXT,
+    captured_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (retro_id) REFERENCES retrospectives(id) ON DELETE CASCADE
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS retro_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    retro_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description_md TEXT,
+    owner_id INTEGER,
+    due_date TEXT,
+    status TEXT NOT NULL DEFAULT 'todo',
+    result_md TEXT,
+    closed_at DATETIME,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (retro_id) REFERENCES retrospectives(id) ON DELETE CASCADE,
+    FOREIGN KEY (owner_id) REFERENCES users(id),
+    FOREIGN KEY (created_by) REFERENCES users(id)
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS retro_audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    retro_id INTEGER,
+    actor_id INTEGER,
+    action TEXT NOT NULL,
+    before_status TEXT,
+    after_status TEXT,
+    comment TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (retro_id) REFERENCES retrospectives(id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_id) REFERENCES users(id)
+  )`);
+
   // === 权限系统表 ===
 
   // 角色表
@@ -898,6 +1060,221 @@ async function runTimeMigrations() {
       args: [systemSettingsSeedSyncKey, 'done'],
     });
   }
+
+  const dailyReportSeedSyncKey = 'daily_report_seed_sync_20260701';
+  const dailyReportSeedSync = await db.execute({
+    sql: `SELECT value FROM app_meta WHERE key = ?`,
+    args: [dailyReportSeedSyncKey],
+  });
+
+  if (dailyReportSeedSync.rows.length === 0) {
+    const dailyReportPermissions: Array<[string, string, string]> = [
+      ['report:daily:submit', '提交日报', 'report'],
+      ['report:daily:view_team', '查看团队日报', 'report'],
+      ['report:daily:review', '审核日报', 'report'],
+      ['report:daily:subscribe', '订阅日报', 'report'],
+      ['report:daily:archive', '查看日报归档', 'report'],
+    ];
+
+    for (const [code, name, module] of dailyReportPermissions) {
+      await db.execute({
+        sql: `INSERT OR IGNORE INTO permissions (code, name, module) VALUES (?, ?, ?)`,
+        args: [code, name, module],
+      });
+    }
+
+    const roles = await db.execute(
+      `SELECT id, code FROM roles WHERE code IN ('admin', 'director', 'member', 'editor')`
+    );
+    const permissions = await db.execute(
+      `SELECT id, code FROM permissions WHERE module = 'report'`
+    );
+
+    const roleIdByCode = new Map<string, number>();
+    for (const row of roles.rows) {
+      const roleId = Number((row as Record<string, unknown>).id);
+      const roleCode = String((row as Record<string, unknown>).code ?? '');
+      if (roleId && roleCode) {
+        roleIdByCode.set(roleCode, roleId);
+      }
+    }
+
+    const permissionIdByCode = new Map<string, number>();
+    for (const row of permissions.rows) {
+      const permissionId = Number((row as Record<string, unknown>).id);
+      const permissionCode = String((row as Record<string, unknown>).code ?? '');
+      if (permissionId && permissionCode) {
+        permissionIdByCode.set(permissionCode, permissionId);
+      }
+    }
+
+    const rolePermissions: Record<string, string[]> = {
+      admin: dailyReportPermissions.map(([code]) => code),
+      director: ['report:daily:view_team', 'report:daily:review', 'report:daily:subscribe', 'report:daily:archive'],
+      member: ['report:daily:submit', 'report:daily:archive'],
+      editor: ['report:daily:submit', 'report:daily:archive'],
+    };
+
+    for (const [roleCode, permissionCodes] of Object.entries(rolePermissions)) {
+      const roleId = roleIdByCode.get(roleCode);
+      if (!roleId) {
+        continue;
+      }
+
+      for (const permissionCode of permissionCodes) {
+        const permissionId = permissionIdByCode.get(permissionCode);
+        if (!permissionId) {
+          continue;
+        }
+
+        await db.execute({
+          sql: `INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)`,
+          args: [roleId, permissionId],
+        });
+      }
+    }
+
+    const defaultTemplate = await db.execute(
+      `SELECT id FROM daily_report_templates WHERE is_default = 1 AND active = 1 LIMIT 1`
+    );
+
+    if (defaultTemplate.rows.length === 0) {
+      await db.execute({
+        sql: `INSERT INTO daily_report_templates (name, description, sections_json, is_default, active, created_at, updated_at)
+              VALUES (?, ?, ?, 1, 1, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+        args: [
+          '默认日报模板',
+          '日报 MVP 默认模板',
+          JSON.stringify([
+            { key: 'done', title: '今日完成' },
+            { key: 'progress', title: '进行中' },
+            { key: 'risk', title: '风险与阻塞' },
+            { key: 'tomorrow', title: '明日计划' },
+          ]),
+        ],
+      });
+    }
+
+    await db.execute({
+      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
+      args: [dailyReportSeedSyncKey, 'done'],
+    });
+  }
+
+  const retroSeedSyncKey = 'retro_seed_sync_20260702';
+  const retroSeedSync = await db.execute({
+    sql: `SELECT value FROM app_meta WHERE key = ?`,
+    args: [retroSeedSyncKey],
+  });
+
+  if (retroSeedSync.rows.length === 0) {
+    const retroPermissions: Array<[string, string, string]> = [
+      ['analytics:retro:view', '查看数据复盘', 'analytics'],
+      ['analytics:retro:create', '创建数据复盘', 'analytics'],
+      ['analytics:retro:publish', '发布数据复盘', 'analytics'],
+      ['analytics:retro:archive', '归档数据复盘', 'analytics'],
+      ['analytics:retro:action_manage', '管理复盘行动项', 'analytics'],
+      ['analytics:retro:template_manage', '管理复盘模板', 'analytics'],
+    ];
+
+    for (const [code, name, module] of retroPermissions) {
+      await db.execute({
+        sql: `INSERT OR IGNORE INTO permissions (code, name, module) VALUES (?, ?, ?)`,
+        args: [code, name, module],
+      });
+    }
+
+    const roles = await db.execute(
+      `SELECT id, code FROM roles WHERE code IN ('admin', 'director', 'member', 'editor')`
+    );
+    const permissions = await db.execute({
+      sql: `SELECT id, code FROM permissions WHERE code IN (${retroPermissions.map(() => '?').join(',')})`,
+      args: retroPermissions.map(([code]) => code),
+    });
+
+    const roleIdByCode = new Map<string, number>();
+    for (const row of roles.rows) {
+      const roleId = Number((row as Record<string, unknown>).id);
+      const roleCode = String((row as Record<string, unknown>).code ?? '');
+      if (roleId && roleCode) {
+        roleIdByCode.set(roleCode, roleId);
+      }
+    }
+
+    const permissionIdByCode = new Map<string, number>();
+    for (const row of permissions.rows) {
+      const permissionId = Number((row as Record<string, unknown>).id);
+      const permissionCode = String((row as Record<string, unknown>).code ?? '');
+      if (permissionId && permissionCode) {
+        permissionIdByCode.set(permissionCode, permissionId);
+      }
+    }
+
+    const rolePermissions: Record<string, string[]> = {
+      admin: retroPermissions.map(([code]) => code),
+      director: ['analytics:retro:view', 'analytics:retro:create', 'analytics:retro:publish', 'analytics:retro:action_manage'],
+      member: ['analytics:retro:view'],
+      editor: ['analytics:retro:view'],
+    };
+
+    for (const [roleCode, permissionCodes] of Object.entries(rolePermissions)) {
+      const roleId = roleIdByCode.get(roleCode);
+      if (!roleId) {
+        continue;
+      }
+
+      for (const permissionCode of permissionCodes) {
+        const permissionId = permissionIdByCode.get(permissionCode);
+        if (!permissionId) {
+          continue;
+        }
+
+        await db.execute({
+          sql: `INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)`,
+          args: [roleId, permissionId],
+        });
+      }
+    }
+
+    const defaultRetroTemplate = await db.execute(
+      `SELECT id FROM retro_templates WHERE category = 'weekly' AND status = 'active' LIMIT 1`
+    );
+
+    if (defaultRetroTemplate.rows.length === 0) {
+      await db.execute({
+        sql: `INSERT INTO retro_templates
+          (name, category, description, schema_json, metric_bindings_json, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'active', datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+        args: [
+          'Weekly content retrospective',
+          'weekly',
+          'Default weekly retrospective template for content workflow and daily report signals.',
+          JSON.stringify({
+            sections: [
+              { key: 'summary', title: 'Summary' },
+              { key: 'wins', title: 'Wins' },
+              { key: 'risks', title: 'Risks' },
+              { key: 'actions', title: 'Actions' },
+            ],
+          }),
+          JSON.stringify({
+            metrics: [
+              'topics_count',
+              'production_count',
+              'publishing_count',
+              'daily_reports_submitted_count',
+              'daily_reports_risk_count',
+            ],
+          }),
+        ],
+      });
+    }
+
+    await db.execute({
+      sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`,
+      args: [retroSeedSyncKey, 'done'],
+    });
+  }
 }
 
 // 数据迁移：将现有 HTML content 转为 markdown 存入 content_markdown
@@ -1053,6 +1430,23 @@ async function createIndexes() {
 
     // notification_preferences 表索引
     'CREATE INDEX IF NOT EXISTS idx_notification_prefs_user ON notification_preferences(user_id)',
+
+    // daily report 表索引
+    'CREATE INDEX IF NOT EXISTS idx_daily_reports_user_date ON daily_reports(user_id, report_date)',
+    'CREATE INDEX IF NOT EXISTS idx_daily_reports_date_status ON daily_reports(report_date, status)',
+    'CREATE INDEX IF NOT EXISTS idx_daily_reports_team_date ON daily_reports(team_id, report_date)',
+    'CREATE INDEX IF NOT EXISTS idx_daily_report_items_report ON daily_report_items(report_id)',
+    'CREATE INDEX IF NOT EXISTS idx_daily_report_subscriptions_subscriber ON daily_report_subscriptions(subscriber_id)',
+
+    // retrospectives 表索引
+    'CREATE INDEX IF NOT EXISTS idx_retrospectives_status_period ON retrospectives(status, period_start, period_end)',
+    'CREATE INDEX IF NOT EXISTS idx_retrospectives_scope ON retrospectives(scope_type, scope_id)',
+    'CREATE INDEX IF NOT EXISTS idx_retrospectives_owner ON retrospectives(owner_id)',
+    'CREATE INDEX IF NOT EXISTS idx_retro_metric_snapshots_retro ON retro_metric_snapshots(retro_id)',
+    'CREATE INDEX IF NOT EXISTS idx_retro_metric_snapshots_key ON retro_metric_snapshots(metric_key)',
+    'CREATE INDEX IF NOT EXISTS idx_retro_actions_retro ON retro_actions(retro_id)',
+    'CREATE INDEX IF NOT EXISTS idx_retro_actions_owner_status ON retro_actions(owner_id, status)',
+    'CREATE INDEX IF NOT EXISTS idx_retro_actions_due_status ON retro_actions(due_date, status)',
   ];
 
   for (const sql of indexes) {

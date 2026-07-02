@@ -25,6 +25,7 @@ import { cancelDatabaseSync, syncToDatabase } from '../collaboration/core/writeC
 import { getTimelineView, recordTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime } from '../lib/utils';
+import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 
@@ -100,6 +101,7 @@ export default function ProductionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const appStore = useAppStore();
+  const isDark = appStore.theme === 'dark';
   const { hasPermission } = usePermission();
 
   const [production, setProduction] = useState<ProductionType | null>(null);
@@ -572,7 +574,7 @@ export default function ProductionDetail() {
           </div>
 
           {selectedVersion?.isCurrent ? (
-            <div className="min-h-[calc(100vh-22rem)] bg-[#0B1020]">
+            <div className="min-h-[calc(100vh-22rem)] bg-[var(--editor-bg)]">
               <ContentEditor
                 value={editData.content}
                 onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
@@ -583,20 +585,21 @@ export default function ProductionDetail() {
               />
             </div>
           ) : (
-            <div className="min-h-[calc(100vh-22rem)] bg-[#0B1020] p-6 lg:p-8">
+            <div className="min-h-[calc(100vh-22rem)] bg-[var(--editor-bg)] p-6 lg:p-8">
               <div
-                className="production-preview tiptap prose prose-invert max-w-none leading-relaxed text-studio-text-primary"
+                className={`editor-content-preview production-preview tiptap prose max-w-none leading-relaxed text-studio-text-primary ${isDark ? 'prose-invert' : ''}`}
                 dangerouslySetInnerHTML={{
-                  __html:
+                  __html: normalizeLegacyEditorHtmlTheme(
                     selectedVersion?.contentMarkdown ||
-                    normalizeVersionContent(
-                      (production as ProductionType & {
-                        contentMarkdown?: string;
-                        content_markdown?: string;
-                      }).contentMarkdown ||
-                        (production as ProductionType & { content_markdown?: string }).content_markdown,
-                      production.content,
-                    ),
+                      normalizeVersionContent(
+                        (production as ProductionType & {
+                          contentMarkdown?: string;
+                          content_markdown?: string;
+                        }).contentMarkdown ||
+                          (production as ProductionType & { content_markdown?: string }).content_markdown,
+                        production.content,
+                      ),
+                  ),
                 }}
               />
             </div>

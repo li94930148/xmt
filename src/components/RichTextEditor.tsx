@@ -1,9 +1,11 @@
 /**
- * 完整富文本编辑器 - 自定义工具栏的 Quill 编辑器
- * 适用场景：详细的内容编辑（选题详情、创作详情等）
+ * @deprecated
+ * 旧版兼容富文本编辑器，仅用于历史内容或未迁移页面兼容。
+ * 新业务统一优先使用 src/components/editor/Editor.tsx。
  */
 import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../store';
+import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { 
   Bold, Italic, Underline, Strikethrough, 
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
@@ -33,7 +35,7 @@ interface Annotation {
 }
 
 const textColors = [
-  { color: '#000000', label: '黑色' },
+  { color: 'var(--editor-fg)', label: '默认' },
   { color: '#e74c3c', label: '红色' },
   { color: '#3498db', label: '蓝色' },
   { color: '#2ecc71', label: '绿色' },
@@ -63,14 +65,13 @@ const fontSizes = [
 
 const DEFAULT_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 const DEFAULT_FONT_SIZE = '16px';
-const DEFAULT_COLOR = '#333333';
 
 const normalizeHTML = (html: string): string => {
   if (!html || html === '<p><br></p>') {
     return html;
   }
 
-  let result = html;
+  let result = normalizeLegacyEditorHtmlTheme(html);
 
   // 1. 替换所有<font>标签
   result = result.replace(/<font\s+([^>]*)>([\s\S]*?)<\/font>/gi, (match, attrs, content) => {
@@ -122,7 +123,7 @@ const normalizeHTML = (html: string): string => {
       }
     }
 
-    let spanAttrs: string[] = [];
+    const spanAttrs: string[] = [];
     if (styleParts.length > 0) {
       spanAttrs.push(`style="${styleParts.join('; ')}"`);
     }
@@ -263,7 +264,6 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
   const [showBgColorPicker, setShowBgColorPicker] = useState(false);
   const [showFontSizePicker, setShowFontSizePicker] = useState(false);
-  const [selectedColor, setSelectedColor] = useState('');
   const [selectedFontSize, setSelectedFontSize] = useState('16px');
   const [showAnnotationModal, setShowAnnotationModal] = useState(false);
   const [annotationComment, setAnnotationComment] = useState('');
@@ -481,7 +481,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
       range.surroundContents(span);
       handleInput();
       return;
-    } catch (e) {
+    } catch {
       // surroundContents 失败（跨元素），走通用逻辑
       applyStyleAcrossBlocks(styleProperty, styleValue);
     }
@@ -633,8 +633,8 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
       setSelectedRange(null);
       
       appStore.addNotification({ title: '成功', message: '批注已添加', type: 'success' });
-    } catch (e) {
-      console.error('Error adding annotation:', e);
+    } catch {
+      console.error('Error adding annotation');
       appStore.addNotification({ title: '错误', message: '添加批注失败，请尝试选择较短的文本', type: 'error' });
     }
   };
@@ -931,16 +931,25 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
     },
   ];
 
+  const editorPanelClass = isDark
+    ? 'bg-[var(--editor-panel)] border-[var(--editor-border)] shadow-lg shadow-black/20'
+    : 'bg-[var(--editor-panel)] border-[var(--editor-border)] shadow-md';
+  const toolbarButtonClass = isDark
+    ? 'text-gray-300 hover:bg-[var(--editor-hover)]'
+    : 'text-gray-600 hover:bg-[var(--editor-hover)]';
+  const dropdownClass = isDark
+    ? 'bg-[var(--editor-panel)] border-[var(--editor-border)] text-[var(--editor-fg)] shadow-xl shadow-black/25'
+    : 'bg-[var(--editor-panel)] border-[var(--editor-border)] text-[var(--editor-fg)] shadow-lg';
+  const dropdownItemClass = isDark
+    ? 'text-gray-200 hover:bg-[var(--editor-hover)]'
+    : 'text-gray-700 hover:bg-[var(--editor-hover)]';
+
   return (
     <div className="flex gap-4">
-      <div className={`flex-1 rounded-xl border flex flex-col ${
-        isDark 
-          ? 'bg-gray-800 border-gray-700 shadow-lg shadow-black/20' 
-          : 'bg-white border-gray-200 shadow-md'
-      }`} style={{ height: 'calc(100vh - 180px)', minHeight: '500px' }}>
+      <div className={`flex-1 rounded-xl border flex flex-col ${editorPanelClass}`} style={{ height: 'calc(100vh - 180px)', minHeight: '500px' }}>
         <div className={`shrink-0 flex items-center justify-between px-4 py-2 border-b ${
-          isDark ? 'border-gray-700 bg-gray-800' 
-          : 'border-gray-200 bg-white'
+          isDark ? 'border-[var(--editor-border)] bg-[var(--editor-panel)]' 
+          : 'border-[var(--editor-border)] bg-[var(--editor-panel)]'
         }`}>
           <div className="flex items-center gap-1">
             {toolbarButtons.map((btn, index) => {
@@ -955,7 +964,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                 <button
                   key={index}
                   onClick={btn.action}
-                  className={`p-2 rounded hover:${isDark ? 'bg-gray-700' : 'bg-gray-200'} transition-colors`}
+                  className={`p-2 rounded transition-colors ${toolbarButtonClass}`}
                   title={btn.title}
                 >
                   <Icon className={`w-4 h-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
@@ -972,20 +981,20 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                   setShowTextColorPicker(false);
                   setShowBgColorPicker(false);
                 }}
-                className={`p-2 rounded hover:${isDark ? 'bg-gray-700' : 'bg-gray-200'} transition-colors flex items-center gap-1 min-w-[80px] h-[28px] justify-center`}
+                className={`p-2 rounded transition-colors flex items-center gap-1 min-w-[80px] h-[28px] justify-center ${toolbarButtonClass}`}
                 title="字体大小"
               >
                 <span className={`text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{selectedFontSize}</span>
                 <ChevronDown className={`w-3 h-3 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
               </button>
               {showFontSizePicker && (
-                <div className="font-size-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg shadow-lg bg-white border border-gray-200 z-50 min-w-[100px]">
+                <div className={`font-size-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg border z-50 min-w-[100px] ${dropdownClass}`}>
                   <div className="flex flex-col gap-1">
                     {fontSizes.map((item) => (
                       <button
                         key={item.size}
                         onClick={() => handleFontSize(item.size)}
-                        className={`px-3 py-2 rounded hover:bg-gray-100 text-left flex items-center justify-between ${selectedFontSize === item.size ? 'bg-blue-50 text-blue-600' : ''}`}
+                        className={`px-3 py-2 rounded text-left flex items-center justify-between ${selectedFontSize === item.size ? 'bg-blue-500/10 text-blue-500' : dropdownItemClass}`}
                         style={{ fontSize: item.size }}
                       >
                         <span>{item.label}</span>
@@ -1004,20 +1013,20 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                   setShowTextColorPicker(!showTextColorPicker);
                   setShowBgColorPicker(false);
                 }}
-                className={`p-2 rounded hover:${isDark ? 'bg-gray-700' : 'bg-gray-200'} transition-colors relative min-w-[36px] h-[28px] flex items-center justify-center`}
+                className={`p-2 rounded transition-colors relative min-w-[36px] h-[28px] flex items-center justify-center ${toolbarButtonClass}`}
                 title="文字颜色"
               >
                 <span className={`text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>A</span>
                 <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full bg-red-500 border border-white shadow-sm"></span>
               </button>
               {showTextColorPicker && (
-                <div className="color-picker-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg shadow-lg bg-white border border-gray-200 z-50 min-w-[140px]">
+                <div className={`color-picker-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg border z-50 min-w-[140px] ${dropdownClass}`}>
                   <div className="grid grid-cols-3 gap-2">
                     {textColors.map((item) => (
                       <button
                         key={item.color}
                         onClick={() => handleTextColor(item.color)}
-                        className="w-8 h-8 rounded border border-gray-300 hover:scale-110 transition-transform"
+                        className="w-8 h-8 rounded border border-[var(--editor-border)] hover:scale-110 transition-transform"
                         style={{ backgroundColor: item.color }}
                         title={item.label}
                       />
@@ -1033,20 +1042,20 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                   setShowBgColorPicker(!showBgColorPicker);
                   setShowTextColorPicker(false);
                 }}
-                className={`p-2 rounded hover:${isDark ? 'bg-gray-700' : 'bg-gray-200'} transition-colors relative min-w-[36px] h-[28px] flex items-center justify-center`}
+                className={`p-2 rounded transition-colors relative min-w-[36px] h-[28px] flex items-center justify-center ${toolbarButtonClass}`}
                 title="背景颜色"
               >
                 <span className={`text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>A</span>
                 <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full bg-yellow-300 border border-white shadow-sm"></span>
               </button>
               {showBgColorPicker && (
-                <div className="color-picker-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg shadow-lg bg-white border border-gray-200 z-50 min-w-[140px]">
+                <div className={`color-picker-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg border z-50 min-w-[140px] ${dropdownClass}`}>
                   <div className="grid grid-cols-3 gap-2">
                     {bgColors.map((item) => (
                       <button
                         key={item.color}
                         onClick={() => handleBgColor(item.color)}
-                        className="w-8 h-8 rounded border border-gray-300 hover:scale-110 transition-transform"
+                        className="w-8 h-8 rounded border border-[var(--editor-border)] hover:scale-110 transition-transform"
                         style={{ backgroundColor: item.color }}
                         title={item.label}
                       />
@@ -1060,7 +1069,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
 
             <button
               onClick={handleAddAnnotation}
-              className={`p-2 rounded hover:${isDark ? 'bg-gray-700' : 'bg-gray-200'} transition-colors`}
+              className={`p-2 rounded transition-colors ${toolbarButtonClass}`}
               title="添加批注"
             >
               <MessageSquare className={`w-4 h-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
@@ -1068,7 +1077,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
 
             <button
               onClick={handlePrint}
-              className={`p-2 rounded hover:${isDark ? 'bg-gray-700' : 'bg-gray-200'} transition-colors`}
+              className={`p-2 rounded transition-colors ${toolbarButtonClass}`}
               title="打印"
             >
               <Printer className={`w-4 h-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
@@ -1079,7 +1088,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setZoom(prev => Math.max(prev - 10, 50))}
-                className={`p-1.5 rounded hover:${isDark ? 'bg-gray-700' : 'bg-gray-200'} transition-colors`}
+                className={`p-1.5 rounded transition-colors ${toolbarButtonClass}`}
                 title="缩小"
               >
                 <Minus className={`w-3.5 h-3.5 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
@@ -1087,7 +1096,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
               <span className={`text-sm font-medium min-w-[48px] text-center ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{zoom}%</span>
               <button
                 onClick={() => setZoom(prev => Math.min(prev + 10, 200))}
-                className={`p-1.5 rounded hover:${isDark ? 'bg-gray-700' : 'bg-gray-200'} transition-colors`}
+                className={`p-1.5 rounded transition-colors ${toolbarButtonClass}`}
                 title="放大"
               >
                 <Plus className={`w-3.5 h-3.5 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
@@ -1105,8 +1114,8 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
           data-placeholder={placeholder || ''}
           className={`
             flex-1 overflow-y-auto w-full p-6
-            ${isDark ? 'bg-gray-800' : 'bg-white'}
-            ${isDark ? 'text-gray-100' : 'text-gray-900'}
+            bg-[var(--editor-bg)]
+            text-[var(--editor-fg)]
             outline-none
             cursor-text
             rich-text-editor

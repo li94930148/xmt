@@ -5,6 +5,7 @@
 import { useMemo } from 'react';
 import { markdownToHtml } from '../../utils/markdown';
 import { useAppStore } from '../../store';
+import { normalizeLegacyEditorHtmlTheme } from '../../utils/editorTheme';
 
 interface MarkdownPreviewProps {
   markdown: string;
@@ -15,11 +16,11 @@ export default function MarkdownPreview({ markdown, className }: MarkdownPreview
   const appStore = useAppStore();
   const isDark = appStore.theme === 'dark';
 
-  const html = useMemo(() => markdownToHtml(markdown), [markdown]);
+  const html = useMemo(() => normalizeLegacyEditorHtmlTheme(markdownToHtml(markdown)), [markdown]);
 
   return (
     <div
-      className={`prose max-w-none p-6 ${
+      className={`editor-content-preview prose max-w-none p-6 ${
         isDark ? 'prose-invert' : ''
       } ${className || ''}`}
       dangerouslySetInnerHTML={{ __html: html }}

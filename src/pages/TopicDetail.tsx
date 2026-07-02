@@ -7,6 +7,7 @@ import { Topic, User } from '../types';
 import { ChevronLeft, Clock, User as UserIcon, Calendar, FileText, CheckCircle, XCircle, ArrowRight, Save, AlertTriangle, Camera, Scissors, Send, List, FileText as FileIcon } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { usePermission } from '../hooks/usePermission';
 import { STATUS_COLORS, STATUS_TEXT } from '../constants';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
@@ -420,7 +421,7 @@ export default function TopicDetail() {
               collaborationEnabled={false}
             />
           ) : (
-            <div className={`tiptap ${styles.bgTertiary} rounded-lg p-6 ${styles.textPrimary} min-h-[200px] leading-relaxed`} dangerouslySetInnerHTML={{ __html: scriptContent || '暂无大纲内容' }}></div>
+            <div className={`editor-content-preview tiptap ${styles.bgTertiary} rounded-lg p-6 ${styles.textPrimary} min-h-[200px] leading-relaxed`} dangerouslySetInnerHTML={{ __html: normalizeLegacyEditorHtmlTheme(scriptContent || '暂无大纲内容') }}></div>
           )}
         </div>
 

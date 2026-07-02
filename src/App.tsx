@@ -7,6 +7,13 @@ import RealtimeToast from '@/components/RealtimeToast';
 import RoleGuard from '@/components/RoleGuard';
 import NotFound from '@/pages/NotFound';
 
+function applyTheme(theme: 'light' | 'dark') {
+  const root = document.documentElement;
+  root.dataset.theme = theme;
+  root.classList.toggle('dark', theme === 'dark');
+  root.classList.toggle('light', theme === 'light');
+}
+
 function lazyWithRetry<T extends React.ComponentType<object>>(
   importer: () => Promise<{ default: T }>,
   chunkName: string,
@@ -91,7 +98,7 @@ function PageLoading() {
 export default function App() {
   useEffect(() => {
     const savedTheme = (localStorage.getItem('xmt_theme') as 'light' | 'dark') || 'dark';
-    document.documentElement.className = savedTheme;
+    applyTheme(savedTheme);
   }, []);
 
   return (

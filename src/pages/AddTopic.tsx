@@ -6,6 +6,7 @@ import ContentEditor from '../components/ContentEditor';
 import { ChevronLeft, FileText, List, Calendar, User as UserIcon, Send, Save, Eye, EyeOff } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingDate } from '../lib/utils';
+import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 
 export default function AddTopic() {
   const navigate = useNavigate();
@@ -237,7 +238,7 @@ export default function AddTopic() {
             </div>
             <div className="p-6">
               {showPreview ? (
-                <div className={`${styles.bgTertiary} rounded-lg p-6 min-h-[400px] ${styles.textPrimary}`} dangerouslySetInnerHTML={{ __html: formData.outline }}></div>
+                <div className={`editor-content-preview ${styles.bgTertiary} rounded-lg p-6 min-h-[400px] ${styles.textPrimary}`} dangerouslySetInnerHTML={{ __html: normalizeLegacyEditorHtmlTheme(formData.outline) }}></div>
               ) : (
                 <ContentEditor
                   value={formData.outline}

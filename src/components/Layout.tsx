@@ -298,7 +298,7 @@ export default function Layout() {
 
   return (
     <AppShell
-      className="md:grid md:transition-[grid-template-columns] md:duration-300"
+      className="md:grid md:h-screen md:overflow-hidden md:transition-[grid-template-columns] md:duration-300"
       style={{ gridTemplateColumns: `${sidebarWidth} minmax(0, 1fr)` }}
     >
       <Sidebar
@@ -313,7 +313,7 @@ export default function Layout() {
         }}
       />
 
-      <div className="min-h-screen min-w-0">
+      <div className="min-h-screen min-w-0 md:h-screen md:min-h-0 md:overflow-y-auto">
         <Topbar>
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <button

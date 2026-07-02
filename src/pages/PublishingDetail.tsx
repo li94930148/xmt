@@ -6,6 +6,8 @@ import { ChevronLeft, FileText, Camera, Send, Calendar, User as UserIcon, Clock,
 import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
+import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
+import { PageShell } from '../components/studio';
 
 interface PublishingDetailData {
   id: number;
@@ -136,17 +138,21 @@ export default function PublishingDetail() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-      </div>
+      <PageShell>
+        <div className="flex h-64 items-center justify-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+        </div>
+      </PageShell>
     );
   }
 
   if (!data) {
     return (
+      <PageShell>
       <div className="flex items-center justify-center h-64">
         <p className={styles.textMuted}>发布记录不存在</p>
       </div>
+      </PageShell>
     );
   }
 
@@ -154,7 +160,7 @@ export default function PublishingDetail() {
   const displayContent = scriptContent || '<p class="text-gray-500">暂无剧本内容</p>';
 
   return (
-    <div className="space-y-6">
+    <PageShell className="space-y-6">
       {/* 顶部导航 */}
       <div className="flex items-center justify-between">
         <button
@@ -385,19 +391,20 @@ export default function PublishingDetail() {
 
         <div className="p-0">
           {editMode ? (
-            <div style={{ height: '500px' }}>
+            <div className="min-h-[calc(100vh-22rem)] overflow-hidden bg-[var(--editor-bg)]">
               <ContentEditor
                 value={scriptContent}
                 onChange={setScriptContent}
                 onSave={handleSaveScript}
                 mode="rich"
+                immersive
               />
             </div>
           ) : (
             <div className="p-6">
               <div
-                className={`tiptap max-w-none ${styles.textPrimary} leading-relaxed prose ${styles.isDark ? 'prose-invert' : ''}`}
-                dangerouslySetInnerHTML={{ __html: displayContent }}
+                className={`editor-content-preview tiptap max-w-none ${styles.textPrimary} leading-relaxed prose ${styles.isDark ? 'prose-invert' : ''}`}
+                dangerouslySetInnerHTML={{ __html: normalizeLegacyEditorHtmlTheme(displayContent) }}
               />
               {!scriptContent && (
                 <div className={`text-center py-8 ${styles.textMuted}`}>
@@ -444,6 +451,6 @@ export default function PublishingDetail() {
           </div>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

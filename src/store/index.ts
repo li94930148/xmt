@@ -133,6 +133,13 @@ const loadTheme = (): 'light' | 'dark' => {
   }
 };
 
+const applyTheme = (theme: 'light' | 'dark') => {
+  const root = document.documentElement;
+  root.dataset.theme = theme;
+  root.classList.toggle('dark', theme === 'dark');
+  root.classList.toggle('light', theme === 'light');
+};
+
 const loadFontSize = (): number => {
   try {
     const fontSize = localStorage.getItem('xmt_fontSize');
@@ -168,7 +175,7 @@ export const useAppStore = create<AppState>((set) => ({
   toggleTheme: () => set((state) => {
     const newTheme = state.theme === 'dark' ? 'light' : 'dark';
     localStorage.setItem('xmt_theme', newTheme);
-    document.documentElement.className = newTheme;
+    applyTheme(newTheme);
     return { theme: newTheme };
   }),
   fontSize: loadFontSize(),

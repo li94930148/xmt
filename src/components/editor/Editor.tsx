@@ -142,7 +142,7 @@ export default function Editor({
     },
     editorProps: {
       attributes: {
-        class: `prose max-w-none ${immersive ? 'px-4 sm:px-8 lg:px-16 py-8 lg:py-12' : 'px-10 py-8'} min-h-[300px] outline-none ${isDark ? 'prose-invert' : ''}`,
+        class: `editor-content prose max-w-none ${immersive ? 'px-4 sm:px-8 lg:px-16 py-8 lg:py-12' : 'px-10 py-8'} min-h-[300px] outline-none ${isDark ? 'prose-invert' : ''}`,
       },
       handleKeyDown: (view, event) => {
         if ((event.ctrlKey || event.metaKey) && event.key === 's') {
@@ -345,11 +345,11 @@ export default function Editor({
       className={`${containerClass} ${
         immersive
           ? isDark
-            ? 'bg-gray-900'
-            : 'bg-white'
+            ? 'bg-[var(--editor-bg)]'
+            : 'bg-[var(--editor-soft)]'
           : isDark
-            ? 'bg-gray-800 border-gray-700 shadow-lg shadow-black/20'
-            : 'bg-white border-gray-200 shadow-md'
+            ? 'bg-[var(--editor-panel)] border-[var(--editor-border)] shadow-lg shadow-black/20'
+            : 'bg-[var(--editor-panel)] border-[var(--editor-border)] shadow-md'
       }`}
       style={{
         height: isFullscreen ? '100vh' : immersive ? 'auto' : '100%',
@@ -359,7 +359,7 @@ export default function Editor({
       {/* 工具栏 - overflow-visible 确保下拉菜单不被裁剪 */}
       <div
         className={`flex items-center justify-between shrink-0 relative z-30 sticky top-0 ${
-          isDark ? (immersive ? 'bg-gray-900/95' : 'bg-gray-800') : 'bg-white/95'
+          isDark ? 'bg-[var(--editor-panel)]' : 'bg-[var(--editor-panel)]'
         }`}
       >
         <div className="flex-1">
@@ -410,7 +410,7 @@ export default function Editor({
       <div className={`flex flex-1 min-h-0 relative ${immersive ? 'overflow-visible' : 'h-0 overflow-hidden'}`}>
         <div
           ref={scrollAreaRef}
-          className={`flex-1 min-h-0 relative ${immersive ? 'overflow-visible' : 'h-full overflow-y-auto overscroll-contain'}`}
+          className={`flex-1 min-h-0 relative bg-[var(--editor-bg)] text-[var(--editor-fg)] ${immersive ? 'overflow-visible' : 'h-full overflow-y-auto overscroll-contain'}`}
         >
           {/* BubbleMenu */}
           {editor && !readOnly && (
@@ -426,7 +426,7 @@ export default function Editor({
       {showToc && (
           <div
             className={`toc-panel w-64 border-l overflow-y-auto shrink-0 ${
-              isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'
+              isDark ? 'border-[var(--editor-border)] bg-[var(--editor-panel)]' : 'border-[var(--editor-border)] bg-[var(--editor-soft)]'
             }`}
           >
             <TableOfContents editor={editor} />
@@ -437,8 +437,8 @@ export default function Editor({
       <div
         className={`shrink-0 px-4 py-2 border-t text-xs flex items-center justify-end ${
           isDark
-            ? `${immersive ? 'border-gray-800 bg-gray-900' : 'border-gray-700 bg-gray-800'} text-gray-400`
-            : `${immersive ? 'border-gray-100 bg-white' : 'border-gray-200 bg-gray-50'} text-gray-500`
+            ? `${immersive ? 'border-[var(--editor-border)] bg-[var(--editor-bg)]' : 'border-[var(--editor-border)] bg-[var(--editor-panel)]'} text-[var(--editor-muted)]`
+            : `${immersive ? 'border-[var(--editor-border)] bg-[var(--editor-bg)]' : 'border-[var(--editor-border)] bg-[var(--editor-soft)]'} text-[var(--editor-muted)]`
         }`}
       >
         字数 {wordCount}
@@ -555,10 +555,13 @@ export default function Editor({
         }
         .tiptap {
           height: 100%;
+          background: var(--editor-bg);
+          color: var(--editor-fg);
         }
         .tiptap .ProseMirror {
           min-height: 100%;
           outline: none;
+          color: var(--editor-fg);
         }
         .tiptap em,
         .tiptap i {
@@ -618,12 +621,12 @@ export default function Editor({
         }
         .tiptap table td,
         .tiptap table th {
-          border: 1px solid ${isDark ? '#4b5563' : '#d1d5db'};
+          border: 1px solid var(--editor-border);
           padding: 8px 12px;
           text-align: left;
         }
         .tiptap table th {
-          background: ${isDark ? '#374151' : '#f3f4f6'};
+          background: var(--editor-soft);
           font-weight: 600;
         }
         .tiptap ul[data-type="taskList"] {
@@ -647,10 +650,10 @@ export default function Editor({
           border-left: 3px solid #3b82f6;
           padding-left: 1rem;
           margin-left: 0;
-          color: ${isDark ? '#9ca3af' : '#6b7280'};
+          color: var(--editor-muted);
         }
         .tiptap pre {
-          background: ${isDark ? '#1f2937' : '#f3f4f6'};
+          background: var(--editor-code-bg);
           border-radius: 8px;
           padding: 12px 16px;
           overflow-x: auto;
@@ -660,7 +663,7 @@ export default function Editor({
           padding: 0;
         }
         .tiptap code {
-          background: ${isDark ? '#374151' : '#e5e7eb'};
+          background: var(--editor-code-bg);
           padding: 2px 4px;
           border-radius: 4px;
           font-size: 0.9em;

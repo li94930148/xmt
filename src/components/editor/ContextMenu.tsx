@@ -170,7 +170,10 @@ export default function EditorContextMenu({
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {TEXT_COLORS.map((c) => (
                 <button key={c.value || 'default'}
-                  onClick={() => act(() => { c.value ? editor.chain().focus().setColor(c.value).run() : editor.chain().focus().unsetColor().run(); })}
+                  onClick={() => act(() => {
+                    if (c.value) editor.chain().focus().setColor(c.value).run();
+                    else editor.chain().focus().unsetColor().run();
+                  })}
                   className="w-6 h-6 rounded border transition-all hover:scale-110 flex items-center justify-center"
                   style={{ borderColor: isDark ? '#4b5563' : '#d1d5db' }} title={c.name}>
                   <span className="w-4 h-4 rounded-sm font-bold text-xs flex items-center justify-center" style={{ color: c.value || (isDark ? '#fff' : '#000') }}>A</span>
@@ -190,7 +193,10 @@ export default function EditorContextMenu({
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {HIGHLIGHT_COLORS.map((c) => (
                 <button key={c.value}
-                  onClick={() => act(() => { editor.isActive('highlight', { color: c.value }) ? editor.chain().focus().unsetHighlight().run() : editor.chain().focus().setHighlight({ color: c.value }).run(); })}
+                  onClick={() => act(() => {
+                    if (editor.isActive('highlight', { color: c.value })) editor.chain().focus().unsetHighlight().run();
+                    else editor.chain().focus().setHighlight({ color: c.value }).run();
+                  })}
                   className="w-6 h-6 rounded border-2 transition-all hover:scale-110"
                   style={{ backgroundColor: c.bg, borderColor: editor.isActive('highlight', { color: c.value }) ? '#3b82f6' : 'transparent' }} title={c.name} />
               ))}

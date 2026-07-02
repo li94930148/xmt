@@ -2,7 +2,7 @@
  * BubbleMenu - 选中文字浮动工具栏
  * 选中文字后在选区上方显示，支持格式化、颜色、链接、批注等
  */
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Editor } from '@tiptap/react';
 import { BubbleMenu as TiptapBubbleMenu } from '@tiptap/react/menus';
 import { useAppStore } from '../../store';
@@ -46,11 +46,6 @@ export default function BubbleMenuBar({ editor, onAddComment }: BubbleMenuProps)
   const [showTextColor, setShowTextColor] = useState(false);
   const highlightRef = useRef<HTMLDivElement>(null);
   const textColorRef = useRef<HTMLDivElement>(null);
-
-  const closePopups = useCallback(() => {
-    setShowHighlight(false);
-    setShowTextColor(false);
-  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

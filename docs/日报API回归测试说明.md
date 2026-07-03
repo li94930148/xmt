@@ -2,8 +2,6 @@
 
 ## 脚本
 
-本轮新增 `scripts/smoke-daily-reports.mjs`，并在 `package.json` 增加：
-
 ```bash
 npm run test:daily-reports
 ```
@@ -12,25 +10,29 @@ npm run test:daily-reports
 
 ## 环境变量
 
-- `TOKEN`：普通用户登录 token，必填。
-- `ADMIN_TOKEN`：管理员或具备日报审核权限用户 token，可选。
+- `TOKEN`：普通用户登录 token，完整回归需要。
+- `ADMIN_TOKEN`：管理员或具备日报审核权限的用户 token，可选。
 - `API_BASE_URL`：API 根路径，可选。
 
-未提供 `TOKEN` 时脚本只输出用法提示并退出，不会内置任何真实 token。
+未提供 `TOKEN` 时，脚本只输出用法提示并正常退出，不内置任何真实 token。
 
-## 覆盖项
+## 第 11 轮真实回归结果
 
-- `GET /daily-reports/me`
-- `POST /daily-reports/draft`
-- `POST /daily-reports/:id/submit`
-- `GET /daily-reports/archive`
-- 普通用户访问 `GET /daily-reports/team` 的 200/403 兼容检查
-- 设置 `ADMIN_TOKEN` 后检查团队列表与审核接口
-- 非法日期 400
-- 空日报提交 400
-- 版本冲突 409
-- 归档范围超过 31 天 400
+- 已使用临时测试账号登录。
+- 已获取 `TOKEN`：是。
+- 已获取 `ADMIN_TOKEN`：是，账号角色为 admin。
+- 执行命令：`npm run test:daily-reports`。
+- 结果：真实 token 链路通过。
+- 覆盖接口：我的日报查询、非法日期校验、空日报提交校验、保存草稿、版本冲突校验、提交日报、归档查询、归档范围校验、团队日报查询、审核通过。
+- 失败接口：无。
+- 未覆盖：浏览器手工填写六段、保存、提交、审核的深度 UI 流程。
+- 安全说明：未记录账号、密码或 token 明文。
 
-## 注意
+## 有 Token 时的本地命令
 
-脚本会创建未来日期的 smoke 日报，避免影响当天真实工作流。它只通过公开 API 测试，不直接访问数据库。
+仅在本地临时命令行使用 token，不写入代码、文档或提交记录：
+
+```bash
+API_BASE_URL=http://localhost:3001/api TOKEN=本地临时token ADMIN_TOKEN=本地临时管理员token npm run test:daily-reports
+```
+

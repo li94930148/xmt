@@ -9,9 +9,11 @@ if (!TOKEN) {
 }
 
 const date = new Date();
-date.setUTCDate(date.getUTCDate() + 400);
+date.setUTCDate(date.getUTCDate() + 400 + Math.floor(Date.now() % 1200));
 const smokeDate = date.toISOString().slice(0, 10);
-const conflictDate = `${date.getUTCFullYear()}-12-${String(10 + Math.floor(Math.random() * 18)).padStart(2, '0')}`;
+const conflictBase = new Date(date);
+conflictBase.setUTCDate(conflictBase.getUTCDate() + 1);
+const conflictDate = conflictBase.toISOString().slice(0, 10);
 
 async function request(method, path, token, body, expected) {
   const response = await fetch(`${API_BASE_URL}/daily-reports${path}`, {

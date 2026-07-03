@@ -1,5 +1,6 @@
 import type { User } from '../types/index.js';
 import { beijingNow, execute, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils.js';
+import { createMessage } from '../utils/messageHelper.js';
 import type {
   CreateRetroActionInput,
   CreateRetrospectiveInput,
@@ -216,6 +217,8 @@ function formatAction(row: Row) {
     resultMd: String(row.result_md || ''),
     closedAt: row.closed_at ? String(row.closed_at) : null,
     createdBy: row.created_by === null || row.created_by === undefined ? null : Number(row.created_by),
+    creatorName: String(row.creator_name || row.creator_username || ''),
+    retroTitle: String(row.retro_title || ''),
     createdAt: String(row.created_at || ''),
     updatedAt: String(row.updated_at || ''),
   };
@@ -272,14 +275,107 @@ async function loadSnapshots(retroId: number) {
 
 async function loadActions(retroId: number) {
   const rows = await queryAll<Row>(
-    `SELECT a.*, owner.name AS owner_name, owner.username AS owner_username
+    `SELECT a.*, r.title AS retro_title,
+            owner.name AS owner_name, owner.username AS owner_username,
+            creator.name AS creator_name, creator.username AS creator_username
      FROM retro_actions a
+     JOIN retrospectives r ON r.id = a.retro_id
      LEFT JOIN users owner ON owner.id = a.owner_id
+     LEFT JOIN users creator ON creator.id = a.created_by
      WHERE a.retro_id = ?
      ORDER BY a.status ASC, a.due_date ASC, a.id ASC`,
     [retroId],
   );
   return rows.map(formatAction);
+}
+
+async function loadManagerUsers() {
+  return queryAll<{ id: number }>(
+    `SELECT id FROM users WHERE enabled = 1 AND role IN ('admin', 'director')`,
+    [],
+  );
+}
+
+function notifyUser(
+  userId: number | null | undefined,
+  title: string,
+  content: string,
+  type: 'info' | 'success' | 'warning' | 'error' = 'info',
+  link?: string,
+) {
+  if (!userId) return;
+  createMessage(userId, title, content, type, link);
+}
+
+async function notifyRetrospectivePublished(retro: RetrospectiveRow, actorId: number) {
+  const recipients = new Set<number>();
+  if (retro.owner_id) recipients.add(Number(retro.owner_id));
+  if (retro.created_by) recipients.add(Number(retro.created_by));
+  for (const manager of await loadManagerUsers()) {
+    recipients.add(Number(manager.id));
+  }
+  recipients.delete(actorId);
+  for (const userId of recipients) {
+    notifyUser(
+      userId,
+      '复盘已发布',
+      `复盘「${retro.title}」已发布，可进入详情查看结论与行动项。`,
+      'success',
+      `/retrospectives/${retro.id}`,
+    );
+  }
+}
+
+async function notifyRetrospectiveArchived(retro: RetrospectiveRow, actorId: number) {
+  const recipients = new Set<number>();
+  if (retro.owner_id) recipients.add(Number(retro.owner_id));
+  if (retro.created_by) recipients.add(Number(retro.created_by));
+  for (const manager of await loadManagerUsers()) {
+    recipients.add(Number(manager.id));
+  }
+  recipients.delete(actorId);
+  for (const userId of recipients) {
+    notifyUser(
+      userId,
+      '复盘已归档',
+      `复盘「${retro.title}」已归档，后续仅保留查看与行动项结果更新。`,
+      'info',
+      `/retrospectives/${retro.id}`,
+    );
+  }
+}
+
+function notifyActionAssigned(retro: RetrospectiveRow, actionTitle: string, ownerId: number | null, actorId: number) {
+  if (!ownerId || ownerId === actorId) return;
+  notifyUser(
+    ownerId,
+    '你有新的复盘行动项',
+    `复盘「${retro.title}」分配了行动项「${actionTitle}」。`,
+    'warning',
+    `/retrospectives/${retro.id}`,
+  );
+}
+
+async function notifyActionUpdated(retroId: number, action: Row, actorId: number, beforeStatus: string, afterStatus: string) {
+  const retro = await getRetrospectiveRow(retroId);
+  if (!retro) return;
+
+  const recipients = new Set<number>();
+  if (retro.owner_id) recipients.add(Number(retro.owner_id));
+  if (retro.created_by) recipients.add(Number(retro.created_by));
+  if (action.created_by) recipients.add(Number(action.created_by));
+  recipients.delete(actorId);
+
+  const changed = beforeStatus !== afterStatus;
+  for (const userId of recipients) {
+    notifyUser(
+      userId,
+      changed ? '复盘行动项状态已更新' : '复盘行动项已更新',
+      `复盘「${retro.title}」的行动项「${action.title || ''}」已更新${changed ? `：${beforeStatus} -> ${afterStatus}` : '。'}`,
+      changed && afterStatus === 'done' ? 'success' : 'info',
+      `/retrospectives/${retro.id}`,
+    );
+  }
 }
 
 async function userCanView(user: User, retro: RetrospectiveRow) {
@@ -326,6 +422,109 @@ function parseId(value: number | string, field = 'id') {
     throw new RetrospectiveServiceError(400, 'INVALID_ID', `${field} is invalid`);
   }
   return id;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function markdownValue(value: unknown) {
+  const text = String(value ?? '').trim();
+  return text || '-';
+}
+
+function buildRetrospectiveMarkdown(detail: Awaited<ReturnType<typeof getRetrospectiveDetail>>) {
+  const { retrospective, template, snapshots, actions } = detail;
+  const lines: string[] = [
+    `# ${retrospective.title}`,
+    '',
+    `- 类型：${retrospective.templateCategory || 'custom'}`,
+    `- 模板：${template?.name || retrospective.templateName || '-'}`,
+    `- 周期：${retrospective.periodStart} 至 ${retrospective.periodEnd}`,
+    `- 状态：${retrospective.status}`,
+    `- 负责人：${retrospective.ownerName || '-'}`,
+    `- 创建人：${retrospective.creatorName || '-'}`,
+    `- 发布时间：${retrospective.publishedAt || '-'}`,
+    `- 归档时间：${retrospective.archivedAt || '-'}`,
+    '',
+    '## 复盘结论',
+    '',
+    markdownValue(retrospective.summaryMd),
+    '',
+    '## 指标快照',
+    '',
+  ];
+
+  if (snapshots.length === 0) {
+    lines.push('- 暂无指标快照');
+  } else {
+    for (const snapshot of snapshots) {
+      lines.push(`- ${snapshot.metricName}（${snapshot.metricKey}）：${snapshot.valueNum ?? snapshot.valueText ?? '-'}`);
+    }
+  }
+
+  lines.push('', '## 行动项', '');
+  if (actions.length === 0) {
+    lines.push('- 暂无行动项');
+  } else {
+    for (const action of actions) {
+      lines.push(
+        `### ${action.title}`,
+        '',
+        `- 负责人：${action.ownerName || '-'}`,
+        `- 截止日期：${action.dueDate || '-'}`,
+        `- 状态：${action.status}`,
+        `- 关闭时间：${action.closedAt || '-'}`,
+        '',
+        markdownValue(action.descriptionMd),
+        '',
+        `结果：${markdownValue(action.resultMd)}`,
+        '',
+      );
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function buildRetrospectiveHtml(detail: Awaited<ReturnType<typeof getRetrospectiveDetail>>) {
+  const markdown = buildRetrospectiveMarkdown(detail);
+  const blocks = markdown
+    .split('\n')
+    .map((line) => {
+      if (line.startsWith('# ')) return `<h1>${escapeHtml(line.slice(2))}</h1>`;
+      if (line.startsWith('## ')) return `<h2>${escapeHtml(line.slice(3))}</h2>`;
+      if (line.startsWith('### ')) return `<h3>${escapeHtml(line.slice(4))}</h3>`;
+      if (line.startsWith('- ')) return `<p class="list">${escapeHtml(line)}</p>`;
+      if (!line.trim()) return '';
+      return `<p>${escapeHtml(line)}</p>`;
+    })
+    .join('\n');
+
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(detail.retrospective.title)} - 复盘导出</title>
+  <style>
+    body { margin: 40px; color: #111827; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.7; }
+    h1 { font-size: 28px; margin-bottom: 16px; }
+    h2 { margin-top: 32px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+    h3 { margin-top: 24px; }
+    p { white-space: pre-wrap; }
+    .list { margin: 4px 0; color: #374151; }
+    @media print { body { margin: 18mm; } }
+  </style>
+</head>
+<body>
+${blocks}
+</body>
+</html>`;
 }
 
 async function recordAudit(
@@ -439,6 +638,78 @@ export async function listRetrospectives(user: User | undefined, filters: Retros
   return { retrospectives: rows.map((row) => formatRetrospective(row)) };
 }
 
+export async function listMyRetroActions(user: User | undefined, statusValue?: string) {
+  assertAuthenticated(user);
+  const params: unknown[] = [user.id];
+  const where = ['a.owner_id = ?'];
+  const status = statusValue === 'open' || statusValue === 'all' ? undefined : parseActionStatus(statusValue);
+
+  if (statusValue === 'open' || !statusValue) {
+    where.push(`a.status NOT IN ('done', 'cancelled')`);
+  } else if (status) {
+    where.push('a.status = ?');
+    params.push(status);
+  }
+
+  const rows = await queryAll<Row>(
+    `SELECT a.*, r.title AS retro_title,
+            owner.name AS owner_name, owner.username AS owner_username,
+            creator.name AS creator_name, creator.username AS creator_username
+     FROM retro_actions a
+     JOIN retrospectives r ON r.id = a.retro_id
+     LEFT JOIN users owner ON owner.id = a.owner_id
+     LEFT JOIN users creator ON creator.id = a.created_by
+     WHERE ${where.join(' AND ')}
+     ORDER BY CASE a.status WHEN 'todo' THEN 0 WHEN 'doing' THEN 1 WHEN 'done' THEN 2 ELSE 3 END,
+              CASE WHEN a.due_date IS NULL THEN 1 ELSE 0 END,
+              a.due_date ASC,
+              a.updated_at DESC`,
+    params,
+  );
+
+  return { actions: rows.map(formatAction) };
+}
+
+export async function listRetrospectiveDailyRisks(user: User | undefined, retroIdValue: number) {
+  assertAuthenticated(user);
+  const retroId = parseId(retroIdValue);
+  const row = await getRetrospectiveRow(retroId);
+  if (!row) {
+    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', 'Retrospective not found');
+  }
+  if (!await userCanView(user, row)) {
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Cannot view retrospective risks');
+  }
+
+  const rows = await queryAll<Row>(
+    `SELECT i.id AS item_id, i.report_id, i.section_key, i.content_md,
+            r.report_date, r.user_id, r.risk_level, r.status,
+            u.name AS user_name, u.username AS username
+     FROM daily_report_items i
+     JOIN daily_reports r ON r.id = i.report_id
+     LEFT JOIN users u ON u.id = r.user_id
+     WHERE r.report_date BETWEEN ? AND ?
+       AND i.section_key IN ('risk', 'risks', 'blocker', 'blockers')
+       AND TRIM(COALESCE(i.content_md, '')) != ''
+     ORDER BY r.report_date DESC, r.user_id ASC, i.id ASC`,
+    [row.period_start, row.period_end],
+  );
+
+  return {
+    risks: rows.map((item) => ({
+      itemId: Number(item.item_id),
+      reportId: Number(item.report_id),
+      reportDate: String(item.report_date || ''),
+      userId: Number(item.user_id),
+      userName: String(item.user_name || item.username || ''),
+      sectionKey: String(item.section_key || ''),
+      contentMd: String(item.content_md || ''),
+      riskLevel: String(item.risk_level || 'normal'),
+      reportStatus: String(item.status || ''),
+    })),
+  };
+}
+
 export async function createRetrospective(user: User | undefined, input: CreateRetrospectiveInput) {
   assertAuthenticated(user);
   if (!await canUsePermission(user, 'analytics:retro:create')) {
@@ -502,6 +773,19 @@ export async function getRetrospectiveDetail(user: User | undefined, retroIdValu
       canArchive: await userCanArchive(user, row),
       canManageActions: await userCanManageActions(user),
     },
+  };
+}
+
+export async function exportRetrospective(user: User | undefined, retroIdValue: number, typeValue?: string) {
+  const type = typeValue === 'html' ? 'html' : 'markdown';
+  const detail = await getRetrospectiveDetail(user, retroIdValue);
+  const safeTitle = detail.retrospective.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'retrospective';
+  const content = type === 'html' ? buildRetrospectiveHtml(detail) : buildRetrospectiveMarkdown(detail);
+
+  return {
+    filename: `${safeTitle}.${type === 'html' ? 'html' : 'md'}`,
+    contentType: type === 'html' ? 'text/html; charset=utf-8' : 'text/markdown; charset=utf-8',
+    content,
   };
 }
 
@@ -692,6 +976,7 @@ export async function publishRetrospective(user: User | undefined, retroIdValue:
     [retroId],
   );
   await recordAudit(retroId, user.id, 'publish', String(row.status), 'published');
+  void notifyRetrospectivePublished(row, user.id);
   return getRetrospectiveDetail(user, retroId);
 }
 
@@ -713,6 +998,7 @@ export async function archiveRetrospective(user: User | undefined, retroIdValue:
     [retroId],
   );
   await recordAudit(retroId, user.id, 'archive', String(row.status), 'archived');
+  void notifyRetrospectiveArchived(row, user.id);
   return getRetrospectiveDetail(user, retroId);
 }
 
@@ -743,6 +1029,7 @@ export async function createRetroAction(user: User | undefined, retroIdValue: nu
     [retroId, title, String(input.descriptionMd || ''), ownerId, dueDate, user.id],
   );
   await recordAudit(retroId, user.id, 'action_create', String(row.status), String(row.status), `action=${actionId}`);
+  notifyActionAssigned(row, title, ownerId, user.id);
   return getRetrospectiveDetail(user, retroId);
 }
 
@@ -777,7 +1064,10 @@ export async function updateRetroAction(user: User | undefined, actionIdValue: n
   const ownerId = input.ownerId === undefined || !canManage
     ? action.owner_id === null || action.owner_id === undefined ? null : Number(action.owner_id)
     : input.ownerId ? parseId(input.ownerId, 'ownerId') : null;
-  const closedAt = nextStatus === 'done' ? beijingNow() : null;
+  const wasDone = String(action.status || '') === 'done';
+  const closedAt = nextStatus === 'done'
+    ? wasDone && action.closed_at ? String(action.closed_at) : beijingNow()
+    : null;
 
   await execute(
     `UPDATE retro_actions
@@ -796,5 +1086,6 @@ export async function updateRetroAction(user: User | undefined, actionIdValue: n
   );
   const retroId = Number(action.parent_retro_id);
   await recordAudit(retroId, user.id, 'action_update', String(action.retro_status || ''), String(action.retro_status || ''), `action=${actionId}`);
+  void notifyActionUpdated(retroId, action, user.id, String(action.status || ''), nextStatus);
   return getRetrospectiveDetail(user, retroId);
 }

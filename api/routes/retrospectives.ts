@@ -6,8 +6,11 @@ import {
   createRetroAction,
   createRetroTemplate,
   createRetrospective,
+  exportRetrospective,
   generateRetrospectiveSnapshot,
   getRetrospectiveDetail,
+  listMyRetroActions,
+  listRetrospectiveDailyRisks,
   listRetroTemplates,
   listRetrospectives,
   publishRetrospective,
@@ -111,9 +114,33 @@ router.post('/', async (req, res) => {
   }
 });
 
+router.get('/actions/mine', async (req, res) => {
+  try {
+    sendData(res, await listMyRetroActions(req.user, getQueryString(req, 'status')));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
 router.patch('/actions/:actionId', async (req, res) => {
   try {
     sendData(res, await updateRetroAction(req.user, parseId(req.params.actionId), req.body as UpdateRetroActionInput));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+router.get('/:id/daily-risks', async (req, res) => {
+  try {
+    sendData(res, await listRetrospectiveDailyRisks(req.user, parseId(req.params.id)));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+router.get('/:id/export', async (req, res) => {
+  try {
+    sendData(res, await exportRetrospective(req.user, parseId(req.params.id), getQueryString(req, 'type')));
   } catch (error) {
     handleError(error, res);
   }

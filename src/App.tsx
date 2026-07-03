@@ -83,6 +83,8 @@ const ExportPage = lazyWithRetry(() => import('@/pages/ExportPage'), 'ExportPage
 const PomodoroPage = lazyWithRetry(() => import('@/pages/PomodoroPage'), 'PomodoroPage');
 const BackupPage = lazyWithRetry(() => import('@/pages/BackupPage'), 'BackupPage');
 const DailyReportPage = lazyWithRetry(() => import('@/pages/DailyReportPage'), 'DailyReportPage');
+const RetrospectivesPage = lazyWithRetry(() => import('@/pages/RetrospectivesPage'), 'RetrospectivesPage');
+const RetrospectiveDetailPage = lazyWithRetry(() => import('@/pages/RetrospectiveDetailPage'), 'RetrospectiveDetailPage');
 
 function PageLoading() {
   return (
@@ -138,6 +140,10 @@ export default function App() {
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/analytics" element={<Analytics />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['analytics:retro:view']} />}>
+                  <Route path="/retrospectives" element={<RetrospectivesPage />} />
+                  <Route path="/retrospectives/:id" element={<RetrospectiveDetailPage />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/collaboration-dashboard" element={<CollaborationDashboard />} />

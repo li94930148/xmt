@@ -34,6 +34,7 @@ export type { PomodoroSession, PomodoroStats, PomodoroRanking } from './pomodoro
 export { getCalendarEvents, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from './calendar';
 export type { CalendarEvent } from './calendar';
 export { exportTopics, exportAnalytics, getWeeklyReport } from './export';
+export * from './retrospectives';
 export { getActivityLogs } from './users';
 
 // 抖音数据

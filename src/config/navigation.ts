@@ -4,6 +4,7 @@ import {
   Archive,
   BarChart3,
   Bell,
+  BookOpenCheck,
   Calendar,
   Camera,
   FileBarChart,
@@ -64,7 +65,8 @@ export const navigationSections: NavigationSection[] = [
   {
     label: '数据与复盘',
     items: [
-      { id: 'analytics', label: '数据复盘', icon: BarChart3, path: '/analytics', permissions: ['analytics:view'] },
+      { id: 'analytics', label: '实时数据看板', icon: BarChart3, path: '/analytics', permissions: ['analytics:view'] },
+      { id: 'retrospectives', label: '复盘中心', icon: BookOpenCheck, path: '/retrospectives', permissions: ['analytics:retro:view'] },
       { id: 'content-timeline', label: '内容时间轴', icon: History, path: '/content-timeline', permissions: ['analytics:view'] },
       { id: 'export', label: '报告中心', icon: FileBarChart, path: '/export', permissions: ['export:data'] },
       { id: 'daily-report', label: '日报中心', icon: FileClock, path: '/daily-report' },

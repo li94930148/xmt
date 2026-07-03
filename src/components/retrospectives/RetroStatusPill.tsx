@@ -28,8 +28,8 @@ export default function RetroStatusPill({ status, kind = 'retro' }: Props) {
     : retroStatusLabels[status as RetrospectiveStatus];
 
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${classes}`}>
-      {label}
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${classes || 'border-slate-400/30 bg-slate-400/10 text-slate-300'}`}>
+      {label || '未知状态'}
     </span>
   );
 }

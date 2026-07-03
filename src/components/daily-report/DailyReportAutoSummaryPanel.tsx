@@ -9,6 +9,13 @@ type DailyReportAutoSummaryPanelProps = {
   onApply: (items: DailyReportItem[]) => void;
 };
 
+const sourceLabels: Record<string, string> = {
+  topic: '选题',
+  production: '创作',
+  publishing: '发布',
+  unknown: '未知来源',
+};
+
 export default function DailyReportAutoSummaryPanel({
   loading,
   result,
@@ -40,7 +47,7 @@ export default function DailyReportAutoSummaryPanel({
             <div key={`${item.sourceType}-${item.sourceId}-${index}`} className="rounded-card border border-studio-border-soft bg-white/[0.04] p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-studio-text-primary">{item.title || '自动记录'}</p>
-                <span className="text-xs text-studio-text-muted">{item.sourceType || 'source'} #{item.sourceId || '-'}</span>
+                <span className="text-xs text-studio-text-muted">{sourceLabels[item.sourceType || 'unknown'] || '业务来源'} #{item.sourceId || '-'}</span>
               </div>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{item.contentMd}</p>
             </div>

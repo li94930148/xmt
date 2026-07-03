@@ -13,13 +13,38 @@ type Props = {
 
 const groupOrder = ['内容生产', '团队执行', '风险闭环', '行动项', '其他'];
 
+const sourceTableLabels: Record<string, string> = {
+  topics: '选题库',
+  production: '创作管理',
+  publishing: '发布管理',
+  daily_reports: '日报记录',
+  daily_report_items: '日报分段',
+  retro_actions: '复盘行动项',
+  internal: '系统内部数据',
+};
+
+const sourceFieldLabels: Record<string, string> = {
+  created_at: '创建时间',
+  report_date: '日报日期',
+  risk_level: '风险等级',
+};
+
+const sectionLabels: Record<string, string> = {
+  risk: '风险分段',
+  tomorrow: '明日计划',
+};
+
 function sourceText(snapshot: RetroMetricSnapshot) {
   const source = snapshot.sourceRefJson;
   if (!source) return 'XMT 系统内部数据';
   const table = typeof source.table === 'string' ? source.table : 'internal';
   const field = typeof source.field === 'string' ? source.field : '';
-  const sectionKey = typeof source.sectionKey === 'string' ? ` / ${source.sectionKey}` : '';
-  return [table, field].filter(Boolean).join('.') + sectionKey;
+  const sectionKey = typeof source.sectionKey === 'string' ? source.sectionKey : '';
+  return [
+    sourceTableLabels[table] || '系统内部数据',
+    field ? sourceFieldLabels[field] || '业务字段' : '',
+    sectionKey ? sectionLabels[sectionKey] || '日报分段' : '',
+  ].filter(Boolean).join(' / ');
 }
 
 function valueText(snapshot: RetroMetricSnapshot) {

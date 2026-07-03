@@ -17,8 +17,17 @@ function getSourceRows(report: DailyReport) {
 }
 
 function formatName(report: DailyReport) {
-  return report.userName || report.username || `User ${report.userId}`;
+  return report.userName || report.username || `成员 #${report.userId}`;
 }
+
+const sourceTypeLabels: Record<string, string> = {
+  topic: '选题',
+  production: '创作',
+  shooting: '拍摄',
+  publishing: '发布',
+  manual: '手动记录',
+  system: '系统记录',
+};
 
 export default function DailyReportDetailDrawer({
   report,
@@ -37,14 +46,14 @@ export default function DailyReportDetailDrawer({
     <div className="fixed inset-0 z-50">
       <button
         type="button"
-        aria-label="Close detail drawer"
+        aria-label="关闭日报详情"
         className="absolute inset-0 bg-black/45"
         onClick={onClose}
       />
       <aside className="absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col border-l border-studio-border-soft bg-studio-surface text-studio-text-primary shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-studio-border-soft px-5 py-4">
           <div>
-            <p className="text-sm text-studio-text-muted">Daily report detail</p>
+            <p className="text-sm text-studio-text-muted">日报详情</p>
             <h2 className="mt-1 text-xl font-semibold">{formatName(report)}</h2>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="text-sm text-studio-text-secondary">{report.reportDate}</span>
@@ -56,7 +65,7 @@ export default function DailyReportDetailDrawer({
             type="button"
             onClick={onClose}
             className="rounded-button border border-studio-border-soft p-2 text-studio-text-muted transition hover:bg-white/[0.06] hover:text-studio-text-primary"
-            aria-label="Close"
+            aria-label="关闭"
           >
             <X className="h-4 w-4" />
           </button>
@@ -64,14 +73,14 @@ export default function DailyReportDetailDrawer({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           <div className="grid gap-3 text-sm md:grid-cols-2">
-            <Info label="Submitted" value={report.submittedAt || '-'} />
-            <Info label="Reviewed" value={report.reviewedAt || '-'} />
-            <Info label="Reviewer" value={report.reviewerName || report.reviewerUsername || (report.reviewedBy ? `#${report.reviewedBy}` : '-')} />
-            <Info label="Review comment" value={report.reviewComment || '-'} />
+            <Info label="提交时间" value={report.submittedAt || '-'} />
+            <Info label="审核时间" value={report.reviewedAt || '-'} />
+            <Info label="审核人" value={report.reviewerName || report.reviewerUsername || (report.reviewedBy ? `#${report.reviewedBy}` : '-')} />
+            <Info label="审核意见" value={report.reviewComment || '-'} />
           </div>
 
           <section className="mt-5 rounded-card border border-studio-border-soft bg-white/[0.035] p-4">
-            <h3 className="text-sm font-semibold text-studio-text-primary">Manual summary</h3>
+            <h3 className="text-sm font-semibold text-studio-text-primary">手动总结</h3>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">
               {report.manualSummaryMd || '-'}
             </p>
@@ -86,7 +95,7 @@ export default function DailyReportDetailDrawer({
                     <h3 className="text-sm font-semibold text-studio-text-primary">{section.title}</h3>
                     {item?.sourceType ? (
                       <span className="rounded-full border border-studio-border-soft px-2 py-1 text-xs text-studio-text-muted">
-                        {item.sourceType} #{item.sourceId || '-'}
+                        {sourceTypeLabels[item.sourceType] || '业务来源'} #{item.sourceId || '-'}
                       </span>
                     ) : null}
                   </div>
@@ -99,19 +108,19 @@ export default function DailyReportDetailDrawer({
           </div>
 
           <section className="mt-5 rounded-card border border-studio-border-soft bg-white/[0.035] p-4">
-            <h3 className="text-sm font-semibold text-studio-text-primary">Auto sources</h3>
+            <h3 className="text-sm font-semibold text-studio-text-primary">自动草稿来源</h3>
             {sources.length === 0 ? (
-              <p className="mt-2 text-sm text-studio-text-muted">No auto sources recorded.</p>
+              <p className="mt-2 text-sm text-studio-text-muted">暂无自动草稿来源记录。</p>
             ) : (
               <div className="mt-3 space-y-2">
                 {sources.map((source, index) => (
                   <div key={`${String(source.sourceType || 'source')}-${String(source.sourceId || index)}`} className="rounded-card border border-studio-border-soft p-3 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-semibold text-studio-text-primary">{String(source.title || 'Untitled source')}</span>
-                      <span className="text-xs text-studio-text-muted">{String(source.sourceType || 'unknown')} #{String(source.sourceId || '-')}</span>
+                      <span className="font-semibold text-studio-text-primary">{String(source.title || '未命名来源')}</span>
+                      <span className="text-xs text-studio-text-muted">来源 #{String(source.sourceId || '-')}</span>
                     </div>
                     {source.updatedAt ? (
-                      <p className="mt-1 text-xs text-studio-text-muted">Updated: {String(source.updatedAt)}</p>
+                      <p className="mt-1 text-xs text-studio-text-muted">更新于：{String(source.updatedAt)}</p>
                     ) : null}
                   </div>
                 ))}
@@ -121,10 +130,10 @@ export default function DailyReportDetailDrawer({
         </div>
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-studio-border-soft px-5 py-4">
-          <ActionButton onClick={onClose}>Close</ActionButton>
+          <ActionButton onClick={onClose}>关闭</ActionButton>
           {canReview && report.status === 'submitted' ? (
             <ActionButton variant="primary" onClick={() => onReview(report)}>
-              Review
+              审核
             </ActionButton>
           ) : null}
         </div>

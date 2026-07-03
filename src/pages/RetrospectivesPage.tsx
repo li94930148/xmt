@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { BarChart3, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus } from 'lucide-react';
 import {
   createRetrospective,
   getMyRetroActions,
@@ -131,15 +131,9 @@ export default function RetrospectivesPage() {
     <PageShell>
       <PageHeader
         title="复盘中心"
-        description="用于沉淀周期复盘、指标快照、结论和行动项；实时数据看板仍保留在 analytics。"
+        description="复盘团队工作结果，跟进行动项。"
         actions={
           <div className="flex flex-wrap gap-3">
-            <Link to="/analytics">
-              <ActionButton variant="ghost">
-                <BarChart3 className="h-4 w-4" />
-                查看实时看板
-              </ActionButton>
-            </Link>
             {canCreate ? (
               <ActionButton variant="primary" onClick={() => setCreateOpen(true)}>
                 <Plus className="h-4 w-4" />

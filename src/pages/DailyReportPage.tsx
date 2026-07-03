@@ -250,7 +250,7 @@ export default function DailyReportPage() {
   const handleApplyAutoDraft = (suggestions: DailyReportItem[]) => {
     const freshSuggestions = suggestions.filter((suggestion) => !importedSuggestionKeys.includes(getSuggestionKey(suggestion)));
     if (freshSuggestions.length === 0) {
-      appStore.addNotification({ title: 'Auto draft', message: 'Selected records have already been imported.', type: 'info' });
+      appStore.addNotification({ title: '自动草稿', message: '选中的记录已经导入过。', type: 'info' });
       return;
     }
     const nextItems = [...items];

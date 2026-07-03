@@ -38,10 +38,10 @@ const riskTone: Record<string, StatusTone> = {
 };
 
 export function DailyReportStatusPill({ status }: { status: DailyReportStatus }) {
-  return <StatusPill tone={statusTone[status] || 'muted'}>{statusText[status] || status}</StatusPill>;
+  return <StatusPill tone={statusTone[status] || 'muted'}>{statusText[status] || '未知状态'}</StatusPill>;
 }
 
 export function DailyReportRiskPill({ risk }: { risk?: DailyReportRiskLevel }) {
   const value = risk || 'normal';
-  return <StatusPill tone={riskTone[value] || 'muted'}>{riskText[value] || value}</StatusPill>;
+  return <StatusPill tone={riskTone[value] || 'muted'}>{riskText[value] || '未知风险'}</StatusPill>;
 }

@@ -39,7 +39,7 @@ export default function RetroList({ retrospectives, loading, canCreate, onCreate
       <div className="flex items-center justify-between gap-3 border-b border-studio-border-soft px-5 py-4">
         <div>
           <h2 className="text-base font-bold text-studio-text-primary">复盘列表</h2>
-          <p className="mt-1 text-xs text-studio-text-muted">保留 analytics 实时看板，这里只沉淀复盘闭环。</p>
+          <p className="mt-1 text-xs text-studio-text-muted">查看周期复盘进展和行动项跟进情况。</p>
         </div>
         <ActionButton onClick={onRefresh} disabled={loading}>
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />

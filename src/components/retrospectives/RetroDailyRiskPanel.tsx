@@ -19,6 +19,22 @@ function excerpt(text: string) {
   return normalized.length > 34 ? `${normalized.slice(0, 34)}...` : normalized;
 }
 
+const sectionLabels: Record<string, string> = {
+  risk: '风险',
+  risks: '风险',
+  blocker: '阻塞',
+  blockers: '阻塞',
+};
+
+const riskLabels: Record<string, string> = {
+  normal: '无风险',
+  warning: '有风险',
+  blocked: '阻塞',
+  low: '低',
+  medium: '中',
+  high: '高',
+};
+
 export default function RetroDailyRiskPanel({
   risks,
   users,
@@ -53,8 +69,8 @@ export default function RetroDailyRiskPanel({
     const sourceDescription = [
       `来源日报：${selected.reportDate}`,
       `成员：${selected.userName || selected.userId}`,
-      `分段：${selected.sectionKey}`,
-      `风险等级：${selected.riskLevel}`,
+      `分段：${sectionLabels[selected.sectionKey] || '风险'}`,
+      `风险等级：${riskLabels[selected.riskLevel] || '未知风险'}`,
       '',
       '风险内容：',
       selected.contentMd,
@@ -110,7 +126,7 @@ export default function RetroDailyRiskPanel({
         {selected ? (
           <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4">
             <p className="text-xs text-studio-text-muted">
-              {formatDate(selected.reportDate)} · {selected.userName || selected.userId} · {selected.riskLevel}
+              {formatDate(selected.reportDate)} · {selected.userName || selected.userId} · {riskLabels[selected.riskLevel] || '未知风险'}
             </p>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{selected.contentMd}</p>
 

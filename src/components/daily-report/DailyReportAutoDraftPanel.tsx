@@ -13,10 +13,16 @@ type DailyReportAutoDraftPanelProps = {
 };
 
 const sourceLabels: Record<string, string> = {
-  topic: 'Topic',
-  production: 'Production',
-  publishing: 'Publishing',
-  unknown: 'Unknown',
+  topic: '选题',
+  production: '创作',
+  publishing: '发布',
+  unknown: '未知来源',
+};
+
+const sectionLabels: Record<string, string> = {
+  done: '今日完成',
+  risk: '风险阻塞',
+  tomorrow: '明日计划',
 };
 
 export default function DailyReportAutoDraftPanel({
@@ -69,19 +75,19 @@ export default function DailyReportAutoDraftPanel({
     <GlassPanel className="p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-studio-text-primary">Auto draft</h2>
-          <p className="mt-1 text-sm text-studio-text-muted">Only imports existing business records. Nothing is invented.</p>
+          <h2 className="text-base font-semibold text-studio-text-primary">自动草稿</h2>
+          <p className="mt-1 text-sm text-studio-text-muted">仅汇总已有业务记录，不会编造内容。</p>
         </div>
         <ActionButton onClick={onGenerate} disabled={loading}>
           <Wand2 className="h-4 w-4" />
-          {loading ? 'Generating...' : 'Generate'}
+          {loading ? '生成中...' : '生成草稿'}
         </ActionButton>
       </div>
 
       {!result ? (
-        <EmptyState icon={Wand2} title="No auto draft yet" description="Generate to inspect today's topic, production and publishing records." />
+        <EmptyState icon={Wand2} title="暂无自动草稿" description="生成后可查看今日选题、创作和发布记录。" />
       ) : suggestions.length === 0 ? (
-        <EmptyState icon={Wand2} title="No source records today" description="You can continue writing the report manually." />
+        <EmptyState icon={Wand2} title="今日暂无来源记录" description="可以继续手动填写日报。" />
       ) : (
         <div className="space-y-4">
           {Object.entries(groups).map(([sourceType, items]) => (
@@ -112,13 +118,13 @@ export default function DailyReportAutoDraftPanel({
                       />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-studio-text-primary">{item.title || 'Auto record'}</p>
-                          <span className="text-xs text-studio-text-muted">{item.sourceType || 'source'} #{item.sourceId || '-'}</span>
+                          <p className="text-sm font-semibold text-studio-text-primary">{item.title || '自动草稿记录'}</p>
+                          <span className="text-xs text-studio-text-muted">{sourceLabels[item.sourceType || 'unknown'] || '业务来源'} #{item.sourceId || '-'}</span>
                         </div>
                         <div className="mt-1 flex flex-wrap gap-2 text-xs text-studio-text-muted">
-                          <span>Section: {item.sectionKey}</span>
-                          {updatedAt ? <span>Updated: {String(updatedAt)}</span> : null}
-                          {imported ? <span className="inline-flex items-center gap-1 text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Imported</span> : null}
+                          <span>分段：{sectionLabels[item.sectionKey] || '其他'}</span>
+                          {updatedAt ? <span>更新于：{String(updatedAt)}</span> : null}
+                          {imported ? <span className="inline-flex items-center gap-1 text-emerald-400"><CheckCircle2 className="h-3 w-3" /> 已导入</span> : null}
                         </div>
                         <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{item.contentMd}</p>
                       </div>
@@ -131,10 +137,10 @@ export default function DailyReportAutoDraftPanel({
 
           <div className="grid gap-2 sm:grid-cols-2">
             <ActionButton onClick={applySelected} variant="primary" disabled={selectedKeys.length === 0} className="w-full">
-              Import selected
+              导入选中
             </ActionButton>
             <ActionButton onClick={() => onApply(available)} disabled={available.length === 0} className="w-full">
-              Import all
+              全部导入
             </ActionButton>
           </div>
         </div>

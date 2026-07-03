@@ -22,6 +22,42 @@ const RETRO_STATUSES: RetrospectiveStatus[] = ['draft', 'published', 'archived']
 const ACTION_STATUSES: RetroActionStatus[] = ['todo', 'doing', 'done', 'cancelled'];
 const MAX_RETRO_RANGE_DAYS = 366;
 
+const RETRO_STATUS_LABELS: Record<RetrospectiveStatus, string> = {
+  draft: '草稿',
+  published: '已发布',
+  archived: '已归档',
+};
+
+const ACTION_STATUS_LABELS: Record<RetroActionStatus, string> = {
+  todo: '待处理',
+  doing: '进行中',
+  done: '已完成',
+  cancelled: '已取消',
+};
+
+const RETRO_CATEGORY_LABELS: Record<RetroTemplateCategory, string> = {
+  weekly: '周复盘',
+  project: '项目复盘',
+  channel: '渠道复盘',
+  topic: '选题复盘',
+  daily: '日报复盘',
+  custom: '自定义',
+};
+
+const METRIC_LABELS: Record<string, string> = {
+  topics_count: '选题数量',
+  production_count: '创作数量',
+  publishing_count: '发布数量',
+  daily_reports_submitted_count: '日报提交数',
+  daily_reports_reviewed_count: '日报审核数',
+  daily_reports_rejected_count: '日报退回数',
+  daily_reports_risk_count: '日报风险数',
+  daily_report_risk_section_nonempty: '日报风险分段数',
+  daily_report_tomorrow_section_nonempty: '日报明日计划分段数',
+  retro_actions_count: '复盘行动项数',
+  retro_actions_done_count: '已完成行动项数',
+};
+
 type Row = Record<string, unknown>;
 
 type RetrospectiveRow = Row & {
@@ -57,7 +93,7 @@ export class RetrospectiveServiceError extends Error {
 
 function assertAuthenticated(user?: User): asserts user is User {
   if (!user) {
-    throw new RetrospectiveServiceError(401, 'UNAUTHENTICATED', 'Unauthenticated');
+    throw new RetrospectiveServiceError(401, 'UNAUTHENTICATED', '请先登录');
   }
 }
 
@@ -88,7 +124,7 @@ async function canUsePermission(user: User, code: string) {
 function parseDate(value?: string, field = 'date') {
   const date = String(value || '').trim();
   if (!DATE_RE.test(date)) {
-    throw new RetrospectiveServiceError(400, 'INVALID_DATE', `${field} must use YYYY-MM-DD`);
+    throw new RetrospectiveServiceError(400, 'INVALID_DATE', `${field} 必须使用 YYYY-MM-DD 格式`);
   }
   return date;
 }
@@ -97,12 +133,12 @@ function ensureDateRange(start: string, end: string) {
   const startTime = new Date(`${start}T00:00:00+08:00`).getTime();
   const endTime = new Date(`${end}T00:00:00+08:00`).getTime();
   if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime > endTime) {
-    throw new RetrospectiveServiceError(400, 'INVALID_RANGE', 'Invalid retrospective period');
+    throw new RetrospectiveServiceError(400, 'INVALID_RANGE', '复盘周期不合法');
   }
 
   const days = Math.floor((endTime - startTime) / 86_400_000) + 1;
   if (days > MAX_RETRO_RANGE_DAYS) {
-    throw new RetrospectiveServiceError(400, 'RANGE_TOO_LARGE', 'Retrospective period cannot exceed 366 days');
+    throw new RetrospectiveServiceError(400, 'RANGE_TOO_LARGE', '复盘周期不能超过 366 天');
   }
 }
 
@@ -129,7 +165,7 @@ function parseCategory(value?: string): RetroTemplateCategory | undefined {
     return undefined;
   }
   if (!TEMPLATE_CATEGORIES.includes(value as RetroTemplateCategory)) {
-    throw new RetrospectiveServiceError(400, 'INVALID_CATEGORY', 'Invalid retrospective template category');
+    throw new RetrospectiveServiceError(400, 'INVALID_CATEGORY', '复盘模板类型不合法');
   }
   return value as RetroTemplateCategory;
 }
@@ -139,7 +175,7 @@ function parseStatus(value?: string): RetrospectiveStatus | undefined {
     return undefined;
   }
   if (!RETRO_STATUSES.includes(value as RetrospectiveStatus)) {
-    throw new RetrospectiveServiceError(400, 'INVALID_STATUS', 'Invalid retrospective status');
+    throw new RetrospectiveServiceError(400, 'INVALID_STATUS', '复盘状态不合法');
   }
   return value as RetrospectiveStatus;
 }
@@ -147,7 +183,7 @@ function parseStatus(value?: string): RetrospectiveStatus | undefined {
 function parseScopeType(value?: string): RetrospectiveScopeType {
   const scopeType = value || 'custom';
   if (!SCOPE_TYPES.includes(scopeType as RetrospectiveScopeType)) {
-    throw new RetrospectiveServiceError(400, 'INVALID_SCOPE_TYPE', 'Invalid retrospective scope type');
+    throw new RetrospectiveServiceError(400, 'INVALID_SCOPE_TYPE', '复盘范围不合法');
   }
   return scopeType as RetrospectiveScopeType;
 }
@@ -157,7 +193,7 @@ function parseActionStatus(value?: string): RetroActionStatus | undefined {
     return undefined;
   }
   if (!ACTION_STATUSES.includes(value as RetroActionStatus)) {
-    throw new RetrospectiveServiceError(400, 'INVALID_ACTION_STATUS', 'Invalid action status');
+    throw new RetrospectiveServiceError(400, 'INVALID_ACTION_STATUS', '行动项状态不合法');
   }
   return value as RetroActionStatus;
 }
@@ -371,7 +407,7 @@ async function notifyActionUpdated(retroId: number, action: Row, actorId: number
     notifyUser(
       userId,
       changed ? '复盘行动项状态已更新' : '复盘行动项已更新',
-      `复盘「${retro.title}」的行动项「${action.title || ''}」已更新${changed ? `：${beforeStatus} -> ${afterStatus}` : '。'}`,
+      `复盘「${retro.title}」的行动项「${action.title || ''}」已更新${changed ? `：从${ACTION_STATUS_LABELS[beforeStatus as RetroActionStatus] || '未知状态'}调整为${ACTION_STATUS_LABELS[afterStatus as RetroActionStatus] || '未知状态'}` : '。'}`,
       changed && afterStatus === 'done' ? 'success' : 'info',
       `/retrospectives/${retro.id}`,
     );
@@ -419,7 +455,7 @@ async function userCanManageActions(user: User) {
 function parseId(value: number | string, field = 'id') {
   const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) {
-    throw new RetrospectiveServiceError(400, 'INVALID_ID', `${field} is invalid`);
+    throw new RetrospectiveServiceError(400, 'INVALID_ID', `${field} 不合法`);
   }
   return id;
 }
@@ -443,10 +479,10 @@ function buildRetrospectiveMarkdown(detail: Awaited<ReturnType<typeof getRetrosp
   const lines: string[] = [
     `# ${retrospective.title}`,
     '',
-    `- 类型：${retrospective.templateCategory || 'custom'}`,
+    `- 类型：${RETRO_CATEGORY_LABELS[retrospective.templateCategory as RetroTemplateCategory] || '自定义'}`,
     `- 模板：${template?.name || retrospective.templateName || '-'}`,
     `- 周期：${retrospective.periodStart} 至 ${retrospective.periodEnd}`,
-    `- 状态：${retrospective.status}`,
+    `- 状态：${RETRO_STATUS_LABELS[retrospective.status as RetrospectiveStatus] || '未知状态'}`,
     `- 负责人：${retrospective.ownerName || '-'}`,
     `- 创建人：${retrospective.creatorName || '-'}`,
     `- 发布时间：${retrospective.publishedAt || '-'}`,
@@ -464,7 +500,7 @@ function buildRetrospectiveMarkdown(detail: Awaited<ReturnType<typeof getRetrosp
     lines.push('- 暂无指标快照');
   } else {
     for (const snapshot of snapshots) {
-      lines.push(`- ${snapshot.metricName}（${snapshot.metricKey}）：${snapshot.valueNum ?? snapshot.valueText ?? '-'}`);
+      lines.push(`- ${METRIC_LABELS[snapshot.metricKey] || snapshot.metricName || '指标'}：${snapshot.valueNum ?? snapshot.valueText ?? '-'}`);
     }
   }
 
@@ -478,7 +514,7 @@ function buildRetrospectiveMarkdown(detail: Awaited<ReturnType<typeof getRetrosp
         '',
         `- 负责人：${action.ownerName || '-'}`,
         `- 截止日期：${action.dueDate || '-'}`,
-        `- 状态：${action.status}`,
+        `- 状态：${ACTION_STATUS_LABELS[action.status as RetroActionStatus] || '未知状态'}`,
         `- 关闭时间：${action.closedAt || '-'}`,
         '',
         markdownValue(action.descriptionMd),
@@ -557,12 +593,12 @@ export async function listRetroTemplates(user: User | undefined, includeDisabled
 export async function createRetroTemplate(user: User | undefined, input: CreateRetroTemplateInput) {
   assertAuthenticated(user);
   if (!await canUsePermission(user, 'analytics:retro:template_manage')) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Missing retrospective template permission');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号没有管理复盘模板的权限');
   }
 
   const name = String(input.name || '').trim();
   if (!name) {
-    throw new RetrospectiveServiceError(400, 'INVALID_NAME', 'Template name is required');
+    throw new RetrospectiveServiceError(400, 'INVALID_NAME', '请填写模板名称');
   }
   const category = parseCategory(input.category || 'custom') || 'custom';
   const templateId = await executeInsert(
@@ -675,10 +711,10 @@ export async function listRetrospectiveDailyRisks(user: User | undefined, retroI
   const retroId = parseId(retroIdValue);
   const row = await getRetrospectiveRow(retroId);
   if (!row) {
-    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', 'Retrospective not found');
+    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', '复盘不存在或不可访问');
   }
   if (!await userCanView(user, row)) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Cannot view retrospective risks');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号不能查看该复盘的日报风险');
   }
 
   const rows = await queryAll<Row>(
@@ -713,12 +749,12 @@ export async function listRetrospectiveDailyRisks(user: User | undefined, retroI
 export async function createRetrospective(user: User | undefined, input: CreateRetrospectiveInput) {
   assertAuthenticated(user);
   if (!await canUsePermission(user, 'analytics:retro:create')) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Missing retrospective create permission');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号没有创建复盘的权限');
   }
 
   const title = String(input.title || '').trim();
   if (!title) {
-    throw new RetrospectiveServiceError(400, 'INVALID_TITLE', 'Retrospective title is required');
+    throw new RetrospectiveServiceError(400, 'INVALID_TITLE', '请填写复盘标题');
   }
   const periodStart = parseDate(input.periodStart, 'periodStart');
   const periodEnd = parseDate(input.periodEnd, 'periodEnd');
@@ -731,7 +767,7 @@ export async function createRetrospective(user: User | undefined, input: CreateR
   if (templateId) {
     const template = await queryOne<Row>(`SELECT id FROM retro_templates WHERE id = ?`, [templateId]);
     if (!template) {
-      throw new RetrospectiveServiceError(404, 'TEMPLATE_NOT_FOUND', 'Retrospective template not found');
+      throw new RetrospectiveServiceError(404, 'TEMPLATE_NOT_FOUND', '复盘模板不存在');
     }
   }
 
@@ -750,10 +786,10 @@ export async function getRetrospectiveDetail(user: User | undefined, retroIdValu
   const retroId = parseId(retroIdValue);
   const row = await getRetrospectiveRow(retroId);
   if (!row) {
-    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', 'Retrospective not found');
+    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', '复盘不存在或不可访问');
   }
   if (!await userCanView(user, row)) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Cannot view retrospective');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号不能查看该复盘');
   }
 
   const [template, snapshots, actions] = await Promise.all([
@@ -779,7 +815,7 @@ export async function getRetrospectiveDetail(user: User | undefined, retroIdValu
 export async function exportRetrospective(user: User | undefined, retroIdValue: number, typeValue?: string) {
   const type = typeValue === 'html' ? 'html' : 'markdown';
   const detail = await getRetrospectiveDetail(user, retroIdValue);
-  const safeTitle = detail.retrospective.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'retrospective';
+  const safeTitle = detail.retrospective.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || '复盘';
   const content = type === 'html' ? buildRetrospectiveHtml(detail) : buildRetrospectiveMarkdown(detail);
 
   return {
@@ -794,18 +830,18 @@ export async function updateRetrospective(user: User | undefined, retroIdValue: 
   const retroId = parseId(retroIdValue);
   const row = await getRetrospectiveRow(retroId);
   if (!row) {
-    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', 'Retrospective not found');
+    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', '复盘不存在或不可访问');
   }
   if (!await userCanEdit(user, row)) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Cannot edit retrospective');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前复盘不可编辑');
   }
   if (input.version !== undefined && Number(input.version) !== Number(row.version || 1)) {
-    throw new RetrospectiveServiceError(409, 'VERSION_CONFLICT', 'Retrospective version changed');
+    throw new RetrospectiveServiceError(409, 'VERSION_CONFLICT', '复盘已被更新，请刷新后重试');
   }
 
   const title = input.title === undefined ? String(row.title) : String(input.title || '').trim();
   if (!title) {
-    throw new RetrospectiveServiceError(400, 'INVALID_TITLE', 'Retrospective title is required');
+    throw new RetrospectiveServiceError(400, 'INVALID_TITLE', '请填写复盘标题');
   }
 
   await execute(
@@ -830,49 +866,49 @@ async function buildMetricSnapshots(retro: RetrospectiveRow) {
   const metrics = [
     {
       metricKey: 'topics_count',
-      metricName: 'Topics count',
+      metricName: '选题数量',
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM topics WHERE date(created_at) BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'topics', field: 'created_at' },
     },
     {
       metricKey: 'production_count',
-      metricName: 'Production count',
+      metricName: '创作数量',
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM production WHERE date(created_at) BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'production', field: 'created_at' },
     },
     {
       metricKey: 'publishing_count',
-      metricName: 'Publishing count',
+      metricName: '发布数量',
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM publishing WHERE date(created_at) BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'publishing', field: 'created_at' },
     },
     {
       metricKey: 'daily_reports_submitted_count',
-      metricName: 'Daily reports submitted',
+      metricName: '日报提交数',
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM daily_reports WHERE submitted_at IS NOT NULL AND report_date BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'daily_reports', field: 'report_date' },
     },
     {
       metricKey: 'daily_reports_reviewed_count',
-      metricName: 'Daily reports reviewed',
+      metricName: '日报审核数',
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM daily_reports WHERE reviewed_at IS NOT NULL AND report_date BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'daily_reports', field: 'report_date' },
     },
     {
       metricKey: 'daily_reports_rejected_count',
-      metricName: 'Daily reports rejected',
+      metricName: '日报退回数',
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM daily_reports WHERE status = 'rejected' AND report_date BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'daily_reports', status: 'rejected' },
     },
     {
       metricKey: 'daily_reports_risk_count',
-      metricName: 'Daily reports risk count',
+      metricName: '日报风险数',
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM daily_reports WHERE risk_level IN ('warning', 'blocked', 'high') AND report_date BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'daily_reports', field: 'risk_level' },
     },
     {
       metricKey: 'daily_report_risk_section_nonempty',
-      metricName: 'Daily report risk sections',
+      metricName: '日报风险分段数',
       valueNum: await countOne(
         `SELECT COUNT(*) AS count
          FROM daily_report_items i
@@ -884,7 +920,7 @@ async function buildMetricSnapshots(retro: RetrospectiveRow) {
     },
     {
       metricKey: 'daily_report_tomorrow_section_nonempty',
-      metricName: 'Daily report tomorrow sections',
+      metricName: '日报明日计划分段数',
       valueNum: await countOne(
         `SELECT COUNT(*) AS count
          FROM daily_report_items i
@@ -896,13 +932,13 @@ async function buildMetricSnapshots(retro: RetrospectiveRow) {
     },
     {
       metricKey: 'retro_actions_count',
-      metricName: 'Retrospective actions',
+      metricName: '复盘行动项数',
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM retro_actions WHERE date(created_at) BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'retro_actions', field: 'created_at' },
     },
     {
       metricKey: 'retro_actions_done_count',
-      metricName: 'Retrospective actions done',
+      metricName: '已完成行动项数',
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM retro_actions WHERE status = 'done' AND date(updated_at) BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'retro_actions', status: 'done' },
     },
@@ -916,13 +952,13 @@ export async function generateRetrospectiveSnapshot(user: User | undefined, retr
   const retroId = parseId(retroIdValue);
   const row = await getRetrospectiveRow(retroId);
   if (!row) {
-    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', 'Retrospective not found');
+    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', '复盘不存在或不可访问');
   }
   if (!await userCanEdit(user, row)) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Cannot generate retrospective snapshot');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号不能生成指标快照');
   }
   if (input.mode && input.mode !== 'replace') {
-    throw new RetrospectiveServiceError(400, 'INVALID_MODE', 'Only replace snapshot mode is supported');
+    throw new RetrospectiveServiceError(400, 'INVALID_MODE', '只支持刷新指标快照');
   }
 
   const capturedAt = beijingNow();
@@ -957,16 +993,16 @@ export async function publishRetrospective(user: User | undefined, retroIdValue:
   const retroId = parseId(retroIdValue);
   const row = await getRetrospectiveRow(retroId);
   if (!row) {
-    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', 'Retrospective not found');
+    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', '复盘不存在或不可访问');
   }
   if (!await userCanPublish(user, row)) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Cannot publish retrospective');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号不能发布该复盘');
   }
 
   const snapshotCount = await countOne(`SELECT COUNT(*) AS count FROM retro_metric_snapshots WHERE retro_id = ?`, [retroId]);
   const actionCount = await countOne(`SELECT COUNT(*) AS count FROM retro_actions WHERE retro_id = ?`, [retroId]);
   if (!String(row.summary_md || '').trim() && snapshotCount === 0 && actionCount === 0) {
-    throw new RetrospectiveServiceError(400, 'EMPTY_RETRO', 'Publish requires summary, snapshot or action');
+    throw new RetrospectiveServiceError(400, 'EMPTY_RETRO', '发布前请先填写结论、生成快照或创建行动项');
   }
 
   await execute(
@@ -985,10 +1021,10 @@ export async function archiveRetrospective(user: User | undefined, retroIdValue:
   const retroId = parseId(retroIdValue);
   const row = await getRetrospectiveRow(retroId);
   if (!row) {
-    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', 'Retrospective not found');
+    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', '复盘不存在或不可访问');
   }
   if (!await userCanArchive(user, row)) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Cannot archive retrospective');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号不能归档该复盘');
   }
 
   await execute(
@@ -1007,18 +1043,18 @@ export async function createRetroAction(user: User | undefined, retroIdValue: nu
   const retroId = parseId(retroIdValue);
   const row = await getRetrospectiveRow(retroId);
   if (!row) {
-    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', 'Retrospective not found');
+    throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', '复盘不存在或不可访问');
   }
   if (String(row.status) === 'archived') {
-    throw new RetrospectiveServiceError(409, 'RETRO_ARCHIVED', 'Cannot add actions to archived retrospective');
+    throw new RetrospectiveServiceError(409, 'RETRO_ARCHIVED', '复盘已归档，不能新增行动项');
   }
   if (!await userCanManageActions(user)) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Cannot create retrospective actions');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号不能创建行动项');
   }
 
   const title = String(input.title || '').trim();
   if (!title) {
-    throw new RetrospectiveServiceError(400, 'INVALID_ACTION_TITLE', 'Action title is required');
+    throw new RetrospectiveServiceError(400, 'INVALID_ACTION_TITLE', '请填写行动项标题');
   }
   const dueDate = input.dueDate ? parseDate(input.dueDate, 'dueDate') : null;
   const ownerId = input.ownerId ? parseId(input.ownerId, 'ownerId') : user.id;
@@ -1044,19 +1080,19 @@ export async function updateRetroAction(user: User | undefined, actionIdValue: n
     [actionId],
   );
   if (!action) {
-    throw new RetrospectiveServiceError(404, 'ACTION_NOT_FOUND', 'Retrospective action not found');
+    throw new RetrospectiveServiceError(404, 'ACTION_NOT_FOUND', '行动项不存在或不可访问');
   }
 
   const canManage = await userCanManageActions(user);
   const isOwner = Number(action.owner_id) === user.id;
   if (!canManage && !isOwner) {
-    throw new RetrospectiveServiceError(403, 'FORBIDDEN', 'Cannot update retrospective action');
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号不能更新该行动项');
   }
 
   const nextStatus = parseActionStatus(input.status) || String(action.status || 'todo') as RetroActionStatus;
   const title = input.title === undefined || !canManage ? String(action.title || '') : String(input.title || '').trim();
   if (!title) {
-    throw new RetrospectiveServiceError(400, 'INVALID_ACTION_TITLE', 'Action title is required');
+    throw new RetrospectiveServiceError(400, 'INVALID_ACTION_TITLE', '请填写行动项标题');
   }
   const dueDate = input.dueDate === undefined || !canManage
     ? action.due_date === null || action.due_date === undefined ? null : String(action.due_date)

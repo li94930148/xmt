@@ -48,24 +48,24 @@ async function main() {
 
   const conflict = await request('POST', '/draft', TOKEN, {
     reportDate: conflictDate,
-    manualSummaryMd: 'Smoke report',
+    manualSummaryMd: `回归测试日报-${Date.now()}`,
     riskLevel: 'normal',
-    items: [{ sectionKey: 'done', title: 'Done', contentMd: 'Smoke item', sortOrder: 0 }],
+    items: [{ sectionKey: 'done', title: '今日完成', contentMd: '回归测试日报分段', sortOrder: 0 }],
   }, [200]);
   await request('POST', '/draft', TOKEN, {
     reportDate: conflictDate,
     version: Math.max(0, Number(conflict.version) - 1),
-    manualSummaryMd: 'Conflict smoke',
+    manualSummaryMd: '回归测试冲突分支',
     riskLevel: 'normal',
-    items: [{ sectionKey: 'done', title: 'Done', contentMd: 'Conflict item', sortOrder: 0 }],
+    items: [{ sectionKey: 'done', title: '今日完成', contentMd: '回归测试冲突内容', sortOrder: 0 }],
   }, [409]);
 
   const saved = await request('POST', '/draft', TOKEN, {
     reportDate: smokeDate,
     version: empty.version,
-    manualSummaryMd: 'Smoke report ready',
+    manualSummaryMd: `回归测试日报已就绪-${Date.now()}`,
     riskLevel: 'normal',
-    items: [{ sectionKey: 'done', title: 'Done', contentMd: 'Smoke item', sortOrder: 0 }],
+    items: [{ sectionKey: 'done', title: '今日完成', contentMd: '回归测试日报分段', sortOrder: 0 }],
   }, [200]);
   const submitted = await request('POST', `/${saved.id}/submit`, TOKEN, null, [200]);
 
@@ -75,7 +75,7 @@ async function main() {
 
   if (ADMIN_TOKEN) {
     await request('GET', `/team?date=${smokeDate}`, ADMIN_TOKEN, null, [200]);
-    await request('POST', `/${submitted.id}/review`, ADMIN_TOKEN, { action: 'approve', comment: 'Smoke approved' }, [200, 409]);
+    await request('POST', `/${submitted.id}/review`, ADMIN_TOKEN, { action: 'approve', comment: '回归测试审核通过' }, [200, 409]);
   } else {
     console.log('SKIP admin team/review checks because ADMIN_TOKEN is not set.');
   }

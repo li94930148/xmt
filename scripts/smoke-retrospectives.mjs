@@ -49,7 +49,7 @@ async function main() {
   }, [400, 403]);
 
   const created = await request('POST', '/', createToken, {
-    title: `Smoke retrospective ${Date.now()}`,
+    title: `回归测试复盘-${Date.now()}`,
     scopeType: 'team',
     scopeId: null,
     periodStart: start,
@@ -65,19 +65,19 @@ async function main() {
   await request('GET', `/${retroId}`, TOKEN, null, [200]);
   await request('PUT', `/${retroId}`, createToken, {
     title: created.retrospective.title,
-    summaryMd: 'Smoke summary',
+    summaryMd: '回归测试结论',
     version: Math.max(0, Number(created.retrospective.version) - 1),
   }, [409]);
 
   const updated = await request('PUT', `/${retroId}`, createToken, {
     title: created.retrospective.title,
-    summaryMd: 'Smoke summary',
+    summaryMd: '回归测试结论',
     version: created.retrospective.version,
   }, [200]);
   await request('POST', `/${retroId}/snapshot`, createToken, { mode: 'replace' }, [200]);
   await request('POST', `/${retroId}/actions`, createToken, {
-    title: 'Smoke follow-up action',
-    descriptionMd: 'Created by smoke test',
+    title: `回归测试行动项-${Date.now()}`,
+    descriptionMd: '由回归测试创建，用于验证复盘行动项链路。',
     dueDate: end,
   }, [200, 403]);
 
@@ -86,7 +86,7 @@ async function main() {
   if (actionId) {
     await request('PATCH', `/actions/${actionId}`, createToken, {
       status: 'doing',
-      resultMd: 'In progress',
+      resultMd: '处理中',
     }, [200]);
   }
 
@@ -94,7 +94,7 @@ async function main() {
   await request('POST', `/${retroId}/archive`, createToken, null, [200, 403, 409]);
   await request('PUT', `/${retroId}`, createToken, {
     title: updated.retrospective.title,
-    summaryMd: 'Should be readonly after publish/archive',
+    summaryMd: '发布或归档后应保持只读',
     version: Number(updated.retrospective.version) + 2,
   }, [403, 409]);
 }

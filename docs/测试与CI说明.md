@@ -49,3 +49,13 @@ E2E_BASE_URL=http://localhost:5174 E2E_USERNAME=本地测试账号 E2E_PASSWORD=
 - 不在 GitHub Actions 中写入真实生产 token。
 - 全仓 lint 应在历史债务分批清理后再作为 CI 阻塞项。
 
+## 第 12 轮中文化专项补充
+
+- smoke 脚本后续不再生成英文测试标题或英文测试正文。
+- 本地已将明确匹配 `Smoke retrospective%` 和 `Smoke follow-up action` 的开发测试数据改为中文。
+- 非沙箱 `npm run build` 已通过。
+- 专项 eslint 已通过。
+- 日报 smoke 和复盘 smoke 均已使用本地临时 token 真实链路通过。
+- 登录态 E2E smoke 已通过。
+- 中文化浏览器深度补测已覆盖日报、复盘列表、复盘详情、Markdown 导出、HTML 打印页、暗色模式和移动端窄屏。
+- CI 仍只执行 `check/build`，不注入真实 token，不把 smoke/E2E 作为阻塞项。

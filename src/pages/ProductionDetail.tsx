@@ -13,7 +13,7 @@ import {
   Users,
   Wifi,
 } from 'lucide-react';
-import { useAppStore } from '../store';
+import { useAppStore, useAuthStore } from '../store';
 import { deleteProduction, getProductionById, getProductionHistory, updateProduction } from '../api';
 import type { Production as ProductionType, ProductionHistory, Topic } from '../types';
 import { getTopic } from '../api';
@@ -49,6 +49,8 @@ const NEXT_STATUSES: Record<string, string> = {
   approved: 'approved',
   rejected: 'draft',
 };
+
+const CONTENT_EDIT_ROLES = new Set(['admin', 'editor', 'copywriter', 'post_production', 'camera']);
 
 type HistoryVersion = ProductionHistory & {
   content_markdown?: string;
@@ -101,6 +103,7 @@ export default function ProductionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const appStore = useAppStore();
+  const authUser = useAuthStore((state) => state.user);
   const isDark = appStore.theme === 'dark';
   const { hasPermission } = usePermission();
 
@@ -118,7 +121,16 @@ export default function ProductionDetail() {
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
   const lastAutoSavedContentRef = useRef('');
 
-  const canDelete = hasPermission('production:delete');
+  const canEditProduction = Boolean(
+    production &&
+      (
+        CONTENT_EDIT_ROLES.has(authUser?.role || '') ||
+        Number(production.operator_id) === authUser?.id ||
+        Number(topic?.creator_id) === authUser?.id ||
+        Number(topic?.assignee_id) === authUser?.id
+      ),
+  );
+  const canDelete = canEditProduction && hasPermission('production:delete');
   const activeDocId = production ? getCollaborationRoomId('production', production.id) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
 
@@ -282,7 +294,7 @@ export default function ProductionDetail() {
   };
 
   useEffect(() => {
-    if (!production || selectedVersionId !== 'current') return;
+    if (!production || !canEditProduction || selectedVersionId !== 'current') return;
     if (editData.content === lastAutoSavedContentRef.current) return;
 
     syncToDatabase({
@@ -307,10 +319,10 @@ export default function ProductionDetail() {
     return () => {
       cancelDatabaseSync(getCollaborationRoomId('production', production.id));
     };
-  }, [editData.content, editData.status, production, selectedVersionId]);
+  }, [canEditProduction, editData.content, editData.status, production, selectedVersionId]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
-    if (!production) return;
+    if (!production || !canEditProduction) return;
 
     try {
       const result = await updateProduction(production.id, {
@@ -340,7 +352,7 @@ export default function ProductionDetail() {
   };
 
   const handleSubmitReview = async () => {
-    if (!production) return;
+    if (!production || !canEditProduction) return;
 
     try {
       await updateProduction(production.id, {
@@ -369,7 +381,7 @@ export default function ProductionDetail() {
   };
 
   const handleStatusUpdate = async (status: string) => {
-    if (!production) return;
+    if (!production || !canEditProduction) return;
 
     try {
       await updateProduction(production.id, {
@@ -513,17 +525,17 @@ export default function ProductionDetail() {
               <FileText className="h-4 w-4" />
               当前稿件
             </ActionButton>
-            {production.status !== 'approved' ? (
+            {canEditProduction && production.status !== 'approved' ? (
               <ActionButton onClick={() => handleStatusUpdate(NEXT_STATUSES[production.status])} variant="primary" className="px-3 py-2">
                 <ArrowRight className="h-4 w-4" />
                 {production.status === 'draft' ? '提交审核' : production.status === 'review' ? '审核通过' : '重新编辑'}
               </ActionButton>
-            ) : (
+            ) : production.status === 'approved' ? (
               <ActionButton onClick={() => navigate('/shooting')} variant="primary" className="px-3 py-2">
                 <ArrowRight className="h-4 w-4" />
                 成片制作
               </ActionButton>
-            )}
+            ) : null}
             {canDelete ? (
               <ActionButton
                 onClick={() => setShowDeleteModal(true)}
@@ -573,7 +585,7 @@ export default function ProductionDetail() {
             ) : null}
           </div>
 
-          {selectedVersion?.isCurrent ? (
+          {selectedVersion?.isCurrent && canEditProduction ? (
             <div className="min-h-[calc(100vh-22rem)] bg-[var(--editor-bg)]">
               <ContentEditor
                 value={editData.content}
@@ -645,10 +657,10 @@ export default function ProductionDetail() {
 
             <div className="space-y-3 border-t border-studio-border-soft pt-5">
               <p className="text-xs font-semibold uppercase text-studio-text-muted">版本操作</p>
-              <ActionButton onClick={startEditing} className="w-full">
+              {canEditProduction && <ActionButton onClick={startEditing} className="w-full">
                 当前版本查看 / 编辑
-              </ActionButton>
-              <div className="grid grid-cols-2 gap-2">
+              </ActionButton>}
+              {canEditProduction && <div className="grid grid-cols-2 gap-2">
                 <ActionButton onClick={() => handleVersionedSave('minor')} className="px-3 py-2">
                   <Save className="h-4 w-4" />
                   小修保存
@@ -657,8 +669,8 @@ export default function ProductionDetail() {
                   <Save className="h-4 w-4" />
                   另开新版
                 </ActionButton>
-              </div>
-              {editData.status === 'draft' ? (
+              </div>}
+              {canEditProduction && editData.status === 'draft' ? (
                 <ActionButton onClick={handleSubmitReview} variant="primary" className="w-full">
                   <ArrowRight className="h-4 w-4" />
                   提交审核

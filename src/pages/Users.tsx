@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Calendar, Edit3, History, Lock, Mail, Plus, Search, Shield, Trash2, Unlock, User as UserIcon } from 'lucide-react';
-import { createUser, deleteUser, getLogs, getRoles, getUsers, updateUser } from '../api';
+import { createUser, deleteUser, getAssignableRoles, getLogs, getUsers, updateUser } from '../api';
 import EmptyState from '../components/EmptyState';
 import { ConfirmModal, FormModal, LoadingState, PageHeader, PageToolbar } from '../components/common';
+import { usePermission } from '../hooks/usePermission';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { getRoleDisplayName } from '../lib/roles';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
@@ -13,8 +14,6 @@ interface RoleOption {
   id: number;
   code: string;
   name: string;
-  description?: string;
-  is_system?: boolean;
 }
 
 interface UserFormData {
@@ -26,10 +25,13 @@ interface UserFormData {
   enabled: boolean;
 }
 
-const baseRoleColors: Record<string, string> = {
+const roleColors: Record<string, string> = {
   admin: 'bg-red-500/20 text-red-400 border-red-500/30',
   director: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   editor: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  copywriter: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  post_production: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  camera: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
   member: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
 };
 
@@ -60,58 +62,72 @@ export default function Users() {
 
   const addNotification = useAppStore((state) => state.addNotification);
   const styles = useThemeStyles();
+  const { hasPermission } = usePermission();
+
+  const canViewUsers = hasPermission('user:view');
+  const canCreateUser = hasPermission('user:create');
+  const canUpdateUser = hasPermission('user:update');
+  const canDeleteUser = hasPermission('user:delete');
+  const canViewLogs = hasPermission('user:logs');
+  const canManageRoles = hasPermission('system:role');
+  const canLoadAssignableRoles = canCreateUser || canUpdateUser;
 
   const defaultRoleCode = useMemo(() => {
-    if (roles.some((role) => role.code === 'member')) {
-      return 'member';
-    }
-    return roles[0]?.code || '';
+    if (roles.some((role) => role.code === 'member')) return 'member';
+    return roles[0]?.code || 'member';
   }, [roles]);
 
   const roleNameMap = useMemo(
-    () =>
-      roles.reduce<Record<string, string>>((acc, role) => {
-        acc[role.code] = role.name;
-        return acc;
-      }, {}),
+    () => roles.reduce<Record<string, string>>((acc, role) => {
+      acc[role.code] = role.name;
+      return acc;
+    }, {}),
     [roles],
   );
 
-  const getRoleBadgeClass = (roleCode: string) =>
-    baseRoleColors[roleCode] || 'bg-slate-500/20 text-slate-300 border-slate-500/30';
-
+  const getRoleBadgeClass = (roleCode: string) => roleColors[roleCode] || 'bg-slate-500/20 text-slate-300 border-slate-500/30';
   const getRoleLabel = (roleCode: string) => roleNameMap[roleCode] || getRoleDisplayName(roleCode);
 
-  const resetForm = (roleCode = defaultRoleCode) => {
-    setFormData(buildDefaultForm(roleCode));
+  const ensureAssignableRoles = async () => {
+    if (!canLoadAssignableRoles) return roles;
+    if (roles.length > 0) return roles;
+
+    try {
+      const roleList = await getAssignableRoles();
+      setRoles(roleList);
+      setFormData((current) => ({
+        ...current,
+        role: current.role || (roleList.some((role) => role.code === 'member') ? 'member' : roleList[0]?.code || ''),
+      }));
+      return roleList;
+    } catch (error) {
+      addNotification({ title: '获取角色失败', message: (error as Error).message, type: 'error' });
+      return [];
+    }
   };
 
   useEffect(() => {
-    async function loadRoles() {
-      try {
-        const roleList = await getRoles();
-        setRoles(roleList);
-        setFormData((current) => ({
-          ...current,
-          role:
-            current.role ||
-            (roleList.some((role: RoleOption) => role.code === 'member') ? 'member' : roleList[0]?.code || ''),
-        }));
-      } catch (error) {
-        addNotification({ title: '获取角色失败', message: (error as Error).message, type: 'error' });
-      }
+    if (activeTab === 'logs' && !canViewLogs) {
+      setActiveTab('users');
     }
-
-    void loadRoles();
-  }, [addNotification]);
+  }, [activeTab, canViewLogs]);
 
   useEffect(() => {
     async function fetchCurrentTabData() {
       setLoading(true);
       try {
         if (activeTab === 'users') {
+          if (!canViewUsers) {
+            setUsers([]);
+            return;
+          }
           const result = await getUsers();
           setUsers(result.data);
+          return;
+        }
+
+        if (!canViewLogs) {
+          setLogs([]);
           return;
         }
 
@@ -125,46 +141,61 @@ export default function Users() {
     }
 
     void fetchCurrentTabData();
-  }, [activeTab, addNotification]);
+  }, [activeTab, addNotification, canViewLogs, canViewUsers]);
 
-  const filteredUsers = users.filter(
-    (user) =>
-      user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
+  const filteredUsers = users.filter((user) => {
+    const term = searchTerm.toLowerCase();
+    return (
+      user.username.toLowerCase().includes(term) ||
+      (user.name || '').toLowerCase().includes(term) ||
+      (user.email || '').toLowerCase().includes(term)
+    );
+  });
 
-  const filteredLogs = logs.filter(
-    (log) =>
-      log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.user_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.target.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
+  const filteredLogs = logs.filter((log) => {
+    const term = searchTerm.toLowerCase();
+    return (
+      log.action.toLowerCase().includes(term) ||
+      (log.user_name || '').toLowerCase().includes(term) ||
+      log.target.toLowerCase().includes(term)
+    );
+  });
 
-  const openCreateModal = () => {
-    resetForm();
+  const openCreateModal = async () => {
+    if (!canCreateUser) return;
+    const roleList = await ensureAssignableRoles();
+    const nextRole = roleList.some((role) => role.code === 'member') ? 'member' : roleList[0]?.code || defaultRoleCode;
+    setFormData(buildDefaultForm(nextRole));
     setShowCreateModal(true);
   };
 
-  const openEditModal = (user: User) => {
+  const openEditModal = async (user: User) => {
+    if (!canUpdateUser) return;
+    await ensureAssignableRoles();
     setEditingUser(user);
     setFormData({
       username: user.username,
       password: '',
-      email: user.email,
+      email: user.email || '',
       role: user.role,
-      name: user.name,
+      name: user.name || '',
       enabled: user.enabled,
     });
     setShowEditModal(true);
   };
 
+  const refreshUsers = async () => {
+    if (!canViewUsers) return;
+    const result = await getUsers();
+    setUsers(result.data);
+  };
+
   const handleCreate = async () => {
+    if (!canCreateUser) return;
     if (!formData.username || !formData.password) {
       addNotification({ title: '创建失败', message: '用户名和密码不能为空', type: 'error' });
       return;
     }
-
     if (!formData.role) {
       addNotification({ title: '创建失败', message: '请选择角色', type: 'error' });
       return;
@@ -174,20 +205,15 @@ export default function Users() {
       await createUser(formData);
       addNotification({ title: '创建成功', message: '用户已创建', type: 'success' });
       setShowCreateModal(false);
-      resetForm();
-
-      const result = await getUsers();
-      setUsers(result.data);
+      setFormData(buildDefaultForm(defaultRoleCode));
+      await refreshUsers();
     } catch (error) {
       addNotification({ title: '创建失败', message: (error as Error).message, type: 'error' });
     }
   };
 
   const handleEdit = async () => {
-    if (!editingUser) {
-      return;
-    }
-
+    if (!canUpdateUser || !editingUser) return;
     if (!formData.role) {
       addNotification({ title: '更新失败', message: '请选择角色', type: 'error' });
       return;
@@ -200,28 +226,20 @@ export default function Users() {
         name: formData.name,
         enabled: formData.enabled,
       };
-
-      if (formData.password) {
-        updateData.password = formData.password;
-      }
+      if (formData.password) updateData.password = formData.password;
 
       await updateUser(editingUser.id, updateData);
       addNotification({ title: '更新成功', message: '用户信息已更新', type: 'success' });
       setShowEditModal(false);
       setEditingUser(null);
-
-      const result = await getUsers();
-      setUsers(result.data);
+      await refreshUsers();
     } catch (error) {
       addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
     }
   };
 
   const handleDelete = async () => {
-    if (!pendingDeleteUser) {
-      return;
-    }
-
+    if (!canDeleteUser || !pendingDeleteUser) return;
     setDeleting(true);
     try {
       await deleteUser(pendingDeleteUser.id);
@@ -236,6 +254,7 @@ export default function Users() {
   };
 
   const handleToggleEnable = async (user: User) => {
+    if (!canUpdateUser) return;
     try {
       await updateUser(user.id, { enabled: !user.enabled });
       addNotification({
@@ -243,9 +262,7 @@ export default function Users() {
         message: user.enabled ? '用户已禁用' : '用户已启用',
         type: 'success',
       });
-      setUsers((current) =>
-        current.map((item) => (item.id === user.id ? { ...item, enabled: !item.enabled } : item)),
-      );
+      setUsers((current) => current.map((item) => (item.id === user.id ? { ...item, enabled: !item.enabled } : item)));
     } catch (error) {
       addNotification({ title: '操作失败', message: (error as Error).message, type: 'error' });
     }
@@ -255,21 +272,19 @@ export default function Users() {
     <div className={`flex w-fit gap-2 rounded-xl p-1 ${styles.bgSecondary} ${styles.border}`}>
       <button
         onClick={() => setActiveTab('users')}
-        className={`rounded-lg px-4 py-2 transition-colors ${
-          activeTab === 'users' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`
-        }`}
+        className={`rounded-lg px-4 py-2 transition-colors ${activeTab === 'users' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`}`}
       >
         用户列表
       </button>
-      <button
-        onClick={() => setActiveTab('logs')}
-        className={`flex items-center gap-2 rounded-lg px-4 py-2 transition-colors ${
-          activeTab === 'logs' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`
-        }`}
-      >
-        <History className="h-4 w-4" />
-        操作日志
-      </button>
+      {canViewLogs && (
+        <button
+          onClick={() => setActiveTab('logs')}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 transition-colors ${activeTab === 'logs' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`}`}
+        >
+          <History className="h-4 w-4" />
+          操作日志
+        </button>
+      )}
     </div>
   );
 
@@ -286,18 +301,29 @@ export default function Users() {
     </div>
   );
 
+  const renderRoleSelect = (
+    <select
+      value={formData.role}
+      onChange={(event) => setFormData({ ...formData, role: event.target.value })}
+      className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+    >
+      {roles.map((role) => (
+        <option key={role.id} value={role.code}>
+          {role.name}
+        </option>
+      ))}
+    </select>
+  );
+
   return (
     <>
       <div className="space-y-6">
         <PageHeader
           title="人员管理"
-          description="管理系统用户和查看操作日志"
+          description={canManageRoles ? '管理系统用户、角色分配和操作日志' : '查看系统用户和可访问的操作信息'}
           actions={
-            activeTab === 'users' ? (
-              <button
-                onClick={openCreateModal}
-                className={`flex items-center gap-2 rounded-lg px-4 py-2 ${styles.buttonPrimary} transition-colors`}
-              >
+            activeTab === 'users' && canCreateUser ? (
+              <button onClick={() => void openCreateModal()} className={`flex items-center gap-2 rounded-lg px-4 py-2 ${styles.buttonPrimary} transition-colors`}>
                 <Plus className="h-5 w-5" />
                 添加用户
               </button>
@@ -310,15 +336,9 @@ export default function Users() {
         {activeTab === 'users' && (
           <div className={`${styles.bgSecondary} overflow-hidden rounded-xl ${styles.border}`}>
             {loading ? (
-              <div className="px-6 py-12">
-                <LoadingState type="section" text="加载用户中..." />
-              </div>
+              <div className="px-6 py-12"><LoadingState type="section" text="加载用户中..." /></div>
             ) : filteredUsers.length === 0 ? (
-              <EmptyState
-                icon={UserIcon}
-                title="暂无用户"
-                description="当前还没有可显示的用户记录。"
-              />
+              <EmptyState icon={UserIcon} title="暂无用户" description="当前没有可显示的用户记录。" />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -346,10 +366,7 @@ export default function Users() {
                         </td>
                         <td className={`px-6 py-4 ${styles.textSecondary}`}>{user.name || '-'}</td>
                         <td className={`px-6 py-4 ${styles.textSecondary}`}>
-                          <div className="flex items-center gap-2">
-                            <Mail className="h-4 w-4" />
-                            {user.email || '-'}
-                          </div>
+                          <div className="flex items-center gap-2"><Mail className="h-4 w-4" />{user.email || '-'}</div>
                         </td>
                         <td className="px-6 py-4">
                           <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs ${getRoleBadgeClass(user.role)}`}>
@@ -358,40 +375,36 @@ export default function Users() {
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <button
-                            onClick={() => handleToggleEnable(user)}
-                            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs transition-colors ${
-                              user.enabled
-                                ? 'border border-green-500/30 bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                                : 'border border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                            }`}
-                          >
-                            {user.enabled ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-                            {user.enabled ? '启用' : '禁用'}
-                          </button>
+                          {canUpdateUser ? (
+                            <button
+                              onClick={() => void handleToggleEnable(user)}
+                              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs transition-colors ${user.enabled ? 'border border-green-500/30 bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'border border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30'}`}
+                            >
+                              {user.enabled ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                              {user.enabled ? '启用' : '禁用'}
+                            </button>
+                          ) : (
+                            <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs ${user.enabled ? 'border border-green-500/30 bg-green-500/20 text-green-400' : 'border border-red-500/30 bg-red-500/20 text-red-400'}`}>
+                              {user.enabled ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                              {user.enabled ? '启用' : '禁用'}
+                            </span>
+                          )}
                         </td>
                         <td className={`px-6 py-4 ${styles.textSecondary}`}>
-                          <div className="flex items-center gap-2">
-                            <Calendar className="h-4 w-4" />
-                            {formatBeijingDate(user.created_at)}
-                          </div>
+                          <div className="flex items-center gap-2"><Calendar className="h-4 w-4" />{formatBeijingDate(user.created_at)}</div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => openEditModal(user)}
-                              className={`rounded-lg p-2 text-blue-400 transition-colors ${styles.hoverBg} hover:text-blue-300`}
-                              title="编辑"
-                            >
-                              <Edit3 className="h-5 w-5" />
-                            </button>
-                            <button
-                              onClick={() => setPendingDeleteUser(user)}
-                              className={`rounded-lg p-2 text-red-400 transition-colors ${styles.hoverBg} hover:text-red-300`}
-                              title="删除"
-                            >
-                              <Trash2 className="h-5 w-5" />
-                            </button>
+                            {canUpdateUser && (
+                              <button onClick={() => void openEditModal(user)} className={`rounded-lg p-2 text-blue-400 transition-colors ${styles.hoverBg} hover:text-blue-300`} title="编辑">
+                                <Edit3 className="h-5 w-5" />
+                              </button>
+                            )}
+                            {canDeleteUser && (
+                              <button onClick={() => setPendingDeleteUser(user)} className={`rounded-lg p-2 text-red-400 transition-colors ${styles.hoverBg} hover:text-red-300`} title="删除">
+                                <Trash2 className="h-5 w-5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -403,18 +416,12 @@ export default function Users() {
           </div>
         )}
 
-        {activeTab === 'logs' && (
+        {activeTab === 'logs' && canViewLogs && (
           <div className={`${styles.bgSecondary} overflow-hidden rounded-xl ${styles.border}`}>
             {loading ? (
-              <div className="px-6 py-12">
-                <LoadingState type="section" text="加载日志中..." />
-              </div>
+              <div className="px-6 py-12"><LoadingState type="section" text="加载日志中..." /></div>
             ) : filteredLogs.length === 0 ? (
-              <EmptyState
-                icon={History}
-                title="暂无操作日志"
-                description="当前还没有可显示的操作记录。"
-              />
+              <EmptyState icon={History} title="暂无操作日志" description="当前没有可显示的操作记录。" />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -433,9 +440,7 @@ export default function Users() {
                         <td className={`px-6 py-4 font-medium ${styles.textPrimary}`}>{log.user_name || '-'}</td>
                         <td className={`px-6 py-4 ${styles.textSecondary}`}>{log.action}</td>
                         <td className={`px-6 py-4 ${styles.textSecondary}`}>{log.target}</td>
-                        <td className={`max-w-xs truncate px-6 py-4 ${styles.textSecondary}`} title={log.detail}>
-                          {log.detail}
-                        </td>
+                        <td className={`max-w-xs truncate px-6 py-4 ${styles.textSecondary}`} title={log.detail}>{log.detail}</td>
                         <td className={`px-6 py-4 ${styles.textSecondary}`}>{formatBeijingTime(log.created_at)}</td>
                       </tr>
                     ))}
@@ -447,156 +452,56 @@ export default function Users() {
         )}
       </div>
 
-      <FormModal
-        open={showCreateModal}
-        title="添加用户"
-        onCancel={() => setShowCreateModal(false)}
-        onSubmit={handleCreate}
-        submitText="保存"
-        cancelText="取消"
-      >
+      <FormModal open={showCreateModal} title="添加用户" onCancel={() => setShowCreateModal(false)} onSubmit={handleCreate} submitText="保存" cancelText="取消">
         <div className="space-y-4">
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>用户名 *</label>
-            <input
-              type="text"
-              value={formData.username}
-              onChange={(event) => setFormData({ ...formData, username: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              placeholder="请输入用户名"
-            />
+            <input type="text" value={formData.username} onChange={(event) => setFormData({ ...formData, username: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="请输入用户名" />
           </div>
-
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>密码 *</label>
-            <input
-              type="password"
-              value={formData.password}
-              onChange={(event) => setFormData({ ...formData, password: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              placeholder="请输入密码"
-            />
+            <input type="password" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="请输入密码" />
           </div>
-
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>姓名</label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(event) => setFormData({ ...formData, name: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              placeholder="请输入姓名"
-            />
+            <input type="text" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="请输入姓名" />
           </div>
-
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>邮箱</label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(event) => setFormData({ ...formData, email: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              placeholder="请输入邮箱"
-            />
+            <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="请输入邮箱" />
           </div>
-
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>角色</label>
-            <select
-              value={formData.role}
-              onChange={(event) => setFormData({ ...formData, role: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            >
-              {roles.map((role) => (
-                <option key={role.id} value={role.code}>
-                  {role.name}
-                </option>
-              ))}
-            </select>
+            {renderRoleSelect}
           </div>
         </div>
       </FormModal>
 
-      <FormModal
-        open={showEditModal && Boolean(editingUser)}
-        title="编辑用户"
-        onCancel={() => {
-          setShowEditModal(false);
-          setEditingUser(null);
-        }}
-        onSubmit={handleEdit}
-        submitText="保存"
-        cancelText="取消"
-      >
+      <FormModal open={showEditModal && Boolean(editingUser)} title="编辑用户" onCancel={() => { setShowEditModal(false); setEditingUser(null); }} onSubmit={handleEdit} submitText="保存" cancelText="取消">
         <div className="space-y-4">
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>用户名</label>
-            <input
-              type="text"
-              value={formData.username}
-              onChange={(event) => setFormData({ ...formData, username: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              disabled
-            />
+            <input type="text" value={formData.username} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`} disabled />
           </div>
-
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>密码（留空则不修改）</label>
-            <input
-              type="password"
-              value={formData.password}
-              onChange={(event) => setFormData({ ...formData, password: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              placeholder="留空则不修改密码"
-            />
+            <input type="password" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="留空则不修改密码" />
           </div>
-
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>姓名</label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(event) => setFormData({ ...formData, name: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            />
+            <input type="text" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} />
           </div>
-
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>邮箱</label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(event) => setFormData({ ...formData, email: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            />
+            <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} />
           </div>
-
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>角色</label>
-            <select
-              value={formData.role}
-              onChange={(event) => setFormData({ ...formData, role: event.target.value })}
-              className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            >
-              {roles.map((role) => (
-                <option key={role.id} value={role.code}>
-                  {role.name}
-                </option>
-              ))}
-            </select>
+            {renderRoleSelect}
           </div>
-
           <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="enabled"
-              checked={formData.enabled}
-              onChange={(event) => setFormData({ ...formData, enabled: event.target.checked })}
-              className={`h-5 w-5 rounded ${styles.borderInput} ${styles.bgInput} text-blue-600 focus:ring-blue-500`}
-            />
-            <label htmlFor="enabled" className={styles.textSecondary}>
-              启用用户
-            </label>
+            <input type="checkbox" id="enabled" checked={formData.enabled} onChange={(event) => setFormData({ ...formData, enabled: event.target.checked })} className={`h-5 w-5 rounded ${styles.borderInput} ${styles.bgInput} text-blue-600 focus:ring-blue-500`} />
+            <label htmlFor="enabled" className={styles.textSecondary}>启用用户</label>
           </div>
         </div>
       </FormModal>
@@ -604,21 +509,13 @@ export default function Users() {
       <ConfirmModal
         open={Boolean(pendingDeleteUser)}
         title="确认删除用户"
-        description={
-          pendingDeleteUser
-            ? `确定要删除用户「${pendingDeleteUser.username}」吗？该操作执行后将无法恢复。`
-            : '确定要删除该用户吗？'
-        }
+        description={pendingDeleteUser ? `确定要删除用户「${pendingDeleteUser.username}」吗？该操作执行后将无法恢复。` : '确定要删除该用户吗？'}
         confirmText="确认删除"
         cancelText="取消"
         variant="danger"
         loading={deleting}
         onConfirm={handleDelete}
-        onCancel={() => {
-          if (!deleting) {
-            setPendingDeleteUser(null);
-          }
-        }}
+        onCancel={() => { if (!deleting) setPendingDeleteUser(null); }}
       />
     </>
   );

@@ -590,9 +590,12 @@ async function initTables() {
   if (!rolesExist) {
     // 插入默认角色
     await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['admin', '管理员', '拥有所有权限', 1] });
-    await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['director', '编导', '管理级权限', 1] });
-    await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['member', '成员', '基础权限', 1] });
-    await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['editor', '编辑', '内容编辑权限', 1] });
+    await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['director', '管理层', '管理级权限', 1] });
+    await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['member', '普通人员', '基础权限', 1] });
+    await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['editor', '通用编辑', '通用内容生产角色', 1] });
+    await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['copywriter', '文案', '内容生产-文案角色', 1] });
+    await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['post_production', '后期', '内容生产-后期角色', 1] });
+    await db.execute({ sql: `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, ?)`, args: ['camera', '摄像', '内容生产-摄像角色', 1] });
 
     // 插入权限定义
     const permissions = [
@@ -662,12 +665,13 @@ async function initTables() {
       await db.execute({ sql: `INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, args: [memberRoleId, perm.id] });
     }
 
-    // editor 拥有内容编辑相关权限
-    const editorRole = await db.execute(`SELECT id FROM roles WHERE code = 'editor'`);
-    const editorRoleId = editorRole.rows[0].id;
-    const editorPerms = await db.execute(`SELECT id FROM permissions WHERE code IN ('topic:view', 'topic:update', 'workflow:production', 'workflow:comment')`);
-    for (const perm of editorPerms.rows) {
-      await db.execute({ sql: `INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, args: [editorRoleId, perm.id] });
+    // 内容生产角色拥有内容查看和编辑权限，但不授予系统管理、用户管理、角色权限管理或删除权限。
+    const contentRoles = await db.execute(`SELECT id, code FROM roles WHERE code IN ('editor', 'copywriter', 'post_production', 'camera')`);
+    const contentPerms = await db.execute(`SELECT id FROM permissions WHERE code IN ('topic:create', 'topic:view', 'topic:update', 'workflow:production', 'workflow:shooting', 'workflow:publishing', 'workflow:comment')`);
+    for (const role of contentRoles.rows) {
+      for (const perm of contentPerms.rows) {
+        await db.execute({ sql: `INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, args: [role.id, perm.id] });
+      }
     }
 
     // 为现有用户分配角色映射
@@ -677,6 +681,44 @@ async function initTables() {
       if (role.rows.length > 0) {
         await db.execute({ sql: `INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)`, args: [user.id, role.rows[0].id] });
       }
+    }
+  }
+
+  // 兼容已有数据库：补齐内容生产角色及名称，避免人员管理角色下拉缺项。
+  const requiredRoles: Array<[string, string, string]> = [
+    ['admin', '管理员', '拥有所有权限'],
+    ['director', '管理层', '管理级权限'],
+    ['editor', '通用编辑', '通用内容生产角色'],
+    ['copywriter', '文案', '内容生产-文案角色'],
+    ['post_production', '后期', '内容生产-后期角色'],
+    ['camera', '摄像', '内容生产-摄像角色'],
+    ['member', '普通人员', '基础权限'],
+  ];
+
+  for (const [code, name, description] of requiredRoles) {
+    await db.execute({
+      sql: `INSERT OR IGNORE INTO roles (code, name, description, is_system) VALUES (?, ?, ?, 1)`,
+      args: [code, name, description],
+    });
+    await db.execute({
+      sql: `UPDATE roles SET name = ?, description = ?, is_system = 1 WHERE code = ?`,
+      args: [name, description, code],
+    });
+  }
+
+  const contentRoleRows = await db.execute(
+    `SELECT id, code FROM roles WHERE code IN ('editor', 'copywriter', 'post_production', 'camera')`
+  );
+  const contentPermissionRows = await db.execute(
+    `SELECT id, code FROM permissions WHERE code IN ('topic:create', 'topic:view', 'topic:update', 'workflow:production', 'workflow:shooting', 'workflow:publishing', 'workflow:comment')`
+  );
+
+  for (const role of contentRoleRows.rows) {
+    for (const permission of contentPermissionRows.rows) {
+      await db.execute({
+        sql: `INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)`,
+        args: [role.id, permission.id],
+      });
     }
   }
 

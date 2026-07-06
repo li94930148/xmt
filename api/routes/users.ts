@@ -1,9 +1,8 @@
 ﻿﻿import express from 'express';
 import bcrypt from 'bcrypt';
-import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
+import { queryOne, queryAll, execute, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
-import { requirePermission } from '../middleware/permissions';
-import { User } from '../types';
+import { clearPermissionCache, requirePermission } from '../middleware/permissions';
 
 const router = express.Router();
 
@@ -11,17 +10,15 @@ async function getRoleByCode(roleCode: string) {
   return queryOne(`SELECT id, code, name FROM roles WHERE code = ?`, [roleCode]);
 }
 
-async function syncUserPrimaryRole(userId: number, roleCode: string) {
-  const role = await getRoleByCode(roleCode);
-  if (!role) {
-    return false;
+// 固定路由必须放在 /:id 之前，否则 Express 会把 assignable-roles 当成用户 id。
+router.get('/assignable-roles', authenticate, requirePermission('user:create', 'user:update'), async (_req, res) => {
+  try {
+    const roles = await queryAll(`SELECT id, code, name FROM roles ORDER BY id`);
+    res.json(roles);
+  } catch (error) {
+    res.status(500).json({ message: '获取可分配角色失败', error });
   }
-
-  await execute(`DELETE FROM user_roles WHERE user_id = ?`, [userId]);
-  await execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [userId, role.id]);
-  await execute(`UPDATE users SET role = ? WHERE id = ?`, [roleCode, userId]);
-  return true;
-}
+});
 
 router.get('/', authenticate, requirePermission('user:view'), async (req, res) => {
   try {
@@ -75,10 +72,10 @@ router.get('/activity-logs', authenticate, requirePermission('user:logs'), async
     const offset = (pageNum - 1) * limitNum;
 
     let whereClause = '';
-    const params: any[] = [];
+    const params: unknown[] = [];
 
     if (user_id) {
-      whereClause = 'WHERE al.user_id = ';
+      whereClause = 'WHERE al.user_id = ?';
       params.push(parseInt(user_id as string));
     }
 
@@ -141,10 +138,13 @@ router.post('/', authenticate, requirePermission('user:create'), async (req, res
     
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    const userId = await executeInsert(`INSERT INTO users (username, password, email, role, name, enabled) 
+    const userId = await runInTransaction(async (tx) => {
+      const createdUserId = await tx.executeInsert(`INSERT INTO users (username, password, email, role, name, enabled) 
             VALUES (?, ?, ?, ?, ?, ?)`, [username, hashedPassword, email, role, name, 1]);
 
-    await execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [userId, targetRole.id]);
+      await tx.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [createdUserId, targetRole.id]);
+      return createdUserId;
+    });
     
     await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
       req.user?.id, 'create', 'user', `创建用户: ${username}`
@@ -166,15 +166,16 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
       return res.status(404).json({ message: '用户不存在' });
     }
 
+    let targetRole: Awaited<ReturnType<typeof getRoleByCode>> | null = null;
     if (role) {
-      const targetRole = await getRoleByCode(role);
+      targetRole = await getRoleByCode(role);
       if (!targetRole) {
         return res.status(400).json({ message: '所选角色不存在' });
       }
     }
     
     const updates: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (password) {
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -193,10 +194,17 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
     updates.push("updated_at = datetime('now', '+8 hours')");
     params.push(id);
     
-    await execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+    await runInTransaction(async (tx) => {
+      await tx.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+
+      if (role && targetRole) {
+        await tx.execute(`DELETE FROM user_roles WHERE user_id = ?`, [id]);
+        await tx.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [id, targetRole.id]);
+      }
+    });
 
     if (role) {
-      await syncUserPrimaryRole(Number(id), role);
+      clearPermissionCache(Number(id));
     }
     
     await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [

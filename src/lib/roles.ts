@@ -1,8 +1,11 @@
 const ROLE_LABELS: Record<string, string> = {
   admin: '\u7ba1\u7406\u5458',
-  director: '\u7f16\u5bfc',
-  editor: '\u7f16\u8f91',
-  member: '\u6210\u5458',
+  director: '\u7ba1\u7406\u5c42',
+  editor: '\u901a\u7528\u7f16\u8f91',
+  copywriter: '\u6587\u6848',
+  post_production: '\u540e\u671f',
+  camera: '\u6444\u50cf',
+  member: '\u666e\u901a\u4eba\u5458',
 };
 
 export function getRoleDisplayName(roleCode?: string | null) {

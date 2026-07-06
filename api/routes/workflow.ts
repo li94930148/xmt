@@ -2,7 +2,7 @@
 import { beijingNow, beijingToday, queryOne, queryAll, execute, executeInsert } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
-import { canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, isPrivilegedUser, resolveCommentTopicScope } from '../utils/access';
+import { canEditProduction, canViewAllContent, canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, resolveCommentTopicScope } from '../utils/access';
 import { syncPublishedArchive } from '../services/publishedArchive';
 import { buildWorkflowRuntimeContext } from '@shared/workflow/workflow_runtime';
 import { broadcastToRoom } from '../utils/socket';
@@ -358,10 +358,10 @@ router.get('/production', authenticate, async (req, res) => {
                  LEFT JOIN topics t ON p.topic_id = t.id WHERE 1=1`;
     const params: any[] = [];
     if (topic_id) { query += ` AND p.topic_id = ?`; params.push(topic_id); }
-    if (!isPrivilegedUser(req.user)) {
+    if (!canViewAllContent(req.user)) {
       const userId = req.user!.id;
-      query += ` AND (t.creator_id = ? OR t.assignee_id = ?)`;
-      params.push(userId, userId);
+      query += ` AND (t.creator_id = ? OR t.assignee_id = ? OR p.operator_id = ?)`;
+      params.push(userId, userId, userId);
     }
     query += ` ORDER BY p.created_at DESC`;
     const productions = await queryAll(query, params);
@@ -377,7 +377,7 @@ router.post('/production', authenticate, async (req, res) => {
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
     const topic = await getTopicScopeById(topic_id);
     if (!topic) return res.status(404).json({ message: '选题不存在' });
-    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限操作该选题的创作记录' });
+    if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限操作该选题的创作记录' });
     const contentMarkdown = req.body.contentMarkdown || content;
     const contentJson = req.body.contentJson || content;
     const productionId = await executeInsert(`INSERT INTO production (topic_id, version, content, content_markdown, content_json, status, operator_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [topic_id, version, content, contentMarkdown, contentJson, status, req.user?.id]);
@@ -416,10 +416,10 @@ router.put('/production/:id', authenticate, async (req, res) => {
     const existingProduction = await queryOne(`SELECT * FROM production WHERE id = ?`, [id]);
     if (!existingProduction) return res.status(404).json({ message: '创作记录不存在' });
     const originalTopic = await getTopicScopeByProductionId(id);
-    if (!canAccessTopic(req.user, originalTopic)) return res.status(403).json({ message: '无权限修改该创作记录' });
+    if (!canEditProduction(req.user, originalTopic)) return res.status(403).json({ message: '无权限修改该创作记录' });
     const nextTopic = await getTopicScopeById(topic_id);
     if (!nextTopic) return res.status(404).json({ message: '选题不存在' });
-    if (!canAccessTopic(req.user, nextTopic)) return res.status(403).json({ message: '无权限关联到目标选题' });
+    if (!canEditProduction(req.user, nextTopic)) return res.status(403).json({ message: '无权限关联到目标选题' });
 
     const currentVersion = String(existingProduction.version || version || 'v1.0');
     const resolvedVersionAction: VersionAction =
@@ -524,12 +524,17 @@ router.get('/production/:id/history', authenticate, async (req, res) => {
   }
 });
 
-router.get('/shooting', authenticate, requirePermission('workflow:shooting'), async (req, res) => {
+router.get('/shooting', authenticate, async (req, res) => {
   try {
     const { topic_id } = req.query;
     let query = `SELECT s.*, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM shooting s LEFT JOIN users u ON s.operator_id = u.id LEFT JOIN topics t ON s.topic_id = t.id WHERE 1=1`;
     const params: any[] = [];
     if (topic_id) { query += ` AND s.topic_id = ?`; params.push(topic_id); }
+    if (!canViewAllContent(req.user)) {
+      const userId = req.user!.id;
+      query += ` AND (t.creator_id = ? OR t.assignee_id = ? OR s.operator_id = ?)`;
+      params.push(userId, userId, userId);
+    }
     query += ` ORDER BY s.created_at DESC`;
     res.json(await queryAll(query, params));
   } catch (error) {
@@ -572,7 +577,14 @@ router.put('/shooting/:id', authenticate, requirePermission('workflow:shooting')
 
     const shooting = await queryOne(`SELECT topic_id FROM shooting WHERE id = ?`, [id]);
     if (!shooting) return res.status(404).json({ message: '成片制作记录不存在' });
+    const currentTopic = await getTopicScopeByShootingId(id);
+    if (!canEditProduction(req.user, currentTopic)) return res.status(403).json({ message: '无权限修改该成片制作记录' });
     const targetTopicId = topic_id !== undefined ? topic_id : shooting.topic_id;
+    if (topic_id !== undefined) {
+      const nextTopic = await getTopicScopeById(topic_id);
+      if (!nextTopic) return res.status(404).json({ message: '选题不存在' });
+      if (!canEditProduction(req.user, nextTopic)) return res.status(403).json({ message: '无权限关联到目标选题' });
+    }
     params.push(id);
     await execute(`UPDATE shooting SET ${updateFields.join(', ')}, updated_at = datetime('now', '+8 hours') WHERE id = ?`, params);
     
@@ -603,6 +615,8 @@ router.delete('/shooting/:id', authenticate, requirePermission('workflow:shootin
   try {
     const shooting = await queryOne(`SELECT * FROM shooting WHERE id = ?`, [req.params.id]);
     if (!shooting) return res.status(404).json({ message: '成片制作记录不存在' });
+    const topic = await getTopicScopeByShootingId(req.params.id);
+    if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限删除该成片制作记录' });
     await execute(`DELETE FROM shooting WHERE id = ?`, [req.params.id]);
     res.json({ message: '成片制作记录删除成功' });
   } catch (error) {
@@ -614,6 +628,9 @@ router.post('/shooting', authenticate, requirePermission('workflow:shooting'), a
   try {
     const { topic_id, plan_date, location, equipment, status = 'planned' } = req.body;
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
+    const topic = await getTopicScopeById(topic_id);
+    if (!topic) return res.status(404).json({ message: '选题不存在' });
+    if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限操作该选题的成片制作记录' });
     const shootingId = await executeInsert(`INSERT INTO shooting (topic_id, plan_date, location, equipment, status, operator_id) VALUES (?, ?, ?, ?, ?, ?)`, [topic_id, plan_date, location, equipment, status, req.user?.id]);
     if (status === 'completed') await execute(`UPDATE topics SET status = 'publishing' WHERE id = ?`, [topic_id]);
     broadcastToRoom('shooting', 'shooting:created', { id: shootingId, topic_id: req.body.topic_id });
@@ -650,12 +667,17 @@ router.get('/publishing/:id', authenticate, async (req, res) => {
   }
 });
 
-router.get('/publishing', authenticate, requirePermission('workflow:publishing'), async (req, res) => {
+router.get('/publishing', authenticate, async (req, res) => {
   try {
     const { topic_id } = req.query;
     let query = `SELECT p.*, u.name as operator_name, t.title as topic_title, COALESCE(a.views, 0) as views, COALESCE(a.likes, 0) as likes, COALESCE(a.shares, 0) as shares, COALESCE(a.comments, 0) as comments FROM publishing p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id LEFT JOIN analytics a ON t.id = a.topic_id WHERE 1=1`;
     const params: any[] = [];
     if (topic_id) { query += ` AND p.topic_id = ?`; params.push(topic_id); }
+    if (!canViewAllContent(req.user)) {
+      const userId = req.user!.id;
+      query += ` AND (t.creator_id = ? OR t.assignee_id = ? OR p.operator_id = ?)`;
+      params.push(userId, userId, userId);
+    }
     query += ` ORDER BY p.created_at DESC`;
     res.json(await queryAll(query, params));
   } catch (error) {
@@ -667,6 +689,9 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
   try {
     const { topic_id, platform, url, status = 'pending', publish_time, views = 0, likes = 0, shares = 0, comments = 0 } = req.body;
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
+    const topic = await getTopicScopeById(topic_id);
+    if (!topic) return res.status(404).json({ message: '选题不存在' });
+    if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限操作该选题的发布记录' });
     const publishingId = await executeInsert(`INSERT INTO publishing (topic_id, platform, url, status, publish_time, operator_id) VALUES (?, ?, ?, ?, ?, ?)`, [topic_id, platform, url, status, publish_time, req.user?.id]);
     
     const existingAnalytics = await queryOne(`SELECT id FROM analytics WHERE topic_id = ?`, [topic_id]);
@@ -699,6 +724,8 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
     if (!existingPublishing) {
       return res.status(404).json({ message: '发布记录不存在' });
     }
+    const currentTopic = await getTopicScopeByPublishingId(id);
+    if (!canEditProduction(req.user, currentTopic)) return res.status(403).json({ message: '无权限修改该发布记录' });
 
     const updateFields: string[] = [];
     const params: any[] = [];
@@ -759,6 +786,9 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
 router.delete('/publishing/:id', authenticate, requirePermission('workflow:publishing'), async (req, res) => {
   try {
     const publishing = await queryOne(`SELECT topic_id FROM publishing WHERE id = ?`, [req.params.id]);
+    if (!publishing) return res.status(404).json({ message: '发布记录不存在' });
+    const topic = await getTopicScopeByPublishingId(req.params.id);
+    if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限删除该发布记录' });
     if (publishing) await execute(`DELETE FROM publishing WHERE id = ?`, [req.params.id]);
     res.json({ message: '发布记录删除成功' });
   } catch (error) {
@@ -804,3 +834,4 @@ router.delete('/comments/:id', authenticate, requirePermission('comment:delete')
 });
 
 export default router;
+

@@ -4,7 +4,7 @@ import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { TopicStatus } from '../types';
 import { isValidTransition, isValidAuditAction, STATUS_TEXT, getTransitionText } from '../utils/workflow';
-import { canAccessTopic, isPrivilegedUser } from '../utils/access';
+import { canEditTopic, canViewAllContent, canAccessTopic } from '../utils/access';
 import { createMessage } from '../utils/messageHelper';
 import { broadcastToRoom } from '../utils/socket';
 import { sendSuccess, sendSuccessWithPagination, sendError, sendNotFound, sendServerError } from '../utils/response';
@@ -30,7 +30,7 @@ router.get('/', authenticate, async (req, res) => {
       params.push(`%${search}%`, `%${search}%`);
     }
 
-    if (!isPrivilegedUser(req.user)) {
+    if (!canViewAllContent(req.user)) {
       const userId = req.user!.id;
       query += ` AND (t.creator_id = ? OR t.assignee_id = ?)`;
       params.push(userId, userId);
@@ -139,7 +139,7 @@ router.put('/:id', authenticate, async (req, res) => {
       return sendNotFound(res, '选题不存在');
     }
 
-    if (!canAccessTopic(req.user, topic as { creator_id: number | null; assignee_id: number | null })) {
+    if (!canEditTopic(req.user, topic as { creator_id: number | null; assignee_id: number | null })) {
       return sendError(res, '无权限修改此选题', 403);
     }
 
@@ -278,7 +278,7 @@ router.post('/:id/status', authenticate, async (req, res) => {
       return sendNotFound(res, '选题不存在');
     }
 
-    if (!canAccessTopic(req.user, topic as { creator_id: number | null; assignee_id: number | null })) {
+    if (!canEditTopic(req.user, topic as { creator_id: number | null; assignee_id: number | null })) {
       return sendError(res, '无权限修改此选题状态', 403);
     }
 

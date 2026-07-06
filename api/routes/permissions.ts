@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
-import { requirePermission } from '../middleware/permissions';
+import { clearPermissionCache, requirePermission } from '../middleware/permissions';
 import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
 
 const router = Router();
@@ -62,6 +62,7 @@ router.post('/', authenticate, requirePermission('system:permission'), async (re
       [code, name, module]
     );
 
+    clearPermissionCache();
     res.json({ message: '权限创建成功', id: permId });
   } catch (error) {
     res.status(500).json({ message: '创建权限失败', error });
@@ -80,6 +81,7 @@ router.delete('/:id', authenticate, requirePermission('system:permission'), asyn
     }
 
     await execute(`DELETE FROM permissions WHERE id = ?`, [permId]);
+    clearPermissionCache();
     res.json({ message: '权限删除成功' });
   } catch (error) {
     res.status(500).json({ message: '删除权限失败', error });

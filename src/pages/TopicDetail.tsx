@@ -36,6 +36,7 @@ export default function TopicDetail() {
   const appStore = useAppStore();
   const styles = useThemeStyles();
   const { hasPermission, loading: permissionsLoading } = usePermission();
+  const contentEditRoles = new Set(['admin', 'editor', 'copywriter', 'post_production', 'camera']);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -190,7 +191,16 @@ export default function TopicDetail() {
   };
 
   const canAudit = hasPermission('topic:audit');
-  const canEditTopic = hasPermission('topic:update');
+  const canEditTopicPermission = hasPermission('topic:update');
+  const canEditTopic = Boolean(
+    topic &&
+      canEditTopicPermission &&
+      (
+        contentEditRoles.has(authStore.user?.role || '') ||
+        Number(topic.creator_id) === authStore.user?.id ||
+        Number(topic.assignee_id) === authStore.user?.id
+      ),
+  );
   const isOverdue = topic?.deadline && new Date(topic.deadline) < new Date() && topic.status !== 'completed' && topic.status !== 'rejected';
 
   const beginEditingTopic = () => {
@@ -504,7 +514,7 @@ export default function TopicDetail() {
                 </span>
               )
             )}
-            {topic.status !== 'completed' && topic.status !== 'rejected' && (
+            {canEditTopic && topic.status !== 'completed' && topic.status !== 'rejected' && (
               <button
                 onClick={() => handleUpdateStatus(nextStatuses[topic.status])}
                 className={`px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 ${styles.textPrimary} font-semibold rounded-lg hover:opacity-90 transition-opacity flex items-center gap-2`}

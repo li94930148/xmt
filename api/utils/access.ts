@@ -5,6 +5,7 @@ type TopicScopeRecord = {
   id: number;
   creator_id: number | null;
   assignee_id: number | null;
+  participant_id?: number | null;
   workflow_template_id?: number | null;
   status?: string | null;
 };
@@ -22,16 +23,63 @@ export function isPrivilegedUser(user?: User | null) {
   return user?.role === 'admin' || user?.role === 'director';
 }
 
-export function canAccessTopic(user: User | undefined, topic: Pick<TopicScopeRecord, 'creator_id' | 'assignee_id'> | null | undefined) {
+const CONTENT_ROLE_CODES = new Set([
+  'editor',
+  'copywriter',
+  'post_production',
+  'camera',
+]);
+
+export function isPrivilegedContentRole(user?: User | null) {
+  return Boolean(user?.role && CONTENT_ROLE_CODES.has(user.role));
+}
+
+export function canViewAllContent(user?: User | null) {
+  return isPrivilegedUser(user) || isPrivilegedContentRole(user) || user?.role === 'member';
+}
+
+export function canEditAllContent(user?: User | null) {
+  return user?.role === 'admin' || isPrivilegedContentRole(user);
+}
+
+export function canAccessTopic(user: User | undefined, topic: Pick<TopicScopeRecord, 'creator_id' | 'assignee_id' | 'participant_id'> | null | undefined) {
   if (!user || !topic) {
     return false;
   }
 
-  if (isPrivilegedUser(user)) {
+  if (canViewAllContent(user)) {
     return true;
   }
 
-  return Number(topic.creator_id) === user.id || Number(topic.assignee_id) === user.id;
+  return Number(topic.creator_id) === user.id ||
+    Number(topic.assignee_id) === user.id ||
+    Number(topic.participant_id) === user.id;
+}
+
+export function canViewTopic(user: User | undefined, topic: Pick<TopicScopeRecord, 'creator_id' | 'assignee_id' | 'participant_id'> | null | undefined) {
+  return canAccessTopic(user, topic);
+}
+
+export function canEditTopic(user: User | undefined, topic: Pick<TopicScopeRecord, 'creator_id' | 'assignee_id' | 'participant_id'> | null | undefined) {
+  if (!user || !topic) {
+    return false;
+  }
+
+  if (canEditAllContent(user)) {
+    return true;
+  }
+
+  return Number(topic.creator_id) === user.id ||
+    Number(topic.assignee_id) === user.id ||
+    Number(topic.participant_id) === user.id;
+}
+
+export function canViewProduction(user: User | undefined, production: Pick<TopicScopeRecord, 'creator_id' | 'assignee_id' | 'participant_id'> | null | undefined) {
+  return canViewTopic(user, production);
+}
+
+export function canEditProduction(user: User | undefined, production: Pick<TopicScopeRecord, 'creator_id' | 'assignee_id' | 'participant_id'> | null | undefined) {
+  return canEditTopic(user, production);
 }
 
 export function canManageOwnedResource(user: User | undefined, resource: { uploader_id?: unknown } | null | undefined) {
@@ -86,7 +134,7 @@ export async function getTopicScopeById(topicId: number | string) {
 
 export async function getTopicScopeByProductionId(productionId: number | string) {
   return await queryOne<TopicScopeRecord>(
-    `SELECT t.id, t.creator_id, t.assignee_id, t.workflow_template_id, t.status
+    `SELECT t.id, t.creator_id, t.assignee_id, p.operator_id as participant_id, t.workflow_template_id, t.status
      FROM production p
      JOIN topics t ON p.topic_id = t.id
      WHERE p.id = ?`,
@@ -96,7 +144,7 @@ export async function getTopicScopeByProductionId(productionId: number | string)
 
 export async function getTopicScopeByShootingId(shootingId: number | string) {
   return await queryOne<TopicScopeRecord>(
-    `SELECT t.id, t.creator_id, t.assignee_id, t.workflow_template_id, t.status
+    `SELECT t.id, t.creator_id, t.assignee_id, s.operator_id as participant_id, t.workflow_template_id, t.status
      FROM shooting s
      JOIN topics t ON s.topic_id = t.id
      WHERE s.id = ?`,
@@ -106,7 +154,7 @@ export async function getTopicScopeByShootingId(shootingId: number | string) {
 
 export async function getTopicScopeByPublishingId(publishingId: number | string) {
   return await queryOne<TopicScopeRecord>(
-    `SELECT t.id, t.creator_id, t.assignee_id, t.workflow_template_id, t.status
+    `SELECT t.id, t.creator_id, t.assignee_id, p.operator_id as participant_id, t.workflow_template_id, t.status
      FROM publishing p
      JOIN topics t ON p.topic_id = t.id
      WHERE p.id = ?`,

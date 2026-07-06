@@ -380,10 +380,16 @@ export default function Inspirations() {
             const isPromoted = inspiration.status === 'promoted';
 
             return (
-              <button
+              <div
                 key={inspiration.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => void openDetail(inspiration.id)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  void openDetail(inspiration.id);
+                }}
                 className={`${styles.card} p-5 text-left hover:border-[#5c7cfa]/30 hover:-translate-y-0.5 transition-all duration-200 group ${newItemIds.has(inspiration.id) ? 'animate-new-item new-item-highlight' : ''}`}
               >
                 <div className="flex items-start justify-between gap-3 mb-3">
@@ -490,7 +496,7 @@ export default function Inspirations() {
                     )}
                   </div>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

@@ -1,7 +1,7 @@
 // 统一导出入口 - 保持向后兼容
 export { login, getMe, changePassword } from './auth';
 export { getTopics, getTopic, createTopic, updateTopic, deleteTopic, auditTopic, updateTopicStatus } from './topics';
-export { getUsers, createUser, updateUser, deleteUser, getLogs } from './users';
+export { getUsers, getAssignableRoles, createUser, updateUser, deleteUser, getLogs } from './users';
 export { getMessages, getUnreadCount, markMessageAsRead, clearMessages, markAllAsRead } from './messages';
 export { getTeamStats, getMonthlyStats, getUserStats, createAnalytics, getTopicAnalytics } from './analytics';
 export { getResources, createResource, updateResource, deleteResource, getCategories, getArchives, getArchiveDetail } from './resources';

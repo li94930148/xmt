@@ -25,6 +25,7 @@ import {
 import { getInspirations, getMonthlyStats, getTeamStats, getTopics, voteInspiration } from '../api';
 import type { Inspiration, MonthlyStats, TeamStats, Topic, TopicStatus } from '../types';
 import { useAuthStore } from '../store';
+import { usePermission } from '../hooks/usePermission';
 import AnnouncementBoard from '../components/AnnouncementBoard';
 import PomodoroTimer from '../components/PomodoroTimer';
 import {
@@ -81,21 +82,27 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const { permissions, loading: permissionsLoading } = usePermission();
   const dailyQuote = getDailyQuote();
+  const canViewAnalytics = user?.role === 'admin' || permissions.includes('*') || permissions.includes('analytics:view');
 
   useEffect(() => {
+    if (user && permissionsLoading) {
+      return;
+    }
+
     const fetchData = async () => {
       try {
         const [team, monthly, pending, recent, inspirations] = await Promise.allSettled([
-          getTeamStats(),
-          getMonthlyStats(),
+          canViewAnalytics ? getTeamStats() : Promise.resolve(null),
+          canViewAnalytics ? getMonthlyStats() : Promise.resolve(null),
           getTopics({ status: 'pending' }),
           getTopics(),
           getInspirations({ limit: 6 }),
         ]);
 
-        if (team.status === 'fulfilled') setTeamStats(team.value);
-        if (monthly.status === 'fulfilled') setMonthlyStats(monthly.value);
+        if (team.status === 'fulfilled' && team.value) setTeamStats(team.value);
+        if (monthly.status === 'fulfilled' && monthly.value) setMonthlyStats(monthly.value);
         if (pending.status === 'fulfilled') setPendingTopics(pending.value.data.slice(0, 5));
         if (recent.status === 'fulfilled') setRecentTopics(recent.value.data.slice(0, 6));
         if (inspirations.status === 'fulfilled') {
@@ -109,7 +116,7 @@ export default function Home() {
     };
 
     void fetchData();
-  }, []);
+  }, [canViewAnalytics, permissionsLoading, user]);
 
   const rhythm = useMemo(() => {
     const inProduction = recentTopics.filter((topic) => topic.status === 'production').length;

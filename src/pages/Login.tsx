@@ -142,6 +142,35 @@ function StyleShell({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function FilingLinks({ light = false }: { light?: boolean }) {
+  const linkClass = light
+    ? 'text-slate-400 hover:text-slate-600'
+    : 'text-slate-400/80 hover:text-[#c8a832]';
+
+  return (
+    <div className="pointer-events-auto absolute inset-x-0 bottom-4 z-20 px-4 text-center text-xs leading-6 text-slate-400 sm:bottom-5">
+      <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-x-4 gap-y-1">
+        <a
+          href="https://beian.miit.gov.cn/"
+          rel="noreferrer"
+          target="_blank"
+          className={`transition-colors ${linkClass}`}
+        >
+          鲁ICP备2026036685号
+        </a>
+        <a
+          href="https://beian.mps.gov.cn/#/query/webSearch?code=37091102000948"
+          rel="noreferrer"
+          target="_blank"
+          className={`transition-colors ${linkClass}`}
+        >
+          鲁公网安备37091102000948号
+        </a>
+      </div>
+    </div>
+  );
+}
+
 type LoginFormProps = {
   username: string;
   password: string;
@@ -507,7 +536,7 @@ export default function Login() {
               <div className="absolute bottom-[5%] left-[40%] h-[400px] w-[400px] rounded-full bg-orange-500/[0.04] blur-[160px]" />
             </div>
 
-            <div className={`relative z-10 flex min-h-screen items-center justify-center px-5 transition-all duration-1000 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
+            <div className={`relative z-10 flex min-h-screen items-center justify-center px-5 py-12 pb-24 transition-all duration-1000 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
               <div className="w-full max-w-[460px]">
                 <div className="mb-10 text-center">
                   <div className="relative mx-auto mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full border border-amber-500/25 bg-gradient-to-br from-amber-500/10 via-yellow-600/5 to-transparent text-3xl font-light text-amber-200/90 shadow-[0_0_60px_rgba(212,175,55,0.12)]">
@@ -526,6 +555,7 @@ export default function Login() {
                 </div>
               </div>
             </div>
+            <FilingLinks />
           </div>
         </StyleShell>
       );
@@ -534,7 +564,7 @@ export default function Login() {
     if (layout === 'style3') {
       return (
         <StyleShell>
-          <div className="min-h-screen overflow-hidden bg-white">
+          <div className="relative min-h-screen overflow-hidden bg-white pb-20">
             <div className="min-h-screen lg:grid lg:grid-cols-2">
               <div className="relative hidden bg-[#0c0f1a] lg:flex lg:flex-col lg:justify-between overflow-hidden p-12 xl:p-16">
                 <div className={`relative z-10 transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
@@ -574,6 +604,7 @@ export default function Login() {
                 </div>
               </div>
             </div>
+            <FilingLinks light />
           </div>
         </StyleShell>
       );
@@ -594,7 +625,7 @@ export default function Login() {
           <div className="pointer-events-none fixed right-0 top-0 h-full w-px translate-x-[30vw] rotate-12 bg-gradient-to-b from-transparent via-[#c8a832]/20 to-transparent" />
           <div className="pointer-events-none fixed right-0 top-0 h-full w-px translate-x-[32vw] rotate-12 bg-gradient-to-b from-transparent via-[#c8a832]/10 to-transparent" />
 
-          <div className="min-h-screen flex">
+          <div className="min-h-screen flex pb-20">
             <div className="hidden lg:flex lg:w-[55%] relative items-center justify-center overflow-hidden">
               <div className="absolute inset-0">
                 <div className="absolute left-1/4 top-1/3 h-[500px] w-[500px] rounded-full bg-[#c8a832]/5 blur-[150px]" />
@@ -793,6 +824,7 @@ export default function Login() {
               </div>
             </div>
           </div>
+          <FilingLinks />
         </div>
       </StyleShell>
     );

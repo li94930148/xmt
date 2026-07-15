@@ -1,6 +1,32 @@
 import { db } from './db';
+import { dateKeyBjt, formatBjtDatabase, nowBjt } from '../../shared/time';
 
 type DbArg = string | number | boolean | null;
+
+/**
+ * Transitional SQL compatibility boundary.
+ *
+ * Existing routes still contain the former SQLite expression while they are
+ * migrated in small, reviewable batches. Before execution it is converted to
+ * a bound Beijing timestamp, so SQLite never calculates the application time
+ * and every write receives an explicit value.
+ */
+function bindLegacyBjtNow(sql: string, params: unknown[]): { sql: string; params: unknown[] } {
+  const expression = "datetime('now', '+8 hours')";
+  let cursor = 0;
+  let rewritten = sql;
+  const values = [...params];
+
+  while (true) {
+    const index = rewritten.indexOf(expression, cursor);
+    if (index < 0) break;
+    const placeholdersBefore = (rewritten.slice(0, index).match(/\?/g) ?? []).length;
+    values.splice(placeholdersBefore, 0, beijingNow());
+    rewritten = `${rewritten.slice(0, index)}?${rewritten.slice(index + expression.length)}`;
+    cursor = index + 1;
+  }
+  return { sql: rewritten, params: values };
+}
 
 export class DatabaseError extends Error {
   sql: string;
@@ -23,11 +49,11 @@ export class DatabaseError extends Error {
  * 格式：YYYY-MM-DD HH:MM:SS
  */
 export function beijingNow(): string {
-  return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  return formatBjtDatabase(nowBjt());
 }
 
 export function beijingToday(): string {
-  return beijingNow().slice(0, 10);
+  return dateKeyBjt(nowBjt());
 }
 
 function normalizeParams(params: unknown[]): DbArg[] {
@@ -41,9 +67,10 @@ function buildDatabaseError(operation: string, sql: string, params: unknown[], e
 
 export async function queryOne<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T | null> {
   try {
+    const prepared = bindLegacyBjtNow(sql, params);
     const result = await db.execute({
-      sql,
-      args: normalizeParams(params),
+      sql: prepared.sql,
+      args: normalizeParams(prepared.params),
     });
 
     if (result.rows.length === 0) {
@@ -58,9 +85,10 @@ export async function queryOne<T = Record<string, unknown>>(sql: string, params:
 
 export async function queryAll<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   try {
+    const prepared = bindLegacyBjtNow(sql, params);
     const result = await db.execute({
-      sql,
-      args: normalizeParams(params),
+      sql: prepared.sql,
+      args: normalizeParams(prepared.params),
     });
 
     return result.rows as unknown as T[];
@@ -71,9 +99,10 @@ export async function queryAll<T = Record<string, unknown>>(sql: string, params:
 
 export async function execute(sql: string, params: unknown[] = []): Promise<number> {
   try {
+    const prepared = bindLegacyBjtNow(sql, params);
     const result = await db.execute({
-      sql,
-      args: normalizeParams(params),
+      sql: prepared.sql,
+      args: normalizeParams(prepared.params),
     });
 
     return result.rowsAffected ?? 0;
@@ -87,9 +116,10 @@ export async function execute(sql: string, params: unknown[] = []): Promise<numb
  */
 export async function executeInsert(sql: string, params: unknown[] = []): Promise<number> {
   try {
+    const prepared = bindLegacyBjtNow(sql, params);
     const result = await db.execute({
-      sql,
-      args: normalizeParams(params),
+      sql: prepared.sql,
+      args: normalizeParams(prepared.params),
     });
 
     return Number(result.lastInsertRowid ?? 0);
@@ -111,7 +141,8 @@ export async function runInTransaction<T>(callback: (tx: TransactionContext) => 
   const txContext: TransactionContext = {
     async queryOne<U = Record<string, unknown>>(sql: string, params: unknown[] = []) {
       try {
-        const result = await transaction.execute({ sql, args: normalizeParams(params) });
+        const prepared = bindLegacyBjtNow(sql, params);
+        const result = await transaction.execute({ sql: prepared.sql, args: normalizeParams(prepared.params) });
         return result.rows.length === 0 ? null : (result.rows[0] as unknown as U);
       } catch (err) {
         throw buildDatabaseError('queryOne', sql, params, err);
@@ -119,7 +150,8 @@ export async function runInTransaction<T>(callback: (tx: TransactionContext) => 
     },
     async queryAll<U = Record<string, unknown>>(sql: string, params: unknown[] = []) {
       try {
-        const result = await transaction.execute({ sql, args: normalizeParams(params) });
+        const prepared = bindLegacyBjtNow(sql, params);
+        const result = await transaction.execute({ sql: prepared.sql, args: normalizeParams(prepared.params) });
         return result.rows as unknown as U[];
       } catch (err) {
         throw buildDatabaseError('queryAll', sql, params, err);
@@ -127,7 +159,8 @@ export async function runInTransaction<T>(callback: (tx: TransactionContext) => 
     },
     async execute(sql: string, params: unknown[] = []) {
       try {
-        const result = await transaction.execute({ sql, args: normalizeParams(params) });
+        const prepared = bindLegacyBjtNow(sql, params);
+        const result = await transaction.execute({ sql: prepared.sql, args: normalizeParams(prepared.params) });
         return result.rowsAffected ?? 0;
       } catch (err) {
         throw buildDatabaseError('execute', sql, params, err);
@@ -135,7 +168,8 @@ export async function runInTransaction<T>(callback: (tx: TransactionContext) => 
     },
     async executeInsert(sql: string, params: unknown[] = []) {
       try {
-        const result = await transaction.execute({ sql, args: normalizeParams(params) });
+        const prepared = bindLegacyBjtNow(sql, params);
+        const result = await transaction.execute({ sql: prepared.sql, args: normalizeParams(prepared.params) });
         return Number(result.lastInsertRowid ?? 0);
       } catch (err) {
         throw buildDatabaseError('executeInsert', sql, params, err);

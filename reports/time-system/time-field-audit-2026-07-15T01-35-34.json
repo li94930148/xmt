@@ -1,0 +1,1510 @@
+{
+  "generatedAt": "2026-07-15T01:35:34.318Z",
+  "dbPath": "D:\\xmt\\data\\xmt.db",
+  "backupPath": "D:\\xmt\\data\\backups\\xmt-before-phase2-time-2026-07-15T01-35-34.db",
+  "rows": [
+    {
+      "table": "achievements",
+      "field": "created_at",
+      "nonNullCount": 21,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-01 11:05:04",
+      "max": "2026-06-01 11:05:04",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "activity_log",
+      "field": "created_at",
+      "nonNullCount": 639,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-05-26 11:11:00",
+      "max": "2026-07-14 09:29:19",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "analytics",
+      "field": "data_date",
+      "nonNullCount": 19,
+      "formats": [
+        "date-only",
+        "unrecognized"
+      ],
+      "min": "2026-05-26T10:00",
+      "max": "2026-06-17",
+      "possiblyUtc": false,
+      "migration": "review"
+    },
+    {
+      "table": "analytics",
+      "field": "created_at",
+      "nonNullCount": 19,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-05-27 08:59:03",
+      "max": "2026-06-17 03:38:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "announcements",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "announcements",
+      "field": "updated_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "app_meta",
+      "field": "created_at",
+      "nonNullCount": 8,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-11 09:59:46",
+      "max": "2026-07-14 13:58:22",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "approval_records",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "calendar_events",
+      "field": "event_date",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "calendar_events",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "comments",
+      "field": "created_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-05-26 14:51:50",
+      "max": "2026-05-26 14:51:50",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "content_categories",
+      "field": "created_at",
+      "nonNullCount": 5,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-11 07:13:05",
+      "max": "2026-07-11 07:13:05",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_report_audit_logs",
+      "field": "created_at",
+      "nonNullCount": 36,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 10:10:02",
+      "max": "2026-07-04 15:50:50",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_report_items",
+      "field": "created_at",
+      "nonNullCount": 30,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 10:10:02",
+      "max": "2026-07-04 15:50:48",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_report_items",
+      "field": "updated_at",
+      "nonNullCount": 30,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 10:10:02",
+      "max": "2026-07-04 15:50:48",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_report_subscriptions",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_report_subscriptions",
+      "field": "updated_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_report_templates",
+      "field": "created_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-01 13:43:51",
+      "max": "2026-07-01 13:43:51",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_report_templates",
+      "field": "updated_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-01 13:43:51",
+      "max": "2026-07-01 13:43:51",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_reports",
+      "field": "report_date",
+      "nonNullCount": 15,
+      "formats": [
+        "date-only"
+      ],
+      "min": "2026-07-01",
+      "max": "2030-05-21",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_reports",
+      "field": "submitted_at",
+      "nonNullCount": 9,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 10:10:06",
+      "max": "2026-07-04 15:50:50",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_reports",
+      "field": "reviewed_at",
+      "nonNullCount": 6,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:23:29",
+      "max": "2026-07-04 09:12:26",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_reports",
+      "field": "created_at",
+      "nonNullCount": 15,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 10:10:02",
+      "max": "2026-07-04 15:50:48",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "daily_reports",
+      "field": "updated_at",
+      "nonNullCount": 15,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 10:10:06",
+      "max": "2026-07-04 15:50:50",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "douyin_accounts",
+      "field": "created_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 07:46:36",
+      "max": "2026-06-02 07:46:36",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "douyin_snapshots",
+      "field": "scraped_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "douyin_snapshots",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "douyin_videos",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "editing",
+      "field": "created_at",
+      "nonNullCount": 2,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 10:07:10",
+      "max": "2026-06-02 10:07:11",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "editing",
+      "field": "updated_at",
+      "nonNullCount": 2,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 10:07:10",
+      "max": "2026-06-02 10:07:11",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "inspiration_comments",
+      "field": "created_at",
+      "nonNullCount": 10,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-11 09:27:06",
+      "max": "2026-06-26 09:57:52",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "inspiration_votes",
+      "field": "created_at",
+      "nonNullCount": 29,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-03 06:50:38",
+      "max": "2026-06-15 07:09:24",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "inspirations",
+      "field": "created_at",
+      "nonNullCount": 37,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-03 10:41:38",
+      "max": "2026-06-26 08:48:41",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "inspirations",
+      "field": "updated_at",
+      "nonNullCount": 37,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-03 22:50:51",
+      "max": "2026-06-26 09:57:52",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "messages",
+      "field": "created_at",
+      "nonNullCount": 595,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-05-26 19:20:27",
+      "max": "2026-07-04 15:50:50",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "notification_preferences",
+      "field": "created_at",
+      "nonNullCount": 11,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-04 00:54:39",
+      "max": "2026-06-04 06:30:07",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "notification_preferences",
+      "field": "updated_at",
+      "nonNullCount": 11,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-04 00:54:39",
+      "max": "2026-06-04 06:30:07",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "permissions",
+      "field": "created_at",
+      "nonNullCount": 41,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-04 00:30:51",
+      "max": "2026-07-02 01:59:49",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "pomodoro_sessions",
+      "field": "started_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "pomodoro_sessions",
+      "field": "ended_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "production",
+      "field": "created_at",
+      "nonNullCount": 34,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 14:01:25",
+      "max": "2026-06-25 08:38:39",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "production",
+      "field": "updated_at",
+      "nonNullCount": 34,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 16:20:26",
+      "max": "2026-06-29 16:56:41",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "production",
+      "field": "last_saved_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "production_history",
+      "field": "created_at",
+      "nonNullCount": 96,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 14:03:28",
+      "max": "2026-06-26 05:40:33",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "publishing",
+      "field": "publish_time",
+      "nonNullCount": 15,
+      "formats": [
+        "unrecognized"
+      ],
+      "min": "",
+      "max": "2026-06-11T00:00",
+      "possiblyUtc": false,
+      "migration": "review"
+    },
+    {
+      "table": "publishing",
+      "field": "created_at",
+      "nonNullCount": 16,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-05-29 17:21:39",
+      "max": "2026-06-17 01:19:09",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "publishing",
+      "field": "updated_at",
+      "nonNullCount": 16,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-05-29 17:21:39",
+      "max": "2026-06-17 11:38:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "resources",
+      "field": "created_at",
+      "nonNullCount": 14,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-17 02:01:08",
+      "max": "2026-06-17 03:38:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "resources",
+      "field": "updated_at",
+      "nonNullCount": 14,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-17 02:01:08",
+      "max": "2026-06-17 03:38:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retro_actions",
+      "field": "due_date",
+      "nonNullCount": 7,
+      "formats": [
+        "date-only"
+      ],
+      "min": "2026-07-18",
+      "max": "2026-07-20",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retro_actions",
+      "field": "closed_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retro_actions",
+      "field": "created_at",
+      "nonNullCount": 7,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:23:30",
+      "max": "2026-07-04 09:12:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retro_actions",
+      "field": "updated_at",
+      "nonNullCount": 7,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:23:30",
+      "max": "2026-07-04 09:12:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retro_audit_logs",
+      "field": "created_at",
+      "nonNullCount": 49,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:23:30",
+      "max": "2026-07-04 09:12:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retro_metric_snapshots",
+      "field": "captured_at",
+      "nonNullCount": 77,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:23:30",
+      "max": "2026-07-04 09:12:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retro_metric_snapshots",
+      "field": "created_at",
+      "nonNullCount": 77,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:23:30",
+      "max": "2026-07-04 09:12:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retro_templates",
+      "field": "created_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 09:59:49",
+      "max": "2026-07-02 09:59:49",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retro_templates",
+      "field": "updated_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 09:59:49",
+      "max": "2026-07-02 09:59:49",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retrospectives",
+      "field": "period_start",
+      "nonNullCount": 8,
+      "formats": [
+        "date-only"
+      ],
+      "min": "2026-07-12",
+      "max": "2026-08-02",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retrospectives",
+      "field": "period_end",
+      "nonNullCount": 8,
+      "formats": [
+        "date-only"
+      ],
+      "min": "2026-07-18",
+      "max": "2026-08-08",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retrospectives",
+      "field": "published_at",
+      "nonNullCount": 7,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:23:30",
+      "max": "2026-07-04 09:12:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retrospectives",
+      "field": "archived_at",
+      "nonNullCount": 5,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:35:41",
+      "max": "2026-07-04 09:12:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retrospectives",
+      "field": "created_at",
+      "nonNullCount": 8,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:23:30",
+      "max": "2026-07-04 09:12:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "retrospectives",
+      "field": "updated_at",
+      "nonNullCount": 8,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-02 17:23:30",
+      "max": "2026-07-04 09:12:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "roles",
+      "field": "created_at",
+      "nonNullCount": 7,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-04 00:30:51",
+      "max": "2026-07-04 05:51:04",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "roles",
+      "field": "updated_at",
+      "nonNullCount": 7,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-04 00:30:51",
+      "max": "2026-07-04 05:51:04",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "shooting",
+      "field": "plan_date",
+      "nonNullCount": 1,
+      "formats": [
+        "unrecognized"
+      ],
+      "min": "",
+      "max": "",
+      "possiblyUtc": false,
+      "migration": "review"
+    },
+    {
+      "table": "shooting",
+      "field": "created_at",
+      "nonNullCount": 17,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-05-26 14:32:28",
+      "max": "2026-06-23 02:29:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "shooting",
+      "field": "updated_at",
+      "nonNullCount": 17,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-05-26 14:32:28",
+      "max": "2026-06-25 16:41:56",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_accounts",
+      "field": "last_fetched_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 16:44:34",
+      "max": "2026-07-14 16:44:34",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_accounts",
+      "field": "created_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 07:46:36",
+      "max": "2026-06-02 07:46:36",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_accounts",
+      "field": "updated_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 16:44:44",
+      "max": "2026-07-14 16:44:44",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_credentials",
+      "field": "expires_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_credentials",
+      "field": "last_verified_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-06 15:00:27",
+      "max": "2026-07-06 15:00:27",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_credentials",
+      "field": "last_failed_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_credentials",
+      "field": "updated_by",
+      "nonNullCount": 1,
+      "formats": [
+        "numeric-epoch-or-id"
+      ],
+      "min": "1",
+      "max": "1",
+      "possiblyUtc": false,
+      "migration": "review"
+    },
+    {
+      "table": "social_credentials",
+      "field": "created_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-06 15:00:27",
+      "max": "2026-07-06 15:00:27",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_credentials",
+      "field": "updated_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-06 15:00:27",
+      "max": "2026-07-06 15:00:27",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_ingestion_health",
+      "field": "last_success_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 16:44:44",
+      "max": "2026-07-14 16:44:44",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_ingestion_health",
+      "field": "last_failed_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 14:33:02",
+      "max": "2026-07-14 14:33:02",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_ingestion_health",
+      "field": "updated_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 17:29:27",
+      "max": "2026-07-14 17:29:27",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_ingestion_jobs",
+      "field": "started_at",
+      "nonNullCount": 57,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-06 13:50:25",
+      "max": "2026-07-14 16:44:24",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_ingestion_jobs",
+      "field": "finished_at",
+      "nonNullCount": 57,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-06 13:50:34",
+      "max": "2026-07-14 16:44:44",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_ingestion_jobs",
+      "field": "created_at",
+      "nonNullCount": 57,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-06 13:50:25",
+      "max": "2026-07-14 16:44:24",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_ingestion_jobs",
+      "field": "updated_at",
+      "nonNullCount": 57,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-06 13:50:34",
+      "max": "2026-07-14 16:44:44",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_metric_rollups",
+      "field": "scope_date",
+      "nonNullCount": 6,
+      "formats": [
+        "date-only"
+      ],
+      "min": "2026-07-06",
+      "max": "2026-07-06",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_metric_rollups",
+      "field": "created_at",
+      "nonNullCount": 6,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-06 07:01:03",
+      "max": "2026-07-06 07:01:03",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_operation_suggestions",
+      "field": "created_at",
+      "nonNullCount": 9,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 17:29:27",
+      "max": "2026-07-14 17:29:27",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_review_reports",
+      "field": "period_start",
+      "nonNullCount": 5,
+      "formats": [
+        "date-only"
+      ],
+      "min": "2026-04-16",
+      "max": "2026-07-08",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_review_reports",
+      "field": "period_end",
+      "nonNullCount": 5,
+      "formats": [
+        "date-only"
+      ],
+      "min": "2026-07-11",
+      "max": "2026-07-14",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_review_reports",
+      "field": "created_at",
+      "nonNullCount": 5,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-11 16:13:33",
+      "max": "2026-07-14 14:05:12",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_review_reports",
+      "field": "updated_at",
+      "nonNullCount": 5,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-11 16:13:33",
+      "max": "2026-07-14 17:30:50",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_review_reports",
+      "field": "period_type",
+      "nonNullCount": 5,
+      "formats": [
+        "unrecognized"
+      ],
+      "min": "30d",
+      "max": "90d",
+      "possiblyUtc": false,
+      "migration": "review"
+    },
+    {
+      "table": "social_scheduled_jobs",
+      "field": "last_run_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_scheduled_jobs",
+      "field": "next_run_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_scheduled_jobs",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_scheduled_jobs",
+      "field": "updated_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_snapshots",
+      "field": "snapshot_date",
+      "nonNullCount": 4,
+      "formats": [
+        "date-only"
+      ],
+      "min": "2026-07-09",
+      "max": "2026-07-14",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_snapshots",
+      "field": "fetched_at",
+      "nonNullCount": 4,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-09 14:28:06",
+      "max": "2026-07-14 16:44:34",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_snapshots",
+      "field": "created_at",
+      "nonNullCount": 4,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-09 11:27:26",
+      "max": "2026-07-14 10:00:33",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "social_videos",
+      "field": "publish_time",
+      "nonNullCount": 28,
+      "formats": [
+        "iso-utc",
+        "unrecognized"
+      ],
+      "min": "2026-04-12 ~ 2026-07-11",
+      "max": "2026-07-13T09:32:47.000Z",
+      "possiblyUtc": true,
+      "migration": "review"
+    },
+    {
+      "table": "social_videos",
+      "field": "created_at",
+      "nonNullCount": 28,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-11 09:39:31",
+      "max": "2026-07-14 10:00:33",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "topic_history",
+      "field": "created_at",
+      "nonNullCount": 121,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-01 15:06:12",
+      "max": "2026-06-25 08:38:39",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "topic_templates",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "topic_templates",
+      "field": "updated_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "topics",
+      "field": "deadline",
+      "nonNullCount": 46,
+      "formats": [
+        "date-only",
+        "unrecognized"
+      ],
+      "min": "",
+      "max": "2026-06-28",
+      "possiblyUtc": false,
+      "migration": "review"
+    },
+    {
+      "table": "topics",
+      "field": "created_at",
+      "nonNullCount": 49,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 11:13:09",
+      "max": "2026-06-24 09:19:05",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "topics",
+      "field": "updated_at",
+      "nonNullCount": 49,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 14:01:31",
+      "max": "2026-06-25 16:38:39",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "topics",
+      "field": "submitted_at",
+      "nonNullCount": 49,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 11:13:09",
+      "max": "2026-06-24 17:19:05",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "user_achievements",
+      "field": "earned_at",
+      "nonNullCount": 12,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 16:06:37",
+      "max": "2026-06-26 03:39:07",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "users",
+      "field": "created_at",
+      "nonNullCount": 20,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-05-26 11:04:34",
+      "max": "2026-07-04 06:32:14",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "users",
+      "field": "updated_at",
+      "nonNullCount": 20,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-02 10:11:03",
+      "max": "2026-07-04 14:31:39",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_category_relations",
+      "field": "created_at",
+      "nonNullCount": 28,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-11 07:13:05",
+      "max": "2026-07-14 02:00:33",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_content_features",
+      "field": "created_at",
+      "nonNullCount": 154,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 17:30:50",
+      "max": "2026-07-14 17:30:50",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_identity_mapping_diagnostics",
+      "field": "created_at",
+      "nonNullCount": 28,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 05:38:02",
+      "max": "2026-07-14 08:44:40",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_identity_mappings",
+      "field": "created_at",
+      "nonNullCount": 19,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 05:38:02",
+      "max": "2026-07-14 07:58:30",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_identity_mappings",
+      "field": "updated_at",
+      "nonNullCount": 19,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 16:44:37",
+      "max": "2026-07-14 16:44:37",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_insights",
+      "field": "created_at",
+      "nonNullCount": 21,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-14 16:02:33",
+      "max": "2026-07-14 17:30:50",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_metric_snapshots",
+      "field": "snapshot_date",
+      "nonNullCount": 55,
+      "formats": [
+        "date-only"
+      ],
+      "min": "2026-07-11",
+      "max": "2026-07-14",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_metric_snapshots",
+      "field": "created_at",
+      "nonNullCount": 55,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-11 06:38:33",
+      "max": "2026-07-14 02:00:33",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_performance_scores",
+      "field": "created_at",
+      "nonNullCount": 28,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-07-11 02:02:40",
+      "max": "2026-07-14 02:00:33",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "video_tags",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "workflow_shadow_logs",
+      "field": "created_at",
+      "nonNullCount": 0,
+      "formats": [
+        "empty"
+      ],
+      "min": null,
+      "max": null,
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "workflow_templates",
+      "field": "created_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-04 00:30:51",
+      "max": "2026-06-04 00:30:51",
+      "possiblyUtc": false,
+      "migration": "no"
+    },
+    {
+      "table": "workflow_templates",
+      "field": "updated_at",
+      "nonNullCount": 1,
+      "formats": [
+        "beijing-civil-or-unknown"
+      ],
+      "min": "2026-06-04 00:30:51",
+      "max": "2026-06-04 00:30:51",
+      "possiblyUtc": false,
+      "migration": "no"
+    }
+  ]
+}

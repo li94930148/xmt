@@ -9,6 +9,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "check": "tsc --noEmit",
+    "test:time": "tsx scripts/time-contract-test.ts",
+    "audit:time": "tsx scripts/audit-time-fields.ts",
     "server:dev": "nodemon",
     "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",
     "repair:published-archives": "tsx scripts/backfill-published-archives.ts",

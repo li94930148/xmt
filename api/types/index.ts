@@ -62,4 +62,17 @@ export type {
   BackupFile,
   // JWT
   JwtPayload,
+  // 短视频复盘
+  FetchStrategy,
+  NormalizedAccountSnapshot,
+  NormalizedVideoSnapshot,
+  SocialAccount,
+  SocialCredential,
+  SocialCredentialStatus,
+  SocialCredentialType,
+  SocialIngestionJob,
+  SocialMetricRollup,
+  SocialPlatform,
+  SocialSnapshot,
+  SocialVideo,
 } from '@shared/types';

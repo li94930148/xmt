@@ -1,0 +1,15 @@
+import 'dotenv/config';
+import { apiRequest, login } from './social-review-test-utils.mjs';
+const accountId = Number(process.argv.find((arg) => arg.startsWith('--account-id='))?.split('=')[1] || 0);
+if (accountId !== 2) throw new Error('仅支持 --account-id=2。');
+const token = await login();
+const result = await apiRequest('POST', `/accounts/${accountId}/performance-sync`, token, { source: 'manual' });
+if (!result.payload?.data?.summary) throw new Error('性能同步未返回安全摘要。');
+const summary = result.payload.data;
+console.log(`accountId: ${accountId}`);
+console.log(`endpoint: performance-sync`);
+console.log(`status: success`);
+console.log(`receivedCount: ${summary.summary.received}`);
+console.log(`matchedVideos: ${summary.summary.matched}`);
+console.log(`notMatchedVideos: ${summary.summary.skipped}`);
+for (const [key, value] of Object.entries(summary.metrics)) console.log(`${key}: ${value}`);

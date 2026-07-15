@@ -24,6 +24,7 @@ export interface ContentEditorProps {
   collaborationKey?: string;
   collaborationEnabled?: boolean;
   immersive?: boolean;
+  pageScroll?: boolean;
   persistenceStatus?: EditorState;
 }
 
@@ -40,6 +41,7 @@ export default function ContentEditor({
   collaborationKey,
   collaborationEnabled = Boolean(collaborationKey),
   immersive = false,
+  pageScroll = false,
   persistenceStatus = 'synced',
 }: ContentEditorProps) {
   const resolvedReadOnly = readOnly || mode === 'readonly';
@@ -184,6 +186,7 @@ export default function ContentEditor({
         placeholder={placeholder}
         collaboration={editorCollaboration}
         immersive={immersive}
+        pageScroll={pageScroll}
         stateDocId={collaborationKey}
       />
     </div>

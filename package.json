@@ -14,7 +14,37 @@
     "repair:published-archives": "tsx scripts/backfill-published-archives.ts",
     "test:daily-reports": "node scripts/smoke-daily-reports.mjs",
     "test:retrospectives": "node scripts/smoke-retrospectives.mjs",
-    "test:e2e": "node scripts/e2e-smoke.mjs"
+    "test:e2e": "node scripts/e2e-smoke.mjs",
+    "smoke:social-review": "node scripts/social-review-smoke-safe.mjs",
+    "smoke:social-review:collect": "node scripts/social-review-collect-account.mjs",
+    "smoke:social-review:export": "node scripts/social-review-collect-account.mjs --mode=official-export",
+    "verify:social-review:data": "node scripts/social-review-verify-data.mjs",
+    "verify:social-review:collect-result": "node scripts/social-review-verify-collect-result-v2.mjs",
+    "smoke:social-credentials": "node scripts/social-review-smoke-credentials.mjs",
+    "verify:social-credential-binding": "node scripts/social-review-verify-credential-binding.mjs"
+    ,"smoke:social-review:analysis": "node scripts/smoke-social-review-analysis.mjs"
+    ,"smoke:social-review:dashboard": "node scripts/smoke-social-review-dashboard.mjs"
+    ,"smoke:social-review:scheduler": "tsx scripts/smoke-social-review-scheduler.ts"
+    ,"smoke:social-review:operations": "node scripts/smoke-social-review-operations.mjs"
+    ,"smoke:social-review:video-page": "node scripts/smoke-social-review-video-page.mjs"
+    ,"smoke:social-review:sync-export": "node scripts/smoke-social-review-sync-export.mjs"
+    ,"debug:social-review:content-list": "tsx scripts/debug-douyin-content-list-probe.mjs"
+    ,"debug:social-review:video-metric-api": "tsx scripts/debug-douyin-video-metric-api.mjs"
+    ,"debug:social-review:creator-api-map": "tsx scripts/debug-douyin-creator-api-map.mjs"
+    ,"debug:social-review:interaction-api": "tsx scripts/debug-douyin-interaction-api.mjs"
+    ,"debug:social-review:interaction-discovery": "node scripts/debug-douyin-interaction-discovery.mjs"
+    ,"debug:social-review:item-list-request-diff": "tsx scripts/debug-douyin-item-list-request-diff.mjs"
+    ,"smoke:social-review:interaction-sync": "node scripts/smoke-social-review-interaction-sync.mjs"
+    ,"refresh:social-review:analysis": "tsx scripts/refresh-social-review-analysis.mjs"
+    ,"smoke:social-review:content-items": "tsx scripts/smoke-social-review-content-items.mjs"
+    ,"smoke:social-review:lifecycle": "node scripts/smoke-social-review-lifecycle.mjs"
+    ,"smoke:social-review:content-analysis": "node scripts/smoke-social-review-content-analysis.mjs"
+    ,"smoke:social-review:report": "node scripts/smoke-social-review-report.mjs"
+    ,"smoke:social-review:suggestions": "node scripts/smoke-social-review-suggestions.mjs"
+    ,"smoke:social-review:performance-sync": "tsx scripts/smoke-social-review-performance-sync.mjs"
+    ,"smoke:social-review:full-performance": "tsx scripts/smoke-social-review-full-performance.mjs"
+    ,"smoke:social-review:video-identity": "tsx scripts/smoke-social-review-video-identity.mjs"
+    ,"smoke:social-review:metric-availability": "tsx scripts/smoke-social-review-metric-availability.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
@@ -58,6 +88,7 @@
     "socket.io-client": "^4.8.3",
     "tailwind-merge": "^3.0.2",
     "tsx": "^4.20.3",
+    "xlsx": "^0.18.5",
     "y-prosemirror": "^1.3.7",
     "y-protocols": "^1.0.7",
     "yjs": "^13.6.31",

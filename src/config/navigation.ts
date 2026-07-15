@@ -66,6 +66,7 @@ export const navigationSections: NavigationSection[] = [
     label: '数据与复盘',
     items: [
       { id: 'analytics', label: '实时数据看板', icon: BarChart3, path: '/analytics', permissions: ['analytics:view'] },
+      { id: 'social-review', label: '短视频复盘', icon: Video, path: '/social-review', permissions: ['analytics:view'] },
       { id: 'retrospectives', label: '复盘中心', icon: BookOpenCheck, path: '/retrospectives', permissions: ['analytics:retro:view'] },
       { id: 'content-timeline', label: '内容时间轴', icon: History, path: '/content-timeline', permissions: ['analytics:view'] },
       { id: 'export', label: '报告中心', icon: FileBarChart, path: '/export', permissions: ['export:data'] },

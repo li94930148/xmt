@@ -368,6 +368,272 @@ async function initTables() {
     FOREIGN KEY (snapshot_id) REFERENCES douyin_snapshots(id) ON DELETE CASCADE
   )`);
 
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL,
+    external_account_id TEXT,
+    account_name TEXT NOT NULL,
+    display_name TEXT,
+    profile_url TEXT,
+    avatar_url TEXT,
+    owner_id INTEGER,
+    active BOOLEAN DEFAULT 1,
+    fetch_strategy TEXT DEFAULT 'manual',
+    cookie_ref TEXT,
+    credential_ref TEXT,
+    remark TEXT,
+    last_fetched_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(platform, external_account_id)
+  )`);
+
+  try { await db.execute(`ALTER TABLE social_accounts ADD COLUMN credential_ref TEXT`); } catch (e) {}
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    followers INTEGER,
+    following_count INTEGER,
+    likes_total INTEGER,
+    video_count INTEGER,
+    works_count INTEGER,
+    engagement_est REAL,
+    source_method TEXT,
+    source_project TEXT,
+    raw_json TEXT,
+    fetched_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, snapshot_date),
+    FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_videos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    snapshot_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,
+    internal_video_key TEXT,
+    external_video_id TEXT,
+    title TEXT,
+    video_url TEXT,
+    cover_url TEXT,
+    publish_time DATETIME,
+    likes INTEGER,
+    comments INTEGER,
+    shares INTEGER,
+    collects INTEGER,
+    views INTEGER,
+    duration INTEGER,
+    status TEXT,
+    visibility TEXT,
+    raw_json TEXT,
+    source_type TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(platform, external_video_id, snapshot_id),
+    FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (snapshot_id) REFERENCES social_snapshots(id) ON DELETE CASCADE
+  )`);
+
+  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN internal_video_key TEXT`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN source_type TEXT`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN duration INTEGER`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN status TEXT`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN visibility TEXT`); } catch (e) {}
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_ingestion_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER,
+    platform TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    retry_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    started_at DATETIME,
+    finished_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE SET NULL
+  )`);
+  try { await db.execute(`ALTER TABLE social_ingestion_jobs ADD COLUMN trigger_source TEXT NOT NULL DEFAULT 'manual'`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_ingestion_jobs ADD COLUMN failure_type TEXT`); } catch (e) {}
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_scheduled_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    schedule_type TEXT NOT NULL DEFAULT 'daily',
+    enabled BOOLEAN NOT NULL DEFAULT 1,
+    last_run_at DATETIME,
+    next_run_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, schedule_type),
+    FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_ingestion_health (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL UNIQUE,
+    last_success_at DATETIME,
+    last_failed_at DATETIME,
+    success_rate REAL NOT NULL DEFAULT 0,
+    total_jobs INTEGER NOT NULL DEFAULT 0,
+    success_jobs INTEGER NOT NULL DEFAULT 0,
+    failed_jobs INTEGER NOT NULL DEFAULT 0,
+    last_failure_type TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_metric_rollups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_date TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    metric_key TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    metric_value REAL NOT NULL DEFAULT 0,
+    dimension_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_credentials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL,
+    account_id INTEGER NOT NULL,
+    credential_type TEXT NOT NULL,
+    credential_ref TEXT NOT NULL UNIQUE,
+    encrypted_payload TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    expires_at DATETIME,
+    last_verified_at DATETIME,
+    last_failed_at DATETIME,
+    last_error TEXT,
+    created_by INTEGER,
+    updated_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
+  )`);
+  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN expired_reason TEXT`); } catch (e) {}
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS video_performance_scores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    play_score REAL NOT NULL DEFAULT 0,
+    interaction_score REAL NOT NULL DEFAULT 0,
+    hot_score REAL NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(video_id),
+    FOREIGN KEY (video_id) REFERENCES social_videos(id) ON DELETE CASCADE
+  )`);
+  try { await db.execute(`ALTER TABLE video_performance_scores ADD COLUMN growth_score REAL NOT NULL DEFAULT 0`); } catch (e) {}
+  await db.execute(`CREATE TABLE IF NOT EXISTS video_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    tag TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(video_id, tag),
+    FOREIGN KEY (video_id) REFERENCES social_videos(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS video_metric_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    views INTEGER NOT NULL DEFAULT 0,
+    likes INTEGER NOT NULL DEFAULT 0,
+    comments INTEGER NOT NULL DEFAULT 0,
+    shares INTEGER NOT NULL DEFAULT 0,
+    collects INTEGER NOT NULL DEFAULT 0,
+    interaction_rate REAL NOT NULL DEFAULT 0,
+    snapshot_date DATE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(video_id, snapshot_date),
+    FOREIGN KEY (video_id) REFERENCES social_videos(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS video_identity_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL,
+    account_id INTEGER NOT NULL,
+    source_type TEXT NOT NULL,
+    source_video_id TEXT NOT NULL,
+    social_video_id INTEGER NOT NULL,
+    confidence TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(platform, account_id, source_type, source_video_id),
+    FOREIGN KEY (social_video_id) REFERENCES social_videos(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS video_identity_mapping_diagnostics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    source_id_type TEXT NOT NULL,
+    matched_field TEXT NOT NULL,
+    matched_count INTEGER NOT NULL DEFAULT 0,
+    unmatched_count INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { await db.execute(`ALTER TABLE video_metric_snapshots ADD COLUMN interaction_rate REAL NOT NULL DEFAULT 0`); } catch (e) {}
+  await db.execute(`CREATE TABLE IF NOT EXISTS video_insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'system',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(video_id, type, source),
+    FOREIGN KEY (video_id) REFERENCES social_videos(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS video_content_features (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    feature_type TEXT NOT NULL,
+    feature_value TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'system',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(video_id, feature_type, feature_value),
+    FOREIGN KEY (video_id) REFERENCES social_videos(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_review_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    report_type TEXT NOT NULL,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    summary_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, report_type, period_start, period_end),
+    FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
+  )`);
+  try { await db.execute(`ALTER TABLE social_review_reports ADD COLUMN period_type TEXT NOT NULL DEFAULT '30d'`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_review_reports ADD COLUMN report_json TEXT`); } catch (e) {}
+  await db.execute(`UPDATE social_review_reports SET report_json = summary_json WHERE report_json IS NULL`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_operation_suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'system',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, type, title, content),
+    FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS content_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS video_category_relations (
+    video_id INTEGER NOT NULL,
+    category_id INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (video_id, category_id),
+    FOREIGN KEY (video_id) REFERENCES social_videos(id) ON DELETE CASCADE,
+    FOREIGN KEY (category_id) REFERENCES content_categories(id) ON DELETE CASCADE
+  )`);
+
   // 历史遗留的剪辑/编辑表，需保留以兼容现有数据
   await db.execute(`CREATE TABLE IF NOT EXISTS editing (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -906,6 +1172,11 @@ async function initTables() {
 }
 
 async function runTimeMigrations() {
+  const metricAvailabilityMigration = await db.execute({ sql: `SELECT value FROM app_meta WHERE key = ?`, args: ['social_review_unknown_interaction_20260714'] });
+  if (metricAvailabilityMigration.rows.length === 0) {
+    await db.execute(`UPDATE social_videos SET likes = NULL, comments = NULL, shares = NULL, collects = NULL WHERE source_type = 'creator_item_api' AND likes = 0 AND comments = 0 AND shares = 0 AND collects = 0`);
+    await db.execute({ sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`, args: ['social_review_unknown_interaction_20260714', 'done'] });
+  }
   try {
     await db.execute(`DROP INDEX IF EXISTS idx_calendar_events_user`);
     await db.execute(`DROP INDEX IF EXISTS idx_calendar_events_date`);
@@ -1463,6 +1734,38 @@ async function createIndexes() {
     'CREATE INDEX IF NOT EXISTS idx_douyin_snapshots_account ON douyin_snapshots(account_id)',
     'CREATE INDEX IF NOT EXISTS idx_douyin_snapshots_scraped_at ON douyin_snapshots(scraped_at)',
     'CREATE INDEX IF NOT EXISTS idx_douyin_videos_snapshot ON douyin_videos(snapshot_id)',
+
+    // social-review 表索引
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_social_accounts_platform_external ON social_accounts(platform, external_account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_social_accounts_credential_ref ON social_accounts(credential_ref)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_social_snapshots_account_date ON social_snapshots(account_id, snapshot_date)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_social_videos_platform_external_snapshot ON social_videos(platform, external_video_id, snapshot_id)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_social_videos_account_external ON social_videos(platform, account_id, external_video_id) WHERE external_video_id IS NOT NULL',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_social_videos_platform_internal ON social_videos(platform, internal_video_key)',
+    'CREATE INDEX IF NOT EXISTS idx_social_ingestion_jobs_account ON social_ingestion_jobs(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_social_ingestion_jobs_status ON social_ingestion_jobs(status)',
+    'CREATE INDEX IF NOT EXISTS idx_social_ingestion_jobs_created ON social_ingestion_jobs(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_social_ingestion_jobs_trigger_source ON social_ingestion_jobs(trigger_source)',
+    'CREATE INDEX IF NOT EXISTS idx_social_ingestion_jobs_failure_type ON social_ingestion_jobs(failure_type)',
+    'CREATE INDEX IF NOT EXISTS idx_social_scheduled_jobs_enabled_next ON social_scheduled_jobs(enabled, next_run_at)',
+    'CREATE INDEX IF NOT EXISTS idx_social_scheduled_jobs_account ON social_scheduled_jobs(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_social_ingestion_health_updated ON social_ingestion_health(updated_at)',
+    'CREATE INDEX IF NOT EXISTS idx_social_metric_rollups_scope ON social_metric_rollups(scope_date)',
+    'CREATE INDEX IF NOT EXISTS idx_social_metric_rollups_platform ON social_metric_rollups(platform)',
+    'CREATE INDEX IF NOT EXISTS idx_social_metric_rollups_metric ON social_metric_rollups(metric_key)',
+    'CREATE INDEX IF NOT EXISTS idx_social_credentials_account ON social_credentials(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_social_credentials_status ON social_credentials(status)',
+    'CREATE INDEX IF NOT EXISTS idx_video_performance_scores_video ON video_performance_scores(video_id)',
+    'CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id)',
+    'CREATE INDEX IF NOT EXISTS idx_video_metric_snapshots_date ON video_metric_snapshots(snapshot_date)',
+    'CREATE INDEX IF NOT EXISTS idx_video_metric_snapshots_video ON video_metric_snapshots(video_id)',
+    'CREATE INDEX IF NOT EXISTS idx_video_insights_video ON video_insights(video_id)',
+    'CREATE INDEX IF NOT EXISTS idx_video_content_features_video ON video_content_features(video_id)',
+    'CREATE INDEX IF NOT EXISTS idx_video_content_features_type_value ON video_content_features(feature_type, feature_value)',
+    'CREATE INDEX IF NOT EXISTS idx_social_review_reports_account_created ON social_review_reports(account_id, created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_social_operation_suggestions_account ON social_operation_suggestions(account_id, created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_content_categories_name ON content_categories(name)',
+    'CREATE INDEX IF NOT EXISTS idx_video_category_relations_category ON video_category_relations(category_id)',
 
     // editing 表索引
     'CREATE INDEX IF NOT EXISTS idx_editing_topic ON editing(topic_id)',

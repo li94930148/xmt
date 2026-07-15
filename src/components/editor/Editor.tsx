@@ -34,6 +34,7 @@ interface EditorProps {
     connected: boolean;
   };
   immersive?: boolean;
+  pageScroll?: boolean;
   stateDocId?: string;
 }
 
@@ -45,6 +46,7 @@ export default function Editor({
   placeholder = '开始编写...',
   collaboration,
   immersive = false,
+  pageScroll = false,
   stateDocId,
 }: EditorProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
@@ -336,7 +338,7 @@ export default function Editor({
   const containerClass = isFullscreen
     ? 'fixed inset-0 z-[100] flex flex-col rounded-none h-screen min-h-0'
     : immersive
-      ? 'flex flex-col min-h-[calc(100vh-13rem)]'
+      ? `flex flex-col ${pageScroll ? 'min-h-[300px]' : 'min-h-[calc(100vh-13rem)]'}`
       : 'rounded-xl border flex flex-col h-full min-h-0';
 
   return (

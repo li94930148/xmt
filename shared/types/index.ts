@@ -462,3 +462,18 @@ export interface JwtPayload {
   username: string;
   role: string;
 }
+
+export type {
+  FetchStrategy,
+  NormalizedAccountSnapshot,
+  NormalizedVideoSnapshot,
+  SocialAccount,
+  SocialCredential,
+  SocialCredentialStatus,
+  SocialCredentialType,
+  SocialIngestionJob,
+  SocialMetricRollup,
+  SocialPlatform,
+  SocialSnapshot,
+  SocialVideo,
+} from './social-review';

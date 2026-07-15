@@ -114,3 +114,20 @@ export type {
   SaveDailyReportDraftPayload,
   TeamDailyReportResponse,
 } from './dailyReports';
+export {
+  getSocialAccountsOverview,
+  getSocialHotVideos,
+  getSocialIngestionJobs,
+  getSocialAccount,
+  getSocialDashboard,
+  getSocialDailySummary,
+  getSocialDataQuality,
+} from './socialReview';
+export type {
+  AccountDashboard,
+  DailySummary,
+  DataQuality,
+  IngestionJob,
+  SocialAccountOverview,
+  VideoPerformanceItem,
+} from './socialReview';

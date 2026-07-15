@@ -34,6 +34,8 @@ import pomodoroRoutes from './routes/pomodoro.js'
 import calendarRoutes from './routes/calendar.js'
 import exportRoutes from './routes/export.js'
 import douyinRoutes from './routes/douyin.js'
+import socialReviewRoutes from './routes/social-review.js'
+import { startSocialIngestionScheduler } from './services/social-review/socialIngestionScheduler.js'
 import backupRoutes from './routes/backup.js'
 import { createBackup, cleanOldBackups } from './routes/backup.js'
 import rolesRoutes from './routes/roles.js'
@@ -287,6 +289,7 @@ app.use('/api/pomodoro', pomodoroRoutes)
 app.use('/api/calendar', calendarRoutes)
 app.use('/api/export', exportRoutes)
 app.use('/api/douyin', douyinRoutes)
+app.use('/api/social-review', socialReviewRoutes)
 app.use('/api/backup', backupRoutes)
 app.use('/api/roles', rolesRoutes)
 app.use('/api/permissions', permissionsRoutes)
@@ -527,6 +530,8 @@ export async function startServer() {
   setInterval(() => {
     cleanupInactiveRooms()
   }, 60 * 1000)
+
+  startSocialIngestionScheduler()
 
   // 启动时自动备份一次
   try {

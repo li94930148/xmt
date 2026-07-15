@@ -453,7 +453,7 @@ export default function ProductionDetail() {
   const syncLabel = editorStateLabel(syncStatus);
 
   return (
-    <PageShell className="space-y-4">
+    <PageShell>
       <style>{`
         .production-preview mark {
           border-radius: 2px;
@@ -568,8 +568,8 @@ export default function ProductionDetail() {
         </div>
       </GlassPanel>
 
-      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <GlassPanel className="min-w-0 overflow-hidden">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <GlassPanel className="min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft bg-white/[0.025] px-5 py-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-studio-text-primary">{selectedVersion?.version || production.version}</span>
@@ -586,7 +586,7 @@ export default function ProductionDetail() {
           </div>
 
           {selectedVersion?.isCurrent && canEditProduction ? (
-            <div className="min-h-[calc(100vh-22rem)] bg-[var(--editor-bg)]">
+            <div className="min-h-[300px] bg-[var(--editor-bg)]">
               <ContentEditor
                 value={editData.content}
                 onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
@@ -594,10 +594,11 @@ export default function ProductionDetail() {
                 collaborationKey={getCollaborationRoomId('production', production.id)}
                 persistenceStatus={syncStatus}
                 immersive
+                pageScroll
               />
             </div>
           ) : (
-            <div className="min-h-[calc(100vh-22rem)] bg-[var(--editor-bg)] p-6 lg:p-8">
+            <div className="min-h-[300px] bg-[var(--editor-bg)] p-6 lg:p-8">
               <div
                 className={`editor-content-preview production-preview tiptap prose max-w-none leading-relaxed text-studio-text-primary ${isDark ? 'prose-invert' : ''}`}
                 dangerouslySetInnerHTML={{
@@ -618,10 +619,10 @@ export default function ProductionDetail() {
           )}
         </GlassPanel>
 
-        <GlassPanel className={`${showSidebar ? 'flex' : 'hidden'} min-h-0 flex-col overflow-hidden xl:flex`}>
+        <GlassPanel className={`${showSidebar ? 'flex' : 'hidden'} self-start flex-col xl:flex`}>
           <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4">
             <div>
-              <p className="text-xs font-semibold uppercase text-studio-text-muted">Version Rail</p>
+              <p className="text-xs font-semibold text-studio-text-muted">版本历史</p>
               <h2 className="mt-1 text-sm font-semibold text-studio-text-primary">版本与审核说明</h2>
             </div>
             <button type="button" onClick={() => setShowSidebar(false)} className="rounded-lg p-2 text-studio-text-muted transition hover:bg-white/[0.06] hover:text-studio-text-primary">
@@ -629,7 +630,7 @@ export default function ProductionDetail() {
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+          <div className="space-y-5 p-5">
             <div className="space-y-2">
               {sidebarVersionEntries.map((entry) => (
                 <button

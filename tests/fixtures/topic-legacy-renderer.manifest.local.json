@@ -1,0 +1,20 @@
+{
+  "purpose": "D10-H1 scoped legacy renderer browser fixture",
+  "legacyTopic": {
+    "id": 115,
+    "title": "[D10-H1 TEST] Topic Legacy Renderer",
+    "expectedMode": "legacy",
+    "allowedLegacyFixtureIds": [115],
+    "outlineMarker": "D10-H1 Legacy Renderer Fixture Content"
+  },
+  "runtimeTopic": {
+    "id": 116,
+    "title": "[D10-H1 TEST] Topic Runtime Renderer",
+    "expectedMode": "runtime",
+    "outlineMarker": "D10-H1 Runtime Renderer Fixture Content"
+  },
+  "rollback": {
+    "disableScope": "Remove VITE_TOPIC_LEGACY_FIXTURE_IDS from the local development process and restart it.",
+    "deleteFixtures": "Delete only Topic IDs 115 and 116 through the normal Topic management workflow after acceptance."
+  }
+}

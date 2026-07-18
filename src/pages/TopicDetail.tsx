@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore, useAppStore } from '../store';
 import { getTopic, auditTopic, updateTopicStatus, updateTopic } from '../api';
@@ -6,14 +6,32 @@ import { getUsers } from '../api';
 import { Topic, User } from '../types';
 import { ChevronLeft, Clock, User as UserIcon, Calendar, FileText, CheckCircle, XCircle, ArrowRight, Save, AlertTriangle, Camera, Scissors, Send, List, FileText as FileIcon } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
+import BaseModal from '../components/common/BaseModal';
+import { createTopicDetailManualAdapter } from '../editor/adapters/topicDetailManualAdapter';
+import type { ContentEditorRuntimeHandle, ContentEditorSaveContext } from '../editor/contracts/contentEditorAdapter';
+import { getCurrentTopicEditorModePolicy } from '../editor/topic/topicEditorModePolicy';
+import { useTopicDetailLeaveGuard } from '../hooks/useTopicDetailLeaveGuard';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { usePermission } from '../hooks/usePermission';
 import { STATUS_COLORS, STATUS_TEXT } from '../constants';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
+import {
+  TopicDetailAggregateSaveGate,
+  buildTopicDetailDescription,
+  buildTopicDetailUpdatePayload,
+  cloneTopicDetailDraft,
+  createTopicDetailDraft,
+  topicDetailDraftEquals,
+  type TopicDetailAggregateDraft,
+  type TopicDetailFields,
+  type TopicDetailParsedFields,
+} from './topicDetailAggregateDraft';
+import { resolveTopicDetailEditorBranch, type TopicDetailEditorBranch } from './topicDetailEditorBranch';
 
 export default function TopicDetail() {
   const { id } = useParams<{ id: string }>();
+  const topicEditorModePolicy = useMemo(() => getCurrentTopicEditorModePolicy(), []);
   const [topic, setTopic] = useState<Topic | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,10 +44,31 @@ export default function TopicDetail() {
   const [editOutline, setEditOutline] = useState(false);
   
   const [title, setTitle] = useState('');
-  const [details, setDetails] = useState({ assignee_id: 0, deadline: '', platform: '' });
+  const [details, setDetails] = useState<TopicDetailFields>({ assignee_id: 0, deadline: '', platform: '' });
   const [description, setDescription] = useState('');
   const [scriptContent, setScriptContent] = useState('');
-  const [parsedFields, setParsedFields] = useState({ projectBackground: '', targetAudience: '' });
+  const [parsedFields, setParsedFields] = useState<TopicDetailParsedFields>({ projectBackground: '', targetAudience: '' });
+  const [isTopicDirty, setIsTopicDirty] = useState(false);
+  const [isAggregateSaving, setIsAggregateSaving] = useState(false);
+  const baselineDraftRef = useRef<TopicDetailAggregateDraft | null>(null);
+  const draftRef = useRef<TopicDetailAggregateDraft>({
+    title: '', description: '', details: { assignee_id: 0, deadline: '', platform: '' }, outline: '',
+    parsedFields: { projectBackground: '', targetAudience: '' },
+  });
+  const aggregateRevisionRef = useRef(0);
+  const aggregateSaveGateRef = useRef(new TopicDetailAggregateSaveGate());
+  const topicRuntimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
+  const manualSaveSnapshotsRef = useRef(new Map<number, TopicDetailAggregateDraft>());
+  const aggregatePersistCommandRef = useRef<(
+    snapshot: TopicDetailAggregateDraft,
+    revision: number,
+  ) => Promise<void>>(async () => {
+    throw new Error('Topic aggregate save command is not ready');
+  });
+  const [hasTopicManualRuntimeHandle, setHasTopicManualRuntimeHandle] = useState(false);
+  const [topicEditorBranch, setTopicEditorBranch] = useState<TopicDetailEditorBranch>(() => (
+    resolveTopicDetailEditorBranch(0, true, topicEditorModePolicy)
+  ));
   
   const navigate = useNavigate();
   const authStore = useAuthStore();
@@ -37,6 +76,15 @@ export default function TopicDetail() {
   const styles = useThemeStyles();
   const { hasPermission, loading: permissionsLoading } = usePermission();
   const contentEditRoles = new Set(['admin', 'editor', 'copywriter', 'post_production', 'camera']);
+  const persistTopicManualBridge = useCallback(async (_content: string, context: ContentEditorSaveContext) => {
+    const snapshot = manualSaveSnapshotsRef.current.get(context.contentRevision);
+    if (!snapshot) throw new Error('Topic manual save snapshot is unavailable');
+    await aggregatePersistCommandRef.current(snapshot, context.contentRevision);
+  }, []);
+  const handleTopicRuntimeHandleChange = useCallback((handle: ContentEditorRuntimeHandle | null) => {
+    topicRuntimeHandleRef.current = handle;
+    setHasTopicManualRuntimeHandle(Boolean(handle?.manualSave));
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -44,6 +92,13 @@ export default function TopicDetail() {
       try {
         const topicData = await getTopic(parseInt(id!));
         setTopic(topicData);
+        // Resolve once per loaded Topic. The policy is static for the page
+        // lifetime, so a dirty draft can never hot-switch editor renderers.
+        setTopicEditorBranch(resolveTopicDetailEditorBranch(
+          topicData.id,
+          true,
+          topicEditorModePolicy,
+        ));
         setTitle(topicData.title);
         setDescription(topicData.description);
 
@@ -67,7 +122,16 @@ export default function TopicDetail() {
         setUsers(usersData.data);
 
         // 大纲内容从 topic 取
-        setScriptContent(topicData.outline || '');
+        const draft = createTopicDetailDraft(topicData);
+        baselineDraftRef.current = cloneTopicDetailDraft(draft);
+        draftRef.current = cloneTopicDetailDraft(draft);
+        aggregateRevisionRef.current = 0;
+        setTitle(draft.title);
+        setDescription(draft.description);
+        setDetails(draft.details);
+        setParsedFields(draft.parsedFields);
+        setScriptContent(draft.outline);
+        setIsTopicDirty(false);
       } catch (error) {
         appStore.addNotification({ title: '获取选题详情失败', message: (error as Error).message, type: 'error' });
       } finally {
@@ -77,6 +141,51 @@ export default function TopicDetail() {
     
     fetchData();
   }, [id]);
+
+  const applyDraft = (draft: TopicDetailAggregateDraft) => {
+    draftRef.current = cloneTopicDetailDraft(draft);
+    setTitle(draft.title);
+    setDescription(draft.description);
+    setDetails(draft.details);
+    setParsedFields(draft.parsedFields);
+    setScriptContent(draft.outline);
+  };
+
+  const recordDraftChange = (nextDraft: TopicDetailAggregateDraft) => {
+    draftRef.current = cloneTopicDetailDraft(nextDraft);
+    aggregateRevisionRef.current += 1;
+    setIsTopicDirty(!baselineDraftRef.current || !topicDetailDraftEquals(nextDraft, baselineDraftRef.current));
+  };
+
+  const isCurrentDraftDirty = useCallback(() => (
+    !baselineDraftRef.current || !topicDetailDraftEquals(draftRef.current, baselineDraftRef.current)
+  ), []);
+
+  const changeTitle = (nextTitle: string) => {
+    const nextDraft = { ...draftRef.current, title: nextTitle };
+    setTitle(nextTitle);
+    recordDraftChange(nextDraft);
+  };
+
+  const changeDetails = (nextDetails: TopicDetailFields) => {
+    const nextDraft = { ...draftRef.current, details: { ...nextDetails } };
+    setDetails(nextDetails);
+    recordDraftChange(nextDraft);
+  };
+
+  const changeParsedFields = (nextFields: TopicDetailParsedFields) => {
+    const nextDescription = buildTopicDetailDescription(nextFields);
+    const nextDraft = { ...draftRef.current, description: nextDescription, parsedFields: { ...nextFields } };
+    setParsedFields(nextFields);
+    setDescription(nextDescription);
+    recordDraftChange(nextDraft);
+  };
+
+  const changeOutline = (nextOutline: string) => {
+    const nextDraft = { ...draftRef.current, outline: nextOutline };
+    setScriptContent(nextOutline);
+    recordDraftChange(nextDraft);
+  };
 
   const handleAudit = async () => {
     try {
@@ -105,52 +214,97 @@ export default function TopicDetail() {
     }
   };
 
-  const handleSave = async () => {
-    try {
-      // description 只存项目背景和目标受众
-      const parts: string[] = [];
-      if (parsedFields.projectBackground) parts.push(`【项目背景】\n${parsedFields.projectBackground}`);
-      if (parsedFields.targetAudience) parts.push(`【目标受众】\n${parsedFields.targetAudience}`);
-      const descOnly = parts.join('\n\n');
+  const persistTopicAggregate = (saveSnapshot: TopicDetailAggregateDraft, saveRevision: number) => (
+    aggregateSaveGateRef.current.run(async () => {
+      setIsAggregateSaving(true);
+      try {
+        await updateTopic(parseInt(id!), buildTopicDetailUpdatePayload(saveSnapshot));
+        const topicData = await getTopic(parseInt(id!));
+        setTopic(topicData);
+        if (aggregateRevisionRef.current === saveRevision) {
+          const refreshedDraft = createTopicDetailDraft(topicData);
+          baselineDraftRef.current = cloneTopicDetailDraft(refreshedDraft);
+          applyDraft(refreshedDraft);
+          setIsTopicDirty(false);
+          setEditTitle(false);
+          setEditDetails(false);
+          setEditDescription(false);
+          setEditOutline(false);
+        } else {
+          // A stale response confirms only an older snapshot. Keep the current
+          // baseline so that it cannot clear or redefine a newer local draft.
+          setIsTopicDirty(!baselineDraftRef.current || !topicDetailDraftEquals(draftRef.current, baselineDraftRef.current));
+        }
+        appStore.addNotification({ title: '保存成功', message: '选题信息已更新', type: 'success' });
+      } catch (error) {
+        appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+        throw error;
+      } finally {
+        setIsAggregateSaving(false);
+      }
+    })
+  );
 
-      await updateTopic(parseInt(id!), {
-        title,
-        description: descOnly,
-        outline: scriptContent,
-        platform: details.platform,
-        deadline: details.deadline,
-        assignee_id: details.assignee_id
-      });
+  aggregatePersistCommandRef.current = persistTopicAggregate;
 
-      appStore.addNotification({ title: '保存成功', message: '选题信息已更新', type: 'success' });
-      setEditTitle(false);
-      setEditDetails(false);
-      setEditDescription(false);
-      setEditOutline(false);
-      const topicData = await getTopic(parseInt(id!));
-      setTopic(topicData);
-      setScriptContent(topicData.outline || '');
-    } catch (error) {
-      appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+  const performTopicManualSave = (): Promise<void> => {
+    const saveRevision = aggregateRevisionRef.current;
+    const saveSnapshot = cloneTopicDetailDraft(draftRef.current);
+
+    if (!topicEditorBranch.usesRuntimeManualSave) {
+      return persistTopicAggregate(saveSnapshot, saveRevision);
     }
+    const runtimeHandle = topicRuntimeHandleRef.current;
+
+    if (!runtimeHandle?.manualSave) {
+      appStore.addNotification({ title: '保存不可用', message: '编辑器保存能力尚未就绪，请稍后重试。', type: 'error' });
+      return Promise.reject(new Error('Topic manual save is unavailable'));
+    }
+
+    manualSaveSnapshotsRef.current.set(saveRevision, saveSnapshot);
+    return runtimeHandle.manualSave(saveSnapshot.outline, saveRevision).then((result) => {
+      manualSaveSnapshotsRef.current.delete(saveRevision);
+      if (result.status === 'saved') return;
+      if (result.status === 'failed') throw result.error;
+      if (result.status === 'already_destroyed') {
+        appStore.addNotification({ title: '保存失败', message: '编辑器已释放，未能保存当前修改。', type: 'error' });
+        throw new Error('Topic manual save was destroyed');
+      }
+      throw new Error('Topic manual save was cancelled');
+    });
+  };
+
+  const handleSave = () => {
+    void performTopicManualSave().catch(() => undefined);
   };
 
   const handleCancel = () => {
-    if (topic) {
-      setTitle(topic.title);
-      setDescription(topic.description);
-      setDetails({
-        assignee_id: topic.assignee_id,
-        deadline: topic.deadline,
-        platform: topic.platform
-      });
-      setScriptContent(topic.outline || '');
+    const baseline = baselineDraftRef.current;
+    if (baseline) {
+      applyDraft(baseline);
+      setIsTopicDirty(false);
     }
     setEditTitle(false);
     setEditDetails(false);
     setEditDescription(false);
     setEditOutline(false);
   };
+
+  const {
+    state: topicLeaveState,
+    requestLeave: requestTopicLeave,
+    saveAndLeave: saveTopicAndLeave,
+    discardAndLeave: discardTopicAndLeave,
+    continueEditing: continueTopicEditing,
+  } = useTopicDetailLeaveGuard({
+    isDirty: isCurrentDraftDirty,
+    save: performTopicManualSave,
+    discard: handleCancel,
+  });
+
+  const handleReturnToTopics = useCallback(() => {
+    void requestTopicLeave(() => navigate('/topics'));
+  }, [navigate, requestTopicLeave]);
 
   const statusColors: Record<string, string> = {
     pending: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
@@ -201,6 +355,12 @@ export default function TopicDetail() {
         Number(topic.assignee_id) === authStore.user?.id
       ),
   );
+  const topicDetailManualAdapter = useMemo(() => createTopicDetailManualAdapter({
+    documentId: `topic:${topic?.id ?? id ?? 'unbound'}`,
+    initialContent: baselineDraftRef.current?.outline || '',
+    readonly: !canEditTopic || !editOutline,
+    persist: persistTopicManualBridge,
+  }), [canEditTopic, editOutline, id, persistTopicManualBridge, topic?.id]);
   const isOverdue = topic?.deadline && new Date(topic.deadline) < new Date() && topic.status !== 'completed' && topic.status !== 'rejected';
 
   const beginEditingTopic = () => {
@@ -232,12 +392,24 @@ export default function TopicDetail() {
   }
 
   const isEditing = editTitle || editDetails || editDescription || editOutline;
+  // Only readonly varies while this page is active. The renderer mode was
+  // captured after Topic load, which prevents a dirty draft from hot-switching.
+  const activeTopicEditorBranch: TopicDetailEditorBranch = {
+    ...topicEditorBranch,
+    readonly: !canEditTopic || !editOutline,
+  };
 
   return (
-    <div className="space-y-6">
+    <div
+      className="space-y-6"
+      data-topic-dirty={isTopicDirty ? 'true' : 'false'}
+      data-topic-manual-runtime={hasTopicManualRuntimeHandle ? 'ready' : 'unavailable'}
+      data-topic-leave-state={topicLeaveState}
+      data-topic-editor-mode={topicEditorBranch.topicEditorMode}
+    >
       <div className="flex items-center gap-4">
         <button
-          onClick={() => navigate('/topics')}
+          onClick={handleReturnToTopics}
           className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
         >
           <ChevronLeft className="w-5 h-5" />
@@ -253,7 +425,7 @@ export default function TopicDetail() {
                 <input
                   type="text"
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  onChange={(e) => changeTitle(e.target.value)}
                   className={`text-2xl font-bold ${styles.textPrimary} ${styles.bgInput} border border-blue-500 rounded-lg px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 w-96`}
                   autoFocus
                 />
@@ -299,7 +471,7 @@ export default function TopicDetail() {
             {editDetails ? (
               <select
                 value={details.assignee_id}
-                onChange={(e) => setDetails({ ...details, assignee_id: parseInt(e.target.value) })}
+                onChange={(e) => changeDetails({ ...details, assignee_id: parseInt(e.target.value) })}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
               >
                 <option value={0}>未分配</option>
@@ -327,7 +499,7 @@ export default function TopicDetail() {
               <input
                 type="date"
                 value={details.deadline}
-                onChange={(e) => setDetails({ ...details, deadline: e.target.value })}
+                onChange={(e) => changeDetails({ ...details, deadline: e.target.value })}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
               />
             ) : (
@@ -350,7 +522,7 @@ export default function TopicDetail() {
               <input
                 type="text"
                 value={details.platform}
-                onChange={(e) => setDetails({ ...details, platform: e.target.value })}
+                onChange={(e) => changeDetails({ ...details, platform: e.target.value })}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500 ${styles.textPlaceholder}`}
                 placeholder="输入发布平台"
               />
@@ -379,7 +551,7 @@ export default function TopicDetail() {
             {editDescription ? (
               <textarea
                 value={parsedFields.projectBackground}
-                onChange={(e) => setParsedFields({ ...parsedFields, projectBackground: e.target.value })}
+                onChange={(e) => changeParsedFields({ ...parsedFields, projectBackground: e.target.value })}
                 rows={4}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none`}
                 placeholder="项目背景..."
@@ -400,7 +572,7 @@ export default function TopicDetail() {
             {editDescription ? (
               <textarea
                 value={parsedFields.targetAudience}
-                onChange={(e) => setParsedFields({ ...parsedFields, targetAudience: e.target.value })}
+                onChange={(e) => changeParsedFields({ ...parsedFields, targetAudience: e.target.value })}
                 rows={4}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none`}
                 placeholder="目标受众..."
@@ -424,12 +596,25 @@ export default function TopicDetail() {
             </div>
           </div>
           {editOutline ? (
-            <ContentEditor
-              value={scriptContent}
-              onChange={setScriptContent}
-              mode="rich"
-              collaborationEnabled={false}
-            />
+            activeTopicEditorBranch.usesRuntimeManualSave ? (
+              <ContentEditor
+                value={scriptContent}
+                onChange={changeOutline}
+                mode={activeTopicEditorBranch.contentEditorMode}
+                readOnly={activeTopicEditorBranch.readonly}
+                collaborationEnabled={false}
+                adapter={topicDetailManualAdapter}
+                onRuntimeHandleChange={handleTopicRuntimeHandleChange}
+              />
+            ) : (
+              <ContentEditor
+                value={scriptContent}
+                onChange={changeOutline}
+                mode={activeTopicEditorBranch.contentEditorMode}
+                readOnly={activeTopicEditorBranch.readonly}
+                collaborationEnabled={false}
+              />
+            )
           ) : (
             <div className={`editor-content-preview tiptap ${styles.bgTertiary} rounded-lg p-6 ${styles.textPrimary} min-h-[200px] leading-relaxed`} dangerouslySetInnerHTML={{ __html: normalizeLegacyEditorHtmlTheme(scriptContent || '暂无大纲内容') }}></div>
           )}
@@ -439,6 +624,7 @@ export default function TopicDetail() {
           <div className="flex gap-3 mb-6">
             <button
               onClick={handleSave}
+              disabled={isAggregateSaving}
               className={`px-4 py-2 bg-blue-600 hover:bg-blue-700 ${styles.textPrimary} rounded-lg transition-colors flex items-center gap-2`}
             >
               <Save className="w-4 h-4" />
@@ -627,6 +813,49 @@ export default function TopicDetail() {
           </div>
         </div>
       )}
+
+      <BaseModal
+        open={topicLeaveState === 'dirty' || topicLeaveState === 'saving' || topicLeaveState === 'failed'}
+        onClose={continueTopicEditing}
+        title={topicLeaveState === 'failed' ? '保存失败，无法离开' : '存在未保存的修改'}
+        description={topicLeaveState === 'failed'
+          ? '保存未完成。您可以重试保存，放弃本次修改后离开，或继续编辑。'
+          : '离开前请选择保存当前选题修改，或明确放弃本次修改。'}
+        size="sm"
+        closeOnOverlayClick={topicLeaveState !== 'saving'}
+        footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={continueTopicEditing}
+              disabled={topicLeaveState === 'saving'}
+              className={`rounded-xl px-4 py-2.5 text-sm disabled:opacity-60 ${styles.buttonSecondary}`}
+            >
+              继续编辑
+            </button>
+            <button
+              type="button"
+              onClick={() => { void discardTopicAndLeave(); }}
+              disabled={topicLeaveState === 'saving'}
+              className="rounded-xl bg-red-600 px-4 py-2.5 text-sm text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+            >
+              放弃离开
+            </button>
+            <button
+              type="button"
+              onClick={() => { void saveTopicAndLeave(); }}
+              disabled={topicLeaveState === 'saving'}
+              className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm text-white transition-colors hover:bg-brand-400 disabled:opacity-60"
+            >
+              {topicLeaveState === 'saving' ? '正在保存…' : '保存并离开'}
+            </button>
+          </div>
+        }
+      >
+        <p className={`text-sm leading-6 ${styles.textSecondary}`}>
+          当前提示只依据 TopicDetail 的 aggregate draft 是否相对 baseline 发生变化；不会使用编辑器 Runtime dispose 结果判断保存完成。
+        </p>
+      </BaseModal>
     </div>
   );
 }

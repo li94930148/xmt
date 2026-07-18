@@ -228,6 +228,15 @@ body {
   color: var(--editor-fg);
 }
 
+/* Shared ContentEditor runtime surface: long unbroken text must wrap inside its flex item. */
+.editor-content,
+.editor-content .ProseMirror {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .editor-content-preview,
 .production-preview {
   background: transparent;

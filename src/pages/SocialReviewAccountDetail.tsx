@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Activity, BarChart3, CircleAlert, CircleCheck, Eye, Heart, RefreshCw, ShieldCheck, TrendingUp, Video } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
 import { ErrorState, LoadingState, PageHeader, PageToolbar } from '../components/common';
-import { generateSocialReport, getSocialAccount, getSocialContentInsights, getSocialDashboard, getSocialDailySummary, getSocialDataQuality, getSocialAccountVideos, getSocialLatestReport, getSocialMetricStatus, getSocialOperationSuggestions, syncSocialExport, type AccountDashboard, type ContentInsights, type DailySummary, type DataQuality, type FeaturePattern, type MetricStatus, type OperationSuggestion, type SocialReviewReport, type SocialVideoReview } from '../api/socialReview';
+import { checkCredentialHealth, generateSocialReport, getSocialAccount, getSocialContentInsights, getSocialDashboard, getSocialDailySummary, getSocialDataQuality, getSocialAccountVideos, getSocialLatestReport, getSocialMetricStatus, getSocialOperationSuggestions, syncSocialExport, type AccountDashboard, type ContentInsights, type CredentialHealth, type DailySummary, type DataQuality, type FeaturePattern, type MetricStatus, type OperationSuggestion, type SocialReviewReport, type SocialVideoReview } from '../api/socialReview';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 
 function count(value: number | null | undefined) { return value == null ? '暂无数据' : Number(value).toLocaleString('zh-CN'); }
@@ -31,6 +31,7 @@ export default function SocialReviewAccountDetail() {
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState('');
+  const [credentialHealth, setCredentialHealth] = useState<CredentialHealth | null>(null);
 
   const load = useCallback(async () => {
     if (!accountId) { setError('账号信息无效。'); setLoading(false); return; }
@@ -44,6 +45,7 @@ export default function SocialReviewAccountDetail() {
       if (reportResult.status === 'fulfilled') { setReport(reportResult.value); setSelectedPeriod((reportResult.value.periodType || '30d') as '7d' | '30d' | '90d'); }
       if (contentResult.status === 'fulfilled') setContentInsights(contentResult.value);
       if (suggestionResult.status === 'fulfilled') setOperationSuggestions(suggestionResult.value.items || []);
+      setCredentialHealth(await checkCredentialHealth(accountId));
     } catch (loadError) { setError(loadError instanceof Error ? loadError.message : '数据暂时无法加载，请稍后重试。'); }
     finally { setLoading(false); }
   }, [accountId]);

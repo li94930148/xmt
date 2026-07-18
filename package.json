@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.3.0",
+  "version": "2.6.0",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "check": "tsc --noEmit",
     "test:time": "tsx scripts/time-contract-test.ts",
+    "test:rate-limit": "tsx scripts/rate-limit-contract-test.ts",
     "audit:time": "tsx scripts/audit-time-fields.ts",
     "server:dev": "nodemon",
     "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",
@@ -32,10 +33,10 @@
     ,"smoke:social-review:sync-export": "node scripts/smoke-social-review-sync-export.mjs"
     ,"debug:social-review:content-list": "tsx scripts/debug-douyin-content-list-probe.mjs"
     ,"debug:social-review:video-metric-api": "tsx scripts/debug-douyin-video-metric-api.mjs"
-    ,"debug:social-review:creator-api-map": "tsx scripts/debug-douyin-creator-api-map.mjs"
     ,"debug:social-review:interaction-api": "tsx scripts/debug-douyin-interaction-api.mjs"
     ,"debug:social-review:interaction-discovery": "node scripts/debug-douyin-interaction-discovery.mjs"
     ,"debug:social-review:item-list-request-diff": "tsx scripts/debug-douyin-item-list-request-diff.mjs"
+    ,"debug:social-review:creator-api-map": "node scripts/debug-douyin-cdp-connect.mjs"
     ,"smoke:social-review:interaction-sync": "node scripts/smoke-social-review-interaction-sync.mjs"
     ,"refresh:social-review:analysis": "tsx scripts/refresh-social-review-analysis.mjs"
     ,"smoke:social-review:content-items": "tsx scripts/smoke-social-review-content-items.mjs"
@@ -47,6 +48,14 @@
     ,"smoke:social-review:full-performance": "tsx scripts/smoke-social-review-full-performance.mjs"
     ,"smoke:social-review:video-identity": "tsx scripts/smoke-social-review-video-identity.mjs"
     ,"smoke:social-review:metric-availability": "tsx scripts/smoke-social-review-metric-availability.mjs"
+    ,"smoke:social-review:credential-health": "node scripts/smoke-social-review-credential-health.mjs"
+    ,"smoke:social-review:login-flow": "node scripts/smoke-social-review-login-flow.mjs"
+    ,"smoke:social-review:login-recovery": "node scripts/smoke-social-review-login-flow.mjs"
+    ,"smoke:social-review:video-detail": "node scripts/smoke-social-review-video-detail.mjs"
+    ,"smoke:social-review:similar-video": "node scripts/smoke-social-review-similar-video.mjs"
+    ,"smoke:social-review:cdp-sync": "node scripts/smoke-social-review-cdp-sync.mjs"
+    ,"smoke:social-review:server-browser": "tsx scripts/smoke-social-review-server-browser.mjs"
+    ,"smoke:social-review:login-ui": "node scripts/smoke-social-review-login-ui.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

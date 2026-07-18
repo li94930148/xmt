@@ -88,6 +88,7 @@ const RetrospectiveDetailPage = lazyWithRetry(() => import('@/pages/Retrospectiv
 const SocialReview = lazyWithRetry(() => import('@/pages/SocialReview'), 'SocialReview');
 const SocialReviewAccountDetail = lazyWithRetry(() => import('@/pages/SocialReviewAccountDetail'), 'SocialReviewAccountDetail');
 const SocialReviewVideoDetail = lazyWithRetry(() => import('@/pages/SocialReviewVideoDetail'), 'SocialReviewVideoDetail');
+const SocialLoginRecovery = lazyWithRetry(() => import('@/pages/SocialLoginRecovery'), 'SocialLoginRecovery');
 
 function PageLoading() {
   return (
@@ -148,6 +149,7 @@ export default function App() {
                   <Route path="/social-review" element={<SocialReview />} />
                   <Route path="/social-review/accounts/:id" element={<SocialReviewAccountDetail />} />
                   <Route path="/social-review/accounts/:accountId/videos/:videoId" element={<SocialReviewVideoDetail />} />
+                  <Route path="/social-review/login-recovery/:sessionId" element={<SocialLoginRecovery />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:retro:view']} />}>
                   <Route path="/retrospectives" element={<RetrospectivesPage />} />

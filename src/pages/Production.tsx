@@ -193,9 +193,10 @@ export default function Production() {
     rejected: '已驳回',
   };
 
-  const filteredProductions = productions.filter(p => 
-    p.topic_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.version.toLowerCase().includes(searchTerm.toLowerCase())
+  const normalizedSearchTerm = searchTerm.toLowerCase();
+  const filteredProductions = productions.filter((production) =>
+    String(production.topic_title ?? '').toLowerCase().includes(normalizedSearchTerm) ||
+    String(production.version ?? '').toLowerCase().includes(normalizedSearchTerm),
   );
 
   return (

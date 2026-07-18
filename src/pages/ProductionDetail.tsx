@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowRight,
@@ -18,16 +18,19 @@ import { deleteProduction, getProductionById, getProductionHistory, updateProduc
 import type { Production as ProductionType, ProductionHistory, Topic } from '../types';
 import { getTopic } from '../api';
 import ContentEditor from '../components/ContentEditor';
+import EditorLeaveFailureDialog from '../components/editor/EditorLeaveFailureDialog';
 import { ConfirmModal } from '../components/common';
 import { ActionButton, EmptyState, GlassPanel, PageShell, StatusPill, StudioSkeletonCard } from '../components/studio';
 import { getCollaborationRoomId } from '../collaboration/core/events';
-import { cancelDatabaseSync, syncToDatabase } from '../collaboration/core/writeConsistency';
+import { createProductionEditorAdapter } from '../editor/adapters/productionEditorAdapter';
 import { getTimelineView, recordTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime } from '../lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
+import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
+import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
 
 const STATUS_TEXT: Record<string, string> = {
   draft: '草稿',
@@ -119,7 +122,7 @@ export default function ProductionDetail() {
     status: 'draft',
   });
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
-  const lastAutoSavedContentRef = useRef('');
+  const [leaveFailureDialogDismissed, setLeaveFailureDialogDismissed] = useState(false);
 
   const canEditProduction = Boolean(
     production &&
@@ -133,6 +136,51 @@ export default function ProductionDetail() {
   const canDelete = canEditProduction && hasPermission('production:delete');
   const activeDocId = production ? getCollaborationRoomId('production', production.id) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
+  const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
+  const {
+    requestLeave,
+    retry: retryLeave,
+    discardAndLeave,
+    state: leaveGuardState,
+    result: leaveGuardResult,
+  } = useEditorLeaveGuard({ runtimeHandleRef });
+
+  const handleRuntimeHandleChange = useCallback((handle: ContentEditorRuntimeHandle | null) => {
+    runtimeHandleRef.current = handle;
+  }, []);
+
+  const handleContinueEditing = useCallback(() => {
+    setLeaveFailureDialogDismissed(true);
+  }, []);
+
+  const handleRetryLeave = useCallback(() => retryLeave(), [retryLeave]);
+
+  const handleDiscardAndLeave = useCallback(() => discardAndLeave(), [discardAndLeave]);
+
+  const handleGuardedNavigate = useCallback(async (to: string) => {
+    setLeaveFailureDialogDismissed(false);
+    const leaveResult = await requestLeave({
+      reason: 'route_transition',
+      continuation: () => navigate(to),
+    });
+
+    if (leaveResult.decision === 'waiting_confirmation') {
+      appStore.addNotification({
+        title: '最后修改尚未保存',
+        message: '已阻止离开当前页面，请留在此页后重试保存。',
+        type: 'warning',
+      });
+      return;
+    }
+
+    if (leaveResult.warning === 'collaboration_unconfirmed') {
+      appStore.addNotification({
+        title: '内容已保存',
+        message: '协作交接尚未确认，已按安全保存结果继续导航。',
+        type: 'warning',
+      });
+    }
+  }, [appStore, navigate, requestLeave]);
 
   const fetchData = async () => {
     if (!id) return;
@@ -150,7 +198,6 @@ export default function ProductionDetail() {
         content: productionData.content || '',
         status: productionData.status,
       });
-      lastAutoSavedContentRef.current = productionData.content || '';
 
       const [topicData, historyData] = await Promise.all([
         getTopic(productionData.topic_id),
@@ -293,14 +340,20 @@ export default function ProductionDetail() {
     setEditMode(true);
   };
 
-  useEffect(() => {
-    if (!production || !canEditProduction || selectedVersionId !== 'current') return;
-    if (editData.content === lastAutoSavedContentRef.current) return;
-
-    syncToDatabase({
-      docId: getCollaborationRoomId('production', production.id),
-      content: editData.content,
-      previousContent: lastAutoSavedContentRef.current,
+  const productionEditorAdapter = useMemo(() => {
+    if (!production) return undefined;
+    const room = getCollaborationRoomId('production', production.id);
+    return createProductionEditorAdapter({
+      documentId: room,
+      collaborationRoom: room,
+      initialContent: editData.content,
+      readonly: !canEditProduction || selectedVersionId !== 'current',
+      capabilities: {
+        collaboration: true,
+        manualSave: false,
+        immersive: true,
+        pageScroll: true,
+      },
       persist: (content) => updateProduction(production.id, {
         topic_id: production.topic_id,
         version: production.version,
@@ -308,17 +361,7 @@ export default function ProductionDetail() {
         status: editData.status,
         version_action: 'none',
       }).then(() => undefined),
-      onSynced: (content) => {
-        lastAutoSavedContentRef.current = content;
-      },
-      onError: () => {
-        // Manual save still surfaces full errors; keep autosave quiet during collaboration.
-      },
     });
-
-    return () => {
-      cancelDatabaseSync(getCollaborationRoomId('production', production.id));
-    };
   }, [canEditProduction, editData.content, editData.status, production, selectedVersionId]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
@@ -478,7 +521,7 @@ export default function ProductionDetail() {
           <div className="flex min-w-0 items-start gap-3">
             <button
               type="button"
-              onClick={() => navigate('/production')}
+              onClick={() => void handleGuardedNavigate('/production')}
               className="mt-1 rounded-button border border-studio-border-soft bg-white/[0.04] p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
               title="返回创作管理"
             >
@@ -497,7 +540,7 @@ export default function ProductionDetail() {
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
                 <span>{production.version || 'v1.0'}</span>
-                <button type="button" onClick={() => navigate(`/topics/${production.topic_id}`)} className="text-studio-cyan transition hover:text-white">
+                <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="text-studio-cyan transition hover:text-white">
                   {topic?.title || production.topic_title || '关联选题'}
                 </button>
                 <span className="inline-flex items-center gap-1">
@@ -531,7 +574,7 @@ export default function ProductionDetail() {
                 {production.status === 'draft' ? '提交审核' : production.status === 'review' ? '审核通过' : '重新编辑'}
               </ActionButton>
             ) : production.status === 'approved' ? (
-              <ActionButton onClick={() => navigate('/shooting')} variant="primary" className="px-3 py-2">
+              <ActionButton onClick={() => void handleGuardedNavigate('/shooting')} variant="primary" className="px-3 py-2">
                 <ArrowRight className="h-4 w-4" />
                 成片制作
               </ActionButton>
@@ -595,6 +638,8 @@ export default function ProductionDetail() {
                 persistenceStatus={syncStatus}
                 immersive
                 pageScroll
+                adapter={productionEditorAdapter}
+                onRuntimeHandleChange={handleRuntimeHandleChange}
               />
             </div>
           ) : (
@@ -682,7 +727,7 @@ export default function ProductionDetail() {
             <div className="space-y-3 border-t border-studio-border-soft pt-5">
               <div>
                 <p className="text-xs font-semibold uppercase text-studio-text-muted">关联选题</p>
-                <button type="button" onClick={() => navigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan transition hover:text-white">
+                <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan transition hover:text-white">
                   {topic?.title || production.topic_title || '-'}
                 </button>
               </div>
@@ -706,6 +751,15 @@ export default function ProductionDetail() {
         variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteModal(false)}
+      />
+
+      <EditorLeaveFailureDialog
+        open={leaveGuardState === 'waiting_confirmation' && !leaveFailureDialogDismissed}
+        state={leaveGuardState}
+        result={leaveGuardResult}
+        onContinueEditing={handleContinueEditing}
+        onRetry={handleRetryLeave}
+        onDiscardAndLeave={handleDiscardAndLeave}
       />
     </PageShell>
   );

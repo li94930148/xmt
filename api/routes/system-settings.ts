@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { execute, queryOne } from '../database/utils';
+import fs from 'fs';
+import path from 'path';
 
 const router = Router();
 
@@ -27,6 +29,10 @@ type ManagedSystemSettings = {
 };
 
 const SETTINGS_META_KEY = 'system_settings';
+const packageJson = JSON.parse(
+  fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'),
+) as { version: string };
+const APP_VERSION = packageJson.version;
 
 const defaultSettings: ManagedSystemSettings = {
   system: {
@@ -117,7 +123,7 @@ async function saveSettings(settings: ManagedSystemSettings) {
 
 router.get('/public', async (_req, res) => {
   try {
-    res.json(await loadSettings());
+    res.json({ ...(await loadSettings()), version: APP_VERSION });
   } catch (error) {
     res.status(500).json({ message: '获取公开系统设置失败', error });
   }
@@ -125,7 +131,7 @@ router.get('/public', async (_req, res) => {
 
 router.get('/', authenticate, requirePermission('system:settings'), async (_req, res) => {
   try {
-    res.json(await loadSettings());
+    res.json({ ...(await loadSettings()), version: APP_VERSION });
   } catch (error) {
     res.status(500).json({ message: '获取系统设置失败', error });
   }
@@ -141,7 +147,7 @@ router.put('/', authenticate, requirePermission('system:settings'), async (req, 
     });
 
     await saveSettings(next);
-    res.json(next);
+    res.json({ ...next, version: APP_VERSION });
   } catch (error) {
     res.status(500).json({ message: '保存系统设置失败', error });
   }

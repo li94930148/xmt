@@ -1,0 +1,10 @@
+import { API_BASE_URL, login } from './social-review-test-utils.mjs';
+const token = await login();
+const headers = { Authorization: `Bearer ${token}` };
+const createdResponse = await fetch(`${API_BASE_URL}/social-review/accounts/2/login/start`, { method: 'POST', headers });
+const created = await createdResponse.json();
+if (!createdResponse.ok || created?.data?.status !== 'waiting_scan') throw new Error('login session was not created');
+const statusResponse = await fetch(`${API_BASE_URL}/social-review/login-session/${encodeURIComponent(created.data.sessionId)}`, { headers });
+const status = await statusResponse.json();
+if (!statusResponse.ok || status?.data?.status !== 'waiting_scan') throw new Error('login status contract invalid');
+console.log('login flow waiting_scan contract passed');

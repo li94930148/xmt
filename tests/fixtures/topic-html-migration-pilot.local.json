@@ -1,0 +1,22 @@
+{
+  "phase": "D10-H2",
+  "topicId": 115,
+  "operator": "local-browser-test-account",
+  "htmlType": "THTML-01",
+  "originalOutline": "D10-H1 Legacy Renderer Fixture Content",
+  "originalOutlineSha256": "3129429aa383cb6a70a8e31ae9564628142f1b14eacdeeea66916a3dd9d12b56",
+  "candidateRuntimeHtml": "<p>D10-H1 Legacy Renderer Fixture Content</p>",
+  "candidateRuntimeHtmlSha256": "550e02443f96fd2463fc1c8c4166d5cd4c13450c4abde335f5e853f10fcd930d",
+  "admission": {
+    "annotation": false,
+    "fontOrFontSizeOrFontFamily": false,
+    "backgroundColor": false,
+    "unknownHtml": false,
+    "approvedForSingleTopicPilot": true
+  },
+  "rollback": {
+    "outline": "D10-H1 Legacy Renderer Fixture Content",
+    "outlineSha256": "3129429aa383cb6a70a8e31ae9564628142f1b14eacdeeea66916a3dd9d12b56",
+    "renderer": "Set the local VITE_TOPIC_LEGACY_FIXTURE_IDS scope to 115 only if a legacy renderer rollback is needed."
+  }
+}

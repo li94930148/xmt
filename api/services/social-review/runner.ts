@@ -6,7 +6,7 @@ import { getSocialFetchAdapter } from './adapters/index.js';
 import type { SocialCollectOptions } from './adapters/base.js';
 import { saveCurrentVideoMetricSnapshots } from './videoMetricSnapshotService.js';
 import { classifyIngestionFailure, type IngestionFailureType } from './ingestionFailure.js';
-import { markCredentialExpired } from './credentials.js';
+import { credentialHealthCheck, markCredentialExpired } from './credentials.js';
 import { listVideoPerformance } from './videoAnalysis.js';
 import { analyzeAccountHealth } from './accountHealthService.js';
 import { refreshIngestionHealth } from './ingestionHealthService.js';
@@ -263,6 +263,12 @@ export async function runSocialCollection(accountId: number, options: SocialColl
   }
   if (!account.active) {
     throw new Error('账号未启用。');
+  }
+  const credentialHealth = await credentialHealthCheck(accountId);
+  if (credentialHealth.status !== 'active') {
+    const job = await createIngestionJob(account, 'running', triggerSource, retryCount);
+    await updateJobFailed(Number(job?.id || 0), credentialHealth.reason || '账号登录已失效，请重新登录', 'credential_expired');
+    return { job: await getIngestionJob(Number(job?.id || 0)), account, snapshot: null, videoCount: 0, insertCount: 0, updateCount: 0, diagnostics: [{ type: 'credential_health' as SocialCollectDiagnostic['type'], message: credentialHealth.reason || '账号登录状态不可用', count: 0, at: new Date().toISOString() }], errorMessage: 'credential_expired' };
   }
 
   const job = await createIngestionJob(account, 'running', triggerSource, retryCount);

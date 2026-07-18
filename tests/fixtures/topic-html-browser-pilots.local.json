@@ -1,0 +1,33 @@
+{
+  "phase": "D10-H4",
+  "operator": "local-browser-test-account",
+  "fixtures": [
+    {
+      "type": "THTML-07",
+      "topicId": 117,
+      "originalOutline": "",
+      "originalOutlineSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidateHtml": "<p></p>",
+      "candidateSha256": "fe04a9dc88d3f3be8d4f6bc63a9a80f45a4c6d8460e7551dab849457c091920a",
+      "rollbackOutline": ""
+    },
+    {
+      "type": "THTML-04",
+      "topicId": 118,
+      "originalOutline": "",
+      "originalOutlineSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidateHtml": "<ul><li><p>D10-H4 List Parent</p></li><li><p>D10-H4 List Child</p></li></ul><ol><li><p>D10-H4 List Ordered</p></li></ol>",
+      "candidateSha256": "d396f313054b02c3d2f98a3f52336e281b61105b6efc9def56eac5f0c8c02a90",
+      "rollbackOutline": ""
+    },
+    {
+      "type": "THTML-05",
+      "topicId": 119,
+      "originalOutline": "",
+      "originalOutlineSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "candidateHtml": "<table style=\"min-width: 50px;\"><colgroup><col style=\"min-width: 25px;\"><col style=\"min-width: 25px;\"></colgroup><tbody><tr><th colspan=\"1\" rowspan=\"1\"><p>D10-H4 Header A</p></th><th colspan=\"1\" rowspan=\"1\"><p>D10-H4 Header B</p></th></tr><tr><td colspan=\"1\" rowspan=\"1\"><p>D10-H4 Cell A</p></td><td colspan=\"1\" rowspan=\"1\"><p>D10-H4 Cell B</p></td></tr></tbody></table>",
+      "candidateSha256": "4c1cd148106e7a26414a01f20a6c41d27cb3c648c0f3bf6fa78f2acec66d2aba",
+      "rollbackOutline": ""
+    }
+  ]
+}

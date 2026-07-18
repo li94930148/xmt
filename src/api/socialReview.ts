@@ -106,6 +106,7 @@ export type DataQuality = {
 };
 
 export type MetricStatus = { views: boolean; likes: boolean; comments: boolean; shares: boolean; collects: boolean };
+export type CredentialHealth = { status: 'active' | 'expired' | 'need_login' | 'checking'; code?: 'credential_expired' | 'need_login'; reason: string | null };
 
 export type SocialReviewReport = {
   accountId: number;
@@ -191,3 +192,12 @@ export async function getSocialContentInsights(accountId: number) {
 export async function getSocialOperationSuggestions(accountId: number) {
   return request<{ items: OperationSuggestion[] }>(`/accounts/${accountId}/suggestions`);
 }
+export async function checkCredentialHealth(accountId: number) { return post<CredentialHealth>(`/accounts/${accountId}/credential-health`); }
+export type VideoMetricPoint = { snapshotDate: string; views: number; likes: number; comments: number; shares: number; collects: number; interactionRate: number };
+export async function getSocialVideoLifecycle(videoId: number) { return request<{ historicalTrend: VideoMetricPoint[]; growthStage: string; growthSpeed: { viewsPerDay: number; recentGrowthRate: number | null } }>(`/videos/${videoId}/lifecycle`); }
+export async function getSocialVideoFeatures(videoId: number) { return request<{ items: Array<{ featureType: string; featureValue: string }> }>(`/videos/${videoId}/features`); }
+export async function getSocialVideoInsights(videoId: number) { return request<{ items: Array<{ type: string; content: string }> }>(`/videos/${videoId}/insights`); }
+export async function getSimilarSocialVideos(videoId: number) { return request<{ items: Array<{ id: number; title: string | null; coverUrl: string | null; publishTime: string | null; views: number | null; score: number }> }>(`/videos/${videoId}/similar`); }
+export async function createSocialLoginSession(accountId: number) { return post<{ sessionId: string; status: 'waiting_scan' }>(`/accounts/${accountId}/login/start`); }
+export async function getSocialLoginStatus(sessionId: string) { return request<{ sessionId: string; status: 'waiting_scan' | 'scanned' | 'success' | 'failed' | 'expired'; message: string | null }>(`/login-session/${encodeURIComponent(sessionId)}`); }
+export async function cancelSocialLoginSession(sessionId: string) { return post<{ sessionId: string; status: 'failed' }>(`/login-session/${encodeURIComponent(sessionId)}/cancel`); }

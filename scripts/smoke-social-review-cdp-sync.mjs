@@ -1,0 +1,2 @@
+import { apiRequest, login } from './social-review-test-utils.mjs';
+const token=await login(); const synced=await apiRequest('POST','/accounts/2/cdp-sync',token); if(synced.payload?.data?.source!=='chrome_cdp')throw new Error('CDP sync failed'); const metrics=await apiRequest('GET','/accounts/2/metrics',token); if(!(Number(metrics.payload?.data?.followers)>0))throw new Error('followers unavailable'); console.log('CDP account metrics sync passed');

@@ -4,11 +4,11 @@ import { queryOne, execute } from '../database/utils';
 import { User } from '../types';
 import { signToken } from '../utils/jwt';
 import { authenticate } from '../middleware/auth';
-import { loginLimiter, passwordChangeLimiter } from '../middleware/rateLimit';
+import { loginAccountLimiter, loginIpLimiter, logFailedLogin, passwordChangeLimiter } from '../middleware/rateLimit';
 
 const router = express.Router();
 
-router.post('/login', loginLimiter, async (req, res) => {
+router.post('/login', loginIpLimiter, loginAccountLimiter, logFailedLogin, async (req, res) => {
   try {
     const { username, password } = req.body;
     

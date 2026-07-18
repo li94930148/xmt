@@ -10,6 +10,23 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.6.0',
+    date: '2026年7月',
+    title: '传媒内容中台能力升级版',
+    changes: [
+      { type: 'security', description: '权限管理体系重构：完成角色权限重新规划；admin 拥有完整系统权限，member 仅可查看选题、创作及详情，文案、后期、摄像等生产角色具备内容编辑权限，普通人员可提交选题并编辑自己的内容；系统设置仅管理员可用，个人设置对所有用户开放。同步优化页面权限控制、数据归属过滤与操作权限校验。' },
+      { type: 'improvement', description: '多人实时协作编辑优化：基于 Tiptap + Yjs + Socket.IO 优化实时同步、断线重连与连接策略，修复编辑器高频操作卡顿，并增强异常日志。' },
+      { type: 'improvement', description: '内容版本管理升级：Production / Shooting 版本规则优化，小版本在当前 major 下自动递增且同一 major 仅保留最新 minor；新版本自动生成 major 并保留历史主版本最新记录。同步优化历史展示、版本聚合和数据冗余清理。' },
+      { type: 'feature', description: '工作流系统升级：完成 Shadow Logging、Analytics、Decision、Enforcement、Explainability 能力建设，增强流程追踪、操作记录及后续 AI 自动化扩展能力。' },
+      { type: 'improvement', description: '系统稳定性优化：优化登录错误提示与登录限流、API 请求限制和 429 异常提示，并修复系统设置接口异常。' },
+      { type: 'improvement', description: 'Socket.IO 生产环境优化：完成单例连接复用、连接异常日志增强与断线恢复优化，提升生产环境稳定运行能力。' },
+      { type: 'feature', description: '部署运维升级：完善 PM2 服务管理、Caddy 代理配置、健康检查接口、自动部署脚本与数据备份机制，提升生产环境可靠性。' },
+      { type: 'feature', description: '数据资料库建设：完成山东省情资料采集方案、泰安节点数据抓取、本地资料归档、目录结构保存、断点续爬和数据索引生成，为知识库与 AI 能力提供数据基础。' },
+      { type: 'feature', description: 'AI 能力准备：完成 llama.cpp 本地模型运行验证、Qwen GGUF 模型部署测试及 OpenAI API 兼容调用准备，支持后续 AI 内容助手、AI 选题分析与私有知识库。' },
+      { type: 'fix', description: 'Bug 修复：覆盖登录异常反馈、Socket 连接、编辑器性能、版本历史、点赞接口限流、环境变量及部署异常等问题。' },
+    ],
+  },
+  {
     version: '2.3.0',
     date: '2026-06-17',
     title: '编辑器统一入口与低风险页面接入',

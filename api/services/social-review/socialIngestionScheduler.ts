@@ -3,6 +3,7 @@ import { classifyIngestionFailure, type IngestionFailureType } from './ingestion
 import { createIngestionJob, getIngestionJob, getSocialAccount, runSocialCollection } from './runner.js';
 import { markCredentialExpired } from './credentials.js';
 import { refreshIngestionHealth } from './ingestionHealthService.js';
+import { detectServerLogin } from './serverBrowserService.js';
 
 const MAX_SCHEDULE_ATTEMPTS = 3;
 let schedulerTimer: NodeJS.Timeout | null = null;
@@ -94,6 +95,12 @@ export async function runScheduledJob(scheduleId: number, options: { dryRun?: bo
   if (!schedule.enabled) throw new Error('采集计划未启用。');
   const account = await getSocialAccount(schedule.account_id);
   if (!account?.active) throw new Error('计划账号未启用。');
+
+  const loginStatus = await detectServerLogin(account.id);
+  if (loginStatus !== 'logged_in') {
+    if (account.credential_ref) await markCredentialExpired(account.credential_ref, '服务器浏览器需要管理员扫码登录。');
+    throw new Error('服务器浏览器需要管理员扫码登录。');
+  }
 
   if (options.dryRun) {
     const job = await createIngestionJob(account, 'pending', 'scheduled');

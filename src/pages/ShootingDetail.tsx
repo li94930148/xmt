@@ -1,17 +1,20 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
 import { getShootingById, updateShooting } from '../api';
 import { Shooting as ShootingType } from '../types';
 import { ChevronLeft, Calendar, MapPin, Camera, User as UserIcon, CheckCircle, Clock, FileText, ArrowRight, PanelRight, PanelRightClose } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
+import EditorLeaveFailureDialog from '../components/editor/EditorLeaveFailureDialog';
 import { getCollaborationRoomId } from '../collaboration/core/events';
-import { cancelDatabaseSync, syncToDatabase } from '../collaboration/core/writeConsistency';
+import { createShootingEditorAdapter } from '../editor/adapters/shootingEditorAdapter';
 import { getTimelineView, recordTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
 import { setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
+import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
+import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
 
 interface ShootingDetailData extends ShootingType {
   production: {
@@ -44,9 +47,45 @@ export default function ShootingDetail() {
   // 剧本编辑状态
   const [scriptContent, setScriptContent] = useState('');
   const [showSidebar, setShowSidebar] = useState(false);
-  const lastAutoSavedScriptRef = useRef('');
+  const [leaveFailureDialogDismissed, setLeaveFailureDialogDismissed] = useState(false);
   const activeDocId = shooting ? getCollaborationRoomId('shooting', shooting.id) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
+  const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
+  const {
+    requestLeave,
+    retry: retryLeave,
+    discardAndLeave,
+    state: leaveGuardState,
+    result: leaveGuardResult,
+  } = useEditorLeaveGuard({ runtimeHandleRef });
+
+  const handleRuntimeHandleChange = useCallback((handle: ContentEditorRuntimeHandle | null) => {
+    runtimeHandleRef.current = handle;
+  }, []);
+
+  const handleContinueEditing = useCallback(() => {
+    setLeaveFailureDialogDismissed(true);
+  }, []);
+
+  const handleRetryLeave = useCallback(() => retryLeave(), [retryLeave]);
+
+  const handleDiscardAndLeave = useCallback(() => discardAndLeave(), [discardAndLeave]);
+
+  const handleGuardedNavigate = useCallback(async (to: string) => {
+    setLeaveFailureDialogDismissed(false);
+    const leaveResult = await requestLeave({
+      reason: 'route_transition',
+      continuation: () => navigate(to),
+    });
+
+    if (leaveResult.warning === 'collaboration_unconfirmed') {
+      appStore.addNotification({
+        title: '内容已保存',
+        message: '协作交接尚未确认，已按安全保存结果继续导航。',
+        type: 'warning',
+      });
+    }
+  }, [appStore, navigate, requestLeave]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -62,7 +101,6 @@ export default function ShootingDetail() {
         // 初始化剧本内容：优先使用本地编辑版，其次使用创作管理审核通过的内容
         const content = result.script_content || result.production?.content || result.production?.content_markdown || '';
         setScriptContent(content);
-        lastAutoSavedScriptRef.current = content;
       } catch (error) {
         appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
       } finally {
@@ -73,28 +111,23 @@ export default function ShootingDetail() {
     fetchData();
   }, [id]);
 
-  useEffect(() => {
-    if (!shooting) return;
-    if (scriptContent === lastAutoSavedScriptRef.current) return;
-
-    syncToDatabase({
-      docId: getCollaborationRoomId('shooting', shooting.id),
-      content: scriptContent,
-      previousContent: lastAutoSavedScriptRef.current,
+  const shootingEditorAdapter = useMemo(() => {
+    if (!shooting) return undefined;
+    const room = getCollaborationRoomId('shooting', shooting.id);
+    return createShootingEditorAdapter({
+      documentId: room,
+      collaborationRoom: room,
+      initialContent: scriptContent,
+      readonly: false,
+      capabilities: {
+        collaboration: true,
+        manualSave: false,
+        immersive: true,
+        pageScroll: false,
+      },
       persist: (content) => updateShooting(shooting.id, { script_content: content }).then(() => undefined),
-      onSynced: (content) => {
-        lastAutoSavedScriptRef.current = content;
-      },
-      onError: () => {
-        // 保持静默，手动保存会给出明确反馈。
-      },
     });
-
-    return () => {
-      cancelDatabaseSync(getCollaborationRoomId('shooting', shooting.id));
-    };
   }, [scriptContent, shooting]);
-
   const handleStatusChange = async (newStatus: string) => {
     if (!shooting) return;
 
@@ -198,12 +231,12 @@ export default function ShootingDetail() {
   const hasLocalScriptEdit = shooting.script_content !== null && shooting.script_content !== undefined;
 
   return (
-    <div className="flex flex-col gap-3" style={{ height: 'calc(100vh - 96px)' }}>
+    <div className="flex flex-col gap-3">
       <div className={`shrink-0 border-b ${styles.border} px-3 py-2`}>
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <button
-              onClick={() => navigate('/shooting')}
+              onClick={() => void handleGuardedNavigate('/shooting')}
               className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
             >
               <ChevronLeft className={`w-5 h-5 ${styles.textSecondary}`} />
@@ -282,8 +315,8 @@ export default function ShootingDetail() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-3">
-        <main className="min-w-0 flex-1 overflow-hidden">
+      <div className="flex gap-3">
+        <main className="min-w-0 flex-1">
           <ContentEditor
             value={scriptContent}
             onChange={setScriptContent}
@@ -292,12 +325,14 @@ export default function ShootingDetail() {
             persistenceStatus={syncStatus}
             immersive
             className="h-full"
+            adapter={shootingEditorAdapter}
+            onRuntimeHandleChange={handleRuntimeHandleChange}
             placeholder="开始编写剧本..."
           />
         </main>
 
         {showSidebar && (
-          <aside className={`${styles.bgSecondary} border ${styles.border} hidden w-80 shrink-0 overflow-y-auto rounded-2xl xl:block`}>
+          <aside className={`${styles.bgSecondary} border ${styles.border} hidden w-80 shrink-0 rounded-2xl xl:block`}>
             <div className={`flex items-center justify-between border-b ${styles.border} px-5 py-4`}>
               <div>
                 <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>信息栏</p>
@@ -317,7 +352,7 @@ export default function ShootingDetail() {
                   <p className={`mt-1 text-xs ${styles.textMuted}`}>版本已纳入统一时间轴，当前页保留本地剧本编辑版。</p>
                 </div>
                 <button
-                  onClick={() => shooting.production?.id && navigate(`/production/${shooting.production.id}`)}
+                  onClick={() => shooting.production?.id && void handleGuardedNavigate(`/production/${shooting.production.id}`)}
                   disabled={!shooting.production?.id}
                   className={`w-full rounded-lg px-3 py-2 text-xs ${styles.buttonSecondary} disabled:opacity-50`}
                 >
@@ -368,6 +403,15 @@ export default function ShootingDetail() {
           </aside>
         )}
       </div>
+
+      <EditorLeaveFailureDialog
+        open={leaveGuardState === 'waiting_confirmation' && !leaveFailureDialogDismissed}
+        state={leaveGuardState}
+        result={leaveGuardResult}
+        onContinueEditing={handleContinueEditing}
+        onRetry={handleRetryLeave}
+        onDiscardAndLeave={handleDiscardAndLeave}
+      />
     </div>
   );
 }

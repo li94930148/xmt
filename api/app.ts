@@ -19,6 +19,7 @@ import { queryOne } from './database/utils.js'
 import { verifyToken } from './utils/jwt.js'
 import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/socket.js'
 import { apiLimiter } from './middleware/rateLimit.js'
+import { parseTrustProxy } from './utils/trustProxy.js'
 import authRoutes from './routes/auth.js'
 import topicsRoutes from './routes/topics.js'
 import usersRoutes from './routes/users.js'
@@ -138,8 +139,9 @@ function normalizeHostHeader(hostHeader?: string) {
   }
 }
 
-// 信任反向代理（nginx等），使 req.ip 获取真实客户端 IP
-app.set('trust proxy', 1)
+// Production is client -> Caddy -> Node: trust exactly one proxy hop. Do not use `true`,
+// which would let a public client supply an arbitrary X-Forwarded-For address.
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY))
 
 // 自动检测 HTTPS 证书（局域网桌面通知需要 HTTPS）
 const certsDir = path.join(__dirname, '..', 'certs')
@@ -250,9 +252,6 @@ app.use('/api', cors(corsOptions))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
-// 全局 API 限制
-app.use('/api/', apiLimiter)
-
 // 生产环境：服务前端静态文件
 const distPath = path.join(__dirname, '..', 'dist')
 app.use(express.static(distPath, {
@@ -275,6 +274,8 @@ app.use(express.static(distPath, {
 }))
 
 app.use('/api/auth', authRoutes)
+// Auth is mounted first so its dedicated login limiters never consume the shared API quota.
+app.use('/api/', apiLimiter)
 app.use('/api/topics', topicsRoutes)
 app.use('/api/users', usersRoutes)
 app.use('/api/messages', messagesRoutes)
@@ -441,6 +442,13 @@ io.on('connection', (socket) => {
     if (PUBLIC_SOCKET_ROOMS.has(room)) {
       socket.leave(room)
     }
+  })
+
+  socket.on('social-login:join', async (sessionId: string) => {
+    if (socketUser.role !== 'admin') return
+    if (!/^[0-9a-f-]{16,}$/i.test(String(sessionId))) return
+    const session = await queryOne('SELECT account_id FROM social_login_sessions WHERE id = ?', [sessionId])
+    if (session) socket.join(`social-login-session-${sessionId}`)
   })
 
   socket.on(COLLABORATION_EVENTS.JOIN, (payload) => {

@@ -442,6 +442,9 @@ async function initTables() {
   try { await db.execute(`ALTER TABLE social_videos ADD COLUMN duration INTEGER`); } catch (e) {}
   try { await db.execute(`ALTER TABLE social_videos ADD COLUMN status TEXT`); } catch (e) {}
   try { await db.execute(`ALTER TABLE social_videos ADD COLUMN visibility TEXT`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN avg_play_duration REAL`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN completion_rate_5s REAL`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_videos ADD COLUMN bounce_rate_2s REAL`); } catch (e) {}
 
   await db.execute(`CREATE TABLE IF NOT EXISTS social_ingestion_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -508,6 +511,11 @@ async function initTables() {
     last_verified_at DATETIME,
     last_failed_at DATETIME,
     last_error TEXT,
+    last_check_time DATETIME,
+    last_success_time DATETIME,
+    last_failure_time DATETIME,
+    failure_reason TEXT,
+    expire_detected_at DATETIME,
     created_by INTEGER,
     updated_by INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -515,6 +523,28 @@ async function initTables() {
     FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
   )`);
   try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN expired_reason TEXT`); } catch (e) {}
+  // Credential health is metadata only. Authentication material is deliberately not
+  // written here; browser sessions remain in the operator-controlled browser profile.
+  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN last_check_time DATETIME`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN last_success_time DATETIME`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN last_failure_time DATETIME`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN failure_reason TEXT`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE social_credentials ADD COLUMN expire_detected_at DATETIME`); } catch (e) {}
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_login_sessions (
+    id TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'waiting_scan',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expired_at DATETIME NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS social_account_metric_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, metric_name TEXT NOT NULL,
+    metric_value REAL, snapshot_date TEXT NOT NULL, source TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, metric_name, snapshot_date), FOREIGN KEY (account_id) REFERENCES social_accounts(id) ON DELETE CASCADE
+  )`);
 
   await db.execute(`CREATE TABLE IF NOT EXISTS video_performance_scores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1755,6 +1785,7 @@ async function createIndexes() {
     'CREATE INDEX IF NOT EXISTS idx_social_metric_rollups_metric ON social_metric_rollups(metric_key)',
     'CREATE INDEX IF NOT EXISTS idx_social_credentials_account ON social_credentials(account_id)',
     'CREATE INDEX IF NOT EXISTS idx_social_credentials_status ON social_credentials(status)',
+    'CREATE INDEX IF NOT EXISTS idx_social_login_sessions_account_status ON social_login_sessions(account_id, status)',
     'CREATE INDEX IF NOT EXISTS idx_video_performance_scores_video ON video_performance_scores(video_id)',
     'CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id)',
     'CREATE INDEX IF NOT EXISTS idx_video_metric_snapshots_date ON video_metric_snapshots(snapshot_date)',

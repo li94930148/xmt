@@ -4,17 +4,19 @@ import type { User } from '../types';
 const BASE_URL = '/api';
 
 export type LoginErrorKind = 'invalid_credentials' | 'rate_limited' | 'account_unavailable' | 'server_unavailable';
+export type LoginRateLimitDimension = 'api' | 'login_ip' | 'login_account';
 
 export class LoginError extends Error {
   status?: number;
   kind: LoginErrorKind;
   retryAfterSeconds?: number;
   remainingAttempts?: number;
+  rateLimitDimension?: LoginRateLimitDimension;
 
   constructor(
     message: string,
     kind: LoginErrorKind,
-    options: { status?: number; retryAfterSeconds?: number; remainingAttempts?: number } = {},
+    options: { status?: number; retryAfterSeconds?: number; remainingAttempts?: number; rateLimitDimension?: LoginRateLimitDimension } = {},
   ) {
     super(message);
     this.name = 'LoginError';
@@ -22,6 +24,7 @@ export class LoginError extends Error {
     this.status = options.status;
     this.retryAfterSeconds = options.retryAfterSeconds;
     this.remainingAttempts = options.remainingAttempts;
+    this.rateLimitDimension = options.rateLimitDimension;
   }
 }
 
@@ -82,6 +85,7 @@ export async function login(username: string, password: string): Promise<{ user:
         status: response.status,
         retryAfterSeconds: readRetryAfterSeconds(response, body),
         remainingAttempts: readRemainingAttempts(body),
+        rateLimitDimension: readRateLimitDimension(body),
       });
     }
 
@@ -119,4 +123,10 @@ export async function changePassword(oldPassword: string, newPassword: string): 
     throw new Error(err.message || '修改密码失败');
   }
   return response.json();
+}
+
+function readRateLimitDimension(body: Record<string, unknown>): LoginRateLimitDimension | undefined {
+  return body.dimension === 'api' || body.dimension === 'login_ip' || body.dimension === 'login_account'
+    ? body.dimension
+    : undefined;
 }

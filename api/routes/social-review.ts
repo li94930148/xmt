@@ -2,7 +2,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { execute, executeInsert, queryAll, queryOne } from '../database/utils.js';
-import { getCredentialSummaryByAccountId } from '../services/social-review/credentials.js';
+import { credentialHealthCheck, getCredentialSummaryByAccountId } from '../services/social-review/credentials.js';
 import { collectDouyinPerformanceMetrics } from '../services/social-review/douyinPerformanceService.js';
 import {
   createIngestionJob,
@@ -25,6 +25,10 @@ import { refreshAccountVideoContentFeatures, listVideoContentFeatures } from '..
 import { analyzeContentPerformance } from '../services/social-review/contentPerformanceAnalysis.js';
 import { generateAccountReport, getLatestSocialReviewReport, type ReportPeriod } from '../services/social-review/reportGenerationService.js';
 import { generateAccountSuggestions, listAccountSuggestions } from '../services/social-review/operationSuggestionService.js';
+import { cancelSocialLoginRecovery, getSocialLoginRecovery, startSocialLoginRecovery } from '../services/social-review/socialLoginRecoveryService.js';
+import { listSimilarVideos } from '../services/social-review/similarVideoService.js';
+import { connectCreatorCdp } from '../services/social-review/cdpBrowserService.js';
+import { syncDouyinAccountMetrics } from '../services/social-review/douyinAccountMetricService.js';
 
 const router = express.Router();
 
@@ -371,6 +375,13 @@ router.get('/videos/:id/insights', requirePermission('analytics:view'), async (r
   }
 });
 
+router.get('/videos/:id/features', requirePermission('analytics:view'), async (req, res) => {
+  try { sendData(res, { items: await listVideoContentFeatures(Number(req.params.id)) }); } catch (error) { handleError(error, res); }
+});
+router.get('/videos/:id/similar', requirePermission('analytics:view'), async (req, res) => {
+  try { sendData(res, { items: await listSimilarVideos(Number(req.params.id)) }); } catch (error) { handleError(error, res); }
+});
+
 router.post('/accounts/:id/jobs', async (req, res) => {
   try {
     const account = await getSocialAccount(Number(req.params.id));
@@ -382,7 +393,7 @@ router.post('/accounts/:id/jobs', async (req, res) => {
   }
 });
 
-router.post('/accounts/:id/collect', async (req, res) => {
+router.post('/accounts/:id/collect', requirePermission('analytics:view'), async (req, res) => {
   try {
     const accountId = Number(req.params.id);
     const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
@@ -412,12 +423,34 @@ router.post('/accounts/:id/collect', async (req, res) => {
   }
 });
 
-router.get('/accounts/:id/credentials', async (req, res) => {
+router.get('/accounts/:id/credentials', requirePermission('analytics:view'), async (req, res) => {
   try {
     sendData(res, await getCredentialSummaryByAccountId(Number(req.params.id)));
   } catch (error) {
     handleError(error, res);
   }
+});
+
+router.post('/accounts/:id/credential-health', requirePermission('analytics:view'), async (req, res) => {
+  try { sendData(res, await credentialHealthCheck(Number(req.params.id))); } catch (error) { handleError(error, res); }
+});
+router.post('/accounts/:id/cdp-sync', requirePermission('analytics:view'), async (req, res) => {
+  let browser: Awaited<ReturnType<typeof connectCreatorCdp>>['browser'] | null = null;
+  try { const accountId = Number(req.params.id); const connected = await connectCreatorCdp(); browser = connected.browser; const summary = await syncDouyinAccountMetrics(accountId, connected.page); sendData(res, { source: 'chrome_cdp', accountMetrics: { nickname: summary.nickname, followers: summary.followers, videoCount: summary.videoCount }, videoMetrics: { matched: summary.videoMatched, updated: summary.videoUpdated }, diagnostics: { pageConnected: true, ...summary } }); } catch (error) { handleError(error, res); } finally { await browser?.close().catch(() => undefined); }
+});
+router.get('/accounts/:id/metrics', requirePermission('analytics:view'), async (req, res) => {
+  try { const accountId = Number(req.params.id); const rows = await queryAll<Record<string, unknown>>(`SELECT metric_name,metric_value,snapshot_date FROM social_account_metric_snapshots WHERE account_id=? ORDER BY snapshot_date DESC,id DESC LIMIT 500`,[accountId]); const latest = new Map<string, unknown>(); for (const row of rows) if (!latest.has(String(row.metric_name))) latest.set(String(row.metric_name), row.metric_value); sendData(res,{ followers:latest.get('followers') ?? null,totalFavorited:latest.get('total_favorited') ?? null,videoCount:latest.get('video_count') ?? null,trends:rows.map(r=>({metric:r.metric_name,date:r.snapshot_date,value:r.metric_value})) }); } catch(error){handleError(error,res);}
+});
+router.get('/videos/:id/quality', requirePermission('analytics:view'), async (req,res) => { try { const row=await queryOne<Record<string,unknown>>(`SELECT avg_play_duration,completion_rate_5s,bounce_rate_2s FROM social_videos WHERE id=?`,[Number(req.params.id)]); if(!row)return res.status(404).json({success:false,message:'作品不存在'}); sendData(res,{avgPlayDuration:row.avg_play_duration ?? null,completionRate:row.completion_rate_5s ?? null,bounceRate:row.bounce_rate_2s ?? null}); }catch(error){handleError(error,res);} });
+
+router.post('/accounts/:id/login/start', requireAdmin, async (req, res) => {
+  try { sendData(res, await startSocialLoginRecovery(Number(req.params.id))); } catch (error) { handleError(error, res); }
+});
+router.get('/login-session/:id', requireAdmin, async (req, res) => {
+  try { const session = await getSocialLoginRecovery(req.params.id); if (!session) return res.status(404).json({ success: false, message: '登录会话不存在' }); sendData(res, session); } catch (error) { handleError(error, res); }
+});
+router.post('/login-session/:id/cancel', requireAdmin, async (req, res) => {
+  try { const session = await cancelSocialLoginRecovery(req.params.id); if (!session) return res.status(404).json({ success: false, message: '登录会话不存在' }); sendData(res, session); } catch (error) { handleError(error, res); }
 });
 
 router.get('/accounts/:id/health', requirePermission('analytics:view'), async (req, res) => {

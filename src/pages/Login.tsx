@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, getPublicSystemSettings, login } from '../api';
@@ -23,11 +23,21 @@ function resolveLoginErrorMessage(error: unknown) {
   if (error instanceof LoginError) {
     if (error.kind === 'rate_limited') {
       const retryText = formatRetryAfter(error.retryAfterSeconds);
+      const rateLimitMessage = error.rateLimitDimension === 'login_ip'
+        ? '当前网络登录请求较多，请稍后重试。'
+        : error.rateLimitDimension === 'login_account'
+          ? '该账号连续登录失败次数较多，请检查密码后再试。'
+          : error.rateLimitDimension === 'api'
+            ? '系统请求较多，请稍后重试。'
+            : '';
       const remainingText = typeof error.remainingAttempts === 'number'
         ? `还可以尝试 ${error.remainingAttempts} 次。`
         : '';
 
       if (retryText) {
+        if (rateLimitMessage) {
+          return `${rateLimitMessage} 请在 ${retryText}`;
+        }
         return `试错次数过多，请在 ${retryText}`;
       }
       if (remainingText) {
@@ -340,6 +350,7 @@ export default function Login() {
   const [confirmPwd, setConfirmPwd] = useState('');
   const [changePwdLoading, setChangePwdLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const loginRequestInFlight = useRef(false);
 
   useEffect(() => {
     setMounted(true);
@@ -413,6 +424,7 @@ export default function Login() {
 
   const handleSubmit = useCallback(async (event: FormEvent) => {
     event.preventDefault();
+    if (loginRequestInFlight.current) return;
     setErrorMessage('');
 
     if (!username.trim() || !password.trim()) {
@@ -422,6 +434,7 @@ export default function Login() {
       return;
     }
 
+    loginRequestInFlight.current = true;
     setLoading(true);
     try {
       const result = await login(username.trim(), password);
@@ -447,6 +460,7 @@ export default function Login() {
       setErrorMessage(message);
       appStore.addNotification({ title: '登录失败', message, type: 'error' });
     } finally {
+      loginRequestInFlight.current = false;
       setLoading(false);
     }
   }, [appStore, authStore, location.state, navigate, password, remember, username]);

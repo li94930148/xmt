@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import Editor from './editor/Editor';
 import RichTextEditor from './RichTextEditor';
 import { useAuthStore } from '../store';
@@ -9,6 +9,14 @@ import { getEditingRegions, setActiveUsers } from '../editor/collaboration/edito
 import { editorStateLabel, getEditorState, normalizeEditorState, useEditorEventState, type EditorState } from '../editor/state/editorStateManager';
 import { emitEditorState } from '../editor/state/editorStateEventBus';
 import { recordEditorTelemetry } from '../editor/telemetry/editorTelemetry';
+import ContentEditorRuntime from '../editor/runtime/ContentEditorRuntime';
+import {
+  resolveContentEditorSaveStrategy,
+  type ContentEditorAdapter,
+  type ContentEditorRuntimeHandle,
+  type ContentEditorSaveStatus,
+} from '../editor/contracts/contentEditorAdapter';
+import { RuntimeHandleBridge } from '../editor/runtime/RuntimeHandleBridge';
 
 export type ContentEditorMode = 'rich' | 'legacy' | 'readonly';
 
@@ -26,9 +34,12 @@ export interface ContentEditorProps {
   immersive?: boolean;
   pageScroll?: boolean;
   persistenceStatus?: EditorState;
+  adapter?: ContentEditorAdapter;
+  onRuntimeHandleChange?: (handle: ContentEditorRuntimeHandle | null) => void;
 }
 
 const noop = () => {};
+const runtimeNoopPersist: ContentEditorAdapter['persist'] = async () => undefined;
 export default function ContentEditor({
   value,
   onChange = noop,
@@ -43,6 +54,8 @@ export default function ContentEditor({
   immersive = false,
   pageScroll = false,
   persistenceStatus = 'synced',
+  adapter,
+  onRuntimeHandleChange,
 }: ContentEditorProps) {
   const resolvedReadOnly = readOnly || mode === 'readonly';
   const wrapperStyle = minHeight === undefined ? undefined : { minHeight };
@@ -50,6 +63,10 @@ export default function ContentEditor({
   const user = useAuthStore((state) => state.user);
   const editStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousValueRef = useRef(value);
+  const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
+  const runtimeHandleBridgeRef = useRef<RuntimeHandleBridge | null>(null);
+  if (!runtimeHandleBridgeRef.current) runtimeHandleBridgeRef.current = new RuntimeHandleBridge();
+  const runtimeRevisionRef = useRef(0);
   const collaborationRequested = mode === 'rich' && collaborationEnabled && !resolvedReadOnly;
   const collaborationAvailable = collaborationRequested && Boolean(socket?.connected);
   const collaboration = useCollaborativeDocument({
@@ -87,6 +104,56 @@ export default function ContentEditor({
   const saveHint = persistenceStatus === 'saving'
     ? explainAutoSave('debounce')
     : editorStateLabel(editorState);
+  const fallbackRuntimeAdapter = useMemo<ContentEditorAdapter>(() => ({
+    documentId: collaborationKey || 'content-editor:unbound',
+    collaborationRoom: collaborationKey || '',
+    initialContent: value,
+    readonly: resolvedReadOnly,
+    capabilities: {
+      collaboration: collaborationRequested,
+      manualSave: Boolean(onSave),
+      immersive,
+      pageScroll,
+    },
+    saveStrategy: 'external',
+    // Existing pages still own persistence through writeConsistency. The
+    // Runtime handle is intentionally dormant until an adapter is introduced.
+    persist: runtimeNoopPersist,
+  }), [collaborationKey, collaborationRequested, immersive, onSave, pageScroll, resolvedReadOnly, value]);
+  const runtimeAdapter = adapter || fallbackRuntimeAdapter;
+  const saveStrategy = resolveContentEditorSaveStrategy(adapter);
+
+  const handleRuntimeReady = useCallback((handle: ContentEditorRuntimeHandle) => {
+    runtimeHandleRef.current = handle;
+    runtimeHandleBridgeRef.current?.publish(handle);
+  }, []);
+
+  const handleRuntimeDisposed = useCallback((handle: ContentEditorRuntimeHandle) => {
+    if (runtimeHandleRef.current === handle) runtimeHandleRef.current = null;
+    runtimeHandleBridgeRef.current?.release(handle);
+  }, []);
+
+  useEffect(() => {
+    runtimeHandleBridgeRef.current?.setListener(onRuntimeHandleChange);
+  }, [onRuntimeHandleChange]);
+
+  const handleRuntimeStatusChange = useCallback((status: ContentEditorSaveStatus) => {
+    if (!adapter || !collaborationKey) return;
+    if (status === 'saving') emitEditorState('writeConsistency:save', collaborationKey, { source: 'ContentEditorRuntime' });
+    if (status === 'synced') emitEditorState('writeConsistency:saved', collaborationKey, { source: 'ContentEditorRuntime' });
+    if (status === 'conflicted') emitEditorState('conflict:event', collaborationKey, { source: 'ContentEditorRuntime' });
+  }, [adapter, collaborationKey]);
+
+  const handleEditorChange = useCallback((content: string) => {
+    onChange(content);
+    if (saveStrategy !== 'autosave') return;
+    runtimeRevisionRef.current += 1;
+    runtimeHandleRef.current?.scheduleSave(content, runtimeRevisionRef.current);
+  }, [onChange, saveStrategy]);
+
+  useEffect(() => {
+    runtimeRevisionRef.current = 0;
+  }, [runtimeAdapter.documentId]);
 
   useEffect(() => {
     if (!collaborationKey) return;
@@ -136,6 +203,8 @@ export default function ContentEditor({
   useEffect(() => {
     return () => {
       if (editStopTimerRef.current) clearTimeout(editStopTimerRef.current);
+      runtimeHandleRef.current = null;
+      runtimeHandleBridgeRef.current?.dispose();
     };
   }, []);
 
@@ -178,17 +247,26 @@ export default function ContentEditor({
           )}
         </div>
       )}
-      <Editor
-        value={value}
-        onChange={onChange}
-        onSave={onSave ? () => onSave(value) : undefined}
-        readOnly={resolvedReadOnly}
-        placeholder={placeholder}
-        collaboration={editorCollaboration}
-        immersive={immersive}
-        pageScroll={pageScroll}
-        stateDocId={collaborationKey}
-      />
+      <ContentEditorRuntime
+        adapter={runtimeAdapter}
+        onReady={handleRuntimeReady}
+        onDisposed={handleRuntimeDisposed}
+        onStatusChange={handleRuntimeStatusChange}
+      >
+        {(runtime) => (
+          <Editor
+            value={value}
+            onChange={handleEditorChange}
+            onSave={onSave ? () => onSave(value) : undefined}
+            readOnly={runtime.readonly}
+            placeholder={placeholder}
+            collaboration={editorCollaboration}
+            immersive={runtime.capabilities.immersive}
+            pageScroll={runtime.capabilities.pageScroll}
+            stateDocId={collaborationKey}
+          />
+        )}
+      </ContentEditorRuntime>
     </div>
   );
 }

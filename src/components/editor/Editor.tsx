@@ -46,7 +46,6 @@ export default function Editor({
   placeholder = '开始编写...',
   collaboration,
   immersive = false,
-  pageScroll = false,
   stateDocId,
 }: EditorProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
@@ -71,10 +70,11 @@ export default function Editor({
   } | null>(null);
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [wordCount, setWordCount] = useState(0);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const baseExtensions = useMemo(() => createEditorExtensions(placeholder), [placeholder]);
 
   // 立即保存（仅 Ctrl+S 触发）
@@ -194,6 +194,61 @@ export default function Editor({
     },
   }, [readOnly, collaboration?.provider, baseExtensions]);
 
+  const handleCopyAll = useCallback(async () => {
+    if (!editor) return;
+
+    const plainText = editor.getText({ blockSeparator: '\n\n' });
+    const html = editor.getHTML();
+
+    const copyPlainTextWithLegacyFallback = () => {
+      const textarea = document.createElement('textarea');
+      textarea.value = plainText;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('Legacy clipboard copy failed');
+    };
+
+    if (copyStatusTimeoutRef.current) clearTimeout(copyStatusTimeoutRef.current);
+
+    try {
+      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+        throw new Error('Rich clipboard API unavailable');
+      }
+
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/plain': new Blob([plainText], { type: 'text/plain' }),
+          'text/html': new Blob([html], { type: 'text/html' }),
+        }),
+      ]);
+      setCopyStatus('copied');
+    } catch {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(plainText);
+        } else {
+          copyPlainTextWithLegacyFallback();
+        }
+        setCopyStatus('copied');
+      } catch {
+        try {
+          copyPlainTextWithLegacyFallback();
+          setCopyStatus('copied');
+        } catch {
+          setCopyStatus('failed');
+        }
+      }
+    } finally {
+      copyStatusTimeoutRef.current = setTimeout(() => setCopyStatus('idle'), 2000);
+    }
+  }, [editor]);
+
   // 外部 value 变化时同步
   useEffect(() => {
     if (!editor) return;
@@ -233,6 +288,7 @@ export default function Editor({
     return () => {
       if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (copyStatusTimeoutRef.current) clearTimeout(copyStatusTimeoutRef.current);
     };
   }, []);
 
@@ -338,8 +394,8 @@ export default function Editor({
   const containerClass = isFullscreen
     ? 'fixed inset-0 z-[100] flex flex-col rounded-none h-screen min-h-0'
     : immersive
-      ? `flex flex-col ${pageScroll ? 'min-h-[300px]' : 'min-h-[calc(100vh-13rem)]'}`
-      : 'rounded-xl border flex flex-col h-full min-h-0';
+      ? 'flex flex-col min-w-0'
+      : 'rounded-xl border flex flex-col min-w-0';
 
   return (
     <div
@@ -354,7 +410,7 @@ export default function Editor({
             : 'bg-[var(--editor-panel)] border-[var(--editor-border)] shadow-md'
       }`}
       style={{
-        height: isFullscreen ? '100vh' : immersive ? 'auto' : '100%',
+        height: isFullscreen ? '100vh' : undefined,
         minHeight: isFullscreen ? '100vh' : '0',
       }}
     >
@@ -377,6 +433,20 @@ export default function Editor({
           )}
         </div>
         <div className="flex items-center gap-2 px-3 shrink-0">
+          {editor && (
+            <button
+              type="button"
+              onClick={() => void handleCopyAll()}
+              className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                isDark
+                  ? 'border-white/15 text-gray-200 hover:bg-white/10'
+                  : 'border-gray-300 text-gray-700 hover:bg-gray-100'
+              }`}
+              title="复制编辑器全部内容（文本和 HTML）"
+            >
+              {copyStatus === 'copied' ? '已复制' : copyStatus === 'failed' ? '复制失败' : '复制全文'}
+            </button>
+          )}
           {collaboration && (
             <div className="flex items-center gap-2">
               <span
@@ -409,17 +479,16 @@ export default function Editor({
       </div>
 
       {/* 编辑区域 + 目录侧栏 */}
-      <div className={`flex flex-1 min-h-0 relative ${immersive ? 'overflow-visible' : 'h-0 overflow-hidden'}`}>
+      <div className="editor-shell relative min-w-0 max-w-full">
         <div
-          ref={scrollAreaRef}
-          className={`flex-1 min-h-0 relative bg-[var(--editor-bg)] text-[var(--editor-fg)] ${immersive ? 'overflow-visible' : 'h-full overflow-y-auto overscroll-contain'}`}
+          className="relative min-w-0 max-w-full bg-[var(--editor-bg)] text-[var(--editor-fg)]"
         >
           {/* BubbleMenu */}
           {editor && !readOnly && (
             <BubbleMenuBar editor={editor} onAddComment={handleAddComment} />
           )}
 
-          <div className="relative min-h-full">
+          <div className="relative min-h-full min-w-0 max-w-full">
             <EditorContent editor={editor} />
           </div>
         </div>
@@ -427,7 +496,7 @@ export default function Editor({
         {/* 目录面板 */}
       {showToc && (
           <div
-            className={`toc-panel w-64 border-l overflow-y-auto shrink-0 ${
+            className={`toc-panel w-64 border-l shrink-0 ${
               isDark ? 'border-[var(--editor-border)] bg-[var(--editor-panel)]' : 'border-[var(--editor-border)] bg-[var(--editor-soft)]'
             }`}
           >
@@ -556,7 +625,7 @@ export default function Editor({
           height: 0;
         }
         .tiptap {
-          height: 100%;
+          min-height: 100%;
           background: var(--editor-bg);
           color: var(--editor-fg);
         }

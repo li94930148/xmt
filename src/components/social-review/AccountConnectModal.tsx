@@ -5,7 +5,7 @@ import { getLoginSessionStatus, startAccountConnect } from '../../api/socialRevi
 import { useSocket } from '../../hooks/useSocket';
 import { useThemeStyles } from '../../hooks/useThemeStyles';
 
-type LoginStatus = 'waiting_scan' | 'scanned' | 'success' | 'failed' | 'expired' | 'checking';
+type LoginStatus = 'waiting_scan' | 'scanned' | 'manual_verify_required' | 'auth_required' | 'success' | 'failed' | 'expired' | 'checking';
 
 type Props = {
   open: boolean;
@@ -13,7 +13,7 @@ type Props = {
   onSuccess: (accountId: number) => void;
 };
 
-const statusCopy: Record<LoginStatus, string> = {
+const statusCopy: Partial<Record<LoginStatus, string>> = {
   checking: '正在准备服务器浏览器',
   waiting_scan: '等待扫码',
   scanned: '扫码成功，正在确认登录',
@@ -46,7 +46,7 @@ export default function AccountConnectModal({ open, onClose, onSuccess }: Props)
       try {
         const result = await getLoginSessionStatus(sessionId);
         setStatus(result.status);
-        if (result.status === 'failed' || result.status === 'expired') setError(result.message || statusCopy[result.status]);
+        if (result.status === 'failed' || result.status === 'expired') setError(result.message || statusCopy[result.status] || '登录状态异常');
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : '无法读取登录状态');
       }
@@ -73,7 +73,8 @@ export default function AccountConnectModal({ open, onClose, onSuccess }: Props)
     setSubmitting(true); setError('');
     try {
       const result = await startAccountConnect(nickname.trim(), remark.trim() || undefined);
-      setAccountId(result.accountId); setSessionId(result.loginSessionId); setStatus(result.status); setStep(2);
+      // The dedicated recovery workspace is the only surface that can relay explicit operator input to this temporary session.
+      window.location.assign(`/social-review/login-recovery/${encodeURIComponent(result.loginSessionId)}`);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '无法创建账号接入任务');
     } finally {

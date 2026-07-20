@@ -26,6 +26,7 @@ import { analyzeContentPerformance } from '../services/social-review/contentPerf
 import { generateAccountReport, getLatestSocialReviewReport, type ReportPeriod } from '../services/social-review/reportGenerationService.js';
 import { generateAccountSuggestions, listAccountSuggestions } from '../services/social-review/operationSuggestionService.js';
 import { cancelSocialLoginRecovery, getSocialLoginRecovery, startSocialLoginRecovery } from '../services/social-review/socialLoginRecoveryService.js';
+import { RemoteBrowserSessionError, captureRemoteBrowser, remoteBrowserClick, remoteBrowserPress, remoteBrowserScroll, remoteBrowserType } from '../services/social-review/serverBrowserService.js';
 import { listSimilarVideos } from '../services/social-review/similarVideoService.js';
 import { connectCreatorCdp } from '../services/social-review/cdpBrowserService.js';
 import { syncDouyinAccountMetrics } from '../services/social-review/douyinAccountMetricService.js';
@@ -157,7 +158,7 @@ router.post('/accounts/connect/start', requireAdmin, async (req, res) => {
       `UPDATE social_accounts SET credential_ref = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
       [credentialRef, accountId],
     );
-    const recovery = await startSocialLoginRecovery(accountId);
+    const recovery = await startSocialLoginRecovery(accountId, Number(req.user?.id));
     sendData(res, { accountId, loginSessionId: recovery.sessionId, status: recovery.status, streamReady: recovery.streamReady === true });
   } catch (error) {
     handleError(error, res);
@@ -509,7 +510,7 @@ router.get('/accounts/:id/metrics', requirePermission('analytics:view'), async (
 router.get('/videos/:id/quality', requirePermission('analytics:view'), async (req,res) => { try { const row=await queryOne<Record<string,unknown>>(`SELECT avg_play_duration,completion_rate_5s,bounce_rate_2s FROM social_videos WHERE id=?`,[Number(req.params.id)]); if(!row)return res.status(404).json({success:false,message:'作品不存在'}); sendData(res,{avgPlayDuration:row.avg_play_duration ?? null,completionRate:row.completion_rate_5s ?? null,bounceRate:row.bounce_rate_2s ?? null}); }catch(error){handleError(error,res);} });
 
 router.post('/accounts/:id/login/start', requireAdmin, async (req, res) => {
-  try { sendData(res, await startSocialLoginRecovery(Number(req.params.id))); } catch (error) { handleError(error, res); }
+  try { sendData(res, await startSocialLoginRecovery(Number(req.params.id), Number(req.user?.id))); } catch (error) { handleError(error, res); }
 });
 router.get('/login-session/:id', requireAdmin, async (req, res) => {
   try { const session = await getSocialLoginRecovery(req.params.id); if (!session) return res.status(404).json({ success: false, message: '登录会话不存在' }); sendData(res, session); } catch (error) { handleError(error, res); }
@@ -517,6 +518,13 @@ router.get('/login-session/:id', requireAdmin, async (req, res) => {
 router.post('/login-session/:id/cancel', requireAdmin, async (req, res) => {
   try { const session = await cancelSocialLoginRecovery(req.params.id); if (!session) return res.status(404).json({ success: false, message: '登录会话不存在' }); sendData(res, session); } catch (error) { handleError(error, res); }
 });
+function sendRemoteFrame(res: Response, frame: Awaited<ReturnType<typeof captureRemoteBrowser>>) { sendData(res, { ...frame, image: frame.image.toString('base64') }); }
+function handleRemoteError(error: unknown, res: Response) { if (error instanceof RemoteBrowserSessionError) return res.status(error.status).json({ success: false, message: error.message }); return handleError(error, res); }
+router.get('/login-session/:id/screenshot', requireAdmin, async (req, res) => { try { sendRemoteFrame(res, await captureRemoteBrowser(req.params.id, Number(req.user?.id))); } catch (error) { handleRemoteError(error, res); } });
+router.post('/login-session/:id/click', requireAdmin, async (req, res) => { try { sendRemoteFrame(res, await remoteBrowserClick(req.params.id, Number(req.user?.id), req.body || {})); } catch (error) { handleRemoteError(error, res); } });
+router.post('/login-session/:id/scroll', requireAdmin, async (req, res) => { try { sendRemoteFrame(res, await remoteBrowserScroll(req.params.id, Number(req.user?.id), req.body || {})); } catch (error) { handleRemoteError(error, res); } });
+router.post('/login-session/:id/type', requireAdmin, async (req, res) => { try { sendRemoteFrame(res, await remoteBrowserType(req.params.id, Number(req.user?.id), req.body?.text)); } catch (error) { handleRemoteError(error, res); } });
+router.post('/login-session/:id/press', requireAdmin, async (req, res) => { try { sendRemoteFrame(res, await remoteBrowserPress(req.params.id, Number(req.user?.id), req.body?.key)); } catch (error) { handleRemoteError(error, res); } });
 
 router.get('/accounts/:id/health', requirePermission('analytics:view'), async (req, res) => {
   try { sendData(res, { health: await refreshIngestionHealth(Number(req.params.id)) }); } catch (error) { handleError(error, res); }

@@ -142,6 +142,12 @@ export default function Sidebar({
           const SectionIcon = section.icon;
           const expanded = expandedGroup === section.id;
           const hasActiveItem = section.items.some((item) => isNavigationItemActive(location.pathname, item.path));
+          const isDirectEntry = section.id === 'home' && section.items.length === 1;
+
+          if (isDirectEntry) {
+            const item = section.items[0];
+            return <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}><button type="button" onClick={() => handleNavigate(item.path)} title={section.label} className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-3'} ${hasActiveItem ? 'bg-studio-primary/12 text-studio-text-primary' : 'text-studio-text-muted hover:bg-white/[0.04] hover:text-studio-text-secondary'}`} style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}><SectionIcon className="shrink-0" style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />{(!collapsed || isMobile) && <span className="font-semibold">{section.label}</span>}</button></div>;
+          }
 
           return (
           <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}>
@@ -153,17 +159,18 @@ export default function Sidebar({
                 persistExpandedGroup(nextGroup, location.pathname);
               }}
               title={section.label}
-              className={`flex w-full items-center rounded-button py-2 text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-2 px-3'} ${hasActiveItem ? 'text-studio-text-secondary' : 'text-studio-text-muted hover:bg-white/[0.04] hover:text-studio-text-secondary'}`}
+              className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-2 px-3'} ${hasActiveItem ? 'text-studio-text-secondary' : 'text-studio-text-muted hover:bg-white/[0.04] hover:text-studio-text-secondary'}`}
+              style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}
               aria-expanded={expanded}
             >
-              <SectionIcon className="h-4 w-4 shrink-0" />
-              {(!collapsed || isMobile) && <span className="flex-1 text-[11px] font-semibold">{section.label}</span>}
+              <SectionIcon className="shrink-0" style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />
+              {(!collapsed || isMobile) && <span className="flex-1 font-semibold">{section.label}</span>}
               {(!collapsed || isMobile) && <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? '' : '-rotate-90'}`} />}
             </button>
 
             {collapsed && !isMobile && sectionIndex > 0 ? <div className="mx-2 my-3 border-t border-studio-border-soft" /> : null}
 
-            <ul className={`${expanded ? 'space-y-1' : 'hidden'} ${collapsed && !isMobile ? '' : 'mt-1'}`}>
+            <ul className={`${expanded && (!collapsed || isMobile) ? 'space-y-1' : 'hidden'} mt-1`}>
               {section.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = isNavigationItemActive(location.pathname, item.path);
@@ -175,22 +182,23 @@ export default function Sidebar({
                       type="button"
                       onClick={() => handleNavigate(item.path)}
                       title={item.label}
-                      className={`group relative flex w-full items-center gap-3 rounded-button py-2.5 text-left transition-all duration-200 ${
+                      className={`group relative flex w-full items-center gap-3 rounded-button text-left transition-all duration-200 ${
                         collapsed && !isMobile ? 'justify-center' : ''
                       } ${collapsed && !isMobile ? 'px-2' : 'px-3'} ${
                         isActive
                           ? 'border border-studio-border-active bg-studio-primary/14 text-studio-text-primary shadow-glow-primary'
                           : 'border border-transparent text-studio-text-secondary hover:border-studio-border-soft hover:bg-white/[0.055] hover:text-studio-text-primary'
                       }`}
+                      style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-subnav-font-size)' }}
                     >
                       {isActive ? <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-studio-cyan" /> : null}
 
                       <span className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-[12px] ${isActive ? 'bg-white/[0.08] text-studio-cyan' : 'text-studio-text-muted group-hover:text-studio-cyan'}`}>
-                        <Icon className="h-[18px] w-[18px]" />
+                        <Icon style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />
                         {isMessages ? <NotificationBadge count={messageStore.unreadCount} /> : null}
                       </span>
 
-                      {(!collapsed || isMobile) && <span className="truncate text-sm font-medium">{item.label}</span>}
+                      {(!collapsed || isMobile) && <span className="truncate font-medium">{item.label}</span>}
 
                       {collapsed && !isMobile ? (
                         <span className="pointer-events-none absolute left-full z-50 ml-3 whitespace-nowrap rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-xs font-medium text-studio-text-primary opacity-0 shadow-card transition-opacity group-hover:opacity-100">

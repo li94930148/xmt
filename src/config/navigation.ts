@@ -168,7 +168,7 @@ export function canAccessNavigationItem(
 }
 
 export function isNavigationItemActive(pathname: string, itemPath: string) {
-  if (itemPath === '/') return pathname === '/';
+  if (itemPath === '/') return pathname === '/' || pathname === '/home' || pathname === '/dashboard';
   return pathname === itemPath || pathname.startsWith(`${itemPath}/`);
 }
 

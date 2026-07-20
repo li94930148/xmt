@@ -236,7 +236,14 @@ export async function getSocialVideoFeatures(videoId: number) { return request<{
 export async function getSocialVideoInsights(videoId: number) { return request<{ items: Array<{ type: string; content: string }> }>(`/videos/${videoId}/insights`); }
 export async function getSimilarSocialVideos(videoId: number) { return request<{ items: Array<{ id: number; title: string | null; coverUrl: string | null; publishTime: string | null; views: number | null; score: number }> }>(`/videos/${videoId}/similar`); }
 export async function createSocialLoginSession(accountId: number) { return post<{ sessionId: string; status: 'waiting_scan' }>(`/accounts/${accountId}/login/start`); }
-export async function getSocialLoginStatus(sessionId: string) { return request<{ sessionId: string; status: 'waiting_scan' | 'scanned' | 'success' | 'failed' | 'expired'; message: string | null }>(`/login-session/${encodeURIComponent(sessionId)}`); }
+export type LoginSessionStatus = 'waiting_scan' | 'scanned' | 'manual_verify_required' | 'auth_required' | 'success' | 'failed' | 'expired';
+export type RemoteBrowserFrame = { image: string; mimeType: string; screenshotWidth: number; screenshotHeight: number; viewportWidth: number; viewportHeight: number };
+export async function getSocialLoginStatus(sessionId: string) { return request<{ sessionId: string; status: LoginSessionStatus; message: string | null }>(`/login-session/${encodeURIComponent(sessionId)}`); }
+export async function getSocialLoginScreenshot(sessionId: string) { return request<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/screenshot`); }
+export async function clickSocialLoginBrowser(sessionId: string, x: number, y: number, imageWidth: number, imageHeight: number) { return post<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/click`, { x, y, imageWidth, imageHeight }); }
+export async function scrollSocialLoginBrowser(sessionId: string, deltaX: number, deltaY: number) { return post<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/scroll`, { deltaX, deltaY }); }
+export async function typeSocialLoginBrowser(sessionId: string, text: string) { return post<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/type`, { text }); }
+export async function pressSocialLoginBrowser(sessionId: string, key: string) { return post<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/press`, { key }); }
 export async function cancelSocialLoginSession(sessionId: string) { return post<{ sessionId: string; status: 'failed' }>(`/login-session/${encodeURIComponent(sessionId)}/cancel`); }
 export const startLoginRecovery = createSocialLoginSession;
 export const getLoginSessionStatus = getSocialLoginStatus;

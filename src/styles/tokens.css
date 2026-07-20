@@ -24,6 +24,11 @@ html.dark {
   --xmt-radius-card: 20px;
   --xmt-radius-panel: 24px;
   --xmt-radius-button: 14px;
+  --sidebar-nav-font-size: 0.9375rem;
+  --sidebar-subnav-font-size: 0.875rem;
+  --sidebar-icon-size: 1.125rem;
+  --sidebar-nav-item-height: 2.75rem;
+  --sidebar-nav-gap: 0.5rem;
 
   --color-bg-primary: var(--xmt-app-bg);
   --color-bg-secondary: var(--xmt-surface);

@@ -37,6 +37,7 @@ import exportRoutes from './routes/export.js'
 import douyinRoutes from './routes/douyin.js'
 import socialReviewRoutes from './routes/social-review.js'
 import { startSocialIngestionScheduler } from './services/social-review/socialIngestionScheduler.js'
+import { isRemoteLoginSessionOwner } from './services/social-review/serverBrowserService.js'
 import backupRoutes from './routes/backup.js'
 import { createBackup, cleanOldBackups } from './routes/backup.js'
 import rolesRoutes from './routes/roles.js'
@@ -448,7 +449,7 @@ io.on('connection', (socket) => {
     if (socketUser.role !== 'admin') return
     if (!/^[0-9a-f-]{16,}$/i.test(String(sessionId))) return
     const session = await queryOne('SELECT account_id FROM social_login_sessions WHERE id = ?', [sessionId])
-    if (session) socket.join(`social-login-session-${sessionId}`)
+    if (session && isRemoteLoginSessionOwner(sessionId, socketUser.id)) socket.join(`social-login-session-${sessionId}`)
   })
 
   socket.on(COLLABORATION_EVENTS.JOIN, (payload) => {

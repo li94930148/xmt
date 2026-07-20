@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, Download, FileBarChart, FileClock, Loader2, CalendarRange } from 'lucide-react';
+import { BarChart3, Download, FileBarChart, FileClock, Loader2, CalendarRange, Sparkles } from 'lucide-react';
 import { exportAnalytics, exportTopics, getWeeklyReport } from '../api';
 import { useAppStore } from '../store';
 import { getCurrentBeijingDateString } from '../lib/utils';
 import { ActionButton, EmptyState, GlassPanel, PageHeader, PageShell, StatusPill } from '../components/studio';
 
-type ReportTab = 'daily' | 'weekly' | 'monthly' | 'export';
+type ReportTab = 'daily' | 'weekly' | 'monthly' | 'summary' | 'export';
 
 type WeeklyReport = {
   period?: { start: string; end: string };
@@ -56,15 +56,16 @@ export default function ExportPage() {
     { id: 'daily' as const, label: '日报', icon: FileClock },
     { id: 'weekly' as const, label: '周报', icon: FileBarChart },
     { id: 'monthly' as const, label: '月报', icon: CalendarRange },
+    { id: 'summary' as const, label: '总结', icon: Sparkles },
     { id: 'export' as const, label: '导出', icon: Download },
   ];
 
   return (
     <PageShell>
-      <PageHeader title="报告中心" description="统一承载日报、周报、月报与数据导出。本阶段先完成入口和视觉预留。" />
+      <PageHeader title="报告中心" description="统一承载日报、周报、月报、总结与数据导出；日报归档仍保留原有提交与审核流程。" />
 
       <GlassPanel className="p-2">
-        <div className="grid gap-2 sm:grid-cols-4">
+        <div className="grid gap-2 sm:grid-cols-5">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -143,6 +144,12 @@ export default function ExportPage() {
       {activeTab === 'monthly' ? (
         <GlassPanel className="p-6">
           <EmptyState icon={CalendarRange} title="月报能力规划中" description="月报页签已预留，后续可接入月度内容产能、爆款复盘和平台趋势。" />
+        </GlassPanel>
+      ) : null}
+
+      {activeTab === 'summary' ? (
+        <GlassPanel className="p-6">
+          <EmptyState icon={Sparkles} title="总结能力规划中" description="已建立总结类型入口，后续可在不改变日报归档数据结构的前提下接入跨周期内容总结。" />
         </GlassPanel>
       ) : null}
 

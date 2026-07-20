@@ -345,7 +345,7 @@ export default function DailyReportPage() {
   return (
     <PageShell>
       <PageHeader
-        title="日报中心"
+        title="日报归档"
         description="提交个人日报、查看归档，管理者可查看和审核团队日报。"
         actions={
           <ActionButton onClick={() => activeTab === 'mine' ? void loadMyReport() : activeTab === 'team' ? void loadTeamReports() : void loadArchive()}>

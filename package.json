@@ -18,6 +18,7 @@
     "test:daily-reports": "node scripts/smoke-daily-reports.mjs",
     "test:retrospectives": "node scripts/smoke-retrospectives.mjs",
     "test:e2e": "node scripts/e2e-smoke.mjs",
+    "smoke:navigation": "tsx scripts/smoke-navigation.mjs",
     "smoke:social-review": "node scripts/social-review-smoke-safe.mjs",
     "smoke:social-review:collect": "node scripts/social-review-collect-account.mjs",
     "smoke:social-review:export": "node scripts/social-review-collect-account.mjs --mode=official-export",
@@ -56,6 +57,7 @@
     ,"smoke:social-review:cdp-sync": "node scripts/smoke-social-review-cdp-sync.mjs"
     ,"smoke:social-review:server-browser": "tsx scripts/smoke-social-review-server-browser.mjs"
     ,"smoke:social-review:login-ui": "node scripts/smoke-social-review-login-ui.mjs"
+    ,"smoke:social-review:account-connect": "node scripts/smoke-social-review-account-connect.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

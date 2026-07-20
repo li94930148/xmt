@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, ChevronRight, CircleAlert, CircleCheck, Clock3, KeyRound, RefreshCw, ShieldCheck, TrendingUp, Video } from 'lucide-react';
+import { Activity, ChevronRight, CircleAlert, CircleCheck, Clock3, KeyRound, Plus, RefreshCw, ShieldCheck, Trash2, TrendingUp, Video } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
+import AccountConnectModal from '../components/social-review/AccountConnectModal';
 import { ErrorState, LoadingState, PageHeader, PageToolbar } from '../components/common';
-import { getSocialAccountsOverview, getSocialDailySummary, getSocialHotVideos, getSocialIngestionJobs, getSocialLatestReport, getSocialLatestSnapshot, getSocialDataQuality, getSocialDashboard, getSocialMetricStatus, type IngestionJob, type MetricStatus, type SocialAccountOverview, type VideoPerformanceItem } from '../api/socialReview';
+import { deleteSocialAccount, getSocialAccountStatuses, getSocialAccountsOverview, getSocialDailySummary, getSocialHotVideos, getSocialIngestionJobs, getSocialLatestReport, getSocialLatestSnapshot, getSocialDataQuality, getSocialDashboard, getSocialMetricStatus, startLoginRecovery, type IngestionJob, type MetricStatus, type SocialAccountOverview, type SocialAccountStatus, type VideoPerformanceItem } from '../api/socialReview';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { useAuthStore } from '../store';
 
 function formatDate(value: string | null) {
   if (!value) return '暂无记录';
@@ -44,20 +46,25 @@ function statusClass(status: string | null) {
 export default function SocialReview() {
   const styles = useThemeStyles();
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
   const [accounts, setAccounts] = useState<SocialAccountOverview[]>([]);
+  const [accountStatuses, setAccountStatuses] = useState<Record<number, SocialAccountStatus>>({});
   const [videos, setVideos] = useState<VideoPerformanceItem[]>([]);
   const [jobs, setJobs] = useState<IngestionJob[]>([]);
   const [accountViews, setAccountViews] = useState<Record<number, { followers: number | null; healthScore: number; viewsGrowth: number; interactionChange: number | null; newVideoCount: number; quality: '正常' | '需关注' | '异常'; metricStatus: MetricStatus | null; report: { period: string | null; videoCount: number; averageViews: number; averageInteractionRate: number | null; topTitle: string | null } | null }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [accountActionError, setAccountActionError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [overview, hot, jobList] = await Promise.all([getSocialAccountsOverview(), getSocialHotVideos(), getSocialIngestionJobs()]);
+      const [overview, hot, jobList, statuses] = await Promise.all([getSocialAccountsOverview(), getSocialHotVideos(), getSocialIngestionJobs(), getSocialAccountStatuses()]);
       const overviewItems = overview.items || [];
       setAccounts(overviewItems);
+      setAccountStatuses(Object.fromEntries((statuses.items || []).map((item) => [item.id, item])));
       setVideos(hot.items || []);
       setJobs(jobList.items || []);
       const detailEntries = await Promise.all(overviewItems.map(async (account) => {
@@ -87,6 +94,22 @@ export default function SocialReview() {
 
   useEffect(() => { void load(); }, [load]);
 
+  const restartLogin = async (accountId: number) => {
+    setAccountActionError('');
+    try {
+      const result = await startLoginRecovery(accountId);
+      navigate(`/social-review/login-recovery/${result.sessionId}`);
+    } catch (requestError) {
+      setAccountActionError(requestError instanceof Error ? requestError.message : '无法创建登录恢复任务');
+    }
+  };
+
+  const removeAccount = async (accountId: number, name: string) => {
+    if (!window.confirm(`确认删除账号“${name}”吗？该操作会删除该账号的复盘数据。`)) return;
+    setAccountActionError('');
+    try { await deleteSocialAccount(accountId); await load(); } catch (requestError) { setAccountActionError(requestError instanceof Error ? requestError.message : '无法删除账号'); }
+  };
+
   if (loading) return <LoadingState type="page" text="正在加载短视频复盘数据..." />;
   if (error) return <ErrorState title="短视频复盘数据加载失败" description={error} actionText="重新加载" onRetry={() => void load()} />;
 
@@ -105,19 +128,15 @@ export default function SocialReview() {
       <PageHeader
         title="短视频复盘"
         description="集中查看账号运营、内容表现与采集状态。"
-        actions={
-          <button type="button" onClick={() => void load()} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium ${styles.buttonSecondary}`}>
-            <RefreshCw className="h-4 w-4" />刷新数据
-          </button>
-        }
+        actions={<><button type="button" onClick={() => void load()} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium ${styles.buttonSecondary}`}><RefreshCw className="h-4 w-4" />刷新数据</button>{user?.role === 'admin' ? <button type="button" onClick={() => setConnectOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-4 py-2.5 text-sm font-medium text-white"><Plus className="h-4 w-4" />接入新账号</button> : null}</>}
       />
 
       <PageToolbar
         left={<span className={`text-sm ${styles.textSecondary}`}>账号运营中心</span>}
-        right={<span className={`text-sm ${styles.textMuted}`}>已接入账号 {accounts.length} 个</span>}
+        right={accounts.length > 0 ? <span className={`text-sm ${styles.textMuted}`}>已接入账号 {accounts.length} 个</span> : null}
       />
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      {accounts.length > 0 ? <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {[
           { label: '已接入账号', value: accounts.length, icon: Video, color: '#38bdf8' },
           { label: '最近采集成功', value: successAccounts, icon: CircleCheck, color: '#34d399' },
@@ -126,7 +145,7 @@ export default function SocialReview() {
           const Icon = item.icon;
           return <div key={item.label} className={`${styles.card} p-5`}><div className="flex items-center justify-between"><div><p className={`text-sm ${styles.textMuted}`}>{item.label}</p><p className={`mt-2 text-3xl font-semibold ${styles.textPrimary}`}>{item.value}</p></div><span className="flex h-11 w-11 items-center justify-center rounded-xl" style={{ backgroundColor: `${item.color}1f`, color: item.color }}><Icon className="h-5 w-5" /></span></div></div>;
         })}
-      </section>
+      </section> : null}
 
       <section className={`${styles.card} overflow-hidden`}>
         <div className={`border-b px-5 py-4 ${styles.border}`}><h2 className={`text-base font-semibold ${styles.textPrimary}`}>今日运营摘要</h2></div>
@@ -139,7 +158,29 @@ export default function SocialReview() {
         {[['播放数据', viewsAvailable ? '正常' : '暂无'], ['互动数据', interactionAvailable ? '正常' : '暂无'], ['采集状态', successAccounts === accounts.length && accounts.length > 0 ? '正常' : '需关注'], ['凭据状态', activeCredentials === accounts.length && accounts.length > 0 ? '正常' : '需关注']].map(([label, value]) => <div key={label} className={`${styles.card} flex items-center justify-between p-5`}><span className={`text-sm ${styles.textMuted}`}>{label}</span><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${value === '正常' ? 'bg-emerald-500/15 text-emerald-500' : value === '暂无' ? 'bg-zinc-500/15 text-zinc-500' : 'bg-amber-500/15 text-amber-500'}`}>{value}</span></div>)}
       </section>
 
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <section className={`${styles.card} overflow-hidden`}>
+        <div className={`flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4 ${styles.border}`}>
+          <div><h2 className={`text-base font-semibold ${styles.textPrimary}`}>账号运营中心</h2><p className={`mt-1 text-sm ${styles.textMuted}`}>查看账号登录、采集和复盘状态</p></div>
+          {user?.role === 'admin' ? <button type="button" onClick={() => setConnectOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-3.5 py-2 text-sm font-medium text-white"><Plus className="h-4 w-4" />接入新账号</button> : null}
+        </div>
+        {accountActionError ? <p className="px-5 pt-4 text-sm text-red-500">{accountActionError}</p> : null}
+        {accounts.length === 0 ? <div className="p-10"><EmptyState icon={Video} title="暂无接入账号" description="开始接入你的第一个短视频账号。" actionLabel={user?.role === 'admin' ? '立即接入' : undefined} onAction={user?.role === 'admin' ? () => setConnectOpen(true) : undefined} /></div> : <div className="grid grid-cols-1 gap-4 p-5 xl:grid-cols-2">
+          {accounts.map((account) => {
+            const status = accountStatuses[account.accountId];
+            const credential = status?.credentialStatus || account.credentialStatus || 'need_login';
+            const collecting = status?.ingestionStatus === 'running' || account.latestJob?.status === 'running';
+            const statusText = collecting ? '采集中' : credential === 'active' ? '正常' : credential === 'expired' ? '登录失效' : '需要登录';
+            const statusTone = collecting ? 'bg-blue-500/15 text-blue-600' : credential === 'active' ? 'bg-emerald-500/15 text-emerald-600' : credential === 'expired' ? 'bg-red-500/15 text-red-500' : 'bg-amber-500/15 text-amber-600';
+            return <article key={account.accountId} className={`rounded-xl border p-4 ${styles.border}`}>
+              <div className="flex items-start gap-3"><div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-violet-500/15 text-sm font-semibold text-violet-600">{status?.avatarUrl ? <img src={status.avatarUrl} alt="" className="h-full w-full object-cover" /> : (account.displayName || account.accountName).slice(0, 1)}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className={`truncate font-semibold ${styles.textPrimary}`}>{account.displayName || account.accountName}</h3><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusTone}`}>{statusText}</span></div><p className={`mt-1 text-sm ${styles.textMuted}`}>抖音 · 最近采集 {formatDate(status?.lastSyncTime || account.lastFetchedAt)}</p></div></div>
+              <div className={`mt-4 grid grid-cols-2 gap-3 border-y py-3 text-sm ${styles.border}`}><div><p className={styles.textMuted}>作品数量</p><p className={`mt-1 font-semibold ${styles.textPrimary}`}>{status ? formatCount(status.videoCount) : formatCount(accountViews[account.accountId]?.report?.videoCount)}</p></div><div><p className={styles.textMuted}>登录状态</p><p className={`mt-1 font-semibold ${styles.textPrimary}`}>{statusText}</p></div></div>
+              <div className="mt-4 flex flex-wrap justify-end gap-3"><button type="button" onClick={() => navigate(`/social-review/accounts/${account.accountId}`)} className="text-sm font-medium text-brand-500 hover:text-brand-400">查看复盘</button>{user?.role === 'admin' ? <><button type="button" onClick={() => void restartLogin(account.accountId)} className="text-sm font-medium text-violet-600 hover:text-violet-500">重新登录</button><button type="button" onClick={() => void removeAccount(account.accountId, account.displayName || account.accountName)} className="inline-flex items-center gap-1 text-sm font-medium text-red-500 hover:text-red-400"><Trash2 className="h-4 w-4" />删除账号</button></> : null}</div>
+            </article>;
+          })}
+        </div>}
+      </section>
+
+      <section className="hidden grid-cols-1 gap-4 xl:grid-cols-2">
         {accounts.map((account) => {
           const view = accountViews[account.accountId];
           const qualityClass = view?.quality === '正常' ? 'text-emerald-500 bg-emerald-500/15' : view?.quality === '异常' ? 'text-red-500 bg-red-500/15' : 'text-amber-500 bg-amber-500/15';
@@ -153,7 +194,7 @@ export default function SocialReview() {
 
       <section className={`${styles.card} overflow-hidden`}><div className={`flex items-center justify-between border-b px-5 py-4 ${styles.border}`}><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-violet-400" /><h2 className={`text-base font-semibold ${styles.textPrimary}`}>最新复盘报告</h2></div><span className={`text-sm ${styles.textMuted}`}>按账号展示最近生成结果</span></div><div className="grid grid-cols-1 gap-px bg-theme-border md:grid-cols-2">{accounts.map((account) => { const report = accountViews[account.accountId]?.report; return <button key={account.accountId} type="button" onClick={() => navigate(`/social-review/accounts/${account.accountId}`)} className={`p-5 text-left transition-colors ${styles.tableHover}`}>{report ? <><p className={`font-medium ${styles.textPrimary}`}>{account.displayName || account.accountName} · {report.period || '最近周期'}</p><div className={`mt-3 grid grid-cols-3 gap-3 text-sm ${styles.textSecondary}`}><span>作品 {report.videoCount}</span><span>均播 {formatCount(report.averageViews)}</span><span>互动 {formatPercent(report.averageInteractionRate)}</span></div><p className={`mt-3 truncate text-sm ${styles.textMuted}`}>最高表现：{report.topTitle || '暂无周期作品'}</p></> : <p className={`text-sm ${styles.textMuted}`}>暂无复盘报告</p>}</button>; })}</div></section>
 
-      <section className={`${styles.card} overflow-hidden`}>
+      <section className={`${styles.card} hidden overflow-hidden`}>
         <div className={`flex items-center justify-between border-b px-5 py-4 ${styles.border}`}><h2 className={`text-base font-semibold ${styles.textPrimary}`}>账号列表</h2><span className={`text-sm ${styles.textMuted}`}>查看账号复盘详情</span></div>
         {accounts.length === 0 ? <div className="p-8"><EmptyState icon={Video} title="暂无复盘数据" description="请先添加账号并完成一次采集。" /></div> : (
           <div className="overflow-x-auto"><table className="min-w-[960px] w-full text-left text-sm"><thead className={styles.tableHeader}><tr className={styles.textMuted}><th className="px-5 py-3 font-medium">账号名称</th><th className="px-4 py-3 font-medium">平台</th><th className="px-4 py-3 font-medium">采集状态</th><th className="px-4 py-3 font-medium">凭据状态</th><th className="px-4 py-3 font-medium">健康度</th><th className="px-4 py-3 font-medium">最近采集</th><th className="px-4 py-3 font-medium">下次采集</th><th className="px-5 py-3 font-medium" /></tr></thead><tbody>
@@ -166,6 +207,7 @@ export default function SocialReview() {
         <section className={`${styles.card} overflow-hidden`}><div className={`flex items-center justify-between border-b px-5 py-4 ${styles.border}`}><div className="flex items-center gap-2"><TrendingUp className="h-5 w-5 text-rose-400" /><h2 className={`text-base font-semibold ${styles.textPrimary}`}>热门作品</h2></div><span className={`text-sm ${styles.textMuted}`}>按爆款评分排序</span></div>{videos.length === 0 ? <div className="p-8"><EmptyState icon={TrendingUp} title="暂无热门作品" description="采集到视频数据后会在这里显示。" /></div> : <div className="divide-y divide-theme-border">{videos.slice(0, 6).map((video, index) => <div key={video.id} className="flex items-center gap-4 px-5 py-4"><span className={`w-5 text-sm font-semibold ${index < 3 ? 'text-rose-400' : styles.textMuted}`}>{index + 1}</span><div className="min-w-0 flex-1"><p className={`truncate font-medium ${styles.textPrimary}`}>{video.title || '未填写作品名称'}</p><p className={`mt-1 text-xs ${styles.textMuted}`}>{formatDate(video.publish_time)}</p></div><div className="text-right"><p className={`text-sm font-medium ${styles.textPrimary}`}>{formatCount(video.views)} 播放</p><p className="mt-1 text-xs text-rose-400">爆款评分 {video.performance.hotScore.toFixed(2)}</p></div></div>)}</div>}</section>
         <section className={`${styles.card} overflow-hidden`}><div className={`flex items-center justify-between border-b px-5 py-4 ${styles.border}`}><div className="flex items-center gap-2"><Activity className="h-5 w-5 text-amber-400" /><h2 className={`text-base font-semibold ${styles.textPrimary}`}>采集监控</h2></div><span className={`text-sm ${styles.textMuted}`}>最近任务</span></div>{jobs.length === 0 ? <div className="p-8"><EmptyState icon={Clock3} title="暂无采集记录" description="账号采集完成后会在这里显示任务状态。" /></div> : <div className="divide-y divide-theme-border">{jobs.slice(0, 6).map((job) => <div key={job.id} className="flex items-center gap-4 px-5 py-4"><span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${statusClass(job.status)}`}>{job.status === 'failed' ? <CircleAlert className="h-4 w-4" /> : <Clock3 className="h-4 w-4" />}</span><div className="min-w-0 flex-1"><p className={`font-medium ${styles.textPrimary}`}>{jobLabel(job.status)}</p><p className={`mt-1 truncate text-xs ${job.status === 'failed' ? 'text-red-400' : styles.textMuted}`}>{job.lastError || job.failureType || '任务执行正常'}</p></div><span className={`text-xs ${styles.textMuted}`}>{formatDate(job.finishedAt || job.startedAt)}</span></div>)}</div>}</section>
       </div>
+      <AccountConnectModal open={connectOpen} onClose={() => setConnectOpen(false)} onSuccess={(accountId) => { setConnectOpen(false); navigate(`/social-review/accounts/${accountId}`); void load(); }} />
     </div>
   );
 }

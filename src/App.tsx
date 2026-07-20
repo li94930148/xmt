@@ -69,6 +69,7 @@ const ContentGenerationDashboard = lazyWithRetry(() => import('@/pages/ContentGe
 const ContentOSDashboard = lazyWithRetry(() => import('@/pages/ContentOSDashboard'), 'ContentOSDashboard');
 const Users = lazyWithRetry(() => import('@/pages/Users'), 'Users');
 const Resources = lazyWithRetry(() => import('@/pages/Resources'), 'Resources');
+const AssetCenter = lazyWithRetry(() => import('@/pages/AssetCenter'), 'AssetCenter');
 const Messages = lazyWithRetry(() => import('@/pages/Messages'), 'Messages');
 const Kanban = lazyWithRetry(() => import('@/pages/Kanban'), 'Kanban');
 const CalendarPage = lazyWithRetry(() => import('@/pages/Calendar'), 'CalendarPage');
@@ -129,6 +130,10 @@ export default function App() {
                 <Route path="/shooting/:id" element={<ShootingDetail />} />
                 <Route path="/publishing/:id" element={<PublishingDetail />} />
                 <Route path="/resources" element={<Resources />} />
+                <Route path="/asset-center" element={<AssetCenter />} />
+                <Route path="/asset-center/projects" element={<AssetCenter />} />
+                <Route path="/asset-center/knowledge" element={<AssetCenter />} />
+                <Route path="/asset-center/media" element={<AssetCenter />} />
                 <Route path="/messages" element={<Messages />} />
                 <Route path="/kanban" element={<Kanban />} />
                 <Route path="/calendar" element={<CalendarPage />} />

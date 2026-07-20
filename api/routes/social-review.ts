@@ -129,6 +129,69 @@ router.get('/accounts/overview', requirePermission('analytics:view'), async (_re
   try { sendData(res, { items: await listSocialAccountsOverview() }); } catch (error) { handleError(error, res); }
 });
 
+// Create the account record before login, but deliberately keep authentication
+// material inside the Chromium profile managed by serverBrowserService.
+router.post('/accounts/connect/start', requireAdmin, async (req, res) => {
+  try {
+    const body = req.body as Record<string, unknown>;
+    const platform = String(body.platform || '');
+    const nickname = String(body.nickname || '').trim();
+    const remark = typeof body.remark === 'string' ? body.remark.trim() : null;
+    if (platform !== 'douyin') return res.status(400).json({ success: false, message: 'Only Douyin accounts can be connected here.' });
+    if (!nickname) return res.status(400).json({ success: false, message: 'Account name is required.' });
+
+    const accountId = await executeInsert(
+      `INSERT INTO social_accounts
+        (platform, external_account_id, account_name, display_name, owner_id, active, fetch_strategy, remark, created_at, updated_at)
+       VALUES (?, NULL, ?, ?, ?, 1, 'native_playwright', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+      [platform, nickname, nickname, req.user?.id || null, remark || null],
+    );
+    const credentialRef = `browser-profile:${accountId}`;
+    await execute(
+      `INSERT INTO social_credentials
+        (platform, account_id, credential_type, credential_ref, status, created_by, updated_by, created_at, updated_at)
+       VALUES (?, ?, 'server_browser_profile', ?, 'pending_login', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+      [platform, accountId, credentialRef, req.user?.id || null, req.user?.id || null],
+    );
+    await execute(
+      `UPDATE social_accounts SET credential_ref = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
+      [credentialRef, accountId],
+    );
+    const recovery = await startSocialLoginRecovery(accountId);
+    sendData(res, { accountId, loginSessionId: recovery.sessionId, status: recovery.status, streamReady: recovery.streamReady === true });
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+router.get('/accounts/status', requirePermission('analytics:view'), async (_req, res) => {
+  try {
+    const items = await queryAll<Record<string, unknown>>(
+      `SELECT a.id, a.account_name, a.display_name, a.platform, a.avatar_url, a.last_fetched_at,
+              COALESCE(c.status, 'need_login') AS credential_status,
+              (SELECT COUNT(*) FROM social_videos v WHERE v.account_id = a.id) AS video_count,
+              (SELECT j.status FROM social_ingestion_jobs j WHERE j.account_id = a.id ORDER BY j.created_at DESC, j.id DESC LIMIT 1) AS ingestion_status
+         FROM social_accounts a
+         LEFT JOIN social_credentials c ON c.id = (
+           SELECT c2.id FROM social_credentials c2 WHERE c2.account_id = a.id ORDER BY c2.updated_at DESC, c2.id DESC LIMIT 1
+         )
+        ORDER BY a.updated_at DESC, a.id DESC`,
+    );
+    sendData(res, { items: items.map((item) => ({
+      id: Number(item.id),
+      nickname: item.display_name || item.account_name || '',
+      platform: item.platform || 'douyin',
+      avatarUrl: item.avatar_url || null,
+      credentialStatus: item.credential_status || 'need_login',
+      ingestionStatus: item.ingestion_status || null,
+      lastSyncTime: item.last_fetched_at || null,
+      videoCount: Number(item.video_count || 0),
+    })) });
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
 router.post('/accounts', async (req, res) => {
   try {
     const body = req.body as Record<string, unknown>;
@@ -217,7 +280,7 @@ router.patch('/accounts/:id', async (req, res) => {
   }
 });
 
-router.delete('/accounts/:id', async (req, res) => {
+router.delete('/accounts/:id', requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
     await execute(`DELETE FROM social_scheduled_jobs WHERE account_id = ?`, [id]);
@@ -225,6 +288,8 @@ router.delete('/accounts/:id', async (req, res) => {
     await execute(`DELETE FROM social_videos WHERE account_id = ?`, [id]);
     await execute(`DELETE FROM social_snapshots WHERE account_id = ?`, [id]);
     await execute(`DELETE FROM social_ingestion_jobs WHERE account_id = ?`, [id]);
+    await execute(`DELETE FROM social_login_sessions WHERE account_id = ?`, [id]);
+    await execute(`DELETE FROM social_credentials WHERE account_id = ?`, [id]);
     await execute(`DELETE FROM social_accounts WHERE id = ?`, [id]);
     sendData(res, { message: '账号已删除。' });
   } catch (error) {

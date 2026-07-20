@@ -214,7 +214,7 @@ export default function Layout() {
           // 消息未读数失败不阻断页面进入
         }
 
-        const lastSeenVersion = localStorage.getItem('xmt_last_seen_version');
+        const lastSeenVersion = localStorage.getItem('xmt_last_version_seen');
         if (!ignore && lastSeenVersion !== __APP_VERSION__) {
           setShowUpdateNotification(true);
         }
@@ -265,7 +265,7 @@ export default function Layout() {
 
   const handleCloseUpdateNotification = useCallback(() => {
     setShowUpdateNotification(false);
-    localStorage.setItem('xmt_last_seen_version', __APP_VERSION__);
+    localStorage.setItem('xmt_last_version_seen', __APP_VERSION__);
   }, []);
 
   const handleGoToChangelog = useCallback(() => {

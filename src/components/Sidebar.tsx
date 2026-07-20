@@ -1,9 +1,28 @@
-import { ChevronLeft, ChevronRight, LogOut, Search, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, LogOut, Search, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { navigationSections, canAccessNavigationItem, isNavigationItemActive } from '@/config/navigation';
+import { navigationSections, canAccessNavigationItem, canAccessNavigationSection, findNavigationSectionByPath, isNavigationItemActive } from '@/config/navigation';
 import { useAppStore, useAuthStore, useMessageStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
 import NotificationBadge from './studio/NotificationBadge';
+import { useEffect, useRef, useState } from 'react';
+
+const SIDEBAR_STATE_KEY = 'xmt_sidebar_state';
+
+function readExpandedGroup(pathname: string) {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_STATE_KEY);
+    if (!stored) return undefined;
+    const state = JSON.parse(stored) as { expandedGroup?: string | null; pathname?: string };
+    if (state.pathname && state.pathname !== pathname) return undefined;
+    return typeof state.expandedGroup === 'string' || state.expandedGroup === null ? state.expandedGroup : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistExpandedGroup(expandedGroup: string | null, pathname: string) {
+  localStorage.setItem(SIDEBAR_STATE_KEY, JSON.stringify({ expandedGroup, pathname }));
+}
 
 interface SidebarProps {
   collapsed: boolean;
@@ -27,6 +46,13 @@ export default function Sidebar({
   const { loading: permissionLoading, hasAnyPermission, hasAllPermissions } = usePermission();
   const navigate = useNavigate();
   const location = useLocation();
+  const isDebugMode = authStore.user?.role === 'admin' && new URLSearchParams(location.search).has('debug');
+  const initialRouteGroup = findNavigationSectionByPath(location.pathname)?.id ?? null;
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(() => {
+    const storedGroup = readExpandedGroup(location.pathname);
+    return storedGroup === undefined ? initialRouteGroup : storedGroup;
+  });
+  const previousPathname = useRef(location.pathname);
 
   const handleNavigate = (path: string) => {
     navigate(path);
@@ -40,6 +66,7 @@ export default function Sidebar({
   };
 
   const visibleSections = navigationSections
+    .filter((section) => canAccessNavigationSection(section, authStore.user?.role) && (!section.debugOnly || isDebugMode))
     .map((section) => ({
       ...section,
       items: permissionLoading
@@ -48,10 +75,21 @@ export default function Sidebar({
             canAccessNavigationItem(item, {
               hasAnyPermission,
               hasAllPermissions,
-            }),
+            }, authStore.user?.role),
           ),
     }))
     .filter((section) => section.items.length > 0);
+
+  useEffect(() => {
+    if (previousPathname.current === location.pathname) {
+      return;
+    }
+
+    previousPathname.current = location.pathname;
+    const nextGroup = findNavigationSectionByPath(location.pathname)?.id ?? null;
+    setExpandedGroup(nextGroup);
+    persistExpandedGroup(nextGroup, location.pathname);
+  }, [location.pathname]);
 
   const desktopAsideClass = collapsed ? 'w-[72px]' : 'w-[232px]';
   const shellClass =
@@ -92,27 +130,40 @@ export default function Sidebar({
             onMobileClose?.();
           }}
           title="搜索命令 / 内容"
-          className={`flex w-full items-center rounded-button border border-studio-border-soft bg-white/[0.04] p-2.5 text-sm text-studio-text-muted transition-all duration-200 hover:border-studio-border-active hover:bg-white/[0.07] hover:text-studio-text-primary ${
-            collapsed && !isMobile ? 'justify-center' : 'gap-3'
-          }`}
+          className={`flex w-full items-center rounded-button border border-studio-border-soft bg-white/[0.04] p-2.5 text-sm text-studio-text-muted transition-all duration-200 hover:border-studio-border-active hover:bg-white/[0.07] hover:text-studio-text-primary ${isMobile ? 'gap-3' : 'justify-center'}`}
         >
           <Search className="h-[18px] w-[18px] shrink-0" />
-          {(!collapsed || isMobile) && <span className="font-medium">搜索命令 / 内容</span>}
+          {isMobile && <span className="font-medium">搜索命令 / 内容</span>}
         </button>
       </div>
 
       <nav className={`flex-1 overflow-y-auto pb-3 ${collapsed && !isMobile ? 'px-2' : 'px-3'}`}>
-        {visibleSections.map((section, sectionIndex) => (
+        {visibleSections.map((section, sectionIndex) => {
+          const SectionIcon = section.icon;
+          const expanded = expandedGroup === section.id;
+          const hasActiveItem = section.items.some((item) => isNavigationItemActive(location.pathname, item.path));
+
+          return (
           <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}>
-            {(!collapsed || isMobile) && (
-              <div className="px-3 py-2 text-[11px] font-semibold text-studio-text-muted">
-                {section.label}
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                const nextGroup = expanded ? null : section.id;
+                setExpandedGroup(nextGroup);
+                persistExpandedGroup(nextGroup, location.pathname);
+              }}
+              title={section.label}
+              className={`flex w-full items-center rounded-button py-2 text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-2 px-3'} ${hasActiveItem ? 'text-studio-text-secondary' : 'text-studio-text-muted hover:bg-white/[0.04] hover:text-studio-text-secondary'}`}
+              aria-expanded={expanded}
+            >
+              <SectionIcon className="h-4 w-4 shrink-0" />
+              {(!collapsed || isMobile) && <span className="flex-1 text-[11px] font-semibold">{section.label}</span>}
+              {(!collapsed || isMobile) && <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? '' : '-rotate-90'}`} />}
+            </button>
 
             {collapsed && !isMobile && sectionIndex > 0 ? <div className="mx-2 my-3 border-t border-studio-border-soft" /> : null}
 
-            <ul className="space-y-1">
+            <ul className={`${expanded ? 'space-y-1' : 'hidden'} ${collapsed && !isMobile ? '' : 'mt-1'}`}>
               {section.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = isNavigationItemActive(location.pathname, item.path);
@@ -152,7 +203,8 @@ export default function Sidebar({
               })}
             </ul>
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       <div className={`border-t border-studio-border-soft ${collapsed && !isMobile ? 'p-2' : 'p-3'}`}>

@@ -21,6 +21,13 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return payload.data as T;
 }
 
+async function del<T>(path: string): Promise<T> {
+  const response = await fetch(`${BASE_URL}${path}`, { method: 'DELETE', headers: getAuthHeader() });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.success) throw new Error(payload?.message || 'Operation could not be completed.');
+  return payload.data as T;
+}
+
 export type SocialAccountOverview = {
   accountId: number;
   accountName: string;
@@ -33,6 +40,24 @@ export type SocialAccountOverview = {
   nextRunAt: string | null;
   scheduleEnabled: boolean;
   health: { successRate: number; totalJobs: number; successJobs: number; failedJobs: number; lastSuccessAt: string | null; lastFailedAt: string | null; lastFailureType: string | null };
+};
+
+export type SocialAccountStatus = {
+  id: number;
+  nickname: string;
+  platform: string;
+  avatarUrl: string | null;
+  credentialStatus: string;
+  ingestionStatus: string | null;
+  lastSyncTime: string | null;
+  videoCount: number;
+};
+
+export type AccountConnectStart = {
+  accountId: number;
+  loginSessionId: string;
+  status: 'waiting_scan' | 'failed';
+  streamReady: boolean;
 };
 
 export type VideoPerformanceItem = {
@@ -132,6 +157,18 @@ export async function getSocialAccountsOverview() {
   return request<{ items: SocialAccountOverview[] }>('/accounts/overview');
 }
 
+export async function getSocialAccountStatuses() {
+  return request<{ items: SocialAccountStatus[] }>('/accounts/status');
+}
+
+export async function startAccountConnect(nickname: string, remark?: string) {
+  return post<AccountConnectStart>('/accounts/connect/start', { platform: 'douyin', nickname, remark: remark || undefined });
+}
+
+export async function deleteSocialAccount(accountId: number) {
+  return del<{ message: string }>(`/accounts/${accountId}`);
+}
+
 export async function getSocialHotVideos(accountId?: number) {
   const query = accountId ? `?accountId=${accountId}` : '';
   return request<{ items: VideoPerformanceItem[] }>(`/videos/hot${query}`);
@@ -201,3 +238,6 @@ export async function getSimilarSocialVideos(videoId: number) { return request<{
 export async function createSocialLoginSession(accountId: number) { return post<{ sessionId: string; status: 'waiting_scan' }>(`/accounts/${accountId}/login/start`); }
 export async function getSocialLoginStatus(sessionId: string) { return request<{ sessionId: string; status: 'waiting_scan' | 'scanned' | 'success' | 'failed' | 'expired'; message: string | null }>(`/login-session/${encodeURIComponent(sessionId)}`); }
 export async function cancelSocialLoginSession(sessionId: string) { return post<{ sessionId: string; status: 'failed' }>(`/login-session/${encodeURIComponent(sessionId)}/cancel`); }
+export const startLoginRecovery = createSocialLoginSession;
+export const getLoginSessionStatus = getSocialLoginStatus;
+export const cancelLoginRecovery = cancelSocialLoginSession;

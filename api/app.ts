@@ -46,6 +46,7 @@ import workflowTemplatesRoutes from './routes/workflow-templates.js'
 import notificationsRoutes from './routes/notifications.js'
 import systemSettingsRoutes from './routes/system-settings.js'
 import dailyReportsRoutes from './routes/daily-reports.js'
+import reportsRoutes from './routes/reports.js'
 import retrospectivesRoutes from './routes/retrospectives.js'
 import collaborationDashboardRoutes from './routes/collaboration-dashboard.js'
 import collaborationUxRoutes from './routes/collaboration-ux.js'
@@ -298,6 +299,7 @@ app.use('/api/workflow-templates', workflowTemplatesRoutes)
 app.use('/api/notifications', notificationsRoutes)
 app.use('/api/system-settings', systemSettingsRoutes)
 app.use('/api/daily-reports', dailyReportsRoutes)
+app.use('/api/reports', reportsRoutes)
 app.use('/api/retrospectives', retrospectivesRoutes)
 app.use('/api/collaboration', collaborationDashboardRoutes)
 app.use('/api/collaboration/ux', collaborationUxRoutes)

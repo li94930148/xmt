@@ -27,8 +27,10 @@ export async function completeAuthorization(code: string, state: string) {
   // user-info scope has not propagated yet; syncAccount retries it afterwards.
   let profile: { nickname?: string; avatar?: string; union_id?: string } = {};
   try { profile = await fetchAuthorizedUserProfile(decryptToken(access), data.open_id); } catch (error) { console.warn('[Douyin] initial profile sync deferred:', (error as Error).message); }
+  const accountName = profile.nickname || (data as { nickname?: string }).nickname || '抖音账号';
+  const profileUrl = profile.avatar || '';
   const accountId = await runInTransaction(async (tx) => {
-    const id = existing?.id ?? await tx.executeInsert(`INSERT INTO douyin_accounts (user_id, open_id, union_id, access_token_encrypt, refresh_token_encrypt, expires_at, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)`, [saved.userId, data.open_id, data.union_id ?? null, access, refresh, expiresAt]);
+    const id = existing?.id ?? await tx.executeInsert(`INSERT INTO douyin_accounts (name, profile_url, user_id, open_id, union_id, access_token_encrypt, refresh_token_encrypt, expires_at, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)`, [accountName, profileUrl, saved.userId, data.open_id, data.union_id ?? null, access, refresh, expiresAt]);
     if (existing) await tx.execute(`UPDATE douyin_accounts SET user_id=?, union_id=?, nickname=?, avatar=?, access_token_encrypt=?, refresh_token_encrypt=?, expires_at=?, status='active', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [saved.userId, profile.union_id ?? data.union_id ?? null, profile.nickname ?? null, profile.avatar ?? null, access, refresh, expiresAt, id]);
     else await tx.execute(`UPDATE douyin_accounts SET nickname=?, avatar=?, union_id=? WHERE id=?`, [profile.nickname ?? null, profile.avatar ?? null, profile.union_id ?? data.union_id ?? null, id]);
     await tx.execute(`INSERT INTO douyin_tokens (account_id, access_token, refresh_token, expires_at, last_refresh_time) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`, [id, access, refresh, expiresAt]);

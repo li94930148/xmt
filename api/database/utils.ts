@@ -61,8 +61,11 @@ function normalizeParams(params: unknown[]): DbArg[] {
 }
 
 function buildDatabaseError(operation: string, sql: string, params: unknown[], err: unknown) {
-  console.error(`[DB] ${operation} error:`, err, '\nSQL:', sql, '\nParams:', params);
-  return new DatabaseError(`Database ${operation} failed`, sql, params, err);
+  const sqliteMessage = err instanceof Error ? err.message : String(err);
+  const table = sql.match(/\b(?:INSERT\s+INTO|UPDATE|FROM|TABLE)\s+([a-zA-Z0-9_]+)/i)?.[1] || 'unknown';
+  // Never log bound parameters: this layer is also used for encrypted OAuth tokens.
+  console.error('[DB] operation failed', { operation, table, sqliteMessage });
+  return new DatabaseError(`Database ${operation} failed on ${table}: ${sqliteMessage}`, sql, params, err);
 }
 
 export async function queryOne<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T | null> {

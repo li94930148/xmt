@@ -103,6 +103,14 @@ export const navigationSections: NavigationSection[] = [
     ],
   },
   {
+    id: 'daily-reports',
+    label: '日报系统',
+    icon: FileClock,
+    items: [
+      { id: 'daily-reports', label: '日报系统', icon: FileClock, path: '/daily-report' },
+    ],
+  },
+  {
     id: 'organization-collaboration',
     label: '组织协作',
     icon: Users,

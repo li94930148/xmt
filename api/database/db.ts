@@ -1303,6 +1303,36 @@ async function initTables() {
 }
 
 async function runTimeMigrations() {
+  // Compatibility guard for installations created before the OpenAPI account
+  // model. Keep legacy NOT NULL fields available to protect OAuth inserts.
+  const douyinAccountColumns = await db.execute(`PRAGMA table_info(douyin_accounts)`);
+  const douyinAccountColumnNames = new Set(douyinAccountColumns.rows.map((row) => String(row.name)));
+  if (!douyinAccountColumnNames.has('name')) {
+    await db.execute(`ALTER TABLE douyin_accounts ADD COLUMN name TEXT NOT NULL DEFAULT '抖音账号'`);
+  }
+  if (!douyinAccountColumnNames.has('profile_url')) {
+    await db.execute(`ALTER TABLE douyin_accounts ADD COLUMN profile_url TEXT NOT NULL DEFAULT ''`);
+  }
+  await db.execute(`UPDATE douyin_accounts SET name = '抖音账号' WHERE name IS NULL OR TRIM(name) = ''`);
+  await db.execute(`UPDATE douyin_accounts SET profile_url = '' WHERE profile_url IS NULL`);
+
+  // Report permission aliases used by the restored /api/reports compatibility API.
+  const reportPermissions: Array<[string, string]> = [
+    ['report:view', '查看日报'], ['report:create', '提交日报'], ['report:manage', '管理日报'],
+  ];
+  for (const [code, name] of reportPermissions) {
+    await db.execute({ sql: `INSERT OR IGNORE INTO permissions (code, name, module) VALUES (?, ?, 'report')`, args: [code, name] });
+  }
+  const reportRoleRules: Record<string, string[]> = {
+    admin: reportPermissions.map(([code]) => code), director: ['report:view', 'report:manage'],
+    member: ['report:view', 'report:create'], editor: ['report:view', 'report:create'], copywriter: ['report:view', 'report:create'], post_production: ['report:view', 'report:create'], camera: ['report:view', 'report:create'],
+  };
+  for (const [roleCode, codes] of Object.entries(reportRoleRules)) {
+    const role = await db.execute({ sql: `SELECT id FROM roles WHERE code=?`, args: [roleCode] });
+    if (!role.rows[0]) continue;
+    for (const code of codes) await db.execute({ sql: `INSERT OR IGNORE INTO role_permissions (role_id, permission_id) SELECT ?, id FROM permissions WHERE code=?`, args: [role.rows[0].id, code] });
+  }
+
   const metricAvailabilityMigration = await db.execute({ sql: `SELECT value FROM app_meta WHERE key = ?`, args: ['social_review_unknown_interaction_20260714'] });
   if (metricAvailabilityMigration.rows.length === 0) {
     await db.execute(`UPDATE social_videos SET likes = NULL, comments = NULL, shares = NULL, collects = NULL WHERE source_type = 'creator_item_api' AND likes = 0 AND comments = 0 AND shares = 0 AND collects = 0`);

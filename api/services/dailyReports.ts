@@ -394,6 +394,25 @@ export async function getMyDailyReport(user: User | undefined, dateValue?: strin
   };
 }
 
+export async function getDailyReportById(user: User | undefined, reportId: number) {
+  assertAuthenticated(user);
+  if (!Number.isInteger(reportId) || reportId <= 0) {
+    throw new DailyReportServiceError(400, 'INVALID_ID', '日报 ID 不合法');
+  }
+  const row = await queryOne<DailyReportRow>(
+    `SELECT r.*, u.name AS user_name, u.username, reviewer.name AS reviewer_name, reviewer.username AS reviewer_username
+     FROM daily_reports r
+     LEFT JOIN users u ON u.id = r.user_id
+     LEFT JOIN users reviewer ON reviewer.id = r.reviewed_by
+     WHERE r.id = ?`, [reportId]
+  );
+  if (!row) throw new DailyReportServiceError(404, 'REPORT_NOT_FOUND', '日报不存在');
+  const ownsReport = Number(row.user_id) === user.id;
+  const canManage = isManager(user) || await hasPermissionCode(user, 'report:manage');
+  if (!ownsReport && !canManage) throw new DailyReportServiceError(403, 'FORBIDDEN', '无权查看该日报');
+  return formatReport(row);
+}
+
 export async function saveDailyReportDraft(user: User | undefined, input: SaveDailyReportDraftInput) {
   assertAuthenticated(user);
   const reportDate = parseDate(input.reportDate);
@@ -650,6 +669,21 @@ export async function listDailyReportArchive(user: User | undefined, filters: Da
   return { start, end, userId: requestedUserId, reports };
 }
 
+export async function getDailyWorkReference(user: User | undefined, dateValue?: string) {
+  assertAuthenticated(user);
+  const reportDate = parseDate(dateValue);
+  const [activities, douyinSyncs] = await Promise.all([
+    queryAll<{ action: string; target: string | null; detail: string | null; created_at: string }>(`SELECT action, target, detail, created_at FROM activity_log WHERE user_id=? AND date(created_at)=? ORDER BY created_at DESC LIMIT 30`, [user.id, reportDate]),
+    queryAll<{ sync_type: string; status: string; message: string | null; created_at: string }>(`SELECT l.sync_type,l.status,l.message,l.created_at FROM douyin_sync_logs l JOIN douyin_accounts a ON a.id=l.account_id WHERE a.user_id=? AND date(l.created_at)=? ORDER BY l.created_at DESC LIMIT 20`, [user.id, reportDate]),
+  ]);
+  return {
+    reportDate,
+    activities: activities.map((row) => ({ type: 'activity', title: row.action, detail: row.detail || row.target || '', createdAt: row.created_at })),
+    douyin: douyinSyncs.map((row) => ({ type: 'douyin_sync', title: `${row.sync_type}: ${row.status}`, detail: row.message || '', createdAt: row.created_at })),
+    message: '仅作为今日工作参考，用户可编辑后再保存或提交日报。',
+  };
+}
+
 async function getSourceSuggestions(user: User, reportDate: string) {
   const suggestions: SourceSuggestion[] = [];
 
@@ -716,6 +750,22 @@ async function getSourceSuggestions(user: User, reportDate: string) {
       sourceId: Number(row.id),
       meta: { updatedAt: row.updated_at },
     });
+  }
+
+  const activityRows = await queryAll<Record<string, unknown>>(
+    `SELECT id, action, target, detail, created_at FROM activity_log WHERE user_id = ? AND date(created_at) = ? ORDER BY created_at DESC LIMIT 10`,
+    [user.id, reportDate]
+  );
+  for (const row of activityRows) {
+    suggestions.push({ sectionKey: 'done', title: `系统操作：${String(row.action || '')}`, contentMd: String(row.detail || row.target || ''), sourceType: 'activity_log', sourceId: Number(row.id), meta: { createdAt: row.created_at } });
+  }
+
+  const douyinRows = await queryAll<Record<string, unknown>>(
+    `SELECT l.id, l.sync_type, l.status, l.message, l.created_at FROM douyin_sync_logs l JOIN douyin_accounts a ON a.id = l.account_id WHERE a.user_id = ? AND date(l.created_at) = ? ORDER BY l.created_at DESC LIMIT 10`,
+    [user.id, reportDate]
+  );
+  for (const row of douyinRows) {
+    suggestions.push({ sectionKey: 'progress', title: `抖音运营：${String(row.sync_type || '')}`, contentMd: `${String(row.status || '')}${row.message ? ` - ${String(row.message)}` : ''}`, sourceType: 'douyin_sync', sourceId: Number(row.id), meta: { createdAt: row.created_at } });
   }
 
   return suggestions;

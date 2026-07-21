@@ -237,7 +237,7 @@ export async function getSocialVideoInsights(videoId: number) { return request<{
 export async function getSimilarSocialVideos(videoId: number) { return request<{ items: Array<{ id: number; title: string | null; coverUrl: string | null; publishTime: string | null; views: number | null; score: number }> }>(`/videos/${videoId}/similar`); }
 export async function createSocialLoginSession(accountId: number) { return post<{ sessionId: string; status: 'waiting_scan' }>(`/accounts/${accountId}/login/start`); }
 export type LoginSessionStatus = 'waiting_scan' | 'scanned' | 'manual_verify_required' | 'auth_required' | 'success' | 'failed' | 'expired';
-export type RemoteBrowserFrame = { image: string; mimeType: string; screenshotWidth: number; screenshotHeight: number; viewportWidth: number; viewportHeight: number };
+export type RemoteBrowserFrame = { image: string; mimeType: string; screenshotWidth: number; screenshotHeight: number; viewportWidth: number; viewportHeight: number; updatedAt?: number; code?: string; message?: string | null };
 export type RemoteBrowserClick = { x: number; y: number; screenshotWidth: number; screenshotHeight: number; renderedWidth: number; renderedHeight: number; viewportWidth: number; viewportHeight: number };
 export async function getSocialLoginStatus(sessionId: string) { return request<{ sessionId: string; status: LoginSessionStatus; message: string | null }>(`/login-session/${encodeURIComponent(sessionId)}`); }
 export async function getSocialLoginScreenshot(sessionId: string) { return request<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/screenshot`); }

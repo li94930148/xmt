@@ -59,9 +59,23 @@ router.post('/sync/statistics', authenticate, requirePermission('douyin:sync'), 
 router.get('/analysis', authenticate, requirePermission('douyin:view'), async (req, res) => { res.json(await getOperationalAnalysis(req.query.account_id ? Number(req.query.account_id) : undefined)); });
 router.post('/webhook', async (req, res) => {
   const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody?.toString('utf8') || JSON.stringify(req.body ?? {});
+  let event: Record<string, unknown>;
+  try {
+    event = JSON.parse(rawBody || '{}') as Record<string, unknown>;
+  } catch {
+    return res.status(400).json({ message: 'Webhook 请求体不是合法 JSON' });
+  }
+
+  // URL verification happens before signature checks. Douyin sends this request
+  // while the endpoint is being configured, so no webhook secret exists yet.
+  if (event.event === 'verify_webhook') {
+    return res.status(200).type('application/json').json({
+      challenge: (event.content as { challenge?: unknown } | undefined)?.challenge,
+    });
+  }
+
   if (!verifyWebhook(rawBody, req.header('X-Douyin-Signature') || undefined)) return res.status(401).json({ message: 'Webhook 验签失败' });
-  const event = JSON.parse(rawBody || '{}') as Record<string, unknown>;
-  if (event.event === 'verify_webhook') return res.type('text/plain').send(JSON.stringify({ challenge: (event.content as { challenge?: unknown } | undefined)?.challenge }));
-  await receiveWebhook(event); res.status(204).end();
+  const result = await receiveWebhook(event);
+  res.status(result.duplicate ? 200 : 202).json({ accepted: !result.duplicate, duplicate: result.duplicate });
 });
 export default router;

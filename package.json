@@ -19,6 +19,7 @@
     "test:retrospectives": "node scripts/smoke-retrospectives.mjs",
     "test:e2e": "node scripts/e2e-smoke.mjs",
     "smoke:navigation": "tsx scripts/smoke-navigation.mjs",
+    "test:douyin:webhook": "node scripts/test-douyin-webhook-challenge.mjs",
     "smoke:social-review": "node scripts/social-review-smoke-safe.mjs",
     "smoke:social-review:collect": "node scripts/social-review-collect-account.mjs",
     "smoke:social-review:export": "node scripts/social-review-collect-account.mjs --mode=official-export",

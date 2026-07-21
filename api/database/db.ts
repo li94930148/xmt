@@ -331,7 +331,7 @@ async function initTables() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  // 抖音账号与快照
+  // Deprecated legacy crawl tables. They are retained during the OpenAPI migration.
   await db.execute(`CREATE TABLE IF NOT EXISTS douyin_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -366,6 +366,103 @@ async function initTables() {
     is_pinned BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (snapshot_id) REFERENCES douyin_snapshots(id) ON DELETE CASCADE
+  )`);
+
+  // OpenAPI data model. Existing douyin_accounts is extended in-place so historical
+  // crawl records remain recoverable; legacy columns are documented as deprecated.
+  for (const statement of [
+    `ALTER TABLE douyin_accounts ADD COLUMN user_id INTEGER`,
+    `ALTER TABLE douyin_accounts ADD COLUMN open_id TEXT`,
+    `ALTER TABLE douyin_accounts ADD COLUMN union_id TEXT`,
+    `ALTER TABLE douyin_accounts ADD COLUMN nickname TEXT`,
+    `ALTER TABLE douyin_accounts ADD COLUMN avatar TEXT`,
+    `ALTER TABLE douyin_accounts ADD COLUMN access_token_encrypt TEXT`,
+    `ALTER TABLE douyin_accounts ADD COLUMN refresh_token_encrypt TEXT`,
+    `ALTER TABLE douyin_accounts ADD COLUMN expires_at DATETIME`,
+    `ALTER TABLE douyin_accounts ADD COLUMN status TEXT DEFAULT 'pending_authorization'`,
+    `ALTER TABLE douyin_accounts ADD COLUMN updated_at DATETIME`,
+  ]) { try { await db.execute(statement); } catch {} }
+
+  // The prior douyin_videos requires snapshot_id and is a crawl-only contract.
+  // Rename, do not drop, then create the OpenAPI-owned video table.
+  try {
+    const legacyVideoColumns = await db.execute(`PRAGMA table_info(douyin_videos)`);
+    if (legacyVideoColumns.rows.some((row) => String(row.name) === 'snapshot_id')) {
+      await db.execute(`ALTER TABLE douyin_videos RENAME TO douyin_videos_legacy_deprecated`);
+    }
+  } catch {}
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_videos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    title TEXT,
+    cover TEXT,
+    share_url TEXT,
+    publish_time DATETIME,
+    play_count INTEGER DEFAULT 0,
+    like_count INTEGER DEFAULT 0,
+    comment_count INTEGER DEFAULT 0,
+    share_count INTEGER DEFAULT 0,
+    collect_count INTEGER DEFAULT 0,
+    sync_time DATETIME NOT NULL,
+    raw_data TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, item_id),
+    FOREIGN KEY (account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    last_refresh_time DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_sync_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER,
+    sync_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES douyin_accounts(id) ON DELETE SET NULL
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_webhook_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT UNIQUE,
+    event_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    processed_at DATETIME,
+    status TEXT NOT NULL DEFAULT 'received'
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_video_statistics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    play_count INTEGER DEFAULT 0,
+    like_count INTEGER DEFAULT 0,
+    comment_count INTEGER DEFAULT 0,
+    share_count INTEGER DEFAULT 0,
+    collect_count INTEGER DEFAULT 0,
+    snapshot_date DATE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(video_id, snapshot_date),
+    FOREIGN KEY (video_id) REFERENCES douyin_videos(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_account_statistics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    fans_count INTEGER DEFAULT 0,
+    following_count INTEGER DEFAULT 0,
+    video_count INTEGER DEFAULT 0,
+    snapshot_date DATE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, snapshot_date),
+    FOREIGN KEY (account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE
   )`);
 
   await db.execute(`CREATE TABLE IF NOT EXISTS social_accounts (
@@ -927,6 +1024,10 @@ async function initTables() {
       ['system:template', '管理模板', 'system'],
       ['system:achievement', '管理成就', 'system'],
       ['system:douyin', '管理抖音数据', 'system'],
+      ['douyin:view', '查看抖音运营数据', 'douyin'],
+      ['douyin:account', '管理抖音授权账号', 'douyin'],
+      ['douyin:sync', '同步抖音开放平台数据', 'douyin'],
+      ['douyin:report', '生成抖音运营报告', 'douyin'],
       ['system:role', '管理角色', 'system'],
       ['system:permission', '管理权限', 'system'],
       ['system:settings', '管理系统设置', 'system'],
@@ -1206,6 +1307,20 @@ async function runTimeMigrations() {
   if (metricAvailabilityMigration.rows.length === 0) {
     await db.execute(`UPDATE social_videos SET likes = NULL, comments = NULL, shares = NULL, collects = NULL WHERE source_type = 'creator_item_api' AND likes = 0 AND comments = 0 AND shares = 0 AND collects = 0`);
     await db.execute({ sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, ?, datetime('now', '+8 hours'))`, args: ['social_review_unknown_interaction_20260714', 'done'] });
+  }
+
+  // Idempotent permission migration for databases that already have roles.
+  const douyinPermissions = [
+    ['douyin:view', '查看抖音运营数据', 'douyin'], ['douyin:account', '管理抖音授权账号', 'douyin'],
+    ['douyin:sync', '同步抖音开放平台数据', 'douyin'], ['douyin:report', '生成抖音运营报告', 'douyin'],
+  ];
+  for (const [code, name, module] of douyinPermissions) {
+    await db.execute({ sql: `INSERT OR IGNORE INTO permissions (code, name, module) VALUES (?, ?, ?)`, args: [code, name, module] });
+  }
+  const operatorRoles = await db.execute(`SELECT id FROM roles WHERE code IN ('admin', 'director')`);
+  const operatorPerms = await db.execute(`SELECT id FROM permissions WHERE code IN ('douyin:view', 'douyin:account', 'douyin:sync', 'douyin:report')`);
+  for (const role of operatorRoles.rows) for (const permission of operatorPerms.rows) {
+    await db.execute({ sql: `INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, args: [role.id, permission.id] });
   }
   try {
     await db.execute(`DROP INDEX IF EXISTS idx_calendar_events_user`);
@@ -1763,7 +1878,12 @@ async function createIndexes() {
     // douyin 表索引
     'CREATE INDEX IF NOT EXISTS idx_douyin_snapshots_account ON douyin_snapshots(account_id)',
     'CREATE INDEX IF NOT EXISTS idx_douyin_snapshots_scraped_at ON douyin_snapshots(scraped_at)',
-    'CREATE INDEX IF NOT EXISTS idx_douyin_videos_snapshot ON douyin_videos(snapshot_id)',
+    'CREATE INDEX IF NOT EXISTS idx_douyin_open_videos_account ON douyin_videos(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_douyin_open_videos_publish_time ON douyin_videos(publish_time)',
+    'CREATE INDEX IF NOT EXISTS idx_douyin_tokens_account ON douyin_tokens(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_douyin_sync_logs_account ON douyin_sync_logs(account_id)',
+    'CREATE INDEX IF NOT EXISTS idx_douyin_video_statistics_video_date ON douyin_video_statistics(video_id, snapshot_date)',
+    'CREATE INDEX IF NOT EXISTS idx_douyin_account_statistics_account_date ON douyin_account_statistics(account_id, snapshot_date)',
 
     // social-review 表索引
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_social_accounts_platform_external ON social_accounts(platform, external_account_id)',

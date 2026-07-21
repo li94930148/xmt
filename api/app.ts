@@ -35,8 +35,8 @@ import pomodoroRoutes from './routes/pomodoro.js'
 import calendarRoutes from './routes/calendar.js'
 import exportRoutes from './routes/export.js'
 import douyinRoutes from './routes/douyin.js'
-import socialReviewRoutes from './routes/social-review.js'
-import { startSocialIngestionScheduler } from './services/social-review/socialIngestionScheduler.js'
+import { startDouyinDailyScheduler } from './services/douyin/scheduler.js'
+// Legacy social-review routes are intentionally not mounted during the Douyin OpenAPI migration.
 import { isRemoteLoginSessionOwner } from './services/social-review/serverBrowserService.js'
 import backupRoutes from './routes/backup.js'
 import { createBackup, cleanOldBackups } from './routes/backup.js'
@@ -250,7 +250,7 @@ const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
 }
 
 app.use('/api', cors(corsOptions))
-app.use(express.json({ limit: '10mb' }))
+app.use(express.json({ limit: '10mb', verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
 // 生产环境：服务前端静态文件
@@ -291,7 +291,6 @@ app.use('/api/pomodoro', pomodoroRoutes)
 app.use('/api/calendar', calendarRoutes)
 app.use('/api/export', exportRoutes)
 app.use('/api/douyin', douyinRoutes)
-app.use('/api/social-review', socialReviewRoutes)
 app.use('/api/backup', backupRoutes)
 app.use('/api/roles', rolesRoutes)
 app.use('/api/permissions', permissionsRoutes)
@@ -540,7 +539,8 @@ export async function startServer() {
     cleanupInactiveRooms()
   }, 60 * 1000)
 
-  startSocialIngestionScheduler()
+  // Explicitly disabled unless DOUYIN_SYNC_SCHEDULER_ENABLED=true in deployment.
+  startDouyinDailyScheduler()
 
   // 启动时自动备份一次
   try {

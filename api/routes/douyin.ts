@@ -1,163 +1,67 @@
-﻿import express from 'express';
-import { authenticate } from '../middleware/auth';
-import { requirePermission } from '../middleware/permissions';
-import { scrapeDouyinProfile, parseDouyinNumber, closeBrowser } from '../services/douyin';
-import { db } from '../database/db';
+import express from 'express';
+import { authenticate } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
+import { createAuthorizationUrl, completeAuthorization } from '../services/douyin/auth.service.js';
+import { requestSync, syncAccount, syncStatistics, syncVideos } from '../services/douyin/data.service.js';
+import { getOperationalAnalysis } from '../services/douyin/analysis.service.js';
+import { receiveWebhook, verifyWebhook } from '../services/douyin/webhook.service.js';
+import { queryAll, queryOne, execute } from '../database/utils.js';
 
 const router = express.Router();
 
-// GET /api/douyin/accounts - 获取已添加的账号列表
-router.get('/accounts', authenticate, requirePermission('system:douyin'), async (req, res) => {
-  try {
-    const result = await db.execute(`SELECT * FROM douyin_accounts ORDER BY created_at DESC`);
-    res.json(result.rows);
-  } catch (error) {
-    res.status(500).json({ message: '获取账号列表失败', error: (error as Error).message });
-  }
+router.get('/oauth/url', authenticate, requirePermission('douyin:account'), (req, res) => {
+  try { res.json({ authorization_url: createAuthorizationUrl(req.user!.id) }); }
+  catch (error) { res.status(503).json({ message: (error as Error).message }); }
 });
-
-// POST /api/douyin/accounts - 添加抖音账号
-router.post('/accounts', authenticate, requirePermission('system:douyin'), async (req, res) => {
-  try {
-    const { name, profileUrl } = req.body;
-    if (!name || !profileUrl) {
-      return res.status(400).json({ message: '账号名称和主页链接不能为空' });
-    }
-    const result = await db.execute({
-      sql: `INSERT INTO douyin_accounts (name, profile_url) VALUES (?, ?)`,
-      args: [name, profileUrl],
-    });
-    res.json({ message: '账号添加成功', id: result.lastInsertRowid });
-  } catch (error) {
-    res.status(500).json({ message: '添加账号失败', error: (error as Error).message });
-  }
+// Compatibility alias requested by the original interaction specification.
+router.get('/auth/url', authenticate, requirePermission('douyin:account'), (req, res) => {
+  try { res.json({ authorization_url: createAuthorizationUrl(req.user!.id) }); }
+  catch (error) { res.status(503).json({ message: (error as Error).message }); }
 });
-
-// DELETE /api/douyin/accounts/:id - 删除账号
-router.delete('/accounts/:id', authenticate, requirePermission('system:douyin'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    await db.execute({ sql: `DELETE FROM douyin_videos WHERE snapshot_id IN (SELECT id FROM douyin_snapshots WHERE account_id = ?)`, args: [id] });
-    await db.execute({ sql: `DELETE FROM douyin_snapshots WHERE account_id = ?`, args: [id] });
-    await db.execute({ sql: `DELETE FROM douyin_accounts WHERE id = ?`, args: [id] });
-    res.json({ message: '账号删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除账号失败', error: (error as Error).message });
-  }
+router.get('/oauth/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error || !code || !state) return res.status(400).send('抖音授权未完成。');
+  try { const result = await completeAuthorization(String(code), String(state)); res.send(`抖音账号绑定成功（账号 #${result.accountId}）。请关闭此窗口返回 XMT。`); }
+  catch (cause) { res.status(400).send(`抖音账号绑定失败：${(cause as Error).message}`); }
 });
-
-// POST /api/douyin/scrape/:accountId - 抓取指定账号数据
-router.post('/scrape/:accountId', authenticate, requirePermission('system:douyin'), async (req, res) => {
-  try {
-    const { accountId } = req.params;
-
-    const accountResult = await db.execute({
-      sql: `SELECT * FROM douyin_accounts WHERE id = ?`,
-      args: [accountId],
-    });
-    if (accountResult.rows.length === 0) {
-      return res.status(404).json({ message: '账号不存在' });
-    }
-    const account = accountResult.rows[0];
-
-    const profile = await scrapeDouyinProfile(String(account.profile_url));
-
-    // 保存快照
-    const snapshotResult = await db.execute({
-      sql: `INSERT INTO douyin_snapshots (account_id, username, followers, likes, following_count, ip_location, bio, video_count, raw_data, scraped_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [
-        accountId,
-        profile.username,
-        parseDouyinNumber(profile.followers),
-        parseDouyinNumber(profile.likes),
-        parseDouyinNumber(profile.following),
-        profile.ipLocation,
-        profile.bio,
-        profile.videos.length,
-        JSON.stringify(profile),
-        profile.scrapedAt,
-      ],
-    });
-
-    const snapshotId = Number(snapshotResult.lastInsertRowid);
-
-    // 保存视频数据
-    for (const video of profile.videos) {
-      await db.execute({
-        sql: `INSERT INTO douyin_videos (snapshot_id, title, likes, is_pinned) VALUES (?, ?, ?, ?)`,
-        args: [snapshotId, video.title, parseDouyinNumber(video.likes), video.isPinned ? 1 : 0],
-      });
-    }
-
-    res.json({ message: '抓取成功', snapshot: { id: snapshotId, ...profile } });
-  } catch (error) {
-    console.error('[Douyin] 抓取失败:', error);
-    res.status(500).json({ message: '抓取失败', error: (error as Error).message });
-  }
+router.get('/accounts', authenticate, requirePermission('douyin:view'), async (req, res) => {
+  const ownOnly = req.user!.role !== 'admin' && req.user!.role !== 'director';
+  const accounts = await queryAll(`SELECT id, user_id, open_id, union_id, nickname, avatar, expires_at, status, created_at, updated_at, (SELECT MAX(created_at) FROM douyin_sync_logs l WHERE l.account_id = douyin_accounts.id) AS last_sync_at FROM douyin_accounts WHERE open_id IS NOT NULL ${ownOnly ? 'AND user_id = ?' : ''} ORDER BY updated_at DESC, created_at DESC`, ownOnly ? [req.user!.id] : []);
+  res.json(accounts);
 });
-
-// GET /api/douyin/snapshots/:accountId - 获取某账号的历史快照
-router.get('/snapshots/:accountId', authenticate, requirePermission('system:douyin'), async (req, res) => {
-  try {
-    const { accountId } = req.params;
-    const { limit = 30 } = req.query;
-
-    const snapshots = await db.execute({
-      sql: `SELECT * FROM douyin_snapshots WHERE account_id = ? ORDER BY scraped_at DESC LIMIT ?`,
-      args: [accountId, parseInt(limit as string)],
-    });
-
-    res.json(snapshots.rows);
-  } catch (error) {
-    res.status(500).json({ message: '获取快照失败', error: (error as Error).message });
-  }
+router.post('/accounts/bind', authenticate, requirePermission('douyin:account'), (req, res) => {
+  try { res.json({ authorization_url: createAuthorizationUrl(req.user!.id) }); }
+  catch (error) { res.status(503).json({ message: (error as Error).message }); }
 });
-
-// GET /api/douyin/snapshot/:snapshotId/videos - 获取某次快照的视频列表
-router.get('/snapshot/:snapshotId/videos', authenticate, requirePermission('system:douyin'), async (req, res) => {
-  try {
-    const { snapshotId } = req.params;
-
-    const videos = await db.execute({
-      sql: `SELECT * FROM douyin_videos WHERE snapshot_id = ? ORDER BY is_pinned DESC, likes DESC`,
-      args: [snapshotId],
-    });
-
-    res.json(videos.rows);
-  } catch (error) {
-    res.status(500).json({ message: '获取视频列表失败', error: (error as Error).message });
-  }
+router.delete('/accounts/:id', authenticate, requirePermission('douyin:account'), async (req, res) => {
+  const account = await queryOne<{ user_id: number }>('SELECT user_id FROM douyin_accounts WHERE id = ?', [req.params.id]);
+  if (!account) return res.status(404).json({ message: '账号不存在' });
+  if (req.user!.role !== 'admin' && req.user!.role !== 'director' && account.user_id !== req.user!.id) return res.status(403).json({ message: '无权解绑该账号' });
+  await execute(`UPDATE douyin_accounts SET status='revoked', access_token_encrypt=NULL, refresh_token_encrypt=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?`, [req.params.id]);
+  res.status(204).end();
 });
-
-// GET /api/douyin/trend/:accountId - 获取涨粉趋势数据
-router.get('/trend/:accountId', authenticate, requirePermission('system:douyin'), async (req, res) => {
-  try {
-    const { accountId } = req.params;
-    const { days = 30 } = req.query;
-
-    const trend = await db.execute({
-      sql: `SELECT followers, likes, video_count, scraped_at 
-            FROM douyin_snapshots 
-            WHERE account_id = ? AND scraped_at >= datetime('now', ?)
-            ORDER BY scraped_at ASC`,
-      args: [accountId, `-${parseInt(days as string)} days`],
-    });
-
-    res.json(trend.rows);
-  } catch (error) {
-    res.status(500).json({ message: '获取趋势数据失败', error: (error as Error).message });
-  }
+router.get('/videos', authenticate, requirePermission('douyin:view'), async (req, res) => {
+  const accountId = req.query.account_id ? Number(req.query.account_id) : null;
+  const videos = await queryAll(`SELECT v.*, a.nickname, a.open_id FROM douyin_videos v JOIN douyin_accounts a ON a.id=v.account_id WHERE (? IS NULL OR v.account_id=?) ORDER BY v.publish_time DESC LIMIT 200`, [accountId, accountId]);
+  res.json(videos);
 });
-
-// POST /api/douyin/close-browser - 关闭浏览器实例（释放资源）
-router.post('/close-browser', authenticate, requirePermission('system:douyin'), async (req, res) => {
-  try {
-    await closeBrowser();
-    res.json({ message: '浏览器已关闭' });
-  } catch (error) {
-    res.status(500).json({ message: '关闭浏览器失败', error: (error as Error).message });
-  }
+router.get('/statistics', authenticate, requirePermission('douyin:view'), async (_req, res) => {
+  const summary = await queryOne(`SELECT COUNT(DISTINCT a.id) account_count, COUNT(v.id) video_count, COALESCE(SUM(v.play_count),0) play_count, COALESCE(SUM(v.like_count),0) like_count, COALESCE(SUM(v.comment_count),0) comment_count, COALESCE(SUM(v.share_count),0) share_count FROM douyin_accounts a LEFT JOIN douyin_videos v ON v.account_id=a.id WHERE a.status='active'`);
+  res.json(summary ?? {});
 });
-
+router.post('/sync', authenticate, requirePermission('douyin:sync'), async (req, res) => {
+  const accountId = Number(req.body?.account_id); if (!accountId) return res.status(400).json({ message: 'account_id 必填' });
+  res.status(202).json(await requestSync(accountId, String(req.body?.sync_type || 'full')));
+});
+router.post('/sync/account', authenticate, requirePermission('douyin:sync'), async (req, res) => { try { res.json(await syncAccount(Number(req.body?.account_id))); } catch (error) { res.status(400).json({ message: (error as Error).message }); } });
+router.post('/sync/videos', authenticate, requirePermission('douyin:sync'), async (req, res) => { try { res.json(await syncVideos(Number(req.body?.account_id))); } catch (error) { res.status(400).json({ message: (error as Error).message }); } });
+router.post('/sync/statistics', authenticate, requirePermission('douyin:sync'), async (req, res) => { try { res.json(await syncStatistics(Number(req.body?.account_id))); } catch (error) { res.status(400).json({ message: (error as Error).message }); } });
+router.get('/analysis', authenticate, requirePermission('douyin:view'), async (req, res) => { res.json(await getOperationalAnalysis(req.query.account_id ? Number(req.query.account_id) : undefined)); });
+router.post('/webhook', async (req, res) => {
+  const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody?.toString('utf8') || JSON.stringify(req.body ?? {});
+  if (!verifyWebhook(rawBody, req.header('X-Douyin-Signature') || undefined)) return res.status(401).json({ message: 'Webhook 验签失败' });
+  const event = JSON.parse(rawBody || '{}') as Record<string, unknown>;
+  if (event.event === 'verify_webhook') return res.type('text/plain').send(JSON.stringify({ challenge: (event.content as { challenge?: unknown } | undefined)?.challenge }));
+  await receiveWebhook(event); res.status(204).end();
+});
 export default router;

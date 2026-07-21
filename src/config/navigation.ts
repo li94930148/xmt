@@ -91,15 +91,15 @@ export const navigationSections: NavigationSection[] = [
     ],
   },
   {
-    id: 'operations-review',
-    label: '运营复盘',
+    id: 'douyin-operations',
+    label: '抖音运营中心',
     icon: BarChart3,
     items: [
-      { id: 'analytics', label: '实时数据看板', icon: BarChart3, path: '/analytics', permissions: ['analytics:view'] },
-      { id: 'social-review', label: '短视频复盘', icon: Video, path: '/social-review', permissions: ['analytics:view'] },
-      { id: 'retrospectives', label: '复盘中心', icon: BookOpenCheck, path: '/retrospectives', permissions: ['analytics:retro:view'] },
-      { id: 'export', label: '报告中心', icon: FileBarChart, path: '/export', permissions: ['export:data'] },
-      { id: 'daily-report', label: '日报归档', icon: FileClock, path: '/daily-report' },
+      { id: 'douyin-accounts', label: '账号管理', icon: Video, path: '/douyin-operations/accounts', permissions: ['douyin:view'] },
+      { id: 'douyin-dashboard', label: '数据看板', icon: BarChart3, path: '/douyin-operations/dashboard', permissions: ['douyin:view'] },
+      { id: 'douyin-content', label: '内容分析', icon: BookOpenCheck, path: '/douyin-operations/content', permissions: ['douyin:view'] },
+      { id: 'douyin-retro', label: '运营复盘', icon: FileClock, path: '/douyin-operations/retrospective', permissions: ['douyin:view'] },
+      { id: 'douyin-report', label: '报告中心', icon: FileBarChart, path: '/douyin-operations/reports', permissions: ['douyin:report'] },
     ],
   },
   {

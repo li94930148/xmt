@@ -77,6 +77,7 @@ const Inspirations = lazyWithRetry(() => import('@/pages/Inspirations'), 'Inspir
 const Achievements = lazyWithRetry(() => import('@/pages/Achievements'), 'Achievements');
 const ActivityLog = lazyWithRetry(() => import('@/pages/ActivityLog'), 'ActivityLog');
 const DouyinAnalytics = lazyWithRetry(() => import('@/pages/DouyinAnalytics'), 'DouyinAnalytics');
+const DouyinOperationsCenter = lazyWithRetry(() => import('@/pages/DouyinOperationsCenter'), 'DouyinOperationsCenter');
 const PermissionManagement = lazyWithRetry(() => import('@/pages/PermissionManagement'), 'PermissionManagement');
 const WorkflowDesigner = lazyWithRetry(() => import('@/pages/WorkflowDesigner'), 'WorkflowDesigner');
 const NotificationSettings = lazyWithRetry(() => import('@/pages/NotificationSettings'), 'NotificationSettings');
@@ -150,6 +151,10 @@ export default function App() {
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/analytics" element={<Analytics />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['douyin:view']} />}>
+                  <Route path="/douyin-operations" element={<DouyinOperationsCenter />} />
+                  <Route path="/douyin-operations/:section" element={<DouyinOperationsCenter />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/social-review" element={<SocialReview />} />

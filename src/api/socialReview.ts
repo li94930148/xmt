@@ -238,9 +238,10 @@ export async function getSimilarSocialVideos(videoId: number) { return request<{
 export async function createSocialLoginSession(accountId: number) { return post<{ sessionId: string; status: 'waiting_scan' }>(`/accounts/${accountId}/login/start`); }
 export type LoginSessionStatus = 'waiting_scan' | 'scanned' | 'manual_verify_required' | 'auth_required' | 'success' | 'failed' | 'expired';
 export type RemoteBrowserFrame = { image: string; mimeType: string; screenshotWidth: number; screenshotHeight: number; viewportWidth: number; viewportHeight: number };
+export type RemoteBrowserClick = { x: number; y: number; screenshotWidth: number; screenshotHeight: number; renderedWidth: number; renderedHeight: number; viewportWidth: number; viewportHeight: number };
 export async function getSocialLoginStatus(sessionId: string) { return request<{ sessionId: string; status: LoginSessionStatus; message: string | null }>(`/login-session/${encodeURIComponent(sessionId)}`); }
 export async function getSocialLoginScreenshot(sessionId: string) { return request<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/screenshot`); }
-export async function clickSocialLoginBrowser(sessionId: string, x: number, y: number, imageWidth: number, imageHeight: number) { return post<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/click`, { x, y, imageWidth, imageHeight }); }
+export async function clickSocialLoginBrowser(sessionId: string, click: RemoteBrowserClick) { return post<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/click`, { ...click, imageWidth: click.screenshotWidth, imageHeight: click.screenshotHeight }); }
 export async function scrollSocialLoginBrowser(sessionId: string, deltaX: number, deltaY: number) { return post<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/scroll`, { deltaX, deltaY }); }
 export async function typeSocialLoginBrowser(sessionId: string, text: string) { return post<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/type`, { text }); }
 export async function pressSocialLoginBrowser(sessionId: string, key: string) { return post<RemoteBrowserFrame>(`/login-session/${encodeURIComponent(sessionId)}/press`, { key }); }

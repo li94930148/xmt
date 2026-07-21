@@ -519,7 +519,7 @@ router.post('/login-session/:id/cancel', requireAdmin, async (req, res) => {
   try { const session = await cancelSocialLoginRecovery(req.params.id); if (!session) return res.status(404).json({ success: false, message: '登录会话不存在' }); sendData(res, session); } catch (error) { handleError(error, res); }
 });
 function sendRemoteFrame(res: Response, frame: Awaited<ReturnType<typeof captureRemoteBrowser>>) { sendData(res, { ...frame, image: frame.image.toString('base64') }); }
-function handleRemoteError(error: unknown, res: Response) { if (error instanceof RemoteBrowserSessionError) return res.status(error.status).json({ success: false, message: error.message }); return handleError(error, res); }
+function handleRemoteError(error: unknown, res: Response) { if (error instanceof RemoteBrowserSessionError) return res.status(error.status).json({ success: false, code: error.code, message: error.message }); return handleError(error, res); }
 router.get('/login-session/:id/screenshot', requireAdmin, async (req, res) => { try { sendRemoteFrame(res, await captureRemoteBrowser(req.params.id, Number(req.user?.id))); } catch (error) { handleRemoteError(error, res); } });
 router.post('/login-session/:id/click', requireAdmin, async (req, res) => { try { sendRemoteFrame(res, await remoteBrowserClick(req.params.id, Number(req.user?.id), req.body || {})); } catch (error) { handleRemoteError(error, res); } });
 router.post('/login-session/:id/scroll', requireAdmin, async (req, res) => { try { sendRemoteFrame(res, await remoteBrowserScroll(req.params.id, Number(req.user?.id), req.body || {})); } catch (error) { handleRemoteError(error, res); } });

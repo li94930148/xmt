@@ -179,8 +179,8 @@ function normalizeItemInput(item: DailyReportItemInput, index: number): DailyRep
     sectionKey,
     title: String(item.title || '').trim(),
     contentMd: String(item.contentMd || '').trim(),
-    sourceType: item.sourceType ? String(item.sourceType).trim() : undefined,
-    sourceId: item.sourceId === undefined || item.sourceId === null ? null : Number(item.sourceId),
+    sourceType: undefined,
+    sourceId: null,
     sortOrder: Number.isFinite(item.sortOrder) ? Number(item.sortOrder) : index,
     meta: item.meta || null,
   };

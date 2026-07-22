@@ -419,14 +419,10 @@ export default function DailyReportPage() {
             />
           </div>
 
-          <DailyReportAutoDraftPanel
-            loading={autoDraftLoading}
-            result={autoDraft}
-            importedKeys={importedSuggestionKeys}
-            getSuggestionKey={getSuggestionKey}
-            onGenerate={handleGenerateDraft}
-            onApply={handleApplyAutoDraft}
-          />
+          <GlassPanel className="h-fit p-5">
+            <h2 className="text-base font-semibold text-studio-text-primary">独立办公日报</h2>
+            <p className="mt-2 text-sm text-studio-text-muted">日报仅由员工手动填写，不读取抖音、选题、生产、发布或系统操作日志。</p>
+          </GlassPanel>
         </div>
       ) : null}
 

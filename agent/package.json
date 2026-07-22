@@ -1,0 +1,37 @@
+{
+  "name": "xmt-creator-agent",
+  "productName": "XMT Creator Agent",
+  "description": "XMT 本地抖音创作者数据采集与加密同步桌面客户端",
+  "author": "XMT",
+  "version": "2.7.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist-desktop/desktop/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:renderer:dev\" \"npm:electron:dev\"",
+    "renderer:dev": "vite --config vite.config.ts",
+    "build": "tsc -p tsconfig.json && vite build --config vite.config.ts",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "electron:dev": "wait-on http://127.0.0.1:5178 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5178 electron .",
+    "electron:build": "npm run build && node scripts/build-electron.cjs"
+  },
+  "dependencies": {
+    "playwright": "^1.60.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^9.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5",
+    "wait-on": "^8.0.3"
+  },
+  "allowScripts": {}
+}

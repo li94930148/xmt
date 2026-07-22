@@ -1,0 +1,1 @@
+{"serverUrl":"https://lanyaomedia.com","agentId":1,"deviceId":"sha256-device-fingerprint","platform":"douyin","accountId":"douyin-account-id","accountName":"抖音账号","browserConfig":{"mode":"system_chrome","cdpEndpoint":"http://127.0.0.1:9222"},"syncConfig":{"enabled":true,"interval":"daily","dailyHour":2}}

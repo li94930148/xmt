@@ -1,0 +1,47 @@
+# XMT Creator Agent Desktop
+
+Windows 独立桌面客户端。用户无需安装 Node.js，也不需要使用命令行。采集浏览器和 Profile 完全在用户设备运行，不上传 Cookie，不保存 XMT 或抖音密码。
+
+## 开发
+
+```powershell
+cd agent
+$env:PLAYWRIGHT_BROWSERS_PATH='0'
+npm install
+npx playwright install chromium
+npm run check
+npm run dev
+```
+
+- `npm run build`：构建 core、Electron 主进程和 React UI。
+- `npm run electron:dev`：配合 renderer 开发服务器启动桌面端。
+- `npm run electron:build`：生成 Windows NSIS 安装包。
+
+## Windows Portable 构建产物
+
+```text
+release/XMT-Creator-Agent-Portable.zip
+```
+
+无需安装或管理员权限。解压后双击 `XMT Creator Agent/XMT-Creator-Agent.exe`。不创建快捷方式、卸载器或注册表安装项。
+
+## 本地数据
+
+便携包中存在 `portable.flag` 时，位置为程序旁的 `data/`；开发模式或无标志文件时继续兼容 `%APPDATA%\XMT Creator Agent\`。
+
+- `config.json`：服务器、设备 ID、平台账号和同步计划，不包含敏感 Token。
+- `agent-token.bin`：使用 Electron `safeStorage` 调用当前 Windows 用户的 DPAPI 加密。
+- `browser/`：内置备用浏览器的 Playwright persistent context Profile，仅保存在本机。
+- `logs/sync.log`：脱敏同步日志，不写入 Cookie、密码或 Token。
+
+便携版没有卸载器。关闭程序后移动整个目录即可迁移，删除目录即可清除便携数据。
+
+## 使用流程
+
+1. 启动应用，输入 XMT HTTPS 地址、XMT 用户名/密码和要绑定的抖音账号 ID。
+2. 客户端登录 XMT 并调用既有 `/api/creator-agent/register`，密码在请求结束后即释放。
+3. 默认选择“真实 Chrome”。完全退出 Chrome 后使用 `chrome.exe --remote-debugging-port=9222` 启动，在该 Chrome 中手动登录抖音创作者中心。
+4. 点击“登录抖音”，Agent 使用 `chromium.connectOverCDP()` 连接现有 Chrome 上下文；不会保存或上传 Chrome Profile，也不会自动输入账号密码。
+5. 如真实 Chrome 调试端口不可用，可在设置中切换到“内置浏览器（备用）”。
+6. 点击“立即同步”；数据以 AES-256-GCM 加密并使用 HMAC-SHA256 签名后，通过既有 `/api/creator-agent/report` 上传。
+7. 在设置中选择手动、每 12 小时或每天指定小时同步，并可开启 Windows 登录后自动启动。

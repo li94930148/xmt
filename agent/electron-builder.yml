@@ -1,0 +1,15 @@
+appId: com.lanyaomedia.xmt.creatoragent
+productName: XMT Creator Agent
+executableName: XMT-Creator-Agent
+directories:
+  output: release
+files:
+  - dist-desktop/**/*
+  - package.json
+asar: true
+asarUnpack:
+  - node_modules/playwright-core/.local-browsers/**/*
+win:
+  target:
+    - target: dir
+      arch: [x64]

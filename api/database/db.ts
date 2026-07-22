@@ -381,6 +381,10 @@ async function initTables() {
     `ALTER TABLE douyin_accounts ADD COLUMN expires_at DATETIME`,
     `ALTER TABLE douyin_accounts ADD COLUMN status TEXT DEFAULT 'pending_authorization'`,
     `ALTER TABLE douyin_accounts ADD COLUMN updated_at DATETIME`,
+    `ALTER TABLE douyin_accounts ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth'`,
+    `ALTER TABLE douyin_accounts ADD COLUMN auth_type TEXT NOT NULL DEFAULT 'oauth'`,
+    `ALTER TABLE douyin_accounts ADD COLUMN business_token TEXT`,
+    `ALTER TABLE douyin_accounts ADD COLUMN business_scope TEXT`,
   ]) { try { await db.execute(statement); } catch {} }
 
   // The prior douyin_videos requires snapshot_id and is a crawl-only contract.
@@ -459,10 +463,67 @@ async function initTables() {
     fans_count INTEGER DEFAULT 0,
     following_count INTEGER DEFAULT 0,
     video_count INTEGER DEFAULT 0,
+    play_count INTEGER DEFAULT 0,
+    new_fans INTEGER DEFAULT 0,
+    new_like_count INTEGER DEFAULT 0,
+    new_comment_count INTEGER DEFAULT 0,
+    profile_view_count INTEGER DEFAULT 0,
+    raw_data_json TEXT,
+    douyin_data_source TEXT NOT NULL DEFAULT 'oauth',
     snapshot_date DATE NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(account_id, snapshot_date),
     FOREIGN KEY (account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE
+  )`);
+  for (const statement of [
+    `ALTER TABLE douyin_account_statistics ADD COLUMN play_count INTEGER DEFAULT 0`,
+    `ALTER TABLE douyin_account_statistics ADD COLUMN new_fans INTEGER DEFAULT 0`,
+    `ALTER TABLE douyin_account_statistics ADD COLUMN new_like_count INTEGER DEFAULT 0`,
+    `ALTER TABLE douyin_account_statistics ADD COLUMN new_comment_count INTEGER DEFAULT 0`,
+    `ALTER TABLE douyin_account_statistics ADD COLUMN profile_view_count INTEGER DEFAULT 0`,
+    `ALTER TABLE douyin_account_statistics ADD COLUMN raw_data_json TEXT`,
+    `ALTER TABLE douyin_account_statistics ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth'`,
+    `ALTER TABLE douyin_videos ADD COLUMN status TEXT NOT NULL DEFAULT 'deprecated_pending_business_auth'`,
+    `ALTER TABLE douyin_videos ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth'`,
+    `ALTER TABLE douyin_video_statistics ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth'`,
+  ]) { try { await db.execute(statement); } catch {} }
+  await db.execute(`CREATE TABLE IF NOT EXISTS douyin_fans_source_statistics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    snapshot_date DATE NOT NULL,
+    source_type TEXT NOT NULL,
+    count INTEGER DEFAULT 0,
+    raw_data_json TEXT,
+    douyin_data_source TEXT NOT NULL DEFAULT 'oauth',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, snapshot_date, source_type, douyin_data_source),
+    FOREIGN KEY (account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_agents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    encryption_key_hash TEXT NOT NULL,
+    last_active_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, platform, device_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_data_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    snapshot_time DATETIME NOT NULL,
+    data_json TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'local_agent',
+    agent_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id) REFERENCES creator_agents(id) ON DELETE SET NULL
   )`);
 
   await db.execute(`CREATE TABLE IF NOT EXISTS social_accounts (
@@ -795,6 +856,11 @@ async function initTables() {
     team_id INTEGER,
     template_id INTEGER,
     status TEXT NOT NULL DEFAULT 'draft',
+    content TEXT,
+    summary TEXT,
+    tomorrow_plan TEXT,
+    receiver_ids TEXT,
+    cc_user_ids TEXT,
     manual_summary_md TEXT,
     auto_summary_json TEXT,
     risk_level TEXT DEFAULT 'normal',
@@ -810,6 +876,13 @@ async function initTables() {
     FOREIGN KEY (template_id) REFERENCES daily_report_templates(id),
     FOREIGN KEY (reviewed_by) REFERENCES users(id)
   )`);
+  for (const statement of [
+    `ALTER TABLE daily_reports ADD COLUMN content TEXT`,
+    `ALTER TABLE daily_reports ADD COLUMN summary TEXT`,
+    `ALTER TABLE daily_reports ADD COLUMN tomorrow_plan TEXT`,
+    `ALTER TABLE daily_reports ADD COLUMN receiver_ids TEXT`,
+    `ALTER TABLE daily_reports ADD COLUMN cc_user_ids TEXT`,
+  ]) { try { await db.execute(statement); } catch {} }
 
   await db.execute(`CREATE TABLE IF NOT EXISTS daily_report_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

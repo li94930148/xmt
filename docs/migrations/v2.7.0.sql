@@ -1,0 +1,23 @@
+-- XMT v2.7.0 (SQLite). Runtime migrations in api/database/db.ts are idempotent.
+ALTER TABLE douyin_accounts ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth';
+ALTER TABLE douyin_accounts ADD COLUMN auth_type TEXT NOT NULL DEFAULT 'oauth';
+ALTER TABLE douyin_accounts ADD COLUMN business_token TEXT;
+ALTER TABLE douyin_accounts ADD COLUMN business_scope TEXT;
+ALTER TABLE douyin_videos ADD COLUMN status TEXT NOT NULL DEFAULT 'deprecated_pending_business_auth';
+ALTER TABLE douyin_videos ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth';
+ALTER TABLE douyin_video_statistics ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth';
+ALTER TABLE douyin_account_statistics ADD COLUMN play_count INTEGER DEFAULT 0;
+ALTER TABLE douyin_account_statistics ADD COLUMN new_fans INTEGER DEFAULT 0;
+ALTER TABLE douyin_account_statistics ADD COLUMN new_like_count INTEGER DEFAULT 0;
+ALTER TABLE douyin_account_statistics ADD COLUMN new_comment_count INTEGER DEFAULT 0;
+ALTER TABLE douyin_account_statistics ADD COLUMN profile_view_count INTEGER DEFAULT 0;
+ALTER TABLE douyin_account_statistics ADD COLUMN raw_data_json TEXT;
+ALTER TABLE douyin_account_statistics ADD COLUMN douyin_data_source TEXT NOT NULL DEFAULT 'oauth';
+CREATE TABLE douyin_fans_source_statistics(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,snapshot_date DATE NOT NULL,source_type TEXT NOT NULL,count INTEGER DEFAULT 0,raw_data_json TEXT,douyin_data_source TEXT NOT NULL DEFAULT 'oauth',created_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(account_id,snapshot_date,source_type,douyin_data_source),FOREIGN KEY(account_id)REFERENCES douyin_accounts(id)ON DELETE CASCADE);
+CREATE TABLE creator_agents(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,account_id TEXT NOT NULL,device_id TEXT NOT NULL,token_hash TEXT NOT NULL,encryption_key_hash TEXT NOT NULL,last_active_at DATETIME,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(user_id,platform,device_id),FOREIGN KEY(user_id)REFERENCES users(id)ON DELETE CASCADE);
+CREATE TABLE creator_data_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,account_id TEXT NOT NULL,snapshot_time DATETIME NOT NULL,data_json TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'local_agent',agent_id INTEGER,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(user_id)REFERENCES users(id)ON DELETE CASCADE,FOREIGN KEY(agent_id)REFERENCES creator_agents(id)ON DELETE SET NULL);
+ALTER TABLE daily_reports ADD COLUMN content TEXT;
+ALTER TABLE daily_reports ADD COLUMN summary TEXT;
+ALTER TABLE daily_reports ADD COLUMN tomorrow_plan TEXT;
+ALTER TABLE daily_reports ADD COLUMN receiver_ids TEXT;
+ALTER TABLE daily_reports ADD COLUMN cc_user_ids TEXT;

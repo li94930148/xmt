@@ -1,0 +1,19 @@
+const {spawnSync}=require('node:child_process');
+const fs=require('node:fs');const path=require('node:path');
+const root=path.resolve(__dirname,'..');const release=path.join(root,'release');const work=path.join(root,`release-work-${Date.now()}`);const unpacked=path.join(work,'win-unpacked');const bundle=path.join(release,'XMT Creator Agent');const zip=path.join(release,'XMT-Creator-Agent-Portable.zip');
+const inside=(candidate,parent)=>path.resolve(candidate).startsWith(path.resolve(parent)+path.sep);
+if(!inside(work,root)||!inside(bundle,release))throw new Error('Unsafe portable output path');
+const builder=path.join(root,'node_modules','electron-builder','cli.js');
+const result=spawnSync(process.execPath,[builder,'--win','dir','--x64',`--config.directories.output=${path.basename(work)}`],{cwd:root,stdio:'inherit',env:process.env,shell:false});
+if(result.error)throw result.error;if(result.status!==0)process.exit(result.status||1);
+if(!fs.existsSync(path.join(unpacked,'XMT-Creator-Agent.exe')))throw new Error('Missing portable executable');
+fs.mkdirSync(release,{recursive:true});
+for(const obsolete of ['XMT-Creator-Agent-Setup.exe','XMT-Creator-Agent-Setup.exe.blockmap']){const target=path.join(release,obsolete);if(fs.existsSync(target))fs.rmSync(target,{force:true});}
+if(fs.existsSync(bundle))fs.rmSync(bundle,{recursive:true,force:true});if(fs.existsSync(zip))fs.rmSync(zip,{force:true});
+fs.cpSync(unpacked,bundle,{recursive:true});fs.writeFileSync(path.join(bundle,'portable.flag'),'XMT Creator Agent portable mode\r\n');fs.mkdirSync(path.join(bundle,'data'),{recursive:true});
+fs.writeFileSync(path.join(bundle,'README.txt'),'XMT Creator Agent Portable\r\n\r\nDouble-click XMT-Creator-Agent.exe to run.\r\nAll local config, logs and embedded browser data are stored in .\\data\\.\r\nDo not delete portable.flag. No installer or administrator permission is required.\r\n','utf8');
+fs.writeFileSync(path.join(bundle,'version.json'),JSON.stringify({version:'2.7.0',update_url:''},null,2));
+const ps=`Compress-Archive -LiteralPath '${bundle.replaceAll("'","''")}' -DestinationPath '${zip.replaceAll("'","''")}' -CompressionLevel Optimal -Force`;
+const compressed=spawnSync('powershell.exe',['-NoProfile','-Command',ps],{cwd:root,stdio:'inherit',shell:false});if(compressed.error)throw compressed.error;if(compressed.status!==0)process.exit(compressed.status||1);
+fs.rmSync(bundle,{recursive:true,force:true});fs.rmSync(work,{recursive:true,force:true});
+console.log(`portable bundle: ${zip}`);

@@ -110,13 +110,8 @@ router.get('/archive', async (req, res) => {
 });
 
 router.post('/generate-draft', async (req, res) => {
-  try {
-    const body = req.body as { date?: string };
-    const result = await generateDailyReportDraft(req.user, body.date || getQueryString(req, 'date'));
-    res.json({ success: true, data: result });
-  } catch (error) {
-    handleDailyReportError(error, res);
-  }
+  void req;
+  res.status(410).json({ success: false, code: 'REPORT_MANUAL_ONLY', message: '日报为独立办公模块，仅支持员工手动填写，不读取任何业务数据。' });
 });
 
 export default router;

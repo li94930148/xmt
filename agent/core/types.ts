@@ -22,4 +22,4 @@ export type CreatorSnapshot = {
   videos: CreatorWork[]; operations: { last7Days: unknown; last30Days: unknown; trafficSources: unknown; contentPerformance: unknown };
 };
 
-export type SyncResult = { collectedAt: string; snapshot: CreatorSnapshot; upload: { success: boolean; snapshot_id?: number; source?: string } };
+export type SyncResult = { collectedAt: string; snapshot: CreatorSnapshot; local?: unknown; upload: { success: boolean; snapshot_id?: number; source?: string; modules?: unknown } };

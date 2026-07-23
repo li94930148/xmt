@@ -80,16 +80,19 @@ async function performSync() { if (syncing)
     await log(`开始采集创作者中心，浏览器模式 ${config.browserConfig.mode}`);
     const snapshot = await new douyin_js_1.DouyinCreatorCollector(browserAdapter(config), paths().networkLog).collect();
     const database = new creatorDatabase_js_1.CreatorDatabase(paths().database);
+    let local;
     try {
-        database.save(snapshot);
+        local = database.save(snapshot);
     }
     finally {
         database.close();
     }
+    for (const [module, value] of Object.entries(local.errors))
+        await log(`本地模块 ${module} 保存失败：${value}`);
     const result = await (0, client_js_1.upload)(config, await readToken(), snapshot);
     lastSyncAt = new Date().toISOString();
-    await log(`同步成功，快照 ${result.snapshot_id || '-'}，作品 ${snapshot.works.length}`);
-    return { collectedAt: lastSyncAt, snapshot, upload: result };
+    await log(`同步完成，快照 ${result.snapshot_id || '-'}，作品 ${snapshot.works.length}`);
+    return { collectedAt: lastSyncAt, snapshot, local, upload: result };
 }
 catch (error) {
     lastError = error instanceof Error ? error.message : String(error);

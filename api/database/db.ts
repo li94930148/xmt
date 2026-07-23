@@ -529,6 +529,13 @@ async function initTables() {
   await db.execute(`CREATE TABLE IF NOT EXISTS creator_work_data (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,account_id TEXT NOT NULL,item_id TEXT NOT NULL,snapshot_time DATETIME NOT NULL,work_json TEXT NOT NULL,detail_json TEXT,source TEXT NOT NULL,created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   await db.execute(`CREATE TABLE IF NOT EXISTS creator_dashboard_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,account_id TEXT NOT NULL,snapshot_time DATETIME NOT NULL,dashboard_json TEXT NOT NULL,content_analysis_json TEXT,source TEXT NOT NULL,created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   await db.execute(`CREATE TABLE IF NOT EXISTS creator_fans_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,account_id TEXT NOT NULL,snapshot_time DATETIME NOT NULL,fans_json TEXT NOT NULL,source TEXT NOT NULL,created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  const creatorFansColumns = new Set((await db.execute(`PRAGMA table_info(creator_fans_snapshots)`)).rows.map(row => String(row.name)));
+  for (const [column, definition] of [
+    ['user_id', 'INTEGER'], ['platform', `TEXT DEFAULT 'douyin'`], ['account_id', 'TEXT'], ['snapshot_time', 'DATETIME'],
+    ['fans_count', 'INTEGER DEFAULT 0'], ['fans_json', 'TEXT'], ['raw_json', 'TEXT'], ['source', `TEXT DEFAULT 'local_creator_center'`], ['created_at', 'DATETIME'],
+  ] as const) {
+    if (!creatorFansColumns.has(column)) await db.execute(`ALTER TABLE creator_fans_snapshots ADD COLUMN ${column} ${definition}`);
+  }
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_creator_work_history ON creator_work_data(user_id,account_id,item_id,snapshot_time)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_creator_dashboard_history ON creator_dashboard_snapshots(user_id,account_id,snapshot_time)`);
 

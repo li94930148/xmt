@@ -78,7 +78,12 @@ const Achievements = lazyWithRetry(() => import('@/pages/Achievements'), 'Achiev
 const ActivityLog = lazyWithRetry(() => import('@/pages/ActivityLog'), 'ActivityLog');
 const DouyinAnalytics = lazyWithRetry(() => import('@/pages/DouyinAnalytics'), 'DouyinAnalytics');
 const DouyinOperationsCenter = lazyWithRetry(() => import('@/pages/DouyinOperationsCenter'), 'DouyinOperationsCenter');
-const DouyinCreatorDataCenter = lazyWithRetry(() => import('@/pages/DouyinCreatorDataCenter'), 'DouyinCreatorDataCenter');
+const CreatorDashboard = lazyWithRetry(() => import('@/pages/creator-center/CreatorDashboard'), 'CreatorDashboard');
+const CreatorWorks = lazyWithRetry(() => import('@/pages/creator-center/CreatorWorks'), 'CreatorWorks');
+const CreatorWorkDetail = lazyWithRetry(() => import('@/pages/creator-center/CreatorWorkDetail'), 'CreatorWorkDetail');
+const CreatorTrends = lazyWithRetry(() => import('@/pages/creator-center/CreatorTrends'), 'CreatorTrends');
+const CreatorFans = lazyWithRetry(() => import('@/pages/creator-center/CreatorFans'), 'CreatorFans');
+const CreatorReports = lazyWithRetry(() => import('@/pages/creator-center/CreatorReports'), 'CreatorReports');
 const PermissionManagement = lazyWithRetry(() => import('@/pages/PermissionManagement'), 'PermissionManagement');
 const WorkflowDesigner = lazyWithRetry(() => import('@/pages/WorkflowDesigner'), 'WorkflowDesigner');
 const NotificationSettings = lazyWithRetry(() => import('@/pages/NotificationSettings'), 'NotificationSettings');
@@ -153,10 +158,20 @@ export default function App() {
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/analytics" element={<Analytics />} />
                 </Route>
-                <Route element={<RoleGuard permissions={['douyin:view']} />}>
+                <Route element={<RoleGuard permissions={['creator:data:view']} />}>
                   <Route path="/douyin-operations" element={<DouyinOperationsCenter />} />
                   <Route path="/douyin-operations/:section" element={<DouyinOperationsCenter />} />
-                  <Route path="/douyin-creator-center" element={<DouyinCreatorDataCenter />} />
+                  <Route path="/douyin-creator-center" element={<CreatorDashboard />} />
+                  <Route path="/analytics/creator-center" element={<CreatorDashboard />} />
+                  <Route path="/analytics/creator-center/works" element={<CreatorWorks />} />
+                  <Route path="/analytics/creator-center/reviews" element={<CreatorWorks reviewMode />} />
+                  <Route path="/analytics/creator-center/content/:id" element={<CreatorWorkDetail />} />
+                  <Route path="/analytics/creator-center/work/:id" element={<CreatorWorkDetail />} />
+                  <Route path="/analytics/creator-center/trends" element={<CreatorTrends />} />
+                  <Route path="/analytics/creator-center/fans" element={<CreatorFans />} />
+                </Route>
+                <Route element={<RoleGuard permissions={['creator:report:view']} />}>
+                  <Route path="/analytics/creator-center/reports" element={<CreatorReports />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/social-review" element={<SocialReview />} />

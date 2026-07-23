@@ -37,4 +37,4 @@ function metrics(row) {
     };
     return Object.fromEntries(Object.entries(aliases).flatMap(([name, keys]) => { const value = pick(row, keys); return value === undefined ? [] : [[name, typeof value === 'number' ? value : text(value)]]; }));
 }
-function section(captures, name) { return captures.filter((capture) => capture.name === name).map((capture) => capture.response); }
+function section(captures, page) { return captures.filter((capture) => capture.page === page).map((capture) => capture.response); }

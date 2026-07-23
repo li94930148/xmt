@@ -10,7 +10,9 @@ export async function collectContent(page: Page, captures: NetworkCapture[]): Pr
     if (!(await next.isVisible().catch(() => false)) || await next.isDisabled().catch(() => true)) break;
     await next.click().catch(() => undefined); await page.waitForTimeout(1400);
   }
-  let works = parseWorks(captures.filter((capture) => capture.name === 'works' || capture.name === 'unknown'));
+  const observeMs = Math.max(0, Number(process.env.XMT_DOUYIN_WORK_LIST_OBSERVE_MS ?? 300_000));
+  if (observeMs) await page.waitForTimeout(observeMs);
+  let works = parseWorks(captures);
   if (!works.length) {
     works = await page.locator('[data-item-id], [data-id]').evaluateAll((nodes) => nodes.map((node) => {
       const element = node as HTMLElement; const itemId = element.dataset.itemId || element.dataset.id || '';

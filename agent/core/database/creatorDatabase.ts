@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { CreatorSnapshot } from '../types.js';
 
 export type ModuleSaveStatus = { account: 'success'|'failed'; works: 'success'|'failed'; dashboard: 'success'|'failed'; fans: 'success'|'failed'; raw: 'success'|'failed'; errors: Record<string,string> };
+export type SyncTaskStatus = 'running'|'success'|'partial_success'|'failed';
 
 export class CreatorDatabase {
   private readonly db: DatabaseSync;
@@ -21,11 +22,15 @@ export class CreatorDatabase {
       CREATE TABLE IF NOT EXISTS creator_fans_statistics(id INTEGER PRIMARY KEY,snapshot_time TEXT,statistics_json TEXT);
       CREATE TABLE IF NOT EXISTS creator_fans_snapshots(id INTEGER PRIMARY KEY,account_id TEXT,snapshot_time TEXT,fans_count INTEGER DEFAULT 0,raw_json TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
       CREATE TABLE IF NOT EXISTS creator_raw_snapshots(id INTEGER PRIMARY KEY,snapshot_time TEXT,source TEXT,raw_json TEXT);
+      CREATE TABLE IF NOT EXISTS sync_tasks(task_id TEXT PRIMARY KEY,start_time TEXT NOT NULL,end_time TEXT,platform TEXT NOT NULL,account TEXT NOT NULL,status TEXT NOT NULL,success_count INTEGER DEFAULT 0,failed_count INTEGER DEFAULT 0,error_message TEXT);
       CREATE INDEX IF NOT EXISTS idx_work_stats_item_time ON creator_work_statistics(item_id,snapshot_time);`);
     const columns = new Set((this.db.prepare('PRAGMA table_info(creator_fans_snapshots)').all() as Array<{name:string}>).map(row=>row.name));
     const migrations: Array<[string,string]> = [['account_id','TEXT'],['snapshot_time','TEXT'],['fans_count','INTEGER DEFAULT 0'],['raw_json','TEXT'],['created_at','TEXT']];
     for (const [name,type] of migrations) if (!columns.has(name)) this.db.exec(`ALTER TABLE creator_fans_snapshots ADD COLUMN ${name} ${type}`);
   }
+  knownContentIds(){return new Set((this.db.prepare('SELECT item_id FROM creator_works').all() as Array<{item_id:string}>).map(row=>row.item_id));}
+  startSyncTask(taskId:string,platform:string,account:string,startTime:string){this.db.prepare('INSERT INTO sync_tasks(task_id,start_time,platform,account,status) VALUES(?,?,?,?,?)').run(taskId,startTime,platform,account,'running');}
+  finishSyncTask(taskId:string,status:SyncTaskStatus,successCount:number,failedCount:number,errorMessage?:string){this.db.prepare('UPDATE sync_tasks SET end_time=?,status=?,success_count=?,failed_count=?,error_message=? WHERE task_id=?').run(new Date().toISOString(),status,successCount,failedCount,errorMessage||null,taskId);}
   private attempt(status:ModuleSaveStatus, module:Exclude<keyof ModuleSaveStatus,'errors'>, run:()=>void) {
     try { this.db.exec('BEGIN IMMEDIATE'); run(); this.db.exec('COMMIT'); status[module]='success'; }
     catch(error) { try { this.db.exec('ROLLBACK'); } catch {} status[module]='failed'; status.errors[module]=error instanceof Error?error.message:String(error); }

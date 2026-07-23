@@ -27,6 +27,9 @@ import {
   Users,
   Video,
   Database,
+  ListFilter,
+  ScanSearch,
+  UserRoundSearch,
 } from 'lucide-react';
 
 export interface NavigationItem {
@@ -96,12 +99,12 @@ export const navigationSections: NavigationSection[] = [
     label: '抖音运营中心',
     icon: BarChart3,
     items: [
-      { id: 'douyin-creator-center', label: '创作者数据中心', icon: Database, path: '/douyin-creator-center', permissions: ['douyin:view'] },
-      { id: 'douyin-accounts', label: '账号管理', icon: Video, path: '/douyin-operations/accounts', permissions: ['douyin:view'] },
-      { id: 'douyin-dashboard', label: '数据看板', icon: BarChart3, path: '/douyin-operations/dashboard', permissions: ['douyin:view'] },
-      { id: 'douyin-content', label: '内容分析', icon: BookOpenCheck, path: '/douyin-operations/content', permissions: ['douyin:view'] },
-      { id: 'douyin-retro', label: '运营复盘', icon: FileClock, path: '/douyin-operations/retrospective', permissions: ['douyin:view'] },
-      { id: 'douyin-report', label: '报告中心', icon: FileBarChart, path: '/douyin-operations/reports', permissions: ['douyin:report'] },
+      { id: 'creator-dashboard', label: '数据驾驶舱', icon: Database, path: '/analytics/creator-center', permissions: ['creator:data:view'] },
+      { id: 'creator-works', label: '作品库', icon: ListFilter, path: '/analytics/creator-center/works', permissions: ['creator:data:view'] },
+      { id: 'creator-reviews', label: '作品复盘', icon: ScanSearch, path: '/analytics/creator-center/reviews', permissions: ['creator:data:view'] },
+      { id: 'creator-trends', label: '趋势分析', icon: BarChart3, path: '/analytics/creator-center/trends', permissions: ['creator:data:view'] },
+      { id: 'creator-fans', label: '粉丝分析', icon: UserRoundSearch, path: '/analytics/creator-center/fans', permissions: ['creator:data:view'] },
+      { id: 'creator-reports', label: '运营报告', icon: FileBarChart, path: '/analytics/creator-center/reports', permissions: ['creator:report:view'] },
     ],
   },
   {
@@ -179,6 +182,8 @@ export function canAccessNavigationItem(
 
 export function isNavigationItemActive(pathname: string, itemPath: string) {
   if (itemPath === '/') return pathname === '/' || pathname === '/home' || pathname === '/dashboard';
+  if (itemPath === '/analytics/creator-center') return pathname === itemPath;
+  if (itemPath === '/analytics/creator-center/works' && /^\/analytics\/creator-center\/(work|content)\//.test(pathname)) return true;
   return pathname === itemPath || pathname.startsWith(`${itemPath}/`);
 }
 

@@ -15,6 +15,7 @@ const douyin_js_1 = require("../core/collector/douyin.js");
 const client_js_1 = require("../core/uploader/client.js");
 const scheduler_js_1 = require("../core/scheduler/scheduler.js");
 const creatorDatabase_js_1 = require("../core/database/creatorDatabase.js");
+const pageExplorer_js_1 = require("../core/explorer/pageExplorer.js");
 electron_1.app.setName('XMT Creator Agent');
 const executableDirectory = node_path_1.default.dirname(electron_1.app.getPath('exe'));
 const resourceDirectory = process.resourcesPath;
@@ -37,7 +38,7 @@ let douyinLoggedIn = false;
 let activeLoginAdapter = null;
 const systemAdapters = new Map();
 let embeddedAdapter = null;
-const paths = () => { const root = portableMode ? portableDataRoot : electron_1.app.getPath('userData'); return { root, config: node_path_1.default.join(root, 'config.json'), token: node_path_1.default.join(root, 'agent-token.bin'), profile: node_path_1.default.join(root, 'browser'), database: node_path_1.default.join(root, 'creator.db'), logs: node_path_1.default.join(root, 'logs'), log: node_path_1.default.join(root, 'logs', 'sync.log'), networkLog: node_path_1.default.join(root, 'logs', 'network.json') }; };
+const paths = () => { const root = portableMode ? portableDataRoot : electron_1.app.getPath('userData'); return { root, config: node_path_1.default.join(root, 'config.json'), token: node_path_1.default.join(root, 'agent-token.bin'), profile: node_path_1.default.join(root, 'browser'), database: node_path_1.default.join(root, 'creator.db'), logs: node_path_1.default.join(root, 'logs'), log: node_path_1.default.join(root, 'logs', 'sync.log'), networkLog: node_path_1.default.join(root, 'logs', 'network.json'), discovery: node_path_1.default.join(root, 'douyin-api-discovery') }; };
 async function log(message) { const p = paths(); await promises_1.default.mkdir(p.logs, { recursive: true }); const safe = message.replace(/cookie|password|authorization|token/gi, '[redacted]'); await promises_1.default.appendFile(p.log, `[${new Date().toISOString()}] ${safe}\n`, 'utf8'); }
 async function readConfig() { try {
     const config = JSON.parse(await promises_1.default.readFile(paths().config, 'utf8'));
@@ -76,30 +77,39 @@ async function state() { const config = await readConfig(); return { connected: 
 async function emit() { const value = await state(); mainWindow?.webContents.send('agent:state', value); return value; }
 async function performSync() { if (syncing)
     throw new Error('同步正在进行中'); const config = await readConfig(); if (!config)
-    throw new Error('请先连接 XMT 并绑定账号'); syncing = true; lastError = undefined; await emit(); try {
-    await log(`开始采集创作者中心，浏览器模式 ${config.browserConfig.mode}`);
-    const snapshot = await new douyin_js_1.DouyinCreatorCollector(browserAdapter(config), paths().networkLog).collect();
-    const database = new creatorDatabase_js_1.CreatorDatabase(paths().database);
-    let local;
+    throw new Error('请先连接 XMT 并绑定账号'); syncing = true; lastError = undefined; await emit(); const taskId = node_crypto_1.default.randomUUID(); const startedAt = new Date().toISOString(); let database = null; try {
+    database = new creatorDatabase_js_1.CreatorDatabase(paths().database);
+    database.startSyncTask(taskId, config.platform, config.accountId, startedAt);
+    const knownContentIds = database.knownContentIds();
+    await log(`开始增量采集，任务 ${taskId}，已知作品 ${knownContentIds.size}`);
+    const adapter = browserAdapter(config);
+    const snapshot = await new douyin_js_1.DouyinCreatorCollector(adapter, paths().networkLog, paths().discovery).collect();
+    const capabilityFile = node_path_1.default.join(paths().discovery, 'page-capability-map.json');
+    let capabilities = [];
     try {
-        local = database.save(snapshot);
+        capabilities = await (0, pageExplorer_js_1.exploreCreatorPages)(adapter, capabilityFile);
+        await log(`Page Explorer 完成，页面 ${capabilities.length}`);
     }
-    finally {
-        database.close();
+    catch (error) {
+        await log(`Page Explorer 失败，不影响已采集快照：${error instanceof Error ? error.message : String(error)}`);
     }
+    const local = database.save(snapshot);
     for (const [module, value] of Object.entries(local.errors))
         await log(`本地模块 ${module} 保存失败：${value}`);
-    const result = await (0, client_js_1.upload)(config, await readToken(), snapshot);
+    const result = await (0, client_js_1.upload)(config, await readToken(), snapshot, { knownContentIds, capabilities, taskId });
+    database.finishSyncTask(taskId, result.status, result.success_count, result.failed_count, Object.values(result.errors).join('; '));
     lastSyncAt = new Date().toISOString();
-    await log(`同步完成，快照 ${result.snapshot_id || '-'}，作品 ${snapshot.works.length}`);
+    await log(`同步任务 ${taskId} ${result.status}，新增作品 ${Math.max(0, snapshot.works.length - knownContentIds.size)}，模块成功 ${result.success_count}，失败 ${result.failed_count}`);
     return { collectedAt: lastSyncAt, snapshot, local, upload: result };
 }
 catch (error) {
     lastError = error instanceof Error ? error.message : String(error);
-    await log(`同步失败：${lastError}`);
+    database?.finishSyncTask(taskId, 'failed', 0, 1, lastError);
+    await log(`同步任务 ${taskId} 失败：${lastError}`);
     throw error;
 }
 finally {
+    database?.close();
     syncing = false;
     await emit();
 } }

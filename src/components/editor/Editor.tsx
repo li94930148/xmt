@@ -860,17 +860,14 @@ export default function Editor({
         .xmt-collaboration-cursor {
           position: relative;
           border-left: 2px solid;
-          border-right: 2px solid;
           margin-left: -1px;
-          margin-right: -1px;
           pointer-events: none;
           word-break: normal;
         }
         .xmt-collaboration-cursor-label {
-          position: absolute;
-          top: -1.45rem;
-          left: -2px;
-          border-radius: 4px 4px 4px 0;
+          position: fixed;
+          z-index: 40;
+          border-radius: 5px;
           color: #fff;
           font-size: 11px;
           font-weight: 600;
@@ -878,6 +875,42 @@ export default function Editor({
           padding: 4px 6px;
           white-space: nowrap;
           user-select: none;
+          pointer-events: none;
+          opacity: 0;
+          transform: translateY(-1px);
+          transition: left 140ms ease-out, top 140ms ease-out, opacity 180ms ease, transform 180ms ease;
+          box-shadow: 0 2px 8px rgb(15 23 42 / 18%);
+        }
+        .xmt-collaboration-cursor-label.is-active {
+          opacity: 1;
+          transform: translateY(0);
+        }
+        .xmt-collaboration-cursor-overflow {
+          position: fixed;
+          z-index: 39;
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          min-width: 24px;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 180ms ease;
+        }
+        .xmt-collaboration-cursor-overflow.is-visible {
+          opacity: 1;
+        }
+        .xmt-collaboration-cursor-avatar {
+          display: grid;
+          width: 24px;
+          height: 24px;
+          margin-left: -5px;
+          place-items: center;
+          border: 2px solid var(--editor-bg);
+          border-radius: 999px;
+          color: #fff;
+          font-size: 10px;
+          font-weight: 700;
+          box-shadow: 0 2px 6px rgb(15 23 42 / 16%);
         }
       `}</style>
     </div>

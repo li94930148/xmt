@@ -1,8 +1,14 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { acceptCreatorAgentReport, getCreatorCenterData, registerCreatorAgent } from '../services/creatorAgent.js';
+import { getUnifiedCreatorCenterData } from '../services/creatorDataCenter.js';
+import { acceptCreatorDataSyncV291 } from '../services/creatorSyncV291.js';
+import { creatorInsightService, getCreatorInsights } from '../services/creatorInsights.js';
+import { canManageCreatorAccount, grantCreatorAccountAccess, resolveCreatorAccountScope } from '../services/creatorAccess.js';
+import { requirePermission } from '../middleware/permissions.js';
+import { creatorAnalyticsService, type ReportType } from '../services/creatorAnalytics.js';
 const router=express.Router();
-router.post('/register',authenticate,async(req,res)=>{
+router.post('/register',authenticate,requirePermission('creator:data:manage'),async(req,res)=>{
   try{res.status(201).json(await registerCreatorAgent(req.user!.id,String(req.body?.platform||''),String(req.body?.account_id||''),String(req.body?.device_id||'')));}
   catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'注册失败'});}
 });
@@ -12,5 +18,19 @@ router.post('/report',async(req,res)=>{
     res.status(201).json(await acceptCreatorAgentReport(req.body||{},req.header('authorization')));
   }catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'上传失败'});}
 });
-router.get('/data',authenticate,async(req,res)=>{try{res.json(await getCreatorCenterData(req.user!.id,typeof req.query.account_id==='string'?req.query.account_id:undefined));}catch(error){res.status(500).json({success:false,message:error instanceof Error?error.message:'查询失败'});}});
+router.post('/data-sync',async(req,res)=>{
+  try{
+    if(process.env.NODE_ENV==='production'&&!req.secure)return res.status(426).json({success:false,message:'Creator Agent 仅允许通过 HTTPS 上传'});
+    res.status(201).json(await acceptCreatorDataSyncV291(req.body||{},req.header('authorization')));
+  }catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'统一数据同步失败'});}
+});
+router.get('/data',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const accountId=typeof req.query.account_id==='string'?req.query.account_id:undefined;const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,accountId);if(!scope)return res.json({account:null,works:[],dashboard:null,fans:null,history:[],trends:[],insights:{},analytics:{},data_sources:['local_creator_center']});const [data,insights,analytics]=await Promise.all([(async()=>(await getUnifiedCreatorCenterData(scope.user_id,scope.platform_uid))??(await getCreatorCenterData(scope.user_id,scope.platform_uid)))(),getCreatorInsights(scope.id),creatorAnalyticsService.overview(scope.id)]);res.json({...data,access_level:scope.access_level,insights,analytics});}catch(error){res.status(500).json({success:false,message:error instanceof Error?error.message:'查询失败'});}});
+router.post('/insights/refresh',authenticate,requirePermission('creator:data:manage'),async(req,res)=>{try{const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,String(req.body?.account_id||''));if(!scope||scope.access_level!=='manage')return res.status(403).json({message:'不在账号管理范围内'});res.json(await creatorInsightService.generate(scope.id));}catch(error){res.status(500).json({message:error instanceof Error?error.message:'分析失败'});}});
+router.post('/accounts/:id/access',authenticate,requirePermission('creator:data:manage'),async(req,res)=>{try{const accountId=Number(req.params.id),userId=Number(req.body?.user_id),accessLevel=req.body?.access_level==='manage'?'manage':'view';if(!await canManageCreatorAccount(req.user!.id,req.user!.role,accountId))return res.status(403).json({message:'不在账号管理范围内'});res.json(await grantCreatorAccountAccess(accountId,userId,accessLevel));}catch(error){res.status(400).json({message:error instanceof Error?error.message:'授权失败'});}});
+
+router.get('/works/:id/analysis',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,typeof req.query.account_id==='string'?req.query.account_id:undefined);if(!scope)return res.status(404).json({message:'未找到授权账号'});const period=req.query.period==='24h'||req.query.period==='30d'?req.query.period:'7d';const analysis=await creatorAnalyticsService.work(scope.id,Number(req.params.id),period);if(!analysis)return res.status(404).json({message:'作品不存在或不在授权范围内'});res.json(analysis);}catch(error){res.status(500).json({message:error instanceof Error?error.message:'作品分析失败'});}});
+router.get('/trends',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,typeof req.query.account_id==='string'?req.query.account_id:undefined);if(!scope)return res.status(404).json({message:'未找到授权账号'});const period=req.query.period==='7d'||req.query.period==='90d'?req.query.period:'30d';res.json(await creatorAnalyticsService.trends(scope.id,period));}catch(error){res.status(500).json({message:error instanceof Error?error.message:'趋势计算失败'});}});
+router.get('/fans-analysis',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,typeof req.query.account_id==='string'?req.query.account_id:undefined);if(!scope)return res.status(404).json({message:'未找到授权账号'});res.json(await creatorAnalyticsService.fans(scope.id,Number(req.query.compare_days)||30));}catch(error){res.status(500).json({message:error instanceof Error?error.message:'粉丝分析失败'});}});
+router.get('/reports',authenticate,requirePermission('creator:report:view'),async(req,res)=>{try{const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,typeof req.query.account_id==='string'?req.query.account_id:undefined);if(!scope)return res.status(404).json({message:'未找到授权账号'});res.json(await creatorAnalyticsService.reports(scope.id));}catch(error){res.status(500).json({message:error instanceof Error?error.message:'报告查询失败'});}});
+router.post('/reports/generate',authenticate,requirePermission('creator:report:manage'),async(req,res)=>{try{const requestedAccount=String(req.body?.account_id||'').trim()||undefined;const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,requestedAccount);if(!scope||scope.access_level!=='manage')return res.status(403).json({message:'不在账号管理范围内'});const type:ReportType=req.body?.type==='daily'||req.body?.type==='monthly'?req.body.type:'weekly';res.status(201).json(await creatorAnalyticsService.generateReport(scope.id,type));}catch(error){res.status(500).json({message:error instanceof Error?error.message:'报告生成失败'});}});
 export default router;

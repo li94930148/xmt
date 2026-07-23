@@ -539,6 +539,40 @@ async function initTables() {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_creator_work_history ON creator_work_data(user_id,account_id,item_id,snapshot_time)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_creator_dashboard_history ON creator_dashboard_snapshots(user_id,account_id,snapshot_time)`);
 
+  // v2.9.0 platform-neutral Creator Data Center. Keep this runtime schema in
+  // sync with docs/migrations/v2.9.0.sql for fresh and existing installations.
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_platform_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,platform_uid TEXT NOT NULL,nickname TEXT,avatar TEXT,account_name TEXT,status TEXT NOT NULL DEFAULT 'active',created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(user_id,platform,platform_uid),FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_content_items (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,platform TEXT NOT NULL,platform_item_id TEXT NOT NULL,title TEXT,cover_url TEXT,publish_time DATETIME,duration REAL,status TEXT,raw_json TEXT NOT NULL,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(account_id,platform,platform_item_id),FOREIGN KEY(account_id) REFERENCES creator_platform_accounts(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_content_metrics (id INTEGER PRIMARY KEY AUTOINCREMENT,content_id INTEGER NOT NULL,snapshot_time DATETIME NOT NULL,play_count INTEGER DEFAULT 0,like_count INTEGER DEFAULT 0,comment_count INTEGER DEFAULT 0,share_count INTEGER DEFAULT 0,favorite_count INTEGER DEFAULT 0,play_duration REAL,completion_rate REAL,cover_click_rate REAL,raw_json TEXT NOT NULL,UNIQUE(content_id,snapshot_time),FOREIGN KEY(content_id) REFERENCES creator_content_items(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_content_trends (id INTEGER PRIMARY KEY AUTOINCREMENT,content_id INTEGER NOT NULL,metric_name TEXT NOT NULL,metric_value REAL NOT NULL,record_time DATETIME NOT NULL,UNIQUE(content_id,metric_name,record_time),FOREIGN KEY(content_id) REFERENCES creator_content_items(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_account_metrics (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,snapshot_time DATETIME NOT NULL,fans_count INTEGER DEFAULT 0,play_count INTEGER DEFAULT 0,interaction_count INTEGER DEFAULT 0,profile_visit_count INTEGER DEFAULT 0,growth_json TEXT NOT NULL,raw_json TEXT NOT NULL,UNIQUE(account_id,snapshot_time),FOREIGN KEY(account_id) REFERENCES creator_platform_accounts(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_fans_portraits (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,snapshot_time DATETIME NOT NULL,gender_json TEXT NOT NULL,age_json TEXT NOT NULL,city_json TEXT NOT NULL,province_json TEXT NOT NULL,interest_json TEXT NOT NULL,active_time_json TEXT NOT NULL,raw_json TEXT NOT NULL,UNIQUE(account_id,snapshot_time),FOREIGN KEY(account_id) REFERENCES creator_platform_accounts(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_api_raw_records (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,agent_id INTEGER,platform TEXT NOT NULL,page_type TEXT NOT NULL,api_url TEXT NOT NULL,method TEXT NOT NULL,response_json TEXT NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(user_id,platform,page_type,api_url,method,created_at),FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,FOREIGN KEY(agent_id) REFERENCES creator_agents(id) ON DELETE SET NULL)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_sync_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT,agent_id INTEGER,task_id TEXT NOT NULL,start_time DATETIME NOT NULL,end_time DATETIME,platform TEXT NOT NULL,account TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('running','success','partial_success','failed')),success_count INTEGER DEFAULT 0,failed_count INTEGER DEFAULT 0,error_message TEXT,module_status_json TEXT NOT NULL DEFAULT '{}',UNIQUE(agent_id,task_id),FOREIGN KEY(agent_id) REFERENCES creator_agents(id) ON DELETE SET NULL)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_insights (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,analysis_type TEXT NOT NULL CHECK(analysis_type IN ('daily','weekly','monthly','content')),content TEXT NOT NULL,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(account_id) REFERENCES creator_platform_accounts(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_page_schema (id INTEGER PRIMARY KEY AUTOINCREMENT,page TEXT NOT NULL,tab TEXT NOT NULL,api TEXT NOT NULL,fields TEXT NOT NULL,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(page,tab,api))`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_account_access (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,user_id INTEGER NOT NULL,access_level TEXT NOT NULL DEFAULT 'view' CHECK(access_level IN ('view','manage')),created_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(account_id,user_id),FOREIGN KEY(account_id) REFERENCES creator_platform_accounts(id) ON DELETE CASCADE,FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_work_analysis (id INTEGER PRIMARY KEY AUTOINCREMENT,work_id INTEGER NOT NULL,score REAL NOT NULL DEFAULT 0,level TEXT NOT NULL CHECK(level IN ('viral','excellent','normal','low')),analysis_json TEXT NOT NULL DEFAULT '{}',created_at DATETIME DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(work_id) REFERENCES creator_content_items(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_trend_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,period TEXT NOT NULL CHECK(period IN ('7d','30d','90d')),metric TEXT NOT NULL CHECK(metric IN ('plays','fans','interactions','publishes')),value REAL NOT NULL DEFAULT 0,snapshot_time DATETIME NOT NULL,UNIQUE(account_id,period,metric,snapshot_time),FOREIGN KEY(account_id) REFERENCES creator_platform_accounts(id) ON DELETE CASCADE)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_reports (id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,type TEXT NOT NULL CHECK(type IN ('daily','weekly','monthly')),content_json TEXT NOT NULL DEFAULT '{}',created_at DATETIME DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(account_id) REFERENCES creator_platform_accounts(id) ON DELETE CASCADE)`);
+  for (const statement of [`ALTER TABLE creator_api_raw_records ADD COLUMN hash TEXT`,`ALTER TABLE creator_api_raw_records ADD COLUMN compression TEXT NOT NULL DEFAULT 'none'`]) { try { await db.execute(statement); } catch {} }
+  for (const sql of [
+    `CREATE INDEX IF NOT EXISTS idx_creator_accounts_owner ON creator_platform_accounts(user_id,platform)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_items_account_publish ON creator_content_items(account_id,publish_time DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_metrics_content_time ON creator_content_metrics(content_id,snapshot_time DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_trends_content_metric_time ON creator_content_trends(content_id,metric_name,record_time)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_account_metrics_time ON creator_account_metrics(account_id,snapshot_time DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_fans_portraits_time ON creator_fans_portraits(account_id,snapshot_time DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_raw_records_api ON creator_api_raw_records(platform,api_url,created_at DESC)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_creator_raw_hash ON creator_api_raw_records(user_id,platform,hash) WHERE hash IS NOT NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_sync_tasks_status_time ON creator_sync_tasks(status,start_time DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_insights_account_type_time ON creator_insights(account_id,analysis_type,created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_access_user ON creator_account_access(user_id,access_level)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_work_analysis_latest ON creator_work_analysis(work_id,created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_trend_period_time ON creator_trend_snapshots(account_id,period,metric,snapshot_time DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_creator_reports_account_type_time ON creator_reports(account_id,type,created_at DESC)`,
+  ]) await db.execute(sql);
+
   await db.execute(`CREATE TABLE IF NOT EXISTS social_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     platform TEXT NOT NULL,
@@ -1430,6 +1464,21 @@ async function runTimeMigrations() {
     ['douyin:view', '查看抖音运营数据', 'douyin'], ['douyin:account', '管理抖音授权账号', 'douyin'],
     ['douyin:sync', '同步抖音开放平台数据', 'douyin'], ['douyin:report', '生成抖音运营报告', 'douyin'],
   ];
+  const creatorPermissions = [
+    ['creator:data:view', '查看授权创作者数据', 'creator'],
+    ['creator:data:manage', '管理创作者数据与授权范围', 'creator'],
+    ['creator:report:view', '查看创作者分析报告', 'creator'],
+    ['creator:report:manage', '生成创作者分析报告', 'creator'],
+  ];
+  for (const [code, name, module] of creatorPermissions) {
+    await db.execute({ sql: `INSERT OR IGNORE INTO permissions (code, name, module) VALUES (?, ?, ?)`, args: [code, name, module] });
+  }
+  for (const roleCode of ['admin', 'director']) {
+    await db.execute({ sql: `INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT r.id,p.id FROM roles r,permissions p WHERE r.code=? AND p.code IN ('creator:data:view','creator:data:manage','creator:report:view','creator:report:manage')`, args: [roleCode] });
+  }
+  for (const roleCode of ['member', 'editor', 'copywriter', 'post_production', 'camera']) {
+    await db.execute({ sql: `INSERT OR IGNORE INTO role_permissions(role_id,permission_id) SELECT r.id,p.id FROM roles r,permissions p WHERE r.code=? AND p.code IN ('creator:data:view','creator:report:view')`, args: [roleCode] });
+  }
   for (const [code, name, module] of douyinPermissions) {
     await db.execute({ sql: `INSERT OR IGNORE INTO permissions (code, name, module) VALUES (?, ?, ?)`, args: [code, name, module] });
   }

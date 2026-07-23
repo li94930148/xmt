@@ -2,7 +2,7 @@ import type { Page } from 'playwright';
 
 export async function openPage(page: Page, url: string) {
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-  await page.waitForTimeout(2500);
+  await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined);
 }
 export async function clickLabels(page: Page, labels: string[]) {
   for (const label of labels) {

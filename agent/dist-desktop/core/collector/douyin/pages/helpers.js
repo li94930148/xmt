@@ -5,7 +5,7 @@ exports.clickLabels = clickLabels;
 exports.bodySnapshot = bodySnapshot;
 async function openPage(page, url) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-    await page.waitForTimeout(2500);
+    await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined);
 }
 async function clickLabels(page, labels) {
     for (const label of labels) {

@@ -24,4 +24,4 @@ export function metrics(row: Record<string, unknown>): MetricMap {
   };
   return Object.fromEntries(Object.entries(aliases).flatMap(([name, keys]) => { const value = pick(row, keys); return value === undefined ? [] : [[name, typeof value === 'number' ? value : text(value)]]; }));
 }
-export function section(captures: NetworkCapture[], name: string) { return captures.filter((capture) => capture.name === name).map((capture) => capture.response); }
+export function section(captures: NetworkCapture[], page: string) { return captures.filter((capture) => capture.page === page).map((capture) => capture.response); }

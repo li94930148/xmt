@@ -14,6 +14,7 @@ const embeddedChromiumAdapter_js_1 = require("../core/browser/embeddedChromiumAd
 const douyin_js_1 = require("../core/collector/douyin.js");
 const client_js_1 = require("../core/uploader/client.js");
 const scheduler_js_1 = require("../core/scheduler/scheduler.js");
+const creatorDatabase_js_1 = require("../core/database/creatorDatabase.js");
 electron_1.app.setName('XMT Creator Agent');
 const executableDirectory = node_path_1.default.dirname(electron_1.app.getPath('exe'));
 const resourceDirectory = process.resourcesPath;
@@ -31,10 +32,12 @@ let syncing = false;
 let timer = null;
 let lastSyncAt;
 let lastError;
+let chromeConnected = false;
+let douyinLoggedIn = false;
 let activeLoginAdapter = null;
 const systemAdapters = new Map();
 let embeddedAdapter = null;
-const paths = () => { const root = portableMode ? portableDataRoot : electron_1.app.getPath('userData'); return { root, config: node_path_1.default.join(root, 'config.json'), token: node_path_1.default.join(root, 'agent-token.bin'), profile: node_path_1.default.join(root, 'browser'), logs: node_path_1.default.join(root, 'logs'), log: node_path_1.default.join(root, 'logs', 'sync.log') }; };
+const paths = () => { const root = portableMode ? portableDataRoot : electron_1.app.getPath('userData'); return { root, config: node_path_1.default.join(root, 'config.json'), token: node_path_1.default.join(root, 'agent-token.bin'), profile: node_path_1.default.join(root, 'browser'), database: node_path_1.default.join(root, 'creator.db'), logs: node_path_1.default.join(root, 'logs'), log: node_path_1.default.join(root, 'logs', 'sync.log'), networkLog: node_path_1.default.join(root, 'logs', 'network.json') }; };
 async function log(message) { const p = paths(); await promises_1.default.mkdir(p.logs, { recursive: true }); const safe = message.replace(/cookie|password|authorization|token/gi, '[redacted]'); await promises_1.default.appendFile(p.log, `[${new Date().toISOString()}] ${safe}\n`, 'utf8'); }
 async function readConfig() { try {
     const config = JSON.parse(await promises_1.default.readFile(paths().config, 'utf8'));
@@ -49,9 +52,9 @@ async function writeConfig(config) { await promises_1.default.mkdir(paths().root
 function browserAdapter(config) { if (config.browserConfig.mode === 'embedded_chromium') {
     embeddedAdapter ??= new embeddedChromiumAdapter_js_1.EmbeddedChromiumAdapter(paths().profile);
     return embeddedAdapter;
-} const endpoint = config.browserConfig.cdpEndpoint || 'http://127.0.0.1:9222'; let adapter = systemAdapters.get(endpoint); if (!adapter) {
-    adapter = new systemChromeAdapter_js_1.SystemChromeAdapter(endpoint);
-    systemAdapters.set(endpoint, adapter);
+} const endpoint = config.browserConfig.cdpEndpoint || 'http://127.0.0.1:9222'; const cacheKey = `${endpoint}|${config.browserConfig.chromePath || 'auto'}`; let adapter = systemAdapters.get(cacheKey); if (!adapter) {
+    adapter = new systemChromeAdapter_js_1.SystemChromeAdapter(paths().profile, endpoint, config.browserConfig.chromePath);
+    systemAdapters.set(cacheKey, adapter);
 } return adapter; }
 function protectToken(token) { if (!electron_1.safeStorage.isEncryptionAvailable())
     throw new Error('Windows DPAPI 当前不可用，无法安全保存 Agent 凭据'); return electron_1.safeStorage.encryptString(token); }
@@ -69,16 +72,23 @@ async function recentLogs() { try {
 catch {
     return [];
 } }
-async function state() { const config = await readConfig(); return { connected: Boolean(config && node_fs_1.default.existsSync(paths().token)), configured: Boolean(config), syncing, lastSyncAt, lastError, config: config || undefined, logs: await recentLogs(), autoLaunch: portableMode ? false : electron_1.app.getLoginItemSettings().openAtLogin, portableMode }; }
+async function state() { const config = await readConfig(); return { connected: Boolean(config && node_fs_1.default.existsSync(paths().token)), configured: Boolean(config), syncing, lastSyncAt, lastError, config: config || undefined, logs: await recentLogs(), autoLaunch: portableMode ? false : electron_1.app.getLoginItemSettings().openAtLogin, portableMode, chromeConnected, douyinLoggedIn }; }
 async function emit() { const value = await state(); mainWindow?.webContents.send('agent:state', value); return value; }
 async function performSync() { if (syncing)
     throw new Error('同步正在进行中'); const config = await readConfig(); if (!config)
     throw new Error('请先连接 XMT 并绑定账号'); syncing = true; lastError = undefined; await emit(); try {
-    await log(`开始本地数据同步，浏览器模式 ${config.browserConfig.mode}`);
-    const snapshot = await new douyin_js_1.DouyinCreatorCollector(browserAdapter(config)).collect();
+    await log(`开始采集创作者中心，浏览器模式 ${config.browserConfig.mode}`);
+    const snapshot = await new douyin_js_1.DouyinCreatorCollector(browserAdapter(config), paths().networkLog).collect();
+    const database = new creatorDatabase_js_1.CreatorDatabase(paths().database);
+    try {
+        database.save(snapshot);
+    }
+    finally {
+        database.close();
+    }
     const result = await (0, client_js_1.upload)(config, await readToken(), snapshot);
     lastSyncAt = new Date().toISOString();
-    await log(`同步成功，快照 ${result.snapshot_id || '-'}，作品 ${snapshot.videos.length}`);
+    await log(`同步成功，快照 ${result.snapshot_id || '-'}，作品 ${snapshot.works.length}`);
     return { collectedAt: lastSyncAt, snapshot, upload: result };
 }
 catch (error) {
@@ -117,17 +127,26 @@ electron_1.ipcMain.handle('agent:login-open', async () => { if (activeLoginAdapt
     throw new Error('浏览器登录流程已经打开'); const config = await readConfig(); if (!config)
     throw new Error('请先完成连接'); activeLoginAdapter = browserAdapter(config); try {
     await activeLoginAdapter.openLogin();
-    await log(`已打开抖音登录页，浏览器模式 ${config.browserConfig.mode}`);
+    chromeConnected = true;
+    douyinLoggedIn = false;
+    await log(`已自动启动并连接 Chrome，浏览器模式 ${config.browserConfig.mode}`);
+    await emit();
 }
 catch (error) {
     activeLoginAdapter = null;
+    chromeConnected = false;
     throw error;
 } });
-electron_1.ipcMain.handle('agent:login-complete', async () => { await activeLoginAdapter?.completeLogin(); activeLoginAdapter = null; await log('用户确认抖音登录完成'); return emit(); });
+electron_1.ipcMain.handle('agent:login-complete', async () => { if (!activeLoginAdapter)
+    throw new Error('请先打开登录窗口'); const loggedIn = await activeLoginAdapter.completeLogin(); if (!loggedIn)
+    throw new Error('未检测到有效的抖音创作者中心登录状态，请完成登录后重试。'); douyinLoggedIn = true; activeLoginAdapter = null; await log('Chrome 已连接，抖音登录状态正常'); return emit(); });
 electron_1.ipcMain.handle('agent:sync', () => performSync());
 electron_1.ipcMain.handle('agent:settings', async (_event, input) => { const config = await readConfig(); if (!config)
-    throw new Error('请先完成连接'); config.serverUrl = input.serverUrl.replace(/\/$/, ''); config.browserConfig = { mode: input.browserMode, cdpEndpoint: 'http://127.0.0.1:9222' }; config.syncConfig = { enabled: input.enabled, interval: input.interval, dailyHour: Math.max(0, Math.min(23, Number(input.dailyHour) || 2)) }; await writeConfig(config); if (!portableMode)
+    throw new Error('请先完成连接'); config.serverUrl = input.serverUrl.replace(/\/$/, ''); config.browserConfig = { mode: input.browserMode, cdpEndpoint: 'http://127.0.0.1:9222', chromePath: input.chromePath || undefined }; config.syncConfig = { enabled: input.enabled, interval: input.interval, dailyHour: Math.max(0, Math.min(23, Number(input.dailyHour) || 2)) }; await writeConfig(config); if (!portableMode)
     electron_1.app.setLoginItemSettings({ openAtLogin: input.autoLaunch, path: process.execPath }); await schedule(); await log(`桌面设置已更新，浏览器模式 ${input.browserMode}，运行模式 ${portableMode ? 'portable' : 'standard'}`); return emit(); });
+electron_1.ipcMain.handle('agent:choose-chrome', async () => { const options = { title: '选择 Google Chrome', defaultPath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', properties: ['openFile'], filters: [{ name: 'Google Chrome', extensions: ['exe'] }] }; const result = mainWindow ? await electron_1.dialog.showOpenDialog(mainWindow, options) : await electron_1.dialog.showOpenDialog(options); if (result.canceled || !result.filePaths[0])
+    return null; const selected = result.filePaths[0]; if (node_path_1.default.basename(selected).toLowerCase() !== 'chrome.exe')
+    throw new Error('请选择 chrome.exe'); return selected; });
 electron_1.ipcMain.handle('agent:open-logs', async () => { await promises_1.default.mkdir(paths().logs, { recursive: true }); await electron_1.shell.openPath(paths().logs); });
 electron_1.app.whenReady().then(async () => { createWindow(); createTray(); await schedule(); electron_1.app.on('activate', () => mainWindow?.show()); });
 electron_1.app.on('window-all-closed', () => { });

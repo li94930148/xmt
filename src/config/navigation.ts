@@ -26,6 +26,7 @@ import {
   Trophy,
   Users,
   Video,
+  Database,
 } from 'lucide-react';
 
 export interface NavigationItem {
@@ -95,6 +96,7 @@ export const navigationSections: NavigationSection[] = [
     label: '抖音运营中心',
     icon: BarChart3,
     items: [
+      { id: 'douyin-creator-center', label: '创作者数据中心', icon: Database, path: '/douyin-creator-center', permissions: ['douyin:view'] },
       { id: 'douyin-accounts', label: '账号管理', icon: Video, path: '/douyin-operations/accounts', permissions: ['douyin:view'] },
       { id: 'douyin-dashboard', label: '数据看板', icon: BarChart3, path: '/douyin-operations/dashboard', permissions: ['douyin:view'] },
       { id: 'douyin-content', label: '内容分析', icon: BookOpenCheck, path: '/douyin-operations/content', permissions: ['douyin:view'] },

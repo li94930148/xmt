@@ -1,0 +1,2 @@
+import type { Page } from 'playwright'; import type { NetworkCapture } from '../../../types.js'; import { bodySnapshot, clickLabels, openPage } from './helpers.js';
+export async function collectFollower(page: Page, captures: NetworkCapture[]) { const start=captures.length; await openPage(page,'https://creator.douyin.com/creator-micro/data/stats/follower/portrait'); await clickLabels(page,['粉丝趋势','性别','年龄','城市','地域','活跃时间','兴趣偏好']); return {raw:captures.slice(start).map(c=>c.response),dom:await bodySnapshot(page)}; }

@@ -40,8 +40,8 @@ release/XMT-Creator-Agent-Portable.zip
 
 1. 启动应用，输入 XMT HTTPS 地址、XMT 用户名/密码和要绑定的抖音账号 ID。
 2. 客户端登录 XMT 并调用既有 `/api/creator-agent/register`，密码在请求结束后即释放。
-3. 默认选择“真实 Chrome”。完全退出 Chrome 后使用 `chrome.exe --remote-debugging-port=9222` 启动，在该 Chrome 中手动登录抖音创作者中心。
-4. 点击“登录抖音”，Agent 使用 `chromium.connectOverCDP()` 连接现有 Chrome 上下文；不会保存或上传 Chrome Profile，也不会自动输入账号密码。
+3. 默认选择“真实 Chrome”。点击“登录抖音”后，Agent 自动定位 Chrome、仅关闭 `chrome.exe` 进程，并以 9222 调试端口和 XMT 专用本地 Profile 启动 Chrome。
+4. Agent 使用 `chromium.connectOverCDP()` 连接自动启动的 Chrome；用户在抖音创作者中心手动登录，Agent 不会自动输入账号密码或上传 Cookie/Profile。
 5. 如真实 Chrome 调试端口不可用，可在设置中切换到“内置浏览器（备用）”。
 6. 点击“立即同步”；数据以 AES-256-GCM 加密并使用 HMAC-SHA256 签名后，通过既有 `/api/creator-agent/report` 上传。
 7. 在设置中选择手动、每 12 小时或每天指定小时同步，并可开启 Windows 登录后自动启动。

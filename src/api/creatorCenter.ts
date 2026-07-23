@@ -1,0 +1,3 @@
+import { useAuthStore } from '@/store';
+export type CreatorCenterData={account:(Record<string,unknown>&{account_id:string;snapshot_time:string;source:string})|null;works:Array<Record<string,unknown>>;dashboard:Record<string,unknown>|null;fans:Record<string,unknown>|null;history:Array<{snapshot_time:string;source:string}>;data_sources:string[]};
+export async function getCreatorCenterData(accountId?:string):Promise<CreatorCenterData>{const token=useAuthStore.getState().token;const query=accountId?`?account_id=${encodeURIComponent(accountId)}`:'';const response=await fetch(`/api/creator-agent/data${query}`,{headers:token?{Authorization:`Bearer ${token}`}:{}});if(!response.ok)throw new Error('创作者中心数据加载失败');return response.json();}

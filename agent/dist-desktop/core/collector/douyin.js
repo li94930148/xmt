@@ -1,25 +1,49 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DouyinCreatorCollector = void 0;
-const parseNumber = (text) => { const n = Number(text.replace(/,/g, '').match(/[\d.]+/)?.[0] || 0); return Math.round(n * (text.includes('万') ? 10_000 : 1)); };
-async function extract(page) {
-    const body = await page.locator('body').innerText();
-    if (/扫码登录|手机号登录|登录抖音/.test(body) && !/数据中心|作品管理|创作中心/.test(body))
-        throw new Error('抖音登录状态无效，请先点击“登录抖音”');
-    return page.evaluate((numberSource) => {
-        const parse = eval(`(${numberSource})`);
-        const text = (selectors) => selectors.map(s => document.querySelector(s)?.textContent?.trim()).find(Boolean) || '';
-        const rows = Array.from(document.querySelectorAll('[class*=work-item],[class*=video-item],tr')).slice(0, 100);
-        const videos = rows.map(row => { const value = row.textContent || ''; const nums = (value.match(/[\d,.]+万?/g) || []).map(parse); return { title: (row.querySelector('[class*=title],a')?.textContent || '').trim(), published_at: (value.match(/20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}/)?.[0] || ''), play_count: nums[0] || 0, like_count: nums[1] || 0, comment_count: nums[2] || 0, collect_count: nums[3] || 0, share_count: nums[4] || 0 }; }).filter(v => v.title);
-        return { account: { nickname: text(['[class*=nickname]', '[class*=user-name]']), avatar: document.querySelector('img[class*=avatar]')?.src || '', uid: text(['[class*=uid]', '[class*=account-id]']), fans_count: parse(text(['[class*=fans]', '[class*=follower]'])) }, videos, operations: { last7Days: null, last30Days: null, trafficSources: null, contentPerformance: null } };
-    }, parseNumber.toString());
-}
+const promises_1 = __importDefault(require("node:fs/promises"));
+const node_path_1 = __importDefault(require("node:path"));
+const api_map_js_1 = require("./douyin/network/api-map.js");
+const interceptor_js_1 = require("./douyin/network/interceptor.js");
+const content_js_1 = require("./douyin/pages/content.js");
+const work_detail_js_1 = require("./douyin/pages/work-detail.js");
+const operation_js_1 = require("./douyin/pages/operation.js");
+const content_analysis_js_1 = require("./douyin/pages/content-analysis.js");
+const follower_js_1 = require("./douyin/pages/follower.js");
 class DouyinCreatorCollector {
     browser;
-    platform = 'douyin';
-    constructor(browser) {
+    networkLogPath;
+    constructor(browser, networkLogPath) {
         this.browser = browser;
+        this.networkLogPath = networkLogPath;
     }
-    collect() { return this.browser.withPage(extract); }
+    async collect() {
+        return this.browser.withPage(async (page) => {
+            const network = new interceptor_js_1.DouyinNetworkInterceptor(page);
+            network.start();
+            try {
+                const content = await (0, content_js_1.collectContent)(page, network.captures);
+                const details = [];
+                for (const work of content.works)
+                    details.push(await (0, work_detail_js_1.collectWorkDetail)(page, work.item_id, network.captures));
+                const dashboard = await (0, operation_js_1.collectOperation)(page, network.captures);
+                const contentAnalysis = await (0, content_analysis_js_1.collectContentAnalysis)(page, network.captures);
+                const fans = await (0, follower_js_1.collectFollower)(page, network.captures);
+                const account = await page.evaluate(() => { const avatar = document.querySelector('img[class*=avatar]')?.src || ''; const nickname = document.querySelector('[class*=nickname],[class*=user-name]')?.innerText || ''; return { nickname, avatar, uid: '', fans_count: 0 }; }).catch(() => ({ nickname: '', avatar: '', uid: '', fans_count: 0 }));
+                const snapshot = { platform: 'douyin', source: 'local_creator_center', collected_at: new Date().toISOString(), account, works: content.works, work_details: details, dashboard, content_analysis: contentAnalysis, fans, raw: { api_map: (0, api_map_js_1.buildApiMap)(network.captures), captures: network.captures }, videos: content.works, operations: { last7Days: dashboard, last30Days: dashboard, trafficSources: details.map(d => d.traffic), contentPerformance: contentAnalysis } };
+                if (this.networkLogPath) {
+                    await promises_1.default.mkdir(node_path_1.default.dirname(this.networkLogPath), { recursive: true });
+                    await promises_1.default.writeFile(this.networkLogPath, JSON.stringify({ generated_at: snapshot.collected_at, api_map: snapshot.raw.api_map, captures: network.captures }, null, 2), 'utf8');
+                }
+                return snapshot;
+            }
+            finally {
+                network.stop();
+            }
+        });
+    }
 }
 exports.DouyinCreatorCollector = DouyinCreatorCollector;

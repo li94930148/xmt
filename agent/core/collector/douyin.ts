@@ -1,17 +1,32 @@
-import type { Page } from 'playwright';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { BrowserAdapter } from '../browser/adapter.js';
 import type { CreatorSnapshot } from '../types.js';
-import type { Collector } from './collector.js';
-const parseNumber=(text:string)=>{const n=Number(text.replace(/,/g,'').match(/[\d.]+/)?.[0]||0);return Math.round(n*(text.includes('万')?10_000:1));};
-async function extract(page:Page):Promise<CreatorSnapshot>{
-  const body=await page.locator('body').innerText();
-  if(/扫码登录|手机号登录|登录抖音/.test(body)&&!/数据中心|作品管理|创作中心/.test(body))throw new Error('抖音登录状态无效，请先点击“登录抖音”');
-  return page.evaluate((numberSource)=>{
-    const parse=eval(`(${numberSource})`) as (text:string)=>number;
-    const text=(selectors:string[])=>selectors.map(s=>document.querySelector(s)?.textContent?.trim()).find(Boolean)||'';
-    const rows=Array.from(document.querySelectorAll('[class*=work-item],[class*=video-item],tr')).slice(0,100);
-    const videos=rows.map(row=>{const value=row.textContent||'';const nums=(value.match(/[\d,.]+万?/g)||[]).map(parse);return{title:(row.querySelector('[class*=title],a')?.textContent||'').trim(),published_at:(value.match(/20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}/)?.[0]||''),play_count:nums[0]||0,like_count:nums[1]||0,comment_count:nums[2]||0,collect_count:nums[3]||0,share_count:nums[4]||0};}).filter(v=>v.title);
-    return{account:{nickname:text(['[class*=nickname]','[class*=user-name]']),avatar:(document.querySelector('img[class*=avatar]') as HTMLImageElement)?.src||'',uid:text(['[class*=uid]','[class*=account-id]']),fans_count:parse(text(['[class*=fans]','[class*=follower]']))},videos,operations:{last7Days:null,last30Days:null,trafficSources:null,contentPerformance:null}};
-  },parseNumber.toString());
+import { buildApiMap } from './douyin/network/api-map.js';
+import { DouyinNetworkInterceptor } from './douyin/network/interceptor.js';
+import { collectContent } from './douyin/pages/content.js';
+import { collectWorkDetail } from './douyin/pages/work-detail.js';
+import { collectOperation } from './douyin/pages/operation.js';
+import { collectContentAnalysis } from './douyin/pages/content-analysis.js';
+import { collectFollower } from './douyin/pages/follower.js';
+
+export class DouyinCreatorCollector {
+  constructor(private readonly browser: BrowserAdapter, private readonly networkLogPath?: string) {}
+  async collect(): Promise<CreatorSnapshot> {
+    return this.browser.withPage(async (page) => {
+      const network = new DouyinNetworkInterceptor(page); network.start();
+      try {
+        const content = await collectContent(page, network.captures);
+        const details = [];
+        for (const work of content.works) details.push(await collectWorkDetail(page, work.item_id, network.captures));
+        const dashboard = await collectOperation(page, network.captures);
+        const contentAnalysis = await collectContentAnalysis(page, network.captures);
+        const fans = await collectFollower(page, network.captures);
+        const account = await page.evaluate(() => { const avatar=(document.querySelector('img[class*=avatar]') as HTMLImageElement|null)?.src||''; const nickname=(document.querySelector('[class*=nickname],[class*=user-name]') as HTMLElement|null)?.innerText||''; return {nickname,avatar,uid:'',fans_count:0}; }).catch(()=>({nickname:'',avatar:'',uid:'',fans_count:0}));
+        const snapshot:CreatorSnapshot={platform:'douyin',source:'local_creator_center',collected_at:new Date().toISOString(),account,works:content.works,work_details:details,dashboard,content_analysis:contentAnalysis,fans,raw:{api_map:buildApiMap(network.captures),captures:network.captures},videos:content.works,operations:{last7Days:dashboard,last30Days:dashboard,trafficSources:details.map(d=>d.traffic),contentPerformance:contentAnalysis}};
+        if(this.networkLogPath){await fs.mkdir(path.dirname(this.networkLogPath),{recursive:true});await fs.writeFile(this.networkLogPath,JSON.stringify({generated_at:snapshot.collected_at,api_map:snapshot.raw.api_map,captures:network.captures},null,2),'utf8');}
+        return snapshot;
+      } finally { network.stop(); }
+    });
+  }
 }
-export class DouyinCreatorCollector implements Collector{readonly platform='douyin';constructor(private browser:BrowserAdapter){}collect(){return this.browser.withPage(extract);}}

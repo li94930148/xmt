@@ -525,6 +525,12 @@ async function initTables() {
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (agent_id) REFERENCES creator_agents(id) ON DELETE SET NULL
   )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_center_data (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,account_id TEXT NOT NULL,snapshot_time DATETIME NOT NULL,account_json TEXT NOT NULL,source TEXT NOT NULL,agent_id INTEGER,created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_work_data (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,account_id TEXT NOT NULL,item_id TEXT NOT NULL,snapshot_time DATETIME NOT NULL,work_json TEXT NOT NULL,detail_json TEXT,source TEXT NOT NULL,created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_dashboard_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,account_id TEXT NOT NULL,snapshot_time DATETIME NOT NULL,dashboard_json TEXT NOT NULL,content_analysis_json TEXT,source TEXT NOT NULL,created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_fans_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL,account_id TEXT NOT NULL,snapshot_time DATETIME NOT NULL,fans_json TEXT NOT NULL,source TEXT NOT NULL,created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_creator_work_history ON creator_work_data(user_id,account_id,item_id,snapshot_time)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_creator_dashboard_history ON creator_dashboard_snapshots(user_id,account_id,snapshot_time)`);
 
   await db.execute(`CREATE TABLE IF NOT EXISTS social_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

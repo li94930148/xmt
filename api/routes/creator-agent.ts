@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { acceptCreatorAgentReport, registerCreatorAgent } from '../services/creatorAgent.js';
+import { acceptCreatorAgentReport, getCreatorCenterData, registerCreatorAgent } from '../services/creatorAgent.js';
 const router=express.Router();
 router.post('/register',authenticate,async(req,res)=>{
   try{res.status(201).json(await registerCreatorAgent(req.user!.id,String(req.body?.platform||''),String(req.body?.account_id||''),String(req.body?.device_id||'')));}
@@ -12,4 +12,5 @@ router.post('/report',async(req,res)=>{
     res.status(201).json(await acceptCreatorAgentReport(req.body||{},req.header('authorization')));
   }catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'上传失败'});}
 });
+router.get('/data',authenticate,async(req,res)=>{try{res.json(await getCreatorCenterData(req.user!.id,typeof req.query.account_id==='string'?req.query.account_id:undefined));}catch(error){res.status(500).json({success:false,message:error instanceof Error?error.message:'查询失败'});}});
 export default router;

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ResponseCollector = void 0;
+const safe_json_js_1 = require("./safe-json.js");
 const SECRET = /cookie|authorization|password|passwd|token|session|ticket|signature|secret|access[_-]?key|credential/i;
 function sanitize(value, depth = 0) {
     if (depth > 8)
@@ -30,10 +31,11 @@ class ResponseCollector {
         if (!/creator\.douyin\.com/i.test(request.url()) || this.captures.length >= 2_000)
             return;
         try {
-            const payload = sanitize(await response.json());
+            const responseText = await response.text();
+            const payload = sanitize((0, safe_json_js_1.safeJsonParse)(responseText));
             this.captures.push({
                 page: this.pageType, url: request.url(), method: request.method(), status: response.status(),
-                headers: sanitize(response.headers()), response: payload,
+                headers: sanitize(response.headers()), request_body: request.postData() || undefined, response: payload,
                 response_size: Buffer.byteLength(JSON.stringify(payload)), captured_at: new Date().toISOString(),
             });
         }

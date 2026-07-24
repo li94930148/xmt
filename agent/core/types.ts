@@ -8,12 +8,39 @@ export type AgentConfig = {
 };
 
 export type MetricMap = Record<string, string | number | boolean | null>;
-export type CreatorWork = { item_id: string; title: string; published_at?: string; cover?: string; status?: string; raw?: unknown; [key: string]: unknown };
+export type CollectionMode = 'discover' | 'metrics_refresh' | 'full_snapshot';
+export type DouyinWorkInput = {
+  aweme_id: string;
+  title: string;
+  cover_url: string;
+  publish_time: string;
+  video_url: string;
+  metrics: MetricMap;
+};
+export type CreatorWork = DouyinWorkInput & {
+  item_id: string;
+  published_at?: string;
+  cover?: string;
+  status?: string;
+  raw?: unknown;
+  [key: string]: unknown;
+};
 export type CreatorWorkDetail = { item_id: string; overview: MetricMap; traffic: unknown; audience: unknown; comments: unknown; raw: unknown };
-export type NetworkCapture = { page: string; url: string; method: string; status: number; headers: Record<string,string>; response: unknown; response_size: number; captured_at: string };
+export type NetworkCapture = { page: string; url: string; method: string; status: number; headers: Record<string,string>; request_body?: string; response: unknown; response_size: number; captured_at: string };
+export type DouyinCollectionStats = {
+  raw_response_count: number;
+  aweme_candidate_count: number;
+  normalized_success_count: number;
+  rejected_count: number;
+  rejected_reasons: Record<string, number>;
+  page_count: number;
+  new_count: number;
+};
 
 export type CreatorSnapshot = {
   platform: 'douyin'; source: 'local_creator_center'; collected_at: string;
+  contract_version: '2.10.2'; snapshot_id: string; collection_mode: CollectionMode;
+  collection_stats: DouyinCollectionStats;
   account: { nickname: string; avatar: string; uid: string; fans_count: number; [key: string]: unknown };
   works: CreatorWork[]; work_details: CreatorWorkDetail[];
   dashboard: Record<string, unknown>; content_analysis: Record<string, unknown>; fans: Record<string, unknown>;

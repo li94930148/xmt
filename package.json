@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.10.0",
+  "version": "2.10.2-agent",
   "type": "module",
   "scripts": {
     "client:dev": "vite",

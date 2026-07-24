@@ -1,5 +1,6 @@
 import type { Page, Response } from 'playwright';
 import type { NetworkCapture } from '../types.js';
+import { safeJsonParse } from './safe-json.js';
 
 const SECRET = /cookie|authorization|password|passwd|token|session|ticket|signature|secret|access[_-]?key|credential/i;
 function sanitize(value: unknown, depth = 0): unknown {
@@ -23,10 +24,11 @@ export class ResponseCollector {
     if (!['xhr', 'fetch'].includes(request.resourceType())) return;
     if (!/creator\.douyin\.com/i.test(request.url()) || this.captures.length >= 2_000) return;
     try {
-      const payload = sanitize(await response.json());
+      const responseText = await response.text();
+      const payload = sanitize(safeJsonParse(responseText));
       this.captures.push({
         page: this.pageType, url: request.url(), method: request.method(), status: response.status(),
-        headers: sanitize(response.headers()) as Record<string, string>, response: payload,
+        headers: sanitize(response.headers()) as Record<string, string>, request_body: request.postData() || undefined, response: payload,
         response_size: Buffer.byteLength(JSON.stringify(payload)), captured_at: new Date().toISOString(),
       });
     } catch {}

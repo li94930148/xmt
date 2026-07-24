@@ -11,6 +11,9 @@ const first = (source: JsonRecord, keys: string[], fallback: unknown = 0) => {
 const metric = (work: CreatorWork, detail: JsonRecord, keys: string[]) => first({ ...record(work.raw), ...work, ...record(detail.overview) }, keys);
 
 export type UnifiedCreatorPayload = {
+  contract_version: '2.10.2';
+  snapshot_id: string;
+  collection_mode: CreatorSnapshot['collection_mode'];
   platform: string;
   account: JsonRecord;
   contents: JsonRecord[];
@@ -28,11 +31,14 @@ export function toUnifiedCreatorPayload(snapshot: CreatorSnapshot, options: { kn
   const dashboard = record(snapshot.dashboard);
   const fans = record(snapshot.fans);
   const details = new Map(snapshot.work_details.map((detail) => [String(detail.item_id), detail as unknown as JsonRecord]));
-  const contents = snapshot.works.filter((work) => !options.knownContentIds?.has(work.item_id)).map((work) => ({
-    platform_item_id: work.item_id,
+  const contents = snapshot.works.map((work) => ({
+    aweme_id: String(work.aweme_id || work.item_id),
+    platform_item_id: String(work.aweme_id || work.item_id),
     title: work.title,
-    cover_url: work.cover,
-    publish_time: work.published_at,
+    cover_url: work.cover_url || work.cover || '',
+    publish_time: work.publish_time || work.published_at || '',
+    video_url: work.video_url || '',
+    metrics: work.metrics,
     duration: first(work, ['duration', 'video_duration']),
     status: work.status,
     raw_json: work.raw ?? work,
@@ -66,6 +72,9 @@ export function toUnifiedCreatorPayload(snapshot: CreatorSnapshot, options: { kn
   }));
   const accountMetrics = record(dashboard.metrics || dashboard.overview || dashboard);
   return {
+    contract_version: snapshot.contract_version,
+    snapshot_id: snapshot.snapshot_id,
+    collection_mode: snapshot.collection_mode,
     platform: snapshot.platform,
     account: {
       platform_uid: snapshot.account.uid,
@@ -104,6 +113,15 @@ export function toUnifiedCreatorPayload(snapshot: CreatorSnapshot, options: { kn
       created_at: capture.captured_at,
     })),
     page_schemas: (options.capabilities || []).flatMap((page) => page.tabs.flatMap((tab) => tab.schemas.map((schema) => ({ page: page.page, tab: tab.name, api: schema.api, fields: schema.fields })) )),
-    sync_task: { task_id: options.taskId, start_time: snapshotTime },
+    sync_task: {
+      task_id: options.taskId,
+      snapshot_id: snapshot.snapshot_id,
+      start_time: snapshotTime,
+      collection_mode: snapshot.collection_mode,
+      collection_stats: {
+        ...snapshot.collection_stats,
+        new_count: snapshot.works.filter((work) => !options.knownContentIds?.has(String(work.item_id))).length,
+      },
+    },
   };
 }

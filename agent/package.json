@@ -3,7 +3,7 @@
   "productName": "XMT Creator Agent",
   "description": "XMT 本地抖音创作者数据采集与加密同步桌面客户端",
   "author": "XMT",
-  "version": "2.10.0",
+  "version": "2.10.2-agent",
   "private": true,
   "type": "commonjs",
   "main": "dist-desktop/desktop/main.js",
@@ -14,7 +14,8 @@
     "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "electron:dev": "wait-on http://127.0.0.1:5178 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5178 electron .",
     "electron:build": "npm run build && node scripts/build-electron.cjs",
-    "smoke:v281": "node scripts/smoke-v281.cjs --collect"
+    "smoke:v281": "node scripts/smoke-v281.cjs --collect",
+    "test:contract:v2102": "npm run build && node --test dist-desktop/core/contracts/v2102-contract.test.js"
   },
   "dependencies": {
     "playwright": "^1.60.0",

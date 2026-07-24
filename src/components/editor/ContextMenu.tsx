@@ -2,9 +2,10 @@
  * EditorContextMenu - 编辑器右键菜单
  * 参考腾讯文档风格，支持格式化、批注、链接、标题转换、dark mode
  */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Editor } from '@tiptap/react';
 import { useAppStore } from '../../store';
+import { calculateContextMenuPosition } from './menuBehavior';
 import {
   Copy, Scissors, Clipboard,
   Bold, Italic, Underline, Strikethrough,
@@ -19,6 +20,7 @@ interface EditorContextMenuProps {
   onAddComment?: () => void;
   onEditComment?: (commentId: string, commentText: string) => void;
   onDeleteComment?: (commentId: string) => void;
+  onOpenChange?: (open: boolean) => void;
 }
 
 interface MenuPosition { x: number; y: number; }
@@ -68,11 +70,13 @@ function findCommentInSelection(editor: Editor): CommentInfo | null {
 }
 
 export default function EditorContextMenu({
-  editor, onAddComment, onEditComment, onDeleteComment,
+  editor, onAddComment, onEditComment, onDeleteComment, onOpenChange,
 }: EditorContextMenuProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const [visible, setVisible] = useState(false);
   const [position, setPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+  const [anchor, setAnchor] = useState<MenuPosition>({ x: 0, y: 0 });
+  const [measured, setMeasured] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -81,16 +85,30 @@ export default function EditorContextMenu({
       const editorEl = editor.view.dom;
       if (!editorEl.contains(e.target as Node)) return;
       e.preventDefault();
-      setPosition({
-        x: Math.min(e.clientX, window.innerWidth - 220),
-        y: Math.min(e.clientY, window.innerHeight - 400),
-      });
+      setAnchor({ x: e.clientX, y: e.clientY });
+      setMeasured(false);
       setVisible(true);
     };
     const editorEl = editor.view.dom;
     editorEl.addEventListener('contextmenu', handleContextMenu);
     return () => editorEl.removeEventListener('contextmenu', handleContextMenu);
   }, [editor]);
+
+  useEffect(() => {
+    onOpenChange?.(visible);
+    return () => { if (visible) onOpenChange?.(false); };
+  }, [onOpenChange, visible]);
+
+  useLayoutEffect(() => {
+    if (!visible || !menuRef.current) return;
+    const menu = menuRef.current;
+    setPosition(calculateContextMenuPosition(
+      anchor,
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    ));
+    setMeasured(true);
+  }, [anchor, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -126,10 +144,10 @@ export default function EditorContextMenu({
 
   return (
     <>
-      <div className="fixed inset-0 z-[200]" onClick={close} />
-      <div ref={menuRef} className={`fixed z-[201] min-w-[200px] rounded-xl shadow-2xl border py-1.5 backdrop-blur-sm ${
+      <div data-testid="editor-context-menu-backdrop" className="fixed inset-0 z-[200]" onClick={close} />
+      <div data-testid="editor-context-menu" data-anchor-x={anchor.x} data-anchor-y={anchor.y} ref={menuRef} className={`fixed z-[201] min-w-[200px] rounded-xl shadow-2xl border py-1.5 backdrop-blur-sm ${
         isDark ? 'bg-gray-800/95 border-gray-600' : 'bg-white/95 border-gray-200'
-      }`} style={{ left: position.x, top: position.y }}>
+      }`} style={{ left: position.x, top: position.y, visibility: measured ? 'visible' : 'hidden' }}>
 
         {/* 剪贴板 */}
         <button onClick={() => act(() => document.execCommand('copy'))} className={hasSelection ? itemClass : disabledClass} disabled={!hasSelection}>

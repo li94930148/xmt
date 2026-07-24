@@ -53,6 +53,7 @@ export default function Editor({
   const [saveStatus, setSaveStatus] = useState<Extract<EditorState, 'idle' | 'saving' | 'synced' | 'conflicted'>>('idle');
   const eventSaveStatus = useEditorEventState(stateDocId);
   const [showToc, setShowToc] = useState(false);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [commentState, setCommentState] = useState<{
     show: boolean;
@@ -485,7 +486,7 @@ export default function Editor({
         >
           {/* BubbleMenu */}
           {editor && !readOnly && (
-            <BubbleMenuBar editor={editor} onAddComment={handleAddComment} />
+            <BubbleMenuBar editor={editor} onAddComment={handleAddComment} contextMenuOpen={contextMenuOpen} />
           )}
 
           <div className="relative min-h-full min-w-0 max-w-full">
@@ -522,6 +523,7 @@ export default function Editor({
           onAddComment={handleAddComment}
           onEditComment={handleEditComment}
           onDeleteComment={handleDeleteComment}
+          onOpenChange={setContextMenuOpen}
         />
       )}
 

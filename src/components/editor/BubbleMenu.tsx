@@ -6,6 +6,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Editor } from '@tiptap/react';
 import { BubbleMenu as TiptapBubbleMenu } from '@tiptap/react/menus';
 import { useAppStore } from '../../store';
+import { shouldShowEditorBubbleMenu } from './menuBehavior';
 import {
   Bold, Italic, Underline, Strikethrough,
   Highlighter, Type, Link as LinkIcon,
@@ -16,6 +17,7 @@ import {
 interface BubbleMenuProps {
   editor: Editor;
   onAddComment?: () => void;
+  contextMenuOpen?: boolean;
 }
 
 const HIGHLIGHT_COLORS = [
@@ -40,7 +42,7 @@ const TEXT_COLORS = [
   { name: '粉色', value: '#ec4899', bg: '#ec4899' },
 ];
 
-export default function BubbleMenuBar({ editor, onAddComment }: BubbleMenuProps) {
+export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = false }: BubbleMenuProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const [showHighlight, setShowHighlight] = useState(false);
   const [showTextColor, setShowTextColor] = useState(false);
@@ -98,6 +100,8 @@ export default function BubbleMenuBar({ editor, onAddComment }: BubbleMenuProps)
     editor.chain().focus().toggleHeading({ level }).run();
   };
 
+  if (contextMenuOpen) return null;
+
   return (
     <TiptapBubbleMenu
       editor={editor}
@@ -106,7 +110,7 @@ export default function BubbleMenuBar({ editor, onAddComment }: BubbleMenuProps)
         if (e.isActive('codeBlock')) return false;
         // 必须有选区
         const { from, to } = state.selection;
-        return from !== to;
+        return shouldShowEditorBubbleMenu({ contextMenuOpen, codeBlock: e.isActive('codeBlock'), from, to });
       }}
       className={`flex items-center gap-0.5 px-2 py-1.5 rounded-lg shadow-xl border backdrop-blur-sm ${
         isDark

@@ -59,6 +59,8 @@
     ,"smoke:social-review:server-browser": "tsx scripts/smoke-social-review-server-browser.mjs"
     ,"smoke:social-review:login-ui": "node scripts/smoke-social-review-login-ui.mjs"
     ,"smoke:social-review:account-connect": "node scripts/smoke-social-review-account-connect.mjs"
+    ,"test:douyin:sync": "tsx scripts/test-douyin-sync.ts"
+    ,"verify:douyin:data": "tsx scripts/verify-douyin-data.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

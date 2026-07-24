@@ -2,7 +2,7 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { acceptCreatorAgentReport, getCreatorCenterData, registerCreatorAgent } from '../services/creatorAgent.js';
 import { getUnifiedCreatorCenterData } from '../services/creatorDataCenter.js';
-import { acceptCreatorDataSyncV291 } from '../services/creatorSyncV291.js';
+import { acceptCreatorDataSync } from '../services/creatorSyncV291.js';
 import { creatorInsightService, getCreatorInsights } from '../services/creatorInsights.js';
 import { canManageCreatorAccount, grantCreatorAccountAccess, resolveCreatorAccountScope as resolveCreatorPlatformAccountScope } from '../services/creatorAccess.js';
 import { requirePermission } from '../middleware/permissions.js';
@@ -29,7 +29,7 @@ router.post('/report',async(req,res)=>{
 router.post('/data-sync',async(req,res)=>{
   try{
     if(process.env.NODE_ENV==='production'&&!req.secure)return res.status(426).json({success:false,message:'Creator Agent 仅允许通过 HTTPS 上传'});
-    res.status(201).json(await acceptCreatorDataSyncV291(req.body||{},req.header('authorization')));
+    res.status(201).json(await acceptCreatorDataSync(req.body||{},req.header('authorization')));
   }catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'统一数据同步失败'});}
 });
 router.get('/data',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const accountId=typeof req.query.account_id==='string'?req.query.account_id:undefined;const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,accountId);if(!scope)return res.json({account:null,works:[],dashboard:null,fans:null,history:[],trends:[],insights:{},analytics:{},data_sources:['local_creator_center']});const [data,insights,analytics]=await Promise.all([(async()=>(await getUnifiedCreatorCenterData(scope.user_id,scope.platform_uid))??(await getCreatorCenterData(scope.user_id,scope.platform_uid)))(),getCreatorInsights(scope.id),creatorAnalyticsService.overview(scope.id)]);res.json({...data,access_level:scope.access_level,insights,analytics});}catch(error){res.status(500).json({success:false,message:error instanceof Error?error.message:'查询失败'});}});

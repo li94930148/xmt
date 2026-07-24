@@ -10,6 +10,44 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.10.2-sync',
+    date: '2026-07-24',
+    title: '抖音服务端同步契约升级',
+    changes: [
+      { type: 'feature', description: '支持 contract_version=2.10.2 严格 DouyinWorkInput 链路，并继续兼容无版本和 v2.10.1 Agent。' },
+      { type: 'improvement', description: '同一作品在单事务内写入 creator_content_items 与 douyin_works，并通过 content_id 建立一致性关系。' },
+      { type: 'improvement', description: '同步日志增加 contract_version、collection_mode、snapshot_id 与只含统计摘要的 summary_json。' },
+      { type: 'fix', description: '移除同步过程中的直接删除动作，改为只读污染候选报告；本版本不修改前端页面。' },
+    ],
+  },
+  {
+    version: '2.10.2-agent',
+    date: '2026-07-24',
+    title: 'Creator Agent 契约与编辑器稳定性升级',
+    changes: [
+      { type: 'feature', description: 'Agent 增加安全 JSON 解析、超长 ID 保真、严格作品识别、cursor 分页、collection_mode 和 snapshot_id。' },
+      { type: 'fix', description: '修复编辑器右键菜单定位及 BubbleMenu 互斥问题，保留 Yjs 与多人协作光标。' },
+    ],
+  },
+  {
+    version: '2.10.1',
+    date: '2026-07-24',
+    title: '标准抖音数据中心',
+    changes: [
+      { type: 'feature', description: '新增 douyin_works、daily snapshots、work snapshots、analysis records 与增强同步日志模型。' },
+      { type: 'improvement', description: 'Creator Center 运营分析、作品复盘和趋势改为使用标准 douyin_* 真实数据。' },
+    ],
+  },
+  {
+    version: '2.10.0',
+    date: '2026-07-23',
+    title: 'Creator Data Center 运营分析',
+    changes: [
+      { type: 'feature', description: '新增账号驾驶舱、作品库、作品复盘、趋势、粉丝分析和运营报告。' },
+      { type: 'feature', description: '新增规则驱动的作品评分、账号健康度和日报、周报、月报能力。' },
+    ],
+  },
+  {
     version: '2.6.0',
     date: '2026年7月',
     title: '传媒内容中台能力升级版',

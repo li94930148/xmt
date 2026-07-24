@@ -33,6 +33,34 @@ export type NormalizedDouyinPayload = {
   rejected_count: number;
 };
 
+export type DouyinCollectionMode = 'discover' | 'metrics_refresh' | 'full_snapshot';
+
+export type DouyinWorkInput = {
+  aweme_id: string;
+  title: string;
+  cover_url: string;
+  publish_time: string;
+  video_url: string;
+  metrics: JsonRecord;
+};
+
+export type DouyinContractSummary = {
+  raw_response_count: number;
+  aweme_candidate_count: number;
+  normalized_success_count: number;
+  rejected_count: number;
+  rejected_reasons: Record<string, number>;
+};
+
+export type NormalizedDouyinContract = {
+  account: NormalizedDouyinAccount;
+  works: NormalizedDouyinWork[];
+  contract_version: '2.10.2';
+  collection_mode: DouyinCollectionMode;
+  snapshot_id: string;
+  summary: DouyinContractSummary;
+};
+
 const blockedTitles = new Set(['react', 'flash_mod_modal', 'start_flash_mod']);
 const record = (value: unknown): JsonRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
@@ -119,7 +147,124 @@ function normalizeWork(source: JsonRecord): NormalizedDouyinWork | null {
   };
 }
 
+function nonNegativeInteger(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function contractMetric(metrics: JsonRecord, keys: string[]): number {
+  return number(first(...keys.map(key => metrics[key])));
+}
+
+function incrementReason(reasons: Record<string, number>, reason: string, count = 1) {
+  reasons[reason] = (reasons[reason] || 0) + count;
+}
+
+function validateContractWork(value: unknown): { work?: NormalizedDouyinWork; reason?: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { reason: 'not_object' };
+  const source = value as JsonRecord;
+  const identifier = source.aweme_id ?? source.item_id;
+  if (identifier == null) return { reason: 'missing_aweme_id' };
+  if (typeof identifier !== 'string') return { reason: 'invalid_id_type' };
+  const awemeId = identifier.trim();
+  if (!awemeId) return { reason: 'missing_aweme_id' };
+  if (typeof source.title !== 'string' || !source.title.trim()) return { reason: 'missing_title' };
+  const title = source.title.trim();
+  if (blockedTitles.has(title.toLowerCase())) return { reason: 'blocked_non_work_title' };
+  if (!source.metrics || typeof source.metrics !== 'object' || Array.isArray(source.metrics)) return { reason: 'invalid_metrics' };
+  const metrics = source.metrics as JsonRecord;
+  const playCount = contractMetric(metrics, ['play_count', 'views', 'view_count']);
+  const likeCount = contractMetric(metrics, ['like_count', 'likes', 'digg_count']);
+  const commentCount = contractMetric(metrics, ['comment_count', 'comments']);
+  const shareCount = contractMetric(metrics, ['share_count', 'shares']);
+  const collectCount = contractMetric(metrics, ['collect_count', 'favorite_count', 'collects']);
+  const completionRaw = contractMetric(metrics, ['completion_rate', 'finish_rate']);
+  const completionRate = completionRaw > 1 ? completionRaw / 100 : completionRaw;
+  const interactions = likeCount + commentCount + shareCount + collectCount;
+  const durationRaw = number(source.duration);
+  return {
+    work: {
+      aweme_id: awemeId,
+      title,
+      cover_url: typeof source.cover_url === 'string' ? source.cover_url : '',
+      publish_time: timestamp(source.publish_time),
+      play_count: playCount,
+      like_count: likeCount,
+      comment_count: commentCount,
+      share_count: shareCount,
+      collect_count: collectCount,
+      duration: durationRaw > 10_000 ? durationRaw / 1000 : durationRaw,
+      completion_rate: Math.max(0, completionRate),
+      interaction_rate: playCount > 0 ? interactions / playCount : 0,
+      raw: {
+        aweme_id: awemeId,
+        title,
+        cover_url: typeof source.cover_url === 'string' ? source.cover_url : '',
+        publish_time: typeof source.publish_time === 'string' ? source.publish_time : '',
+        video_url: typeof source.video_url === 'string' ? source.video_url : '',
+        metrics,
+      },
+    },
+  };
+}
+
 export class DouyinDataNormalizer {
+  normalizeContractV2102(payload: JsonRecord, fallbackUid: string): NormalizedDouyinContract {
+    const suppliedAccount = record(payload.account);
+    const uidValue = firstPath(suppliedAccount, ['douyin_uid', 'platform_uid', 'sec_uid', 'uid']);
+    if (uidValue !== undefined && typeof uidValue !== 'string') throw Object.assign(new Error('v2.10.2 账号 ID 必须为字符串'), { statusCode: 400 });
+    const uid = text(uidValue) || fallbackUid;
+    const collectionStats = record(payload.collection_stats || record(payload.sync_task).collection_stats);
+    const agentReasons = record(collectionStats.rejected_reasons);
+    const rejectedReasons: Record<string, number> = {};
+    for (const [reason, count] of Object.entries(agentReasons)) {
+      const validCount = nonNegativeInteger(count);
+      if (validCount) incrementReason(rejectedReasons, reason, validCount);
+    }
+    const source = Array.isArray(payload.works) ? payload.works : Array.isArray(payload.contents) ? payload.contents : [];
+    const works = new Map<string, NormalizedDouyinWork>();
+    for (const candidate of source) {
+      const result = validateContractWork(candidate);
+      if (!result.work) {
+        incrementReason(rejectedReasons, result.reason || 'invalid_work');
+        continue;
+      }
+      if (works.has(result.work.aweme_id)) {
+        incrementReason(rejectedReasons, 'duplicate_aweme_id');
+        continue;
+      }
+      works.set(result.work.aweme_id, result.work);
+    }
+    const normalizedWorks = [...works.values()];
+    const serverRejected = source.length - normalizedWorks.length;
+    const agentRejected = nonNegativeInteger(collectionStats.rejected_count);
+    const collectionMode = payload.collection_mode === 'discover' || payload.collection_mode === 'metrics_refresh' ? payload.collection_mode : 'full_snapshot';
+    const snapshotId = text(payload.snapshot_id || record(payload.sync_task).snapshot_id);
+    if (!snapshotId) throw Object.assign(new Error('v2.10.2 缺少 snapshot_id'), { statusCode: 400 });
+    return {
+      contract_version: '2.10.2',
+      collection_mode: collectionMode,
+      snapshot_id: snapshotId,
+      account: {
+        douyin_uid: uid,
+        nickname: text(firstPath(suppliedAccount, ['nickname', 'nick_name', 'account_name'])),
+        avatar: imageUrl(firstPath(suppliedAccount, ['avatar', 'avatar_thumb', 'avatar_url'])),
+        fans_count: number(firstPath(suppliedAccount, ['fans_count', 'follower_count', 'followers'])),
+        following_count: number(firstPath(suppliedAccount, ['following_count', 'follow_count', 'following'])),
+        works_count: number(firstPath(suppliedAccount, ['works_count', 'aweme_count', 'video_count'])) || normalizedWorks.length,
+        total_likes: number(firstPath(suppliedAccount, ['total_likes', 'total_favorited', 'favoriting_count'])),
+      },
+      works: normalizedWorks,
+      summary: {
+        raw_response_count: nonNegativeInteger(collectionStats.raw_response_count, list(payload.raw_records).length),
+        aweme_candidate_count: nonNegativeInteger(collectionStats.aweme_candidate_count, source.length),
+        normalized_success_count: normalizedWorks.length,
+        rejected_count: agentRejected + serverRejected,
+        rejected_reasons: rejectedReasons,
+      },
+    };
+  }
+
   normalize(payload: JsonRecord, fallbackUid: string): NormalizedDouyinPayload {
     const rawRecords = list(payload.raw_records).map(record);
     const responses = rawRecords.map(item => first(item.response_json, item.response)).filter(Boolean);

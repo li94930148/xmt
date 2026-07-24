@@ -3,7 +3,7 @@ import zlib from 'node:zlib';
 import bcrypt from 'bcrypt';
 import { execute, queryOne, runInTransaction } from '../database/utils.js';
 import { creatorInsightService } from './creatorInsights.js';
-import { persistNormalizedDouyinSync } from './douyinDataCenter.js';
+import { persistDouyinContractV2102, persistNormalizedDouyinSync } from './douyinDataCenter.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentRow = { id: number; user_id: number; platform: string; account_id: string; token_hash: string };
@@ -25,7 +25,7 @@ async function openEnvelope(body: JsonRecord, authorization?: string) {
   catch { throw Object.assign(new Error('上传数据解密失败'), { statusCode: 400 }); }
 }
 
-export async function acceptCreatorDataSyncV291(body: JsonRecord, authorization?: string) {
+export async function acceptCreatorDataSync(body: JsonRecord, authorization?: string) {
   const { agent, payload } = await openEnvelope(body, authorization);
   if (payload.platform !== agent.platform) throw Object.assign(new Error('同步数据平台与 Agent 绑定不匹配'), { statusCode: 403 });
   const account = payload.account && typeof payload.account === 'object' ? payload.account as JsonRecord : {};
@@ -33,6 +33,28 @@ export async function acceptCreatorDataSyncV291(body: JsonRecord, authorization?
   const snapshotTime = text(body.collected_at, new Date().toISOString()); const syncTask = payload.sync_task && typeof payload.sync_task === 'object' ? payload.sync_task as JsonRecord : {};
   const taskId = text(syncTask.task_id, crypto.randomUUID());
   await execute(`INSERT INTO creator_sync_tasks(agent_id,task_id,start_time,platform,account,status) VALUES(?,?,?,?,?,'running') ON CONFLICT(agent_id,task_id) DO UPDATE SET status='running',start_time=excluded.start_time,end_time=NULL,error_message=NULL`, [agent.id, taskId, text(syncTask.start_time,snapshotTime), agent.platform, platformUid]);
+  if (payload.contract_version === '2.10.2') {
+    const modules: Record<string, 'success' | 'failed'> = { douyin_contract: 'failed' };
+    const errors: Record<string, string> = {};
+    let result: Awaited<ReturnType<typeof persistDouyinContractV2102>> | null = null;
+    try {
+      result = await persistDouyinContractV2102(agent, payload, snapshotTime, taskId);
+      modules.douyin_contract = 'success';
+      await execute('UPDATE creator_agents SET last_active_at=CURRENT_TIMESTAMP WHERE id=?', [agent.id]);
+    } catch (error) {
+      errors.douyin_contract = error instanceof Error ? error.message : String(error);
+    }
+    const finished = await finishTask(agent.id, taskId, modules, errors, snapshotTime, result?.creator_account_id || 0, {
+      contract_version: '2.10.2',
+      snapshot_id: result?.snapshot_id || text(payload.snapshot_id || syncTask.snapshot_id),
+      collection_mode: text(payload.collection_mode || syncTask.collection_mode, 'full_snapshot'),
+      works: result?.works || 0,
+      duplicate: result?.duplicate || false,
+      summary: result?.summary || {},
+    });
+    if (!result) throw Object.assign(new Error(errors.douyin_contract || 'v2.10.2 同步失败'), { statusCode: 400, result: finished });
+    return finished;
+  }
   const modules:Record<string,'success'|'failed'>={account:'failed',works:'failed',metrics:'failed',trends:'failed',account_metrics:'failed',fans:'failed',raw:'failed',page_schema:'failed',douyin_business:'failed',insights:'failed'}; const errors:Record<string,string>={};
   const attempt = async (name:string, run:()=>Promise<void>) => { try { await run(); modules[name]='success'; } catch(error) { modules[name]='failed'; errors[name]=error instanceof Error?error.message:String(error); } };
   let accountId = 0;
@@ -53,5 +75,7 @@ export async function acceptCreatorDataSyncV291(body: JsonRecord, authorization?
   await execute('UPDATE creator_agents SET last_active_at=CURRENT_TIMESTAMP WHERE id=?',[agent.id]);
   return finishTask(agent.id,taskId,modules,errors,snapshotTime,accountId,{contents:contents.length,metrics:metrics.length,trends:trends.length,raw_records:rawRecords.length});
 }
+
+export const acceptCreatorDataSyncV291 = acceptCreatorDataSync;
 
 async function finishTask(agentId:number,taskId:string,modules:Record<string,'success'|'failed'>,errors:Record<string,string>,snapshotTime:string,accountId:number,counts:JsonRecord={}){const successCount=Object.values(modules).filter(v=>v==='success').length;const failedCount=Object.keys(modules).length-successCount;const status=failedCount===0?'success':successCount===0?'failed':'partial_success';await execute('UPDATE creator_sync_tasks SET end_time=CURRENT_TIMESTAMP,status=?,success_count=?,failed_count=?,error_message=?,module_status_json=? WHERE agent_id=? AND task_id=?',[status,successCount,failedCount,Object.values(errors).join('; ')||null,JSON.stringify(modules),agentId,taskId]);return{success:successCount>0,status,success_count:successCount,failed_count:failedCount,modules,errors,snapshot_time:snapshotTime,account_id:accountId,...counts};}

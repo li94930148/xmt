@@ -569,14 +569,19 @@ async function initTables() {
     `ALTER TABLE douyin_sync_logs ADD COLUMN failed_count INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE douyin_sync_logs ADD COLUMN error_message TEXT`,
     `ALTER TABLE douyin_sync_logs ADD COLUMN task_id TEXT`,
+    `ALTER TABLE douyin_sync_logs ADD COLUMN contract_version TEXT`,
+    `ALTER TABLE douyin_sync_logs ADD COLUMN collection_mode TEXT`,
+    `ALTER TABLE douyin_sync_logs ADD COLUMN snapshot_id TEXT`,
+    `ALTER TABLE douyin_sync_logs ADD COLUMN summary_json TEXT NOT NULL DEFAULT '{}'`,
   ]) { try { await db.execute(statement); } catch {} }
   await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_douyin_accounts_uid ON douyin_accounts(douyin_uid)`);
   await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_douyin_accounts_creator_scope ON douyin_accounts(creator_account_id)`);
   await db.execute(`CREATE TABLE IF NOT EXISTS douyin_works (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,aweme_id TEXT NOT NULL,title TEXT NOT NULL,cover_url TEXT,publish_time DATETIME,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,content_id INTEGER,account_id INTEGER NOT NULL,aweme_id TEXT NOT NULL,title TEXT NOT NULL,cover_url TEXT,publish_time DATETIME,
     play_count INTEGER NOT NULL DEFAULT 0,like_count INTEGER NOT NULL DEFAULT 0,comment_count INTEGER NOT NULL DEFAULT 0,share_count INTEGER NOT NULL DEFAULT 0,collect_count INTEGER NOT NULL DEFAULT 0,
     duration REAL NOT NULL DEFAULT 0,completion_rate REAL NOT NULL DEFAULT 0,interaction_rate REAL NOT NULL DEFAULT 0,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(account_id,aweme_id),FOREIGN KEY(account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE)`);
+    UNIQUE(account_id,aweme_id),FOREIGN KEY(content_id) REFERENCES creator_content_items(id) ON DELETE SET NULL,FOREIGN KEY(account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE)`);
+  try { await db.execute(`ALTER TABLE douyin_works ADD COLUMN content_id INTEGER`); } catch {}
   await db.execute(`CREATE TABLE IF NOT EXISTS douyin_daily_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,snapshot_date DATE NOT NULL,fans_count INTEGER NOT NULL DEFAULT 0,works_count INTEGER NOT NULL DEFAULT 0,
     play_count INTEGER NOT NULL DEFAULT 0,like_count INTEGER NOT NULL DEFAULT 0,comment_count INTEGER NOT NULL DEFAULT 0,share_count INTEGER NOT NULL DEFAULT 0,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -596,6 +601,8 @@ async function initTables() {
     `CREATE INDEX IF NOT EXISTS idx_douyin_work_snapshots_time ON douyin_work_snapshots(work_id,snapshot_time ASC)`,
     `CREATE INDEX IF NOT EXISTS idx_douyin_analysis_work_time ON douyin_analysis_records(work_id,snapshot_time DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_douyin_sync_logs_account_time ON douyin_sync_logs(account_id,sync_time DESC)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_douyin_sync_logs_snapshot ON douyin_sync_logs(account_id,snapshot_id) WHERE snapshot_id IS NOT NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_douyin_works_content ON douyin_works(content_id) WHERE content_id IS NOT NULL`,
   ]) await db.execute(statement);
   for (const statement of [`ALTER TABLE creator_api_raw_records ADD COLUMN hash TEXT`,`ALTER TABLE creator_api_raw_records ADD COLUMN compression TEXT NOT NULL DEFAULT 'none'`]) { try { await db.execute(statement); } catch {} }
   for (const sql of [

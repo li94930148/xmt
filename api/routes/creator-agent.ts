@@ -4,11 +4,12 @@ import { acceptCreatorAgentReport, getCreatorCenterData, registerCreatorAgent } 
 import { getUnifiedCreatorCenterData } from '../services/creatorDataCenter.js';
 import { acceptCreatorDataSyncV291 } from '../services/creatorSyncV291.js';
 import { creatorInsightService, getCreatorInsights } from '../services/creatorInsights.js';
-import { canManageCreatorAccount, grantCreatorAccountAccess, resolveCreatorAccountScope } from '../services/creatorAccess.js';
+import { canManageCreatorAccount, grantCreatorAccountAccess, resolveCreatorAccountScope as resolveCreatorPlatformAccountScope } from '../services/creatorAccess.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { creatorAnalyticsService, type ReportType } from '../services/creatorAnalytics.js';
 import { getDouyinDashboard, getDouyinSyncLogs, getDouyinTrends, getDouyinWorkDetail, getDouyinWorkReview, getDouyinWorks } from '../services/douyinDataCenter.js';
 const router=express.Router();
+const resolveCreatorAccountScope = (userId: number, role: string, platformUid?: string) => resolveCreatorPlatformAccountScope(userId,role,'douyin',platformUid);
 router.get('/douyin/dashboard',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,typeof req.query.account_id==='string'?req.query.account_id:undefined);if(!scope)return res.status(404).json({message:'未找到授权抖音账号'});const data=await getDouyinDashboard(scope.id);if(!data)return res.status(404).json({message:'该账号尚未完成标准化同步'});res.json({...data,access_level:scope.access_level});}catch(error){res.status(500).json({message:error instanceof Error?error.message:'抖音驾驶舱加载失败'});}});
 router.get('/douyin/works',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,typeof req.query.account_id==='string'?req.query.account_id:undefined);if(!scope)return res.status(404).json({message:'未找到授权抖音账号'});res.json(await getDouyinWorks(scope.id,String(req.query.sort||'latest')));}catch(error){res.status(500).json({message:error instanceof Error?error.message:'抖音作品库加载失败'});}});
 router.get('/douyin/works/:id/review',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorAccountScope(req.user!.id,req.user!.role,typeof req.query.account_id==='string'?req.query.account_id:undefined);if(!scope)return res.status(404).json({message:'未找到授权抖音账号'});const data=await getDouyinWorkReview(scope.id,Number(req.params.id));if(!data)return res.status(404).json({message:'作品不存在或不在授权范围内'});res.json(data);}catch(error){res.status(500).json({message:error instanceof Error?error.message:'作品复盘加载失败'});}});

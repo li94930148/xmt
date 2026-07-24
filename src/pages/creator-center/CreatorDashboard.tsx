@@ -2,13 +2,94 @@ import { useCallback, useEffect, useState } from 'react';
 import { Activity, CalendarRange, Gauge, Heart, Play, Share2, Users, Video } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getDouyinDashboard, getDouyinSyncLogs, type DouyinDashboardData } from '@/api/creatorCenter';
+import ImageFallback from '@/components/common/ImageFallback';
 import { AccountHeader, EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, Panel, asRecord, formatDate, formatNumber, num } from './shared';
 
-function GrowthBlock({title,data}:{title:string;data:DouyinDashboardData['growth_7d']}){return <div className="rounded-xl bg-studio-surface p-4"><p className="text-sm font-medium">{title}</p>{data?<div className="mt-4 grid grid-cols-3 gap-3 text-center"><div><b className="text-emerald-500">{data.fans>=0?'+':''}{formatNumber(data.fans)}</b><span className="mt-1 block text-xs text-studio-text-muted">粉丝</span></div><div><b className="text-cyan-500">{data.plays>=0?'+':''}{formatNumber(data.plays)}</b><span className="mt-1 block text-xs text-studio-text-muted">播放</span></div><div><b className="text-rose-500">{data.interactions>=0?'+':''}{formatNumber(data.interactions)}</b><span className="mt-1 block text-xs text-studio-text-muted">互动</span></div></div>:<p className="mt-4 text-sm text-studio-text-muted">历史快照不足，完成跨周期同步后显示增长。</p>}</div>}
+function GrowthBlock({ title, data }: { title: string; data: DouyinDashboardData['growth_7d'] }) {
+  return <div className="rounded-xl bg-studio-surface p-4">
+    <p className="text-sm font-medium">{title}</p>
+    {data ? <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+      <div><b className="text-emerald-500">{data.fans >= 0 ? '+' : ''}{formatNumber(data.fans)}</b><span className="mt-1 block text-xs text-studio-text-muted">粉丝</span></div>
+      <div><b className="text-cyan-500">{data.plays >= 0 ? '+' : ''}{formatNumber(data.plays)}</b><span className="mt-1 block text-xs text-studio-text-muted">播放</span></div>
+      <div><b className="text-rose-500">{data.interactions >= 0 ? '+' : ''}{formatNumber(data.interactions)}</b><span className="mt-1 block text-xs text-studio-text-muted">互动</span></div>
+    </div> : <p className="mt-4 text-sm text-studio-text-muted">历史快照不足，完成跨周期同步后显示增长。</p>}
+  </div>;
+}
 
-export default function CreatorDashboard(){
-  const navigate=useNavigate();const[data,setData]=useState<DouyinDashboardData|null>(null);const[logs,setLogs]=useState<Array<Record<string,unknown>>>([]);const[loading,setLoading]=useState(true);const[error,setError]=useState('');
-  const load=useCallback(async()=>{setLoading(true);setError('');try{const[dashboard,syncLogs]=await Promise.all([getDouyinDashboard(),getDouyinSyncLogs()]);setData(dashboard);setLogs(syncLogs);}catch(cause){setError(cause instanceof Error?cause.message:'抖音数据驾驶舱加载失败');}finally{setLoading(false);}},[]);
-  useEffect(()=>{void load();},[load]);if(loading&&!data)return <LoadingState/>;if(error&&!data)return <ErrorState message={error}/>;if(!data)return <EmptyState/>;const account=asRecord(data.account);const lastLog=logs[0];
-  return <div className="mx-auto max-w-[1500px] space-y-6 pb-12"><PageHeader title="抖音数据驾驶舱" description="指标只读取 douyin_* 真实入库数据，评分不使用演示或推测值" loading={loading} onRefresh={()=>void load()}/><AccountHeader account={account}/><section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"><MetricCard label="粉丝" value={data.metrics.fans_count} icon={Users}/><MetricCard label="入库作品" value={data.metrics.works_count} icon={Video} accent="violet"/><MetricCard label="累计播放" value={data.metrics.play_count} icon={Play} accent="blue"/><MetricCard label="互动率" value={`${(data.metrics.interaction_rate*100).toFixed(2)}%`} icon={Heart} accent="rose"/><MetricCard label="分享率" value={`${(data.metrics.share_rate*100).toFixed(2)}%`} icon={Share2} accent="blue"/><MetricCard label="爆款作品" value={data.metrics.viral_works_count} icon={Gauge} accent="emerald"/></section><Panel title="账号健康度" description={`当前按 ${data.health.available_weight}% 可用真实维度归一化评分`}><div className="grid gap-4 lg:grid-cols-[220px_1fr]"><div className="grid place-items-center rounded-xl bg-studio-surface p-6"><strong className="text-5xl text-studio-cyan">{data.health.score}</strong><span className="mt-2 text-sm text-studio-text-muted">{data.health.level}</span></div><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">数据新鲜度</span><p className="mt-2 font-semibold">{data.health.dimensions.data_freshness.score} / 20</p></div><div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">30 日内容活跃度</span><p className="mt-2 font-semibold">{data.health.dimensions.content_activity.score} / 25</p></div><div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">互动质量</span><p className="mt-2 font-semibold">{data.health.dimensions.engagement_quality.score} / 30</p></div><div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">粉丝增长</span><p className="mt-2 font-semibold">{data.health.dimensions.fan_growth.score==null?'快照不足':`${data.health.dimensions.fan_growth.score} / 25`}</p></div></div></div>{data.health.data_notes.map(note=><p key={note} className="mt-3 text-xs text-studio-text-muted">{note}</p>)}</Panel><section className="grid gap-6 xl:grid-cols-[1fr_1.4fr]"><Panel title="周期增长" description={`当前已有 ${data.snapshot_count} 个 douyin_daily_snapshots 真实日快照`}><div className="grid gap-4"><GrowthBlock title="近 7 天" data={data.growth_7d}/><GrowthBlock title="近 30 天" data={data.growth_30d}/></div><button type="button" onClick={()=>navigate('/analytics/creator-center/trends')} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-studio-cyan"><CalendarRange className="h-4 w-4"/>查看完整趋势</button></Panel><Panel title="作品表现 TOP 5" description="优先展示规则识别的爆款，再按真实表现评分排序"><div className="space-y-2">{data.top_works.map((work,index)=><button type="button" key={work.id} onClick={()=>navigate(`/analytics/creator-center/work/${work.id}`)} className="flex w-full items-center gap-4 rounded-xl bg-studio-surface p-3 text-left transition hover:ring-1 hover:ring-studio-cyan/40"><span className="w-6 text-center text-sm font-semibold text-studio-text-muted">{index+1}</span>{work.cover_url?<img src={work.cover_url} alt="" className="h-14 w-20 rounded-lg object-cover"/>:<div className="grid h-14 w-20 place-items-center rounded-lg bg-studio-card"><Play className="h-4 w-4"/></div>}<div className="min-w-0 flex-1"><p className="truncate font-medium">{work.title}</p><p className="mt-1 text-xs text-studio-text-muted">{work.performance.is_viral?'爆款 · ':''}评分 {work.performance.score} · 播放 {formatNumber(work.play_count)}</p></div><div className="text-right"><b>{(work.performance.interaction_rate*100).toFixed(2)}%</b><p className="text-xs text-studio-text-muted">互动率</p></div></button>)}{data.top_works.length===0?<p className="py-10 text-center text-sm text-studio-text-muted">尚未识别到合法抖音作品</p>:null}</div></Panel></section><Panel title="最近同步" description="接口、成功作品和失败原因均由 douyin_sync_logs 记录"><div className="grid gap-4 sm:grid-cols-4"><MetricCard label="同步时间" value={lastLog?formatDate(lastLog.sync_time,true):'—'} icon={CalendarRange}/><MetricCard label="接口数量" value={num(lastLog?.api_count)} icon={Activity} accent="blue"/><MetricCard label="成功作品" value={num(lastLog?.success_count)} icon={Video} accent="emerald"/><MetricCard label="识别失败" value={num(lastLog?.failed_count)} icon={Activity} accent="rose"/></div>{lastLog?.error_message?<p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-500">{String(lastLog.error_message)}</p>:null}</Panel></div>;
+export default function CreatorDashboard() {
+  const navigate = useNavigate();
+  const [data, setData] = useState<DouyinDashboardData | null>(null);
+  const [logs, setLogs] = useState<Array<Record<string, unknown>>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [dashboard, syncLogs] = await Promise.all([getDouyinDashboard(), getDouyinSyncLogs()]);
+      setData(dashboard);
+      setLogs(syncLogs);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '抖音数据驾驶舱加载失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  if (loading && !data) return <LoadingState />;
+  if (error && !data) return <ErrorState message={error} />;
+  if (!data) return <EmptyState />;
+  const account = asRecord(data.account);
+  const lastLog = logs[0];
+
+  return <div className="mx-auto max-w-[1500px] space-y-6 pb-12">
+    <PageHeader title="抖音数据驾驶舱" description="指标只读取 douyin_* 真实入库数据，评分不使用演示或推测值" loading={loading} onRefresh={() => void load()} />
+    <AccountHeader account={account} />
+    <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <MetricCard label="粉丝" value={data.metrics.fans_count} icon={Users} />
+      <MetricCard label="入库作品" value={data.metrics.works_count} icon={Video} accent="violet" />
+      <MetricCard label="累计播放" value={data.metrics.play_count} icon={Play} accent="blue" />
+      <MetricCard label="互动率" value={`${(data.metrics.interaction_rate * 100).toFixed(2)}%`} icon={Heart} accent="rose" />
+      <MetricCard label="分享率" value={`${(data.metrics.share_rate * 100).toFixed(2)}%`} icon={Share2} accent="blue" />
+      <MetricCard label="爆款作品" value={data.metrics.viral_works_count} icon={Gauge} accent="emerald" />
+    </section>
+    <Panel title="账号健康度" description={`当前按 ${data.health.available_weight}% 可用真实维度归一化评分`}>
+      <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+        <div className="grid place-items-center rounded-xl bg-studio-surface p-6"><strong className="text-5xl text-studio-cyan">{data.health.score}</strong><span className="mt-2 text-sm text-studio-text-muted">{data.health.level}</span></div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">数据新鲜度</span><p className="mt-2 font-semibold">{data.health.dimensions.data_freshness.score} / 20</p></div>
+          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">30 日内容活跃度</span><p className="mt-2 font-semibold">{data.health.dimensions.content_activity.score} / 25</p></div>
+          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">互动质量</span><p className="mt-2 font-semibold">{data.health.dimensions.engagement_quality.score} / 30</p></div>
+          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">粉丝增长</span><p className="mt-2 font-semibold">{data.health.dimensions.fan_growth.score == null ? '快照不足' : `${data.health.dimensions.fan_growth.score} / 25`}</p></div>
+        </div>
+      </div>
+      {data.health.data_notes.map(note => <p key={note} className="mt-3 text-xs text-studio-text-muted">{note}</p>)}
+    </Panel>
+    <section className="grid gap-6 xl:grid-cols-[1fr_1.4fr]">
+      <Panel title="周期增长" description={`当前已有 ${data.snapshot_count} 个 douyin_daily_snapshots 真实日快照`}>
+        <div className="grid gap-4"><GrowthBlock title="近 7 天" data={data.growth_7d} /><GrowthBlock title="近 30 天" data={data.growth_30d} /></div>
+        <button type="button" onClick={() => navigate('/analytics/creator-center/trends')} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-studio-cyan"><CalendarRange className="h-4 w-4" />查看完整趋势</button>
+      </Panel>
+      <Panel title="作品表现 TOP 5" description="优先展示规则识别的爆款，再按真实表现评分排序">
+        <div className="space-y-2">
+          {data.top_works.map((work, index) => <button type="button" key={work.id} onClick={() => navigate(`/analytics/creator-center/work/${work.id}`)} className="flex w-full items-center gap-4 rounded-xl bg-studio-surface p-3 text-left transition hover:ring-1 hover:ring-studio-cyan/40">
+            <span className="w-6 text-center text-sm font-semibold text-studio-text-muted">{index + 1}</span>
+            <ImageFallback src={work.cover_url} alt={work.title} className="h-14 w-20 rounded-lg object-cover" />
+            <div className="min-w-0 flex-1"><p className="truncate font-medium">{work.title}</p><p className="mt-1 text-xs text-studio-text-muted">{work.performance.is_viral ? '爆款 · ' : ''}评分 {work.performance.score} · 播放 {formatNumber(work.play_count)}</p></div>
+            <div className="text-right"><b>{(work.performance.interaction_rate * 100).toFixed(2)}%</b><p className="text-xs text-studio-text-muted">互动率</p></div>
+          </button>)}
+          {data.top_works.length === 0 ? <p className="py-10 text-center text-sm text-studio-text-muted">尚未识别到合法抖音作品</p> : null}
+        </div>
+      </Panel>
+    </section>
+    <Panel title="最近同步" description="接口、成功作品和失败原因均由 douyin_sync_logs 记录">
+      <div className="grid gap-4 sm:grid-cols-4">
+        <MetricCard label="同步时间" value={lastLog ? formatDate(lastLog.sync_time, true) : '—'} icon={CalendarRange} />
+        <MetricCard label="接口数量" value={num(lastLog?.api_count)} icon={Activity} accent="blue" />
+        <MetricCard label="成功作品" value={num(lastLog?.success_count)} icon={Video} accent="emerald" />
+        <MetricCard label="识别失败" value={num(lastLog?.failed_count)} icon={Activity} accent="rose" />
+      </div>
+      {lastLog?.error_message ? <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-500">{String(lastLog.error_message)}</p> : null}
+    </Panel>
+  </div>;
 }

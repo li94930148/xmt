@@ -13,7 +13,7 @@ export async function grantCreatorAccountAccess(accountId: number, userId: numbe
 }
 
 export async function canManageCreatorAccount(userId: number, role: string, accountId: number) {
-  if (role === 'admin') return true;
+  if (role === 'admin' || role === 'director') return true;
   const row = await queryOne<{ allowed: number }>(`SELECT 1 allowed FROM creator_platform_accounts a LEFT JOIN creator_account_access x ON x.account_id=a.id AND x.user_id=? WHERE a.id=? AND (a.user_id=? OR x.access_level='manage')`, [userId, accountId, userId]);
   return Boolean(row);
 }

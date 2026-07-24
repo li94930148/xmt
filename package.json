@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.10.2-sync",
+  "version": "2.10.2-storage",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -63,6 +63,7 @@
     ,"verify:douyin:data": "tsx scripts/verify-douyin-data.ts"
     ,"test:creator-access-platform": "tsx scripts/creator-access-platform-test.ts"
     ,"test:creator-sync-v2102": "tsx scripts/creator-sync-v2102-contract-test.ts"
+    ,"test:v2102-storage": "tsx scripts/v2102-storage-visibility-test.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

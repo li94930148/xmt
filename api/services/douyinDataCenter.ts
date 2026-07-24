@@ -1,15 +1,52 @@
 import { queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { douyinDataNormalizer, type NormalizedDouyinContract, type NormalizedDouyinWork } from './douyinDataNormalizer.js';
 import { analyzeDouyinWorks, calculateDouyinAccountHealth, DOUYIN_OPERATIONS_FORMULAS, type DouyinMetricsWork } from './douyinOperationsAnalytics.js';
+import { resolveCoverUrl } from '../utils/coverResolver.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentIdentity = { id: number; user_id: number; platform: string; account_id: string };
 type Period = '7d' | '30d' | '90d';
+type WorksCursor = { publish_time: string; id: number };
+type AnalyzedDouyinWork = ReturnType<typeof analyzeDouyinWorks>['works'][number];
+export type DouyinWorksPage = { items: AnalyzedDouyinWork[]; next_cursor: string | null; has_more: boolean; page_size: number };
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const parse = (value: unknown): JsonRecord => { try { return typeof value === 'string' ? JSON.parse(value) as JsonRecord : value && typeof value === 'object' ? value as JsonRecord : {}; } catch { return {}; } };
 const isoDate = (value: string) => value.slice(0, 10);
 const days = (period: Period) => ({ '7d': 7, '30d': 30, '90d': 90 })[period];
+
+const encodeCursor = (cursor: WorksCursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
+function decodeCursor(value?: string): WorksCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<WorksCursor>;
+    return typeof parsed.publish_time === 'string' && Number.isInteger(parsed.id) ? { publish_time: parsed.publish_time, id: Number(parsed.id) } : null;
+  } catch { return null; }
+}
+
+async function resolveWorkCovers<T extends DouyinMetricsWork>(account: Record<string, unknown>, works: T[]): Promise<Array<T & { cover_url: string }>> {
+  if (!works.length) return [];
+  const contentIds = works.map(work => number(work.content_id)).filter(id => id > 0);
+  const itemIds = works.map(work => String(work.aweme_id || '')).filter(Boolean);
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (contentIds.length) {
+    clauses.push(`id IN (${contentIds.map(() => '?').join(',')})`);
+    params.push(...contentIds);
+  }
+  const creatorAccountId = number(account.creator_account_id);
+  if (creatorAccountId && itemIds.length) {
+    clauses.push(`(account_id=? AND platform='douyin' AND platform_item_id IN (${itemIds.map(() => '?').join(',')}))`);
+    params.push(creatorAccountId, ...itemIds);
+  }
+  const candidates = clauses.length ? await queryAll<Record<string, unknown>>(`SELECT id,platform_item_id,cover_url,raw_json FROM creator_content_items WHERE ${clauses.join(' OR ')}`, params) : [];
+  const byId = new Map(candidates.map(item => [number(item.id), item]));
+  const byPlatformId = new Map(candidates.map(item => [String(item.platform_item_id || ''), item]));
+  return works.map(work => {
+    const creator = byId.get(number(work.content_id)) || byPlatformId.get(String(work.aweme_id || ''));
+    return { ...work, cover_url: resolveCoverUrl({ douyinCoverUrl: work.cover_url, creatorCoverUrl: creator?.cover_url, creatorRawJson: creator?.raw_json }) };
+  });
+}
 
 function workAnalysis(work: NormalizedDouyinWork, medianPlay: number) {
   const interactions = work.like_count + work.comment_count + work.share_count + work.collect_count;
@@ -191,7 +228,7 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     baselines: analyzed.baselines,
     growth_7d: growth(latest, previous(7)),
     growth_30d: growth(latest, previous(30)),
-    top_works: rankedWorks.slice(0, 5),
+    top_works: await resolveWorkCovers(account, rankedWorks.slice(0, 5)),
     snapshot_count: snapshots.length,
     metric_sources: {
       account: 'douyin_accounts',
@@ -203,19 +240,37 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   };
 }
 
-export async function getDouyinWorks(creatorAccountId: number, sort = 'latest') {
+export async function getDouyinWorks(creatorAccountId: number, sort = 'latest', requestedLimit = 20, cursorValue?: string): Promise<DouyinWorksPage> {
   const account = await accountForScope(creatorAccountId);
-  if (!account) return [];
+  const limit = Math.min(100, Math.max(1, Math.floor(requestedLimit) || 20));
+  if (!account) return { items: [], next_cursor: null, has_more: false, page_size: limit };
   const works = await queryAll<DouyinMetricsWork>(`SELECT w.*,a.content_category,a.content_json FROM douyin_works w LEFT JOIN douyin_analysis_records a ON a.id=(SELECT id FROM douyin_analysis_records WHERE work_id=w.id ORDER BY snapshot_time DESC,id DESC LIMIT 1) WHERE w.account_id=?`, [account.id]);
   const analyzed = analyzeDouyinWorks(works).works.map(work => ({ ...work, viral_tag: work.performance.is_viral ? '爆款' : '' }));
+  const stableNewestFirst = (left: typeof analyzed[number], right: typeof analyzed[number]) =>
+    new Date(String(right.publish_time || 0)).getTime() - new Date(String(left.publish_time || 0)).getTime()
+    || number(right.id) - number(left.id);
   const comparators: Record<string, (left: typeof analyzed[number], right: typeof analyzed[number]) => number> = {
-    plays: (left, right) => number(right.play_count) - number(left.play_count),
-    interactions: (left, right) => right.performance.interaction_rate - left.performance.interaction_rate,
-    likes: (left, right) => number(right.like_count) - number(left.like_count),
-    score: (left, right) => right.performance.score - left.performance.score,
-    latest: (left, right) => new Date(String(right.publish_time || 0)).getTime() - new Date(String(left.publish_time || 0)).getTime(),
+    plays: (left, right) => number(right.play_count) - number(left.play_count) || stableNewestFirst(left, right),
+    interactions: (left, right) => right.performance.interaction_rate - left.performance.interaction_rate || stableNewestFirst(left, right),
+    likes: (left, right) => number(right.like_count) - number(left.like_count) || stableNewestFirst(left, right),
+    score: (left, right) => right.performance.score - left.performance.score || stableNewestFirst(left, right),
+    latest: stableNewestFirst,
   };
-  return analyzed.sort(comparators[sort] || comparators.latest);
+  const ordered = analyzed.sort(comparators[sort] || comparators.latest);
+  const cursor = decodeCursor(cursorValue);
+  if (cursorValue && !cursor) throw Object.assign(new Error('作品分页 cursor 无效'), { statusCode: 400 });
+  const start = cursor ? ordered.findIndex(work => number(work.id) === cursor.id && String(work.publish_time || '') === cursor.publish_time) + 1 : 0;
+  if (cursor && start === 0) throw Object.assign(new Error('作品分页 cursor 已失效'), { statusCode: 400 });
+  const selected = ordered.slice(start, start + limit);
+  const items = await resolveWorkCovers(account, selected);
+  const hasMore = start + selected.length < ordered.length;
+  const last = selected.at(-1);
+  return {
+    items,
+    next_cursor: hasMore && last ? encodeCursor({ publish_time: String(last.publish_time || ''), id: number(last.id) }) : null,
+    has_more: hasMore,
+    page_size: limit,
+  };
 }
 
 export async function getDouyinWorkDetail(creatorAccountId: number, workId: number) {
@@ -229,8 +284,9 @@ export async function getDouyinWorkDetail(creatorAccountId: number, workId: numb
   const analyzed = analyzeDouyinWorks(works);
   const work = analyzed.works.find(item => number(item.id) === workId);
   if (!work) return null;
+  const [coveredWork] = await resolveWorkCovers(account, [work]);
   return {
-    work: { ...work, viral_tag: work.performance.is_viral ? '爆款' : '' },
+    work: { ...coveredWork, viral_tag: work.performance.is_viral ? '爆款' : '' },
     snapshots,
     analysis: analysis ? { ...analysis, content: parse(analysis.content_json), ai: parse(analysis.ai_analysis_json) } : null,
     performance: work.performance,

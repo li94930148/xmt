@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.10.2-storage',
+    date: '2026-07-24',
+    title: '数据可见性治理与作品库展示优化',
+    changes: [
+      { type: 'improvement', description: 'Creator 数据查看权限与管理权限分离，具有查看权限的成员可读取已标准化同步的公开平台账号数据。' },
+      { type: 'security', description: '同步、绑定、授权管理仍仅限 admin 与 director，普通成员的操作权限不放大。' },
+      { type: 'improvement', description: '作品库增加默认 20 条、最大 100 条的 cursor 分页和下一页加载。' },
+      { type: 'fix', description: '统一解析 douyin_works、creator_content_items 与 raw_json 中的封面，并为作品库和驾驶舱 TOP5 增加懒加载失败占位。' },
+    ],
+  },
+  {
     version: '2.10.2-sync',
     date: '2026-07-24',
     title: '抖音服务端同步契约升级',

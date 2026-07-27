@@ -6,6 +6,10 @@ import { getDatabasePath, getDatabaseUrl } from './path';
 export const dbPath = getDatabasePath();
 const dbDir = path.dirname(dbPath);
 
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 // libsql 客户端 - 直接读写 SQLite 文件，不需要手动持久化
 export const db = createClient({
   url: getDatabaseUrl(),

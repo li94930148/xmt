@@ -19,7 +19,8 @@ XMT 将选题策划、内容创作、拍摄排期、发布执行、数据复盘�
 - [环境变量](#环境变量)
 - [常用命令](#常用命令)
 - [目录结构](#目录结构)
-- [默认开发账号](#默认开发账号)
+- [Creator Agent](#creator-agent)
+- [开发账号安全](#开发账号安全)
 - [API 与实时协作](#api-与实时协作)
 - [测试与质量检查](#测试与质量检查)
 - [生产部署](#生产部署)
@@ -257,12 +258,22 @@ flowchart TB
 
 建议准备以下环境：
 
-- Node.js 22 或更高版本
+- Node.js 22 LTS
 - npm 10 或更高版本
 - Git
 - Windows、macOS 或 Linux
 
 > GitHub Actions 当前以 Node.js 22 为主要验证环境。生产环境使用其他 Node.js 版本前，建议先完成完整构建和冒烟测试。
+
+Apple Silicon Mac 应使用原生 arm64 Node.js，不要复用 Windows 或 Intel Mac 生成的 `node_modules`。可在安装依赖前确认运行架构：
+
+```bash
+node --version
+npm --version
+node -p "process.arch"
+```
+
+最后一条命令应输出 `arm64`。
 
 ### 1. 克隆项目
 
@@ -277,11 +288,7 @@ cd xmt
 npm ci
 ```
 
-开发过程中需要更新依赖时，也可以使用：
-
-```bash
-npm install
-```
+日常初始化优先使用 `npm ci`，以 `package-lock.json` 锁定的版本为准。只有明确要调整依赖并同步更新锁文件时才使用 `npm install`。
 
 ### 3. 创建环境变量
 
@@ -297,11 +304,18 @@ Windows PowerShell：
 Copy-Item .env.example .env
 ```
 
-至少修改 JWT 密钥：
+本地开发建议至少明确以下配置，并为每台开发机生成独立的随机 JWT 密钥：
 
 ```env
-JWT_SECRET=请替换为足够长的随机字符串
+HOST=127.0.0.1
+PORT=3001
+JWT_SECRET=<local-random-secret>
+XMT_DB_PATH=data/xmt.db
+DOUYIN_SYNC_SCHEDULER_ENABLED=false
+SOCIAL_INGESTION_SCHEDULER_ENABLED=false
 ```
+
+`.env` 仅保存在本机，不得提交到 Git。未配置平台密钥时，应保持外部同步、定时采集和自动调度关闭。
 
 ### 4. 启动开发环境
 
@@ -313,7 +327,7 @@ npm run dev
 
 | 服务 | 地址 |
 |---|---|
-| 前端 | `http://127.0.0.1:5174` |
+| 前端 | `http://localhost:5174` |
 | 后端 | `http://127.0.0.1:3001` |
 | 健康检查 | `http://127.0.0.1:3001/api/health` |
 
@@ -377,6 +391,8 @@ DATABASE_URL=file:/absolute/path/to/xmt.db
 ```
 
 生产环境建议使用绝对路径，并将数据库文件放在独立、可备份的持久化目录中。
+
+本地开发数据库应是独立工作副本。首次启动可由应用创建 `data/xmt.db`，并执行现有的幂等初始化、迁移和启动备份。不要让开发环境直接打开下载目录中的原始数据库或生产数据库；迁移前先保留不可变备份，数据库文件、WAL、SHM 和备份均不得提交到 Git。
 
 ### 跨域配置
 
@@ -449,6 +465,7 @@ DOUYIN_SYNC_SCHEDULER_ENABLED=false
 
 ```text
 xmt/
+├── agent/                     # Creator Agent 独立桌面端项目
 ├── api/                       # Express 后端
 │   ├── collaboration/         # 协作运行时与 Yjs 逻辑
 │   ├── database/              # 数据库连接、初始化和迁移
@@ -458,8 +475,7 @@ xmt/
 │   ├── utils/                 # 后端工具
 │   ├── app.ts                 # Express 与 Socket.IO 应用装配
 │   └── server.ts              # 服务启动入口
-├── data/
-│   └── xmt.db                 # 默认 SQLite 数据库
+├── data/                      # 本地 SQLite 与启动备份（不纳入 Git）
 ├── deploy/                    # 生产部署脚本与说明
 ├── docs/                      # 项目设计、架构和开发文档
 ├── public/                    # 静态资源
@@ -493,20 +509,23 @@ xmt/
 
 ---
 
-## 默认开发账号
+## Creator Agent
 
-数据库首次初始化且不存在对应用户时，开发环境可能自动创建以下账号：
+`agent/` 是独立的 Creator Agent 桌面端项目，不是主 Web 项目的运行依赖。当前实现包含 `chrome.exe`、PowerShell、`taskkill`、Windows DPAPI 和 NSIS portable 等 Windows 专属能力，因此目前只支持 Windows。
 
-| 用户名 | 默认密码 | 角色 |
-|---|---|---|
-| `admin` | `admin123` | 管理员 |
-| `director` | `director123` | 负责人 |
-| `member1` | `member123` | 成员 |
-| `member2` | `member123` | 成员 |
+在 macOS 上开发和运行主 Web 项目时：
 
-> **安全警告：** 默认账号只应在本地开发或临时测试环境中使用。首次登录后应立即修改密码。生产环境不得继续使用默认口令。
+- 不需要安装 `agent/` 下的依赖
+- 不要尝试复用其 Windows 二进制文件或打包流程
+- Creator Agent 的 macOS 支持应作为独立适配任务处理，并单独验证浏览器、凭据存储、进程管理和安装包方案
 
-默认账号是否创建，以当前数据库初始化逻辑为准。
+---
+
+## 开发账号安全
+
+数据库初始化逻辑可能为全新的本地数据库创建开发账号，具体行为以当前源码为准。有效的本地登录信息应通过项目负责人提供的安全渠道获取，不在 README、提交记录或聊天记录中保存明文密码。
+
+首次登录后应立即修改临时口令；生产环境不得使用开发账号或默认口令。不要通过读取密码散列、绕过认证或批量试探账号来获取访问权限。
 
 ---
 
@@ -543,8 +562,8 @@ xmt/
 curl -X POST http://127.0.0.1:3001/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "admin",
-    "password": "admin123"
+    "username": "<local-username>",
+    "password": "<local-password>"
   }'
 ```
 
@@ -682,20 +701,9 @@ npm run check
 npm run build
 ```
 
-### 启动后端
+### 启动与进程管理
 
-```bash
-npm run start
-```
-
-生产环境可由 PM2 或 systemd 托管。
-
-PM2 示例：
-
-```bash
-pm2 start ecosystem.config.cjs
-pm2 save
-```
+生产环境的启动、PM2 或 systemd 配置必须以目标服务器的受控部署方案为准，不要把本地开发命令直接用于生产。执行前请依次查看 `docs/上线前检查清单.md`、`docs/上线回滚方案.md` 以及 `deploy/` 中与目标环境对应的脚本和示例配置。
 
 ### Caddy 反向代理
 
@@ -723,16 +731,9 @@ pm2 save
 
 ### 数据库备份
 
-SQLite 数据库是当前系统最重要的生产资产。任何部署、迁移、清理或大规模数据修复前，都应优先完成数据库备份。
+SQLite 数据库是当前系统最重要的生产资产。任何部署、迁移、清理或大规模数据修复前，都应使用经过验证的备份流程；可参考 `deploy/linux/backup-xmt.sh`，但必须先核对目标服务器路径、权限和运行状态。
 
-示例：
-
-```bash
-mkdir -p backups
-cp data/xmt.db "backups/xmt-$(date +%Y%m%d-%H%M%S).db"
-```
-
-数据库启用 WAL 时，还应根据实际运行状态正确处理 `-wal` 和 `-shm` 文件，避免仅复制主文件造成备份不完整。
+数据库启用 WAL 时，不能在未知运行状态下只复制主文件，否则备份可能不完整。不得用本地数据库覆盖生产数据库，也不得把生产数据库下载到仓库工作区后直接运行。
 
 ---
 
@@ -811,11 +812,16 @@ docs/文档索引.md
 
 ```text
 .env
+data/
 *.db
 *.db-wal
 *.db-shm
+*.db.backup*
 certs/
 backups/
+node_modules/
+dist/
+.DS_Store
 生产日志
 访问令牌
 平台密钥

@@ -389,7 +389,7 @@ async function initTables() {
     `ALTER TABLE douyin_accounts ADD COLUMN auth_type TEXT NOT NULL DEFAULT 'oauth'`,
     `ALTER TABLE douyin_accounts ADD COLUMN business_token TEXT`,
     `ALTER TABLE douyin_accounts ADD COLUMN business_scope TEXT`,
-  ]) { try { await db.execute(statement); } catch {} }
+  ]) { try { await db.execute(statement); } catch { /* 字段已存在时跳过 */ } }
 
   // The prior douyin_videos requires snapshot_id and is a crawl-only contract.
   // Rename, do not drop, then create the OpenAPI-owned video table.
@@ -516,6 +516,39 @@ async function initTables() {
     UNIQUE(user_id, platform, device_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`);
+  for (const statement of [
+    `ALTER TABLE creator_agents ADD COLUMN device_name TEXT`,
+    `ALTER TABLE creator_agents ADD COLUMN os TEXT`,
+    `ALTER TABLE creator_agents ADD COLUMN agent_version TEXT`,
+    `ALTER TABLE creator_agents ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE creator_agents ADD COLUMN browser_login_status TEXT NOT NULL DEFAULT 'unknown'`,
+    `ALTER TABLE creator_agents ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`,
+    `ALTER TABLE creator_agents ADD COLUMN last_heartbeat_at DATETIME`,
+    `ALTER TABLE creator_agents ADD COLUMN last_success_sync_at DATETIME`,
+    `ALTER TABLE creator_agents ADD COLUMN last_attempt_sync_at DATETIME`,
+    `ALTER TABLE creator_agents ADD COLUMN browser_type TEXT`,
+    `ALTER TABLE creator_agents ADD COLUMN browser_version TEXT`,
+    `ALTER TABLE creator_agents ADD COLUMN browser_engine TEXT`,
+    `ALTER TABLE creator_agents ADD COLUMN browser_runtime TEXT`,
+    `ALTER TABLE creator_agents ADD COLUMN browser_session_mode TEXT`,
+    `ALTER TABLE creator_agents ADD COLUMN browser_compatibility TEXT NOT NULL DEFAULT 'not_tested'`,
+  ]) { try { await db.execute(statement); } catch { /* 字段已存在时跳过 */ } }
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_agent_binding_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,platform TEXT NOT NULL DEFAULT 'douyin',account_id TEXT NOT NULL,
+    code_hash TEXT NOT NULL UNIQUE,expires_at DATETIME NOT NULL,used_at DATETIME,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_creator_agent_binding_expiry ON creator_agent_binding_codes(expires_at,used_at)`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS creator_agent_nonces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id INTEGER NOT NULL,
+    nonce TEXT NOT NULL,
+    request_time DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(agent_id, nonce),
+    FOREIGN KEY (agent_id) REFERENCES creator_agents(id) ON DELETE CASCADE
+  )`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_creator_agent_nonces_created ON creator_agent_nonces(created_at)`);
   await db.execute(`CREATE TABLE IF NOT EXISTS creator_data_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -562,6 +595,7 @@ async function initTables() {
   for (const statement of [
     `ALTER TABLE douyin_accounts ADD COLUMN douyin_uid TEXT`,
     `ALTER TABLE douyin_accounts ADD COLUMN fans_count INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE douyin_accounts ADD COLUMN fans_count_available INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE douyin_accounts ADD COLUMN following_count INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE douyin_accounts ADD COLUMN works_count INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE douyin_accounts ADD COLUMN total_likes INTEGER NOT NULL DEFAULT 0`,
@@ -590,6 +624,9 @@ async function initTables() {
     id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,snapshot_date DATE NOT NULL,fans_count INTEGER NOT NULL DEFAULT 0,works_count INTEGER NOT NULL DEFAULT 0,
     play_count INTEGER NOT NULL DEFAULT 0,like_count INTEGER NOT NULL DEFAULT 0,comment_count INTEGER NOT NULL DEFAULT 0,share_count INTEGER NOT NULL DEFAULT 0,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(account_id,snapshot_date),FOREIGN KEY(account_id) REFERENCES douyin_accounts(id) ON DELETE CASCADE)`);
+  try { await db.execute(`ALTER TABLE douyin_daily_snapshots ADD COLUMN fans_count_available INTEGER NOT NULL DEFAULT 0`); } catch { /* 字段已存在时跳过 */ }
+  await db.execute(`UPDATE douyin_accounts SET fans_count_available=1 WHERE fans_count>0 AND fans_count_available=0`);
+  await db.execute(`UPDATE douyin_daily_snapshots SET fans_count_available=1 WHERE fans_count>0 AND fans_count_available=0`);
   await db.execute(`CREATE TABLE IF NOT EXISTS douyin_work_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,work_id INTEGER NOT NULL,snapshot_time DATETIME NOT NULL,play_count INTEGER NOT NULL DEFAULT 0,like_count INTEGER NOT NULL DEFAULT 0,comment_count INTEGER NOT NULL DEFAULT 0,
     share_count INTEGER NOT NULL DEFAULT 0,collect_count INTEGER NOT NULL DEFAULT 0,completion_rate REAL NOT NULL DEFAULT 0,interaction_rate REAL NOT NULL DEFAULT 0,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

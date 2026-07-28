@@ -206,11 +206,12 @@ export class CreatorAnalyticsService {
   }
 
   async fans(accountId: number, compareDays = 30) {
-    const current = await queryOne<JsonRecord>('SELECT snapshot_time,age_json,gender_json,city_json,province_json,interest_json,active_time_json FROM creator_fans_portraits WHERE account_id=? ORDER BY snapshot_time DESC LIMIT 1', [accountId]);
+    const availableFilter = `(age_json NOT IN ('','{}','null') OR gender_json NOT IN ('','{}','null') OR city_json NOT IN ('','{}','null') OR province_json NOT IN ('','{}','null') OR interest_json NOT IN ('','{}','null') OR active_time_json NOT IN ('','{}','null'))`;
+    const current = await queryOne<JsonRecord>(`SELECT snapshot_time,age_json,gender_json,city_json,province_json,interest_json,active_time_json FROM creator_fans_portraits WHERE account_id=? AND ${availableFilter} ORDER BY snapshot_time DESC LIMIT 1`, [accountId]);
     const compareTime = current ? new Date(timestamp(current.snapshot_time) - compareDays * 86400000).toISOString() : '';
-    const previous = current ? await queryOne<JsonRecord>('SELECT snapshot_time,age_json,gender_json,city_json,province_json,interest_json,active_time_json FROM creator_fans_portraits WHERE account_id=? AND snapshot_time<=? ORDER BY snapshot_time DESC LIMIT 1', [accountId, compareTime]) : null;
+    const previous = current ? await queryOne<JsonRecord>(`SELECT snapshot_time,age_json,gender_json,city_json,province_json,interest_json,active_time_json FROM creator_fans_portraits WHERE account_id=? AND snapshot_time<=? AND ${availableFilter} ORDER BY snapshot_time DESC LIMIT 1`, [accountId, compareTime]) : null;
     const map = (row?: JsonRecord) => row ? { snapshot_time: row.snapshot_time, age: parse(row.age_json), gender: parse(row.gender_json), city: parse(row.city_json), province: parse(row.province_json), interest: parse(row.interest_json), active_time: parse(row.active_time_json) } : null;
-    return { compare_days: compareDays, current: map(current || undefined), previous: map(previous || undefined) };
+    return { compare_days: compareDays, current: map(current || undefined), previous: map(previous || undefined), data_status: current ? 'ready' : 'unavailable', data_source: 'douyin_creator_center_collection', missing_fields: current ? [] : ['fan_portrait'], warnings: current ? [] : ['已收到粉丝模块快照，但当前采集响应没有可用画像字段。需要获得 fans.data.bind 等相应数据权限后重新采集。'] };
   }
 
   async generateReport(accountId: number, type: ReportType) {

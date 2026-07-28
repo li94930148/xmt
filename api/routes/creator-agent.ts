@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { acceptCreatorAgentReport, getCreatorCenterData, registerCreatorAgent } from '../services/creatorAgent.js';
+import { acceptCreatorAgentReport, bindCreatorAgent, createCreatorAgentBindingCode, getCreatorCenterData, heartbeatCreatorAgent, registerCreatorAgent } from '../services/creatorAgent.js';
 import { getUnifiedCreatorCenterData } from '../services/creatorDataCenter.js';
 import { acceptCreatorDataSync } from '../services/creatorSyncV291.js';
 import { creatorInsightService, getCreatorInsights } from '../services/creatorInsights.js';
@@ -9,10 +9,12 @@ import { canManageCreatorData, resolveManageScope, resolveViewScope } from '../s
 import { requirePermission } from '../middleware/permissions.js';
 import { creatorAnalyticsService, type ReportType } from '../services/creatorAnalytics.js';
 import { getDouyinDashboard, getDouyinSyncLogs, getDouyinTrends, getDouyinWorkDetail, getDouyinWorkReview, getDouyinWorks } from '../services/douyinDataCenter.js';
+import { queryAll } from '../database/utils.js';
 const router=express.Router();
 const requestedPlatformUid = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : undefined;
 const resolveCreatorViewScope = (role: string, platformUid?: string) => resolveViewScope(role,'douyin',platformUid);
 const resolveCreatorManageScope = (role: string, platformUid?: string) => resolveManageScope(role,'douyin',platformUid);
+router.get('/status',authenticate,requirePermission('creator:data:view'),async(_req,res)=>{try{const agents=await queryAll<Record<string,unknown>>(`SELECT id,device_id,device_name,os,agent_version,protocol_version,browser_login_status,browser_type,browser_version,browser_engine,browser_runtime,browser_session_mode,browser_compatibility,status,last_heartbeat_at,last_success_sync_at,last_attempt_sync_at,account_id,CASE WHEN last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) >= datetime('now','-2 minutes') THEN 1 ELSE 0 END AS online FROM creator_agents WHERE platform='douyin' ORDER BY COALESCE(last_heartbeat_at,last_active_at) DESC`);res.json({agents:agents.map(agent=>({...agent,device_id:String(agent.device_id||'').slice(0,8)})),protocol_version:1});}catch(error){res.status(500).json({message:error instanceof Error?error.message:'Agent 状态加载失败'});}});
 router.get('/douyin/dashboard',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});const data=await getDouyinDashboard(scope.id);if(!data)return res.status(404).json({message:'该账号尚未完成标准化同步'});res.json({...data,access_level:scope.access_level});}catch(error){res.status(500).json({message:error instanceof Error?error.message:'抖音驾驶舱加载失败'});}});
 router.get('/douyin/works',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});res.json(await getDouyinWorks(scope.id,String(req.query.sort||'latest'),Number(req.query.limit)||20,requestedPlatformUid(req.query.cursor)));}catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({message:error instanceof Error?error.message:'抖音作品库加载失败'});}});
 router.get('/douyin/works/:id/review',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});const data=await getDouyinWorkReview(scope.id,Number(req.params.id));if(!data)return res.status(404).json({message:'作品不存在或不在查看范围内'});res.json(data);}catch(error){res.status(500).json({message:error instanceof Error?error.message:'作品复盘加载失败'});}});
@@ -23,12 +25,15 @@ router.post('/register',authenticate,requirePermission('creator:data:manage'),as
   try{if(!canManageCreatorData(req.user!.role))return res.status(403).json({success:false,message:'仅管理员或负责人可绑定 Creator Agent'});res.status(201).json(await registerCreatorAgent(req.user!.id,String(req.body?.platform||''),String(req.body?.account_id||''),String(req.body?.device_id||'')));}
   catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'注册失败'});}
 });
+router.post('/binding-codes',authenticate,requirePermission('creator:data:manage'),async(req,res)=>{try{if(!canManageCreatorData(req.user!.role))return res.status(403).json({message:'仅管理员或负责人可创建设备绑定码'});res.status(201).json(await createCreatorAgentBindingCode(req.user!.id,String(req.body?.account_id||''),Number(req.body?.ttl_minutes)||10));}catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({message:error instanceof Error?error.message:'绑定码创建失败'});}});
+router.post('/bind',async(req,res)=>{try{res.status(201).json(await bindCreatorAgent(String(req.body?.binding_code||''),req.body?.device||{}));}catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({message:error instanceof Error?error.message:'设备绑定失败'});}});
 router.post('/report',async(req,res)=>{
   try{
     if(process.env.NODE_ENV==='production'&&!req.secure)return res.status(426).json({success:false,message:'Creator Agent 仅允许通过 HTTPS 上传'});
     res.status(201).json(await acceptCreatorAgentReport(req.body||{},req.header('authorization')));
   }catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'上传失败'});}
 });
+router.post('/heartbeat',async(req,res)=>{try{res.json(await heartbeatCreatorAgent(req.body||{},req.header('authorization')));}catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'心跳失败'});}});
 router.post('/data-sync',async(req,res)=>{
   try{
     if(process.env.NODE_ENV==='production'&&!req.secure)return res.status(426).json({success:false,message:'Creator Agent 仅允许通过 HTTPS 上传'});

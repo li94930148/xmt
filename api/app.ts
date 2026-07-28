@@ -36,7 +36,6 @@ import calendarRoutes from './routes/calendar.js'
 import exportRoutes from './routes/export.js'
 import douyinRoutes from './routes/douyin.js'
 import creatorAgentRoutes from './routes/creator-agent.js'
-import { startDouyinDailyScheduler } from './services/douyin/scheduler.js'
 // Legacy social-review routes are intentionally not mounted during the Douyin OpenAPI migration.
 import { isRemoteLoginSessionOwner } from './services/social-review/serverBrowserService.js'
 import backupRoutes from './routes/backup.js'
@@ -252,8 +251,8 @@ const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
 }
 
 app.use('/api', cors(corsOptions))
-app.use(express.json({ limit: '10mb', verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
-app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+app.use(express.json({ limit: '12mb', verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
+app.use(express.urlencoded({ extended: true, limit: '12mb' }))
 
 // 生产环境：服务前端静态文件
 const distPath = path.join(__dirname, '..', 'dist')
@@ -341,12 +340,13 @@ app.use(
   },
 )
 
-app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
-  void error
+app.use((error: Error & { status?: number; statusCode?: number; type?: string }, req: Request, res: Response, next: NextFunction) => {
+  const payloadTooLarge = error.type === 'entity.too.large' || error.status === 413 || error.statusCode === 413
   void next
-  res.status(500).json({
+  res.status(payloadTooLarge ? 413 : 500).json({
     success: false,
-    error: 'Server internal error',
+    error: payloadTooLarge ? 'Payload too large' : 'Server internal error',
+    message: payloadTooLarge ? '同步数据包超过 12MB 限制' : undefined,
   })
 })
 
@@ -542,9 +542,6 @@ export async function startServer() {
   setInterval(() => {
     cleanupInactiveRooms()
   }, 60 * 1000)
-
-  // Explicitly disabled unless DOUYIN_SYNC_SCHEDULER_ENABLED=true in deployment.
-  startDouyinDailyScheduler()
 
   // 启动时自动备份一次
   try {

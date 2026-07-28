@@ -5,6 +5,7 @@ export type NormalizedDouyinAccount = {
   nickname: string;
   avatar: string;
   fans_count: number;
+  fans_count_available: boolean;
   following_count: number;
   works_count: number;
   total_likes: number;
@@ -72,6 +73,10 @@ const number = (value: unknown) => {
 const first = (...values: unknown[]) => values.find(value => value !== undefined && value !== null && value !== '');
 const nested = (source: JsonRecord, path: string) => path.split('.').reduce<unknown>((value, key) => record(value)[key], source);
 const firstPath = (source: JsonRecord, paths: string[]) => first(...paths.map(path => nested(source, path)));
+const hasPathValue = (source: JsonRecord, paths: string[]) => paths.some(path => {
+  const value = nested(source, path);
+  return value !== undefined && value !== null && value !== '' && Number.isFinite(Number(typeof value === 'string' ? value.replace(/,/g, '') : value));
+});
 
 function imageUrl(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -241,6 +246,7 @@ export class DouyinDataNormalizer {
     const collectionMode = payload.collection_mode === 'discover' || payload.collection_mode === 'metrics_refresh' ? payload.collection_mode : 'full_snapshot';
     const snapshotId = text(payload.snapshot_id || record(payload.sync_task).snapshot_id);
     if (!snapshotId) throw Object.assign(new Error('v2.10.2 缺少 snapshot_id'), { statusCode: 400 });
+    const fanPaths = ['fans_count', 'follower_count', 'followers'];
     return {
       contract_version: '2.10.2',
       collection_mode: collectionMode,
@@ -249,7 +255,8 @@ export class DouyinDataNormalizer {
         douyin_uid: uid,
         nickname: text(firstPath(suppliedAccount, ['nickname', 'nick_name', 'account_name'])),
         avatar: imageUrl(firstPath(suppliedAccount, ['avatar', 'avatar_thumb', 'avatar_url'])),
-        fans_count: number(firstPath(suppliedAccount, ['fans_count', 'follower_count', 'followers'])),
+        fans_count: number(firstPath(suppliedAccount, fanPaths)),
+        fans_count_available: hasPathValue(suppliedAccount, fanPaths),
         following_count: number(firstPath(suppliedAccount, ['following_count', 'follow_count', 'following'])),
         works_count: number(firstPath(suppliedAccount, ['works_count', 'aweme_count', 'video_count'])) || normalizedWorks.length,
         total_likes: number(firstPath(suppliedAccount, ['total_likes', 'total_favorited', 'favoriting_count'])),
@@ -285,12 +292,14 @@ export class DouyinDataNormalizer {
     const uid = text(fromAccount(['douyin_uid', 'platform_uid', 'sec_uid', 'uid', 'user_id'])) || fallbackUid;
     const avatar = imageUrl(fromAccount(['avatar', 'avatar_thumb', 'avatar_medium', 'avatar_url']));
     const normalizedWorks = [...works.values()];
+    const fanPaths = ['fans_count', 'follower_count', 'followers'];
     return {
       account: {
         douyin_uid: uid,
         nickname: text(fromAccount(['nickname', 'nick_name', 'account_name', 'user_name'])),
         avatar,
-        fans_count: number(fromAccount(['fans_count', 'follower_count', 'followers'])),
+        fans_count: number(fromAccount(fanPaths)),
+        fans_count_available: hasPathValue(suppliedAccount, fanPaths) || hasPathValue(discoveredAccount, fanPaths),
         following_count: number(fromAccount(['following_count', 'follow_count', 'following'])),
         works_count: number(fromAccount(['works_count', 'aweme_count', 'video_count'])) || normalizedWorks.length,
         total_likes: number(fromAccount(['total_likes', 'total_favorited', 'favoriting_count'])),

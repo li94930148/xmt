@@ -77,7 +77,6 @@ const Inspirations = lazyWithRetry(() => import('@/pages/Inspirations'), 'Inspir
 const Achievements = lazyWithRetry(() => import('@/pages/Achievements'), 'Achievements');
 const ActivityLog = lazyWithRetry(() => import('@/pages/ActivityLog'), 'ActivityLog');
 const DouyinAnalytics = lazyWithRetry(() => import('@/pages/DouyinAnalytics'), 'DouyinAnalytics');
-const DouyinOperationsCenter = lazyWithRetry(() => import('@/pages/DouyinOperationsCenter'), 'DouyinOperationsCenter');
 const CreatorDashboard = lazyWithRetry(() => import('@/pages/creator-center/CreatorDashboard'), 'CreatorDashboard');
 const CreatorWorks = lazyWithRetry(() => import('@/pages/creator-center/CreatorWorks'), 'CreatorWorks');
 const CreatorWorkDetail = lazyWithRetry(() => import('@/pages/creator-center/CreatorWorkDetail'), 'CreatorWorkDetail');
@@ -159,8 +158,8 @@ export default function App() {
                   <Route path="/analytics" element={<Analytics />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['creator:data:view']} />}>
-                  <Route path="/douyin-operations" element={<DouyinOperationsCenter />} />
-                  <Route path="/douyin-operations/:section" element={<DouyinOperationsCenter />} />
+                  <Route path="/douyin-operations" element={<CreatorDashboard />} />
+                  <Route path="/douyin-operations/:section" element={<CreatorDashboard />} />
                   <Route path="/douyin-creator-center" element={<CreatorDashboard />} />
                   <Route path="/analytics/creator-center" element={<CreatorDashboard />} />
                   <Route path="/analytics/creator-center/works" element={<CreatorWorks />} />

@@ -9,7 +9,5 @@ export function getDouyinConfig() {
     clientSecret: process.env.DOUYIN_CLIENT_SECRET || '',
     redirectUri: process.env.DOUYIN_REDIRECT_URI || '',
     webhookSecret: process.env.DOUYIN_WEBHOOK_SECRET || '',
-    videoListUrl: process.env.DOUYIN_VIDEO_LIST_URL || '',
-    videoStatisticsUrl: process.env.DOUYIN_VIDEO_STATISTICS_URL || '',
   };
 }

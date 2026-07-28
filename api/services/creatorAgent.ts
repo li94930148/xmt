@@ -24,6 +24,9 @@ type Payload = {
   content_analysis?: unknown;
   fans?: unknown;
 };
+const bindingHash=(code:string)=>crypto.createHash('sha256').update(code).digest('hex');
+export async function createCreatorAgentBindingCode(userId:number,accountId:string,ttlMinutes=10){if(!accountId)throw Object.assign(new Error('account_id 必填'),{statusCode:400});const code=crypto.randomBytes(18).toString('base64url');const expiresAt=new Date(Date.now()+Math.max(1,Math.min(30,ttlMinutes))*60_000).toISOString();await executeInsert('INSERT INTO creator_agent_binding_codes(user_id,platform,account_id,code_hash,expires_at)VALUES(?,?,?,?,?)',[userId,'douyin',accountId,bindingHash(code),expiresAt]);return{binding_code:code,expires_at:expiresAt,one_time:true};}
+export async function bindCreatorAgent(code:string,device:Record<string,unknown>){if(!code)throw Object.assign(new Error('绑定码必填'),{statusCode:400});const row=await queryOne<{id:number;user_id:number;platform:string;account_id:string;expires_at:string;used_at:string|null}>('SELECT id,user_id,platform,account_id,expires_at,used_at FROM creator_agent_binding_codes WHERE code_hash=?',[bindingHash(code)]);if(!row||row.used_at||Date.parse(row.expires_at)<=Date.now())throw Object.assign(new Error('绑定码无效、已使用或已过期'),{statusCode:410});const deviceId=String(device.device_id||'');if(!deviceId)throw Object.assign(new Error('设备标识必填'),{statusCode:400});const claimed=await execute('UPDATE creator_agent_binding_codes SET used_at=CURRENT_TIMESTAMP WHERE id=? AND used_at IS NULL',[row.id]);if(claimed!==1)throw Object.assign(new Error('绑定码已被使用'),{statusCode:410});const bound=await registerCreatorAgent(row.user_id,row.platform,row.account_id,deviceId);await execute(`UPDATE creator_agents SET device_name=?,os=?,agent_version=?,protocol_version=?,browser_type=?,browser_version=?,browser_engine=?,browser_runtime=?,browser_session_mode=?,browser_compatibility=? WHERE id=?`,[String(device.device_name||''),String(device.os||''),String(device.agent_version||''),Number(device.protocol_version)||1,String(device.browser_type||''),String(device.browser_version||''),String(device.browser_engine||''),String(device.browser_runtime||''),String(device.session_mode||''),String(device.compatibility_status||'not_tested'),bound.agent_id]);return bound;}
 const key = (token: string) =>
   crypto.createHash("sha256").update(token).digest();
 const canonical = (body: Record<string, unknown>) =>
@@ -70,6 +73,14 @@ export async function registerCreatorAgent(
     account_id: accountId,
     device_id: deviceId,
   };
+}
+export async function heartbeatCreatorAgent(body:Record<string,unknown>,authorization?:string){
+  const token=authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const agent=await queryOne<AgentRow>("SELECT id,user_id,platform,account_id,token_hash FROM creator_agents WHERE id=?",[Number(body.agent_id)]);
+  if(!token||!agent||!(await bcrypt.compare(token,agent.token_hash)))throw Object.assign(new Error('Agent 身份认证失败'),{statusCode:401});
+  if(String(body.account_id||'')!==agent.account_id)throw Object.assign(new Error('Agent 账号绑定不匹配'),{statusCode:403});
+  await execute(`UPDATE creator_agents SET device_name=?,os=?,agent_version=?,protocol_version=?,browser_login_status=?,browser_type=?,browser_version=?,browser_engine=?,browser_runtime=?,browser_session_mode=?,browser_compatibility=?,last_heartbeat_at=CURRENT_TIMESTAMP,last_active_at=CURRENT_TIMESTAMP WHERE id=?`,[String(body.device_name||''),String(body.os||''),String(body.agent_version||''),Number(body.protocol_version)||1,String(body.browser_login_status||'unknown'),String(body.browser_type||''),String(body.browser_version||''),String(body.browser_engine||''),String(body.browser_runtime||''),String(body.session_mode||''),String(body.compatibility_status||'not_tested'),agent.id]);
+  return{success:true,server_time:new Date().toISOString(),protocol_version:1};
 }
 export async function acceptCreatorAgentReport(
   body: Record<string, unknown>,
@@ -209,11 +220,7 @@ export async function getCreatorCenterData(userId: number, accountId?: string) {
       dashboard: null,
       fans: null,
       history: [],
-      data_sources: [
-        "official_api",
-        "local_creator_center",
-        "business_authorization",
-      ],
+      data_sources: ["local_creator_center"],
     };
   const base = [userId, account.account_id];
   const [works, dashboard, fans, history] = await Promise.all([
@@ -261,10 +268,6 @@ export async function getCreatorCenterData(userId: number, accountId?: string) {
       ? { ...parse(fans.fans_json, {}), snapshot_time: fans.snapshot_time }
       : null,
     history,
-    data_sources: [
-      "official_api",
-      "local_creator_center",
-      "business_authorization",
-    ],
+    data_sources: ["local_creator_center"],
   };
 }

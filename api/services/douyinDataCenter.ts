@@ -12,7 +12,7 @@ export type DouyinWorksPage = { items: AnalyzedDouyinWork[]; next_cursor: string
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const parse = (value: unknown): JsonRecord => { try { return typeof value === 'string' ? JSON.parse(value) as JsonRecord : value && typeof value === 'object' ? value as JsonRecord : {}; } catch { return {}; } };
-const isoDate = (value: string) => value.slice(0, 10);
+const shanghaiDate = (value: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
 const days = (period: Period) => ({ '7d': 7, '30d': 30, '90d': 90 })[period];
 
 const encodeCursor = (cursor: WorksCursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
@@ -79,10 +79,10 @@ export async function persistNormalizedDouyinSync(agent: AgentIdentity, payload:
     if (!creatorAccount) throw new Error('抖音权限账号写入失败');
     await tx.execute(`INSERT INTO creator_account_access(account_id,user_id,access_level) VALUES(?,?,'manage') ON CONFLICT(account_id,user_id) DO UPDATE SET access_level='manage'`, [creatorAccount.id, agent.user_id]);
 
-    await tx.execute(`INSERT INTO douyin_accounts(name,profile_url,douyin_id,user_id,nickname,avatar,douyin_uid,fans_count,following_count,works_count,total_likes,last_sync_time,creator_account_id,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-      ON CONFLICT(douyin_uid) DO UPDATE SET user_id=excluded.user_id,nickname=excluded.nickname,avatar=excluded.avatar,fans_count=excluded.fans_count,following_count=excluded.following_count,works_count=excluded.works_count,total_likes=excluded.total_likes,last_sync_time=excluded.last_sync_time,creator_account_id=excluded.creator_account_id,updated_at=CURRENT_TIMESTAMP`,
-      [normalized.account.nickname || normalized.account.douyin_uid, `https://www.douyin.com/user/${encodeURIComponent(normalized.account.douyin_uid)}`, normalized.account.douyin_uid, agent.user_id, normalized.account.nickname, normalized.account.avatar, normalized.account.douyin_uid, normalized.account.fans_count, normalized.account.following_count, normalized.account.works_count, normalized.account.total_likes, snapshotTime, creatorAccount.id]);
+    await tx.execute(`INSERT INTO douyin_accounts(name,profile_url,douyin_id,user_id,nickname,avatar,douyin_uid,fans_count,fans_count_available,following_count,works_count,total_likes,last_sync_time,creator_account_id,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(douyin_uid) DO UPDATE SET user_id=excluded.user_id,nickname=excluded.nickname,avatar=excluded.avatar,fans_count=CASE WHEN excluded.fans_count_available=1 THEN excluded.fans_count ELSE douyin_accounts.fans_count END,fans_count_available=MAX(douyin_accounts.fans_count_available,excluded.fans_count_available),following_count=excluded.following_count,works_count=excluded.works_count,total_likes=excluded.total_likes,last_sync_time=excluded.last_sync_time,creator_account_id=excluded.creator_account_id,updated_at=CURRENT_TIMESTAMP`,
+      [normalized.account.nickname || normalized.account.douyin_uid, `https://www.douyin.com/user/${encodeURIComponent(normalized.account.douyin_uid)}`, normalized.account.douyin_uid, agent.user_id, normalized.account.nickname, normalized.account.avatar, normalized.account.douyin_uid, normalized.account.fans_count, Number(normalized.account.fans_count_available), normalized.account.following_count, normalized.account.works_count, normalized.account.total_likes, snapshotTime, creatorAccount.id]);
     const account = await tx.queryOne<{ id: number }>('SELECT id FROM douyin_accounts WHERE douyin_uid=?', [normalized.account.douyin_uid]);
     if (!account) throw new Error('标准抖音账号写入失败');
 
@@ -103,9 +103,9 @@ export async function persistNormalizedDouyinSync(agent: AgentIdentity, payload:
     }
 
     const aggregate = await tx.queryOne<{ play_count: number; like_count: number; comment_count: number; share_count: number; works_count: number }>(`SELECT COUNT(*) works_count,COALESCE(SUM(play_count),0) play_count,COALESCE(SUM(like_count),0) like_count,COALESCE(SUM(comment_count),0) comment_count,COALESCE(SUM(share_count),0) share_count FROM douyin_works WHERE account_id=?`, [account.id]);
-    await tx.execute(`INSERT INTO douyin_daily_snapshots(account_id,snapshot_date,fans_count,works_count,play_count,like_count,comment_count,share_count)
-      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(account_id,snapshot_date) DO UPDATE SET fans_count=excluded.fans_count,works_count=excluded.works_count,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count`,
-      [account.id, isoDate(snapshotTime), normalized.account.fans_count, number(aggregate?.works_count), number(aggregate?.play_count), number(aggregate?.like_count), number(aggregate?.comment_count), number(aggregate?.share_count)]);
+    await tx.execute(`INSERT INTO douyin_daily_snapshots(account_id,snapshot_date,fans_count,fans_count_available,works_count,play_count,like_count,comment_count,share_count)
+      VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,snapshot_date) DO UPDATE SET fans_count=CASE WHEN excluded.fans_count_available=1 THEN excluded.fans_count ELSE douyin_daily_snapshots.fans_count END,fans_count_available=MAX(douyin_daily_snapshots.fans_count_available,excluded.fans_count_available),works_count=excluded.works_count,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count`,
+      [account.id, shanghaiDate(snapshotTime), normalized.account.fans_count, Number(normalized.account.fans_count_available), number(aggregate?.works_count), number(aggregate?.play_count), number(aggregate?.like_count), number(aggregate?.comment_count), number(aggregate?.share_count)]);
     await tx.execute(`INSERT INTO douyin_sync_logs(account_id,sync_type,status,message,sync_time,api_count,success_count,failed_count,error_message,task_id)
       VALUES(?,?,?,?,?,?,?,?,?,?)`, [account.id, 'agent_incremental', normalized.works.length ? 'success' : 'failed', `标准化作品 ${normalized.works.length} 条`, snapshotTime, normalized.api_count, normalized.works.length, normalized.rejected_count, normalized.works.length ? null : '未从真实接口响应中识别到合法 aweme_list 作品', taskId]);
     return { account_id: account.id, creator_account_id: creatorAccount.id, works: normalized.works.length, api_count: normalized.api_count, rejected_count: normalized.rejected_count };
@@ -136,10 +136,10 @@ async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: 
     if (!creatorAccount) throw new Error('抖音权限账号写入失败');
     await tx.execute(`INSERT INTO creator_account_access(account_id,user_id,access_level) VALUES(?,?,'manage') ON CONFLICT(account_id,user_id) DO UPDATE SET access_level='manage'`, [creatorAccount.id, agent.user_id]);
 
-    await tx.execute(`INSERT INTO douyin_accounts(name,profile_url,douyin_id,user_id,nickname,avatar,douyin_uid,fans_count,following_count,works_count,total_likes,last_sync_time,creator_account_id,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-      ON CONFLICT(douyin_uid) DO UPDATE SET user_id=excluded.user_id,nickname=excluded.nickname,avatar=excluded.avatar,fans_count=excluded.fans_count,following_count=excluded.following_count,works_count=excluded.works_count,total_likes=excluded.total_likes,last_sync_time=excluded.last_sync_time,creator_account_id=excluded.creator_account_id,updated_at=CURRENT_TIMESTAMP`,
-      [normalized.account.nickname || normalized.account.douyin_uid, `https://www.douyin.com/user/${encodeURIComponent(normalized.account.douyin_uid)}`, normalized.account.douyin_uid, agent.user_id, normalized.account.nickname, normalized.account.avatar, normalized.account.douyin_uid, normalized.account.fans_count, normalized.account.following_count, normalized.account.works_count, normalized.account.total_likes, snapshotTime, creatorAccount.id]);
+    await tx.execute(`INSERT INTO douyin_accounts(name,profile_url,douyin_id,user_id,nickname,avatar,douyin_uid,fans_count,fans_count_available,following_count,works_count,total_likes,last_sync_time,creator_account_id,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(douyin_uid) DO UPDATE SET user_id=excluded.user_id,nickname=excluded.nickname,avatar=excluded.avatar,fans_count=CASE WHEN excluded.fans_count_available=1 THEN excluded.fans_count ELSE douyin_accounts.fans_count END,fans_count_available=MAX(douyin_accounts.fans_count_available,excluded.fans_count_available),following_count=excluded.following_count,works_count=excluded.works_count,total_likes=excluded.total_likes,last_sync_time=excluded.last_sync_time,creator_account_id=excluded.creator_account_id,updated_at=CURRENT_TIMESTAMP`,
+      [normalized.account.nickname || normalized.account.douyin_uid, `https://www.douyin.com/user/${encodeURIComponent(normalized.account.douyin_uid)}`, normalized.account.douyin_uid, agent.user_id, normalized.account.nickname, normalized.account.avatar, normalized.account.douyin_uid, normalized.account.fans_count, Number(normalized.account.fans_count_available), normalized.account.following_count, normalized.account.works_count, normalized.account.total_likes, snapshotTime, creatorAccount.id]);
     const account = await tx.queryOne<{ id: number }>('SELECT id FROM douyin_accounts WHERE douyin_uid=?', [normalized.account.douyin_uid]);
     if (!account) throw new Error('标准抖音账号写入失败');
 
@@ -174,9 +174,9 @@ async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: 
     }
 
     const aggregate = await tx.queryOne<{ play_count: number; like_count: number; comment_count: number; share_count: number; works_count: number }>(`SELECT COUNT(*) works_count,COALESCE(SUM(play_count),0) play_count,COALESCE(SUM(like_count),0) like_count,COALESCE(SUM(comment_count),0) comment_count,COALESCE(SUM(share_count),0) share_count FROM douyin_works WHERE account_id=?`, [account.id]);
-    await tx.execute(`INSERT INTO douyin_daily_snapshots(account_id,snapshot_date,fans_count,works_count,play_count,like_count,comment_count,share_count)
-      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(account_id,snapshot_date) DO UPDATE SET fans_count=excluded.fans_count,works_count=excluded.works_count,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count`,
-      [account.id, isoDate(snapshotTime), normalized.account.fans_count, number(aggregate?.works_count), number(aggregate?.play_count), number(aggregate?.like_count), number(aggregate?.comment_count), number(aggregate?.share_count)]);
+    await tx.execute(`INSERT INTO douyin_daily_snapshots(account_id,snapshot_date,fans_count,fans_count_available,works_count,play_count,like_count,comment_count,share_count)
+      VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,snapshot_date) DO UPDATE SET fans_count=CASE WHEN excluded.fans_count_available=1 THEN excluded.fans_count ELSE douyin_daily_snapshots.fans_count END,fans_count_available=MAX(douyin_daily_snapshots.fans_count_available,excluded.fans_count_available),works_count=excluded.works_count,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count`,
+      [account.id, shanghaiDate(snapshotTime), normalized.account.fans_count, Number(normalized.account.fans_count_available), number(aggregate?.works_count), number(aggregate?.play_count), number(aggregate?.like_count), number(aggregate?.comment_count), number(aggregate?.share_count)]);
     const status = normalized.works.length ? 'success' : 'failed';
     await tx.execute(`INSERT INTO douyin_sync_logs(account_id,sync_type,status,message,sync_time,api_count,success_count,failed_count,error_message,task_id,contract_version,collection_mode,snapshot_id,summary_json)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [account.id, 'agent_incremental', status, `标准化作品 ${normalized.works.length} 条`, snapshotTime, normalized.summary.raw_response_count, normalized.summary.normalized_success_count, normalized.summary.rejected_count, status === 'failed' ? '未收到合法 DouyinWorkInput' : null, taskId, normalized.contract_version, normalized.collection_mode, normalized.snapshot_id, JSON.stringify(normalized.summary)]);
@@ -191,7 +191,9 @@ async function accountForScope(creatorAccountId: number) {
 function growth(latest: Record<string, unknown>, previous: Record<string, unknown> | null) {
   if (!previous) return null;
   return {
-    fans: number(latest.fans_count) - number(previous.fans_count),
+    fans: number(latest.fans_count_available) === 1 && number(previous.fans_count_available) === 1
+      ? number(latest.fans_count) - number(previous.fans_count)
+      : null,
     plays: number(latest.play_count) - number(previous.play_count),
     interactions: number(latest.like_count) + number(latest.comment_count) + number(latest.share_count) - number(previous.like_count) - number(previous.comment_count) - number(previous.share_count),
   };
@@ -213,10 +215,12 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   const latest = snapshots.at(-1) || {};
   const previous = (periodDays: number) => snapshots.filter(row => new Date(String(row.snapshot_date)).getTime() <= new Date(String(latest.snapshot_date)).getTime() - periodDays * 86400000).at(-1) || null;
   const rankedWorks = [...analyzed.works].sort((left, right) => Number(right.performance.is_viral) - Number(left.performance.is_viral) || right.performance.score - left.performance.score || number(right.play_count) - number(left.play_count));
+  const fansAvailable = number(latest.fans_count_available ?? account.fans_count_available) === 1;
+  const missingFields = fansAvailable ? [] : ['fans_count', 'fan_growth'];
   return {
     account,
     metrics: {
-      fans_count: number(latest.fans_count ?? account.fans_count),
+      fans_count: fansAvailable ? number(latest.fans_count ?? account.fans_count) : null,
       works_count: works.length,
       play_count: totals.plays,
       interaction_count: totals.interactions,
@@ -230,6 +234,12 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     growth_30d: growth(latest, previous(30)),
     top_works: await resolveWorkCovers(account, rankedWorks.slice(0, 5)),
     snapshot_count: snapshots.length,
+    snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
+    data_status: missingFields.length ? 'partial' : 'ready',
+    data_source: 'douyin_creator_center_collection',
+    last_success_at: account.last_sync_time ?? null,
+    missing_fields: missingFields,
+    warnings: fansAvailable ? [] : ['当前采集响应没有提供粉丝总数；该字段不会按 0 展示或参与增长评分。'],
     metric_sources: {
       account: 'douyin_accounts',
       works: 'douyin_works',
@@ -332,9 +342,12 @@ export async function getDouyinTrends(creatorAccountId: number, period: Period) 
     snapshots: snapshots.map(snapshot => {
       const interactions = number(snapshot.like_count) + number(snapshot.comment_count) + number(snapshot.share_count);
       const plays = number(snapshot.play_count);
-      return { ...snapshot, interaction_count: interactions, tracked_interaction_rate: plays > 0 ? interactions / plays : 0 };
+      return { ...snapshot, fans_count: number(snapshot.fans_count_available) === 1 ? number(snapshot.fans_count) : null, interaction_count: interactions, tracked_interaction_rate: plays > 0 ? interactions / plays : 0 };
     }),
     source: 'douyin_daily_snapshots',
+    data_status: snapshots.length < 2 ? 'partial' : 'ready',
+    snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
+    missing_fields: snapshots.some(snapshot => number(snapshot.fans_count_available) !== 1) ? ['fans_count'] : [],
     note: '日快照表不含收藏历史，因此趋势互动量仅由点赞、评论和分享构成。',
   };
 }

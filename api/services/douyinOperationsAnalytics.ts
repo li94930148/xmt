@@ -143,12 +143,17 @@ export function calculateDouyinAccountHealth(account: JsonRecord, works: Array<D
   const accountInteractionRate = rate(totals.interactions, totals.plays);
   const engagementScore = clamp(accountInteractionRate / .05) * 30;
   const orderedSnapshots = [...snapshots].sort((left, right) => String(left.snapshot_date).localeCompare(String(right.snapshot_date)));
-  const firstSnapshot = orderedSnapshots[0];
-  const lastSnapshot = orderedSnapshots.at(-1);
-  const growthAvailable = orderedSnapshots.length >= 2 && value(firstSnapshot?.fans_count) > 0;
-  const fanGrowthRate = growthAvailable ? (value(lastSnapshot?.fans_count) - value(firstSnapshot?.fans_count)) / value(firstSnapshot?.fans_count) : null;
+  const validFanSnapshots = orderedSnapshots.filter(snapshot => value(snapshot.fans_count_available) === 1);
+  const firstFanSnapshot = validFanSnapshots[0];
+  const lastFanSnapshot = validFanSnapshots.at(-1);
+  const growthAvailable = validFanSnapshots.length >= 2 && value(firstFanSnapshot?.fans_count) > 0;
+  const fanGrowthRate = growthAvailable ? (value(lastFanSnapshot?.fans_count) - value(firstFanSnapshot?.fans_count)) / value(firstFanSnapshot?.fans_count) : null;
   const growthScore = fanGrowthRate == null ? null : clamp((fanGrowthRate + .02) / .12) * 25;
-  const earned = freshnessScore + activityScore + engagementScore + (growthScore ?? 0);
+  const displayedFreshnessScore = round(freshnessScore, 1);
+  const displayedActivityScore = round(activityScore, 1);
+  const displayedEngagementScore = round(engagementScore, 1);
+  const displayedGrowthScore = growthScore == null ? null : round(growthScore, 1);
+  const earned = displayedFreshnessScore + displayedActivityScore + displayedEngagementScore + (displayedGrowthScore ?? 0);
   const availableWeight = 20 + 25 + 30 + (growthScore == null ? 0 : 25);
   const score = availableWeight ? round(earned / availableWeight * 100, 1) : 0;
   const level = score >= 85 ? 'excellent' : score >= 70 ? 'healthy' : score >= 50 ? 'watch' : 'risk';
@@ -157,12 +162,12 @@ export function calculateDouyinAccountHealth(account: JsonRecord, works: Array<D
     level,
     available_weight: availableWeight,
     dimensions: {
-      data_freshness: { score: round(freshnessScore, 1), weight: 20, days_since_sync: freshnessDays == null ? null : round(freshnessDays, 1) },
-      content_activity: { score: round(activityScore, 1), weight: 25, works_published_30d: recentWorks },
-      engagement_quality: { score: round(engagementScore, 1), weight: 30, interaction_rate: round(accountInteractionRate) },
-      fan_growth: { score: growthScore == null ? null : round(growthScore, 1), weight: 25, growth_rate: fanGrowthRate == null ? null : round(fanGrowthRate) },
+      data_freshness: { score: displayedFreshnessScore, weight: 20, days_since_sync: freshnessDays == null ? null : round(freshnessDays, 1) },
+      content_activity: { score: displayedActivityScore, weight: 25, works_published_30d: recentWorks },
+      engagement_quality: { score: displayedEngagementScore, weight: 30, interaction_rate: round(accountInteractionRate) },
+      fan_growth: { score: displayedGrowthScore, weight: 25, growth_rate: fanGrowthRate == null ? null : round(fanGrowthRate), status: growthAvailable ? 'ready' : 'unavailable', reason: growthAvailable ? null : '至少需要 2 个粉丝总数可用的真实日快照' },
     },
-    data_notes: growthAvailable ? [] : ['daily_snapshots 少于 2 条或首条粉丝数为 0，粉丝增长维度未参与评分'],
+    data_notes: growthAvailable ? [] : ['粉丝总数可用的 daily_snapshots 少于 2 条，粉丝增长维度未参与评分'],
   };
 }
 

@@ -12,7 +12,9 @@ const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value
 const json = (value: unknown) => JSON.stringify(value ?? {});
 const array = (value: unknown, max: number): JsonRecord[] => Array.isArray(value) ? value.filter((item): item is JsonRecord => Boolean(item) && typeof item === 'object').slice(0, max) : [];
 const key = (token: string) => crypto.createHash('sha256').update(token).digest();
-const canonical = (body: JsonRecord) => [body.agent_id, body.platform, body.account_id, body.collected_at, JSON.stringify(body.data)].join('\n');
+const canonical = (body: JsonRecord) => body.protocol_version === 1
+  ? [body.protocol_version, body.agent_id, body.platform, body.account_id, body.timestamp, body.nonce, body.collected_at, JSON.stringify(body.data)].join('\n')
+  : [body.agent_id, body.platform, body.account_id, body.collected_at, JSON.stringify(body.data)].join('\n');
 
 async function openEnvelope(body: JsonRecord, authorization?: string) {
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -21,12 +23,23 @@ async function openEnvelope(body: JsonRecord, authorization?: string) {
   if (body.platform !== agent.platform || text(body.account_id) !== agent.account_id) throw Object.assign(new Error('Agent 设备或平台账号绑定不匹配'), { statusCode: 403 });
   const expected = crypto.createHmac('sha256', token).update(canonical(body)).digest('hex'); const supplied = text(body.signature);
   if (supplied.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(supplied))) throw Object.assign(new Error('上传签名验证失败'), { statusCode: 401 });
+  if (body.protocol_version === 1) {
+    const timestamp = Date.parse(text(body.timestamp));
+    const nonce = text(body.nonce);
+    if (!Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > 5 * 60_000) throw Object.assign(new Error('Agent 请求已过期或本机时间不正确'), { statusCode: 408 });
+    if (!/^[0-9a-f-]{36}$/i.test(nonce)) throw Object.assign(new Error('Agent 请求 nonce 无效'), { statusCode: 400 });
+    try { await execute('INSERT INTO creator_agent_nonces(agent_id,nonce,request_time) VALUES(?,?,?)', [agent.id, nonce, new Date(timestamp).toISOString()]); }
+    catch { throw Object.assign(new Error('检测到重复的 Agent 请求'), { statusCode: 409 }); }
+    await execute("DELETE FROM creator_agent_nonces WHERE created_at < datetime('now','-1 day')");
+  }
   try { const envelope = body.data as {iv:string;tag:string;ciphertext:string}; const decipher = crypto.createDecipheriv('aes-256-gcm', key(token), Buffer.from(envelope.iv,'base64')); decipher.setAuthTag(Buffer.from(envelope.tag,'base64')); return { agent, payload: JSON.parse(decipher.update(envelope.ciphertext,'base64','utf8') + decipher.final('utf8')) as JsonRecord }; }
   catch { throw Object.assign(new Error('上传数据解密失败'), { statusCode: 400 }); }
 }
 
 export async function acceptCreatorDataSync(body: JsonRecord, authorization?: string) {
+  if (Buffer.byteLength(JSON.stringify(body)) > 12 * 1024 * 1024) throw Object.assign(new Error('同步数据包超过 12MB 限制'), { statusCode: 413 });
   const { agent, payload } = await openEnvelope(body, authorization);
+  if (payload.schema_version !== undefined && payload.schema_version !== 1) throw Object.assign(new Error('Creator Agent 数据协议版本不兼容'), { statusCode: 422 });
   if (payload.platform !== agent.platform) throw Object.assign(new Error('同步数据平台与 Agent 绑定不匹配'), { statusCode: 403 });
   const account = payload.account && typeof payload.account === 'object' ? payload.account as JsonRecord : {};
   const platformUid = text(account.platform_uid || account.uid || agent.account_id); if (platformUid !== agent.account_id) throw Object.assign(new Error('同步账号与 Agent 绑定不匹配'), { statusCode: 403 });

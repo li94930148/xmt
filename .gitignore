@@ -11,6 +11,16 @@ node_modules
 dist
 dist-ssr
 agent/release*/
+agent/data/
+agent/profiles/
+agent/browser-cache/
+agent/diagnostics/
+agent/downloads/
+agent/**/*response*.json
+agent/**/*network*.json
+playwright-report/
+test-results/
+.playwright/
 *.local
 
 # Environment variables and secrets

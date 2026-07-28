@@ -3,13 +3,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.toUnifiedCreatorPayload = toUnifiedCreatorPayload;
 const record = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 const array = (value) => Array.isArray(value) ? value.map(record) : [];
-const first = (source, keys, fallback = 0) => {
+const first = (source, keys, fallback = null) => {
     for (const key of keys)
         if (source[key] !== undefined && source[key] !== null)
             return source[key];
     return fallback;
 };
 const metric = (work, detail, keys) => first({ ...record(work.raw), ...work, ...record(detail.overview) }, keys);
+const RAW_RESPONSE_LIMIT = 128 * 1024;
+const compactRawResponse = (value) => {
+    const serialized = JSON.stringify(value ?? null);
+    const bytes = Buffer.byteLength(serialized);
+    return bytes <= RAW_RESPONSE_LIMIT ? value : { truncated: true, original_bytes: bytes };
+};
 function toUnifiedCreatorPayload(snapshot, options = {}) {
     const snapshotTime = snapshot.collected_at;
     const dashboard = record(snapshot.dashboard);
@@ -25,7 +31,10 @@ function toUnifiedCreatorPayload(snapshot, options = {}) {
         metrics: work.metrics,
         duration: first(work, ['duration', 'video_duration']),
         status: work.status,
-        raw_json: work.raw ?? work,
+        raw_json: {
+            item_id: work.item_id,
+            metrics: work.metrics,
+        },
     }));
     const metrics = snapshot.works.map((work) => {
         const detail = details.get(String(work.item_id)) || {};
@@ -40,7 +49,10 @@ function toUnifiedCreatorPayload(snapshot, options = {}) {
             play_duration: metric(work, detail, ['play_duration', 'avg_play_duration']),
             completion_rate: metric(work, detail, ['completion_rate', 'finish_rate']),
             cover_click_rate: metric(work, detail, ['cover_click_rate']),
-            raw_json: { work, detail },
+            raw_json: {
+                work: { item_id: work.item_id, metrics: work.metrics },
+                detail: { item_id: detail.item_id, overview: detail.overview },
+            },
         };
     });
     const trendSources = [
@@ -56,6 +68,9 @@ function toUnifiedCreatorPayload(snapshot, options = {}) {
     }));
     const accountMetrics = record(dashboard.metrics || dashboard.overview || dashboard);
     return {
+        schema_version: 1,
+        protocol_version: 1,
+        agent_version: snapshot.agent_version,
         contract_version: snapshot.contract_version,
         snapshot_id: snapshot.snapshot_id,
         collection_mode: snapshot.collection_mode,
@@ -66,6 +81,10 @@ function toUnifiedCreatorPayload(snapshot, options = {}) {
             avatar: snapshot.account.avatar,
             account_name: snapshot.account.nickname,
             status: 'active',
+            availability: snapshot.account.availability,
+            following_count: snapshot.account.following_count,
+            total_likes: snapshot.account.total_likes,
+            works_count: snapshot.account.works_count,
         },
         contents,
         metrics,
@@ -91,9 +110,9 @@ function toUnifiedCreatorPayload(snapshot, options = {}) {
         },
         raw_records: snapshot.raw.captures.map((capture) => ({
             page_type: capture.page,
-            api_url: capture.url,
+            api_url: capture.url.split('?')[0],
             method: capture.method,
-            response_json: capture.response,
+            response_json: compactRawResponse(capture.response),
             created_at: capture.captured_at,
         })),
         page_schemas: (options.capabilities || []).flatMap((page) => page.tabs.flatMap((tab) => tab.schemas.map((schema) => ({ page: page.page, tab: tab.name, api: schema.api, fields: schema.fields })))),

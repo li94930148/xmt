@@ -1,9 +1,8 @@
 export type SyncInterval = 'manual' | '12h' | 'daily';
-export type BrowserMode = 'system_chrome' | 'embedded_chromium';
-
+import type { BrowserSelection, BrowserCompatibility } from './browser/types.js';
 export type AgentConfig = {
   serverUrl: string; agentId: number; deviceId: string; platform: 'douyin'; accountId: string; accountName: string;
-  browserConfig: { mode: BrowserMode; cdpEndpoint: string; chromePath?: string };
+  browserConfig: BrowserSelection & { browserVersion?:string; lastSuccessfulId?:string; compatibilityStatus?:BrowserCompatibility; compatibilityReason?:string; lastTestedAt?:string };
   syncConfig: { enabled: boolean; interval: SyncInterval; dailyHour: number };
 };
 
@@ -38,10 +37,11 @@ export type DouyinCollectionStats = {
 };
 
 export type CreatorSnapshot = {
+  schema_version: 1; protocol_version: 1; agent_version: string;
   platform: 'douyin'; source: 'local_creator_center'; collected_at: string;
   contract_version: '2.10.2'; snapshot_id: string; collection_mode: CollectionMode;
   collection_stats: DouyinCollectionStats;
-  account: { nickname: string; avatar: string; uid: string; fans_count: number; [key: string]: unknown };
+  account: { nickname: string; avatar: string; uid: string; fans_count: number | null; [key: string]: unknown };
   works: CreatorWork[]; work_details: CreatorWorkDetail[];
   dashboard: Record<string, unknown>; content_analysis: Record<string, unknown>; fans: Record<string, unknown>;
   raw: { api_map: Array<{ page: string; url: string; method: string; responseKeys: string[] }>; captures: NetworkCapture[] };

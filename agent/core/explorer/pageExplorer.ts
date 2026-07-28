@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Page, Response } from 'playwright';
-import type { BrowserAdapter } from '../browser/adapter.js';
+import type { BrowserSession } from '../browser/types.js';
 
 const CREATOR_ORIGIN = 'https://creator.douyin.com';
 const PAGES = [
@@ -70,7 +70,7 @@ async function scanPage(page: Page, pagePath: string): Promise<PageCapability> {
   return { page: pagePath, tabs };
 }
 
-export async function exploreCreatorPages(adapter: BrowserAdapter, outputFile: string) {
+export async function exploreCreatorPages(adapter: BrowserSession, outputFile: string) {
   const capabilities = await adapter.withPage(async (page) => {
     const result: PageCapability[] = [];
     for (const pagePath of PAGES) {

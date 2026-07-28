@@ -15,6 +15,7 @@ const operation_js_1 = require("./douyin/pages/operation.js");
 const content_analysis_js_1 = require("./douyin/pages/content-analysis.js");
 const follower_js_1 = require("./douyin/pages/follower.js");
 const discovery_store_js_1 = require("../network/discovery-store.js");
+const account_js_1 = require("./douyin/parser/account.js");
 class DouyinCreatorCollector {
     browser;
     networkLogPath;
@@ -26,22 +27,35 @@ class DouyinCreatorCollector {
     }
     async collect(options = {}) {
         return this.browser.withPage(async (page) => {
+            const capabilities = this.browser.getCapabilities();
+            if (!capabilities.supportsNetworkResponseInspection)
+                throw new Error('当前浏览器无法可靠读取运营数据响应，已安全停止采集');
             const network = new interceptor_js_1.DouyinNetworkInterceptor(page);
             network.start();
             try {
                 network.setPage('work-list');
-                const content = await (0, content_js_1.collectContent)(page, network.captures);
+                const content = await (0, content_js_1.collectContent)(page, network.captures, { maxPages: options.maxPages });
                 network.setPage('work-detail');
-                const detailId = content.works.find((work) => work.item_id === '7663799549412758193')?.item_id ?? '7663799549412758193';
-                const details = [await (0, work_detail_js_1.collectWorkDetail)(page, detailId, network.captures)];
+                const detailLimit = Math.max(0, options.maxDetails ?? content.works.length);
+                const details = [];
+                for (const work of content.works.slice(0, detailLimit)) {
+                    try {
+                        details.push(await (0, work_detail_js_1.collectWorkDetail)(page, work.item_id, network.captures));
+                    }
+                    catch { /* 单条详情失败不会终止任务。 */ }
+                }
                 network.setPage('account-dashboard');
                 const dashboard = await (0, operation_js_1.collectOperation)(page, network.captures);
                 network.setPage('content-analysis');
                 const contentAnalysis = await (0, content_analysis_js_1.collectContentAnalysis)(page, network.captures);
                 network.setPage('fans-analysis');
                 const fans = await (0, follower_js_1.collectFollower)(page, network.captures);
-                const account = await page.evaluate(() => { const avatar = document.querySelector('img[class*=avatar]')?.src || ''; const nickname = document.querySelector('[class*=nickname],[class*=user-name]')?.innerText || ''; return { nickname, avatar, uid: '', fans_count: 0 }; }).catch(() => ({ nickname: '', avatar: '', uid: '', fans_count: 0 }));
-                const snapshot = { platform: 'douyin', source: 'local_creator_center', contract_version: '2.10.2', snapshot_id: options.snapshotId || node_crypto_1.default.randomUUID(), collection_mode: options.collectionMode || 'full_snapshot', collection_stats: content.collectionStats, collected_at: new Date().toISOString(), account, works: content.works, work_details: details, dashboard, content_analysis: contentAnalysis, fans, raw: { api_map: (0, api_map_js_1.buildApiMap)(network.captures), captures: network.captures }, videos: content.works, operations: { last7Days: dashboard, last30Days: dashboard, trafficSources: details.map(d => d.traffic), contentPerformance: contentAnalysis } };
+                network.setPage('account-home');
+                await page.goto('https://creator.douyin.com/creator-micro/home', { waitUntil: 'domcontentloaded', timeout: 45_000 });
+                await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => undefined);
+                const homeBody = await page.locator('body').innerText({ timeout: 10_000 }).catch(() => '');
+                const account = (0, account_js_1.mergeAccountDomFallback)((0, account_js_1.parseAccount)(network.captures), homeBody);
+                const snapshot = { schema_version: 1, protocol_version: 1, agent_version: '2.11.0-agent', platform: 'douyin', source: 'local_creator_center', contract_version: '2.10.2', snapshot_id: options.snapshotId || node_crypto_1.default.randomUUID(), collection_mode: options.collectionMode || 'full_snapshot', collection_stats: content.collectionStats, collected_at: new Date().toISOString(), account, works: content.works, work_details: details, dashboard, content_analysis: contentAnalysis, fans, raw: { api_map: (0, api_map_js_1.buildApiMap)(network.captures), captures: network.captures }, videos: content.works, operations: { last7Days: dashboard, last30Days: dashboard, trafficSources: details.map(d => d.traffic), contentPerformance: contentAnalysis } };
                 if (this.networkLogPath) {
                     await promises_1.default.mkdir(node_path_1.default.dirname(this.networkLogPath), { recursive: true });
                     await promises_1.default.writeFile(this.networkLogPath, JSON.stringify({ generated_at: snapshot.collected_at, contract_version: snapshot.contract_version, snapshot_id: snapshot.snapshot_id, collection_mode: snapshot.collection_mode, collection_stats: snapshot.collection_stats, api_map: snapshot.raw.api_map, captures: network.captures }, null, 2), 'utf8');

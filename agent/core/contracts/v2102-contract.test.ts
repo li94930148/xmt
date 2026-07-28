@@ -20,7 +20,7 @@ const page = (start: number, count: number, cursor: string, hasMore: boolean) =>
 
 function snapshot(snapshotId = 'snapshot-v2102'): CreatorSnapshot {
   const works=[work(0),work(1)];
-  return {platform:'douyin',source:'local_creator_center',contract_version:'2.10.2',snapshot_id:snapshotId,collection_mode:'full_snapshot',collection_stats:{raw_response_count:1,aweme_candidate_count:2,normalized_success_count:2,rejected_count:0,rejected_reasons:{},page_count:1,new_count:2},collected_at:'2026-07-24T00:00:00.000Z',account:{uid:'100000000000000001',nickname:'creator',avatar:'',fans_count:3},works,work_details:[],dashboard:{},content_analysis:{},fans:{},raw:{api_map:[],captures:[capture({data:{aweme_list:works.map((item)=>item.raw)}})]},videos:works,operations:{last7Days:{},last30Days:{},trafficSources:{},contentPerformance:{}}};
+  return {schema_version:1,protocol_version:1,agent_version:'test',platform:'douyin',source:'local_creator_center',contract_version:'2.10.2',snapshot_id:snapshotId,collection_mode:'full_snapshot',collection_stats:{raw_response_count:1,aweme_candidate_count:2,normalized_success_count:2,rejected_count:0,rejected_reasons:{},page_count:1,new_count:2},collected_at:'2026-07-24T00:00:00.000Z',account:{uid:'100000000000000001',nickname:'creator',avatar:'',fans_count:3},works,work_details:[],dashboard:{},content_analysis:{},fans:{},raw:{api_map:[],captures:[capture({data:{aweme_list:works.map((item)=>item.raw)}})]},videos:works,operations:{last7Days:{},last30Days:{},trafficSources:{},contentPerformance:{}}};
 }
 
 test('safe JSON parsing preserves long aweme_id exactly as a string', () => {
@@ -55,6 +55,15 @@ test('knownContentIds is statistics-only and does not remove uploaded contents',
   assert.equal(payload.contents.length,source.works.length);
   assert.equal((payload.sync_task.collection_stats as {new_count:number}).new_count,0);
   assert.equal(payload.contents[0].aweme_id,source.works[0].aweme_id);
+});
+
+test('oversized raw responses are represented by size metadata without dropping normalized data', () => {
+  const source=snapshot();
+  source.raw.captures=[capture({blob:'x'.repeat(256*1024)})];
+  const payload=toUnifiedCreatorPayload(source);
+  assert.deepEqual(payload.raw_records[0].response_json,{truncated:true,original_bytes:262155});
+  assert.equal(payload.contents.length,source.works.length);
+  assert.equal(payload.metrics.length,source.works.length);
 });
 
 test('saving the same snapshot ten times is idempotent', () => {

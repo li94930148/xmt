@@ -1,49 +1,88 @@
-# XMT Creator Agent Desktop
+# XMT Creator Agent
 
-Windows 独立桌面客户端。用户无需安装 Node.js，也不需要使用命令行。采集浏览器和 Profile 完全在用户设备运行，不上传 Cookie，不保存 XMT 或抖音密码。
+Creator Agent 在用户自己的 macOS 或 Windows 电脑上读取抖音创作者中心的只读运营数据。Linux 服务器不登录抖音、不保存浏览器会话，只负责设备认证、数据校验、入库和展示。
 
-## 开发
+## 安全边界
 
-```powershell
+- Cookie、localStorage、二维码、密码、浏览器 Profile 和请求签名仅保留在本机。
+- 上传内容是经过脱敏和规范化的运营数据，使用 AES-256-GCM 加密、HMAC-SHA256 签名、五分钟时间窗和一次性 nonce。
+- 生产服务器必须使用 HTTPS；本地开发仅允许 `localhost` 或 `127.0.0.1`。
+- Agent 不发布、删除或修改抖音内容，也不读取 XMT 的历史 OAuth Token。
+
+## 环境自检
+
+在项目根目录运行：
+
+```bash
+npm run creator-agent:doctor
+```
+
+要求 Node.js 22。自检会报告系统架构、浏览器位置、本地数据目录和协议版本，不输出凭据。
+
+## macOS
+
+支持 Apple Silicon 和 Intel Mac。当前推荐 Chromium 系浏览器以获得最佳兼容性，但 Creator Agent 采用通用浏览器适配架构，并支持多种浏览器运行时。
+
+```bash
 cd agent
-$env:PLAYWRIGHT_BROWSERS_PATH='0'
-npm install
-npx playwright install chromium
+npm ci
 npm run check
 npm run dev
 ```
 
-- `npm run build`：构建 core、Electron 主进程和 React UI。
-- `npm run electron:dev`：配合 renderer 开发服务器启动桌面端。
-- `npm run electron:build`：生成 Windows NSIS 安装包。
+标准数据目录为 `~/Library/Application Support/XMT Creator Agent`，浏览器资料和日志均位于该目录的专用子目录。系统安全存储由 Electron `safeStorage` 提供。Agent 不会结束用户正在使用的日常浏览器。
 
-## Windows Portable 构建产物
+## Windows 10/11
 
-```text
-release/XMT-Creator-Agent-Portable.zip
+```powershell
+cd agent
+npm ci
+npm run check
+npm run dev
 ```
 
-无需安装或管理员权限。解压后双击 `XMT Creator Agent/XMT-Creator-Agent.exe`。不创建快捷方式、卸载器或注册表安装项。
+支持 Chrome、Edge、Brave、Chromium，以及 Playwright 托管运行时。路径通过系统路径 API 构建，可包含空格和中文。标准数据目录使用 `LOCALAPPDATA`/`APPDATA`；历史 Portable 数据目录继续兼容。凭据由当前 Windows 用户的系统安全存储保护。
 
-## 本地数据
+## 浏览器支持和选择
 
-便携包中存在 `portable.flag` 时，位置为程序旁的 `data/`；开发模式或无标志文件时继续兼容 `%APPDATA%\XMT Creator Agent\`。
+- 正式兼容目标：系统 Chrome、Chromium、Edge、Brave，以及 Playwright Chromium。
+- Arc 可按 Chromium 系浏览器发现，但资料目录和启动行为独立处理，完成实机检测前标记为“未检测”。
+- Playwright Firefox 和 WebKit 使用原生持久化上下文，不强制套用 CDP。因创作者中心兼容性差异，默认标记为“部分兼容”。
+- 外部 CDP 只用于用户明确启用的 Chromium 调试会话；Agent 断开时不关闭外部浏览器。
+- Safari 本体不作为自动化目标，避免操作用户日常 Safari 资料；WebKit 仅用于兼容性验证。
 
-- `config.json`：服务器、设备 ID、平台账号和同步计划，不包含敏感 Token。
-- `agent-token.bin`：使用 Electron `safeStorage` 调用当前 Windows 用户的 DPAPI 加密。
-- `browser/`：Agent 启动的真实 Google Chrome 专用 Profile，仅保存在本机。
-- `douyin-api-discovery/`：由真实页面 XHR/Fetch 响应自动生成的接口发现结果，不含 Cookie、Token 或临时访问密钥。
-- `logs/sync.log`：脱敏同步日志，不写入 Cookie、密码或 Token。
+选择顺序是：用户指定、上次成功、已通过兼容检测的系统 Chromium 浏览器、Playwright Chromium、Firefox、WebKit。自动回退只遍历有限候选，不无限重启。
 
-便携版没有卸载器。关闭程序后移动整个目录即可迁移，删除目录即可清除便携数据。
+```bash
+npm run creator-agent:browser:list
+npm run creator-agent:browser:test -- --browser=chrome
+npm run creator-agent:browser:select -- --browser=chrome
+npm run creator-agent:browser:select -- --path="/自定义路径/Browser"
+```
 
-## 使用流程
+不同浏览器、抖音账号和 Profile 名称使用独立目录：`profiles/<browser>/<account>/<profile>`。不会默认复用浏览器日常资料。清理资料会导致重新登录，必须由用户明确确认；清理不会删除设备凭据、XMT 数据库或其他浏览器资料。
 
-1. 启动应用，输入 XMT HTTPS 地址、XMT 用户名/密码和要绑定的抖音账号 ID。
-2. 客户端登录 XMT 并调用既有 `/api/creator-agent/register`，密码在请求结束后即释放。
-3. 默认选择“真实 Chrome”。点击“登录抖音”后，Agent 自动定位 Chrome、仅关闭 `chrome.exe` 进程，并以 9222 调试端口和 XMT 专用本地 Profile 启动 Chrome。
-4. Agent 使用 `chromium.connectOverCDP()` 连接自动启动的 Chrome；用户在抖音创作者中心手动登录，Agent 不会自动输入账号密码或上传 Cookie/Profile。
-5. 点击“立即同步”；Agent 通过 Playwright `connectOverCDP()` 连接 9222，并使用 `page.on('response')` 监听真实 XHR/Fetch；不调用 CDP `Network.enable`。
-6. 作品管理页默认监听 5 分钟，随后依次采集作品详情、账号总览、作品分析和粉丝分析，并生成按页面拆分的接口发现 JSON。
-7. 数据以 AES-256-GCM 加密并使用 HMAC-SHA256 签名后，通过既有 `/api/creator-agent/report` 上传。
-8. 在设置中选择手动、每 12 小时或每天指定小时同步，并可开启 Windows 登录后自动启动。
+## 登录、绑定与同步
+
+1. 管理员在 XMT Creator Center 创建 15 分钟有效的一次性绑定码。
+2. 启动 Agent，填写 XMT 地址和绑定码。绑定码成功使用后立即失效，设备凭据仅返回一次并进入系统安全存储。
+3. 点击“登录抖音”，用抖音 App 扫码；登录状态只保存在 Agent 独立 Profile。
+4. 点击“立即同步”。Agent 按账号、作品列表、作品详情、数据总览、内容分析和粉丝分析分阶段采集。
+5. 作品列表持续读取 `has_more` 和游标，不固定第一页；详情页采用串行低频访问。
+
+浏览器升级或卸载后先执行 `browser:list` 和 `browser:test`，再选择新候选。浏览器崩溃时会释放失效会话，按有限回退策略恢复；登录失效时停止上传，不会用空数据覆盖已有数据。
+
+## 定时同步
+
+桌面设置支持手动、每12小时或每天一次。默认关闭自动同步；同一进程只允许一个任务运行。macOS 使用登录项常驻，Windows 使用登录启动，用户无需手工编辑 launchd 或任务计划文件。
+
+## 登录失效与诊断
+
+- 显示“登录已失效”时，重新打开登录窗口扫码，不要复制浏览器 Profile。
+- 日志按任务记录页面、阶段、数量和错误，不记录 Cookie、Token 或完整敏感响应。
+- `npm run creator-agent:doctor` 用于基础诊断。
+- 历史明文 OAuth 凭据只可用根项目的 `npm run audit:douyin-legacy-tokens` 检测；默认不会删除。
+
+## 数据来源
+
+抖音运营中心正式链路仅为：抖音创作者中心 → Creator Agent → XMT 服务端。官方开放平台 OAuth 仅为仍需授权回调或 Webhook 的独立功能保留，不参与运营数据采集。

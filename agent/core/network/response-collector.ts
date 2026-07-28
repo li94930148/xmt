@@ -2,7 +2,7 @@ import type { Page, Response } from 'playwright';
 import type { NetworkCapture } from '../types.js';
 import { safeJsonParse } from './safe-json.js';
 
-const SECRET = /cookie|authorization|password|passwd|token|session|ticket|signature|secret|access[_-]?key|credential/i;
+const SECRET = /cookie|authorization|password|passwd|token|session|ticket|signature|secret|access[_-]?key|credential|mobile|phone|id[_-]?card|device[_-]?id/i;
 function sanitize(value: unknown, depth = 0): unknown {
   if (depth > 8) return '[truncated]';
   if (Array.isArray(value)) return value.slice(0, 500).map((item) => sanitize(item, depth + 1));
@@ -28,9 +28,11 @@ export class ResponseCollector {
       const payload = sanitize(safeJsonParse(responseText));
       this.captures.push({
         page: this.pageType, url: request.url(), method: request.method(), status: response.status(),
-        headers: sanitize(response.headers()) as Record<string, string>, request_body: request.postData() || undefined, response: payload,
+        headers: {}, request_body: undefined, response: payload,
         response_size: Buffer.byteLength(JSON.stringify(payload)), captured_at: new Date().toISOString(),
       });
-    } catch {}
+    } catch {
+      // A response may be unavailable after navigation; skipping it is safe.
+    }
   }
 }

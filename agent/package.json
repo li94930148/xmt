@@ -14,8 +14,15 @@
     "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "electron:dev": "wait-on http://127.0.0.1:5178 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5178 electron .",
     "electron:build": "npm run build && node scripts/build-electron.cjs",
-    "smoke:v281": "node scripts/smoke-v281.cjs --collect",
-    "test:contract:v2102": "npm run build && node --test dist-desktop/core/contracts/v2102-contract.test.js"
+    "test:contract:v2102": "npm run build && node --test dist-desktop/core/contracts/v2102-contract.test.js",
+    "test:cross-platform": "npm run build && node --test dist-desktop/core/browser/session.test.js",
+    "browser:list": "npm run build && node dist-desktop/core/browser/cli.js list",
+    "browser:test": "npm run build && node dist-desktop/core/browser/cli.js test",
+    "browser:select": "npm run build && node dist-desktop/core/browser/cli.js select",
+    "doctor": "npm run build && node scripts/doctor.cjs",
+    "login": "electron .",
+    "start": "electron .",
+    "sync": "electron ."
   },
   "dependencies": {
     "playwright": "^1.60.0",

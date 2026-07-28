@@ -22,7 +22,7 @@ const work = (index) => {
 const page = (start, count, cursor, hasMore) => ({ data: { aweme_list: Array.from({ length: count }, (_, offset) => work(start + offset).raw), max_cursor: cursor, has_more: hasMore } });
 function snapshot(snapshotId = 'snapshot-v2102') {
     const works = [work(0), work(1)];
-    return { platform: 'douyin', source: 'local_creator_center', contract_version: '2.10.2', snapshot_id: snapshotId, collection_mode: 'full_snapshot', collection_stats: { raw_response_count: 1, aweme_candidate_count: 2, normalized_success_count: 2, rejected_count: 0, rejected_reasons: {}, page_count: 1, new_count: 2 }, collected_at: '2026-07-24T00:00:00.000Z', account: { uid: '100000000000000001', nickname: 'creator', avatar: '', fans_count: 3 }, works, work_details: [], dashboard: {}, content_analysis: {}, fans: {}, raw: { api_map: [], captures: [capture({ data: { aweme_list: works.map((item) => item.raw) } })] }, videos: works, operations: { last7Days: {}, last30Days: {}, trafficSources: {}, contentPerformance: {} } };
+    return { schema_version: 1, protocol_version: 1, agent_version: 'test', platform: 'douyin', source: 'local_creator_center', contract_version: '2.10.2', snapshot_id: snapshotId, collection_mode: 'full_snapshot', collection_stats: { raw_response_count: 1, aweme_candidate_count: 2, normalized_success_count: 2, rejected_count: 0, rejected_reasons: {}, page_count: 1, new_count: 2 }, collected_at: '2026-07-24T00:00:00.000Z', account: { uid: '100000000000000001', nickname: 'creator', avatar: '', fans_count: 3 }, works, work_details: [], dashboard: {}, content_analysis: {}, fans: {}, raw: { api_map: [], captures: [capture({ data: { aweme_list: works.map((item) => item.raw) } })] }, videos: works, operations: { last7Days: {}, last30Days: {}, trafficSources: {}, contentPerformance: {} } };
 }
 (0, node_test_1.default)('safe JSON parsing preserves long aweme_id exactly as a string', () => {
     const parsed = (0, safe_json_js_1.safeJsonParse)('{"aweme_id":7663799549412758193,"author":{"uid":100000000000000001}}');
@@ -53,6 +53,14 @@ function snapshot(snapshotId = 'snapshot-v2102') {
     strict_1.default.equal(payload.contents.length, source.works.length);
     strict_1.default.equal(payload.sync_task.collection_stats.new_count, 0);
     strict_1.default.equal(payload.contents[0].aweme_id, source.works[0].aweme_id);
+});
+(0, node_test_1.default)('oversized raw responses are represented by size metadata without dropping normalized data', () => {
+    const source = snapshot();
+    source.raw.captures = [capture({ blob: 'x'.repeat(256 * 1024) })];
+    const payload = (0, unifiedPayload_js_1.toUnifiedCreatorPayload)(source);
+    strict_1.default.deepEqual(payload.raw_records[0].response_json, { truncated: true, original_bytes: 262155 });
+    strict_1.default.equal(payload.contents.length, source.works.length);
+    strict_1.default.equal(payload.metrics.length, source.works.length);
 });
 (0, node_test_1.default)('saving the same snapshot ten times is idempotent', () => {
     const directory = node_fs_1.default.mkdtempSync(node_path_1.default.join(node_os_1.default.tmpdir(), 'xmt-v2102-'));

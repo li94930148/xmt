@@ -36,14 +36,14 @@ async function fetchCursorPage(page: Page, capture: NetworkCapture, cursor: stri
   return safeJsonParse(responseText);
 }
 
-export async function collectContent(page: Page, captures: NetworkCapture[]): Promise<{ works: CreatorWork[]; dom: string; collectionStats: DouyinCollectionStats }> {
+export async function collectContent(page: Page, captures: NetworkCapture[],options:{maxPages?:number}={}): Promise<{ works: CreatorWork[]; dom: string; collectionStats: DouyinCollectionStats }> {
   await openPage(page, 'https://creator.douyin.com/creator-micro/content/manage');
   const observeMs = Math.max(0, Number(process.env.XMT_DOUYIN_WORK_LIST_OBSERVE_MS ?? 0));
   if (observeMs) await page.waitForTimeout(observeMs);
   const initialCapture = captures.find((capture) => capture.page === 'work-list' && workCandidateArrays(capture.response).length > 0);
   let pageCount = initialCapture ? 1 : 0;
   if (initialCapture) {
-    const paginated = await paginateWorkList(initialCapture.response, (cursor) => fetchCursorPage(page, initialCapture, cursor));
+    const paginated = await paginateWorkList(initialCapture.response, (cursor) => fetchCursorPage(page, initialCapture, cursor),{maxPages:options.maxPages});
     pageCount = paginated.page_count;
     for (const response of paginated.responses.slice(1)) {
       captures.push({

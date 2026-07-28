@@ -66,6 +66,19 @@ async function initTables() {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS anonymous_feedback (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('feature', 'usage', 'process', 'team', 'other')),
+      content TEXT NOT NULL,
+      need_reply BOOLEAN NOT NULL DEFAULT 0,
+      reply_content TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'read', 'done')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS topics (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,

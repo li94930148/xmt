@@ -8,6 +8,7 @@ export { default as MotionCard } from './MotionCard';
 export { default as NotificationBadge } from './NotificationBadge';
 export { default as PageHeader } from './PageHeader';
 export { default as PageShell } from './PageShell';
+export { default as ResponsiveTableShell } from './ResponsiveTableShell';
 export { default as SearchBar } from './SearchBar';
 export { default as StageProgress } from './StageProgress';
 export { default as StatusPill } from './StatusPill';

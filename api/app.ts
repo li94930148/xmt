@@ -48,6 +48,7 @@ import systemSettingsRoutes from './routes/system-settings.js'
 import dailyReportsRoutes from './routes/daily-reports.js'
 import reportsRoutes from './routes/reports.js'
 import retrospectivesRoutes from './routes/retrospectives.js'
+import anonymousFeedbackRoutes from './routes/anonymous-feedback.js'
 import collaborationDashboardRoutes from './routes/collaboration-dashboard.js'
 import collaborationUxRoutes from './routes/collaboration-ux.js'
 import contentIntelligenceRoutes from './routes/content-intelligence.js'
@@ -302,6 +303,7 @@ app.use('/api/system-settings', systemSettingsRoutes)
 app.use('/api/daily-reports', dailyReportsRoutes)
 app.use('/api/reports', reportsRoutes)
 app.use('/api/retrospectives', retrospectivesRoutes)
+app.use('/api/anonymous-feedback', anonymousFeedbackRoutes)
 app.use('/api/collaboration', collaborationDashboardRoutes)
 app.use('/api/collaboration/ux', collaborationUxRoutes)
 app.use('/api/content/intelligence', contentIntelligenceRoutes)

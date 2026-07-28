@@ -20,7 +20,6 @@ import {
   Timer,
   TrendingUp,
   Users,
-  Video,
 } from 'lucide-react';
 import { getInspirations, getMonthlyStats, getTeamStats, getTopics, voteInspiration } from '../api';
 import type { Inspiration, MonthlyStats, TeamStats, Topic, TopicStatus } from '../types';
@@ -28,6 +27,7 @@ import { useAuthStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
 import AnnouncementBoard from '../components/AnnouncementBoard';
 import PomodoroTimer from '../components/PomodoroTimer';
+import AnonymousFeedbackModal from '../components/AnonymousFeedbackModal';
 import {
   ActionButton,
   EmptyState,
@@ -80,6 +80,7 @@ export default function Home() {
   const [recentTopics, setRecentTopics] = useState<Topic[]>([]);
   const [hotInspirations, setHotInspirations] = useState<Inspiration[]>([]);
   const [loading, setLoading] = useState(true);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const { permissions, loading: permissionsLoading } = usePermission();
@@ -376,7 +377,17 @@ export default function Home() {
         </GlassPanel>
       </div>
 
-      <AnnouncementBoard />
+      <div className="grid gap-5 xl:grid-cols-3">
+        <div className="xl:col-span-2"><AnnouncementBoard /></div>
+        <GlassPanel className="flex min-h-32 items-center justify-between gap-5 p-5">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-studio-text-primary">意见箱</h2>
+            <p className="mt-1 text-sm leading-6 text-studio-text-muted">有想法、建议或问题？留下你的声音</p>
+          </div>
+          <ActionButton className="shrink-0" onClick={() => setFeedbackOpen(true)}>提交意见</ActionButton>
+        </GlassPanel>
+      </div>
+      <AnonymousFeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </PageShell>
   );
 }

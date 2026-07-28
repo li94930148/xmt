@@ -18,6 +18,7 @@
     "test:daily-reports": "node scripts/smoke-daily-reports.mjs",
     "test:retrospectives": "node scripts/smoke-retrospectives.mjs",
     "test:e2e": "node scripts/e2e-smoke.mjs",
+    "test:anonymous-feedback": "tsx scripts/test-anonymous-feedback.ts",
     "smoke:navigation": "tsx scripts/smoke-navigation.mjs",
     "test:douyin:webhook": "node scripts/test-douyin-webhook-challenge.mjs",
     "smoke:social-review": "node scripts/social-review-smoke-safe.mjs",

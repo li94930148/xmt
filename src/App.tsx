@@ -84,6 +84,7 @@ const CreatorTrends = lazyWithRetry(() => import('@/pages/creator-center/Creator
 const CreatorFans = lazyWithRetry(() => import('@/pages/creator-center/CreatorFans'), 'CreatorFans');
 const CreatorReports = lazyWithRetry(() => import('@/pages/creator-center/CreatorReports'), 'CreatorReports');
 const PermissionManagement = lazyWithRetry(() => import('@/pages/PermissionManagement'), 'PermissionManagement');
+const AnonymousFeedbackAdmin = lazyWithRetry(() => import('@/pages/AnonymousFeedbackAdmin'), 'AnonymousFeedbackAdmin');
 const WorkflowDesigner = lazyWithRetry(() => import('@/pages/WorkflowDesigner'), 'WorkflowDesigner');
 const NotificationSettings = lazyWithRetry(() => import('@/pages/NotificationSettings'), 'NotificationSettings');
 const ExportPage = lazyWithRetry(() => import('@/pages/ExportPage'), 'ExportPage');
@@ -221,6 +222,9 @@ export default function App() {
                 </Route>
                 <Route element={<RoleGuard permissions={['system:backup']} />}>
                   <Route path="/backup" element={<BackupPage />} />
+                </Route>
+                <Route element={<RoleGuard roles={['admin']} />}>
+                  <Route path="/admin/anonymous-feedback" element={<AnonymousFeedbackAdmin />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Route>

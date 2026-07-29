@@ -72,11 +72,13 @@ async function initTables() {
       content TEXT NOT NULL,
       need_reply BOOLEAN NOT NULL DEFAULT 0,
       reply_content TEXT,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'read', 'done')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed')),
+      is_public BOOLEAN NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  await migrateAnonymousFeedback();
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS topics (
@@ -1522,6 +1524,62 @@ async function initTables() {
       sql: `INSERT INTO users (username, password, email, role, name, enabled, force_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       args: ['member2', member2Password, 'member2@local.dev', 'member', '员工李四', 1, 1]
     });
+  }
+}
+
+async function migrateAnonymousFeedback() {
+  const table = await db.execute(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'anonymous_feedback'`);
+  const tableSql = String(table.rows[0]?.sql || '');
+  const columns = await db.execute(`PRAGMA table_info(anonymous_feedback)`);
+  const hasPublicColumn = columns.rows.some((column) => String(column.name) === 'is_public');
+  const hasLegacyStatuses = tableSql.includes("'read'") || tableSql.includes("'done'");
+
+  if (!hasLegacyStatuses) {
+    if (!hasPublicColumn) {
+      await db.execute(`ALTER TABLE anonymous_feedback ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT 1`);
+    }
+    return;
+  }
+
+  const transaction = await db.transaction('write');
+  try {
+    await transaction.execute(`ALTER TABLE anonymous_feedback RENAME TO anonymous_feedback_legacy`);
+    await transaction.execute(`
+      CREATE TABLE anonymous_feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL CHECK(type IN ('feature', 'usage', 'process', 'team', 'other')),
+        content TEXT NOT NULL,
+        need_reply BOOLEAN NOT NULL DEFAULT 0,
+        reply_content TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'processing', 'completed')),
+        is_public BOOLEAN NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await transaction.execute(`
+      INSERT INTO anonymous_feedback (
+        id, type, content, need_reply, reply_content, status, is_public, created_at, updated_at
+      )
+      SELECT
+        id,
+        type,
+        content,
+        need_reply,
+        reply_content,
+        CASE status WHEN 'read' THEN 'processing' WHEN 'done' THEN 'completed' ELSE 'pending' END,
+        1,
+        created_at,
+        updated_at
+      FROM anonymous_feedback_legacy
+    `);
+    await transaction.execute(`DROP TABLE anonymous_feedback_legacy`);
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  } finally {
+    transaction.close();
   }
 }
 

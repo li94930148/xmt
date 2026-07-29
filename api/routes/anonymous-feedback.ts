@@ -3,14 +3,16 @@ import { authenticate, requireRole } from '../middleware/auth';
 import { beijingNow, execute, executeInsert, queryAll, queryOne } from '../database/utils';
 
 const router = express.Router();
+export const anonymousFeedbackAdminRouter = express.Router();
 const feedbackTypes = new Set(['feature', 'usage', 'process', 'team', 'other']);
-const feedbackStatuses = new Set(['pending', 'read', 'done']);
+const feedbackStatuses = new Set(['pending', 'processing', 'completed']);
 
 router.get('/', authenticate, async (_req, res) => {
   try {
     const feedback = await queryAll(`
-      SELECT id, type, content, need_reply, reply_content, created_at, updated_at
+      SELECT id, type, content, need_reply, reply_content, status, created_at, updated_at
       FROM anonymous_feedback
+      WHERE is_public = 1
       ORDER BY created_at DESC, id DESC
     `);
     return res.json({ data: feedback });
@@ -41,7 +43,9 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
-router.get('/admin', authenticate, requireRole(['admin']), async (_req, res) => {
+anonymousFeedbackAdminRouter.use(authenticate, requireRole(['admin']));
+
+anonymousFeedbackAdminRouter.get('/', async (_req, res) => {
   try {
     const feedback = await queryAll(`SELECT * FROM anonymous_feedback ORDER BY created_at DESC, id DESC`);
     return res.json({ data: feedback });
@@ -50,7 +54,7 @@ router.get('/admin', authenticate, requireRole(['admin']), async (_req, res) => 
   }
 });
 
-router.patch('/admin/:id', authenticate, requireRole(['admin']), async (req, res) => {
+anonymousFeedbackAdminRouter.patch('/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: '意见编号无效' });
   const existing = await queryOne(`SELECT id FROM anonymous_feedback WHERE id = ?`, [id]);
@@ -68,6 +72,10 @@ router.patch('/admin/:id', authenticate, requireRole(['admin']), async (req, res
     }
     updates.push('reply_content = ?'); params.push(req.body.reply_content.trim() || null);
   }
+  if (req.body.is_public !== undefined) {
+    if (typeof req.body.is_public !== 'boolean') return res.status(400).json({ message: '公开状态格式不正确' });
+    updates.push('is_public = ?'); params.push(req.body.is_public ? 1 : 0);
+  }
   if (updates.length === 0) return res.status(400).json({ message: '没有需要更新的字段' });
 
   updates.push('updated_at = ?'); params.push(beijingNow(), id);
@@ -75,7 +83,7 @@ router.patch('/admin/:id', authenticate, requireRole(['admin']), async (req, res
   return res.json({ success: true });
 });
 
-router.delete('/admin/:id', authenticate, requireRole(['admin']), async (req, res) => {
+anonymousFeedbackAdminRouter.delete('/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: '意见编号无效' });
   const affected = await execute(`DELETE FROM anonymous_feedback WHERE id = ?`, [id]);

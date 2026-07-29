@@ -85,6 +85,7 @@ const CreatorFans = lazyWithRetry(() => import('@/pages/creator-center/CreatorFa
 const CreatorReports = lazyWithRetry(() => import('@/pages/creator-center/CreatorReports'), 'CreatorReports');
 const PermissionManagement = lazyWithRetry(() => import('@/pages/PermissionManagement'), 'PermissionManagement');
 const AnonymousFeedbackAdmin = lazyWithRetry(() => import('@/pages/AnonymousFeedbackAdmin'), 'AnonymousFeedbackAdmin');
+const AnonymousFeedback = lazyWithRetry(() => import('@/pages/AnonymousFeedback'), 'AnonymousFeedback');
 const WorkflowDesigner = lazyWithRetry(() => import('@/pages/WorkflowDesigner'), 'WorkflowDesigner');
 const NotificationSettings = lazyWithRetry(() => import('@/pages/NotificationSettings'), 'NotificationSettings');
 const ExportPage = lazyWithRetry(() => import('@/pages/ExportPage'), 'ExportPage');
@@ -147,6 +148,7 @@ export default function App() {
                 <Route path="/calendar" element={<CalendarPage />} />
                 <Route path="/inspirations" element={<Inspirations />} />
                 <Route path="/achievements" element={<Achievements />} />
+                <Route path="/anonymous-feedback" element={<AnonymousFeedback />} />
                 <Route path="/notification-settings" element={<NotificationSettings />} />
                 <Route path="/pomodoro" element={<PomodoroPage />} />
                 <Route element={<RoleGuard permissions={['workflow:shooting']} />}>

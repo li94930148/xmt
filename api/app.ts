@@ -22,6 +22,7 @@ import { apiLimiter } from './middleware/rateLimit.js'
 import { parseTrustProxy } from './utils/trustProxy.js'
 import authRoutes from './routes/auth.js'
 import topicsRoutes from './routes/topics.js'
+import { v1TopicsRouter } from './modules/topics/index.js'
 import usersRoutes from './routes/users.js'
 import messagesRoutes from './routes/messages.js'
 import analyticsRoutes from './routes/analytics.js'
@@ -281,6 +282,9 @@ app.use('/api/auth', authRoutes)
 // Auth is mounted first so its dedicated login limiters never consume the shared API quota.
 app.use('/api/', apiLimiter)
 app.use('/api/topics', topicsRoutes)
+if (process.env.XMT_TOPICS_V1_ENABLED === 'true') {
+  app.use('/api/v1/topics', v1TopicsRouter)
+}
 app.use('/api/users', usersRoutes)
 app.use('/api/messages', messagesRoutes)
 app.use('/api/analytics', analyticsRoutes)

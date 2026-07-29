@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.11.0',
+    date: '2026-07-29',
+    title: 'Topic 模块化基础落地',
+    changes: [
+      { type: 'feature', description: 'Topic 新增 Repository、Policy、Service、Controller 与模块路由边界，legacy 接口继续兼容。' },
+      { type: 'feature', description: '新增默认关闭的 /api/v1/topics 严格 Zod 契约，为后续客户端迁移做准备。' },
+      { type: 'improvement', description: '新增临时 SQLite 专项测试，覆盖数据访问、业务错误和 legacy/v1 API 契约。' },
+      { type: 'security', description: '权限、状态机、通知、Socket 与历史日志行为保持原样，未修改数据库结构。' },
+    ],
+  },
+  {
     version: '2.10.3',
     date: '2026-07-29',
     title: '修复抖音粉丝与作品封面显示并优化数据驾驶舱',

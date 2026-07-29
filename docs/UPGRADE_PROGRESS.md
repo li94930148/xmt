@@ -78,3 +78,59 @@
 ### 下一阶段计划
 
 等待实施指令。进入编码前先确认实施接口范围、v1 开关、测试数据库、依赖与版本基线；不得直接大规模移动目录。
+
+## Phase 2-A：Topic 模块化基础落地
+
+### 当前版本
+
+`v2.11.0`。实施开始时根项目实际版本已是标准版本 `v2.10.3`，因此本次从该有效基线升级；早期文档中的 `v2.10.2-storage` 仅为设计阶段记录，未用于回退版本。
+
+### 新增文件
+
+- `api/modules/topics/index.ts`
+- `api/modules/topics/topics.routes.ts`
+- `api/modules/topics/topics.controller.ts`
+- `api/modules/topics/topics.service.ts`
+- `api/modules/topics/topics.repository.ts`
+- `api/modules/topics/topics.sqlite-repository.ts`
+- `api/modules/topics/topics.policy.ts`
+- `api/modules/topics/topics.mapper.ts`
+- `api/modules/topics/topics.types.ts`
+- `shared/schema/topics.schema.ts`
+- `tests/topics/topics.test.ts`
+- `docs/releases/v2.11.0.md`
+
+### 代码变化
+
+1. Topic SQL 抽入 SQLite Repository，Service 不再直接依赖数据库工具。
+2. 当前 `canViewTopic`、`canEditTopic` 与全量查看判断通过 Policy 复用，未改变角色或归属结果。
+3. Service 统一编排创建、更新、删除、审核和状态流转，继续复用现有状态机、通知和 Socket 工具。
+4. Controller 分离 legacy 与 v1 HTTP 适配；legacy 响应保持原 envelope。
+5. `/api/topics` 继续可用；`/api/v1/topics` 由 `XMT_TOPICS_V1_ENABLED=true` 开启，默认关闭。
+6. v1 使用严格 Zod Schema，legacy 继续宽松兼容。
+
+### 数据库变化
+
+无。未修改数据库结构、表、字段、索引、初始化逻辑或迁移脚本；测试只使用并清理系统临时目录中的 SQLite 数据库。
+
+### 测试结果
+
+- `npm run test:topics`：通过。
+- `npm run check`：通过。
+- `npx eslint api/modules/topics shared/schema/topics.schema.ts`：通过。
+- `npm run build`：通过。
+- `npm run lint`：未通过；全仓现有 259 个错误、38 个警告，Topic 新增文件中的问题已修复，未在本阶段扩大处理历史 lint 债务。
+
+### 风险
+
+1. legacy 行为虽然已由专项测试覆盖核心契约，后续仍需扩展七接口的完整角色与副作用矩阵。
+2. v1 默认关闭；启用写接口前应增加更完整的集成观察与回滚验证。
+3. 旧删除流程仍是逐项 best-effort 清理，本阶段按要求保持，不做事务化修复。
+4. Repository 仍依赖 SQLite 语义，PostgreSQL 实现不在本阶段范围。
+
+### 下一步计划
+
+1. 扩充 Topic 行为冻结测试，覆盖审核、状态流转、通知和 Socket payload。
+2. 在非生产环境只读启用 v1，观测分页、403 和错误 envelope。
+3. 完成观察后再规划 Web 的单点 base path 切换；legacy 在观察窗口结束前不删除。
+4. 权限模型、状态机和删除完整性如需调整，分别立项，不与模块迁移混合。

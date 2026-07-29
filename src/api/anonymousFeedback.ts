@@ -14,6 +14,8 @@ export interface AnonymousFeedback {
   updated_at: string;
 }
 
+export type PublicAnonymousFeedback = Omit<AnonymousFeedback, 'status'>;
+
 function authHeaders(json = false): Record<string, string> {
   const token = useAuthStore.getState().token;
   return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(json ? { 'Content-Type': 'application/json' } : {}) };
@@ -27,6 +29,12 @@ async function ensureOk(response: Response, fallback: string) {
 
 export async function submitAnonymousFeedback(payload: { type: AnonymousFeedbackType; content: string; needReply: boolean }) {
   return ensureOk(await fetch('/api/anonymous-feedback', { method: 'POST', headers: authHeaders(true), body: JSON.stringify(payload) }), '提交意见失败');
+}
+
+export async function getPublicAnonymousFeedback(): Promise<PublicAnonymousFeedback[]> {
+  const response = await ensureOk(await fetch('/api/anonymous-feedback', { headers: authHeaders() }), '获取意见失败');
+  const payload = await response.json();
+  return payload.data || [];
 }
 
 export async function getAnonymousFeedback(): Promise<AnonymousFeedback[]> {

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { queryOne } from '../database/utils';
 import { verifyToken } from '../utils/jwt';
 import { User } from '../types';
+import { sendV1Error } from '../utils/response';
 
 /* eslint-disable @typescript-eslint/no-namespace */
 declare global {
@@ -25,6 +26,9 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   const token = extractBearerToken(req.headers.authorization);
   
   if (!token) {
+    if (req.originalUrl.startsWith('/api/v1/')) {
+      return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '未登录' }, 401);
+    }
     return res.status(401).json({ message: '未登录' });
   }
   
@@ -32,12 +36,18 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     const payload = verifyToken(token);
     
     if (!payload) {
+      if (req.originalUrl.startsWith('/api/v1/')) {
+        return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '登录已过期，请重新登录' }, 401);
+      }
       return res.status(401).json({ message: '登录已过期，请重新登录' });
     }
     
     const result = await queryOne(`SELECT * FROM users WHERE id = ?`, [payload.userId]);
     
     if (!result) {
+      if (req.originalUrl.startsWith('/api/v1/')) {
+        return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '用户不存在' }, 401);
+      }
       return res.status(401).json({ message: '用户不存在' });
     }
     
@@ -56,12 +66,18 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     };
     
     if (!user.enabled) {
+      if (req.originalUrl.startsWith('/api/v1/')) {
+        return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '账号已被禁用' }, 401);
+      }
       return res.status(401).json({ message: '账号已被禁用' });
     }
     
     req.user = user;
     next();
   } catch {
+    if (req.originalUrl.startsWith('/api/v1/')) {
+      return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '登录已过期，请重新登录' }, 401);
+    }
     return res.status(401).json({ message: '登录已过期，请重新登录' });
   }
 }

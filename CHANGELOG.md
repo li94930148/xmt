@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.12.0 - 2026-07-29
+
+- 建立 `/api/v1/*` 成功、错误、分页、错误码和 HTTP 状态码契约。
+- 新增 requestId 生成、透传和响应回写机制，Topic v1 envelope 统一携带 requestId。
+- 新增 Zod 驱动的 OpenAPI 3.0.3 文档与 `/api/docs` Swagger UI，首批覆盖四个 Topic v1 接口。
+- 新增 `packages/api-client` 基础骨架和 API Contract 临时 SQLite 测试；legacy API 与业务规则保持不变。
+
 ## 2.11.0 - 2026-07-29
 
 - 将 Topic 的 Repository、Policy、Service、Controller 与 HTTP 路由抽离到 `api/modules/topics`，旧 `/api/topics` 保持兼容。

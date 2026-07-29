@@ -134,3 +134,67 @@
 2. 在非生产环境只读启用 v1，观测分页、403 和错误 envelope。
 3. 完成观察后再规划 Web 的单点 base path 切换；legacy 在观察窗口结束前不删除。
 4. 权限模型、状态机和删除完整性如需调整，分别立项，不与模块迁移混合。
+
+## Phase 2-B：API Contract 标准化建设
+
+### 当前版本
+
+`v2.12.0`
+
+### 新增文件
+
+- `docs/API_CONTRACT.md`
+- `shared/schema/common.schema.ts`
+- `shared/schema/error.schema.ts`
+- `shared/schema/pagination.schema.ts`
+- `api/middleware/request-id.ts`
+- `api/openapi.ts`
+- `packages/api-client/client.ts`
+- `packages/api-client/error.ts`
+- `packages/api-client/auth.ts`
+- `packages/api-client/types.ts`
+- `tests/api-contract/api-contract.test.ts`
+- `docs/releases/v2.12.0.md`
+
+### API 规范变化
+
+1. 明确新接口使用 `/api/v1/*`，legacy `/api/*` 保持当前契约和业务行为。
+2. v1 成功响应统一为 `{ success: true, data, meta }`，分页使用 `meta.page/limit/total`。
+3. v1 错误响应统一为 `{ success: false, error: { code, message, requestId, details? } }`。
+4. 增加公共错误码与 HTTP 状态映射；Topic 领域错误只在 HTTP 层映射，不改变 Service。
+5. 全局生成或透传 `X-Request-ID`，v1 envelope 同时返回 requestId。
+6. `/api/docs` 提供 Swagger UI，`/api/docs/openapi.json` 提供 OpenAPI 3.0.3 文档。
+
+### Schema 变化
+
+1. 新增 id、日期、requestId、分页和 meta 公共 Schema。
+2. 新增公共成功/错误 Schema 与错误码 Schema。
+3. Topic v1 与 OpenAPI 继续复用 `shared/schema/topics.schema.ts`，未为文档重复声明请求类型。
+4. `packages/api-client` 直接复用共享 API 类型，本阶段未迁移 Web。
+
+### 数据库变化
+
+无。未修改数据库结构、表、字段、索引、数据、初始化代码或迁移脚本；所有 API Contract 集成测试使用系统临时目录中的 SQLite 数据库并在结束后清理。
+
+### 测试结果
+
+- `npm run test:topics`：通过。
+- `npm run test:api-contract`：通过。
+- `npm run check`：通过。
+- API Contract 相关文件定向 lint：通过。
+- `npm run build`：通过。
+- `npm run lint`：未通过；全仓仍有既有 250 个错误、38 个警告，本阶段新增和修改的 Contract 文件已通过定向 lint。
+
+### 风险
+
+1. v1 Topic 仍由环境开关控制，默认关闭；OpenAPI 描述的是准备好的契约，不代表 Web 已切换。
+2. legacy 认证和权限响应继续保持旧格式；只有 `/api/v1/*` 分支使用公共错误 envelope。
+3. OpenAPI 首批只覆盖 Topic 列表、详情、创建和更新，其他模块不能被误认为已标准化。
+4. api-client 目前是基础骨架，刷新 token 只有接口和并发互斥预留，尚未接入认证服务。
+
+### 下一阶段计划
+
+1. 按单模块垂直切片扩展 Auth 或 Production v1 Schema 与 OpenAPI，不批量迁移 legacy。
+2. 为 OpenAPI 增加 CI 快照和破坏性差异检查。
+3. 在非生产环境启用 Topic v1 观察后，再让 Web API 层通过单点配置试用 api-client。
+4. requestId 后续接入结构化日志和错误监控，形成端到端查询链路。

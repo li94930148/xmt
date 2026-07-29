@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.12.0',
+    date: '2026-07-29',
+    title: 'API Contract 标准化建设',
+    changes: [
+      { type: 'feature', description: '建立 /api/v1 成功、错误、分页、错误码和 HTTP 状态码公共契约。' },
+      { type: 'feature', description: '新增 requestId 生成与透传，并提供 Zod 驱动的 OpenAPI 文档和 Swagger UI。' },
+      { type: 'improvement', description: 'Topic v1 接入统一 envelope，新增 api-client 基础骨架和契约测试。' },
+      { type: 'security', description: 'legacy API、数据库、权限、状态机及业务逻辑保持不变。' },
+    ],
+  },
+  {
     version: '2.11.0',
     date: '2026-07-29',
     title: 'Topic 模块化基础落地',

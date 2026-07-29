@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.11.0",
+  "version": "2.12.0",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -13,6 +13,7 @@
     "test:time": "tsx scripts/time-contract-test.ts",
     "test:rate-limit": "tsx scripts/rate-limit-contract-test.ts",
     "test:topics": "tsx tests/topics/topics.test.ts",
+    "test:api-contract": "tsx tests/api-contract/api-contract.test.ts",
     "audit:time": "tsx scripts/audit-time-fields.ts",
     "server:dev": "nodemon",
     "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",
@@ -80,6 +81,7 @@
     "audit:douyin-legacy-tokens": "tsx scripts/audit-legacy-douyin-tokens.ts"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.3.4",
     "@libsql/client": "^0.17.3",
     "@tanstack/react-query": "^5.101.0",
     "@tiptap/core": "^3.25.0",
@@ -119,6 +121,7 @@
     "react-router-dom": "^7.3.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
+    "swagger-ui-express": "^5.0.1",
     "tailwind-merge": "^3.0.2",
     "tsx": "^4.20.3",
     "xlsx": "^0.18.5",
@@ -137,6 +140,7 @@
     "@types/node": "^22.15.30",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/swagger-ui-express": "^4.1.8",
     "@vercel/node": "^5.3.6",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",

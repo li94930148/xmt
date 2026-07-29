@@ -17,6 +17,7 @@ const { createLegacyTopicsRouter, createV1TopicsRouter } = await import('../../a
 const { TopicController } = await import('../../api/modules/topics/topics.controller.js');
 const { currentTopicPolicy } = await import('../../api/modules/topics/topics.policy.js');
 const { signToken } = await import('../../api/utils/jwt.js');
+const { requestId } = await import('../../api/middleware/request-id.js');
 
 await initDatabase();
 
@@ -153,6 +154,7 @@ async function apiTests() {
   });
   const controller = new TopicController(service);
   const app = express();
+  app.use(requestId);
   app.use(express.json());
   app.use('/api/topics', createLegacyTopicsRouter(controller));
   app.use('/api/v1/topics', createV1TopicsRouter(controller));
@@ -175,7 +177,8 @@ async function apiTests() {
     const v1 = await v1Response.json() as Record<string, unknown>;
     assert.equal(v1.success, true);
     assert.deepEqual(v1.data, legacy.data);
-    assert.deepEqual(v1.meta, { pagination: legacy.pagination });
+    assert.deepEqual(v1.meta, { ...legacy.pagination as object, requestId: (v1.meta as { requestId: string }).requestId });
+    assert.equal(typeof (v1.meta as { requestId: string }).requestId, 'string');
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

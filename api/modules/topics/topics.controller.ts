@@ -7,7 +7,16 @@ import {
   transitionTopicInputSchema,
   updateTopicInputSchema,
 } from '@shared/schema/topics.schema';
-import { sendError, sendNotFound, sendServerError, sendSuccess, sendSuccessWithPagination } from '../../utils/response';
+import { idSchema } from '@shared/schema/common.schema';
+import {
+  sendError,
+  sendNotFound,
+  sendServerError,
+  sendSuccess,
+  sendSuccessWithPagination,
+  sendV1Error,
+  sendV1Success,
+} from '../../utils/response';
 import { TopicService } from './topics.service';
 import { TopicServiceError, type TopicActor } from './topics.types';
 
@@ -36,21 +45,42 @@ function legacyError(res: Response, error: unknown, action: TopicAction) {
 }
 
 function v1Error(req: Request, res: Response, error: unknown) {
-  const requestId = String(req.headers['x-request-id'] || 'unavailable');
   if (error instanceof ZodError) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'TOPIC_INVALID_INPUT', message: '请求参数不合法', requestId, details: error.flatten() },
-    });
+    return sendV1Error(req, res, {
+      code: 'VALIDATION_ERROR',
+      message: '请求参数不合法',
+      details: error.flatten(),
+    }, 400);
   }
   if (error instanceof TopicServiceError) {
-    const status = error.code === 'TOPIC_NOT_FOUND' ? 404 : error.code === 'TOPIC_FORBIDDEN' ? 403 : 400;
-    return res.status(status).json({ success: false, error: { code: error.code, message: error.message, requestId } });
+    if (error.code === 'TOPIC_NOT_FOUND') {
+      return sendV1Error(req, res, {
+        code: 'RESOURCE_NOT_FOUND',
+        message: error.message,
+        details: { domainCode: error.code },
+      }, 404);
+    }
+    if (error.code === 'TOPIC_FORBIDDEN') {
+      return sendV1Error(req, res, {
+        code: 'PERMISSION_DENIED',
+        message: error.message,
+        details: { domainCode: error.code },
+      }, 403);
+    }
+    if (error.code === 'TOPIC_INVALID_TRANSITION') {
+      return sendV1Error(req, res, {
+        code: 'INVALID_STATUS',
+        message: error.message,
+        details: { domainCode: error.code },
+      }, 409);
+    }
+    return sendV1Error(req, res, {
+      code: 'VALIDATION_ERROR',
+      message: error.message,
+      details: { domainCode: error.code },
+    }, 400);
   }
-  return res.status(500).json({
-    success: false,
-    error: { code: 'INTERNAL_ERROR', message: '服务器内部错误', requestId },
-  });
+  return sendV1Error(req, res, { code: 'INTERNAL_ERROR', message: '服务器内部错误' }, 500);
 }
 
 function parse<T>(schema: ZodType<T>, value: unknown): T {
@@ -137,16 +167,16 @@ export class TopicController {
         page: query.page ?? 1,
         limit: query.limit ?? 10,
       });
-      return res.json({
-        success: true,
-        data: result.topics,
-        meta: { pagination: { page: result.page, limit: result.limit, total: result.total } },
+      return sendV1Success(req, res, result.topics, {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
       });
     } catch (error) { return v1Error(req, res, error); }
   };
 
   v1Get = async (req: Request, res: Response) => {
-    try { return res.json({ success: true, data: await this.service.getTopic(actor(req), req.params.id) }); }
+    try { return sendV1Success(req, res, await this.service.getTopic(actor(req), parse(idSchema, req.params.id))); }
     catch (error) { return v1Error(req, res, error); }
   };
 
@@ -162,43 +192,48 @@ export class TopicController {
           ? JSON.stringify(input.outlineJson)
           : input.outlineJson,
       };
-      return res.json({ success: true, data: await this.service.createTopic(actor(req), normalized) });
+      return sendV1Success(req, res, await this.service.createTopic(actor(req), normalized));
     } catch (error) { return v1Error(req, res, error); }
   };
 
   v1Update = async (req: Request, res: Response) => {
     try {
       const input = parse(updateTopicInputSchema, req.body);
+      const id = parse(idSchema, req.params.id);
       const normalized = {
         ...input,
         outlineJson: typeof input.outlineJson === 'object' && input.outlineJson !== null
           ? JSON.stringify(input.outlineJson)
           : input.outlineJson,
       };
-      await this.service.updateTopic(actor(req), req.params.id, normalized);
-      return res.json({ success: true, data: null });
+      await this.service.updateTopic(actor(req), id, normalized);
+      return sendV1Success(req, res, null);
     } catch (error) { return v1Error(req, res, error); }
   };
 
   v1Delete = async (req: Request, res: Response) => {
     try {
-      await this.service.deleteTopic(actor(req), req.params.id);
-      return res.json({ success: true, data: null });
+      await this.service.deleteTopic(actor(req), parse(idSchema, req.params.id));
+      return sendV1Success(req, res, null);
     } catch (error) { return v1Error(req, res, error); }
   };
 
   v1Audit = async (req: Request, res: Response) => {
     try {
       const input = parse(auditTopicInputSchema, req.body);
-      await this.service.auditTopic(actor(req), req.params.id, { ...input, comment: input.comment ?? '' });
-      return res.json({ success: true, data: null });
+      await this.service.auditTopic(actor(req), parse(idSchema, req.params.id), { ...input, comment: input.comment ?? '' });
+      return sendV1Success(req, res, null);
     } catch (error) { return v1Error(req, res, error); }
   };
 
   v1Transition = async (req: Request, res: Response) => {
     try {
-      await this.service.transitionTopic(actor(req), req.params.id, parse(transitionTopicInputSchema, req.body));
-      return res.json({ success: true, data: null });
+      await this.service.transitionTopic(
+        actor(req),
+        parse(idSchema, req.params.id),
+        parse(transitionTopicInputSchema, req.body),
+      );
+      return sendV1Success(req, res, null);
     } catch (error) { return v1Error(req, res, error); }
   };
 }

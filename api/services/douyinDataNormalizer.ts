@@ -67,7 +67,10 @@ const record = (value: unknown): JsonRecord => value && typeof value === 'object
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const text = (value: unknown) => value == null ? '' : String(value).trim();
 const number = (value: unknown) => {
-  const parsed = typeof value === 'string' ? Number(value.replace(/,/g, '').replace('%', '')) : Number(value);
+  if (value && typeof value === 'object') { const source=record(value); for(const key of ['value','count','total','number']){if(source[key]!==undefined)return number(source[key]);} }
+  const normalized=typeof value==='string'?value.replace(/[，,\s]/g,'').replace('%',''):value;
+  const match=typeof normalized==='string'?normalized.match(/^(\d+(?:\.\d+)?)(万|亿)?\+?$/):null;
+  const parsed=match?Number(match[1])*(match[2]==='亿'?100_000_000:match[2]==='万'?10_000:1):Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 const first = (...values: unknown[]) => values.find(value => value !== undefined && value !== null && value !== '');
@@ -75,13 +78,15 @@ const nested = (source: JsonRecord, path: string) => path.split('.').reduce<unkn
 const firstPath = (source: JsonRecord, paths: string[]) => first(...paths.map(path => nested(source, path)));
 const hasPathValue = (source: JsonRecord, paths: string[]) => paths.some(path => {
   const value = nested(source, path);
-  return value !== undefined && value !== null && value !== '' && Number.isFinite(Number(typeof value === 'string' ? value.replace(/,/g, '') : value));
+  return value !== undefined && value !== null && value !== '' && (number(value) > 0 || String(value).trim().replace(/[，,\s]/g,'') === '0');
 });
 
 function imageUrl(value: unknown): string {
-  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(imageUrl).find(Boolean) || '';
+  if (typeof value === 'string') { const normalized=value.trim().replace(/\\\//g,'/');const absolute=normalized.startsWith('//')?`https:${normalized}`:normalized;try{const url=new URL(absolute);return ['http:','https:'].includes(url.protocol)?url.toString():'';}catch{return '';} }
   const source = record(value);
-  return text(first(source.url, list(source.url_list)[0], list(source.urlList)[0], source.uri));
+  if (!Object.keys(source).length) return '';
+  return imageUrl(source.url_list) || imageUrl(source.urlList) || imageUrl(source.url) || imageUrl(source.uri);
 }
 
 function timestamp(value: unknown): string | null {

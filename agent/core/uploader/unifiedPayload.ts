@@ -52,6 +52,7 @@ export function toUnifiedCreatorPayload(snapshot: CreatorSnapshot, options: { kn
     status: work.status,
     raw_json: {
       item_id: work.item_id,
+      cover_url: work.cover_url || work.cover || '',
       metrics: work.metrics,
     },
   }));
@@ -101,6 +102,7 @@ export function toUnifiedCreatorPayload(snapshot: CreatorSnapshot, options: { kn
       account_name: snapshot.account.nickname,
       status: 'active',
       availability: snapshot.account.availability,
+      fans_count: snapshot.account.fans_count,
       following_count: snapshot.account.following_count,
       total_likes: snapshot.account.total_likes,
       works_count: snapshot.account.works_count,

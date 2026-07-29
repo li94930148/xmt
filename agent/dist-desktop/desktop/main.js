@@ -118,7 +118,7 @@ async function performSync(sample = false) { if (syncing)
     const result = await (0, client_js_1.upload)(config, await readToken(), snapshot, { knownContentIds, capabilities, taskId });
     database.finishSyncTask(taskId, result.status, result.success_count, result.failed_count, Object.values(result.errors).join('; '));
     lastSyncAt = new Date().toISOString();
-    await log(`同步任务 ${taskId} ${result.status}，新增作品 ${Math.max(0, snapshot.works.length - knownContentIds.size)}，模块成功 ${result.success_count}，失败 ${result.failed_count}`);
+    await log(`同步任务 ${taskId} ${result.status}，数据包 ${result.client_payload_bytes} 字节，新增作品 ${Math.max(0, snapshot.works.length - knownContentIds.size)}，模块成功 ${result.success_count}，失败 ${result.failed_count}`);
     return { collectedAt: lastSyncAt, snapshot, local, upload: result };
 }
 catch (error) {
@@ -166,6 +166,9 @@ function createTray() { const svg = `<svg xmlns="http://www.w3.org/2000/svg" wid
 electron_1.ipcMain.handle('agent:get-state', () => state());
 electron_1.ipcMain.handle('agent:setup', async (_event, input) => { const serverUrl = input.serverUrl.replace(/\/$/, ''); if (!/^https:\/\//i.test(serverUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(serverUrl))
     throw new Error('服务器地址必须使用 HTTPS'); const deviceId = fingerprint(), browser = defaultBrowserConfig(); const bound = await (0, client_js_1.bind)(serverUrl, input.bindingCode, { device_id: deviceId, device_name: node_os_1.default.hostname(), os: `${node_os_1.default.platform()} ${node_os_1.default.arch()}`, agent_version: '2.11.0-agent', protocol_version: 1, browser_type: browser.type, browser_version: '', browser_engine: browser.engine, browser_runtime: browser.runtime, session_mode: browser.sessionMode, compatibility_status: 'not_tested' }); const config = { serverUrl, agentId: bound.agent_id, deviceId, platform: 'douyin', accountId: bound.account_id, accountName: bound.account_id, browserConfig: browser, syncConfig: { enabled: false, interval: 'manual', dailyHour: 2 } }; await writeConfig(config); await saveToken(bound.agent_token); await log('XMT 一次性绑定码已使用，设备绑定成功'); return emit(); });
+electron_1.ipcMain.handle('agent:rebind', async (_event, input) => { const serverUrl = input.serverUrl.replace(/\/$/, ''); if (!/^https:\/\//i.test(serverUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(serverUrl))
+    throw new Error('服务器地址必须使用 HTTPS'); const config = await readConfig(); if (!config)
+    throw new Error('请先完成连接'); const bound = await (0, client_js_1.bind)(serverUrl, input.bindingCode, { device_id: config.deviceId, device_name: node_os_1.default.hostname(), os: `${node_os_1.default.platform()} ${node_os_1.default.arch()}`, agent_version: '2.11.0-agent', protocol_version: 1, browser_type: config.browserConfig.type, browser_version: config.browserConfig.browserVersion || '', browser_engine: config.browserConfig.engine, browser_runtime: config.browserConfig.runtime, session_mode: config.browserConfig.sessionMode, compatibility_status: config.browserConfig.compatibilityStatus || 'not_tested' }); config.serverUrl = serverUrl; config.agentId = bound.agent_id; config.accountId = bound.account_id; config.accountName = bound.account_id; await writeConfig(config); await saveToken(bound.agent_token); await log('XMT 服务器已通过一次性绑定码安全更换'); startHeartbeat(); return emit(); });
 electron_1.ipcMain.handle('agent:login-open', async () => { const config = await readConfig(); if (!config)
     throw new Error('请先完成连接'); try {
     const session = await readyBrowserSession(config);
@@ -206,7 +209,7 @@ electron_1.ipcMain.handle('agent:browser-profile-clear', async () => { const con
     throw new Error('当前会话不使用 Agent 独立浏览器资料'); const answer = mainWindow ? await electron_1.dialog.showMessageBox(mainWindow, { type: 'warning', title: '再次确认清理浏览器资料', message: '这会删除当前账号的 Agent 独立浏览器资料，并清除其中的抖音登录状态。', detail: '不会影响日常浏览器资料，也不会删除 XMT 业务数据。是否继续？', buttons: ['取消', '确认清理'], defaultId: 0, cancelId: 0, noLink: true }) : { response: 0 }; if (answer.response !== 1)
     return { cleared: false, state: await state() }; const profileRoot = node_path_1.default.join(paths().root, 'profiles'); const target = (0, profile_js_1.assertManagedProfile)((0, profile_js_1.managedProfile)(paths().root, config.browserConfig, config.accountId), profileRoot); await activeSession?.stop(); activeSession = null; browserConnected = false; douyinLoggedIn = false; await promises_1.default.rm(target, { recursive: true, force: true }); await log(`已清理当前账号的独立浏览器资料：${config.browserConfig.type}/${config.accountId}`); return { cleared: true, state: await emit() }; });
 electron_1.ipcMain.handle('agent:open-logs', async () => { await promises_1.default.mkdir(paths().logs, { recursive: true }); await electron_1.shell.openPath(paths().logs); });
-electron_1.app.whenReady().then(async () => { createWindow(); createTray(); startHeartbeat(); await schedule(); electron_1.app.on('activate', () => mainWindow?.show()); });
+electron_1.app.whenReady().then(async () => { globalThis.fetch = electron_1.net.fetch; createWindow(); createTray(); startHeartbeat(); await schedule(); electron_1.app.on('activate', () => mainWindow?.show()); });
 electron_1.app.on('window-all-closed', () => { });
 electron_1.app.on('before-quit', () => { electron_1.app.isQuitting = true; if (timer)
     clearTimeout(timer); if (heartbeatTimer)

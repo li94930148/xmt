@@ -89,7 +89,7 @@ export async function persistNormalizedDouyinSync(agent: AgentIdentity, payload:
     for (const work of normalized.works) {
       await tx.execute(`INSERT INTO douyin_works(account_id,aweme_id,title,cover_url,publish_time,play_count,like_count,comment_count,share_count,collect_count,duration,completion_rate,interaction_rate,created_at,updated_at)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-        ON CONFLICT(account_id,aweme_id) DO UPDATE SET title=excluded.title,cover_url=excluded.cover_url,publish_time=excluded.publish_time,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,duration=excluded.duration,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate,updated_at=CURRENT_TIMESTAMP`,
+        ON CONFLICT(account_id,aweme_id) DO UPDATE SET title=excluded.title,cover_url=CASE WHEN trim(excluded.cover_url)<>'' THEN excluded.cover_url ELSE douyin_works.cover_url END,publish_time=excluded.publish_time,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,duration=excluded.duration,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate,updated_at=CURRENT_TIMESTAMP`,
         [account.id, work.aweme_id, work.title, work.cover_url, work.publish_time, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, work.duration, work.completion_rate, work.interaction_rate, snapshotTime]);
       const row = await tx.queryOne<{ id: number }>('SELECT id FROM douyin_works WHERE account_id=? AND aweme_id=?', [account.id, work.aweme_id]);
       if (!row) continue;
@@ -151,7 +151,7 @@ async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: 
     for (const work of normalized.works) {
       await tx.execute(`INSERT INTO creator_content_items(account_id,platform,platform_item_id,title,cover_url,publish_time,duration,status,raw_json)
         VALUES(?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(account_id,platform,platform_item_id) DO UPDATE SET title=excluded.title,cover_url=excluded.cover_url,publish_time=excluded.publish_time,duration=excluded.duration,status=excluded.status,raw_json=excluded.raw_json`,
+        ON CONFLICT(account_id,platform,platform_item_id) DO UPDATE SET title=excluded.title,cover_url=CASE WHEN trim(excluded.cover_url)<>'' THEN excluded.cover_url ELSE creator_content_items.cover_url END,publish_time=excluded.publish_time,duration=excluded.duration,status=excluded.status,raw_json=excluded.raw_json`,
         [creatorAccount.id, 'douyin', work.aweme_id, work.title, work.cover_url, work.publish_time, work.duration, 'published', JSON.stringify(work.raw)]);
       const content = await tx.queryOne<{ id: number }>('SELECT id FROM creator_content_items WHERE account_id=? AND platform=? AND platform_item_id=?', [creatorAccount.id, 'douyin', work.aweme_id]);
       if (!content) throw new Error(`Creator 作品写入失败: ${work.aweme_id}`);
@@ -160,7 +160,7 @@ async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: 
         [content.id, snapshotTime, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, 0, work.completion_rate, 0, JSON.stringify(work.raw)]);
       await tx.execute(`INSERT INTO douyin_works(content_id,account_id,aweme_id,title,cover_url,publish_time,play_count,like_count,comment_count,share_count,collect_count,duration,completion_rate,interaction_rate,created_at,updated_at)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-        ON CONFLICT(account_id,aweme_id) DO UPDATE SET content_id=excluded.content_id,title=excluded.title,cover_url=excluded.cover_url,publish_time=excluded.publish_time,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,duration=excluded.duration,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate,updated_at=CURRENT_TIMESTAMP`,
+        ON CONFLICT(account_id,aweme_id) DO UPDATE SET content_id=excluded.content_id,title=excluded.title,cover_url=CASE WHEN trim(excluded.cover_url)<>'' THEN excluded.cover_url ELSE douyin_works.cover_url END,publish_time=excluded.publish_time,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,duration=excluded.duration,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate,updated_at=CURRENT_TIMESTAMP`,
         [content.id, account.id, work.aweme_id, work.title, work.cover_url, work.publish_time, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, work.duration, work.completion_rate, work.interaction_rate, snapshotTime]);
       const douyinWork = await tx.queryOne<{ id: number }>('SELECT id FROM douyin_works WHERE account_id=? AND aweme_id=?', [account.id, work.aweme_id]);
       if (!douyinWork) throw new Error(`标准抖音作品写入失败: ${work.aweme_id}`);

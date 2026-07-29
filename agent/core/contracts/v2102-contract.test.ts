@@ -7,6 +7,8 @@ import type { CreatorSnapshot, CreatorWork, NetworkCapture } from '../types.js';
 import { safeJsonParse } from '../network/safe-json.js';
 import { paginateWorkList } from '../network/work-list-pagination.js';
 import { parseWorksDetailed } from '../collector/douyin/parser/common.js';
+import { mediaUrl } from '../collector/douyin/parser/common.js';
+import { parseCount } from '../collector/douyin/parser/account.js';
 import { CreatorDatabase } from '../database/creatorDatabase.js';
 import { toUnifiedCreatorPayload } from '../uploader/unifiedPayload.js';
 
@@ -64,6 +66,19 @@ test('oversized raw responses are represented by size metadata without dropping 
   assert.deepEqual(payload.raw_records[0].response_json,{truncated:true,original_bytes:262155});
   assert.equal(payload.contents.length,source.works.length);
   assert.equal(payload.metrics.length,source.works.length);
+});
+
+test('粉丝总数兼容中文单位、分隔符、嵌套对象并区分缺失与真实零', () => {
+  assert.deepEqual(['1234','1,234','1 234','1.2万','1.25万','10万+','1亿'].map(parseCount),[1234,1234,1234,12000,12500,100000,100000000]);
+  assert.equal(parseCount({value:'1.2万'}),12000); assert.equal(parseCount(0),0); assert.equal(parseCount(undefined),null);
+});
+
+test('封面规范化保留主封面并拒绝不安全协议', () => {
+  assert.equal(mediaUrl('//p3.douyinpic.com/a.jpg'),'https://p3.douyinpic.com/a.jpg');
+  assert.equal(mediaUrl({url_list:['https:\\/\\/p3.douyinpic.com\\/b.jpg']}),'https://p3.douyinpic.com/b.jpg');
+  assert.equal(mediaUrl('javascript:alert(1)'),'');
+  const source=snapshot(); source.works[0].cover_url='https://p3.douyinpic.com/cover.jpg'; source.works[0].cover=source.works[0].cover_url;
+  const payload=toUnifiedCreatorPayload(source); assert.equal(payload.contents[0].cover_url,source.works[0].cover_url); assert.equal((payload.contents[0].raw_json as {cover_url:string}).cover_url,source.works[0].cover_url);
 });
 
 test('saving the same snapshot ten times is idempotent', () => {

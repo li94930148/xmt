@@ -1,12 +1,13 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.10.2-storage",
+  "version": "2.10.3",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
     "start": "tsx api/server.ts",
     "build": "tsc -b && vite build",
+    "version:check": "node scripts/version-check.mjs",
     "lint": "eslint .",
     "check": "tsc --noEmit",
     "test:time": "tsx scripts/time-contract-test.ts",
@@ -27,55 +28,55 @@
     "verify:social-review:data": "node scripts/social-review-verify-data.mjs",
     "verify:social-review:collect-result": "node scripts/social-review-verify-collect-result-v2.mjs",
     "smoke:social-credentials": "node scripts/social-review-smoke-credentials.mjs",
-    "verify:social-credential-binding": "node scripts/social-review-verify-credential-binding.mjs"
-    ,"smoke:social-review:analysis": "node scripts/smoke-social-review-analysis.mjs"
-    ,"smoke:social-review:dashboard": "node scripts/smoke-social-review-dashboard.mjs"
-    ,"smoke:social-review:scheduler": "tsx scripts/smoke-social-review-scheduler.ts"
-    ,"smoke:social-review:operations": "node scripts/smoke-social-review-operations.mjs"
-    ,"smoke:social-review:video-page": "node scripts/smoke-social-review-video-page.mjs"
-    ,"smoke:social-review:sync-export": "node scripts/smoke-social-review-sync-export.mjs"
-    ,"debug:social-review:content-list": "tsx scripts/debug-douyin-content-list-probe.mjs"
-    ,"debug:social-review:video-metric-api": "tsx scripts/debug-douyin-video-metric-api.mjs"
-    ,"debug:social-review:interaction-api": "tsx scripts/debug-douyin-interaction-api.mjs"
-    ,"debug:social-review:interaction-discovery": "node scripts/debug-douyin-interaction-discovery.mjs"
-    ,"debug:social-review:item-list-request-diff": "tsx scripts/debug-douyin-item-list-request-diff.mjs"
-    ,"debug:social-review:creator-api-map": "node scripts/debug-douyin-cdp-connect.mjs"
-    ,"smoke:social-review:interaction-sync": "node scripts/smoke-social-review-interaction-sync.mjs"
-    ,"refresh:social-review:analysis": "tsx scripts/refresh-social-review-analysis.mjs"
-    ,"smoke:social-review:content-items": "tsx scripts/smoke-social-review-content-items.mjs"
-    ,"smoke:social-review:lifecycle": "node scripts/smoke-social-review-lifecycle.mjs"
-    ,"smoke:social-review:content-analysis": "node scripts/smoke-social-review-content-analysis.mjs"
-    ,"smoke:social-review:report": "node scripts/smoke-social-review-report.mjs"
-    ,"smoke:social-review:suggestions": "node scripts/smoke-social-review-suggestions.mjs"
-    ,"smoke:social-review:performance-sync": "tsx scripts/smoke-social-review-performance-sync.mjs"
-    ,"smoke:social-review:full-performance": "tsx scripts/smoke-social-review-full-performance.mjs"
-    ,"smoke:social-review:video-identity": "tsx scripts/smoke-social-review-video-identity.mjs"
-    ,"smoke:social-review:metric-availability": "tsx scripts/smoke-social-review-metric-availability.mjs"
-    ,"smoke:social-review:credential-health": "node scripts/smoke-social-review-credential-health.mjs"
-    ,"smoke:social-review:login-flow": "node scripts/smoke-social-review-login-flow.mjs"
-    ,"smoke:social-review:login-recovery": "node scripts/smoke-social-review-login-flow.mjs"
-    ,"smoke:social-review:video-detail": "node scripts/smoke-social-review-video-detail.mjs"
-    ,"smoke:social-review:similar-video": "node scripts/smoke-social-review-similar-video.mjs"
-    ,"smoke:social-review:cdp-sync": "node scripts/smoke-social-review-cdp-sync.mjs"
-    ,"smoke:social-review:server-browser": "tsx scripts/smoke-social-review-server-browser.mjs"
-    ,"smoke:social-review:login-ui": "node scripts/smoke-social-review-login-ui.mjs"
-    ,"smoke:social-review:account-connect": "node scripts/smoke-social-review-account-connect.mjs"
-    ,"test:douyin:sync": "tsx scripts/test-douyin-sync.ts"
-    ,"test:douyin:operations": "tsx --test scripts/test-douyin-operations.ts"
-    ,"verify:douyin:data": "tsx scripts/verify-douyin-data.ts"
-    ,"test:creator-access-platform": "tsx scripts/creator-access-platform-test.ts"
-    ,"test:creator-sync-v2102": "tsx scripts/creator-sync-v2102-contract-test.ts"
-    ,"test:v2102-storage": "tsx scripts/v2102-storage-visibility-test.ts"
-    ,"creator-agent:doctor": "npm --prefix agent run doctor"
-    ,"creator-agent:browser:list": "npm --prefix agent run browser:list --"
-    ,"creator-agent:browser:test": "npm --prefix agent run browser:test --"
-    ,"creator-agent:browser:select": "npm --prefix agent run browser:select --"
-    ,"creator-agent:login": "npm --prefix agent run login"
-    ,"creator-agent:start": "npm --prefix agent run start"
-    ,"creator-agent:sync": "npm --prefix agent run sync"
-    ,"test:creator-agent:cross-platform": "npm --prefix agent run test:cross-platform"
-    ,"test:creator-agent:binding": "tsx scripts/creator-agent-binding-test.ts"
-    ,"audit:douyin-legacy-tokens": "tsx scripts/audit-legacy-douyin-tokens.ts"
+    "verify:social-credential-binding": "node scripts/social-review-verify-credential-binding.mjs",
+    "smoke:social-review:analysis": "node scripts/smoke-social-review-analysis.mjs",
+    "smoke:social-review:dashboard": "node scripts/smoke-social-review-dashboard.mjs",
+    "smoke:social-review:scheduler": "tsx scripts/smoke-social-review-scheduler.ts",
+    "smoke:social-review:operations": "node scripts/smoke-social-review-operations.mjs",
+    "smoke:social-review:video-page": "node scripts/smoke-social-review-video-page.mjs",
+    "smoke:social-review:sync-export": "node scripts/smoke-social-review-sync-export.mjs",
+    "debug:social-review:content-list": "tsx scripts/debug-douyin-content-list-probe.mjs",
+    "debug:social-review:video-metric-api": "tsx scripts/debug-douyin-video-metric-api.mjs",
+    "debug:social-review:interaction-api": "tsx scripts/debug-douyin-interaction-api.mjs",
+    "debug:social-review:interaction-discovery": "node scripts/debug-douyin-interaction-discovery.mjs",
+    "debug:social-review:item-list-request-diff": "tsx scripts/debug-douyin-item-list-request-diff.mjs",
+    "debug:social-review:creator-api-map": "node scripts/debug-douyin-cdp-connect.mjs",
+    "smoke:social-review:interaction-sync": "node scripts/smoke-social-review-interaction-sync.mjs",
+    "refresh:social-review:analysis": "tsx scripts/refresh-social-review-analysis.mjs",
+    "smoke:social-review:content-items": "tsx scripts/smoke-social-review-content-items.mjs",
+    "smoke:social-review:lifecycle": "node scripts/smoke-social-review-lifecycle.mjs",
+    "smoke:social-review:content-analysis": "node scripts/smoke-social-review-content-analysis.mjs",
+    "smoke:social-review:report": "node scripts/smoke-social-review-report.mjs",
+    "smoke:social-review:suggestions": "node scripts/smoke-social-review-suggestions.mjs",
+    "smoke:social-review:performance-sync": "tsx scripts/smoke-social-review-performance-sync.mjs",
+    "smoke:social-review:full-performance": "tsx scripts/smoke-social-review-full-performance.mjs",
+    "smoke:social-review:video-identity": "tsx scripts/smoke-social-review-video-identity.mjs",
+    "smoke:social-review:metric-availability": "tsx scripts/smoke-social-review-metric-availability.mjs",
+    "smoke:social-review:credential-health": "node scripts/smoke-social-review-credential-health.mjs",
+    "smoke:social-review:login-flow": "node scripts/smoke-social-review-login-flow.mjs",
+    "smoke:social-review:login-recovery": "node scripts/smoke-social-review-login-flow.mjs",
+    "smoke:social-review:video-detail": "node scripts/smoke-social-review-video-detail.mjs",
+    "smoke:social-review:similar-video": "node scripts/smoke-social-review-similar-video.mjs",
+    "smoke:social-review:cdp-sync": "node scripts/smoke-social-review-cdp-sync.mjs",
+    "smoke:social-review:server-browser": "tsx scripts/smoke-social-review-server-browser.mjs",
+    "smoke:social-review:login-ui": "node scripts/smoke-social-review-login-ui.mjs",
+    "smoke:social-review:account-connect": "node scripts/smoke-social-review-account-connect.mjs",
+    "test:douyin:sync": "tsx scripts/test-douyin-sync.ts",
+    "test:douyin:operations": "tsx --test scripts/test-douyin-operations.ts",
+    "verify:douyin:data": "tsx scripts/verify-douyin-data.ts",
+    "test:creator-access-platform": "tsx scripts/creator-access-platform-test.ts",
+    "test:creator-sync-v2102": "tsx scripts/creator-sync-v2102-contract-test.ts",
+    "test:v2102-storage": "tsx scripts/v2102-storage-visibility-test.ts",
+    "creator-agent:doctor": "npm --prefix agent run doctor",
+    "creator-agent:browser:list": "npm --prefix agent run browser:list --",
+    "creator-agent:browser:test": "npm --prefix agent run browser:test --",
+    "creator-agent:browser:select": "npm --prefix agent run browser:select --",
+    "creator-agent:login": "npm --prefix agent run login",
+    "creator-agent:start": "npm --prefix agent run start",
+    "creator-agent:sync": "npm --prefix agent run sync",
+    "test:creator-agent:cross-platform": "npm --prefix agent run test:cross-platform",
+    "test:creator-agent:binding": "tsx scripts/creator-agent-binding-test.ts",
+    "audit:douyin-legacy-tokens": "tsx scripts/audit-legacy-douyin-tokens.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

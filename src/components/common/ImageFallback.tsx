@@ -15,5 +15,5 @@ export default function ImageFallback({ src, alt, className = '', fallbackClassN
   if (!src || failed) {
     return <span role="img" aria-label={`${alt || '图片'}加载失败`} className={`grid shrink-0 place-items-center bg-studio-surface text-studio-text-muted ${className} ${fallbackClassName}`}><ImageOff className="h-4 w-4"/></span>;
   }
-  return <img src={src} alt={alt} loading={loading} decoding="async" onError={() => setFailed(true)} className={className}/>;
+  return <img src={src} alt={alt} loading={loading} decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} className={className}/>;
 }

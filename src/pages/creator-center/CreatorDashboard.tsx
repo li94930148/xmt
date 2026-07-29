@@ -57,7 +57,7 @@ export default function CreatorDashboard() {
       {bindingError?<p role="alert" className="mt-3 text-sm text-red-500">{bindingError}</p>:null}
     </Panel>
     <div className={`rounded-xl border p-4 text-sm ${data.data_status==='ready'?'border-emerald-500/30 bg-emerald-500/10':'border-amber-500/30 bg-amber-500/10'}`}><b>{data.data_status==='ready'?'数据正常':'数据不完整'}</b><span className="ml-3 text-studio-text-muted">最后同步 {formatDate(data.last_success_at,true)} · {data.metrics.works_count} 条作品</span></div>
-    <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <section data-testid="creator-core-metrics" className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <MetricCard label="粉丝" value={data.metrics.fans_count == null ? '暂无数据' : data.metrics.fans_count} icon={Users} />
       <MetricCard label="入库作品" value={data.metrics.works_count} icon={Video} accent="violet" />
       <MetricCard label="累计播放" value={data.metrics.play_count} icon={Play} accent="blue" />
@@ -65,17 +65,6 @@ export default function CreatorDashboard() {
       <MetricCard label="分享率" value={`${(data.metrics.share_rate * 100).toFixed(2)}%`} icon={Share2} accent="blue" />
       <MetricCard label="爆款作品" value={data.metrics.viral_works_count} icon={Gauge} accent="emerald" />
     </section>
-    <Panel title="账号健康度" description={`${data.health.available_weight}% 指标可用`}>
-      <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
-        <div className="grid place-items-center rounded-xl bg-studio-surface p-6"><strong className="text-5xl text-studio-cyan">{data.health.score}</strong><span className="mt-2 text-sm text-studio-text-muted">{data.health.level}</span></div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">数据新鲜度</span><p className="mt-2 font-semibold">{data.health.dimensions.data_freshness.score} / 20</p></div>
-          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">30 日内容活跃度</span><p className="mt-2 font-semibold">{data.health.dimensions.content_activity.score} / 25</p></div>
-          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">互动质量</span><p className="mt-2 font-semibold">{data.health.dimensions.engagement_quality.score} / 30</p></div>
-          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">粉丝增长</span><p className="mt-2 font-semibold">{data.health.dimensions.fan_growth.score == null ? '快照不足' : `${data.health.dimensions.fan_growth.score} / 25`}</p></div>
-        </div>
-      </div>
-    </Panel>
     <section className="grid gap-6 xl:grid-cols-[1fr_1.4fr]">
       <Panel title="周期增长" description={`${data.snapshot_count} 个日快照`}>
         <div className="grid gap-4"><GrowthBlock title="近 7 天" data={data.growth_7d} /><GrowthBlock title="近 30 天" data={data.growth_30d} /></div>

@@ -11,6 +11,8 @@ const node_test_1 = __importDefault(require("node:test"));
 const safe_json_js_1 = require("../network/safe-json.js");
 const work_list_pagination_js_1 = require("../network/work-list-pagination.js");
 const common_js_1 = require("../collector/douyin/parser/common.js");
+const common_js_2 = require("../collector/douyin/parser/common.js");
+const account_js_1 = require("../collector/douyin/parser/account.js");
 const creatorDatabase_js_1 = require("../database/creatorDatabase.js");
 const unifiedPayload_js_1 = require("../uploader/unifiedPayload.js");
 const capture = (response) => ({ page: 'work-list', url: 'https://creator.douyin.com/api/works?cursor=0', method: 'GET', status: 200, headers: {}, response, response_size: 0, captured_at: '2026-07-24T00:00:00.000Z' });
@@ -61,6 +63,23 @@ function snapshot(snapshotId = 'snapshot-v2102') {
     strict_1.default.deepEqual(payload.raw_records[0].response_json, { truncated: true, original_bytes: 262155 });
     strict_1.default.equal(payload.contents.length, source.works.length);
     strict_1.default.equal(payload.metrics.length, source.works.length);
+});
+(0, node_test_1.default)('粉丝总数兼容中文单位、分隔符、嵌套对象并区分缺失与真实零', () => {
+    strict_1.default.deepEqual(['1234', '1,234', '1 234', '1.2万', '1.25万', '10万+', '1亿'].map(account_js_1.parseCount), [1234, 1234, 1234, 12000, 12500, 100000, 100000000]);
+    strict_1.default.equal((0, account_js_1.parseCount)({ value: '1.2万' }), 12000);
+    strict_1.default.equal((0, account_js_1.parseCount)(0), 0);
+    strict_1.default.equal((0, account_js_1.parseCount)(undefined), null);
+});
+(0, node_test_1.default)('封面规范化保留主封面并拒绝不安全协议', () => {
+    strict_1.default.equal((0, common_js_2.mediaUrl)('//p3.douyinpic.com/a.jpg'), 'https://p3.douyinpic.com/a.jpg');
+    strict_1.default.equal((0, common_js_2.mediaUrl)({ url_list: ['https:\\/\\/p3.douyinpic.com\\/b.jpg'] }), 'https://p3.douyinpic.com/b.jpg');
+    strict_1.default.equal((0, common_js_2.mediaUrl)('javascript:alert(1)'), '');
+    const source = snapshot();
+    source.works[0].cover_url = 'https://p3.douyinpic.com/cover.jpg';
+    source.works[0].cover = source.works[0].cover_url;
+    const payload = (0, unifiedPayload_js_1.toUnifiedCreatorPayload)(source);
+    strict_1.default.equal(payload.contents[0].cover_url, source.works[0].cover_url);
+    strict_1.default.equal(payload.contents[0].raw_json.cover_url, source.works[0].cover_url);
 });
 (0, node_test_1.default)('saving the same snapshot ten times is idempotent', () => {
     const directory = node_fs_1.default.mkdtempSync(node_path_1.default.join(node_os_1.default.tmpdir(), 'xmt-v2102-'));

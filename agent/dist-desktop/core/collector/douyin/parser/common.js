@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.objects = objects;
 exports.workCandidateArrays = workCandidateArrays;
+exports.mediaUrl = mediaUrl;
 exports.parseWorksDetailed = parseWorksDetailed;
 exports.parseWorks = parseWorks;
 exports.metrics = metrics;
@@ -48,13 +49,24 @@ function platformId(row) {
     return { value: String(value) };
 }
 function mediaUrl(value) {
-    if (typeof value === 'string')
-        return value;
+    if (Array.isArray(value))
+        return value.map(mediaUrl).find(Boolean) || '';
+    if (typeof value === 'string') {
+        const normalized = value.trim().replace(/\\\//g, '/');
+        const absolute = normalized.startsWith('//') ? `https:${normalized}` : normalized;
+        try {
+            const url = new URL(absolute);
+            return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
+        }
+        catch {
+            return '';
+        }
+    }
     const source = record(value);
     if (!source)
         return '';
     const urls = source.url_list ?? source.urlList;
-    return Array.isArray(urls) ? text(urls[0]) : text(source.url ?? source.uri);
+    return mediaUrl(urls) || mediaUrl(source.url) || mediaUrl(source.uri);
 }
 function parseWorksDetailed(captures) {
     const found = new Map();
@@ -94,7 +106,8 @@ function parseWorksDetailed(captures) {
                 continue;
             }
             const publishTime = text(pick(row, ['publish_time', 'publishTime', 'create_time', 'createTime']));
-            const coverUrl = mediaUrl(pick(row, ['cover_url', 'coverUrl', 'cover', 'dynamic_cover', 'origin_cover']));
+            const video = record(row.video) || {};
+            const coverUrl = mediaUrl(pick(row, ['cover_url', 'coverUrl', 'cover'])) || mediaUrl(video.cover) || mediaUrl(pick(row, ['origin_cover', 'originCover'])) || mediaUrl(video.origin_cover) || mediaUrl(pick(row, ['dynamic_cover', 'dynamicCover'])) || mediaUrl(video.dynamic_cover);
             const videoUrl = mediaUrl(pick(row, ['video_url', 'videoUrl', 'play_addr', 'playAddr', 'video']));
             found.set(id.value, {
                 aweme_id: id.value, item_id: id.value, title, cover_url: coverUrl, cover: coverUrl,

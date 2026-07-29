@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.10.3',
+    date: '2026-07-29',
+    title: '修复抖音粉丝与作品封面显示并优化数据驾驶舱',
+    changes: [
+      { type: 'fix', description: '修复粉丝总数未进入统一上传载荷的问题，兼容分隔符、万/亿单位、加号与嵌套对象。' },
+      { type: 'fix', description: '修复作品主封面在数据裁剪和规范化过程中丢失的问题，并避免缺失值覆盖有效封面。' },
+      { type: 'improvement', description: '移除账号健康度模块，将六个核心指标调整为两行三列并优化窄屏显示。' },
+      { type: 'improvement', description: '封面统一使用无 Referer 懒加载与失败占位，Creator Agent 继续作为唯一运营数据主链路。' },
+    ],
+  },
+  {
     version: '2.10.2-storage',
     date: '2026-07-24',
     title: '数据可见性治理与作品库展示优化',

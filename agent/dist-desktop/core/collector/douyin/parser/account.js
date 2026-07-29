@@ -1,9 +1,30 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseCount = parseCount;
 exports.parseAccount = parseAccount;
 exports.mergeAccountDomFallback = mergeAccountDomFallback;
 const record = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-const optionalNumber = (value) => value === undefined || value === null || value === '' ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+function parseCount(value) {
+    if (typeof value === 'number')
+        return Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
+    if (value && typeof value === 'object') {
+        const source = value;
+        for (const key of ['value', 'count', 'total', 'number', 'fans_count', 'follower_count', 'followers']) {
+            const parsed = parseCount(source[key]);
+            if (parsed !== null)
+                return parsed;
+        }
+        return null;
+    }
+    if (typeof value !== 'string')
+        return null;
+    const match = value.trim().replace(/[，,\s]/g, '').match(/(\d+(?:\.\d+)?)(万|亿)?(\+)?/);
+    if (!match)
+        return null;
+    const base = Number(match[1]), multiplier = match[2] === '亿' ? 100_000_000 : match[2] === '万' ? 10_000 : 1;
+    return Number.isFinite(base) ? Math.floor(base * multiplier) : null;
+}
+const optionalNumber = parseCount;
 function parseAccount(captures) {
     const responses = captures.filter((capture) => /\/creator\/user\/info\/|\/media\/user\/info\//.test(capture.url)).map((capture) => record(capture.response));
     const verify = responses.map((response) => record(response.douyin_user_verify_info)).find((value) => Object.keys(value).length) || {};
@@ -31,7 +52,7 @@ function parseAccount(captures) {
 }
 function mergeAccountDomFallback(account, body) {
     const identity = body.match(/(?:^|\n)([^\n]{1,40})\n抖音号[：:]\s*([0-9A-Za-z_-]+)/m);
-    const count = (label) => optionalNumber(body.match(new RegExp(`${label}\\s*([0-9.]+)(万)?`))?.slice(1).reduce((value, part, index) => index === 0 ? Number(part) : part ? Number(value) * 10_000 : value, 0));
+    const count = (label) => parseCount(body.match(new RegExp(`${label}\\s*([0-9.,，\\s]+(?:万|亿)?\\+?)`))?.[1]);
     const fans = account.fans_count ?? count('粉丝'), following = account.following_count ?? count('关注'), likes = account.total_likes ?? count('获赞');
     return { ...account, uid: account.uid || identity?.[2] || '', nickname: account.nickname || identity?.[1]?.trim() || '', fans_count: fans, following_count: following, total_likes: likes, availability: { ...account.availability, fans_count: fans !== null, following_count: following !== null, total_likes: likes !== null } };
 }

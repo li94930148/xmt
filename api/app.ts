@@ -71,6 +71,7 @@ import { cleanupInactiveRooms } from './collaboration/yjs/documentStore.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+const APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version as string
 
 const app: express.Application = express()
 
@@ -252,8 +253,8 @@ const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
 }
 
 app.use('/api', cors(corsOptions))
-app.use(express.json({ limit: '12mb', verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
-app.use(express.urlencoded({ extended: true, limit: '12mb' }))
+app.use(express.json({ limit: '16mb', verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
+app.use(express.urlencoded({ extended: true, limit: '16mb' }))
 
 // 生产环境：服务前端静态文件
 const distPath = path.join(__dirname, '..', 'dist')
@@ -321,6 +322,7 @@ app.use(
         success: true,
         status: 'ok',
         service: 'xmt-api',
+        version: APP_VERSION,
         environment: process.env.NODE_ENV || 'development',
         time: new Date().toISOString(),
         database: {
@@ -332,6 +334,7 @@ app.use(
         success: false,
         status: 'degraded',
         service: 'xmt-api',
+        version: APP_VERSION,
         environment: process.env.NODE_ENV || 'development',
         time: new Date().toISOString(),
         database: {

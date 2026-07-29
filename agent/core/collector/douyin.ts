@@ -23,7 +23,7 @@ export class DouyinCreatorCollector {
         network.setPage('work-list');
         const content = await collectContent(page, network.captures,{maxPages:options.maxPages});
         network.setPage('work-detail');
-        const detailLimit=Math.max(0,options.maxDetails??content.works.length);const details=[];for(const work of content.works.slice(0,detailLimit)){try{details.push(await collectWorkDetail(page,work.item_id,network.captures));}catch{/* 单条详情失败不会终止任务。 */}}
+        const detailLimit=Math.max(0,options.maxDetails??3);const details=[];for(const work of content.works.slice(0,detailLimit)){try{details.push(await collectWorkDetail(page,work.item_id,network.captures));}catch{/* 单条详情失败不会终止任务。 */}}
         network.setPage('account-dashboard');
         const dashboard = await collectOperation(page, network.captures);
         network.setPage('content-analysis');

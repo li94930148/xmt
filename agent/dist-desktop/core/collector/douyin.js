@@ -36,7 +36,7 @@ class DouyinCreatorCollector {
                 network.setPage('work-list');
                 const content = await (0, content_js_1.collectContent)(page, network.captures, { maxPages: options.maxPages });
                 network.setPage('work-detail');
-                const detailLimit = Math.max(0, options.maxDetails ?? content.works.length);
+                const detailLimit = Math.max(0, options.maxDetails ?? 3);
                 const details = [];
                 for (const work of content.works.slice(0, detailLimit)) {
                     try {

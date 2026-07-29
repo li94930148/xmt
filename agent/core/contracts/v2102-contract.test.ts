@@ -68,6 +68,15 @@ test('oversized raw responses are represented by size metadata without dropping 
   assert.equal(payload.metrics.length,source.works.length);
 });
 
+test('full snapshots cap audit raw records without dropping normalized works', () => {
+  const source=snapshot();
+  source.raw.captures=Array.from({length:300},(_,index)=>capture({index,blob:'x'.repeat(32*1024)}));
+  const payload=toUnifiedCreatorPayload(source);
+  assert.ok(payload.raw_records.length<=120);
+  assert.ok(Buffer.byteLength(JSON.stringify(payload.raw_records))<=2*1024*1024+4096);
+  assert.equal(payload.contents.length,source.works.length);
+});
+
 test('粉丝总数兼容中文单位、分隔符、嵌套对象并区分缺失与真实零', () => {
   assert.deepEqual(['1234','1,234','1 234','1.2万','1.25万','10万+','1亿'].map(parseCount),[1234,1234,1234,12000,12500,100000,100000000]);
   assert.equal(parseCount({value:'1.2万'}),12000); assert.equal(parseCount(0),0); assert.equal(parseCount(undefined),null);

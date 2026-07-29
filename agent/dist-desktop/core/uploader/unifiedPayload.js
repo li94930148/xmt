@@ -11,10 +11,36 @@ const first = (source, keys, fallback = null) => {
 };
 const metric = (work, detail, keys) => first({ ...record(work.raw), ...work, ...record(detail.overview) }, keys);
 const RAW_RESPONSE_LIMIT = 128 * 1024;
+const RAW_RECORD_LIMIT = 120;
+const RAW_RECORD_TOTAL_LIMIT = 2 * 1024 * 1024;
 const compactRawResponse = (value) => {
     const serialized = JSON.stringify(value ?? null);
     const bytes = Buffer.byteLength(serialized);
     return bytes <= RAW_RESPONSE_LIMIT ? value : { truncated: true, original_bytes: bytes };
+};
+const compactRawRecords = (snapshot) => {
+    const records = [];
+    let totalBytes = 0;
+    const priority = ['account-home', 'account-dashboard', 'fans-analysis', 'work-list', 'content-analysis', 'work-detail'];
+    const rank = (page) => { const index = priority.indexOf(page); return index < 0 ? priority.length : index; };
+    const captures = [...snapshot.raw.captures].sort((left, right) => rank(left.page) - rank(right.page));
+    for (const capture of captures) {
+        if (records.length >= RAW_RECORD_LIMIT)
+            break;
+        const item = {
+            page_type: capture.page,
+            api_url: capture.url.split('?')[0],
+            method: capture.method,
+            response_json: compactRawResponse(capture.response),
+            created_at: capture.captured_at,
+        };
+        const bytes = Buffer.byteLength(JSON.stringify(item));
+        if (totalBytes + bytes > RAW_RECORD_TOTAL_LIMIT)
+            continue;
+        records.push(item);
+        totalBytes += bytes;
+    }
+    return records;
 };
 function toUnifiedCreatorPayload(snapshot, options = {}) {
     const snapshotTime = snapshot.collected_at;
@@ -110,13 +136,7 @@ function toUnifiedCreatorPayload(snapshot, options = {}) {
             active_time_json: fans.active_time || fans.active_times || {},
             raw_json: fans,
         },
-        raw_records: snapshot.raw.captures.map((capture) => ({
-            page_type: capture.page,
-            api_url: capture.url.split('?')[0],
-            method: capture.method,
-            response_json: compactRawResponse(capture.response),
-            created_at: capture.captured_at,
-        })),
+        raw_records: compactRawRecords(snapshot),
         page_schemas: (options.capabilities || []).flatMap((page) => page.tabs.flatMap((tab) => tab.schemas.map((schema) => ({ page: page.page, tab: tab.name, api: schema.api, fields: schema.fields })))),
         sync_task: {
             task_id: options.taskId,

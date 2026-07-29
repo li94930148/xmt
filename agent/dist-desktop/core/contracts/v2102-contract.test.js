@@ -64,6 +64,14 @@ function snapshot(snapshotId = 'snapshot-v2102') {
     strict_1.default.equal(payload.contents.length, source.works.length);
     strict_1.default.equal(payload.metrics.length, source.works.length);
 });
+(0, node_test_1.default)('full snapshots cap audit raw records without dropping normalized works', () => {
+    const source = snapshot();
+    source.raw.captures = Array.from({ length: 300 }, (_, index) => capture({ index, blob: 'x'.repeat(32 * 1024) }));
+    const payload = (0, unifiedPayload_js_1.toUnifiedCreatorPayload)(source);
+    strict_1.default.ok(payload.raw_records.length <= 120);
+    strict_1.default.ok(Buffer.byteLength(JSON.stringify(payload.raw_records)) <= 2 * 1024 * 1024 + 4096);
+    strict_1.default.equal(payload.contents.length, source.works.length);
+});
 (0, node_test_1.default)('粉丝总数兼容中文单位、分隔符、嵌套对象并区分缺失与真实零', () => {
     strict_1.default.deepEqual(['1234', '1,234', '1 234', '1.2万', '1.25万', '10万+', '1亿'].map(account_js_1.parseCount), [1234, 1234, 1234, 12000, 12500, 100000, 100000000]);
     strict_1.default.equal((0, account_js_1.parseCount)({ value: '1.2万' }), 12000);

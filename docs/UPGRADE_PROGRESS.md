@@ -304,3 +304,71 @@
 ### 下一阶段计划
 
 先评审是否进入 Phase 2-C3。建议把 refresh/session 数据模型、数据库迁移和 v1 refresh 接口拆成独立可回滚任务；在此之前补充 Auth Service 单元测试和 me/change-password 的行为冻结矩阵，不缩短 JWT、不切换 Web 或 Socket。
+
+## Phase 2-C2.5：Auth 完整收口
+
+### 当前版本
+
+`v2.13.3`。本阶段属于无数据库变化、无新 API 能力的模块收口，因此从 `v2.13.2` 升级 PATCH。
+
+### 新增能力
+
+1. Auth Controller 增加 `getMe`、`changePassword`、`logout` HTTP 适配。
+2. Auth Service 增加 `getCurrentUser`、`changePassword`、`logout` 流程编排。
+3. Auth Repository 增加按 ID 查询用户、更新密码、清除强制改密标记和写活动日志接口。
+4. Password Service 增加 bcrypt hash，成本参数继续为 10。
+5. Auth 行为冻结测试覆盖 current user、改密、退出和完整认证链路。
+
+### 迁移接口
+
+- `GET /api/auth/me`
+- `POST /api/auth/change-password`
+- `POST /api/auth/logout`
+
+三个接口继续使用原路径、authenticate/password limiter 顺序、legacy 响应和中文错误消息，不新增 `/api/v1/auth/*`。
+
+### 修改文件
+
+- `api/modules/auth/auth.controller.ts`
+- `api/modules/auth/auth.mapper.ts`
+- `api/modules/auth/auth.repository.ts`
+- `api/modules/auth/auth.routes.ts`
+- `api/modules/auth/auth.service.ts`
+- `api/modules/auth/auth.sqlite-repository.ts`
+- `api/modules/auth/auth.types.ts`
+- `api/modules/auth/password.service.ts`
+- `api/routes/auth.ts`
+- `tests/auth/auth.test.ts`
+- `package.json`
+- `package-lock.json`
+- `CHANGELOG.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/releases/v2.13.3.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+
+### 数据库变化
+
+无。未创建 `refresh_tokens`、session 或其他表，未修改 `users` 表、字段、索引、初始化逻辑、迁移脚本和业务数据。
+
+### 测试结果
+
+- `npm run version:check`：通过，版本一致为 `v2.13.3`。
+- `npm run test:auth`：通过。
+- `npm run test:topics`：通过。
+- `npm run test:api-contract`：通过。
+- `npm run check`：通过。
+- Auth 范围 lint：通过。
+- `npm run build`：通过。
+
+### 风险
+
+1. logout 仍不撤销 JWT，修改密码后既有 JWT 仍有效；这是明确冻结的 legacy 行为。
+2. JWT payload、7 天有效期、前端 token 存储和 Socket 握手认证均未升级。
+3. 本阶段未增加密码复杂度、历史密码、强制退出或设备会话能力。
+4. 工作区另有匿名反馈相关未提交改动，本阶段提交必须继续排除。
+
+### 下一阶段计划
+
+等待 Phase 2-C3 指令。不得在本阶段继续创建 Refresh Token、session、数据库迁移或修改前端/Socket 认证。

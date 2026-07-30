@@ -27,10 +27,27 @@ export type LegacyLoginResult = {
   forceChangePassword: boolean;
 };
 
+export type LegacyCurrentUserResult = Pick<
+  User,
+  'id' | 'username' | 'name' | 'email' | 'role' | 'enabled' | 'created_at' | 'updated_at'
+> & {
+  force_change_password: boolean;
+};
+
+export type LegacyChangePasswordInput = {
+  userId?: number;
+  oldPassword?: unknown;
+  newPassword?: unknown;
+};
+
 export type AuthServiceErrorCode =
   | 'MISSING_CREDENTIALS'
   | 'INVALID_CREDENTIALS'
-  | 'ACCOUNT_DISABLED';
+  | 'ACCOUNT_DISABLED'
+  | 'USER_NOT_FOUND'
+  | 'MISSING_PASSWORDS'
+  | 'NEW_PASSWORD_TOO_SHORT'
+  | 'OLD_PASSWORD_INCORRECT';
 
 export class AuthServiceError extends Error {
   constructor(public readonly code: AuthServiceErrorCode) {

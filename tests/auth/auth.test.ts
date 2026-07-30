@@ -12,7 +12,7 @@ process.env.JWT_SECRET = 'auth-freeze-test-secret';
 const { initDatabase, closeDatabase } = await import('../../api/database/db.js');
 const { execute, executeInsert, queryOne } = await import('../../api/database/utils.js');
 const { authenticate } = await import('../../api/middleware/auth.js');
-const { verifyToken } = await import('../../api/utils/jwt.js');
+const { signToken, verifyToken } = await import('../../api/utils/jwt.js');
 const { default: authRoutes } = await import('../../api/routes/auth.js');
 
 await initDatabase();
@@ -126,6 +126,106 @@ async function authenticateFreezeTests(token: string) {
   assert.deepEqual(await roleChanged.json(), { id: enabledUserId, role: 'director' });
 }
 
+async function getMeFreezeTests(token: string) {
+  const valid = await fetch(`${baseUrl}/api/auth/me`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assert.equal(valid.status, 200);
+  const payload = await valid.json() as Record<string, unknown>;
+  assert.deepEqual(payload, {
+    id: enabledUserId,
+    username: 'auth-freeze-user',
+    name: 'Auth Freeze',
+    email: 'auth-freeze@example.invalid',
+    role: 'director',
+    enabled: true,
+    force_change_password: true,
+    created_at: payload.created_at,
+    updated_at: payload.updated_at,
+  });
+  assert.equal(typeof payload.created_at, 'string');
+  assert.equal(typeof payload.updated_at, 'string');
+
+  const invalid = await fetch(`${baseUrl}/api/auth/me`, {
+    headers: { authorization: 'Bearer invalid-token' },
+  });
+  assert.equal(invalid.status, 401);
+  assert.deepEqual(await invalid.json(), { message: '登录已过期，请重新登录' });
+
+  const disabledToken = signToken({
+    userId: enabledUserId,
+    username: 'auth-freeze-user',
+    role: 'director',
+  });
+  await execute('UPDATE users SET enabled = 0 WHERE id = ?', [enabledUserId]);
+  const disabled = await fetch(`${baseUrl}/api/auth/me`, {
+    headers: { authorization: `Bearer ${disabledToken}` },
+  });
+  assert.equal(disabled.status, 401);
+  assert.deepEqual(await disabled.json(), { message: '账号已被禁用' });
+  await execute('UPDATE users SET enabled = 1 WHERE id = ?', [enabledUserId]);
+}
+
+async function changePasswordFreezeTests(token: string) {
+  const headers = {
+    authorization: `Bearer ${token}`,
+    'content-type': 'application/json',
+  };
+
+  const wrongOldPassword = await fetch(`${baseUrl}/api/auth/change-password`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ oldPassword: 'wrong-password', newPassword: 'new-legacy-password' }),
+  });
+  assert.equal(wrongOldPassword.status, 401);
+  assert.deepEqual(await wrongOldPassword.json(), { message: '旧密码错误' });
+
+  const shortPassword = await fetch(`${baseUrl}/api/auth/change-password`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ oldPassword: password, newPassword: '12345' }),
+  });
+  assert.equal(shortPassword.status, 400);
+  assert.deepEqual(await shortPassword.json(), { message: '新密码至少6位' });
+
+  const newPassword = 'new-legacy-password';
+  const success = await fetch(`${baseUrl}/api/auth/change-password`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ oldPassword: password, newPassword }),
+  });
+  assert.equal(success.status, 200);
+  assert.deepEqual(await success.json(), { message: '密码修改成功' });
+
+  const updatedUser = await queryOne<Record<string, unknown>>(
+    'SELECT password, force_change_password FROM users WHERE id = ?',
+    [enabledUserId],
+  );
+  assert(updatedUser);
+  assert.equal(Number(updatedUser.force_change_password), 0);
+  assert.equal(await bcrypt.compare(newPassword, String(updatedUser.password)), true);
+
+  const activity = await queryOne<Record<string, unknown>>(
+    'SELECT user_id, action, target, detail FROM activity_log WHERE user_id = ? AND action = ?',
+    [enabledUserId, 'change_password'],
+  );
+  assert.deepEqual(activity, {
+    user_id: enabledUserId,
+    action: 'change_password',
+    target: 'auth',
+    detail: '用户修改了密码',
+  });
+
+  const oldPasswordLogin = await postLogin({ username: 'auth-freeze-user', password });
+  assert.equal(oldPasswordLogin.status, 401);
+  assert.deepEqual(await oldPasswordLogin.json(), { message: '用户名或密码错误' });
+
+  const newPasswordLogin = await postLogin({ username: 'auth-freeze-user', password: newPassword });
+  assert.equal(newPasswordLogin.status, 200);
+
+  return (await newPasswordLogin.json() as { token: string }).token;
+}
+
 async function logoutFreezeTest(token: string) {
   const headers = { authorization: `Bearer ${token}` };
   const logout = await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', headers });
@@ -141,7 +241,9 @@ try {
   const token = await loginSuccessTest();
   await loginFailureTests();
   await authenticateFreezeTests(token);
-  await logoutFreezeTest(token);
+  await getMeFreezeTests(token);
+  const tokenAfterPasswordChange = await changePasswordFreezeTests(token);
+  await logoutFreezeTest(tokenAfterPasswordChange);
   console.log('Auth legacy behavior freeze tests passed');
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

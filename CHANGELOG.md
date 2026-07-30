@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.3 - 2026-07-30
+
+- 将 legacy `GET /api/auth/me`、`POST /api/auth/change-password` 和 `POST /api/auth/logout` 收口到 Auth Module。
+- Controller、Service、Repository 与密码服务分别承担 HTTP、流程、SQLite 和 bcrypt 职责，旧路由只保留模块入口。
+- 扩展认证行为冻结测试，覆盖当前用户、禁用账号、修改密码、强制改密标记清除、完整认证链路及退出后 JWT 仍有效。
+- 未修改数据库、JWT、权限、Socket、前端 token 存储或 logout 语义，未引入 Refresh Token。
+
 ## 2.13.2 - 2026-07-30
 
 - 建立 Auth Repository、Service、Controller、Token、Password 与 Mapper 模块边界。

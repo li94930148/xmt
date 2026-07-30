@@ -1,5 +1,33 @@
 # XMT 系统更新日志
 
+## v2.13.6 - 2026-07-30
+
+### 新增
+
+- 新增默认关闭的实验性 Auth v1 登录、刷新、退出和会话查询接口。
+- 新增 Auth v1 请求、响应与会话 Zod Schema，并加入 OpenAPI 实验标记。
+
+### 优化
+
+- v1 Auth 响应统一使用 success/data/meta/requestId 契约及稳定认证错误码。
+- Feature Flag 在生产环境强制关闭，避免实验性 Refresh Token 响应体交付触达生产用户。
+
+### 修复
+
+- 无。
+
+### 技术升级
+
+- 新增 Auth v1 HTTP 集成测试，覆盖开关关闭、登录、刷新、复用检测、退出、会话列表及 legacy 登录兼容。
+
+### 数据库变化
+
+- 无新增表、字段、索引或 migration；继续复用现有认证会话基础表。
+
+### 测试情况
+
+- Auth v1、legacy Auth、Session migration/Service、API Contract、类型检查、Auth 范围 lint、版本检查和生产构建均按要求执行；详细结果见 `UPGRADE_PROGRESS.md`。
+
 ## v2.13.5 - 2026-07-30
 
 ### 新增

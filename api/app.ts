@@ -25,6 +25,7 @@ import topicsRoutes from './routes/topics.js'
 import topicResourcesRoutes from './routes/topic-resources.js'
 import productionResourcesRoutes from './routes/production-resources.js'
 import { v1TopicsRouter } from './modules/topics/index.js'
+import { createAuthV1Module, isAuthV1Enabled } from './modules/auth/v1/index.js'
 import { openApiRouter } from './openapi.js'
 import { requestId } from './middleware/request-id.js'
 import { sendV1Error } from './utils/response.js'
@@ -294,6 +295,10 @@ app.use('/api/productions', productionResourcesRoutes)
 app.use('/api/docs', openApiRouter)
 if (process.env.XMT_TOPICS_V1_ENABLED === 'true') {
   app.use('/api/v1/topics', v1TopicsRouter)
+}
+if (isAuthV1Enabled()) {
+  const authV1Module = createAuthV1Module(process.env.XMT_AUTH_REFRESH_PEPPER?.trim() || '')
+  app.use('/api/v1/auth', authV1Module.router)
 }
 app.use('/api/users', usersRoutes)
 app.use('/api/messages', messagesRoutes)

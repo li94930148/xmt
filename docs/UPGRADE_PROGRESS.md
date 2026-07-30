@@ -553,3 +553,88 @@
 ### 下一阶段计划
 
 等待 Phase 2-C3-4 指令。建议下一阶段只实现默认关闭的 v1 Auth HTTP 适配、Zod/OpenAPI 契约和暗启测试；在 pepper 密钥管理、Cookie/CSRF 和功能开关未冻结前不得对客户端开放。
+
+## Phase 2-C3-4：Auth v1 HTTP 灰度适配
+
+### 当前版本
+
+`v2.13.6`。本阶段新增默认关闭的 Auth v1 实验接口，从 `v2.13.5` 升级 PATCH。
+
+### 完成内容
+
+1. 新增独立 Auth v1 Service、Controller、Router 和模块装配，不修改 legacy Auth Service 或路由。
+2. 新增 `POST /api/v1/auth/login`：验证账号后创建 session、生成 Refresh Token 和 15 分钟 v1 Access Token，返回 v1 envelope。
+3. 新增 `POST /api/v1/auth/refresh`：通过 C3-3 原子事务完成单次轮换，重复使用旧 token 时撤销 session 并返回稳定安全错误。
+4. 新增 `POST /api/v1/auth/logout`：校验 v1 Access Token 和 session 后只撤销当前 session。
+5. 新增 `GET /api/v1/auth/sessions`：只返回当前用户活跃 session 摘要，不返回 token hash、完整 UA 或 IP。
+6. 新增 Auth Zod Schema 和稳定错误码，响应统一携带 requestId，登录与刷新设置 `Cache-Control: no-store`。
+7. OpenAPI 增加四个 Auth v1 endpoint，并使用 `x-experimental: true` 标记。
+8. `XMT_AUTH_V1_ENABLED` 默认关闭；即使误设为 true，`NODE_ENV=production` 仍强制不挂载。启用测试需要独立 pepper。
+9. 新增临时 SQLite HTTP 测试，覆盖开关、登录、刷新、复用、退出、sessions 和 legacy 登录。
+
+### 修改文件
+
+- `.env.example`
+- `api/app.ts`
+- `api/openapi.ts`
+- `api/modules/auth/refresh/refresh-token.service.ts`
+- `api/modules/auth/session/session.service.ts`
+- `api/modules/auth/v1/index.ts`
+- `api/modules/auth/v1/auth.v1.service.ts`
+- `api/modules/auth/v1/auth.v1.controller.ts`
+- `api/modules/auth/v1/auth.v1.routes.ts`
+- `shared/schema/auth.schema.ts`
+- `shared/schema/error.schema.ts`
+- `tests/auth/auth-v1.test.ts`
+- `tests/api-contract/api-contract.test.ts`
+- `package.json`
+- `package-lock.json`
+- `CHANGELOG.md`
+- `docs/API_CONTRACT.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/PHASE2_AUTH_SESSION_DESIGN.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+- `docs/releases/v2.13.6.md`
+
+### 数据库变化
+
+无。未新增表、字段、索引或 migration；继续复用 `auth_sessions` 与 `auth_refresh_tokens`。专项测试使用并清理系统临时目录中的 SQLite 数据库。
+
+### Feature Flag
+
+1. 默认 `XMT_AUTH_V1_ENABLED=false`，接口不挂载并进入标准 v1 404。
+2. 仅非生产环境显式设为 `true` 时挂载。
+3. `NODE_ENV=production` 强制关闭，确保本阶段不会向生产用户返回 Refresh Token。
+4. `XMT_AUTH_REFRESH_PEPPER` 仅在实际启用时要求存在，不影响默认启动和 legacy。
+
+### 测试结果
+
+- `npm run test:auth-v1`：通过。
+- `npm run test:api-contract`：通过，包含 Auth v1 OpenAPI experimental 标记。
+- `npm run version:check`：通过，版本统一为 `v2.13.6`。
+- `npm run test:auth`：通过，legacy 认证行为保持冻结。
+- `npm run test:auth-session-migration`：通过。
+- `npm run test:auth-session-service`：通过。
+- `npm run check`：通过。
+- Auth 范围 ESLint：通过。
+- `npm run build`：通过。
+
+### 未接入范围
+
+1. legacy `/api/auth/*`、旧 JWT payload 和 7 天有效期不变。
+2. Login 页面、store、api-client、Cookie、Mobile SecureStore 和 Socket 认证均未修改。
+3. 没有生产灰度用户、用户 allowlist 或生产 Refresh Token 交付；生产环境强制不挂载。
+4. 未实现 logout-all、指定设备撤销、CSRF/Cookie、跨标签刷新协调或 Socket 重认证。
+
+### 风险
+
+1. 实验接口在非生产启用时通过 JSON 传递 Refresh Token，只允许内部测试，不是最终 Web/Mobile 交付方案。
+2. login 的 session 与首枚 Refresh Token 尚未封装为单一数据库事务；失败时会撤销已创建 session，但仍需在生产灰度前强化原子性。
+3. 复用检测采用严格策略；客户端并发协调尚未实现。
+4. session/token 清理、结构化安全审计、多实例撤销事件仍未实现。
+
+### 下一阶段计划
+
+等待 Phase 2-C3-5 指令。建议下一阶段先冻结生产 Cookie/CSRF、pepper 密钥管理、用户 allowlist 和登录原子事务，再进行 Web 内部账号灰度；不得直接全量切换现有 Login 或 Socket。

@@ -83,7 +83,10 @@ export class RefreshTokenService {
     return { type: 'REFRESH_TOKEN_REUSE', sessionId: record.sessionId, tokenId: record.id };
   }
 
-  async consumeRefreshToken(refreshToken: string, replacementExpiresAt: string): Promise<ConsumeRefreshTokenResult> {
+  async consumeRefreshToken(
+    refreshToken: string,
+    replacementExpiresAt?: string,
+  ): Promise<ConsumeRefreshTokenResult> {
     const current = await this.findRecord(refreshToken);
     if (!current) return { status: 'INVALID' };
 
@@ -102,7 +105,7 @@ export class RefreshTokenService {
         pepperVersion: this.currentPepperVersion,
         generation: current.generation + 1,
         createdAt: usedAt,
-        expiresAt: replacementExpiresAt,
+        expiresAt: replacementExpiresAt ?? current.expiresAt,
         usedAt: null,
         replacedById: null,
         revokedAt: null,

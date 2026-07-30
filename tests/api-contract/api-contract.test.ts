@@ -117,6 +117,10 @@ function openApiTests() {
   assert.ok(document.paths['/api/v1/topics']?.post);
   assert.ok(document.paths['/api/v1/topics/{id}']?.get);
   assert.ok(document.paths['/api/v1/topics/{id}']?.put);
+  assert.equal(document.paths['/api/v1/auth/login']?.post?.['x-experimental'], true);
+  assert.equal(document.paths['/api/v1/auth/refresh']?.post?.['x-experimental'], true);
+  assert.equal(document.paths['/api/v1/auth/logout']?.post?.['x-experimental'], true);
+  assert.equal(document.paths['/api/v1/auth/sessions']?.get?.['x-experimental'], true);
   assert.ok(document.components?.schemas?.ApiError);
   assert.ok(document.components?.schemas?.Topic);
   assert.ok(document.components?.securitySchemes?.bearerAuth);

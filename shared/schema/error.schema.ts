@@ -3,6 +3,11 @@ import { apiMetaSchema, requestIdSchema } from './common.schema';
 
 export const apiErrorCodeSchema = z.enum([
   'AUTH_REQUIRED',
+  'AUTH_INVALID_CREDENTIALS',
+  'AUTH_SESSION_EXPIRED',
+  'AUTH_SESSION_REVOKED',
+  'AUTH_REFRESH_INVALID',
+  'AUTH_REFRESH_REUSED',
   'PERMISSION_DENIED',
   'RESOURCE_NOT_FOUND',
   'VALIDATION_ERROR',

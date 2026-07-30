@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.6 - 2026-07-30
+
+- 新增由 `XMT_AUTH_V1_ENABLED` 控制的实验性 `/api/v1/auth/login|refresh|logout|sessions`，默认关闭且生产环境强制不挂载。
+- 新增 Auth v1 Zod Schema、标准响应/错误码和 OpenAPI `x-experimental` 标记。
+- 新增 HTTP 集成测试，覆盖 token 轮换、复用撤销、session 查询和 logout，并验证 legacy 7 天 JWT 不变。
+- 未修改 Login 页面、Cookie、前端 token 存储或 Socket 认证。
+
 ## 2.13.5 - 2026-07-30
 
 - 新增未接线的 Session Service 和 Refresh Token Service，支持会话生命周期、256-bit 随机凭据、分版本 HMAC、单次轮换与复用检测。

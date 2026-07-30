@@ -10,6 +10,13 @@ import {
   topicResponseSchema,
   updateTopicInputSchema,
 } from '@shared/schema/topics.schema';
+import {
+  loginV1DataSchema,
+  loginV1RequestSchema,
+  refreshDataSchema,
+  refreshRequestSchema,
+  sessionsDataSchema,
+} from '@shared/schema/auth.schema';
 
 extendZodWithOpenApi(z);
 
@@ -25,6 +32,12 @@ const TopicCreatedResponse = registry.register(
   apiSuccessSchema(z.object({ topicId: z.number().int().positive() }).strict()),
 );
 const TopicIdParams = registry.register('TopicIdParams', z.object({ id: idSchema }).strict());
+const AuthV1LoginRequest = registry.register('AuthV1LoginRequest', loginV1RequestSchema);
+const AuthV1LoginResponse = registry.register('AuthV1LoginResponse', apiSuccessSchema(loginV1DataSchema));
+const AuthV1RefreshRequest = registry.register('AuthV1RefreshRequest', refreshRequestSchema);
+const AuthV1RefreshResponse = registry.register('AuthV1RefreshResponse', apiSuccessSchema(refreshDataSchema));
+const AuthV1SessionsResponse = registry.register('AuthV1SessionsResponse', apiSuccessSchema(sessionsDataSchema));
+const AuthV1LogoutResponse = registry.register('AuthV1LogoutResponse', apiSuccessSchema(z.null()));
 
 registry.registerComponent('securitySchemes', 'bearerAuth', {
   type: 'http',
@@ -50,6 +63,62 @@ registry.registerPath({
   request: { query: topicQuerySchema },
   responses: {
     200: { description: '选题分页列表', content: { 'application/json': { schema: TopicListResponse } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/v1/auth/login',
+  tags: ['Auth (Experimental)'],
+  summary: '实验性 v1 登录',
+  description: '仅在 XMT_AUTH_V1_ENABLED=true 时可用；默认关闭。',
+  'x-experimental': true,
+  request: { body: { content: { 'application/json': { schema: AuthV1LoginRequest } } } },
+  responses: {
+    200: { description: '实验性会话创建成功', content: { 'application/json': { schema: AuthV1LoginResponse } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/v1/auth/refresh',
+  tags: ['Auth (Experimental)'],
+  summary: '实验性 token 轮换',
+  description: '仅用于内部测试；尚未采用生产 Cookie 交付。',
+  'x-experimental': true,
+  request: { body: { content: { 'application/json': { schema: AuthV1RefreshRequest } } } },
+  responses: {
+    200: { description: '轮换成功', content: { 'application/json': { schema: AuthV1RefreshResponse } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/v1/auth/logout',
+  tags: ['Auth (Experimental)'],
+  summary: '撤销当前实验性会话',
+  description: '只影响 v1 session，不改变 legacy logout。',
+  'x-experimental': true,
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: { description: '会话已撤销', content: { 'application/json': { schema: AuthV1LogoutResponse } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/v1/auth/sessions',
+  tags: ['Auth (Experimental)'],
+  summary: '查询当前用户实验性会话',
+  description: '不返回 token hash、完整 User-Agent 或 IP。',
+  'x-experimental': true,
+  security: [{ bearerAuth: [] }],
+  responses: {
+    200: { description: '活跃会话列表', content: { 'application/json': { schema: AuthV1SessionsResponse } } },
     ...errorResponses,
   },
 });

@@ -59,6 +59,11 @@ v1 错误响应统一为：
 | 错误码 | 含义 | 常用状态码 |
 | --- | --- | --- |
 | `AUTH_REQUIRED` | 未登录、token 缺失或失效 | 401 |
+| `AUTH_INVALID_CREDENTIALS` | v1 登录凭据错误 | 401 |
+| `AUTH_SESSION_EXPIRED` | v1 session 已过期 | 401 |
+| `AUTH_SESSION_REVOKED` | v1 session 已撤销 | 401 |
+| `AUTH_REFRESH_INVALID` | v1 Refresh Token 缺失、未知、过期或不可用 | 401 |
+| `AUTH_REFRESH_REUSED` | 检测到 v1 Refresh Token 重复使用并已撤销会话 | 401 |
 | `PERMISSION_DENIED` | 已认证但无权访问资源或执行动作 | 403 |
 | `RESOURCE_NOT_FOUND` | 资源不存在 | 404 |
 | `VALIDATION_ERROR` | 请求参数、路径参数或查询参数不合法 | 400 / 422 |
@@ -93,3 +98,4 @@ v1 错误响应统一为：
 - TypeScript 类型从 Zod Schema 推导，不重复手写同形类型。
 - `/api/docs` 提供只读 Swagger UI，OpenAPI JSON 位于 `/api/docs/openapi.json`。
 - 首批文档覆盖 Topic 列表、详情、创建和更新；legacy API 不纳入 v1 Contract 保证。
+- Auth v1 实验接口在 OpenAPI 中使用 `x-experimental: true` 标记；运行时默认关闭且生产环境强制不可挂载。

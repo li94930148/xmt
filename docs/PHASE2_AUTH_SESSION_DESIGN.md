@@ -10,6 +10,8 @@
 
 运行时状态补充：Phase 2-C3-3 已在 `v2.13.5` 实现未接线的 Session Service、Refresh Token Service、原子轮换 Repository 和 v1 Access Token 独立方法。上述能力只由专项测试调用，legacy、公开 API、前端和 Socket 仍未接入。
 
+HTTP 状态补充：Phase 2-C3-4 已在 `v2.13.6` 建立实验性 `/api/v1/auth/login|refresh|logout|sessions`。接口由 `XMT_AUTH_V1_ENABLED` 控制、默认关闭，并在 `NODE_ENV=production` 时强制不挂载；当前请求体/响应体 Refresh Token 只用于临时数据库测试，尚未形成生产 Cookie 或 Mobile 交付方案。
+
 ## 设计结论
 
 选择 **`auth_sessions` 作为稳定会话主模型，并以 `auth_refresh_tokens` 作为单次轮换凭据子表**：一条 `auth_sessions` 代表一次登录形成的设备会话，一条 `auth_refresh_tokens` 只代表该会话轮换链中的一枚 Refresh Token。
@@ -446,4 +448,4 @@ ACTIVE
 
 ## 本阶段结论
 
-Phase 2-C3-1 在 `v2.13.3` 完成设计，C3-2 `v2.13.4` 落地数据库基础设施，C3-3 `v2.13.5` 落地未接线的 Session/Refresh/v1 Access Token 内核。API、legacy JWT、Web、Mobile 与 Socket 认证仍未切换，后续能力必须继续分阶段实施。
+Phase 2-C3-1 在 `v2.13.3` 完成设计，C3-2 `v2.13.4` 落地数据库，C3-3 `v2.13.5` 落地运行时内核，C3-4 `v2.13.6` 增加默认关闭且生产强制禁用的实验 HTTP 适配。legacy JWT、Web、Mobile、Cookie 与 Socket 认证仍未切换，后续能力必须继续分阶段实施。

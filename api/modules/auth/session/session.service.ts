@@ -81,4 +81,8 @@ export class SessionService {
   revokeUserSessions(userId: number, reason: SessionRevokeReason): Promise<number> {
     return this.repository.revokeUserSessions(userId, formatBjtDatabase(this.now()), reason);
   }
+
+  findActiveSessionsByUserId(userId: number): Promise<AuthSessionRecord[]> {
+    return this.repository.findActiveSessionsByUserId(userId, formatBjtDatabase(this.now()));
+  }
 }

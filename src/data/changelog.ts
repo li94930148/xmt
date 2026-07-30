@@ -10,6 +10,16 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.13.1',
+    date: '2026-07-30',
+    title: '资料创建与档案导入修复',
+    changes: [
+      { type: 'fix', description: '修复资料库新增资料按钮无响应，补齐创建表单、校验和详情跳转。' },
+      { type: 'improvement', description: '山东地情档案导入增加统一编码、换行、不可见字符、空白和空行清洗。' },
+      { type: 'security', description: 'manifest 保留原始与清洗后哈希，导入继续支持 ZIP 安全检查、批次审计、幂等和回滚。' },
+    ],
+  },
+  {
     version: '2.13.0',
     date: '2026-07-30',
     title: '创作生产资料引用',

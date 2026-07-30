@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.13.2',
+    date: '2026-07-30',
+    title: 'Auth 模块边界拆分',
+    changes: [
+      { type: 'improvement', description: '认证登录建立 Repository、Service、Controller、Token、Password 与 Mapper 模块边界。' },
+      { type: 'improvement', description: '旧 /api/auth/login 改为兼容委托 Auth Module，外部契约和错误行为保持不变。' },
+      { type: 'security', description: '新增临时 SQLite 冻结测试，覆盖登录、JWT、角色回查及 logout 不撤销令牌的当前行为。' },
+      { type: 'security', description: '未引入 Refresh Token，数据库、权限、Socket、前端登录和 7 天 JWT 时效均未改变。' },
+    ],
+  },
+  {
     version: '2.13.1',
     date: '2026-07-30',
     title: '资料创建与档案导入修复',

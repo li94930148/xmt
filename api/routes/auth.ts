@@ -1,82 +1,14 @@
 ﻿﻿import express from 'express';
 import bcrypt from 'bcrypt';
 import { queryOne, execute } from '../database/utils';
-import { User } from '../types';
-import { signToken } from '../utils/jwt';
 import { authenticate } from '../middleware/auth';
-import { loginAccountLimiter, loginIpLimiter, logFailedLogin, passwordChangeLimiter } from '../middleware/rateLimit';
+import { passwordChangeLimiter } from '../middleware/rateLimit';
+import { createAuthModule } from '../modules/auth/index.js';
 
 const router = express.Router();
+const authModule = createAuthModule();
 
-router.post('/login', loginIpLimiter, loginAccountLimiter, logFailedLogin, async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    
-    if (!username || !password) {
-      return res.status(400).json({ message: '用户名和密码不能为空' });
-    }
-    
-    const result = await queryOne(`SELECT * FROM users WHERE username = ?`, [username]);
-    
-    if (!result) {
-      return res.status(401).json({ message: '用户名或密码错误' });
-    }
-    
-    const resultRecord = result as Record<string, unknown>;
-    const user: User = {
-      id: Number(resultRecord.id),
-      username: String(resultRecord.username),
-      password: String(resultRecord.password),
-      email: String(resultRecord.email),
-      role: String(resultRecord.role) as User['role'],
-      name: String(resultRecord.name),
-      enabled: Number(resultRecord.enabled) === 1,
-      created_at: String(resultRecord.created_at),
-      updated_at: String(resultRecord.updated_at)
-    };
-    
-    if (!user.enabled) {
-      return res.status(401).json({ message: '账号已被禁用' });
-    }
-    
-    const isValid = await bcrypt.compare(password, user.password);
-    
-    if (!isValid) {
-      return res.status(401).json({ message: '用户名或密码错误' });
-    }
-    
-    const token = signToken({
-      userId: user.id,
-      username: user.username,
-      role: user.role
-    });
-    
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
-      user.id,
-      'login',
-      'auth',
-      `用户 ${user.name} 登录系统`
-    ]);
-    
-    // 检查是否需要强制修改密码
-    const forceChange = Number((resultRecord as Record<string, unknown>).force_change_password) === 1;
-    
-    res.json({
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        force_change_password: forceChange,
-      },
-      token,
-      forceChangePassword: forceChange
-    });
-  } catch {
-    res.status(500).json({ message: '登录失败' });
-  }
-});
+router.use(authModule.legacyRouter);
 
 router.post('/logout', authenticate, async (req, res) => {
   res.json({ message: '登出成功' });

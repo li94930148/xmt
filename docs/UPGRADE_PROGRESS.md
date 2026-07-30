@@ -198,3 +198,109 @@
 2. 为 OpenAPI 增加 CI 快照和破坏性差异检查。
 3. 在非生产环境启用 Topic v1 观察后，再让 Web API 层通过单点配置试用 api-client。
 4. requestId 后续接入结构化日志和错误监控，形成端到端查询链路。
+
+## Phase 2-C1：Auth 模块化与 Refresh Token 基础设计
+
+### 当前版本
+
+`v2.12.0`。本阶段只有认证审计与设计文档，没有产品代码变化，因此不升级版本。
+
+### 新增文档
+
+- `docs/AUTH_CURRENT.md`
+- `docs/PHASE2_AUTH_DESIGN.md`
+
+### 文档变化
+
+1. 完整审计 legacy `POST /api/auth/login`、7 天 JWT、用户状态回查、双轨角色/权限、前端 token 与记住密码存储、退出和 Socket 握手行为。
+2. 明确当前没有 refresh token、设备会话、token 轮换、服务端撤销和长连接实时失效能力。
+3. 设计 `api/modules/auth` 的 Route、Controller、Service、Repository、Policy、Token Service 与 Session Service 职责边界。
+4. 设计 access/refresh token 模型、refresh hash 存储、轮换链、重放检测、并发刷新和会话撤销流程。
+5. 设计 `/api/v1/auth/login|refresh|logout|logout-all|sessions` 的统一 envelope、错误码和 Web/Mobile 交付差异。
+6. 设计 Web HttpOnly cookie、Expo SecureStore、统一 api-client，以及 access token 更新后的 Socket 重连、房间恢复和 Yjs 同步方案。
+7. 制定 C2 至 C8 的兼容迁移、风险、回滚、实施门禁、测试和可观测性计划。
+8. 同步 `docs/文档索引.md` 的认证文档入口与阅读路径。
+
+### 代码变化
+
+无。未创建 `api/modules/auth`，未修改后端、前端、Socket、权限、JWT 或 API 行为。
+
+### 数据库变化
+
+无。未创建 `refresh_tokens` 表，未修改表、字段、索引、数据、初始化逻辑或迁移脚本。设计中的字段和索引均为待评审规划。
+
+### 验证结果
+
+- 已按要求核对架构、升级计划、API Contract、升级进度和文档索引。
+- 已审计后端 auth/users/middleware/utils/services、前端 Login/API/store、Socket 和 collaboration 认证链路。
+- 已执行文档链接、Markdown 格式、差异范围和版本/代码未变检查。
+- 未运行应用测试、类型检查、lint 或构建：本阶段明确只改文档，不改变可执行代码。
+
+### 风险
+
+1. 当前“记住密码”回退会把密码密文和解密密钥同时保存在 localStorage，不能抵御 XSS 或本地存储读取；本阶段只记录，不顺手修改。
+2. 当前 7 天 Bearer JWT 不可主动撤销，退出和改密后仍可用到过期；已连接 Socket 也不会因账号或会话变化立即断开。
+3. 候选 `refresh_tokens` 字段尚未明确稳定的 `session_id/family_id`；直接实施会妨碍完整轮换链和设备会话语义。
+4. Web cookie 方案取决于正式域名、HTTPS、反向代理、CORS 与 CSRF 决策；Mobile refresh token 交付通道也尚需单独评审。
+5. Socket 换 token 必须通过重新握手并恢复协作房间；未完成 Yjs 丢包/重复更新验证前不能缩短现有 JWT。
+
+### 下一阶段建议
+
+进入 Phase 2-C2：先建立 Auth Module 边界和 legacy 行为冻结测试，让旧 `/api/auth/*` 兼容委托新 Service；仍不创建 refresh token 表、不缩短 7 天 JWT、不切换前端。数据库会话模型、v1 暗启和 Web/Mobile 接入应分别作为后续可回滚阶段实施。
+
+## Phase 2-C2：Auth Module 边界落地
+
+### 当前版本
+
+`v2.13.2`。任务说明基线为 `v2.12.0`，但实施时仓库已有 `v2.13.1` 有效版本，因此按真实基线升级 PATCH，未执行版本倒退。
+
+### 新增目录与文件
+
+- `api/modules/auth/index.ts`
+- `api/modules/auth/auth.routes.ts`
+- `api/modules/auth/auth.controller.ts`
+- `api/modules/auth/auth.service.ts`
+- `api/modules/auth/auth.repository.ts`
+- `api/modules/auth/auth.sqlite-repository.ts`
+- `api/modules/auth/auth.mapper.ts`
+- `api/modules/auth/auth.types.ts`
+- `api/modules/auth/auth.schema.ts`
+- `api/modules/auth/token.service.ts`
+- `api/modules/auth/password.service.ts`
+- `tests/auth/auth.test.ts`
+- `docs/releases/v2.13.2.md`
+
+### 代码变化
+
+1. legacy 登录的用户查询和登录日志写入迁入 SQLite Repository，Service 不直接依赖数据库工具。
+2. Auth Service 编排参数存在性、用户存在、enabled、密码验证、JWT 签发和登录日志，内部不使用 Express 或 SQL。
+3. Controller 只完成 legacy HTTP 输入输出和现有状态码/消息映射。
+4. bcrypt compare 抽入 Password Service，算法和调用顺序保持不变。
+5. 原 `signToken`/`verifyToken` 实现迁入 Token Service；`api/utils/jwt.ts` 保留兼容导出，因此 middleware 和 Socket 调用路径不变。
+6. `api/routes/auth.ts` 保留，`POST /api/auth/login` 通过 module router 委托 Auth Controller；logout、me、change-password 保持原实现。
+7. 新增 `npm run test:auth`，使用临时 SQLite 冻结 legacy 行为。
+
+### 数据库变化
+
+无。未创建 `refresh_tokens`，未修改 users 或其他表、字段、索引、初始化逻辑、数据和迁移脚本。
+
+### 测试结果
+
+- `npm run test:auth`：通过，覆盖登录成功、密码错误、用户不存在、禁用用户、JWT 验证、角色回查和 logout 不撤销 JWT。
+- `npm run version:check`：通过，版本统一为 `v2.13.2`。
+- `npm run check`：通过。
+- `npm run build`：通过。
+- Auth 新增/兼容文件及测试定向 lint：通过。
+- `npm run test:topics`、`npm run test:api-contract`：通过，JWT 兼容导出未破坏既有模块测试。
+
+### 风险
+
+1. 当前只迁移 login；me、change-password 和 logout 仍在 legacy route，不能误认为 Auth 全量模块化完成。
+2. logout 不撤销 JWT、7 天有效期和 Socket 仅握手认证等历史风险按要求保留。
+3. legacy 输入没有切换严格 Zod 校验，`auth.schema.ts` 只记录当前宽松形状，避免改变错误行为。
+4. Repository 继续绑定当前 SQLite SQL 语义；本阶段不提供其他数据库实现。
+5. 工作区存在匿名反馈相关的并行未提交修改，本次提交必须排除这些文件。
+
+### 下一阶段计划
+
+先评审是否进入 Phase 2-C3。建议把 refresh/session 数据模型、数据库迁移和 v1 refresh 接口拆成独立可回滚任务；在此之前补充 Auth Service 单元测试和 me/change-password 的行为冻结矩阵，不缩短 JWT、不切换 Web 或 Socket。

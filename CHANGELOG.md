@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.2 - 2026-07-30
+
+- 建立 Auth Repository、Service、Controller、Token、Password 与 Mapper 模块边界。
+- legacy `POST /api/auth/login` 改为委托 Auth Module，响应、错误、JWT、日志和限流行为保持不变。
+- 新增临时 SQLite 认证冻结测试，覆盖登录、JWT 验证、角色回查以及 logout 不撤销令牌的现状。
+- 未修改数据库、权限、Socket、前端登录或 7 天 JWT 有效期，未引入 Refresh Token。
+
 ## 2.13.1 - 2026-07-30
 
 - 修复资料库“新增资料”按钮没有交互的问题，补齐创建表单、校验、真实写入和详情跳转。

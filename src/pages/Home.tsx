@@ -27,7 +27,6 @@ import { useAuthStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
 import AnnouncementBoard from '../components/AnnouncementBoard';
 import PomodoroTimer from '../components/PomodoroTimer';
-import AnonymousFeedbackModal from '../components/AnonymousFeedbackModal';
 import {
   ActionButton,
   EmptyState,
@@ -80,7 +79,6 @@ export default function Home() {
   const [recentTopics, setRecentTopics] = useState<Topic[]>([]);
   const [hotInspirations, setHotInspirations] = useState<Inspiration[]>([]);
   const [loading, setLoading] = useState(true);
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const { permissions, loading: permissionsLoading } = usePermission();
@@ -384,10 +382,9 @@ export default function Home() {
             <h2 className="text-base font-semibold text-studio-text-primary">意见箱</h2>
             <p className="mt-1 text-sm leading-6 text-studio-text-muted">有想法、建议或问题？留下你的声音</p>
           </div>
-          <ActionButton className="shrink-0" onClick={() => setFeedbackOpen(true)}>提交意见</ActionButton>
+          <ActionButton className="shrink-0" variant="ghost" onClick={() => navigate('/anonymous-feedback')}>进入意见墙 <ArrowRight className="h-4 w-4" /></ActionButton>
         </GlassPanel>
       </div>
-      <AnonymousFeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </PageShell>
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Eye, MessageSquare, Trash2 } from 'lucide-react';
+import { Check, Eye, EyeOff, MessageSquare, Trash2 } from 'lucide-react';
 import { deleteAnonymousFeedback, getAnonymousFeedback, updateAnonymousFeedback, type AnonymousFeedback, type AnonymousFeedbackStatus } from '../api/anonymousFeedback';
 import { useAppStore } from '../store';
 import { formatBeijingDate } from '../lib/utils';
@@ -10,8 +10,8 @@ import FormModal from '../components/common/FormModal';
 import ConfirmModal from '../components/common/ConfirmModal';
 
 const typeLabels = { feature: '功能建议', usage: '使用问题', process: '流程优化', team: '团队建议', other: '其他' } as const;
-const statusLabels = { pending: '待处理', read: '已查看', done: '已完成' } as const;
-const statusTones = { pending: 'amber', read: 'cyan', done: 'success' } as const;
+const statusLabels = { pending: '待处理', processing: '处理中', completed: '已完成' } as const;
+const statusTones = { pending: 'amber', processing: 'cyan', completed: 'success' } as const;
 
 export default function AnonymousFeedbackAdmin() {
   const [items, setItems] = useState<AnonymousFeedback[]>([]);
@@ -35,10 +35,15 @@ export default function AnonymousFeedbackAdmin() {
     catch (error) { addNotification({ title: '更新失败', message: error instanceof Error ? error.message : '请稍后重试', type: 'error' }); }
   };
 
+  const togglePublic = async (item: AnonymousFeedback) => {
+    try { await updateAnonymousFeedback(item.id, { is_public: !Number(item.is_public) }); await load(); }
+    catch (error) { addNotification({ title: '更新失败', message: error instanceof Error ? error.message : '无法修改公开状态', type: 'error' }); }
+  };
+
   const submitReply = async () => {
     if (!replying) return;
     setBusy(true);
-    try { await updateAnonymousFeedback(replying.id, { reply_content: reply, status: 'done' }); setReplying(null); setReply(''); await load(); addNotification({ title: '回复已保存', message: '意见已标记为完成', type: 'success' }); }
+    try { await updateAnonymousFeedback(replying.id, { reply_content: reply, status: 'completed' }); setReplying(null); setReply(''); await load(); addNotification({ title: '回复已保存', message: '意见已标记为完成', type: 'success' }); }
     catch (error) { addNotification({ title: '保存失败', message: error instanceof Error ? error.message : '请稍后重试', type: 'error' }); }
     finally { setBusy(false); }
   };
@@ -55,9 +60,9 @@ export default function AnonymousFeedbackAdmin() {
     <PageHeader title="匿名意见管理" description="查看和处理团队成员提交的匿名意见" />
     <GlassPanel className="overflow-hidden">
       {loading ? <LoadingState type="table" rows={5} /> : items.length === 0 ? <EmptyState icon={MessageSquare} title="暂无匿名意见" description="团队成员提交的意见会显示在这里。" /> : <ResponsiveTableShell>
-        <table className="w-full min-w-[980px] text-left text-sm">
-          <thead className="border-b border-studio-border-soft bg-white/[0.035] text-xs text-studio-text-muted"><tr><th className="px-4 py-3">时间</th><th className="px-4 py-3">类型</th><th className="px-4 py-3">内容</th><th className="px-4 py-3">需要回复</th><th className="px-4 py-3">状态</th><th className="px-4 py-3 text-right">操作</th></tr></thead>
-          <tbody className="divide-y divide-studio-border-soft">{items.map((item) => <tr key={item.id} className="text-studio-text-secondary"><td className="whitespace-nowrap px-4 py-4 text-xs">{formatBeijingDate(item.created_at)}</td><td className="px-4 py-4">{typeLabels[item.type]}</td><td className="max-w-md px-4 py-4"><p className="line-clamp-2">{item.content}</p></td><td className="px-4 py-4">{Number(item.need_reply) ? '是' : '否'}</td><td className="px-4 py-4"><StatusPill tone={statusTones[item.status]}>{statusLabels[item.status]}</StatusPill></td><td className="px-4 py-4"><div className="flex justify-end gap-1"><ActionButton variant="ghost" title="查看详情" onClick={() => setSelected(item)}><Eye className="h-4 w-4" /></ActionButton>{item.status === 'pending' ? <ActionButton variant="ghost" title="标记已查看" onClick={() => void update(item, 'read')}><Check className="h-4 w-4" /></ActionButton> : null}<ActionButton variant="ghost" title="标记完成" onClick={() => void update(item, 'done')}><Check className="h-4 w-4" /></ActionButton><ActionButton variant="ghost" title="回复" onClick={() => { setReplying(item); setReply(item.reply_content || ''); }}><MessageSquare className="h-4 w-4" /></ActionButton><ActionButton variant="ghost" title="删除" onClick={() => setDeleting(item)}><Trash2 className="h-4 w-4 text-studio-coral" /></ActionButton></div></td></tr>)}</tbody>
+        <table className="w-full min-w-[1080px] text-left text-sm">
+          <thead className="border-b border-studio-border-soft bg-white/[0.035] text-xs text-studio-text-muted"><tr><th className="px-4 py-3">时间</th><th className="px-4 py-3">类型</th><th className="px-4 py-3">内容</th><th className="px-4 py-3">需要回复</th><th className="px-4 py-3">公开</th><th className="px-4 py-3">状态</th><th className="px-4 py-3 text-right">操作</th></tr></thead>
+          <tbody className="divide-y divide-studio-border-soft">{items.map((item) => <tr key={item.id} className="text-studio-text-secondary"><td className="whitespace-nowrap px-4 py-4 text-xs">{formatBeijingDate(item.created_at)}</td><td className="px-4 py-4">{typeLabels[item.type]}</td><td className="max-w-md px-4 py-4"><p className="line-clamp-2">{item.content}</p></td><td className="px-4 py-4">{Number(item.need_reply) ? '是' : '否'}</td><td className="px-4 py-4">{Number(item.is_public) ? '公开' : '隐藏'}</td><td className="px-4 py-4"><StatusPill tone={statusTones[item.status]}>{statusLabels[item.status]}</StatusPill></td><td className="px-4 py-4"><div className="flex justify-end gap-1"><ActionButton variant="ghost" title="查看详情" onClick={() => setSelected(item)}><Eye className="h-4 w-4" /></ActionButton>{item.status === 'pending' ? <ActionButton variant="ghost" title="标记处理中" onClick={() => void update(item, 'processing')}><Check className="h-4 w-4" /></ActionButton> : null}<ActionButton variant="ghost" title="标记完成" onClick={() => void update(item, 'completed')}><Check className="h-4 w-4" /></ActionButton><ActionButton variant="ghost" title={Number(item.is_public) ? '隐藏意见' : '公开意见'} onClick={() => void togglePublic(item)}>{Number(item.is_public) ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</ActionButton><ActionButton variant="ghost" title="回复" onClick={() => { setReplying(item); setReply(item.reply_content || ''); }}><MessageSquare className="h-4 w-4" /></ActionButton><ActionButton variant="ghost" title="删除" onClick={() => setDeleting(item)}><Trash2 className="h-4 w-4 text-studio-coral" /></ActionButton></div></td></tr>)}</tbody>
         </table>
       </ResponsiveTableShell>}
     </GlassPanel>

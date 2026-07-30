@@ -14,9 +14,40 @@ const [{ default: app }, { initDatabase, db }, { executeInsert, queryOne }, { si
   import('../api/utils/jwt.js'),
 ]);
 
+await db.execute(`
+  CREATE TABLE anonymous_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL CHECK(type IN ('feature', 'usage', 'process', 'team', 'other')),
+    content TEXT NOT NULL,
+    need_reply BOOLEAN DEFAULT 0,
+    reply_content TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'read', 'done')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+await db.execute({
+  sql: `INSERT INTO anonymous_feedback
+    (type, content, need_reply, status)
+    VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+  args: [
+    'feature', '旧版已查看意见', 0, 'read',
+    'process', '旧版已完成意见', 1, 'done',
+  ],
+});
+
 await initDatabase();
 const columns = await db.execute(`PRAGMA table_info(anonymous_feedback)`);
-assert.deepEqual(columns.rows.map((row) => String(row.name)), ['id', 'type', 'content', 'need_reply', 'reply_content', 'status', 'created_at', 'updated_at']);
+assert.deepEqual(columns.rows.map((row) => String(row.name)), ['id', 'type', 'content', 'need_reply', 'reply_content', 'status', 'is_public', 'created_at', 'updated_at']);
+const legacyRows = await db.execute(`SELECT id, status, is_public FROM anonymous_feedback ORDER BY id`);
+assert.deepEqual(
+  legacyRows.rows.map((row) => ({ id: Number(row.id), status: row.status, isPublic: Number(row.is_public) })),
+  [
+    { id: 1, status: 'processing', isPublic: 1 },
+    { id: 2, status: 'completed', isPublic: 1 },
+  ],
+);
+await db.execute(`DELETE FROM anonymous_feedback`);
 
 const now = '2026-07-28 12:00:00';
 const memberId = await executeInsert(`INSERT INTO users (username, password, role, name, enabled, created_at, updated_at) VALUES (?, ?, 'member', '成员', 1, ?, ?)`, ['feedback_member', 'unused', now, now]);
@@ -47,19 +78,26 @@ try {
   assert.equal(memberPublicPayload.data.length, 1);
   assert.equal(memberPublicPayload.data[0].content, '简化发布审批');
   assert.equal(Object.hasOwn(memberPublicPayload.data[0], 'user_id'), false);
-  assert.equal(Object.hasOwn(memberPublicPayload.data[0], 'status'), false);
+  assert.equal(memberPublicPayload.data[0].status, 'pending');
+  assert.equal(Object.hasOwn(memberPublicPayload.data[0], 'is_public'), false);
 
-  const memberList = await fetch(`${base}/admin`, { headers: { Authorization: `Bearer ${memberToken}` } });
+  const adminBase = `http://127.0.0.1:${address.port}/api/admin/anonymous-feedback`;
+  const memberList = await fetch(adminBase, { headers: { Authorization: `Bearer ${memberToken}` } });
   assert.equal(memberList.status, 403);
-  const adminList = await fetch(`${base}/admin`, { headers: { Authorization: `Bearer ${adminToken}` } });
+  const adminList = await fetch(adminBase, { headers: { Authorization: `Bearer ${adminToken}` } });
   assert.equal(adminList.status, 200);
 
-  const updated = await fetch(`${base}/admin/${stored.id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done', reply_content: '已纳入优化计划' }) });
+  const updated = await fetch(`${adminBase}/${stored.id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'completed', reply_content: '已纳入优化计划' }) });
   assert.equal(updated.status, 200);
   const repliedPublicList = await fetch(base, { headers: { Authorization: `Bearer ${memberToken}` } });
   const repliedPublicPayload = await repliedPublicList.json() as { data: Array<Record<string, unknown>> };
   assert.equal(repliedPublicPayload.data[0].reply_content, '已纳入优化计划');
-  const removed = await fetch(`${base}/admin/${stored.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${adminToken}` } });
+  const hidden = await fetch(`${adminBase}/${stored.id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ is_public: false }) });
+  assert.equal(hidden.status, 200);
+  const hiddenPublicList = await fetch(base, { headers: { Authorization: `Bearer ${memberToken}` } });
+  const hiddenPublicPayload = await hiddenPublicList.json() as { data: Array<Record<string, unknown>> };
+  assert.equal(hiddenPublicPayload.data.length, 0);
+  const removed = await fetch(`${adminBase}/${stored.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${adminToken}` } });
   assert.equal(removed.status, 200);
   console.log('匿名意见箱迁移与 API 权限测试通过');
 } finally {

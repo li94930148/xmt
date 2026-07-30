@@ -16,7 +16,15 @@ const types: Array<{ value: AnonymousFeedbackType; label: string }> = [
 
 const typeLabels = Object.fromEntries(types.map((item) => [item.value, item.label])) as Record<AnonymousFeedbackType, string>;
 
-export default function AnonymousFeedbackModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function AnonymousFeedbackModal({
+  open,
+  onClose,
+  onSubmitted,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmitted?: () => void | Promise<void>;
+}) {
   const [feedback, setFeedback] = useState<PublicAnonymousFeedback[]>([]);
   const [loading, setLoading] = useState(false);
   const [type, setType] = useState<AnonymousFeedbackType | ''>('');
@@ -54,6 +62,7 @@ export default function AnonymousFeedbackModal({ open, onClose }: { open: boolea
       await submitAnonymousFeedback({ type, content: content.trim(), needReply });
       setType(''); setContent(''); setNeedReply(false);
       await loadFeedback();
+      await onSubmitted?.();
       addNotification({ title: '提交成功', message: '感谢你的声音，意见已匿名发布', type: 'success' });
     } catch (error) {
       addNotification({ title: '提交失败', message: error instanceof Error ? error.message : '请稍后重试', type: 'error' });

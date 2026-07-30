@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.13.0 - 2026-07-30
+
+- 创作生产详情新增参考资料模块，支持搜索资料中心、添加关联、查看详情和解除关联。
+- 新增生产资料关联 API，复用 `resource_relations` 保存 `production/reference` 关系，不新增业务数据表。
+- 生产编辑者可在具备资料查看权限时使用关联能力，普通查看用户只读，资料管理权限保持不变。
+- 资料关联操作独立于编辑器正文、版本历史、协作编辑和保存流程，解除关联不会删除原资料。
+
+## 2.12.0 - 2026-07-29
+
+- 建立 `/api/v1/*` 成功、错误、分页、错误码和 HTTP 状态码契约。
+- 新增 requestId 生成、透传和响应回写机制，Topic v1 envelope 统一携带 requestId。
+- 新增 Zod 驱动的 OpenAPI 3.0.3 文档与 `/api/docs` Swagger UI，首批覆盖四个 Topic v1 接口。
+- 新增 `packages/api-client` 基础骨架和 API Contract 临时 SQLite 测试；legacy API 与业务规则保持不变。
+
+## 2.11.0 - 2026-07-29
+
+- 将 Topic 的 Repository、Policy、Service、Controller 与 HTTP 路由抽离到 `api/modules/topics`，旧 `/api/topics` 保持兼容。
+- 新增默认关闭的 `/api/v1/topics` 严格 Zod 契约；只有设置 `XMT_TOPICS_V1_ENABLED=true` 才挂载，Web 仍使用旧接口。
+- 新增临时 SQLite Topic 专项测试，覆盖 Repository、Service 失败分支及 legacy/v1 API 契约。
+- 保持数据库结构、权限判断、状态机、通知、Socket 事件和 history/activity 写入行为不变。
+
 ## 2.10.3 - 2026-07-29
 
 - 修复 Creator Agent 未上传粉丝总数的问题，兼容分隔符、万/亿单位、加号和嵌套对象。

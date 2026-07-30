@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { queryAll } from '../database/utils';
+import { sendV1Error } from '../utils/response';
 
 // 权限缓存（内存 Map，TTL 5 分钟）
 const permissionCache = new Map<string, { permissions: string[]; expires: number }>();
@@ -51,6 +52,9 @@ export function clearPermissionCache(userId?: number) {
 export function requirePermission(...permissionCodes: string[]) {
   return async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
+      if (req.originalUrl.startsWith('/api/v1/')) {
+        return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '未登录' }, 401);
+      }
       return res.status(401).json({ message: '未登录' });
     }
 
@@ -66,6 +70,13 @@ export function requirePermission(...permissionCodes: string[]) {
       const hasPermission = permissionCodes.some(code => userPermissions.includes(code));
 
       if (!hasPermission) {
+        if (req.originalUrl.startsWith('/api/v1/')) {
+          return sendV1Error(req, res, {
+            code: 'PERMISSION_DENIED',
+            message: '权限不足',
+            details: { required: permissionCodes, current: userPermissions },
+          }, 403);
+        }
         return res.status(403).json({
           message: '权限不足',
           required: permissionCodes,
@@ -74,7 +85,10 @@ export function requirePermission(...permissionCodes: string[]) {
       }
 
       next();
-    } catch (error) {
+    } catch {
+      if (req.originalUrl.startsWith('/api/v1/')) {
+        return sendV1Error(req, res, { code: 'INTERNAL_ERROR', message: '权限验证失败' }, 500);
+      }
       return res.status(500).json({ message: '权限验证失败' });
     }
   };
@@ -86,6 +100,9 @@ export function requirePermission(...permissionCodes: string[]) {
 export function requireAllPermissions(...permissionCodes: string[]) {
   return async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
+      if (req.originalUrl.startsWith('/api/v1/')) {
+        return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '未登录' }, 401);
+      }
       return res.status(401).json({ message: '未登录' });
     }
 
@@ -101,6 +118,13 @@ export function requireAllPermissions(...permissionCodes: string[]) {
       const hasAllPermissions = permissionCodes.every(code => userPermissions.includes(code));
 
       if (!hasAllPermissions) {
+        if (req.originalUrl.startsWith('/api/v1/')) {
+          return sendV1Error(req, res, {
+            code: 'PERMISSION_DENIED',
+            message: '权限不足',
+            details: { required: permissionCodes, current: userPermissions },
+          }, 403);
+        }
         return res.status(403).json({
           message: '权限不足',
           required: permissionCodes,
@@ -109,7 +133,10 @@ export function requireAllPermissions(...permissionCodes: string[]) {
       }
 
       next();
-    } catch (error) {
+    } catch {
+      if (req.originalUrl.startsWith('/api/v1/')) {
+        return sendV1Error(req, res, { code: 'INTERNAL_ERROR', message: '权限验证失败' }, 500);
+      }
       return res.status(500).json({ message: '权限验证失败' });
     }
   };

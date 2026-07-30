@@ -106,3 +106,34 @@ export async function updateTopicStatus(id: number, status: string): Promise<{ m
   if (!response.ok) throw new Error('更新状态失败');
   return response.json();
 }
+
+export interface TopicResource {
+  id: number;
+  title: string;
+  summary: string | null;
+  library_type: 'project' | 'content_archive' | 'knowledge' | 'media';
+  category: { id: number; name: string; path?: string } | null;
+}
+
+export async function getTopicResources(topicId: number): Promise<TopicResource[]> {
+  const response = await fetch(`${BASE_URL}/topics/${topicId}/resources`, { headers: getAuthHeader() });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '获取关联资料失败'));
+  return (await response.json()).data;
+}
+
+export async function addTopicResource(topicId: number, resourceId: number): Promise<void> {
+  const response = await fetch(`${BASE_URL}/topics/${topicId}/resources`, {
+    method: 'POST',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resource_id: resourceId }),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '关联资料失败'));
+}
+
+export async function removeTopicResource(topicId: number, resourceId: number): Promise<void> {
+  const response = await fetch(`${BASE_URL}/topics/${topicId}/resources/${resourceId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '解除关联失败'));
+}

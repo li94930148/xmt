@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getDatabasePath, getDatabaseUrl } from './path';
+import { runDatabaseMigrations } from './migrations/runner';
 
 export const dbPath = getDatabasePath();
 const dbDir = path.dirname(dbPath);
@@ -34,6 +35,7 @@ export async function initDatabase() {
   await db.execute('PRAGMA foreign_keys = ON');
 
   await initTables();
+  await runDatabaseMigrations(db);
   await runTimeMigrations();
   await createIndexes();
 }

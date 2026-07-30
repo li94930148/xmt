@@ -1,7 +1,9 @@
-import { Response } from 'express';
+import type { Request, Response } from 'express';
+import type { ApiErrorCode } from '@shared/schema/error.schema';
+import type { Pagination } from '@shared/schema/pagination.schema';
 
 // 统一 API 响应格式
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   message?: string;
@@ -63,4 +65,37 @@ export function sendNotFound(res: Response, message = '资源不存在') {
 // 服务器错误响应（不泄露内部错误信息）
 export function sendServerError(res: Response, message = '服务器内部错误') {
   return sendError(res, message, 500);
+}
+
+export type V1ResponseMeta = Partial<Pagination> & Record<string, unknown>;
+
+export function sendV1Success<T>(
+  req: Request,
+  res: Response,
+  data: T,
+  meta: V1ResponseMeta = {},
+  statusCode = 200,
+) {
+  return res.status(statusCode).json({
+    success: true,
+    data,
+    meta: { ...meta, requestId: req.requestId },
+  });
+}
+
+export function sendV1Error(
+  req: Request,
+  res: Response,
+  error: { code: ApiErrorCode; message: string; details?: unknown },
+  statusCode: number,
+) {
+  return res.status(statusCode).json({
+    success: false,
+    error: {
+      code: error.code,
+      message: error.message,
+      requestId: req.requestId,
+      ...(error.details === undefined ? {} : { details: error.details }),
+    },
+  });
 }

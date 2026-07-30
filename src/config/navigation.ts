@@ -90,7 +90,7 @@ export const navigationSections: NavigationSection[] = [
     items: [
       { id: 'asset-center', label: '资料中心概览', icon: Archive, path: '/asset-center' },
       { id: 'project-library', label: '项目资料库', icon: PackageOpen, path: '/asset-center/projects' },
-      { id: 'content-archives', label: '内容档案库', icon: FileText, path: '/resources' },
+      { id: 'content-archives', label: '内容档案库', icon: FileText, path: '/asset-center/resources?library_type=content_archive' },
       { id: 'knowledge-base', label: '知识库', icon: BookOpen, path: '/asset-center/knowledge' },
       { id: 'media-archive', label: '素材归档', icon: Images, path: '/asset-center/media' },
     ],
@@ -183,10 +183,11 @@ export function canAccessNavigationItem(
 }
 
 export function isNavigationItemActive(pathname: string, itemPath: string) {
+  const normalizedItemPath = itemPath.split('?')[0];
   if (itemPath === '/') return pathname === '/' || pathname === '/home' || pathname === '/dashboard';
   if (itemPath === '/analytics/creator-center') return pathname === itemPath;
   if (itemPath === '/analytics/creator-center/works' && /^\/analytics\/creator-center\/(work|content)\//.test(pathname)) return true;
-  return pathname === itemPath || pathname.startsWith(`${itemPath}/`);
+  return pathname === normalizedItemPath || pathname.startsWith(`${normalizedItemPath}/`);
 }
 
 export function findNavigationItem(pathname: string) {

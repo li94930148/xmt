@@ -10,6 +10,39 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.13.0',
+    date: '2026-07-30',
+    title: '创作生产资料引用',
+    changes: [
+      { type: 'feature', description: '生产详情新增参考资料模块，支持搜索、关联、查看和解除资料。' },
+      { type: 'feature', description: '新增生产资料关联接口，统一使用 production/reference 关系记录。' },
+      { type: 'security', description: '关联操作同时校验生产编辑范围和资料查看权限，普通查看用户保持只读。' },
+      { type: 'improvement', description: '资料关联独立于编辑器、版本历史、协作编辑和保存流程，解除关联不删除资料。' },
+    ],
+  },
+  {
+    version: '2.12.0',
+    date: '2026-07-29',
+    title: 'API Contract 标准化建设',
+    changes: [
+      { type: 'feature', description: '建立 /api/v1 成功、错误、分页、错误码和 HTTP 状态码公共契约。' },
+      { type: 'feature', description: '新增 requestId 生成与透传，并提供 Zod 驱动的 OpenAPI 文档和 Swagger UI。' },
+      { type: 'improvement', description: 'Topic v1 接入统一 envelope，新增 api-client 基础骨架和契约测试。' },
+      { type: 'security', description: 'legacy API、数据库、权限、状态机及业务逻辑保持不变。' },
+    ],
+  },
+  {
+    version: '2.11.0',
+    date: '2026-07-29',
+    title: 'Topic 模块化基础落地',
+    changes: [
+      { type: 'feature', description: 'Topic 新增 Repository、Policy、Service、Controller 与模块路由边界，legacy 接口继续兼容。' },
+      { type: 'feature', description: '新增默认关闭的 /api/v1/topics 严格 Zod 契约，为后续客户端迁移做准备。' },
+      { type: 'improvement', description: '新增临时 SQLite 专项测试，覆盖数据访问、业务错误和 legacy/v1 API 契约。' },
+      { type: 'security', description: '权限、状态机、通知、Socket 与历史日志行为保持原样，未修改数据库结构。' },
+    ],
+  },
+  {
     version: '2.10.3',
     date: '2026-07-29',
     title: '修复抖音粉丝与作品封面显示并优化数据驾驶舱',

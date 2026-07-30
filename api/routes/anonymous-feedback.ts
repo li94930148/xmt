@@ -6,6 +6,19 @@ const router = express.Router();
 const feedbackTypes = new Set(['feature', 'usage', 'process', 'team', 'other']);
 const feedbackStatuses = new Set(['pending', 'read', 'done']);
 
+router.get('/', authenticate, async (_req, res) => {
+  try {
+    const feedback = await queryAll(`
+      SELECT id, type, content, need_reply, reply_content, created_at, updated_at
+      FROM anonymous_feedback
+      ORDER BY created_at DESC, id DESC
+    `);
+    return res.json({ data: feedback });
+  } catch {
+    return res.status(500).json({ message: '获取意见列表失败' });
+  }
+});
+
 router.post('/', authenticate, async (req, res) => {
   const type = typeof req.body.type === 'string' ? req.body.type : '';
   const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';

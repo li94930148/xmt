@@ -41,6 +41,14 @@ try {
   assert.equal(Object.hasOwn(stored, 'user_id'), false);
   assert.equal(stored.content, '简化发布审批');
 
+  const memberPublicList = await fetch(base, { headers: { Authorization: `Bearer ${memberToken}` } });
+  assert.equal(memberPublicList.status, 200);
+  const memberPublicPayload = await memberPublicList.json() as { data: Array<Record<string, unknown>> };
+  assert.equal(memberPublicPayload.data.length, 1);
+  assert.equal(memberPublicPayload.data[0].content, '简化发布审批');
+  assert.equal(Object.hasOwn(memberPublicPayload.data[0], 'user_id'), false);
+  assert.equal(Object.hasOwn(memberPublicPayload.data[0], 'status'), false);
+
   const memberList = await fetch(`${base}/admin`, { headers: { Authorization: `Bearer ${memberToken}` } });
   assert.equal(memberList.status, 403);
   const adminList = await fetch(`${base}/admin`, { headers: { Authorization: `Bearer ${adminToken}` } });
@@ -48,6 +56,9 @@ try {
 
   const updated = await fetch(`${base}/admin/${stored.id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done', reply_content: '已纳入优化计划' }) });
   assert.equal(updated.status, 200);
+  const repliedPublicList = await fetch(base, { headers: { Authorization: `Bearer ${memberToken}` } });
+  const repliedPublicPayload = await repliedPublicList.json() as { data: Array<Record<string, unknown>> };
+  assert.equal(repliedPublicPayload.data[0].reply_content, '已纳入优化计划');
   const removed = await fetch(`${base}/admin/${stored.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${adminToken}` } });
   assert.equal(removed.status, 200);
   console.log('匿名意见箱迁移与 API 权限测试通过');

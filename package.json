@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.13.4",
+  "version": "2.13.5",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -16,6 +16,7 @@
     "test:api-contract": "tsx tests/api-contract/api-contract.test.ts",
     "test:auth": "tsx tests/auth/auth.test.ts",
     "test:auth-session-migration": "tsx tests/auth/session-migration.test.ts",
+    "test:auth-session-service": "tsx tests/auth/session-service.test.ts",
     "audit:time": "tsx scripts/audit-time-fields.ts",
     "server:dev": "nodemon",
     "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.5 - 2026-07-30
+
+- 新增未接线的 Session Service 和 Refresh Token Service，支持会话生命周期、256-bit 随机凭据、分版本 HMAC、单次轮换与复用检测。
+- 新增 SQLite 原子轮换 Repository，在一个事务内消费旧 token、创建替换记录并更新会话活动。
+- 为 Token Service 增加独立 v1 Access Token 方法，旧 `signToken`、`verifyToken`、payload 和 7 天有效期保持不变。
+- 新增 Session Service 专项测试；未开放 `/api/v1/auth/*`，未修改前端或 Socket 认证。
+
 ## 2.13.4 - 2026-07-30
 
 - 通过正式 migration 新增 `auth_sessions` 与 `auth_refresh_tokens`，包含会话到期、撤销、轮换链及必要索引。

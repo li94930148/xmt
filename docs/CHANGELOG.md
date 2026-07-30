@@ -1,5 +1,34 @@
 # XMT 系统更新日志
 
+## v2.13.5 - 2026-07-30
+
+### 新增
+
+- 新增 Session Service，提供会话创建、状态判断、单会话撤销和用户全部会话撤销基础能力。
+- 新增 Refresh Token 内核，提供安全随机值、分版本 HMAC hash、单次轮换和复用检测。
+- 新增独立 v1 Access Token 创建与验证方法，支持完整会话声明。
+
+### 优化
+
+- Refresh Token 轮换在一个 SQLite 写事务内完成旧记录校验、消费、替换记录创建和会话活动更新。
+
+### 修复
+
+- 无。
+
+### 技术升级
+
+- 新增 Auth Session Service 专项测试，覆盖会话、token hash、单次消费、替换链、复用检测和 legacy JWT 隔离。
+- 新内核未接入 Auth Service、路由、前端或 Socket。
+
+### 数据库变化
+
+- 无新增表或字段；继续使用 v2.13.4 已创建的 `auth_sessions` 与 `auth_refresh_tokens`。
+
+### 测试情况
+
+- Session migration、Session Service、legacy Auth、Topic、API Contract、类型检查、Auth 范围 lint、版本检查和生产构建均按要求执行；详细结果见 `UPGRADE_PROGRESS.md`。
+
 ## v2.13.4 - 2026-07-30
 
 ### 新增

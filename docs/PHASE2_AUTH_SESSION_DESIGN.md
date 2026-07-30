@@ -8,6 +8,8 @@
 
 实施状态补充：Phase 2-C3-2 已在 `v2.13.4` 按本文设计落地 `auth_sessions`、`auth_refresh_tokens`、指定索引和未接入业务的 Session Repository 基础层。Token 签发、刷新、JWT、前端、Socket 和 `/api/v1/auth/*` 仍未实施。
 
+运行时状态补充：Phase 2-C3-3 已在 `v2.13.5` 实现未接线的 Session Service、Refresh Token Service、原子轮换 Repository 和 v1 Access Token 独立方法。上述能力只由专项测试调用，legacy、公开 API、前端和 Socket 仍未接入。
+
 ## 设计结论
 
 选择 **`auth_sessions` 作为稳定会话主模型，并以 `auth_refresh_tokens` 作为单次轮换凭据子表**：一条 `auth_sessions` 代表一次登录形成的设备会话，一条 `auth_refresh_tokens` 只代表该会话轮换链中的一枚 Refresh Token。
@@ -444,4 +446,4 @@ ACTIVE
 
 ## 本阶段结论
 
-Phase 2-C3-1 在 `v2.13.3` 完成 Session + Refresh Token 架构设计，推荐 `auth_sessions` 主表与 `auth_refresh_tokens` 轮换子表；该设计在 C3-2 `v2.13.4` 只落地数据库和 Repository 基础设施。API、JWT、Token 签发、Web、Mobile 与 Socket 认证仍未切换，后续能力必须继续分阶段实施。
+Phase 2-C3-1 在 `v2.13.3` 完成设计，C3-2 `v2.13.4` 落地数据库基础设施，C3-3 `v2.13.5` 落地未接线的 Session/Refresh/v1 Access Token 内核。API、legacy JWT、Web、Mobile 与 Socket 认证仍未切换，后续能力必须继续分阶段实施。

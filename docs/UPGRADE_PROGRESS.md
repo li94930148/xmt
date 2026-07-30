@@ -481,3 +481,75 @@
 ### 下一阶段计划
 
 等待下一步指令。建议 Phase 2-C3-3 只实现 Session/Token 内核事务与服务测试，继续不开放 `/api/v1/auth/*`、不切换 legacy、Web 或 Socket；必须先明确 pepper 密钥管理和并发刷新事务边界。
+
+## Phase 2-C3-3：Auth Session 运行时服务建设
+
+### 当前版本
+
+`v2.13.5`。本阶段新增未接线的认证核心服务能力，从 `v2.13.4` 升级 PATCH。
+
+### 完成内容
+
+1. 新增 Session Service，支持创建稳定 session id、查询并区分有效/不存在/撤销/空闲过期/绝对过期状态。
+2. 支持以 `logout`、`admin`、`security_event`、`logout_all`、`password_changed`、`user_disabled` 等原因撤销单会话或用户会话。
+3. 新增 Refresh Token Service，使用 Node crypto 生成 32 字节随机值，并通过分版本 pepper 执行 HMAC-SHA256。
+4. 新增独立 Refresh Token Repository 与 SQLite 实现；正常刷新在一个写事务中完成旧记录查询、session 校验、单次消费、替换记录插入和 session 活动更新。
+5. 已使用 token 再次出现时返回内部安全事件，并在同一事务中撤销所属 session 与 token 链。
+6. Token Service 增加 `createAccessTokenV1()`、`verifyAccessTokenV1()`，严格校验 HS256、issuer、audience 和 access 类型；legacy 方法保持原样。
+7. 新增 Session Service 专项测试，覆盖会话生命周期、hash、单次消费、替换链、复用检测、撤销后不可用和新旧 JWT 隔离。
+
+### 修改文件
+
+- `api/modules/auth/index.ts`
+- `api/modules/auth/token.service.ts`
+- `api/modules/auth/session/session.repository.ts`
+- `api/modules/auth/session/session.sqlite-repository.ts`
+- `api/modules/auth/session/session.service.ts`
+- `api/modules/auth/session/session.types.ts`
+- `api/modules/auth/refresh/refresh-token.repository.ts`
+- `api/modules/auth/refresh/refresh-token.sqlite-repository.ts`
+- `api/modules/auth/refresh/refresh-token.service.ts`
+- `tests/auth/session-service.test.ts`
+- `package.json`
+- `package-lock.json`
+- `CHANGELOG.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/PHASE2_AUTH_SESSION_DESIGN.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+- `docs/releases/v2.13.5.md`
+
+### 数据库变化
+
+无。未新增表、字段、索引或 migration；继续复用 `v2.13.4` 已创建的 `auth_sessions` 与 `auth_refresh_tokens`。测试只写入系统临时目录中的 SQLite 数据库。
+
+### 测试结果
+
+- `npm run test:auth-session-service`：通过。
+- `npm run version:check`：通过，版本一致为 `v2.13.5`。
+- `npm run test:auth-session-migration`：通过。
+- `npm run test:auth`：通过，legacy JWT、登录、me、改密和 logout 行为保持不变。
+- `npm run test:topics`：通过。
+- `npm run test:api-contract`：通过。
+- `npm run check`：通过。
+- Auth 模块、相关 migration 与认证测试定向 lint：通过。
+- `npm run build`：通过。
+
+### 未接入范围
+
+1. legacy `/api/auth/login|me|change-password|logout` 不调用 Session 或 Refresh Token Service。
+2. `signToken()`、`verifyToken()`、旧 payload 和 7 天有效期不变。
+3. 未挂载或开放 `/api/v1/auth/*`，没有 Controller、Cookie 或 HTTP 响应返回 Refresh Token。
+4. 未修改 Web token 存储、api-client、Mobile SecureStore 或 Socket 认证。
+
+### 风险
+
+1. pepper 当前通过 Service 构造参数注入；正式接线前必须冻结环境密钥命名、加载、轮换和应急流程。
+2. 复用检测采用严格策略，正常并发也可能触发 session 撤销；客户端单飞和跨标签协调必须在 Web 灰度前完成。
+3. Refresh Token 内核内部会返回替换 token 原值供未来安全交付层使用；当前没有任何路由或日志接触该值。
+4. session 与 token 清理任务、审计事件持久化和多实例撤销广播仍未实现。
+
+### 下一阶段计划
+
+等待 Phase 2-C3-4 指令。建议下一阶段只实现默认关闭的 v1 Auth HTTP 适配、Zod/OpenAPI 契约和暗启测试；在 pepper 密钥管理、Cookie/CSRF 和功能开关未冻结前不得对客户端开放。

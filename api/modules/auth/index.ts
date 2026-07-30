@@ -28,5 +28,17 @@ export { SqliteAuthRepository } from './auth.sqlite-repository.js';
 export { createLegacyAuthRouter } from './auth.routes.js';
 export { AuthService } from './auth.service.js';
 export { BcryptPasswordService } from './password.service.js';
-export { LegacyJwtTokenService, signToken, verifyToken } from './token.service.js';
+export {
+  LegacyJwtTokenService,
+  createAccessTokenV1,
+  signToken,
+  verifyAccessTokenV1,
+  verifyToken,
+} from './token.service.js';
+export { RefreshTokenService } from './refresh/refresh-token.service.js';
+export type { RefreshTokenRepository } from './refresh/refresh-token.repository.js';
+export { SqliteRefreshTokenRepository } from './refresh/refresh-token.sqlite-repository.js';
+export { SessionService } from './session/session.service.js';
+export type { SessionRepository } from './session/session.repository.js';
+export { SqliteSessionRepository } from './session/session.sqlite-repository.js';
 export { AuthServiceError } from './auth.types.js';

@@ -28,6 +28,7 @@ import {
   type TopicDetailParsedFields,
 } from './topicDetailAggregateDraft';
 import { resolveTopicDetailEditorBranch, type TopicDetailEditorBranch } from './topicDetailEditorBranch';
+import TopicResourcesPanel from '../components/topic/TopicResourcesPanel';
 
 export default function TopicDetail() {
   const { id } = useParams<{ id: string }>();
@@ -346,6 +347,7 @@ export default function TopicDetail() {
 
   const canAudit = hasPermission('topic:audit');
   const canEditTopicPermission = hasPermission('topic:update');
+  const canManageTopicResources = canEditTopicPermission && hasPermission('resource:view');
   const canEditTopic = Boolean(
     topic &&
       canEditTopicPermission &&
@@ -638,6 +640,8 @@ export default function TopicDetail() {
             </button>
           </div>
         )}
+
+        <TopicResourcesPanel topicId={topic.id} canManage={canEditTopic && canManageTopicResources} />
 
         <div className="mb-6">
           <h3 className={`${styles.textSecondary} text-sm mb-4`}>流程进度</h3>

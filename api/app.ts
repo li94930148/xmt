@@ -22,6 +22,8 @@ import { apiLimiter } from './middleware/rateLimit.js'
 import { parseTrustProxy } from './utils/trustProxy.js'
 import authRoutes from './routes/auth.js'
 import topicsRoutes from './routes/topics.js'
+import topicResourcesRoutes from './routes/topic-resources.js'
+import productionResourcesRoutes from './routes/production-resources.js'
 import { v1TopicsRouter } from './modules/topics/index.js'
 import { openApiRouter } from './openapi.js'
 import { requestId } from './middleware/request-id.js'
@@ -30,6 +32,7 @@ import usersRoutes from './routes/users.js'
 import messagesRoutes from './routes/messages.js'
 import analyticsRoutes from './routes/analytics.js'
 import resourcesRoutes from './routes/resources.js'
+import resourceCenterRoutes from './routes/resource-center.js'
 import workflowRoutes from './routes/workflow.js'
 import inspirationsRoutes from './routes/inspirations.js'
 import templatesRoutes from './routes/templates.js'
@@ -285,7 +288,9 @@ app.use(express.static(distPath, {
 app.use('/api/auth', authRoutes)
 // Auth is mounted first so its dedicated login limiters never consume the shared API quota.
 app.use('/api/', apiLimiter)
+app.use('/api/topics', topicResourcesRoutes)
 app.use('/api/topics', topicsRoutes)
+app.use('/api/productions', productionResourcesRoutes)
 app.use('/api/docs', openApiRouter)
 if (process.env.XMT_TOPICS_V1_ENABLED === 'true') {
   app.use('/api/v1/topics', v1TopicsRouter)
@@ -294,6 +299,7 @@ app.use('/api/users', usersRoutes)
 app.use('/api/messages', messagesRoutes)
 app.use('/api/analytics', analyticsRoutes)
 app.use('/api/resources', resourcesRoutes)
+app.use('/api/resource-center', resourceCenterRoutes)
 app.use('/api/workflow', workflowRoutes)
 app.use('/api/inspirations', inspirationsRoutes)
 app.use('/api/templates', templatesRoutes)

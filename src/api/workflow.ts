@@ -71,6 +71,32 @@ export async function getProductionHistory(productionId: number): Promise<any[]>
   return response.json();
 }
 
+export interface ProductionResource {
+  id: number;
+  title: string;
+  summary: string | null;
+  library_type: 'project' | 'content_archive' | 'knowledge' | 'media';
+  category: { id: number; name: string; path?: string } | null;
+}
+
+export async function getProductionResources(productionId: number): Promise<ProductionResource[]> {
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/resources`, { headers: getAuthHeader() });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '获取参考资料失败'));
+  return (await response.json()).data;
+}
+
+export async function addProductionResource(productionId: number, resourceId: number): Promise<void> {
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/resources`, {
+    method: 'POST', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify({ resource_id: resourceId }),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '添加参考资料失败'));
+}
+
+export async function removeProductionResource(productionId: number, resourceId: number): Promise<void> {
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/resources/${resourceId}`, { method: 'DELETE', headers: getAuthHeader() });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '解除参考资料失败'));
+}
+
 // Comments
 export async function getComments(targetType: string, targetId: number): Promise<Comment[]> {
   const response = await fetch(`${BASE_URL}/workflow/comments?target_type=${targetType}&target_id=${targetId}`, {

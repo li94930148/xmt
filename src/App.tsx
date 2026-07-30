@@ -70,6 +70,10 @@ const ContentOSDashboard = lazyWithRetry(() => import('@/pages/ContentOSDashboar
 const Users = lazyWithRetry(() => import('@/pages/Users'), 'Users');
 const Resources = lazyWithRetry(() => import('@/pages/Resources'), 'Resources');
 const AssetCenter = lazyWithRetry(() => import('@/pages/AssetCenter'), 'AssetCenter');
+const ResourceLibrary = lazyWithRetry(() => import('@/pages/ResourceLibrary'), 'ResourceLibrary');
+const KnowledgeLibrary = lazyWithRetry(() => import('@/pages/KnowledgeLibrary'), 'KnowledgeLibrary');
+const ResourceDetail = lazyWithRetry(() => import('@/pages/ResourceDetail'), 'ResourceDetail');
+const ResourceSearch = lazyWithRetry(() => import('@/pages/ResourceSearch'), 'ResourceSearch');
 const Messages = lazyWithRetry(() => import('@/pages/Messages'), 'Messages');
 const Kanban = lazyWithRetry(() => import('@/pages/Kanban'), 'Kanban');
 const CalendarPage = lazyWithRetry(() => import('@/pages/Calendar'), 'CalendarPage');
@@ -139,9 +143,12 @@ export default function App() {
                 <Route path="/publishing/:id" element={<PublishingDetail />} />
                 <Route path="/resources" element={<Resources />} />
                 <Route path="/asset-center" element={<AssetCenter />} />
-                <Route path="/asset-center/projects" element={<AssetCenter />} />
-                <Route path="/asset-center/knowledge" element={<AssetCenter />} />
-                <Route path="/asset-center/media" element={<AssetCenter />} />
+                <Route path="/asset-center/resources" element={<ResourceLibrary />} />
+                <Route path="/asset-center/resources/:id" element={<ResourceDetail />} />
+                <Route path="/asset-center/knowledge" element={<KnowledgeLibrary />} />
+                <Route path="/asset-center/search" element={<ResourceSearch />} />
+                <Route path="/asset-center/projects" element={<ResourceLibrary fixedLibraryType="project" />} />
+                <Route path="/asset-center/media" element={<ResourceLibrary fixedLibraryType="media" />} />
                 <Route path="/messages" element={<Messages />} />
                 <Route path="/kanban" element={<Kanban />} />
                 <Route path="/calendar" element={<CalendarPage />} />

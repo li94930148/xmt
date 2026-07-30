@@ -10,6 +10,17 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.13.0',
+    date: '2026-07-30',
+    title: '创作生产资料引用',
+    changes: [
+      { type: 'feature', description: '生产详情新增参考资料模块，支持搜索、关联、查看和解除资料。' },
+      { type: 'feature', description: '新增生产资料关联接口，统一使用 production/reference 关系记录。' },
+      { type: 'security', description: '关联操作同时校验生产编辑范围和资料查看权限，普通查看用户保持只读。' },
+      { type: 'improvement', description: '资料关联独立于编辑器、版本历史、协作编辑和保存流程，解除关联不删除资料。' },
+    ],
+  },
+  {
     version: '2.12.0',
     date: '2026-07-29',
     title: 'API Contract 标准化建设',

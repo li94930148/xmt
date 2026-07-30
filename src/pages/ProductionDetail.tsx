@@ -31,6 +31,7 @@ import { setCurrentContentDocument } from '../content/orchestrator/currentConten
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
+import ProductionResourcesPanel from '../components/production/ProductionResourcesPanel';
 
 const STATUS_TEXT: Record<string, string> = {
   draft: '草稿',
@@ -134,6 +135,7 @@ export default function ProductionDetail() {
       ),
   );
   const canDelete = canEditProduction && hasPermission('production:delete');
+  const canManageProductionResources = canEditProduction && hasPermission('production:update') && hasPermission('resource:view');
   const activeDocId = production ? getCollaborationRoomId('production', production.id) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
   const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
@@ -610,6 +612,8 @@ export default function ProductionDetail() {
           </div>
         </div>
       </GlassPanel>
+
+      <ProductionResourcesPanel productionId={production.id} canManage={canManageProductionResources} />
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <GlassPanel className="min-w-0">

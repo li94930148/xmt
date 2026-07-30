@@ -372,3 +372,112 @@
 ### 下一阶段计划
 
 等待 Phase 2-C3 指令。不得在本阶段继续创建 Refresh Token、session、数据库迁移或修改前端/Socket 认证。
+
+## Phase 2-C3-1：Auth Session / Refresh Token 架构设计
+
+### 当前版本
+
+`v2.13.3`。本阶段只完成架构设计，不修改代码和生产行为，因此版本号保持不变。
+
+### 完成内容
+
+1. 新增 `docs/PHASE2_AUTH_SESSION_DESIGN.md`，完成当前认证模型、目标架构、会话与 Refresh Token 生命周期设计。
+2. 对比 `refresh_tokens`、`auth_sessions`、`device_sessions` 三种模型，选择 `auth_sessions` 作为稳定会话主模型，并使用 `auth_refresh_tokens` 保存单次轮换凭据。
+3. 设计 token 单次轮换、SQLite 原子并发控制、Refresh Token 重放检测、泄露防护和会话撤销策略。
+4. 设计多设备登录、当前会话退出、全部退出，以及用户改密、管理员重置和账号禁用后的会话策略。
+5. 设计 Web HttpOnly Cookie、Mobile SecureStore、Socket 重新认证和 Yjs 重连恢复边界。
+6. 规划 `/api/v1/auth/login|refresh|logout|logout-all|sessions`，遵守 v1 envelope、稳定错误码、requestId 和 Zod/OpenAPI 单一来源要求。
+7. 定义分阶段迁移、用户灰度、观测指标、放量门禁、回滚和完整测试矩阵。
+
+### 修改文件
+
+- `docs/PHASE2_AUTH_SESSION_DESIGN.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+
+### 数据库变化
+
+无。本阶段未创建 `auth_sessions`、`auth_refresh_tokens`、`refresh_tokens`、`device_sessions` 或其他表，未修改字段、索引、数据、初始化逻辑和 migration。文档中的表与索引仅为待评审设计。
+
+### 测试结果
+
+- 文档结构检查：通过，设计文档包含任务要求的十七个章节，Git whitespace 检查通过。
+- `npm run version:check`：通过，版本一致并保持 `v2.13.3`。
+- 未执行代码测试与构建：本阶段没有业务代码、配置、依赖或数据库变化；不会把未运行记录为通过。
+
+### 风险
+
+1. Access 15 分钟、Session 绝对 30 天/空闲 7 天是设计建议，实施前仍需产品、安全和运维评审。
+2. SQLite 并发轮换、事务锁和清理性能必须用真实 migration 与并发测试证明，不能仅凭设计结论上线。
+3. Web Cookie 依赖正式 HTTPS、同站部署、反向代理、CORS 和 CSRF 配置；部署事实未冻结前不能切换。
+4. Mobile Refresh Token 响应体交付不能只信任客户端声明，必须在独立阶段完成受控交付门禁。
+5. Session 即时撤销要求 v1 HTTP 检查 `sid`，Socket 多实例还要求共享撤销事件；缺少任一环节都不能宣称立即退出。
+6. legacy 7 天 JWT、logout 不撤销和改密不撤销仍保持现状，灰度期会同时存在两种安全语义。
+
+### 下一阶段计划
+
+等待后续实施指令。建议下一阶段只处理数据模型与 migration 评审：先备份和验证 SQLite 原子性，再创建默认不被 legacy 使用的新表；不得把数据库、v1 接口、Web、Mobile 和 Socket 一次性切换。
+
+## Phase 2-C3-2：Auth Session 数据库基础设施建设
+
+### 当前版本
+
+`v2.13.4`。本阶段新增认证会话数据库基础设施，从 `v2.13.3` 升级 PATCH；认证产品能力尚未开放。
+
+### 完成内容
+
+1. 新增正式 migration `005_auth_session_foundation`，在独立事务中幂等创建两张认证基础表和指定索引。
+2. 新增 `auth_sessions`，承载用户、客户端展示元数据、会话活动、空闲/绝对到期和撤销信息。
+3. 新增 `auth_refresh_tokens`，只保存未来 Refresh Token hash、pepper 版本、generation、替换关系和撤销信息，不保存明文。
+4. 新增独立 Session Repository 接口、SQLite 实现和类型；未接入 Auth Service、Controller 或路由。
+5. 新增 migration 专项测试，覆盖注册顺序、幂等执行、表、字段、索引唯一性、外键和既有 users 数据保护。
+6. 同步认证设计、更新日志、业务升级说明、发布说明和文档索引。
+
+### 修改文件
+
+- `api/database/migrations/005_auth_session_foundation.ts`
+- `api/database/migrations/index.ts`
+- `api/modules/auth/session/session.repository.ts`
+- `api/modules/auth/session/session.sqlite-repository.ts`
+- `api/modules/auth/session/session.types.ts`
+- `tests/auth/session-migration.test.ts`
+- `package.json`
+- `package-lock.json`
+- `CHANGELOG.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/PHASE2_AUTH_SESSION_DESIGN.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+- `docs/releases/v2.13.4.md`
+
+### 数据库变化
+
+1. 新增 `auth_sessions`，`user_id` 外键关联 `users(id)`；未修改 `users` 表。
+2. 新增 `auth_refresh_tokens`，`session_id` 外键关联 `auth_sessions(id)`，`replaced_by_id` 自关联下一枚轮换记录。
+3. 新增 `auth_sessions(user_id, revoked_at, absolute_expires_at)`、绝对到期和空闲到期索引。
+4. 新增 Refresh Token hash 唯一索引、`(session_id, generation)` 唯一索引、session 创建时间和到期索引。
+5. 未创建 token 生成或回填数据；新增表当前不被生产认证链路读写。
+
+### 测试结果
+
+- `npm run test:auth-session-migration`：通过。
+- `npm run version:check`：通过，版本一致为 `v2.13.4`。
+- `npm run test:auth`：通过，legacy 认证行为保持不变。
+- `npm run test:topics`：通过。
+- `npm run test:api-contract`：通过。
+- `npm run check`：通过。
+- Auth Session migration、Repository 与测试定向 lint：通过。
+- `npm run build`：通过。
+
+### 风险
+
+1. 新表会在应用初始化时通过正式 migration 创建；上线前仍需按部署规范完成生产数据库备份。
+2. Repository 目前提供原子消费的条件更新，但完整“消费旧 token + 创建新 token”事务编排不在本阶段，禁止直接接入生产刷新流程。
+3. `client_type` 等设备信息只作未来展示与风险元数据，不是可信设备认证因子。
+4. 新表当前没有清理任务；在真实签发前必须实现并验证保留期和清理策略。
+5. legacy JWT 仍为 7 天且不可撤销，logout、前端和 Socket 安全语义没有变化。
+
+### 下一阶段计划
+
+等待下一步指令。建议 Phase 2-C3-3 只实现 Session/Token 内核事务与服务测试，继续不开放 `/api/v1/auth/*`、不切换 legacy、Web 或 Socket；必须先明确 pepper 密钥管理和并发刷新事务边界。

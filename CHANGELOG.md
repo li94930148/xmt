@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.4 - 2026-07-30
+
+- 通过正式 migration 新增 `auth_sessions` 与 `auth_refresh_tokens`，包含会话到期、撤销、轮换链及必要索引。
+- 新增独立 Session Repository 接口与 SQLite 基础实现，但不接入 Auth Service。
+- 新增 migration 专项测试，验证表、字段、索引、外键、幂等执行和既有用户数据完整性。
+- legacy `/api/auth/*`、7 天 JWT、前端 token 存储、Socket 认证和生产登录行为保持不变。
+
 ## 2.13.3 - 2026-07-30
 
 - 将 legacy `GET /api/auth/me`、`POST /api/auth/change-password` 和 `POST /api/auth/logout` 收口到 Auth Module。

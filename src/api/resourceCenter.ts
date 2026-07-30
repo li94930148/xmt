@@ -83,6 +83,21 @@ export function getResourceCenterResource(id: number) {
   return request<ResourceDetailData>(`/resources/${id}`, { headers: authHeaders() });
 }
 
+export function createResourceCenterResource(input: {
+  title: string;
+  summary?: string;
+  library_type: LibraryType;
+  category_id?: number;
+  visibility: 'team' | 'company' | 'private';
+  content_text?: string;
+}) {
+  return request<{ message: string; id: number }>('/resources', {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify(input),
+  });
+}
+
 export function getResourceCategories(libraryType?: LibraryType) {
   return request<{ data: ResourceCategory[] }>(`/categories?${queryString({ library_type: libraryType })}`, { headers: authHeaders() });
 }

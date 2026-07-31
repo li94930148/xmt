@@ -1,6 +1,8 @@
 import type { Request, Response } from 'express';
 import type { AuthService } from './auth.service.js';
 import { AuthServiceError } from './auth.types.js';
+import { authMigrationLogger } from './rollout/auth-migration.logger.js';
+import { authMigrationMetrics } from './rollout/auth-migration.metrics.js';
 
 export class AuthController {
   constructor(private readonly service: AuthService) {}
@@ -9,6 +11,8 @@ export class AuthController {
     try {
       const { username, password, remember } = req.body;
       const result = await this.service.login({ username, password, remember });
+      authMigrationMetrics.increment('legacy_login_count');
+      authMigrationLogger.record({ event: 'auth.migration.login', requestId: req.requestId, userId: result.user.id, mode: 'legacy', outcome: 'success' });
       res.json(result);
     } catch (error) {
       if (error instanceof AuthServiceError) {

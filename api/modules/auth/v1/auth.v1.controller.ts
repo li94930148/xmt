@@ -16,6 +16,9 @@ import {
   type AuthCookieConfig,
 } from '../web/auth-cookie.config.js';
 import type { CsrfService } from '../web/csrf.service.js';
+import type { AuthMigrationLogger } from '../rollout/auth-migration.logger.js';
+import type { AuthMigrationMetrics } from '../rollout/auth-migration.metrics.js';
+import type { AuthRolloutService } from '../rollout/auth-rollout.service.js';
 import { AuthV1ServiceError, type AuthV1Identity, type AuthV1Service } from './auth.v1.service.js';
 
 function serviceError(req: Request, res: Response, error: AuthV1ServiceError) {
@@ -73,10 +76,12 @@ function identity(res: Response): AuthV1Identity {
 
 type AuthV1WebOptions = {
   enabled: boolean;
-  allowlistedUserIds: ReadonlySet<number>;
+  rolloutService: AuthRolloutService;
   allowedOrigins: ReadonlySet<string>;
   cookieConfig: AuthCookieConfig;
   csrfService: CsrfService;
+  metrics: AuthMigrationMetrics;
+  logger: AuthMigrationLogger;
 };
 
 function parseCookies(header: string | undefined): Map<string, string> {
@@ -122,19 +127,25 @@ export class AuthV1Controller {
         if (!hasTrustedOrigin(req, this.webOptions)) {
           return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '请求来源不受信任' }, 403);
         }
-        const result = await this.service.loginWeb(input, userAgent, this.webOptions.allowlistedUserIds);
+        const result = await this.service.loginWeb(input, userAgent, this.webOptions.rolloutService);
         const csrfToken = this.webOptions.csrfService.generateToken(result.data.session.id);
         setAuthRefreshCookie(res, result.refreshToken, this.webOptions.cookieConfig);
         setAuthCsrfCookie(res, csrfToken, this.webOptions.cookieConfig);
+        this.webOptions.metrics.increment('v1_login_count');
+        this.webOptions.logger.record({ event: 'auth.migration.login', requestId: req.requestId, userId: result.data.user.id, mode: 'v1-web', outcome: 'success' });
         return sendV1Success(req, res, result.data);
       }
       return sendV1Success(req, res, await this.service.login(input, userAgent));
     } catch (error) {
+      if (this.webOptions?.enabled && !(error instanceof AuthV1ServiceError)) {
+        this.webOptions.logger.record({ event: 'auth.migration.rollback', requestId: req.requestId, mode: 'v1-web', outcome: 'failed', reason: 'login_failed' });
+      }
       return controllerError(req, res, error);
     }
   };
 
   refresh = async (req: Request, res: Response) => {
+    let migrationUserId: number | undefined;
     try {
       res.setHeader('Cache-Control', 'no-store');
       if (this.webOptions?.enabled) {
@@ -145,23 +156,40 @@ export class AuthV1Controller {
         const cookies = parseCookies(req.headers.cookie);
         const refreshToken = cookies.get(AUTH_REFRESH_COOKIE_NAME);
         if (!refreshToken) throw new AuthV1ServiceError('REFRESH_INVALID');
-        const sessionId = await this.service.resolveWebRefreshSession(refreshToken);
+        const refreshIdentity = await this.service.resolveWebRefreshIdentity(refreshToken);
+        const { sessionId } = refreshIdentity;
+        migrationUserId = refreshIdentity.userId;
         if (!this.webOptions.csrfService.verifyDoubleSubmit(
           sessionId,
           cookies.get(AUTH_CSRF_COOKIE_NAME),
           csrfHeader(req),
         )) {
+          this.webOptions.metrics.increment('refresh_failed');
+          this.webOptions.metrics.increment('csrf_failed');
+          this.webOptions.logger.record({ event: 'auth.migration.refresh', requestId: req.requestId, userId: migrationUserId, mode: 'v1-web', outcome: 'failed', reason: 'csrf_failed' });
           return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '请求验证失败' }, 403);
         }
         const result = await this.service.refreshWeb(refreshToken);
         const csrfToken = this.webOptions.csrfService.generateToken(result.data.session.id);
         setAuthRefreshCookie(res, result.refreshToken, this.webOptions.cookieConfig);
         setAuthCsrfCookie(res, csrfToken, this.webOptions.cookieConfig);
+        this.webOptions.metrics.increment('refresh_success');
+        this.webOptions.logger.record({ event: 'auth.migration.refresh', requestId: req.requestId, userId: migrationUserId, mode: 'v1-web', outcome: 'success' });
         return sendV1Success(req, res, result.data);
       }
       const input = refreshRequestSchema.parse(req.body);
       return sendV1Success(req, res, await this.service.refresh(input.refreshToken));
     } catch (error) {
+      if (this.webOptions?.enabled) {
+        this.webOptions.metrics.increment('refresh_failed');
+        if (error instanceof AuthV1ServiceError && error.code === 'REFRESH_REUSED') {
+          this.webOptions.metrics.increment('token_reuse_detected');
+        }
+        if (error instanceof AuthV1ServiceError && (error.code === 'SESSION_EXPIRED' || error.code === 'SESSION_REVOKED')) {
+          this.webOptions.metrics.increment('expired_count');
+        }
+        this.webOptions.logger.record({ event: 'auth.migration.refresh', requestId: req.requestId, userId: migrationUserId, mode: 'v1-web', outcome: 'failed', reason: error instanceof AuthV1ServiceError ? error.code.toLowerCase() : 'internal_error' });
+      }
       if (
         this.webOptions?.enabled
         && error instanceof AuthV1ServiceError
@@ -193,6 +221,8 @@ export class AuthV1Controller {
         await this.service.logout(currentIdentity);
         clearAuthRefreshCookie(res, this.webOptions.cookieConfig);
         clearAuthCsrfCookie(res, this.webOptions.cookieConfig);
+        this.webOptions.metrics.increment('logout_success');
+        this.webOptions.logger.record({ event: 'auth.migration.logout', requestId: req.requestId, userId: currentIdentity.userId, mode: 'v1-web', outcome: 'success' });
         return sendV1Success(req, res, null);
       }
       await this.service.logout(identity(res));

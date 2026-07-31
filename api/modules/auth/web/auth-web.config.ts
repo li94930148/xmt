@@ -1,6 +1,14 @@
+import {
+  isWebAuthRolloutEnabled,
+  readAuthRolloutConfig,
+  type AuthRolloutConfig,
+} from '../rollout/auth-rollout.config.js';
+import { AuthRolloutService } from '../rollout/auth-rollout.service.js';
+
 export type AuthWebConfig = {
   enabled: boolean;
   allowlistedUserIds: ReadonlySet<number>;
+  rolloutConfig?: AuthRolloutConfig;
   allowedOrigins: ReadonlySet<string>;
   csrfSecret: string | null;
   secureCookies: boolean;
@@ -16,11 +24,11 @@ export function parseAuthWebAllowlist(value: string | undefined): ReadonlySet<nu
 }
 
 export function readAuthWebConfig(env: NodeJS.ProcessEnv = process.env): AuthWebConfig {
+  const rolloutConfig = readAuthRolloutConfig(env);
   return {
-    enabled: env.XMT_AUTH_V1_ENABLED === 'true'
-      && env.XMT_AUTH_WEB_ENABLED === 'true'
-      && env.NODE_ENV !== 'production',
+    enabled: isWebAuthRolloutEnabled(rolloutConfig),
     allowlistedUserIds: parseAuthWebAllowlist(env.XMT_AUTH_WEB_ALLOWLIST_USER_IDS),
+    rolloutConfig,
     allowedOrigins: new Set((env.XMT_AUTH_WEB_ORIGINS ?? '')
       .split(',')
       .map((origin) => origin.trim())
@@ -32,5 +40,6 @@ export function readAuthWebConfig(env: NodeJS.ProcessEnv = process.env): AuthWeb
 
 export function isAuthWebAllowed(userId: number, env: NodeJS.ProcessEnv = process.env): boolean {
   const config = readAuthWebConfig(env);
-  return config.enabled && config.allowlistedUserIds.has(userId);
+  if (!config.enabled || !config.rolloutConfig) return false;
+  return new AuthRolloutService(config.rolloutConfig).shouldUseWebAuth({ id: userId });
 }

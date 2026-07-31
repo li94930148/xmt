@@ -42,3 +42,7 @@ export { SessionService } from './session/session.service.js';
 export type { SessionRepository } from './session/session.repository.js';
 export { SqliteSessionRepository } from './session/session.sqlite-repository.js';
 export { AuthServiceError } from './auth.types.js';
+export { readAuthRolloutConfig, type AuthRolloutConfig, type AuthRolloutMode } from './rollout/auth-rollout.config.js';
+export { AuthRolloutService } from './rollout/auth-rollout.service.js';
+export { AuthMigrationMetrics, authMigrationMetrics } from './rollout/auth-migration.metrics.js';
+export { AuthMigrationLogger, authMigrationLogger } from './rollout/auth-migration.logger.js';

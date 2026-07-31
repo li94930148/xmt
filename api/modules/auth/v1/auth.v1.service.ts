@@ -4,6 +4,7 @@ import type { RefreshTokenService } from '../refresh/refresh-token.service.js';
 import type { SessionService } from '../session/session.service.js';
 import type { AuthSessionRecord } from '../session/session.types.js';
 import type { AuthWebLoginRepository } from '../web/auth-web-login.repository.js';
+import type { AuthRolloutService } from '../rollout/auth-rollout.service.js';
 import { createAccessTokenV1, verifyAccessTokenV1 } from '../token.service.js';
 import type {
   AuthSessionSummary,
@@ -109,10 +110,10 @@ export class AuthV1Service {
   async loginWeb(
     input: LoginV1RequestInput,
     userAgentSummary: string | null,
-    allowlistedUserIds: ReadonlySet<number>,
+    rolloutService: AuthRolloutService,
   ): Promise<{ data: LoginV1WebData; refreshToken: string }> {
     const user = await this.validateCredentials(input);
-    if (!allowlistedUserIds.has(user.id)) throw new AuthV1ServiceError('WEB_NOT_ALLOWED');
+    if (!rolloutService.shouldUseWebAuth({ id: user.id })) throw new AuthV1ServiceError('WEB_NOT_ALLOWED');
     const repository = this.dependencies.authWebLoginRepository;
     if (!repository) throw new Error('Auth Web login repository is not configured');
 
@@ -174,12 +175,12 @@ export class AuthV1Service {
     };
   }
 
-  async resolveWebRefreshSession(refreshToken: string): Promise<string> {
+  async resolveWebRefreshIdentity(refreshToken: string): Promise<AuthV1Identity> {
     const sessionId = await this.dependencies.refreshTokenService.findRefreshTokenSessionId(refreshToken);
     if (!sessionId) throw new AuthV1ServiceError('REFRESH_INVALID');
     const lookup = await this.dependencies.sessionService.getSession(sessionId);
     if (!lookup.session || lookup.state !== 'ACTIVE') throw new AuthV1ServiceError('REFRESH_INVALID');
-    return sessionId;
+    return { sessionId, userId: lookup.session.userId };
   }
 
   async refreshWeb(refreshToken: string): Promise<{ data: RefreshWebData; refreshToken: string }> {

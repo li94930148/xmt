@@ -15,10 +15,12 @@ const { initDatabase, closeDatabase } = await import('../../api/database/db.js')
 const { executeInsert, queryOne } = await import('../../api/database/utils.js');
 const { requestId } = await import('../../api/middleware/request-id.js');
 const { createAuthV1Module } = await import('../../api/modules/auth/v1/index.js');
+const { authMigrationMetrics } = await import('../../api/modules/auth/rollout/auth-migration.metrics.js');
 const { SqliteAuthWebLoginRepository } = await import('../../api/modules/auth/web/auth-web-login.sqlite-repository.js');
 const { sendV1Error } = await import('../../api/utils/response.js');
 
 await initDatabase();
+authMigrationMetrics.reset();
 
 const password = 'web-cookie-password';
 const passwordHash = await bcrypt.hash(password, 10);
@@ -220,6 +222,14 @@ try {
     [userId],
   );
   assert.equal(Number(activityAfter?.count), Number(activityBefore?.count));
+
+  const metrics = authMigrationMetrics.snapshot();
+  assert.equal(metrics.v1_login_count, 2);
+  assert.equal(metrics.refresh_success, 1);
+  assert(metrics.refresh_failed >= 3);
+  assert.equal(metrics.csrf_failed, 1);
+  assert.equal(metrics.token_reuse_detected, 1);
+  assert.equal(metrics.logout_success, 1);
 
   console.log('Auth Web Cookie and CSRF HTTP tests passed');
 } finally {

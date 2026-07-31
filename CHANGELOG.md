@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.13.10 - 2026-07-31
+
+- 新增统一 Auth Rollout Config，支持 disabled、legacy、internal、allowlist 和稳定 percentage 分桶。
+- 兼容现有 `XMT_AUTH_V1_ENABLED`、`XMT_AUTH_WEB_ENABLED` 与用户 ID allowlist，生产环境继续强制 legacy。
+- 新增 Auth Migration Metrics 和不含 Token 的结构化迁移事件，覆盖登录、刷新、CSRF、复用、退出与过期。
+- 配置回滚只停止新用户进入 v1-web，保留既有 Session 数据，legacy JWT 继续有效。
+- 正式 Login、默认登录流程、Socket/Yjs、Caddy 和生产 v1-web 均未切换。
+
 ## 2.13.9 - 2026-07-31
 
 - 新增真实 Chromium Web Auth 暗启契约测试，覆盖冷启动、F5、新标签页、关闭重开、并发 401、失败过期和注销闭环。

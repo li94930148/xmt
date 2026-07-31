@@ -900,3 +900,66 @@
 ### 下一阶段计划
 
 等待 Phase 2-C3-5-E 指令。建议先设计并验证跨标签刷新协调、暗启观测指标和灰度准入/退出清单，继续保持正式 Login、Socket、Caddy 与生产开关不变。
+
+## Phase 2-C3-5-E1：Web Auth 灰度准入与观测体系建设
+
+### 当前版本
+
+`v2.13.10`。本阶段新增 Auth 灰度治理与迁移观测基础，从 `v2.13.9` 升级 PATCH。
+
+### 完成内容
+
+1. 新增统一 Auth Rollout Config，支持 `disabled`、`legacy`、`internal`、`allowlist`、`percentage` 五种模式。
+2. 兼容旧 `XMT_AUTH_V1_ENABLED`、`XMT_AUTH_WEB_ENABLED` 和 `XMT_AUTH_WEB_ALLOWLIST_USER_IDS`；旧双开关同时为 true 时等价映射为 allowlist。
+3. 新增 `AuthRolloutService.shouldUseWebAuth(user)`，按用户 ID 与非敏感 salt 执行 0–9999 稳定 SHA-256 分桶。
+4. 新增八项 Auth Migration Metrics：legacy/v1 登录、refresh 成功/失败、CSRF 失败、Token reuse、logout 成功和 expired。
+5. 新增 `auth.migration.login|refresh|logout|rollback` 结构化事件，携带 requestId、可用时的 userId、mode、outcome 和安全 reason，不记录 Token。
+6. v1 Web Controller 与 legacy 登录接入观测；Cookie、CSRF、轮换、复用、注销和 session 失效均保持原响应契约。
+7. 配置回滚为 `v1-web -> legacy`：停止新的 Web Auth 准入，不删除 Session 数据，不影响已签发 legacy JWT。
+
+### 修改文件
+
+- `api/modules/auth/rollout/*`
+- `api/modules/auth/web/auth-web.config.ts`
+- `api/modules/auth/v1/*`
+- `api/modules/auth/auth.controller.ts`
+- `api/modules/auth/index.ts`
+- `tests/auth/auth-rollout.test.ts`
+- `tests/auth/auth-web-cookie.test.ts`
+- `.env.example`
+- `package.json`
+- `package-lock.json`
+- `CHANGELOG.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+- `docs/releases/v2.13.10.md`
+
+### 数据库变化
+
+无。未新增表、字段、索引或 migration；指标为进程内观测能力，Session 表只读验证回滚保留行为。
+
+### 测试结果
+
+- `npm run test:auth-rollout`：通过，覆盖五种模式、兼容配置、稳定分桶、回滚、指标和无 Token 日志。
+- `npm run version:check`：通过，版本统一为 `v2.13.10`。
+- `npm run test:auth`：通过，legacy 登录与 JWT 行为保持冻结。
+- `npm run test:auth-v1`：通过，experimental v1 HTTP 行为保持兼容。
+- `npm run test:auth-web-runtime`：通过。
+- `npm run test:auth-web-cookie`：通过，包含迁移指标断言。
+- `npm run test:api-contract`：通过。
+- `npm run check`：通过。
+- Auth/rollout 范围 ESLint：通过。
+- `npm run build`：通过。
+
+### 回滚与风险
+
+1. 将 `XMT_AUTH_ROLLOUT_MODE` 设为 `legacy` 或 `disabled` 即停止新用户进入 v1-web；生产环境无条件归一为 legacy。
+2. 回滚不清理 `auth_sessions` 或 `auth_refresh_tokens`，旧 JWT 验证路径继续工作。
+3. 当前指标为单进程内存计数，重启会清零，多实例不会自动聚合；在正式灰度前需接入统一监控后端。
+4. percentage 只决定准入，不会自动切换正式 Login；模式必须在后续入口接入阶段冻结到会话。
+
+### 下一阶段计划
+
+等待 Phase 2-C3-5-E2 指令。建议建设跨实例指标导出与告警阈值、灰度操作审计和准入决策只读诊断接口；继续不切正式 Login、Socket/Yjs、Caddy 或生产 Web Auth。

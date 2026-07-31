@@ -17,6 +17,8 @@ export const refreshRequestSchema = z.object({
   refreshToken: z.string().min(32).max(512),
 }).strict();
 
+export const refreshWebRequestSchema = z.object({}).strict();
+
 export const authV1UserSchema = z.object({
   id: z.number().int().positive(),
   username: z.string(),
@@ -53,6 +55,9 @@ export const refreshDataSchema = z.object({
   session: authSessionSummarySchema,
 }).strict();
 
+export const loginV1WebDataSchema = loginV1DataSchema.omit({ refreshToken: true });
+export const refreshWebDataSchema = refreshDataSchema.omit({ refreshToken: true });
+
 export const sessionsDataSchema = z.array(authSessionSummarySchema);
 
 export const loginV1ResponseSchema = apiSuccessSchema(loginV1DataSchema);
@@ -68,5 +73,7 @@ export const SessionResponse = sessionResponseSchema;
 export type LoginV1RequestInput = z.infer<typeof loginV1RequestSchema>;
 export type LoginV1Data = z.infer<typeof loginV1DataSchema>;
 export type RefreshData = z.infer<typeof refreshDataSchema>;
+export type LoginV1WebData = z.infer<typeof loginV1WebDataSchema>;
+export type RefreshWebData = z.infer<typeof refreshWebDataSchema>;
 export type AuthSessionSummary = z.infer<typeof authSessionSummarySchema>;
 export type AuthV1User = z.infer<typeof authV1UserSchema>;

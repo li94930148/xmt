@@ -8,6 +8,8 @@
 
 实施状态补充：Phase 2-C3-5-B 已在 `v2.13.7` 落地未接线的 Web Auth Runtime、api-client 刷新能力、Auth v1 客户端、Cookie/CSRF 服务和 Web allowlist 配置。现有 Login、持久 Token、legacy、Socket 与生产开关仍未切换。
 
+HTTP 适配状态补充：Phase 2-C3-5-C 已在 `v2.13.8` 将非生产 allowlist Web 分支接入 HttpOnly Refresh Cookie、Origin/CSRF 校验和原子登录事务。现有 Login 尚未消费该分支，默认及生产开关继续关闭。
+
 ## 一、当前 Web 认证流程
 
 ### 1.1 登录入口与 API

@@ -757,3 +757,80 @@
 ### 下一阶段计划
 
 等待 Phase 2-C3-5-C 指令。建议只完成后端 Web Cookie/CSRF HTTP 适配、登录事务原子化和浏览器契约测试，继续不切换 `Login.tsx`、持久 Token、Socket、Caddy 或生产默认开关。
+
+## Phase 2-C3-5-C：Web Cookie / CSRF HTTP 适配
+
+### 当前版本
+
+`v2.13.8`。本阶段完成默认关闭的 Web Cookie/CSRF HTTP 适配，从 `v2.13.7` 升级 PATCH。
+
+### 完成内容
+
+1. v1 Web login 使用 HttpOnly `__Host-xmt_refresh` Cookie 交付 Refresh Token，JSON 不再包含原值，并设置独立 CSRF Cookie。
+2. Web refresh 只读取 Cookie，拒绝 body Refresh Token；依次完成空 body Schema、Origin、Cookie、Session、CSRF 和 Refresh hash/轮换校验。
+3. refresh 成功后返回不含 Refresh Token 的标准 envelope，并覆盖新的 Refresh/CSRF Cookie。
+4. Web logout 在 Access Token 与 session middleware 后校验 Origin/CSRF，撤销当前 session，并以同名同 Path、`Max-Age=0` 清除 Cookie。
+5. 新增 Web 登录事务 Repository，将 `auth_sessions`、generation 0 Refresh hash 与 `activity_log` 纳入单个 SQLite 写事务。
+6. Session/Refresh Service 新增记录准备能力，既有 create/rotate 行为与 legacy 路径保持不变。
+7. OpenAPI、共享 Zod Schema 和 Auth v1 Client 更新为 Web Cookie 契约。
+8. 新增 Cookie/CSRF HTTP 测试，覆盖 Cookie 属性、body 降级拒绝、CSRF 失败、轮换、重放、退出、no-store 和事务回滚。
+
+### 修改文件
+
+- `api/modules/auth/v1/*`
+- `api/modules/auth/web/*`
+- `api/modules/auth/session/session.service.ts`
+- `api/modules/auth/refresh/refresh-token.service.ts`
+- `api/openapi.ts`
+- `shared/schema/auth.schema.ts`
+- `packages/api-client/auth-client.ts`
+- `tests/auth/auth-web-cookie.test.ts`
+- `tests/auth/auth-web-runtime.test.ts`
+- `.env.example`
+- `package.json`
+- `package-lock.json`
+- `CHANGELOG.md`
+- `docs/API_CONTRACT.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/PHASE2_AUTH_WEB_MIGRATION_DESIGN.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+- `docs/releases/v2.13.8.md`
+
+### 数据库变化
+
+无。未新增表、字段、索引或 migration；只把现有 session、Refresh 记录和活动日志写入收口到单事务。
+
+### 测试结果
+
+- `npm run test:auth-web-cookie`：通过。
+- `npm run version:check`：通过，版本统一为 `v2.13.8`。
+- `npm run test:auth`：通过，legacy 行为保持冻结。
+- `npm run test:auth-session-migration`：通过。
+- `npm run test:auth-session-service`：通过。
+- `npm run test:auth-v1`：通过，非 Web experimental 测试分支保持兼容。
+- `npm run test:auth-web-runtime`：通过。
+- `npm run test:api-contract`：通过。
+- `npm run check`：通过。
+- Auth 相关 ESLint：通过。
+- `npm run build`：通过。
+
+### 当前未切换范围
+
+1. `Login.tsx`、legacy `/api/auth/*` 和现有前端登录入口不变。
+2. localStorage/sessionStorage Token 逻辑、旧 JWT payload 和 7 天有效期不变。
+3. Web Auth 仍要求 v1/Web 双开关、非生产环境和用户 ID allowlist；默认关闭且生产不可开启。
+4. Socket、Yjs、Caddy 和线上 Cookie 配置不变。
+5. Web Runtime 尚未被现有页面消费，普通用户不会进入 Cookie 流程。
+
+### 风险说明
+
+1. 当前 CSRF 来源使用非 HttpOnly Cookie + Header 双提交，仍依赖 CSP 和 XSS 治理，不能把 CSRF 视为 XSS 防护。
+2. api-client 单飞仍是单实例范围，跨标签协调尚未实施。
+3. Cookie Secure/Origin 的真实线上部署事实未验证，因此生产硬门禁继续保留。
+4. Access Token 刷新后的 Socket 重认证和 Yjs 恢复尚未实施。
+
+### 下一阶段计划
+
+等待 Phase 2-C3-5-D 指令。建议只做非生产浏览器暗启测试入口或自动化夹具，验证 Runtime 冷启动、401 刷新和退出；仍不切正式 Login、持久 Token、Socket、Caddy 或生产开关。

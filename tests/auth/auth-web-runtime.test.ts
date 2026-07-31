@@ -200,7 +200,7 @@ assert.equal('domain' in cookieOptions, false);
 let setCookieCall: unknown[] = [];
 let clearCookieCall: unknown[] = [];
 setAuthRefreshCookie({ cookie: (...args: unknown[]) => { setCookieCall = args; return undefined as never; } }, 'secret', { secure: true });
-clearAuthRefreshCookie({ clearCookie: (...args: unknown[]) => { clearCookieCall = args; return undefined as never; } }, { secure: true });
+clearAuthRefreshCookie({ cookie: (...args: unknown[]) => { clearCookieCall = args; return undefined as never; } }, { secure: true });
 assert.equal(setCookieCall[0], AUTH_REFRESH_COOKIE_NAME);
 assert.equal(setCookieCall[1], 'secret');
 assert.equal(clearCookieCall[0], AUTH_REFRESH_COOKIE_NAME);

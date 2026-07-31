@@ -1,6 +1,9 @@
 export type AuthWebConfig = {
   enabled: boolean;
   allowlistedUserIds: ReadonlySet<number>;
+  allowedOrigins: ReadonlySet<string>;
+  csrfSecret: string | null;
+  secureCookies: boolean;
 };
 
 export function parseAuthWebAllowlist(value: string | undefined): ReadonlySet<number> {
@@ -18,6 +21,12 @@ export function readAuthWebConfig(env: NodeJS.ProcessEnv = process.env): AuthWeb
       && env.XMT_AUTH_WEB_ENABLED === 'true'
       && env.NODE_ENV !== 'production',
     allowlistedUserIds: parseAuthWebAllowlist(env.XMT_AUTH_WEB_ALLOWLIST_USER_IDS),
+    allowedOrigins: new Set((env.XMT_AUTH_WEB_ORIGINS ?? '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean)),
+    csrfSecret: env.XMT_AUTH_CSRF_SECRET?.trim() || null,
+    secureCookies: env.NODE_ENV === 'production' || env.XMT_AUTH_COOKIE_SECURE === 'true',
   };
 }
 

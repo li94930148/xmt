@@ -1,7 +1,21 @@
 import type { Request, Response } from 'express';
 import { ZodError } from 'zod';
-import { loginV1RequestSchema, refreshRequestSchema } from '../../../../shared/schema/auth.schema.js';
+import {
+  loginV1RequestSchema,
+  refreshRequestSchema,
+  refreshWebRequestSchema,
+} from '../../../../shared/schema/auth.schema.js';
 import { sendV1Error, sendV1Success } from '../../../utils/response.js';
+import {
+  AUTH_CSRF_COOKIE_NAME,
+  AUTH_REFRESH_COOKIE_NAME,
+  clearAuthCsrfCookie,
+  clearAuthRefreshCookie,
+  setAuthCsrfCookie,
+  setAuthRefreshCookie,
+  type AuthCookieConfig,
+} from '../web/auth-cookie.config.js';
+import type { CsrfService } from '../web/csrf.service.js';
 import { AuthV1ServiceError, type AuthV1Identity, type AuthV1Service } from './auth.v1.service.js';
 
 function serviceError(req: Request, res: Response, error: AuthV1ServiceError) {
@@ -35,6 +49,9 @@ function serviceError(req: Request, res: Response, error: AuthV1ServiceError) {
       message: '会话已过期，请重新登录',
     }, 401);
   }
+  if (error.code === 'WEB_NOT_ALLOWED') {
+    return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '当前账号不在测试范围内' }, 403);
+  }
   return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '未登录或登录已失效' }, 401);
 }
 
@@ -54,8 +71,45 @@ function identity(res: Response): AuthV1Identity {
   return res.locals.authV1 as AuthV1Identity;
 }
 
+type AuthV1WebOptions = {
+  enabled: boolean;
+  allowlistedUserIds: ReadonlySet<number>;
+  allowedOrigins: ReadonlySet<string>;
+  cookieConfig: AuthCookieConfig;
+  csrfService: CsrfService;
+};
+
+function parseCookies(header: string | undefined): Map<string, string> {
+  const cookies = new Map<string, string>();
+  for (const item of header?.split(';') ?? []) {
+    const separator = item.indexOf('=');
+    if (separator <= 0) continue;
+    const name = item.slice(0, separator).trim();
+    const value = item.slice(separator + 1).trim();
+    try {
+      cookies.set(name, decodeURIComponent(value));
+    } catch {
+      // Malformed cookies are treated as missing credentials.
+    }
+  }
+  return cookies;
+}
+
+function hasTrustedOrigin(req: Request, options: AuthV1WebOptions): boolean {
+  const origin = req.headers.origin;
+  return typeof origin === 'string' && options.allowedOrigins.has(origin);
+}
+
+function csrfHeader(req: Request): string | undefined {
+  const value = req.headers['x-xmt-csrf'];
+  return typeof value === 'string' ? value : undefined;
+}
+
 export class AuthV1Controller {
-  constructor(private readonly service: AuthV1Service) {}
+  constructor(
+    private readonly service: AuthV1Service,
+    private readonly webOptions?: AuthV1WebOptions,
+  ) {}
 
   login = async (req: Request, res: Response) => {
     try {
@@ -64,6 +118,16 @@ export class AuthV1Controller {
         ? req.headers['user-agent'].slice(0, 255)
         : null;
       res.setHeader('Cache-Control', 'no-store');
+      if (this.webOptions?.enabled) {
+        if (!hasTrustedOrigin(req, this.webOptions)) {
+          return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '请求来源不受信任' }, 403);
+        }
+        const result = await this.service.loginWeb(input, userAgent, this.webOptions.allowlistedUserIds);
+        const csrfToken = this.webOptions.csrfService.generateToken(result.data.session.id);
+        setAuthRefreshCookie(res, result.refreshToken, this.webOptions.cookieConfig);
+        setAuthCsrfCookie(res, csrfToken, this.webOptions.cookieConfig);
+        return sendV1Success(req, res, result.data);
+      }
       return sendV1Success(req, res, await this.service.login(input, userAgent));
     } catch (error) {
       return controllerError(req, res, error);
@@ -72,17 +136,70 @@ export class AuthV1Controller {
 
   refresh = async (req: Request, res: Response) => {
     try {
-      const input = refreshRequestSchema.parse(req.body);
       res.setHeader('Cache-Control', 'no-store');
+      if (this.webOptions?.enabled) {
+        refreshWebRequestSchema.parse(req.body ?? {});
+        if (!hasTrustedOrigin(req, this.webOptions)) {
+          return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '请求来源不受信任' }, 403);
+        }
+        const cookies = parseCookies(req.headers.cookie);
+        const refreshToken = cookies.get(AUTH_REFRESH_COOKIE_NAME);
+        if (!refreshToken) throw new AuthV1ServiceError('REFRESH_INVALID');
+        const sessionId = await this.service.resolveWebRefreshSession(refreshToken);
+        if (!this.webOptions.csrfService.verifyDoubleSubmit(
+          sessionId,
+          cookies.get(AUTH_CSRF_COOKIE_NAME),
+          csrfHeader(req),
+        )) {
+          return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '请求验证失败' }, 403);
+        }
+        const result = await this.service.refreshWeb(refreshToken);
+        const csrfToken = this.webOptions.csrfService.generateToken(result.data.session.id);
+        setAuthRefreshCookie(res, result.refreshToken, this.webOptions.cookieConfig);
+        setAuthCsrfCookie(res, csrfToken, this.webOptions.cookieConfig);
+        return sendV1Success(req, res, result.data);
+      }
+      const input = refreshRequestSchema.parse(req.body);
       return sendV1Success(req, res, await this.service.refresh(input.refreshToken));
     } catch (error) {
+      if (
+        this.webOptions?.enabled
+        && error instanceof AuthV1ServiceError
+        && (error.code === 'REFRESH_INVALID' || error.code === 'REFRESH_REUSED')
+      ) {
+        clearAuthRefreshCookie(res, this.webOptions.cookieConfig);
+        clearAuthCsrfCookie(res, this.webOptions.cookieConfig);
+      }
       return controllerError(req, res, error);
     }
   };
 
-  logout = async (_req: Request, res: Response) => {
-    await this.service.logout(identity(res));
-    return sendV1Success(_req, res, null);
+  logout = async (req: Request, res: Response) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      if (this.webOptions?.enabled) {
+        if (!hasTrustedOrigin(req, this.webOptions)) {
+          return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '请求来源不受信任' }, 403);
+        }
+        const currentIdentity = identity(res);
+        const cookies = parseCookies(req.headers.cookie);
+        if (!this.webOptions.csrfService.verifyDoubleSubmit(
+          currentIdentity.sessionId,
+          cookies.get(AUTH_CSRF_COOKIE_NAME),
+          csrfHeader(req),
+        )) {
+          return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '请求验证失败' }, 403);
+        }
+        await this.service.logout(currentIdentity);
+        clearAuthRefreshCookie(res, this.webOptions.cookieConfig);
+        clearAuthCsrfCookie(res, this.webOptions.cookieConfig);
+        return sendV1Success(req, res, null);
+      }
+      await this.service.logout(identity(res));
+      return sendV1Success(req, res, null);
+    } catch (error) {
+      return controllerError(req, res, error);
+    }
   };
 
   sessions = async (req: Request, res: Response) => {

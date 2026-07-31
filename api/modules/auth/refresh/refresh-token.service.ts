@@ -61,8 +61,18 @@ export class RefreshTokenService {
     generation: number;
     expiresAt: string;
   }): Promise<string> {
+    const prepared = this.prepareRefreshToken(input);
+    await this.repository.createRefreshTokenRecord(prepared.record);
+    return prepared.refreshToken;
+  }
+
+  prepareRefreshToken(input: {
+    sessionId: string;
+    generation: number;
+    expiresAt: string;
+  }): { refreshToken: string; record: AuthRefreshTokenRecord } {
     const refreshToken = this.generateRefreshToken();
-    await this.repository.createRefreshTokenRecord({
+    return { refreshToken, record: {
       id: this.idGenerator(),
       sessionId: input.sessionId,
       tokenHash: this.hashRefreshToken(refreshToken),
@@ -74,13 +84,16 @@ export class RefreshTokenService {
       replacedById: null,
       revokedAt: null,
       revokeReason: null,
-    });
-    return refreshToken;
+    } };
   }
 
   detectReuse(record: AuthRefreshTokenRecord): RefreshTokenSecurityEvent | null {
     if (!record.usedAt) return null;
     return { type: 'REFRESH_TOKEN_REUSE', sessionId: record.sessionId, tokenId: record.id };
+  }
+
+  async findRefreshTokenSessionId(refreshToken: string): Promise<string | null> {
+    return (await this.findRecord(refreshToken))?.sessionId ?? null;
   }
 
   async consumeRefreshToken(

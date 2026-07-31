@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.13.8 - 2026-07-31
+
+- 为显式开启且命中用户 ID 白名单的非生产 v1 Web Auth 增加 HttpOnly Refresh Cookie 与 CSRF HTTP 适配。
+- Web login/refresh JSON 不再返回 Refresh Token；refresh 只接受 Cookie，并在成功轮换后覆盖 Cookie。
+- Web login 将 session、generation 0 Refresh hash 和登录活动记录纳入同一 SQLite 事务。
+- logout 验证 Access/Session/Origin/CSRF 后撤销 session，并以相同 Cookie 范围清除凭据。
+- legacy 登录、持久 Token、JWT、Socket、Caddy 和生产开关不变。
+
 ## 2.13.7 - 2026-07-31
 
 - 新增未接入现有登录页的 Web Auth Runtime，Access Token 仅保存在内存，并提供认证状态机和刷新单飞能力。

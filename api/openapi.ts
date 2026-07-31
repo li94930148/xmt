@@ -11,10 +11,10 @@ import {
   updateTopicInputSchema,
 } from '@shared/schema/topics.schema';
 import {
-  loginV1DataSchema,
+  loginV1WebDataSchema,
   loginV1RequestSchema,
-  refreshDataSchema,
-  refreshRequestSchema,
+  refreshWebDataSchema,
+  refreshWebRequestSchema,
   sessionsDataSchema,
 } from '@shared/schema/auth.schema';
 
@@ -33,9 +33,9 @@ const TopicCreatedResponse = registry.register(
 );
 const TopicIdParams = registry.register('TopicIdParams', z.object({ id: idSchema }).strict());
 const AuthV1LoginRequest = registry.register('AuthV1LoginRequest', loginV1RequestSchema);
-const AuthV1LoginResponse = registry.register('AuthV1LoginResponse', apiSuccessSchema(loginV1DataSchema));
-const AuthV1RefreshRequest = registry.register('AuthV1RefreshRequest', refreshRequestSchema);
-const AuthV1RefreshResponse = registry.register('AuthV1RefreshResponse', apiSuccessSchema(refreshDataSchema));
+const AuthV1WebLoginResponse = registry.register('AuthV1WebLoginResponse', apiSuccessSchema(loginV1WebDataSchema));
+const AuthV1WebRefreshRequest = registry.register('AuthV1WebRefreshRequest', refreshWebRequestSchema);
+const AuthV1WebRefreshResponse = registry.register('AuthV1WebRefreshResponse', apiSuccessSchema(refreshWebDataSchema));
 const AuthV1SessionsResponse = registry.register('AuthV1SessionsResponse', apiSuccessSchema(sessionsDataSchema));
 const AuthV1LogoutResponse = registry.register('AuthV1LogoutResponse', apiSuccessSchema(z.null()));
 
@@ -76,7 +76,7 @@ registry.registerPath({
   'x-experimental': true,
   request: { body: { content: { 'application/json': { schema: AuthV1LoginRequest } } } },
   responses: {
-    200: { description: '实验性会话创建成功', content: { 'application/json': { schema: AuthV1LoginResponse } } },
+    200: { description: 'Web 会话创建成功；Refresh Token 仅通过 HttpOnly Cookie 交付', content: { 'application/json': { schema: AuthV1WebLoginResponse } } },
     ...errorResponses,
   },
 });
@@ -86,11 +86,11 @@ registry.registerPath({
   path: '/api/v1/auth/refresh',
   tags: ['Auth (Experimental)'],
   summary: '实验性 token 轮换',
-  description: '仅用于内部测试；尚未采用生产 Cookie 交付。',
+  description: 'Web 模式只从 HttpOnly Cookie 读取 Refresh Token，并要求 Origin 与 CSRF Header。',
   'x-experimental': true,
-  request: { body: { content: { 'application/json': { schema: AuthV1RefreshRequest } } } },
+  request: { body: { content: { 'application/json': { schema: AuthV1WebRefreshRequest } } } },
   responses: {
-    200: { description: '轮换成功', content: { 'application/json': { schema: AuthV1RefreshResponse } } },
+    200: { description: '轮换成功；新 Refresh Token 仅通过 Cookie 交付', content: { 'application/json': { schema: AuthV1WebRefreshResponse } } },
     ...errorResponses,
   },
 });

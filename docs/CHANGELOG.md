@@ -1,5 +1,33 @@
 # XMT 系统更新日志
 
+## v2.13.8 - 2026-07-31
+
+### 新增
+
+- 新增 v1 Web Auth 的 HttpOnly Refresh Cookie、Origin 与 CSRF HTTP 适配。
+- 新增 Web 登录原子事务 Repository 和 Cookie 专项集成测试。
+
+### 优化
+
+- Web login/refresh 响应不再包含 Refresh Token 原文，refresh 只接受 Cookie 并在轮换后覆盖新 Cookie。
+- Web logout 在 Access/Session 与 CSRF 验证后撤销当前会话并清除 Refresh/CSRF Cookie。
+
+### 修复
+
+- 无。
+
+### 技术升级
+
+- OpenAPI 与 Auth v1 Client 同步 Web Cookie 契约；专项测试覆盖 Cookie 属性、body 降级拒绝、CSRF、轮换、重放、退出和事务回滚。
+
+### 数据库变化
+
+- 无表、字段、索引或 migration 变化；只将现有三类登录写入纳入单一事务。
+
+### 测试情况
+
+- Auth、Session、v1、Web Runtime、Web Cookie、API Contract、类型检查、Auth 范围 lint、版本检查和生产构建按要求执行；详见 `UPGRADE_PROGRESS.md`。
+
 ## v2.13.7 - 2026-07-31
 
 ### 新增

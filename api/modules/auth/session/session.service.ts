@@ -39,6 +39,12 @@ export class SessionService {
   }
 
   async createSession(input: CreateSessionServiceInput): Promise<string> {
+    const session = this.prepareSession(input);
+    await this.repository.createSession(session);
+    return session.id;
+  }
+
+  prepareSession(input: CreateSessionServiceInput): AuthSessionRecord {
     const now = this.now();
     const nowValue = formatBjtDatabase(now);
     const session: AuthSessionRecord = {
@@ -56,8 +62,7 @@ export class SessionService {
       revokeReason: null,
       lastIpPrefix: input.lastIpPrefix ?? null,
     };
-    await this.repository.createSession(session);
-    return session.id;
+    return session;
   }
 
   async getSession(sessionId: string): Promise<SessionLookupResult> {

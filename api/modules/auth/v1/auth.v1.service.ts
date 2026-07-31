@@ -3,12 +3,15 @@ import type { PasswordService } from '../password.service.js';
 import type { RefreshTokenService } from '../refresh/refresh-token.service.js';
 import type { SessionService } from '../session/session.service.js';
 import type { AuthSessionRecord } from '../session/session.types.js';
+import type { AuthWebLoginRepository } from '../web/auth-web-login.repository.js';
 import { createAccessTokenV1, verifyAccessTokenV1 } from '../token.service.js';
 import type {
   AuthSessionSummary,
   LoginV1Data,
   LoginV1RequestInput,
+  LoginV1WebData,
   RefreshData,
+  RefreshWebData,
 } from '../../../../shared/schema/auth.schema.js';
 
 export type AuthV1ErrorCode =
@@ -18,7 +21,8 @@ export type AuthV1ErrorCode =
   | 'SESSION_EXPIRED'
   | 'SESSION_REVOKED'
   | 'REFRESH_INVALID'
-  | 'REFRESH_REUSED';
+  | 'REFRESH_REUSED'
+  | 'WEB_NOT_ALLOWED';
 
 export class AuthV1ServiceError extends Error {
   constructor(public readonly code: AuthV1ErrorCode) {
@@ -32,6 +36,7 @@ type AuthV1ServiceDependencies = {
   passwordService: PasswordService;
   sessionService: SessionService;
   refreshTokenService: RefreshTokenService;
+  authWebLoginRepository?: AuthWebLoginRepository;
 };
 
 export type AuthV1Identity = {
@@ -59,12 +64,7 @@ export class AuthV1Service {
   constructor(private readonly dependencies: AuthV1ServiceDependencies) {}
 
   async login(input: LoginV1RequestInput, userAgentSummary: string | null): Promise<LoginV1Data> {
-    const user = await this.dependencies.authRepository.findUserByUsername(input.username);
-    if (!user) throw new AuthV1ServiceError('INVALID_CREDENTIALS');
-    if (!user.enabled) throw new AuthV1ServiceError('ACCOUNT_DISABLED');
-    if (!await this.dependencies.passwordService.verify(input.password, user.password)) {
-      throw new AuthV1ServiceError('INVALID_CREDENTIALS');
-    }
+    const user = await this.validateCredentials(input);
 
     const sessionId = await this.dependencies.sessionService.createSession({
       userId: user.id,
@@ -106,6 +106,53 @@ export class AuthV1Service {
     }
   }
 
+  async loginWeb(
+    input: LoginV1RequestInput,
+    userAgentSummary: string | null,
+    allowlistedUserIds: ReadonlySet<number>,
+  ): Promise<{ data: LoginV1WebData; refreshToken: string }> {
+    const user = await this.validateCredentials(input);
+    if (!allowlistedUserIds.has(user.id)) throw new AuthV1ServiceError('WEB_NOT_ALLOWED');
+    const repository = this.dependencies.authWebLoginRepository;
+    if (!repository) throw new Error('Auth Web login repository is not configured');
+
+    const session = this.dependencies.sessionService.prepareSession({
+      userId: user.id,
+      clientType: input.client.type,
+      deviceName: input.client.deviceName,
+      userAgentSummary,
+      appVersion: input.client.appVersion,
+    });
+    const prepared = this.dependencies.refreshTokenService.prepareRefreshToken({
+      sessionId: session.id,
+      generation: 0,
+      expiresAt: session.absoluteExpiresAt,
+    });
+    await repository.createLogin({ user, session, refreshToken: prepared.record });
+
+    try {
+      return {
+        refreshToken: prepared.refreshToken,
+        data: {
+          user: {
+            id: user.id,
+            username: user.username,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            forceChangePassword: user.forceChangePassword,
+          },
+          accessToken: createAccessTokenV1({ userId: user.id, sessionId: session.id }),
+          expiresIn: ACCESS_TOKEN_EXPIRES_IN,
+          session: sessionSummary(session, session.id),
+        },
+      };
+    } catch (error) {
+      await this.dependencies.sessionService.revokeSession(session.id, 'security_event');
+      throw error;
+    }
+  }
+
   async refresh(refreshToken: string): Promise<RefreshData> {
     const provisional = await this.dependencies.refreshTokenService.consumeRefreshToken(refreshToken);
     if (provisional.status === 'SECURITY_EVENT') throw new AuthV1ServiceError('REFRESH_REUSED');
@@ -125,6 +172,20 @@ export class AuthV1Service {
       expiresIn: ACCESS_TOKEN_EXPIRES_IN,
       session: sessionSummary(lookup.session, provisional.sessionId),
     };
+  }
+
+  async resolveWebRefreshSession(refreshToken: string): Promise<string> {
+    const sessionId = await this.dependencies.refreshTokenService.findRefreshTokenSessionId(refreshToken);
+    if (!sessionId) throw new AuthV1ServiceError('REFRESH_INVALID');
+    const lookup = await this.dependencies.sessionService.getSession(sessionId);
+    if (!lookup.session || lookup.state !== 'ACTIVE') throw new AuthV1ServiceError('REFRESH_INVALID');
+    return sessionId;
+  }
+
+  async refreshWeb(refreshToken: string): Promise<{ data: RefreshWebData; refreshToken: string }> {
+    const result = await this.refresh(refreshToken);
+    const { refreshToken: replacement, ...data } = result;
+    return { data, refreshToken: replacement };
   }
 
   async authenticate(accessToken: string | null): Promise<AuthV1Identity> {
@@ -149,5 +210,15 @@ export class AuthV1Service {
   async sessions(identity: AuthV1Identity): Promise<AuthSessionSummary[]> {
     const sessions = await this.dependencies.sessionService.findActiveSessionsByUserId(identity.userId);
     return sessions.map((session) => sessionSummary(session, identity.sessionId));
+  }
+
+  private async validateCredentials(input: LoginV1RequestInput) {
+    const user = await this.dependencies.authRepository.findUserByUsername(input.username);
+    if (!user) throw new AuthV1ServiceError('INVALID_CREDENTIALS');
+    if (!user.enabled) throw new AuthV1ServiceError('ACCOUNT_DISABLED');
+    if (!await this.dependencies.passwordService.verify(input.password, user.password)) {
+      throw new AuthV1ServiceError('INVALID_CREDENTIALS');
+    }
+    return user;
   }
 }

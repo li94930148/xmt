@@ -1,8 +1,7 @@
 import type { Request, Response } from 'express';
 import type { AuthService } from './auth.service.js';
 import { AuthServiceError } from './auth.types.js';
-import { authMigrationLogger } from './rollout/auth-migration.logger.js';
-import { authMigrationMetrics } from './rollout/auth-migration.metrics.js';
+import { authMetricsService } from './events/index.js';
 
 export class AuthController {
   constructor(private readonly service: AuthService) {}
@@ -11,10 +10,15 @@ export class AuthController {
     try {
       const { username, password, remember } = req.body;
       const result = await this.service.login({ username, password, remember });
-      authMigrationMetrics.increment('legacy_login_count');
-      authMigrationLogger.record({ event: 'auth.migration.login', requestId: req.requestId, userId: result.user.id, mode: 'legacy', outcome: 'success' });
+      authMetricsService.countLoginSuccess({ requestId: req.requestId, userId: result.user.id, mode: 'legacy', clientType: 'web' });
       res.json(result);
     } catch (error) {
+      authMetricsService.countLoginFailed({
+        requestId: req.requestId,
+        mode: 'legacy',
+        clientType: 'web',
+        reason: error instanceof AuthServiceError ? error.code.toLowerCase() : 'internal_error',
+      });
       if (error instanceof AuthServiceError) {
         if (error.code === 'MISSING_CREDENTIALS') {
           return res.status(400).json({ message: '用户名和密码不能为空' });

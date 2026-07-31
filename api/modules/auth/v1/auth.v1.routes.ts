@@ -2,8 +2,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { sendV1Error } from '../../../utils/response.js';
 import { AuthV1ServiceError, type AuthV1Service } from './auth.v1.service.js';
 import type { AuthV1Controller } from './auth.v1.controller.js';
-import { authMigrationMetrics } from '../rollout/auth-migration.metrics.js';
-import { authMigrationLogger } from '../rollout/auth-migration.logger.js';
+import { authMetricsService } from '../events/index.js';
 
 function bearerToken(req: Request): string | null {
   const authorization = req.headers.authorization;
@@ -19,8 +18,7 @@ function authenticateV1(service: AuthV1Service, webMigrationEnabled: boolean) {
     } catch (error) {
       if (error instanceof AuthV1ServiceError && error.code === 'SESSION_REVOKED') {
         if (webMigrationEnabled) {
-          authMigrationMetrics.increment('expired_count');
-          authMigrationLogger.record({ event: 'auth.migration.rollback', requestId: req.requestId, mode: 'v1-web', outcome: 'failed', reason: 'session_revoked' });
+          authMetricsService.countExpired({ requestId: req.requestId, mode: 'v1-web', clientType: 'web', reason: 'session_revoked' });
         }
         return sendV1Error(req, res, {
           code: 'AUTH_SESSION_REVOKED',
@@ -29,8 +27,7 @@ function authenticateV1(service: AuthV1Service, webMigrationEnabled: boolean) {
       }
       if (error instanceof AuthV1ServiceError && error.code === 'SESSION_EXPIRED') {
         if (webMigrationEnabled) {
-          authMigrationMetrics.increment('expired_count');
-          authMigrationLogger.record({ event: 'auth.migration.rollback', requestId: req.requestId, mode: 'v1-web', outcome: 'failed', reason: 'session_expired' });
+          authMetricsService.countExpired({ requestId: req.requestId, mode: 'v1-web', clientType: 'web', reason: 'session_expired' });
         }
         return sendV1Error(req, res, {
           code: 'AUTH_SESSION_EXPIRED',

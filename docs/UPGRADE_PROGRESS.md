@@ -1070,3 +1070,59 @@
 2. 生产禁止 `internal` 与 `percentage`。
 3. 异常时将模式切回 legacy、关闭批准开关并重启；不删除会话和审计记录。
 4. 结构化 login 日志事件数高于实际成功登录/Session 数，扩大灰度前需统一指标去重口径。
+
+## Phase 2-C3-6-A：Auth 事件模型统一与外部指标基础
+
+### 当前版本
+
+`v2.13.13`。本阶段只治理认证观测，不扩大灰度或修改认证业务行为。
+
+### 完成内容
+
+1. 新增 `api/modules/auth/events/`，统一十类 Auth Event 与固定安全字段。
+2. `AuthEventService` 成为认证指标唯一事实入口，日志只输出事件，不再作为计数来源。
+3. 新增 `AuthMetricsService` 与 `AuthMetricsExporter`，当前使用有界 Memory Exporter，并为 Prometheus/OpenTelemetry 预留 `increment/observe/gauge`。
+4. legacy 与 v1 登录成功均只产生一个 login success 计数；Session、Rollout 决策保持独立事件但不重复计入登录。
+5. Refresh、CSRF、Token reuse、Logout、Session 撤销统一由 mapper 派生指标，移除 Controller/Route 的多点手工计数。
+6. `/api/v1/auth-rollout/status` 增加 5 分钟窗口，连同 60 分钟、24 小时统一展示登录、刷新、失败和安全事件。
+
+### 修改文件
+
+- `api/modules/auth/events/*`
+- `api/modules/auth/auth.controller.ts`
+- `api/modules/auth/v1/*`
+- `api/modules/auth/rollout/*`
+- `shared/schema/auth-rollout.schema.ts`
+- `src/api/authRollout.ts`
+- `src/pages/AuthRolloutStatus.tsx`
+- `tests/auth/*`
+- `docs/*`
+- `package.json`
+- `package-lock.json`
+
+### 数据库变化
+
+无。未新增或修改任何认证表、字段、索引与 migration，旧日志也未删除。
+
+### 测试结果
+
+- `npm run version:check`：通过（v2.13.13）
+- `npm run test:auth`：通过
+- `npm run test:auth-rollout`：通过
+- `npm run test:auth-events`：通过
+- `npm run test:auth-web-runtime`：通过
+- `npm run test:auth-web-cookie`：通过
+- `npm run test:auth-browser`：通过
+- `npm run test:api-contract`：通过
+- `npm run test:auth-v1`：通过（补充回归）
+- `npm run test:auth-rollout-governance`：通过（补充回归）
+- `npm run check`：通过
+- `npm run build`：通过
+- Auth 相关范围 ESLint：通过
+
+### 风险与下一阶段
+
+1. Memory Exporter 在进程重启后清零，尚不能替代持久外部监控。
+2. 旧 Migration Logger/Metrics 保留兼容导出，但生产 Auth 路径不再写入；后续确认无调用方后再单独弃用。
+3. 正式 Login、legacy JWT、生产灰度、Socket/Yjs 和数据库结构保持不变。
+4. 下一阶段应接入真实 Prometheus/OpenTelemetry Exporter 并冻结告警，再评估正式 Login 准入。

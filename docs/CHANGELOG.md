@@ -1,5 +1,32 @@
 # XMT 系统更新日志
 
+## v2.13.13 - 2026-07-31
+
+### 新增
+
+- 新增统一 Auth Event 模型、事件服务、mapper、指标服务与 Memory Exporter。
+- 管理诊断新增最近 5 分钟事件统计，并继续提供 60 分钟、24 小时窗口。
+
+### 优化
+
+- 登录、Refresh、Logout、CSRF、Token reuse 和 Session 事件统一由事件事实派生指标，不再按日志行统计。
+
+### 修复
+
+- 修复生产灰度中单次成功认证被不同观测层重复计数的问题。
+
+### 技术升级
+
+- 新增 `AuthMetricsExporter` 的 `increment/observe/gauge` 抽象，为 Prometheus 与 OpenTelemetry 预留适配边界。
+
+### 数据库变化
+
+- 无数据库表、字段、索引或 migration 变化。
+
+### 测试情况
+
+- 新增 Auth Event 与生产灰度回归测试，完整验证结果见 `UPGRADE_PROGRESS.md`。
+
 ## v2.13.12 - 2026-07-31
 
 ### 新增

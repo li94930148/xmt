@@ -72,6 +72,7 @@ export default function AuthRolloutStatus() {
     return <PageShell><PageHeader title="认证迁移状态" /><GlassPanel className="p-6 text-studio-coral">{error}</GlassPanel></PageShell>;
   }
 
+  const recent = data.metrics.last5Minutes;
   const hour = data.metrics.lastHour;
   return (
     <PageShell>
@@ -131,7 +132,7 @@ export default function AuthRolloutStatus() {
       <GlassPanel className="overflow-hidden">
         <div className="border-b border-studio-border-soft px-6 py-5">
           <h2 className="text-base font-semibold text-studio-text-primary">最近 60 分钟</h2>
-          <p className="mt-1 text-xs text-studio-text-muted">指标为当前进程内只读聚合，服务重启后重新计数。</p>
+          <p className="mt-1 text-xs text-studio-text-muted">统一 Auth Event 聚合；最近 5 分钟安全事件 {recent.categories.securityEvents} 个。当前内存适配器在服务重启后重新计数。</p>
         </div>
         <div className="grid md:grid-cols-4">
           <MetricCell label="登录" value={hour.categories.login} icon={LogIn} />

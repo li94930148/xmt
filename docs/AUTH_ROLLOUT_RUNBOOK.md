@@ -41,6 +41,14 @@
 
 进程内指标会在重启时清零。正式灰度前必须接入外部聚合与告警，不能只依赖当前页面。
 
+### 统一事件模型
+
+认证观测以 `AuthEventService` 产生的事件为唯一统计事实，不按日志行数反推指标。HTTP Request Log 只描述请求，Security Event 描述登录失败、CSRF、Token reuse 等风险，Business Metric Event 描述成功登录、刷新和退出；同一认证结果只能产生一个对应的成功或失败事实事件。
+
+统一字段为 `eventId`、`eventType`、`requestId`、`userId`、`sessionId`、`mode`、`clientType`、`success`、`reason`、`createdAt`。事件、Exporter 和诊断响应均不得记录 Access Token、Refresh Token、密码或 Cookie 内容。
+
+管理诊断同时检查最近 5 分钟、60 分钟和 24 小时。当前 Memory Exporter 仅是外部指标适配基础，服务重启会清零；扩大灰度前仍须接入 Prometheus、OpenTelemetry 或等价持久后端。
+
 ## 四、停止条件
 
 任一安全高风险事件立即停止新准入：Token 泄露、跨用户会话、CSRF 绕过、Refresh 一次性消费失效或协作数据异常。

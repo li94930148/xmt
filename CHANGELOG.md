@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.13 - 2026-07-31
+
+- 新增统一 Auth Event、Metrics Service 与 Memory Exporter，指标只从事件事实派生。
+- 修复成功登录在不同观测层重复计数；Session 与 Rollout 事件不再重复增加 login 指标。
+- Auth Rollout 诊断增加 5 分钟窗口和统一安全事件统计，保留 60 分钟与 24 小时窗口。
+- 不修改正式 Login、legacy 行为、Socket/Yjs 或数据库认证结构。
+
 ## 2.13.12 - 2026-07-31
 
 - 新增生产 Auth v1-web 独立批准门禁；仅允许批准后的明确用户 ID allowlist。

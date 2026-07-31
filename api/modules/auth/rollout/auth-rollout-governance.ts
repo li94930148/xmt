@@ -1,5 +1,4 @@
-import { authMigrationMetrics } from './auth-migration.metrics.js';
-import { AuthMigrationMetricsService } from './auth-migration-metrics.service.js';
+import { authMetricsService } from '../events/index.js';
 import { readAuthRolloutConfig } from './auth-rollout.config.js';
 import { AuthRolloutAuditService } from './auth-rollout-audit.service.js';
 import { AuthRolloutRiskService } from './auth-rollout-risk.service.js';
@@ -10,8 +9,8 @@ const rolloutConfig = readAuthRolloutConfig();
 const thresholds = readAuthRolloutThresholdConfig();
 
 export const authRolloutStatusService = new AuthRolloutStatusService(rolloutConfig);
-export const authMigrationMetricsService = new AuthMigrationMetricsService(authMigrationMetrics);
-export const authRolloutRiskService = new AuthRolloutRiskService(authMigrationMetricsService, thresholds);
+export const authRolloutRiskService = new AuthRolloutRiskService(authMetricsService, thresholds);
+export { authMetricsService };
 export const authRolloutAuditService = new AuthRolloutAuditService();
 
 authRolloutAuditService.record({

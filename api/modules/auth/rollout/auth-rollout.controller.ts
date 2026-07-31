@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { sendV1Error, sendV1Success } from '../../../utils/response.js';
 import { authRolloutStatusQuerySchema } from '../../../../shared/schema/auth-rollout.schema.js';
 import {
-  authMigrationMetricsService,
+  authMetricsService,
   authRolloutAuditService,
   authRolloutRiskService,
   authRolloutStatusService,
@@ -35,8 +35,9 @@ export class AuthRolloutController {
         ...authRolloutStatusService.diagnose({ id: userId }),
       },
       metrics: {
-        lastHour: authMigrationMetricsService.aggregate(60),
-        last24Hours: authMigrationMetricsService.aggregate(24 * 60),
+        last5Minutes: authMetricsService.aggregate(5),
+        lastHour: authMetricsService.aggregate(60),
+        last24Hours: authMetricsService.aggregate(24 * 60),
       },
       risk: { status: risk.status, events: risk.risks },
       thresholds: authRolloutThresholds,

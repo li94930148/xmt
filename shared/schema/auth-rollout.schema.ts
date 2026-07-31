@@ -22,6 +22,7 @@ const aggregateSchema = z.object({
     refresh: z.number().int().nonnegative(),
     logout: z.number().int().nonnegative(),
     failure: z.number().int().nonnegative(),
+    securityEvents: z.number().int().nonnegative(),
   }).strict(),
   counters: authMigrationCountersSchema,
   refreshFailureRate: z.number().min(0).max(1),
@@ -42,7 +43,7 @@ export const authRolloutStatusDataSchema = z.object({
     matchedRule: z.union([authRolloutModeSchema, z.literal('none')]),
     reason: z.string(),
   }).strict(),
-  metrics: z.object({ lastHour: aggregateSchema, last24Hours: aggregateSchema }).strict(),
+  metrics: z.object({ last5Minutes: aggregateSchema, lastHour: aggregateSchema, last24Hours: aggregateSchema }).strict(),
   risk: z.object({
     status: z.enum(['healthy', 'risk']),
     events: z.array(z.object({

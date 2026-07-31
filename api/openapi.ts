@@ -91,7 +91,7 @@ registry.registerPath({
   path: '/api/v1/auth/login',
   tags: ['Auth (Experimental)'],
   summary: '实验性 v1 登录',
-  description: '仅在 XMT_AUTH_V1_ENABLED=true 时可用；默认关闭。',
+  description: '默认关闭；生产仅在独立批准且命中明确用户 ID allowlist 时可用。',
   'x-experimental': true,
   request: { body: { content: { 'application/json': { schema: AuthV1LoginRequest } } } },
   responses: {

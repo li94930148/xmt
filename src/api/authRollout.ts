@@ -27,11 +27,11 @@ export type AuthRolloutStatusData = {
     matchedRule: AuthRolloutMode | 'none';
     reason: string;
   };
-  metrics: Record<'lastHour' | 'last24Hours', {
+  metrics: Record<'last5Minutes' | 'lastHour' | 'last24Hours', {
     windowMinutes: number;
     from: string;
     to: string;
-    categories: { login: number; refresh: number; logout: number; failure: number };
+    categories: { login: number; refresh: number; logout: number; failure: number; securityEvents: number };
     counters: AuthMigrationCounters;
     refreshFailureRate: number;
   }>;

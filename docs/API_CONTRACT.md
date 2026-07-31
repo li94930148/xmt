@@ -98,6 +98,6 @@ v1 错误响应统一为：
 - TypeScript 类型从 Zod Schema 推导，不重复手写同形类型。
 - `/api/docs` 提供只读 Swagger UI，OpenAPI JSON 位于 `/api/docs/openapi.json`。
 - 首批文档覆盖 Topic 列表、详情、创建和更新；legacy API 不纳入 v1 Contract 保证。
-- Auth v1 实验接口在 OpenAPI 中使用 `x-experimental: true` 标记；运行时默认关闭且生产环境强制不可挂载。
+- Auth v1 实验接口在 OpenAPI 中使用 `x-experimental: true` 标记；运行时默认关闭，生产只允许独立批准后的明确用户 ID allowlist。
 - Auth v1 Web 模式的 Refresh Token 只通过 `__Host-xmt_refresh` HttpOnly Cookie 交付；login/refresh JSON 不含原值，refresh 不接受 body Token，并要求受信 Origin 与 `X-XMT-CSRF`。
-- Auth Rollout 管理诊断使用 `GET /api/v1/auth-rollout/status`，接受当前 legacy Bearer JWT 以支持迁移期管理员访问；只读返回灰度、指标、风险和审计，不提供配置写接口。
+- Auth Rollout 管理诊断使用 `GET /api/v1/auth-rollout/status`，接受当前 legacy Bearer JWT 以支持迁移期管理员访问；只读返回 5 分钟、60 分钟、24 小时统一 Auth Event 聚合、风险和审计，不提供配置写接口。

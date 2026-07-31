@@ -1,4 +1,4 @@
-import type { AuthMigrationMetricsService } from './auth-migration-metrics.service.js';
+import type { AuthMetricsService } from '../events/auth-metrics.service.js';
 import type { AuthRolloutThresholdConfig } from './auth-rollout-threshold.config.js';
 
 export type AuthRolloutRiskEvent = {
@@ -12,7 +12,7 @@ export type AuthRolloutRiskEvent = {
 
 export class AuthRolloutRiskService {
   constructor(
-    private readonly metrics: AuthMigrationMetricsService,
+    private readonly metrics: AuthMetricsService,
     private readonly thresholds: AuthRolloutThresholdConfig,
   ) {}
 

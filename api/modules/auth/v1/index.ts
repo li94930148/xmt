@@ -9,8 +9,7 @@ import { SqliteAuthWebLoginRepository } from '../web/auth-web-login.sqlite-repos
 import { CsrfService } from '../web/csrf.service.js';
 import { readAuthRolloutConfig } from '../rollout/auth-rollout.config.js';
 import { AuthRolloutService } from '../rollout/auth-rollout.service.js';
-import { authMigrationMetrics } from '../rollout/auth-migration.metrics.js';
-import { authMigrationLogger } from '../rollout/auth-migration.logger.js';
+import { authMetricsService } from '../events/index.js';
 import { AuthV1Controller } from './auth.v1.controller.js';
 import { createAuthV1Router } from './auth.v1.routes.js';
 import { AuthV1Service } from './auth.v1.service.js';
@@ -56,8 +55,7 @@ export function createAuthV1Module(
     allowedOrigins: webConfig.allowedOrigins,
     cookieConfig: { secure: webConfig.secureCookies },
     csrfService: new CsrfService({ secret: webConfig.csrfSecret as string }),
-    metrics: authMigrationMetrics,
-    logger: authMigrationLogger,
+    metrics: authMetricsService,
   } : undefined);
   return {
     service,

@@ -1,4 +1,4 @@
-import { authMetricsService } from '../events/index.js';
+import { authEventService, authMetricsRegistry, authMetricsService } from '../events/index.js';
 import { readAuthRolloutConfig } from './auth-rollout.config.js';
 import { AuthRolloutAuditService } from './auth-rollout-audit.service.js';
 import { AuthRolloutRiskService } from './auth-rollout-risk.service.js';
@@ -11,6 +11,7 @@ const thresholds = readAuthRolloutThresholdConfig();
 export const authRolloutStatusService = new AuthRolloutStatusService(rolloutConfig);
 export const authRolloutRiskService = new AuthRolloutRiskService(authMetricsService, thresholds);
 export { authMetricsService };
+export { authEventService, authMetricsRegistry };
 export const authRolloutAuditService = new AuthRolloutAuditService();
 
 authRolloutAuditService.record({

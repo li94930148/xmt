@@ -96,11 +96,13 @@ export default function AuthRolloutStatus() {
             </div>
             <StatusPill tone={data.rollout.enabled ? 'amber' : 'muted'}>{data.rollout.enabled ? '灰度能力可用' : '保持 Legacy'}</StatusPill>
           </div>
-          <dl className="mt-6 grid gap-4 border-t border-studio-border-soft pt-5 sm:grid-cols-3">
+          <dl className="mt-6 grid gap-4 border-t border-studio-border-soft pt-5 sm:grid-cols-2 xl:grid-cols-4">
             <div><dt className="text-xs text-studio-text-muted">比例</dt><dd className="mt-1 text-sm font-semibold text-studio-text-primary">{data.rollout.percentage}%</dd></div>
             <div><dt className="text-xs text-studio-text-muted">白名单用户</dt><dd className="mt-1 text-sm font-semibold text-studio-text-primary">{data.rollout.allowlistCount}</dd></div>
             <div><dt className="text-xs text-studio-text-muted">内部用户</dt><dd className="mt-1 text-sm font-semibold text-studio-text-primary">{data.rollout.internalCount}</dd></div>
+            <div><dt className="text-xs text-studio-text-muted">指标来源</dt><dd className="mt-1 text-sm font-semibold text-studio-text-primary">{data.exporters.source.join(' + ') || '未启用'}</dd></div>
           </dl>
+          <p className="mt-4 text-xs text-studio-text-muted">最近事件：{data.exporters.lastEventAt ? formatTime(data.exporters.lastEventAt) : '暂无'}</p>
         </GlassPanel>
 
         <GlassPanel className="p-6">

@@ -1,5 +1,33 @@
 # XMT 系统更新日志
 
+## v2.13.14 - 2026-07-31
+
+### 新增
+
+- 新增 Auth Metrics Registry、Prometheus Exporter 与厂商无关 OpenTelemetry 适配。
+- 新增 Refresh 失败率、Token reuse、CSRF 与 Expired 告警规则基础。
+
+### 优化
+
+- 认证指标支持同时分发到 Memory、Prometheus 和 OTel，管理诊断可查看来源、状态及最近导出时间。
+- 增加活跃 Session Gauge 与 Refresh 耗时 Histogram。
+
+### 修复
+
+- 多 Exporter 复用同一个 Auth Event 事实，避免因输出目标增加而重复计数。
+
+### 技术升级
+
+- Prometheus 输出标准 Counter、Gauge、Histogram；OTel 适配不绑定具体厂商。
+
+### 数据库变化
+
+- 无数据库表、字段、索引或 migration 变化。
+
+### 测试情况
+
+- 新增 Auth Metrics Exporter 专项测试，完整验证结果见 `UPGRADE_PROGRESS.md`。
+
 ## v2.13.13 - 2026-07-31
 
 ### 新增

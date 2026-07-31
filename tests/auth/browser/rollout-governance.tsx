@@ -20,6 +20,15 @@ window.fetch = async (input, init) => {
         lastHour: { windowMinutes: 60, from: now, to: now, categories: { login: 18, refresh: 0, logout: 3, failure: 0, securityEvents: 0 }, counters: { legacy_login_count: 18, v1_login_count: 0, refresh_success: 0, refresh_failed: 0, csrf_failed: 0, token_reuse_detected: 0, logout_success: 3, expired_count: 0 }, refreshFailureRate: 0 },
         last24Hours: { windowMinutes: 1440, from: now, to: now, categories: { login: 126, refresh: 0, logout: 21, failure: 0, securityEvents: 0 }, counters: { legacy_login_count: 126, v1_login_count: 0, refresh_success: 0, refresh_failed: 0, csrf_failed: 0, token_reuse_detected: 0, logout_success: 21, expired_count: 0 }, refreshFailureRate: 0 },
       },
+      exporters: {
+        source: ['memory', 'prometheus'],
+        status: [
+          { name: 'memory', kind: 'memory', enabled: true, healthy: true, lastExportAt: now, reason: null },
+          { name: 'prometheus', kind: 'prometheus', enabled: true, healthy: true, lastExportAt: now, reason: null },
+        ],
+        lastEventAt: now,
+        lastExportAt: now,
+      },
       risk: { status: 'healthy', events: [] },
       thresholds: { windowMinutes: 60, refreshFailureRate: 0.2, csrfFailureCount: 5, tokenReuseCount: 1, expiredCount: 10 },
       audits: [{ actor: 'system', action: 'config_loaded', before: null, after: { mode: 'legacy' }, reason: '服务启动时载入 Auth Rollout 只读配置', created_at: now }],

@@ -44,6 +44,19 @@ export const authRolloutStatusDataSchema = z.object({
     reason: z.string(),
   }).strict(),
   metrics: z.object({ last5Minutes: aggregateSchema, lastHour: aggregateSchema, last24Hours: aggregateSchema }).strict(),
+  exporters: z.object({
+    source: z.array(z.enum(['memory', 'prometheus', 'opentelemetry'])),
+    status: z.array(z.object({
+      name: z.string(),
+      kind: z.enum(['memory', 'prometheus', 'opentelemetry']),
+      enabled: z.boolean(),
+      healthy: z.boolean(),
+      lastExportAt: z.string().nullable(),
+      reason: z.string().nullable(),
+    }).strict()),
+    lastEventAt: z.string().nullable(),
+    lastExportAt: z.string().nullable(),
+  }).strict(),
   risk: z.object({
     status: z.enum(['healthy', 'risk']),
     events: z.array(z.object({

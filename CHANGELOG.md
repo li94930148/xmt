@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.14 - 2026-07-31
+
+- 新增 Auth Metrics Registry、Prometheus Exporter 与厂商无关 OpenTelemetry 适配。
+- 增加登录、Refresh、失败、Logout、安全事件、活跃 Session 和 Refresh 耗时生产指标。
+- Auth Rollout 诊断增加 Exporter 状态、指标来源、最近事件和最近导出时间。
+- 新增生产告警规则基础；不修改 Login、legacy JWT、Socket/Yjs、数据库或生产灰度。
+
 ## 2.13.13 - 2026-07-31
 
 - 新增统一 Auth Event、Metrics Service 与 Memory Exporter，指标只从事件事实派生。

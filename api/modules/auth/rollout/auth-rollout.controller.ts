@@ -3,6 +3,8 @@ import { sendV1Error, sendV1Success } from '../../../utils/response.js';
 import { authRolloutStatusQuerySchema } from '../../../../shared/schema/auth-rollout.schema.js';
 import {
   authMetricsService,
+  authEventService,
+  authMetricsRegistry,
   authRolloutAuditService,
   authRolloutRiskService,
   authRolloutStatusService,
@@ -38,6 +40,12 @@ export class AuthRolloutController {
         last5Minutes: authMetricsService.aggregate(5),
         lastHour: authMetricsService.aggregate(60),
         last24Hours: authMetricsService.aggregate(24 * 60),
+      },
+      exporters: {
+        source: authMetricsRegistry.source(),
+        status: authMetricsRegistry.statuses(),
+        lastEventAt: authEventService.lastEventAt(),
+        lastExportAt: authMetricsRegistry.lastExportAt(),
       },
       risk: { status: risk.status, events: risk.risks },
       thresholds: authRolloutThresholds,

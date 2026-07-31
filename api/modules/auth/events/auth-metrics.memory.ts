@@ -9,6 +9,8 @@ export type AuthMetricPoint = {
 };
 
 export class MemoryAuthMetricsExporter implements AuthMetricsExporter {
+  readonly name = 'memory';
+  readonly kind = 'memory' as const;
   private points: AuthMetricPoint[] = [];
 
   increment(name: string, value = 1, labels: AuthMetricLabels = {}, at = new Date()): void {
@@ -29,6 +31,11 @@ export class MemoryAuthMetricsExporter implements AuthMetricsExporter {
 
   reset(): void {
     this.points = [];
+  }
+
+  status() {
+    const last = this.points.at(-1)?.createdAt ?? null;
+    return { name: this.name, kind: this.kind, enabled: true, healthy: true, lastExportAt: last, reason: null };
   }
 
   private push(operation: AuthMetricPoint['operation'], name: string, value: number, labels: AuthMetricLabels, at: Date): void {

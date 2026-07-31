@@ -151,6 +151,7 @@ export class AuthV1Controller {
 
   refresh = async (req: Request, res: Response) => {
     let migrationUserId: number | undefined;
+    const refreshStartedAt = process.hrtime.bigint();
     try {
       res.setHeader('Cache-Control', 'no-store');
       if (this.webOptions?.enabled) {
@@ -176,7 +177,14 @@ export class AuthV1Controller {
         const csrfToken = this.webOptions.csrfService.generateToken(result.data.session.id);
         setAuthRefreshCookie(res, result.refreshToken, this.webOptions.cookieConfig);
         setAuthCsrfCookie(res, csrfToken, this.webOptions.cookieConfig);
-        this.webOptions.metrics.countRefreshSuccess({ requestId: req.requestId, userId: migrationUserId, sessionId, mode: 'v1-web', clientType: 'web' });
+        this.webOptions.metrics.countRefreshSuccess({
+          requestId: req.requestId,
+          userId: migrationUserId,
+          sessionId,
+          mode: 'v1-web',
+          clientType: 'web',
+          durationSeconds: Number(process.hrtime.bigint() - refreshStartedAt) / 1_000_000_000,
+        });
         return sendV1Success(req, res, result.data);
       }
       const input = refreshRequestSchema.parse(req.body);

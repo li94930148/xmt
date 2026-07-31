@@ -1126,3 +1126,57 @@
 2. 旧 Migration Logger/Metrics 保留兼容导出，但生产 Auth 路径不再写入；后续确认无调用方后再单独弃用。
 3. 正式 Login、legacy JWT、生产灰度、Socket/Yjs 和数据库结构保持不变。
 4. 下一阶段应接入真实 Prometheus/OpenTelemetry Exporter 并冻结告警，再评估正式 Login 准入。
+
+## Phase 2-C3-6-B：Auth 生产指标 Exporter 与告警基础
+
+### 当前版本
+
+`v2.13.14`。本阶段只建设认证观测基础，不扩大灰度或修改认证行为。
+
+### 完成内容
+
+1. 新增 `api/modules/auth/metrics/`，包含统一类型、Metrics Registry、Prometheus 与 OpenTelemetry 适配。
+2. Registry 同时扇出 Memory 与 Prometheus；OTel 支持部署环境注入兼容 Meter，且不绑定具体厂商。
+3. Prometheus 提供登录、Refresh、Refresh 失败、Logout、安全事件 Counter，活跃 Session Gauge 和 Refresh 耗时 Histogram。
+4. Auth Event 继续作为唯一指标事实，多 Exporter 不会重复业务计数；安全指标只使用低基数事件类型与原因标签。
+5. `/api/v1/auth-rollout/status` 增加 Exporter 状态、指标来源、最近事件时间和最近导出时间。
+6. 新增 `AUTH_ALERT_RULES.md`，冻结 Refresh 失败率、Token reuse、CSRF、Expired 告警建议与停止动作。
+
+### 修改文件
+
+- `api/modules/auth/metrics/*`
+- `api/modules/auth/events/*`
+- `api/modules/auth/v1/auth.v1.controller.ts`
+- `api/modules/auth/rollout/*`
+- `shared/schema/auth-rollout.schema.ts`
+- `src/api/authRollout.ts`
+- `src/pages/AuthRolloutStatus.tsx`
+- `tests/auth/auth-metrics-exporter.test.ts`
+- `docs/*`
+- `package.json`
+- `package-lock.json`
+
+### 数据库变化
+
+无。未新增或修改表、字段、索引和 migration。
+
+### 测试结果
+
+- `npm run version:check`：通过（v2.13.14）
+- `npm run test:auth`：通过
+- `npm run test:auth-events`：通过
+- `npm run test:auth-metrics-exporter`：通过
+- `npm run test:auth-rollout`：通过
+- `npm run test:auth-web-runtime`：通过
+- `npm run test:auth-web-cookie`：通过
+- `npm run test:api-contract`：通过
+- `npm run check`：通过
+- `npm run build`：通过
+- Auth 相关范围 ESLint：通过
+
+### 风险与下一阶段
+
+1. Prometheus Exporter 需要部署侧接入抓取入口和持久监控后端；代码内聚合不能代替外部时序数据库。
+2. OTel 默认不绑定 SDK 或厂商，需在部署组合根注入 Meter，并验证 Collector 与告警链路。
+3. 活跃 Session Gauge 是单实例观测值，多实例应保留实例维度，不能简单求和当作全局唯一会话数。
+4. 正式 Login 准入前需完成生产采集、跨实例聚合、告警通知、值班演练和基线校准；当前仍保持 legacy。

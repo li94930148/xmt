@@ -39,7 +39,7 @@
 - Logout 成功次数。
 - Expired 次数及重复登录反馈。
 
-进程内指标会在重启时清零。正式灰度前必须接入外部聚合与告警，不能只依赖当前页面。
+Memory 指标会在重启时清零。Prometheus Exporter 与厂商无关的 OpenTelemetry 适配已具备，正式灰度前必须完成外部抓取/采集、跨实例聚合和告警接收验证，不能只依赖当前页面。告警阈值与处置见 `AUTH_ALERT_RULES.md`。
 
 ### 统一事件模型
 
@@ -47,7 +47,7 @@
 
 统一字段为 `eventId`、`eventType`、`requestId`、`userId`、`sessionId`、`mode`、`clientType`、`success`、`reason`、`createdAt`。事件、Exporter 和诊断响应均不得记录 Access Token、Refresh Token、密码或 Cookie 内容。
 
-管理诊断同时检查最近 5 分钟、60 分钟和 24 小时。当前 Memory Exporter 仅是外部指标适配基础，服务重启会清零；扩大灰度前仍须接入 Prometheus、OpenTelemetry 或等价持久后端。
+管理诊断同时检查最近 5 分钟、60 分钟和 24 小时，并显示 Exporter 状态、指标来源、最近事件和最近导出时间。Memory、Prometheus 与 OTel 由 Registry 扇出同一个事件事实；Exporter 数量增加不会增加业务计数。
 
 ## 四、停止条件
 

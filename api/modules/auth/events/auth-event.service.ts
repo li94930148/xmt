@@ -31,10 +31,16 @@ export class AuthEventService {
     if (this.events.length > 10_000) this.events = this.events.slice(-10_000);
     const at = new Date(event.createdAt);
     const labels = { mode: event.mode, clientType: event.clientType };
-    for (const metric of mapAuthEventToMetrics(event)) {
-      for (const exporter of this.exporters) exporter.increment(metric, 1, labels, at);
+    const eventClass = classifyAuthEvent(event);
+    const metrics: string[] = [...mapAuthEventToMetrics(event)];
+    if (eventClass === 'security') metrics.push('security_events');
+    for (const metric of metrics) {
+      const metricLabels = metric === 'security_events'
+        ? { ...labels, eventType: event.eventType, reason: event.reason ?? 'unknown' }
+        : labels;
+      for (const exporter of this.exporters) exporter.increment(metric, 1, metricLabels, at);
     }
-    this.sink({ ...event, eventClass: classifyAuthEvent(event) });
+    this.sink({ ...event, eventClass });
     return event;
   }
 
@@ -45,6 +51,18 @@ export class AuthEventService {
 
   list(): AuthEvent[] {
     return this.events.map((event) => ({ ...event }));
+  }
+
+  lastEventAt(): string | null {
+    return this.events.at(-1)?.createdAt ?? null;
+  }
+
+  observe(name: string, value: number, labels: Readonly<Record<string, string>> = {}, at = new Date()): void {
+    for (const exporter of this.exporters) exporter.observe(name, value, labels, at);
+  }
+
+  gauge(name: string, value: number, labels: Readonly<Record<string, string>> = {}, at = new Date()): void {
+    for (const exporter of this.exporters) exporter.gauge(name, value, labels, at);
   }
 
   reset(): void {

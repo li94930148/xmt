@@ -35,6 +35,19 @@ export type AuthRolloutStatusData = {
     counters: AuthMigrationCounters;
     refreshFailureRate: number;
   }>;
+  exporters: {
+    source: Array<'memory' | 'prometheus' | 'opentelemetry'>;
+    status: Array<{
+      name: string;
+      kind: 'memory' | 'prometheus' | 'opentelemetry';
+      enabled: boolean;
+      healthy: boolean;
+      lastExportAt: string | null;
+      reason: string | null;
+    }>;
+    lastEventAt: string | null;
+    lastExportAt: string | null;
+  };
   risk: {
     status: 'healthy' | 'risk';
     events: Array<{

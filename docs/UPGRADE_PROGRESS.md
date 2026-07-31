@@ -1233,3 +1233,52 @@
 2. Endpoint 必须同时受 Node CIDR、防火墙和反向代理保护；仅设置应用开关不足以授权公网访问。
 3. instance 标识不稳定会导致时序膨胀；部署前必须冻结命名规则。
 4. 正式 Login 仍不准入，下一阶段需完成真实监控联通、告警到达演练、24 小时基线和 Socket/Yjs 交接决策。
+
+## Phase 2-C3-7-A：Socket/Yjs Auth Bridge 设计
+
+### 当前版本
+
+`v2.13.16`。本阶段只完成审计、设计和测试契约，不修改业务代码。
+
+### 完成内容
+
+1. 新增 `SOCKET_AUTH_CURRENT.md`，冻结 legacy handshake、Token 来源、用户复查、Room/Yjs 恢复与依赖点。
+2. 新增 `AUTH_SOCKET_MIGRATION_DESIGN.md`，定义 `SocketAuthContext` 和显式 legacy/v1 验证分支。
+3. 明确 v1 Socket 只传短期 Access Token，Refresh Token、Cookie 与 CSRF Token 永不进入 Socket。
+4. 设计 HTTP 单飞 Refresh → Access 更新 → 新 handshake → Room/Yjs 恢复的固定顺序。
+5. 规划 Legacy Socket → Bridge 暗启 → Bridge allowlist → v1 Socket 的可回滚阶段。
+6. 新增 `AUTH_SOCKET_TEST_PLAN.md`，覆盖 Token 到期、Session 撤销、断网、Yjs 最终一致、多标签和回滚。
+7. 审计识别 collaboration presence 依赖客户端 user payload、Room 准入未强绑定业务权限，列为 Bridge 实施前门禁。
+
+### 修改文件
+
+- `docs/SOCKET_AUTH_CURRENT.md`
+- `docs/AUTH_SOCKET_MIGRATION_DESIGN.md`
+- `docs/AUTH_SOCKET_TEST_PLAN.md`
+- `docs/releases/v2.13.16.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/文档索引.md`
+- `CHANGELOG.md`
+- `package.json`
+- `package-lock.json`
+
+### 数据库变化
+
+无。未新增或修改数据库、migration、Socket/Yjs 协议或生产配置。
+
+### 验证结果
+
+- 三份核心设计文档与发布说明均存在、非空，章节结构检查通过。
+- 文档索引、CHANGELOG、SYSTEM_UPDATE 与阶段记录引用检查通过。
+- `npm run version:check`：通过（v2.13.16）。
+- `git diff --check`：通过。
+- 变更范围检查：仅文档、CHANGELOG 与版本元数据，无业务代码、数据库、Socket/Yjs 协议或生产配置变化。
+
+### 风险与下一阶段
+
+1. 当前 Socket 只在 handshake 验证 legacy JWT，长连接建立后不复验 Token 到期、Session 撤销或用户禁用。
+2. v1 Access Token 当前无法通过 legacy `payload.userId` 链路建立身份。
+3. Yjs 重连保留本地 Doc 并重发 JOIN，但待发送更新缺少应用级 ACK，必须以 CRDT 状态向量验证最终一致。
+4. 下一阶段建议只实现纯 Auth Bridge middleware、Context mapper 和临时数据库契约测试，feature flag 默认关闭；不要同时切换前端或生产 Socket。

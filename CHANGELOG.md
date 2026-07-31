@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.16 - 2026-07-31
+
+- 完成 Socket/Yjs 当前认证链路审计与 Auth Bridge 设计。
+- 冻结 SocketAuthContext、v1 Access handshake、Refresh 重连和 Room/Yjs 恢复契约。
+- 新增断网、多标签、Token 到期、Yjs 最终一致性和回滚测试计划。
+- 仅更新设计文档；不修改生产 Socket、Yjs、正式 Login、数据库或灰度配置。
+
 ## 2.13.15 - 2026-07-31
 
 - 新增默认关闭、受内网 CIDR 控制的 Auth Prometheus HTTP endpoint。

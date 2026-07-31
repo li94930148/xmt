@@ -1034,3 +1034,35 @@
 ### 下一阶段计划
 
 等待 E3 指令。建议只选择明确责任人的内部普通测试账号进入 allowlist，先完成值班、指标导出、报警通知和回滚演练；不要直接切换管理员、比例流量或依赖 Socket/Yjs 的工作流。
+
+## Phase 2-C3-5-E3：生产 Auth v1-web 受控灰度准备
+
+### 当前版本
+
+`v2.13.12`。本阶段增加生产专用批准门禁，默认仍为 legacy。
+
+### 完成内容
+
+1. 生产环境只有同时满足独立批准开关和明确用户 ID allowlist 才可挂载 Auth v1。
+2. `internal` 与 `percentage` 在生产继续强制回落 legacy，避免范围扩散。
+3. 正式 Login、管理员账号、legacy JWT、Socket/Yjs 与 Caddy 不切换。
+4. 灰度执行责任人由李庆承担，allowlist 由李庆与刘启超复核；观察窗口为 2026-07-31 12:00–13:00。
+
+### 数据库变化
+
+无数据库结构变化。生产执行阶段只新增三个隔离的 member 测试用户，并复用既有认证会话表。
+
+### 测试结果
+
+- `npm run version:check`：通过，版本统一为 `v2.13.12`。
+- `npm run test:auth`、`test:auth-rollout`、`test:auth-v1`：通过。
+- `npm run test:auth-web-runtime`、`test:auth-web-cookie`、`test:auth-browser`：通过。
+- `npm run test:auth-rollout-governance`、`test:api-contract`：通过。
+- `npm run check`、Auth 变更范围 ESLint、`npm run build`：通过。
+- 生产真实浏览器与指标观察结果待执行后写入 `AUTH_PRODUCTION_GRAY_REPORT.md`。
+
+### 风险与回滚
+
+1. 任一批准条件缺失即回落 legacy。
+2. 生产禁止 `internal` 与 `percentage`。
+3. 异常时将模式切回 legacy、关闭批准开关并重启；不删除会话和审计记录。

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.12 - 2026-07-31
+
+- 新增生产 Auth v1-web 独立批准门禁；仅允许批准后的明确用户 ID allowlist。
+- 生产 `internal` 与 `percentage` 模式继续强制回落 legacy，未批准配置不会挂载 v1 Auth。
+- 不切换正式 Login、管理员账号、Socket/Yjs 或 legacy JWT。
+- 无数据库结构变化，生产验证使用三个隔离的普通测试账号。
+
 ## 2.13.11 - 2026-07-31
 
 - 新增管理员只读 Auth Rollout 状态诊断，展示当前模式、用户命中规则、指标、风险和配置审计。

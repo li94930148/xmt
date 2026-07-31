@@ -82,6 +82,18 @@ try {
   assert.equal(isAuthV1Enabled({ XMT_AUTH_V1_ENABLED: undefined, NODE_ENV: 'test' }), false);
   assert.equal(isAuthV1Enabled({ XMT_AUTH_V1_ENABLED: 'true', NODE_ENV: 'test' }), true);
   assert.equal(isAuthV1Enabled({ XMT_AUTH_V1_ENABLED: 'true', NODE_ENV: 'production' }), false);
+  assert.equal(isAuthV1Enabled({
+    NODE_ENV: 'production',
+    XMT_AUTH_ROLLOUT_MODE: 'allowlist',
+    XMT_AUTH_ROLLOUT_APPROVED: 'true',
+    XMT_AUTH_WEB_ALLOWLIST_USER_IDS: String(userId),
+  }), true);
+  assert.equal(isAuthV1Enabled({
+    NODE_ENV: 'production',
+    XMT_AUTH_ROLLOUT_MODE: 'percentage',
+    XMT_AUTH_ROLLOUT_APPROVED: 'true',
+    XMT_AUTH_ROLLOUT_PERCENTAGE: '100',
+  }), false);
 
   disabledServer = startApp(false);
   const disabledBaseUrl = await listen(disabledServer);

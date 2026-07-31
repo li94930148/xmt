@@ -1,5 +1,31 @@
 # XMT 系统更新日志
 
+## v2.13.12 - 2026-07-31
+
+### 新增
+
+- 新增生产 Auth v1-web 独立批准门禁，仅允许经过复核的用户 ID allowlist。
+
+### 优化
+
+- 生产环境仅在 `XMT_AUTH_ROLLOUT_APPROVED=true` 且模式为 `allowlist` 时挂载 v1 Auth；`internal` 与 `percentage` 继续强制回落 legacy。
+
+### 修复
+
+- 无。
+
+### 技术升级
+
+- 增加生产门禁自动测试，覆盖未批准、批准 allowlist、非名单用户及禁止模式。
+
+### 数据库变化
+
+- 无数据库结构变化；生产灰度仅使用既有 Session 与 Refresh Token 表。
+
+### 测试情况
+
+- 本地验证结果记录于 `UPGRADE_PROGRESS.md`；生产灰度结果记录于 `AUTH_PRODUCTION_GRAY_REPORT.md`。
+
 ## v2.13.11 - 2026-07-31
 
 ### 新增

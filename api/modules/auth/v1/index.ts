@@ -41,6 +41,7 @@ export function createAuthV1Module(
   const webConfig = options.webConfig ?? readAuthWebConfig();
   const rolloutConfig = webConfig.rolloutConfig ?? {
     mode: webConfig.enabled ? 'allowlist' as const : 'legacy' as const,
+    productionApproved: false,
     allowlistedUserIds: webConfig.allowlistedUserIds,
     internalUserIds: new Set<number>(),
     percentage: 0,
@@ -66,8 +67,10 @@ export function createAuthV1Module(
 }
 
 export function isAuthV1Enabled(env: NodeJS.ProcessEnv = process.env) {
-  if (env.NODE_ENV === 'production') return false;
   const rollout = readAuthRolloutConfig(env);
+  if (env.NODE_ENV === 'production') {
+    return rollout.productionApproved && rollout.mode === 'allowlist';
+  }
   return env.XMT_AUTH_V1_ENABLED === 'true'
     || (rollout.mode !== 'disabled' && rollout.mode !== 'legacy');
 }

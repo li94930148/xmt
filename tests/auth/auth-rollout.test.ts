@@ -67,6 +67,28 @@ assert.equal(readAuthRolloutConfig({
   XMT_AUTH_ROLLOUT_MODE: 'percentage',
   XMT_AUTH_ROLLOUT_PERCENTAGE: '100',
 }).mode, 'legacy');
+assert.equal(readAuthRolloutConfig({
+  NODE_ENV: 'production',
+  XMT_AUTH_ROLLOUT_MODE: 'allowlist',
+  XMT_AUTH_ROLLOUT_APPROVED: 'false',
+  XMT_AUTH_WEB_ALLOWLIST_USER_IDS: '7',
+}).mode, 'legacy');
+const approvedProduction = readAuthRolloutConfig({
+  NODE_ENV: 'production',
+  XMT_AUTH_ROLLOUT_MODE: 'allowlist',
+  XMT_AUTH_ROLLOUT_APPROVED: 'true',
+  XMT_AUTH_WEB_ALLOWLIST_USER_IDS: '7',
+});
+assert.equal(approvedProduction.mode, 'allowlist');
+assert.equal(approvedProduction.productionApproved, true);
+assert.equal(new AuthRolloutService(approvedProduction).shouldUseWebAuth({ id: 7 }), true);
+assert.equal(new AuthRolloutService(approvedProduction).shouldUseWebAuth({ id: 8 }), false);
+assert.equal(readAuthRolloutConfig({
+  NODE_ENV: 'production',
+  XMT_AUTH_ROLLOUT_MODE: 'internal',
+  XMT_AUTH_ROLLOUT_APPROVED: 'true',
+  XMT_AUTH_ROLLOUT_INTERNAL_USER_IDS: '7',
+}).mode, 'legacy');
 
 const metrics = new AuthMigrationMetrics();
 for (const name of AUTH_MIGRATION_METRIC_NAMES) metrics.increment(name);

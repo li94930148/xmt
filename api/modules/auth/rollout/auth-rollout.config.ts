@@ -2,6 +2,7 @@ export type AuthRolloutMode = 'disabled' | 'legacy' | 'internal' | 'allowlist' |
 
 export type AuthRolloutConfig = {
   mode: AuthRolloutMode;
+  productionApproved: boolean;
   allowlistedUserIds: ReadonlySet<number>;
   internalUserIds: ReadonlySet<number>;
   percentage: number;
@@ -34,10 +35,17 @@ function legacyCompatibleMode(env: NodeJS.ProcessEnv): AuthRolloutMode {
 export function readAuthRolloutConfig(env: NodeJS.ProcessEnv = process.env): AuthRolloutConfig {
   const requested = env.XMT_AUTH_ROLLOUT_MODE?.trim().toLowerCase() as AuthRolloutMode | undefined;
   let mode = requested && MODES.has(requested) ? requested : legacyCompatibleMode(env);
-  if (env.NODE_ENV === 'production' && mode !== 'disabled' && mode !== 'legacy') mode = 'legacy';
+  const productionApproved = env.XMT_AUTH_ROLLOUT_APPROVED === 'true';
+  if (
+    env.NODE_ENV === 'production'
+    && mode !== 'disabled'
+    && mode !== 'legacy'
+    && (!productionApproved || mode !== 'allowlist')
+  ) mode = 'legacy';
 
   return {
     mode,
+    productionApproved,
     allowlistedUserIds: parseAuthRolloutUserIds(env.XMT_AUTH_WEB_ALLOWLIST_USER_IDS),
     internalUserIds: parseAuthRolloutUserIds(env.XMT_AUTH_ROLLOUT_INTERNAL_USER_IDS),
     percentage: parsePercentage(env.XMT_AUTH_ROLLOUT_PERCENTAGE),

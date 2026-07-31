@@ -963,3 +963,74 @@
 ### 下一阶段计划
 
 等待 Phase 2-C3-5-E2 指令。建议建设跨实例指标导出与告警阈值、灰度操作审计和准入决策只读诊断接口；继续不切正式 Login、Socket/Yjs、Caddy 或生产 Web Auth。
+
+## Phase 2-C3-5-E2：Auth 灰度运行治理与上线准备
+
+### 当前版本
+
+`v2.13.11`。本阶段新增只读运行治理与上线准备能力，从 `v2.13.10` 升级 PATCH。
+
+### 完成内容
+
+1. 新增 Auth Rollout Status Service，返回当前 mode、enabled、用户 matchedRule 和安全 reason。
+2. 新增时间指标事件与 Metrics Service，按 60 分钟、24 小时聚合 login、refresh、logout 和 failure。
+3. 新增有界配置审计服务，字段包含 actor、action、before、after、reason、created_at；本阶段无写配置入口。
+4. 新增 Threshold Config 与风险服务，覆盖 Refresh 失败率、CSRF 失败、Token reuse 和 expired 次数，超过阈值只生成风险事件。
+5. 新增管理员只读 `GET /api/v1/auth-rollout/status`，继续接受 legacy JWT，并同步共享 Zod Schema 与 OpenAPI。
+6. 新增 `/admin/auth-rollout` 认证迁移状态页，展示模式、指标、风险、用户准入原因和配置审计，不提供配置修改操作。
+7. 新增 `AUTH_ROLLOUT_RUNBOOK.md`，冻结上线前检查、灰度步骤、观察指标、停止条件、回滚和责任人清单。
+
+### 修改文件
+
+- `api/modules/auth/rollout/*`
+- `api/modules/auth/index.ts`
+- `api/app.ts`
+- `api/openapi.ts`
+- `shared/schema/auth-rollout.schema.ts`
+- `src/api/authRollout.ts`
+- `src/pages/AuthRolloutStatus.tsx`
+- `src/App.tsx`
+- `src/config/navigation.ts`
+- `tests/auth/auth-rollout-governance.test.ts`
+- `tests/auth/browser/rollout-governance.html`
+- `tests/auth/browser/rollout-governance.tsx`
+- `.env.example`
+- `package.json`
+- `package-lock.json`
+- `CHANGELOG.md`
+- `docs/API_CONTRACT.md`
+- `docs/AUTH_ROLLOUT_RUNBOOK.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+- `docs/releases/v2.13.11.md`
+
+### 数据库变化
+
+无。未新增表、字段、索引或 migration；指标事件与配置审计为有界进程内数据。
+
+### 测试结果
+
+- `npm run test:auth-rollout-governance`：通过，覆盖诊断、时间指标、审计、阈值和回滚。
+- 桌面 1440×900 和移动端 390×844 浏览器验证通过；用户诊断交互成功，无横向溢出或控制台错误。
+- `npm run version:check`：通过，版本统一为 `v2.13.11`。
+- `npm run test:auth`：通过，legacy 行为保持冻结。
+- `npm run test:auth-rollout`：通过。
+- `npm run test:auth-web-runtime`：通过。
+- `npm run test:auth-web-cookie`：通过。
+- `npm run test:api-contract`：通过。
+- `npm run check`：通过。
+- Auth Rollout/API/页面/浏览器夹具范围 ESLint：通过。
+- `npm run build`：通过。
+
+### 风险与未切换范围
+
+1. 指标和审计为单进程有界内存记录，重启清零且多实例不聚合，不能替代正式监控和持久审计。
+2. 阈值只生成风险事件，不自动修改灰度配置，停止动作仍需按运行手册人工执行和复核。
+3. 正式 Login、默认 `/api/auth/login`、生产 v1-web、legacy JWT、Socket/Yjs、Caddy 和数据库结构均未修改。
+4. 管理页只对 admin 开放且完全只读，本阶段不扩大或切换任何真实用户。
+
+### 下一阶段计划
+
+等待 E3 指令。建议只选择明确责任人的内部普通测试账号进入 allowlist，先完成值班、指标导出、报警通知和回滚演练；不要直接切换管理员、比例流量或依赖 Socket/Yjs 的工作流。

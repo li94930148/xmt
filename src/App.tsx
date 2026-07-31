@@ -102,6 +102,7 @@ const SocialReview = lazyWithRetry(() => import('@/pages/SocialReview'), 'Social
 const SocialReviewAccountDetail = lazyWithRetry(() => import('@/pages/SocialReviewAccountDetail'), 'SocialReviewAccountDetail');
 const SocialReviewVideoDetail = lazyWithRetry(() => import('@/pages/SocialReviewVideoDetail'), 'SocialReviewVideoDetail');
 const SocialLoginRecovery = lazyWithRetry(() => import('@/pages/SocialLoginRecovery'), 'SocialLoginRecovery');
+const AuthRolloutStatus = lazyWithRetry(() => import('@/pages/AuthRolloutStatus'), 'AuthRolloutStatus');
 
 function PageLoading() {
   return (
@@ -234,6 +235,7 @@ export default function App() {
                 </Route>
                 <Route element={<RoleGuard roles={['admin']} />}>
                   <Route path="/admin/anonymous-feedback" element={<AnonymousFeedbackAdmin />} />
+                  <Route path="/admin/auth-rollout" element={<AuthRolloutStatus />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Route>

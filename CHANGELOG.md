@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.13.11 - 2026-07-31
+
+- 新增管理员只读 Auth Rollout 状态诊断，展示当前模式、用户命中规则、指标、风险和配置审计。
+- Auth Migration Metrics 增加有界时间事件与 60 分钟/24 小时聚合，不记录 Token。
+- 新增 Refresh 失败率、CSRF、Token reuse 和 expired 停止阈值，只生成风险事件，不自动修改配置。
+- 新增认证迁移状态管理页与运行手册；正式登录、生产灰度、legacy JWT、Socket/Yjs 和 Caddy 不变。
+- 无数据库结构变化，配置审计和运行指标当前为进程内有界记录。
+
 ## 2.13.10 - 2026-07-31
 
 - 新增统一 Auth Rollout Config，支持 disabled、legacy、internal、allowlist 和稳定 percentage 分桶。

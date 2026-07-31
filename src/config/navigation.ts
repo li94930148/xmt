@@ -31,6 +31,7 @@ import {
   ScanSearch,
   UserRoundSearch,
   Inbox,
+  ShieldCheck,
 } from 'lucide-react';
 
 export interface NavigationItem {
@@ -141,6 +142,7 @@ export const navigationSections: NavigationSection[] = [
       { id: 'backup', label: '备份管理', icon: Archive, path: '/backup', permissions: ['system:backup'] },
       { id: 'activity', label: '活动日志', icon: Activity, path: '/activity', permissions: ['user:logs'] },
       { id: 'anonymous-feedback', label: '匿名意见管理', icon: Inbox, path: '/admin/anonymous-feedback', roles: ['admin'] },
+      { id: 'auth-rollout', label: '认证迁移状态', icon: ShieldCheck, path: '/admin/auth-rollout', roles: ['admin'] },
       // TODO: 独立运维中心就绪后在此接入服务状态、定时任务、队列与系统健康能力。
     ],
   },

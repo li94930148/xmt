@@ -26,6 +26,7 @@ import topicResourcesRoutes from './routes/topic-resources.js'
 import productionResourcesRoutes from './routes/production-resources.js'
 import { v1TopicsRouter } from './modules/topics/index.js'
 import { createAuthV1Module, isAuthV1Enabled } from './modules/auth/v1/index.js'
+import { authRolloutGovernanceRouter } from './modules/auth/rollout/auth-rollout.routes.js'
 import { openApiRouter } from './openapi.js'
 import { requestId } from './middleware/request-id.js'
 import { sendV1Error } from './utils/response.js'
@@ -293,6 +294,7 @@ app.use('/api/topics', topicResourcesRoutes)
 app.use('/api/topics', topicsRoutes)
 app.use('/api/productions', productionResourcesRoutes)
 app.use('/api/docs', openApiRouter)
+app.use('/api/v1/auth-rollout', authRolloutGovernanceRouter)
 if (process.env.XMT_TOPICS_V1_ENABLED === 'true') {
   app.use('/api/v1/topics', v1TopicsRouter)
 }

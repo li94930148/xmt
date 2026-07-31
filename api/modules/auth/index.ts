@@ -46,3 +46,8 @@ export { readAuthRolloutConfig, type AuthRolloutConfig, type AuthRolloutMode } f
 export { AuthRolloutService } from './rollout/auth-rollout.service.js';
 export { AuthMigrationMetrics, authMigrationMetrics } from './rollout/auth-migration.metrics.js';
 export { AuthMigrationLogger, authMigrationLogger } from './rollout/auth-migration.logger.js';
+export { AuthMigrationMetricsService } from './rollout/auth-migration-metrics.service.js';
+export { AuthRolloutStatusService } from './rollout/auth-rollout.status.service.js';
+export { AuthRolloutAuditService } from './rollout/auth-rollout-audit.service.js';
+export { AuthRolloutRiskService } from './rollout/auth-rollout-risk.service.js';
+export { readAuthRolloutThresholdConfig } from './rollout/auth-rollout-threshold.config.js';

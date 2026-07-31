@@ -17,6 +17,10 @@ import {
   refreshWebRequestSchema,
   sessionsDataSchema,
 } from '@shared/schema/auth.schema';
+import {
+  authRolloutStatusDataSchema,
+  authRolloutStatusQuerySchema,
+} from '@shared/schema/auth-rollout.schema';
 
 extendZodWithOpenApi(z);
 
@@ -38,6 +42,7 @@ const AuthV1WebRefreshRequest = registry.register('AuthV1WebRefreshRequest', ref
 const AuthV1WebRefreshResponse = registry.register('AuthV1WebRefreshResponse', apiSuccessSchema(refreshWebDataSchema));
 const AuthV1SessionsResponse = registry.register('AuthV1SessionsResponse', apiSuccessSchema(sessionsDataSchema));
 const AuthV1LogoutResponse = registry.register('AuthV1LogoutResponse', apiSuccessSchema(z.null()));
+const AuthRolloutStatusResponse = registry.register('AuthRolloutStatusResponse', apiSuccessSchema(authRolloutStatusDataSchema));
 
 registry.registerComponent('securitySchemes', 'bearerAuth', {
   type: 'http',
@@ -53,6 +58,20 @@ const errorResponses = {
   409: { description: '业务状态冲突', content: { 'application/json': { schema: ApiError } } },
   500: { description: '服务端内部错误', content: { 'application/json': { schema: ApiError } } },
 };
+
+registry.registerPath({
+  method: 'get',
+  path: '/api/v1/auth-rollout/status',
+  tags: ['Auth Rollout Governance'],
+  summary: '查询 Auth 灰度运行状态',
+  description: '管理员只读诊断接口。接受当前 legacy Bearer JWT，不修改灰度配置。',
+  security: [{ bearerAuth: [] }],
+  request: { query: authRolloutStatusQuerySchema },
+  responses: {
+    200: { description: '灰度模式、用户诊断、指标、风险和审计', content: { 'application/json': { schema: AuthRolloutStatusResponse } } },
+    ...errorResponses,
+  },
+});
 
 registry.registerPath({
   method: 'get',

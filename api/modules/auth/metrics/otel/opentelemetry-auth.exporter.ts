@@ -24,7 +24,10 @@ export class OpenTelemetryAuthExporter implements AuthMetricsExporter {
   private gaugeValues = new Map<string, number>();
   private lastExportAt: string | null = null;
 
-  constructor(private readonly meter: OpenTelemetryMeterAdapter) {}
+  constructor(
+    private readonly meter: OpenTelemetryMeterAdapter,
+    private readonly instance = process.env.XMT_INSTANCE_ID?.trim() || process.env.HOSTNAME?.trim() || 'unknown',
+  ) {}
 
   increment(name: string, value = 1, labels: AuthMetricLabels = {}, at = new Date()): void {
     const mapped = this.map(name, labels);
@@ -75,8 +78,8 @@ export class OpenTelemetryAuthExporter implements AuthMetricsExporter {
     if (!metricName) return null;
     const mode = name === 'legacy_login_count' ? 'legacy' : labels.mode ?? (name === 'v1_login_count' ? 'v1-web' : undefined);
     const normalized: AuthMetricLabels = name === 'security_events'
-      ? { mode: mode ?? 'unknown', eventType: labels.eventType ?? 'unknown', reason: labels.reason ?? 'unknown' }
-      : mode ? { mode } : {};
+      ? { instance: this.instance, mode: mode ?? 'unknown', eventType: labels.eventType ?? 'unknown', reason: labels.reason ?? 'unknown' }
+      : mode ? { instance: this.instance, mode } : { instance: this.instance };
     return { name: metricName, labels: normalized };
   }
 }

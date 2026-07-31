@@ -27,6 +27,8 @@ import productionResourcesRoutes from './routes/production-resources.js'
 import { v1TopicsRouter } from './modules/topics/index.js'
 import { createAuthV1Module, isAuthV1Enabled } from './modules/auth/v1/index.js'
 import { authRolloutGovernanceRouter } from './modules/auth/rollout/auth-rollout.routes.js'
+import { authMetricsPrometheusExporter } from './modules/auth/events/index.js'
+import { createAuthMetricsHttpRouter, readAuthMetricsHttpConfig } from './modules/auth/metrics/index.js'
 import { openApiRouter } from './openapi.js'
 import { requestId } from './middleware/request-id.js'
 import { sendV1Error } from './utils/response.js'
@@ -265,6 +267,10 @@ app.use(requestId)
 app.use('/api', cors(corsOptions))
 app.use(express.json({ limit: '16mb', verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
 app.use(express.urlencoded({ extended: true, limit: '16mb' }))
+app.use('/internal/metrics/auth', createAuthMetricsHttpRouter(
+  authMetricsPrometheusExporter,
+  readAuthMetricsHttpConfig(),
+))
 
 // 生产环境：服务前端静态文件
 const distPath = path.join(__dirname, '..', 'dist')

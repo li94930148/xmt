@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.15 - 2026-07-31
+
+- 新增默认关闭、受内网 CIDR 控制的 Auth Prometheus HTTP endpoint。
+- Prometheus/OTel 指标增加稳定 instance 标签，并提供 scrape、Collector 与告警规则示例。
+- 新增多实例指标治理和正式 Login 迁移设计；active_sessions 不作为全局唯一会话数求和。
+- 不修改正式 Login、legacy JWT、Socket/Yjs、数据库或生产用户灰度。
+
 ## 2.13.14 - 2026-07-31
 
 - 新增 Auth Metrics Registry、Prometheus Exporter 与厂商无关 OpenTelemetry 适配。

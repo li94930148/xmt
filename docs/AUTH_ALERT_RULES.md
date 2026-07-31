@@ -50,3 +50,10 @@
 3. 使用测试事件验证 Warning/Critical 通知链，不制造生产 Token reuse。
 4. 告警恢复条件、静默审批和回滚操作均记录 requestId 与责任人。
 5. 外部监控中不出现 Token、密码、Cookie、用户 ID 或 Session ID。
+
+## 联通验证方式
+
+- Warning：使用隔离测试 Registry 或监控平台规则测试功能注入普通 Refresh 失败样本，验证通知标题、接收人、恢复通知和静默审批。
+- Critical：使用规则测试数据验证 15% Refresh 失败率和 Critical 路由；生产环境禁止制造 Token reuse。
+- Token reuse 规则只允许通过离线样本或监控平台表达式测试验证，不调用真实生产 Refresh Token。
+- 联通验证完成必须记录时间、规则版本、接收人、到达延迟和结果；未完成真实通知平台配置时只能标记为“契约通过”，不能标记为“生产告警已上线”。

@@ -1180,3 +1180,56 @@
 2. OTel 默认不绑定 SDK 或厂商，需在部署组合根注入 Meter，并验证 Collector 与告警链路。
 3. 活跃 Session Gauge 是单实例观测值，多实例应保留实例维度，不能简单求和当作全局唯一会话数。
 4. 正式 Login 准入前需完成生产采集、跨实例聚合、告警通知、值班演练和基线校准；当前仍保持 legacy。
+
+## Phase 2-C3-6-C：Auth 生产观测链路接入与正式 Login 准入设计
+
+### 当前版本
+
+`v2.13.15`。本阶段完成观测接入准备与设计，不切换生产 Login。
+
+### 完成内容
+
+1. 新增默认关闭的 `/internal/metrics/auth`，返回 Prometheus text format，并按配置 CIDR 校验来源。
+2. 公网 Caddy 示例明确对内部指标路径返回 404；Prometheus 示例直接从私网 Node 地址抓取。
+3. Prometheus/OTel 统一增加低基数 `instance` 标签，部署通过 `XMT_INSTANCE_ID` 提供稳定实例身份。
+4. 新增 OTel Collector 配置样例，并用注入 Meter 模拟 Collector 验证 XMT → OTel Exporter → Collector 契约。
+5. 新增 Warning/Critical 规则样例；Token reuse 只做离线规则验证，不在生产制造真实复用事件。
+6. 新增多实例治理文档，明确 Counter/Histogram 聚合规则及 `active_sessions` 不可简单求和。
+7. 新增正式 Login 迁移计划，冻结 legacy/v1 状态、准入前置、allowlist 阶段、回滚与 Socket/Yjs 风险。
+
+### 修改文件
+
+- `api/modules/auth/metrics/*`
+- `api/modules/auth/events/*`
+- `api/app.ts`
+- `.env.example`
+- `deploy/observability/*`
+- `deploy/linux/Caddyfile.example`
+- `tests/auth/auth-observability-integration.test.ts`
+- `docs/*`
+- `package.json`
+- `package-lock.json`
+
+### 数据库变化
+
+无。未新增或修改表、字段、索引或 migration。
+
+### 测试结果
+
+- `npm run version:check`：通过（v2.13.15）
+- `npm run test:auth`：通过
+- `npm run test:auth-events`：通过
+- `npm run test:auth-metrics-exporter`：通过
+- `npm run test:auth-observability`：通过
+- `npm run test:auth-rollout`：通过
+- `npm run check`：通过
+- `npm run build`：通过
+- Auth 相关范围 ESLint：通过
+- 本机无 OTel Collector 可执行文件；模拟 Collector Meter 与配置契约通过，真实 Collector 联通待部署环境验证。
+
+### 风险与下一阶段
+
+1. 本阶段验证的是本地 scrape 与模拟 Collector 契约，尚未连接真实生产 Prometheus、Collector 或通知平台。
+2. Endpoint 必须同时受 Node CIDR、防火墙和反向代理保护；仅设置应用开关不足以授权公网访问。
+3. instance 标识不稳定会导致时序膨胀；部署前必须冻结命名规则。
+4. 正式 Login 仍不准入，下一阶段需完成真实监控联通、告警到达演练、24 小时基线和 Socket/Yjs 交接决策。

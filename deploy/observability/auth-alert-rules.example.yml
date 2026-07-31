@@ -1,0 +1,40 @@
+groups:
+  - name: xmt-auth
+    rules:
+      - alert: XmtAuthRefreshFailureRateWarning
+        expr: |
+          sum(rate(xmt_auth_refresh_failed_total[5m]))
+          /
+          clamp_min(sum(rate(xmt_auth_refresh_total[5m])) + sum(rate(xmt_auth_refresh_failed_total[5m])), 0.000001)
+          > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: XMT Auth Refresh failure rate is elevated
+
+      - alert: XmtAuthRefreshFailureRateCritical
+        expr: |
+          sum(rate(xmt_auth_refresh_failed_total[5m]))
+          /
+          clamp_min(sum(rate(xmt_auth_refresh_total[5m])) + sum(rate(xmt_auth_refresh_failed_total[5m])), 0.000001)
+          > 0.15
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: XMT Auth Refresh failure rate is critical
+
+      - alert: XmtAuthTokenReuseDetected
+        expr: sum(increase(xmt_auth_security_events_total{eventType="auth.token.reuse_detected"}[5m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: XMT Auth refresh token reuse was detected
+
+      - alert: XmtAuthCsrfFailures
+        expr: sum(increase(xmt_auth_security_events_total{eventType="auth.csrf.failed"}[5m])) >= 3
+        labels:
+          severity: warning
+        annotations:
+          summary: XMT Auth CSRF failures exceeded the warning threshold

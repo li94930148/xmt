@@ -1060,9 +1060,13 @@
 - `npm run test:auth-rollout-governance`、`test:api-contract`：通过。
 - `npm run check`、Auth 变更范围 ESLint、`npm run build`：通过。
 - 生产真实浏览器与指标观察结果待执行后写入 `AUTH_PRODUCTION_GRAY_REPORT.md`。
+- 生产真实浏览器验证通过：3 个隔离 member 账号完成登录、Cookie、Refresh、刷新/新标签页/重开、并发单飞、Logout、撤销与重新登录。
+- 生产观察约 33 分钟，31 个连续健康样本全部正常；无新增 Socket、SQLite、未处理异常或 Yjs 错误。
+- 测试结束后已恢复 legacy、关闭批准和 v1/Web 开关，并将测试账号标记 disabled；Session 与审计记录保留。
 
 ### 风险与回滚
 
 1. 任一批准条件缺失即回落 legacy。
 2. 生产禁止 `internal` 与 `percentage`。
 3. 异常时将模式切回 legacy、关闭批准开关并重启；不删除会话和审计记录。
+4. 结构化 login 日志事件数高于实际成功登录/Session 数，扩大灰度前需统一指标去重口径。

@@ -24,7 +24,7 @@
 
 ### 测试情况
 
-- 本地验证结果记录于 `UPGRADE_PROGRESS.md`；生产灰度结果记录于 `AUTH_PRODUCTION_GRAY_REPORT.md`。
+- 本地验证全部通过；三个隔离 member 账号完成约 33 分钟生产灰度，浏览器闭环和 31 个连续健康样本通过，结束后已恢复 legacy。详细结果见 `AUTH_PRODUCTION_GRAY_REPORT.md`。
 
 ## v2.13.11 - 2026-07-31
 

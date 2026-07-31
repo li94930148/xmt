@@ -834,3 +834,69 @@
 ### 下一阶段计划
 
 等待 Phase 2-C3-5-D 指令。建议只做非生产浏览器暗启测试入口或自动化夹具，验证 Runtime 冷启动、401 刷新和退出；仍不切正式 Login、持久 Token、Socket、Caddy 或生产开关。
+
+## Phase 2-C3-5-D：Web Auth 暗启验证与浏览器契约测试
+
+### 当前版本
+
+`v2.13.9`。本阶段完成 Web Auth 非生产浏览器暗启验证基础，从 `v2.13.8` 升级 PATCH。
+
+### 完成内容
+
+1. 新增独立 Vite/Playwright 浏览器夹具，调用真实 Web Runtime、api-client 和 Auth v1 Cookie HTTP 接口，不接入正式页面。
+2. 冻结 F5、新标签页、关闭重开后的 Cookie 冷启动恢复，确认 Access Token 只存在页面内存。
+3. 覆盖多个并发 401 的单飞刷新，并处理刷新完成后迟到的旧 401，原请求最多重试一次。
+4. 覆盖 Cookie 缺失、session 撤销、Refresh Token reuse 和 CSRF 失败，确认 Runtime 进入 expired 并清除 Token 与用户状态。
+5. 覆盖 logout 后服务端 session 撤销、Cookie 清理、客户端清理及再次访问要求认证。
+6. 冻结 v1/Web 双开关、用户 ID allowlist、非生产环境四重门禁。
+
+### 修改文件
+
+- `packages/api-client/client.ts`
+- `src/auth/runtime/auth-runtime.ts`
+- `tests/auth/auth-web-runtime.test.ts`
+- `tests/auth/auth-browser.test.ts`
+- `tests/auth/browser/fixture.html`
+- `tests/auth/browser/fixture.ts`
+- `package.json`
+- `package-lock.json`
+- `CHANGELOG.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+- `docs/releases/v2.13.9.md`
+
+### 数据库变化
+
+无。未新增表、字段、索引或 migration；浏览器契约测试使用临时 SQLite，完成后关闭连接。
+
+### 测试结果
+
+- `npm run test:auth-browser`：通过，使用真实 Chromium 浏览器验证完整暗启闭环。
+- `npm run version:check`：通过，版本统一为 `v2.13.9`。
+- `npm run test:auth`：通过，legacy Auth 行为保持冻结。
+- `npm run test:auth-v1`：通过。
+- `npm run test:auth-web-runtime`：通过。
+- `npm run test:auth-web-cookie`：通过。
+- `npm run test:api-contract`：通过。
+- `npm run check`：通过。
+- Auth/Web Runtime/浏览器夹具范围 ESLint：通过。
+- `npm run build`：通过。
+
+### 当前未切换范围
+
+1. `Login.tsx`、`src/api/auth.ts`、Zustand Auth Store 和正式页面登录入口未修改。
+2. legacy `/api/auth/*`、浏览器持久 Token、旧 JWT payload 与 7 天有效期保持不变。
+3. `XMT_AUTH_V1_ENABLED` 与 `XMT_AUTH_WEB_ENABLED` 默认关闭，生产环境硬门禁保持有效。
+4. Socket、Yjs、Caddy 和线上 Cookie 策略未修改。
+
+### 风险说明
+
+1. 单飞刷新当前限定在单个页面 Runtime/api-client 实例，跨标签协调尚未实现。
+2. 本阶段使用本地同源浏览器与临时数据库，不代表生产代理、域名和证书链已验证。
+3. Web Runtime 仍未接入正式页面，测试通过不等于用户流量已迁移。
+
+### 下一阶段计划
+
+等待 Phase 2-C3-5-E 指令。建议先设计并验证跨标签刷新协调、暗启观测指标和灰度准入/退出清单，继续保持正式 Login、Socket、Caddy 与生产开关不变。

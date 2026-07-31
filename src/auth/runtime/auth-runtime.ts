@@ -61,7 +61,7 @@ export class AuthRuntime {
 
   expire(): void {
     this.tokenStore.clearToken();
-    this.state = { ...this.state, status: 'expired' };
+    this.state = { ...this.state, status: 'expired', user: null };
   }
 
   clear(): void {

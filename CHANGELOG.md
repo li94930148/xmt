@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.9 - 2026-07-31
+
+- 新增真实 Chromium Web Auth 暗启契约测试，覆盖冷启动、F5、新标签页、关闭重开、并发 401、失败过期和注销闭环。
+- 浏览器验证确认 Access Token 仅存在内存，HttpOnly Refresh Cookie 不可由页面读取，CSRF Cookie 可按契约回传。
+- api-client 修复浏览器默认 fetch 调用上下文，并避免已完成刷新后的迟到 401 再次触发刷新。
+- legacy 登录、正式 Login 页面、持久 Token、Socket/Yjs、Caddy、生产开关和线上 Cookie 策略不变。
+
 ## 2.13.8 - 2026-07-31
 
 - 为显式开启且命中用户 ID 白名单的非生产 v1 Web Auth 增加 HttpOnly Refresh Cookie 与 CSRF HTTP 适配。

@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.13.8",
+  "version": "2.13.9",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -20,6 +20,7 @@
     "test:auth-v1": "tsx tests/auth/auth-v1.test.ts",
     "test:auth-web-runtime": "tsx tests/auth/auth-web-runtime.test.ts",
     "test:auth-web-cookie": "tsx tests/auth/auth-web-cookie.test.ts",
+    "test:auth-browser": "tsx tests/auth/auth-browser.test.ts",
     "audit:time": "tsx scripts/audit-time-fields.ts",
     "server:dev": "nodemon",
     "dev": "concurrently \"npm run client:dev\" \"npm run server:dev\"",

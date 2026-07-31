@@ -90,6 +90,7 @@ failedRuntime.bootstrap('v1-web');
 failedRuntime.authenticate(user, 'temporary-access');
 assert.equal(await failedRuntime.refresh(), null);
 assert.equal(failedRuntime.getState().status, 'expired');
+assert.equal(failedRuntime.getState().user, null);
 assert.equal(failedRuntime.getAccessToken(), null);
 failedRuntime.clear();
 assert.deepEqual(failedRuntime.getState(), { mode: 'legacy', status: 'anonymous', user: null });

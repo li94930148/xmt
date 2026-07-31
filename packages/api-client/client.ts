@@ -22,7 +22,7 @@ export class ApiClient {
 
   constructor(options: ApiClientOptions = {}) {
     this.baseURL = options.baseURL ?? '/api/v1';
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.auth = new ApiAuth(options);
   }
 
@@ -39,27 +39,30 @@ export class ApiClient {
       headers.set('Accept', 'application/json');
       headers.set('X-Request-ID', requestId);
       if (requestBody !== undefined) headers.set('Content-Type', 'application/json');
-      if (!skipAuth) {
-        const token = await this.auth.getAccessToken();
-        if (token) headers.set('Authorization', `Bearer ${token}`);
-      }
+      const accessToken = skipAuth ? null : await this.auth.getAccessToken();
+      if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
       try {
-        return await this.fetchImpl(joinUrl(this.baseURL, path), {
+        const response = await this.fetchImpl(joinUrl(this.baseURL, path), {
           ...requestInit,
           credentials: requestInit.credentials ?? 'include',
           headers,
           body,
         });
+        return { response, accessToken };
       } catch (error) {
         throw new ApiClientError('NETWORK_ERROR', error instanceof Error ? error.message : '网络请求失败', 0, requestId);
       }
     };
 
-    let response = await execute();
-    if (response.status === 401 && !skipAuth && this.auth.shouldRefreshAccessToken()) {
-      const refreshedToken = await this.auth.refreshAccessToken();
-      if (refreshedToken) response = await execute();
+    let result = await execute();
+    if (result.response.status === 401 && !skipAuth && this.auth.shouldRefreshAccessToken()) {
+      const currentToken = await this.auth.getAccessToken();
+      const refreshedToken = currentToken && currentToken !== result.accessToken
+        ? currentToken
+        : await this.auth.refreshAccessToken();
+      if (refreshedToken) result = await execute();
     }
+    const response = result.response;
 
     let payload: ApiResponse<T>;
     try {

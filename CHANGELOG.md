@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.7 - 2026-07-31
+
+- 新增未接入现有登录页的 Web Auth Runtime，Access Token 仅保存在内存，并提供认证状态机和刷新单飞能力。
+- api-client 增加 `credentials: include`、显式 v1 模式 401 刷新和原请求最多一次重试，并新增 Auth v1 客户端封装。
+- 新增未挂载的 Refresh Cookie、CSRF 签名服务、Web Auth 开关与用户 ID allowlist 基础能力。
+- legacy 登录、浏览器持久 Token、JWT、Socket、Caddy 和生产 v1 开关均保持不变。
+
 ## 2.13.6 - 2026-07-30
 
 - 新增由 `XMT_AUTH_V1_ENABLED` 控制的实验性 `/api/v1/auth/login|refresh|logout|sessions`，默认关闭且生产环境强制不挂载。

@@ -29,26 +29,36 @@ export class ApiClient {
   async request<T>(path: string, options: ApiClientRequestOptions = {}): Promise<T> {
     const { requestId: suppliedRequestId, skipAuth, body: requestBody, ...requestInit } = options;
     const requestId = suppliedRequestId ?? createRequestId();
-    const headers = new Headers(requestInit.headers);
-    headers.set('Accept', 'application/json');
-    headers.set('X-Request-ID', requestId);
-
-    if (!skipAuth) {
-      const token = await this.auth.getAccessToken();
-      if (token) headers.set('Authorization', `Bearer ${token}`);
-    }
-
     let body: BodyInit | undefined;
     if (requestBody !== undefined) {
-      headers.set('Content-Type', 'application/json');
       body = JSON.stringify(requestBody);
     }
 
-    let response: Response;
-    try {
-      response = await this.fetchImpl(joinUrl(this.baseURL, path), { ...requestInit, headers, body });
-    } catch (error) {
-      throw new ApiClientError('NETWORK_ERROR', error instanceof Error ? error.message : '网络请求失败', 0, requestId);
+    const execute = async () => {
+      const headers = new Headers(requestInit.headers);
+      headers.set('Accept', 'application/json');
+      headers.set('X-Request-ID', requestId);
+      if (requestBody !== undefined) headers.set('Content-Type', 'application/json');
+      if (!skipAuth) {
+        const token = await this.auth.getAccessToken();
+        if (token) headers.set('Authorization', `Bearer ${token}`);
+      }
+      try {
+        return await this.fetchImpl(joinUrl(this.baseURL, path), {
+          ...requestInit,
+          credentials: requestInit.credentials ?? 'include',
+          headers,
+          body,
+        });
+      } catch (error) {
+        throw new ApiClientError('NETWORK_ERROR', error instanceof Error ? error.message : '网络请求失败', 0, requestId);
+      }
+    };
+
+    let response = await execute();
+    if (response.status === 401 && !skipAuth && this.auth.shouldRefreshAccessToken()) {
+      const refreshedToken = await this.auth.refreshAccessToken();
+      if (refreshedToken) response = await execute();
     }
 
     let payload: ApiResponse<T>;

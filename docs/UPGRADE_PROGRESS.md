@@ -638,3 +638,122 @@
 ### 下一阶段计划
 
 等待 Phase 2-C3-5 指令。建议下一阶段先冻结生产 Cookie/CSRF、pepper 密钥管理、用户 allowlist 和登录原子事务，再进行 Web 内部账号灰度；不得直接全量切换现有 Login 或 Socket。
+
+## Phase 2-C3-5-A：Web 认证迁移前置设计
+
+### 当前版本
+
+`v2.13.6`。本阶段只新增 Web 认证迁移设计，不改变已发布行为，因此版本保持不变。
+
+### 完成内容
+
+1. 基于 `Login.tsx`、`src/api/auth.ts`、Auth Store、全局 401 拦截器、Layout、ProtectedRoute、api-client 和 Socket hook 记录当前 Web 认证链路。
+2. 冻结内存 Access Token + HttpOnly Refresh Cookie 的目标流程，以及冷启动恢复、单飞刷新、单次重试和新旧模式隔离。
+3. 冻结 `__Host-xmt_refresh` 的 name、Domain、Path、Secure、HttpOnly、SameSite 和 Max-Age 语义。
+4. 设计 Origin 校验与 session 绑定签名双提交 CSRF Token，明确来源、校验顺序和接口范围。
+5. 设计 Refresh Pepper 的 Secret 来源、active version、双版本读取、自然轮换和泄露处置。
+6. 设计总开关、Web 独立开关、用户 ID allowlist、管理员优先但显式准入、稳定分桶和回滚。
+7. 冻结登录事务边界，要求 session、generation 0 Refresh 记录与审计同事务提交。
+8. 设计后续 Socket handshake、Access 更新重连、房间恢复与 Yjs 同步，但本阶段不实施。
+9. 将前端迁移拆为 Auth Runtime 准备、内部 HTTP 灰度、扩大灰度并向 Socket 阶段交接三个阶段。
+
+### 修改文件
+
+- `docs/PHASE2_AUTH_WEB_MIGRATION_DESIGN.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+
+### 数据库变化
+
+无。未新增或修改表、字段、索引、migration 和数据；登录事务内容仅为设计。
+
+### 测试结果
+
+- 未运行代码测试或构建：本阶段仅修改 Markdown 设计文档，不改变代码、依赖、配置或运行行为。
+- 已执行文档章节、版本、变更范围和 Git whitespace 检查。
+
+### 风险说明
+
+1. 当前 experimental v1 仍以 JSON 交付 Refresh Token，不能直接用于 Web；实施时必须切换为 Cookie 且确保 Web JSON 不含原值。
+2. 请求分散且全局 401 拦截会与静默刷新竞争，必须按模块收敛而非一次性替换。
+3. `__Host-` Cookie 要求 HTTPS、Path=/ 且无 Domain；线上 origin 与代理事实未确认前不能启用。
+4. 严格单次轮换要求跨标签协调，否则正常并发可能触发 reuse 撤销。
+5. Socket 尚未迁移，v1 Web 灰度不能被描述为完整认证迁移。
+
+### 下一阶段计划
+
+等待 Phase 2-C3-5-B 指令。建议下一阶段只实现后端 Web Cookie/CSRF、Pepper 版本加载、登录事务与 allowlist 基础设施，仍不修改 `Login.tsx`、前端 Token 存储、Socket、Caddy 或生产默认开关。
+
+## Phase 2-C3-5-B：Web Auth Runtime 与迁移基础设施
+
+### 当前版本
+
+`v2.13.7`。本阶段新增 Web Auth 迁移基础能力，从 `v2.13.6` 升级 PATCH，但不切换现有登录入口。
+
+### 完成内容
+
+1. 新增 `src/auth/runtime`，提供 `legacy | v1-web` 模式、五态认证状态机、内存 Access Token Store、刷新协调和 Runtime。
+2. Access Token Store 只使用类私有内存字段，不引用 localStorage/sessionStorage。
+3. api-client 默认使用 `credentials: include`，仅在调用方明确允许 v1 refresh 时处理 401；刷新使用单飞锁，原请求最多重试一次。
+4. 新增 Auth v1 Client，封装 login、refresh、logout 和 sessions，但未被现有页面或 API 引用。
+5. 新增 `__Host-xmt_refresh` Cookie 设置/清除配置能力，固定 HttpOnly、SameSite=Lax、Path=/，不设置 Domain；尚未接入 Controller。
+6. 新增 CSRF Service，支持 32 字节随机值、HMAC-SHA256 session 绑定签名、恒定时间验证和双提交校验；尚未接入接口。
+7. 新增 `XMT_AUTH_WEB_ENABLED=false` 与数字用户 ID allowlist 解析；生产环境强制关闭，用户名不参与准入。
+8. 新增专项测试，覆盖模式、开关、内存 Token、刷新单飞、401 单次重试、过期、清理、Auth Client、Cookie、CSRF 和 allowlist。
+
+### 修改文件
+
+- `src/auth/runtime/*`
+- `packages/api-client/auth.ts`
+- `packages/api-client/client.ts`
+- `packages/api-client/types.ts`
+- `packages/api-client/auth-client.ts`
+- `api/modules/auth/web/*`
+- `shared/schema/auth.schema.ts`
+- `tests/auth/auth-web-runtime.test.ts`
+- `.env.example`
+- `package.json`
+- `package-lock.json`
+- `CHANGELOG.md`
+- `docs/CHANGELOG.md`
+- `docs/SYSTEM_UPDATE.md`
+- `docs/PHASE2_AUTH_WEB_MIGRATION_DESIGN.md`
+- `docs/UPGRADE_PROGRESS.md`
+- `docs/文档索引.md`
+- `docs/releases/v2.13.7.md`
+
+### 数据库变化
+
+无。未新增表、字段、索引、migration 或数据；现有 Auth Session/Refresh 表和 Repository 语义不变。
+
+### 测试结果
+
+- `npm run test:auth-web-runtime`：通过。
+- `npm run version:check`：通过，版本统一为 `v2.13.7`。
+- `npm run test:auth`：通过，legacy 登录、JWT、me、改密和 logout 行为保持冻结。
+- `npm run test:auth-session-migration`：通过。
+- `npm run test:auth-session-service`：通过。
+- `npm run test:auth-v1`：通过。
+- `npm run test:api-contract`：通过。
+- `npm run check`：通过。
+- Auth 相关 ESLint：通过。
+- `npm run build`：通过。
+
+### 当前未切换范围
+
+1. `Login.tsx`、`src/api/auth.ts`、Auth Zustand Store 与现有持久 Token 逻辑未修改。
+2. legacy `/api/auth/*`、旧 JWT payload、7 天有效期和生产登录行为不变。
+3. Cookie/CSRF Service 未挂载到 v1 login/refresh/logout，experimental JSON Refresh Token 契约暂时不变。
+4. `XMT_AUTH_WEB_ENABLED` 默认 false，生产强制关闭；没有真实灰度用户。
+5. Socket、Yjs、Caddy 和线上 Cookie 策略未修改。
+
+### 风险说明
+
+1. 新 Runtime 尚无页面消费者，只有测试证明基础行为，不能宣称 Web 已完成迁移。
+2. api-client 的单飞锁只覆盖同一实例；跨标签 BroadcastChannel/Web Locks 尚未实现。
+3. Cookie/CSRF 未接线，因此还没有浏览器 Set-Cookie、Origin 或端到端 CSRF 保护验证。
+4. 登录创建 session 与首枚 Refresh Token 的原子事务仍待下一阶段实现。
+
+### 下一阶段计划
+
+等待 Phase 2-C3-5-C 指令。建议只完成后端 Web Cookie/CSRF HTTP 适配、登录事务原子化和浏览器契约测试，继续不切换 `Login.tsx`、持久 Token、Socket、Caddy 或生产默认开关。

@@ -10,3 +10,4 @@ export type ApiClientRequestOptions = Omit<RequestInit, 'body'> & {
 
 export type TokenProvider = () => string | null | Promise<string | null>;
 export type RefreshTokenHandler = () => Promise<string | null>;
+export type RefreshEligibility = () => boolean;

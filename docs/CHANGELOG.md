@@ -1,5 +1,33 @@
 # XMT 系统更新日志
 
+## v2.13.7 - 2026-07-31
+
+### 新增
+
+- 新增未接入登录页面的 Web Auth Runtime、内存 Access Token Store 和认证状态机。
+- 新增 Auth v1 客户端封装、Refresh Cookie 配置、CSRF 签名服务及用户 ID 白名单解析能力。
+
+### 优化
+
+- api-client 支持携带 Cookie、显式 v1 模式下单飞刷新，并将 401 原请求重试限制为一次。
+- Web Auth 独立开关默认关闭，生产环境强制不可启用，只有白名单用户具备未来测试资格。
+
+### 修复
+
+- 无。
+
+### 技术升级
+
+- 新增 Web Auth Runtime 专项测试，覆盖模式、内存 Token、刷新单飞、401 重试上限、过期状态、Cookie、CSRF 和白名单。
+
+### 数据库变化
+
+- 无。未新增表、字段、索引、migration 或业务数据。
+
+### 测试情况
+
+- 版本、Auth 全链路、Web Runtime、API Contract、类型检查、Auth 范围 lint 和生产构建按要求执行；详细结果见 `UPGRADE_PROGRESS.md`。
+
 ## v2.13.6 - 2026-07-30
 
 ### 新增

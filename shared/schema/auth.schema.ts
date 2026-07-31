@@ -69,3 +69,4 @@ export type LoginV1RequestInput = z.infer<typeof loginV1RequestSchema>;
 export type LoginV1Data = z.infer<typeof loginV1DataSchema>;
 export type RefreshData = z.infer<typeof refreshDataSchema>;
 export type AuthSessionSummary = z.infer<typeof authSessionSummarySchema>;
+export type AuthV1User = z.infer<typeof authV1UserSchema>;

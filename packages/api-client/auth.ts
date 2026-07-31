@@ -1,8 +1,9 @@
-import type { RefreshTokenHandler, TokenProvider } from './types';
+import type { RefreshEligibility, RefreshTokenHandler, TokenProvider } from './types';
 
 export type ApiAuthOptions = {
   getAccessToken?: TokenProvider;
   refreshAccessToken?: RefreshTokenHandler;
+  shouldRefreshAccessToken?: RefreshEligibility;
 };
 
 export class ApiAuth {
@@ -12,6 +13,10 @@ export class ApiAuth {
 
   getAccessToken() {
     return this.options.getAccessToken?.() ?? null;
+  }
+
+  shouldRefreshAccessToken() {
+    return this.options.shouldRefreshAccessToken?.() ?? false;
   }
 
   refreshAccessToken() {

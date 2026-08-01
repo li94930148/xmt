@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.14.0",
+  "version": "2.14.1",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -32,6 +32,8 @@
     "test:socket-production-gate": "tsx tests/auth/socket-production-gate.test.ts",
     "test:production-version-sync": "tsx tests/workflow-production-version-sync.test.ts",
     "auth:production-preflight": "tsx scripts/auth-production-preflight.ts",
+    "auth:gray-readiness": "tsx scripts/auth-gray-readiness-check.ts",
+    "test:auth-gray-readiness": "tsx tests/auth/auth-gray-readiness.test.ts",
     "test:socket-coordinator": "tsx tests/auth/socket-coordinator.test.ts",
     "test:yjs-auth-recovery": "tsx tests/collaboration/yjs-auth-recovery.test.ts",
     "test:browser-auth-recovery": "tsx tests/browser/socket-auth-recovery.spec.ts",

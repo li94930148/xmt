@@ -32,6 +32,8 @@ import { editorStateLabel, useEditorEventState } from '../editor/state/editorSta
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
 import ProductionResourcesPanel from '../components/production/ProductionResourcesPanel';
+import { useSocket } from '../hooks/useSocket';
+import { COLLABORATION_EVENTS, type VersionSupersededPayload } from '../collaboration/core/events';
 
 const STATUS_TEXT: Record<string, string> = {
   draft: '草稿',
@@ -71,6 +73,7 @@ type VersionEntry = {
   operatorName?: string;
   createdAt: string;
   isCurrent: boolean;
+  versionState?: 'historical' | 'superseded';
 };
 
 function normalizeVersionContent(contentMarkdown?: string, content?: string) {
@@ -96,6 +99,13 @@ function versionChangeLabel(changeType?: string) {
   return '当前生效';
 }
 
+function versionSyncLabel(entry: VersionEntry, needsSwitch: boolean) {
+  if (needsSwitch && entry.isCurrent) return '需切换';
+  if (entry.isCurrent) return '当前生效';
+  if (entry.versionState === 'superseded') return '已替代';
+  return '历史版本';
+}
+
 function syncTone(syncStatus: string): 'cyan' | 'success' | 'coral' | 'muted' {
   if (syncStatus === 'saving') return 'cyan';
   if (syncStatus === 'saved') return 'success';
@@ -110,6 +120,7 @@ export default function ProductionDetail() {
   const authUser = useAuthStore((state) => state.user);
   const isDark = appStore.theme === 'dark';
   const { hasPermission } = usePermission();
+  const socket = useSocket();
 
   const [production, setProduction] = useState<ProductionType | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null);
@@ -124,6 +135,7 @@ export default function ProductionDetail() {
   });
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
   const [leaveFailureDialogDismissed, setLeaveFailureDialogDismissed] = useState(false);
+  const [superseded, setSuperseded] = useState<VersionSupersededPayload | null>(null);
 
   const canEditProduction = Boolean(
     production &&
@@ -150,6 +162,18 @@ export default function ProductionDetail() {
   const handleRuntimeHandleChange = useCallback((handle: ContentEditorRuntimeHandle | null) => {
     runtimeHandleRef.current = handle;
   }, []);
+
+  useEffect(() => {
+    if (!socket || !production || !authUser) return;
+    const handleSuperseded = (payload: VersionSupersededPayload) => {
+      if (payload.productionId !== production.id || payload.fromVersion !== production.version) return;
+      if (payload.createdBy.id === authUser.id) return;
+      setSuperseded(payload);
+      setEditMode(false);
+    };
+    socket.on(COLLABORATION_EVENTS.VERSION_SUPERSEDED, handleSuperseded);
+    return () => { socket.off(COLLABORATION_EVENTS.VERSION_SUPERSEDED, handleSuperseded); };
+  }, [authUser, production, socket]);
 
   const handleContinueEditing = useCallback(() => {
     setLeaveFailureDialogDismissed(true);
@@ -209,6 +233,7 @@ export default function ProductionDetail() {
       setTopic(topicData);
       setHistory(historyData);
       setSelectedVersionId('current');
+      setSuperseded(null);
     } catch (error) {
       appStore.addNotification({
         title: '获取创作详情失败',
@@ -255,6 +280,7 @@ export default function ProductionDetail() {
       operatorName: record.operator_name,
       createdAt: record.created_at,
       isCurrent: false,
+      versionState: record.version_state,
     }));
 
     return [currentEntry, ...historyEntries];
@@ -349,7 +375,7 @@ export default function ProductionDetail() {
       documentId: room,
       collaborationRoom: room,
       initialContent: editData.content,
-      readonly: !canEditProduction || selectedVersionId !== 'current',
+      readonly: !canEditProduction || selectedVersionId !== 'current' || Boolean(superseded),
       capabilities: {
         collaboration: true,
         manualSave: false,
@@ -364,10 +390,10 @@ export default function ProductionDetail() {
         version_action: 'none',
       }).then(() => undefined),
     });
-  }, [canEditProduction, editData.content, editData.status, production, selectedVersionId]);
+  }, [canEditProduction, editData.content, editData.status, production, selectedVersionId, superseded]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
-    if (!production || !canEditProduction) return;
+    if (!production || !canEditProduction || superseded) return;
 
     try {
       const result = await updateProduction(production.id, {
@@ -397,7 +423,7 @@ export default function ProductionDetail() {
   };
 
   const handleSubmitReview = async () => {
-    if (!production || !canEditProduction) return;
+    if (!production || !canEditProduction || superseded) return;
 
     try {
       await updateProduction(production.id, {
@@ -426,7 +452,7 @@ export default function ProductionDetail() {
   };
 
   const handleStatusUpdate = async (status: string) => {
-    if (!production || !canEditProduction) return;
+    if (!production || !canEditProduction || superseded) return;
 
     try {
       await updateProduction(production.id, {
@@ -496,6 +522,7 @@ export default function ProductionDetail() {
   const statusTone = STATUS_TONE[production.status] || 'muted';
   const statusLabel = STATUS_TEXT[production.status] || production.status;
   const syncLabel = editorStateLabel(syncStatus);
+  const editorLocked = Boolean(superseded);
 
   return (
     <PageShell>
@@ -539,6 +566,7 @@ export default function ProductionDetail() {
                   <Wifi className="h-3.5 w-3.5" />
                   {syncLabel}
                 </StatusPill>
+                <StatusPill tone={editorLocked ? 'coral' : 'success'}>{editorLocked ? `检测到新大版本 ${superseded?.toVersion}` : `正在编辑当前最新版本 ${production.version || 'v1.0'}`}</StatusPill>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
                 <span>{production.version || 'v1.0'}</span>
@@ -632,7 +660,7 @@ export default function ProductionDetail() {
             ) : null}
           </div>
 
-          {selectedVersion?.isCurrent && canEditProduction ? (
+          {selectedVersion?.isCurrent && canEditProduction && !editorLocked ? (
             <div className="min-h-[300px] bg-[var(--editor-bg)]">
               <ContentEditor
                 value={editData.content}
@@ -694,8 +722,8 @@ export default function ProductionDetail() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold text-studio-text-primary">{entry.version}</span>
-                    <StatusPill tone={entry.changeType === 'major' ? 'violet' : entry.changeType === 'minor' ? 'primary' : 'success'} className="px-2 py-0.5 text-[10px]">
-                      {versionChangeLabel(entry.changeType)}
+                    <StatusPill tone={selectedVersionId === entry.id && editorLocked ? 'coral' : entry.isCurrent ? 'success' : entry.versionState === 'superseded' ? 'coral' : 'muted'} className="px-2 py-0.5 text-[10px]">
+                      {versionSyncLabel(entry, selectedVersionId === entry.id && editorLocked)}
                     </StatusPill>
                   </div>
                   <p className="mt-2 text-xs text-studio-text-muted">{formatBeijingTime(entry.createdAt)}</p>
@@ -707,10 +735,10 @@ export default function ProductionDetail() {
 
             <div className="space-y-3 border-t border-studio-border-soft pt-5">
               <p className="text-xs font-semibold uppercase text-studio-text-muted">版本操作</p>
-              {canEditProduction && <ActionButton onClick={startEditing} className="w-full">
+              {canEditProduction && !editorLocked && <ActionButton onClick={startEditing} className="w-full">
                 当前版本查看 / 编辑
               </ActionButton>}
-              {canEditProduction && <div className="grid grid-cols-2 gap-2">
+              {canEditProduction && !editorLocked && <div className="grid grid-cols-2 gap-2">
                 <ActionButton onClick={() => handleVersionedSave('minor')} className="px-3 py-2">
                   <Save className="h-4 w-4" />
                   小修保存
@@ -720,7 +748,7 @@ export default function ProductionDetail() {
                   另开新版
                 </ActionButton>
               </div>}
-              {canEditProduction && editData.status === 'draft' ? (
+              {canEditProduction && !editorLocked && editData.status === 'draft' ? (
                 <ActionButton onClick={handleSubmitReview} variant="primary" className="w-full">
                   <ArrowRight className="h-4 w-4" />
                   提交审核
@@ -745,6 +773,17 @@ export default function ProductionDetail() {
           </div>
         </GlassPanel>
       </div>
+
+      {superseded && canEditProduction ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="production-version-superseded-title">
+          <GlassPanel className="w-full max-w-lg border-studio-coral/45 p-6 shadow-glow-primary">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-studio-coral">版本同步提醒</p>
+            <h2 id="production-version-superseded-title" className="mt-3 text-xl font-bold text-studio-text-primary">检测到新的大版本已创建</h2>
+            <p className="mt-3 leading-7 text-studio-text-secondary">{superseded.createdBy.name} 已创建新大版本 {superseded.toVersion}。你当前所在的 {superseded.fromVersion} 已转为历史版本，不能继续编辑。请进入最新版本继续协作。</p>
+            <ActionButton onClick={() => void fetchData()} variant="primary" className="mt-6 w-full">进入最新版本</ActionButton>
+          </GlassPanel>
+        </div>
+      ) : null}
 
       <ConfirmModal
         open={showDeleteModal}

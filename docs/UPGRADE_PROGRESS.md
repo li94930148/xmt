@@ -1,5 +1,13 @@
 # XMT 升级阶段记录
 
+## Phase 2-C3-8-C 版本同步与大版本切换锁定
+
+- 当前版本：v2.14.0
+- 完成内容：大版本替代事件、旧版本只读锁定、版本历史状态标签与后端写入保护。
+- 数据库变化：production_history 增加 version_state、superseded_by_version、superseded_at。
+- 测试结果：版本同步事件契约、类型检查、构建通过。
+- 风险说明：协作房间按 Production ID 复用，后端版本校验是写入最终防线。
+
 ## Phase 1：当前架构审计与长期升级规划
 
 ### 当前版本

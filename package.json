@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.13.23",
+  "version": "2.14.0",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -30,6 +30,7 @@
     "test:auth-socket-contract": "tsx tests/auth/socket-auth-contract.test.ts",
     "test:auth-socket-bridge": "tsx tests/auth/socket-auth-bridge.test.ts",
     "test:socket-production-gate": "tsx tests/auth/socket-production-gate.test.ts",
+    "test:production-version-sync": "tsx tests/workflow-production-version-sync.test.ts",
     "auth:production-preflight": "tsx scripts/auth-production-preflight.ts",
     "test:socket-coordinator": "tsx tests/auth/socket-coordinator.test.ts",
     "test:yjs-auth-recovery": "tsx tests/collaboration/yjs-auth-recovery.test.ts",

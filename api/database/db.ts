@@ -133,6 +133,9 @@ async function initTables() {
       change_type TEXT,
       comment TEXT,
       operator_id INTEGER,
+      version_state TEXT DEFAULT 'historical',
+      superseded_by_version TEXT,
+      superseded_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -1432,6 +1435,9 @@ async function initTables() {
   // production_history 表新增字段
   try { await db.execute(`ALTER TABLE production_history ADD COLUMN content_json TEXT`); } catch (e) {}
   try { await db.execute(`ALTER TABLE production_history ADD COLUMN content_markdown TEXT`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE production_history ADD COLUMN version_state TEXT DEFAULT 'historical'`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE production_history ADD COLUMN superseded_by_version TEXT`); } catch (e) {}
+  try { await db.execute(`ALTER TABLE production_history ADD COLUMN superseded_at DATETIME`); } catch (e) {}
 
   // topics 表新增字段
   try { await db.execute(`ALTER TABLE topics ADD COLUMN outline_json TEXT`); } catch (e) {}

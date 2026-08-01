@@ -14,7 +14,18 @@ export const COLLABORATION_EVENTS = {
   DOC_LOCKED: 'collaboration:doc-locked',
   DOC_UNLOCKED: 'collaboration:doc-unlocked',
   CONFLICT_DETECTED: 'collaboration:conflict-detected',
+  VERSION_SUPERSEDED: 'version:superseded',
 } as const;
+
+export interface VersionSupersededPayload {
+  productionId: number;
+  topicId: number;
+  fromVersion: string;
+  toVersion: string;
+  toVersionId: number;
+  createdBy: { id: number; name: string };
+  createdAt: string;
+}
 
 export type CollaborationDocType = 'production' | 'shooting';
 

@@ -5,7 +5,8 @@ import { requirePermission } from '../middleware/permissions';
 import { canEditProduction, canViewAllContent, canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, resolveCommentTopicScope } from '../utils/access';
 import { syncPublishedArchive } from '../services/publishedArchive';
 import { buildWorkflowRuntimeContext } from '@shared/workflow/workflow_runtime';
-import { broadcastToRoom } from '../utils/socket';
+import { broadcastToRoom, getSocketIO } from '../utils/socket';
+import { getCollaborationRoomId, COLLABORATION_EVENTS, type VersionSupersededPayload } from '../../src/collaboration/core/events.js';
 
 const router = express.Router();
 
@@ -422,6 +423,9 @@ router.put('/production/:id', authenticate, async (req, res) => {
     if (!canEditProduction(req.user, nextTopic)) return res.status(403).json({ message: '无权限关联到目标选题' });
 
     const currentVersion = String(existingProduction.version || version || 'v1.0');
+    if (version && String(version) !== currentVersion) {
+      return res.status(409).json({ message: `当前版本 ${version} 已被 ${currentVersion} 替代，请切换到最新版本后继续编辑`, code: 'PRODUCTION_VERSION_SUPERSEDED', currentVersion });
+    }
     const resolvedVersionAction: VersionAction =
       version_action === 'major' || version_action === 'minor' || version_action === 'none'
         ? version_action
@@ -444,7 +448,7 @@ router.put('/production/:id', authenticate, async (req, res) => {
 
     if (shouldCreateHistory) {
       await execute(
-        `INSERT INTO production_history (production_id, version, content, content_markdown, content_json, status, change_type, operator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO production_history (production_id, version, content, content_markdown, content_json, status, change_type, operator_id, version_state, superseded_by_version, superseded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           currentVersion,
@@ -454,6 +458,9 @@ router.put('/production/:id', authenticate, async (req, res) => {
           existingProduction.status,
           resolvedVersionAction === 'major' ? 'major' : 'minor',
           req.user?.id,
+          resolvedVersionAction === 'major' ? 'superseded' : 'historical',
+          null,
+          resolvedVersionAction === 'major' ? beijingNow() : null,
         ],
       );
     }
@@ -474,6 +481,10 @@ router.put('/production/:id', authenticate, async (req, res) => {
     const contentJson = req.body.contentJson || content;
     await execute(`UPDATE production SET topic_id = ?, version = ?, content = ?, content_markdown = ?, content_json = ?, status = ?, operator_id = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, id]);
 
+    if (resolvedVersionAction === 'major') {
+      await execute(`UPDATE production_history SET superseded_by_version = ? WHERE production_id = ? AND version = ? AND version_state = 'superseded'`, [newVersion, id, currentVersion]);
+    }
+
     if (resolvedVersionAction !== 'none') {
       await cleanupProductionHistoryToLatestMinor(id, newVersion);
     }
@@ -492,6 +503,13 @@ router.put('/production/:id', authenticate, async (req, res) => {
       }
     }
     broadcastToRoom('production', 'production:updated', { id: Number(req.params.id) });
+    if (resolvedVersionAction === 'major') {
+      const payload: VersionSupersededPayload = {
+        productionId: Number(id), topicId: Number(topic_id), fromVersion: currentVersion, toVersion: newVersion, toVersionId: Number(id),
+        createdBy: { id: Number(req.user?.id), name: String(req.user?.name || '协作者') }, createdAt: beijingNow(),
+      };
+      getSocketIO()?.to(getCollaborationRoomId('production', id)).emit(COLLABORATION_EVENTS.VERSION_SUPERSEDED, payload);
+    }
     res.json({ message: '创作记录更新成功', version: newVersion });
   } catch (error) {
     res.status(500).json({ message: '更新创作记录失败', error });
@@ -834,4 +852,3 @@ router.delete('/comments/:id', authenticate, requirePermission('comment:delete')
 });
 
 export default router;
-

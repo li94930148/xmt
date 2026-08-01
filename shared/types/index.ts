@@ -122,6 +122,9 @@ export interface ProductionHistory {
   operator_id: number;
   operator_name?: string;
   created_at: string;
+  version_state?: 'historical' | 'superseded';
+  superseded_by_version?: string;
+  superseded_at?: string;
 }
 
 export interface Comment {

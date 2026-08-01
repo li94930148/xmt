@@ -1472,3 +1472,41 @@
 1. 本阶段验证使用本地临时 Auth/Socket 测试服务器，不代表生产 Socket 已切换。
 2. 生产仍保持 legacy，Coordinator 开关和 v1 Socket 继续关闭。
 3. 下一阶段建议在 CI 固化 Chromium 版本与 Playwright 浏览器缓存，再进行 allowlist 用户的受控 Socket/Yjs 灰度。
+
+## Phase 2-C3-8-B1：正式 Login 双轨灰度准入设计与实施准备
+
+### 当前版本
+
+`v2.13.21`
+
+### 完成内容
+
+1. 新增 `docs/AUTH_LOGIN_ROLLOUT_POLICY.md`，冻结 disabled、legacy、allowlist、percentage 模式和审批、观察、回滚规则。
+2. 新增 `LoginRolloutPolicy`，提供统一入口前的纯准入决策；默认开关 `XMT_LOGIN_ROLLOUT_ENABLED=false`。
+3. 强制管理员/director 保持 legacy；percentage 必须额外审批，生产必须显式批准，未批准自动回 legacy。
+4. 新增 `tests/auth/login-rollout-policy.test.ts`，覆盖关闭、legacy、allowlist、管理员保护、非名单、percentage 和生产回滚。
+5. 未修改 `/api/auth/login`、legacy JWT、数据库、Socket/Yjs 或生产灰度配置。
+
+### 修改文件
+
+- `api/modules/auth/rollout/login-rollout-policy.ts`
+- `api/modules/auth/index.ts`
+- `tests/auth/login-rollout-policy.test.ts`
+- `.env.example`
+- `package.json`
+- `package-lock.json`
+- `docs/AUTH_LOGIN_ROLLOUT_POLICY.md`
+- `docs/*`
+
+### 数据库变化
+
+无。
+
+### 测试结果
+
+- Login Policy 专项测试通过；完整 Auth、Socket、Yjs、浏览器回归结果见提交前验证记录。
+
+### 风险与下一阶段
+
+1. Policy 尚未接入正式 `/api/auth/login`，生产行为保持 legacy。
+2. 下一阶段应先实现可观测 Login Gateway 适配层，并以专用普通账号 allowlist 做受控演练，禁止自动扩大和 percentage 默认开启。

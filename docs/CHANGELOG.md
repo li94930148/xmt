@@ -1,5 +1,32 @@
 # XMT 系统更新日志
 
+## v2.13.21 - 2026-08-01
+
+### 新增
+
+- 新增正式 Login 双轨灰度策略文档与 `LoginRolloutPolicy` 准入层。
+- 新增 `XMT_LOGIN_ROLLOUT_ENABLED`，默认关闭。
+
+### 优化
+
+- 明确 legacy 与 v1-web 并行、管理员保护、allowlist 优先和一键回滚边界。
+
+### 修复
+
+- 防止未审批的 percentage 模式或受保护角色进入 v1-web。
+
+### 技术升级
+
+- Login Policy 只负责决策，不改写 `/api/auth/login`、JWT、数据库或 Socket/Yjs 协议。
+
+### 数据库变化
+
+- 无数据库变化。
+
+### 测试情况
+
+- 新增 Login Rollout Policy 测试，覆盖关闭、legacy、allowlist、管理员保护、percentage 审批和生产回滚。
+
 ## v2.13.20 - 2026-08-01
 
 ### 新增

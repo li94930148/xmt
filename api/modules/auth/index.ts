@@ -51,6 +51,7 @@ export { AuthRolloutStatusService } from './rollout/auth-rollout.status.service.
 export { AuthRolloutAuditService } from './rollout/auth-rollout-audit.service.js';
 export { AuthRolloutRiskService } from './rollout/auth-rollout-risk.service.js';
 export { readAuthRolloutThresholdConfig } from './rollout/auth-rollout-threshold.config.js';
+export { LoginRolloutPolicy, createLoginRolloutPolicy, readLoginRolloutPolicyConfig } from './rollout/login-rollout-policy.js';
 export * from './events/index.js';
 export * from './metrics/index.js';
 export * from './socket/index.js';

@@ -1,5 +1,32 @@
 # XMT 系统更新日志
 
+## v2.13.22 - 2026-08-01
+
+### 新增
+
+- `/api/auth/login` 新增默认关闭的 Login Gateway 双轨准入能力。
+- 新增 Gateway 专项测试，覆盖关闭、legacy、allowlist、非名单、受保护角色和 v1 适配器不可用回退。
+
+### 优化
+
+- allowlist 命中的普通账号可由 Gateway 交给 v1-web 适配器；其余请求继续进入原 legacy Controller。
+
+### 修复
+
+- 防止 v1 适配器缺失或不符合准入条件时误切换认证路径。
+
+### 技术升级
+
+- Gateway 不重复登录、Session 创建、activity_log 或指标计数；legacy/v1 各自保留原有处理链。
+
+### 数据库变化
+
+- 无数据库变化。
+
+### 测试情况
+
+- Login Gateway、Auth、Rollout、Socket、Coordinator、Yjs 与浏览器恢复回归通过。
+
 ## v2.13.21 - 2026-08-01
 
 ### 新增

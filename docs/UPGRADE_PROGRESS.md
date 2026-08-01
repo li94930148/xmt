@@ -1510,3 +1510,44 @@
 
 1. Policy 尚未接入正式 `/api/auth/login`，生产行为保持 legacy。
 2. 下一阶段应先实现可观测 Login Gateway 适配层，并以专用普通账号 allowlist 做受控演练，禁止自动扩大和 percentage 默认开启。
+
+## Phase 2-C3-8-B2：Login Gateway 双轨接入与内部账号灰度准备
+
+### 当前版本
+
+`v2.13.22`
+
+### 完成内容
+
+1. 新增 `LoginGatewayController` 并接入 `POST /api/auth/login`。
+2. Gateway 仅做用户身份预查和 Policy 决策：开关关闭、非名单、admin/director 或 v1 adapter 不可用时，委托原 legacy Controller。
+3. allowlist 普通账号命中时，由 v1-web Controller 完成 Session、Refresh Cookie、CSRF、activity_log 和 v1-web 指标；Gateway 不重复计数。
+4. legacy 分支继续沿用原 Controller，因此 JWT payload、7 天有效期、中文错误、限流中间件和 activity_log 保持原样。
+5. 禁用 percentage 和自动名单扩大；生产默认开关关闭。
+6. 新增 Login Gateway 专项测试；既有真实 Chromium Auth/Socket/Yjs 浏览器回归继续通过。
+
+### 修改文件
+
+- `api/modules/auth/rollout/login-gateway.controller.ts`
+- `api/routes/auth.ts`
+- `api/modules/auth/index.ts`
+- `tests/auth/login-gateway.test.ts`
+- `package.json`
+- `package-lock.json`
+- `docs/*`
+
+### 数据库变化
+
+无。
+
+### 测试结果
+
+- `npm run version:check`：通过（v2.13.22）
+- `npm run test:login-gateway`：通过
+- Auth、Rollout、Socket、Coordinator、Yjs、浏览器恢复、类型检查和构建：通过
+
+### 风险与下一阶段
+
+1. 生产 Flag 默认关闭，生产不会进入 v1-web；本阶段不自动添加 allowlist。
+2. v1 分支依赖已有 v1 Auth Web 的 Origin、CSRF、Pepper 与审批配置；缺失 adapter 时安全回退 legacy。
+3. 下一阶段建议由已审批的专用 member 测试账号，在固定观察窗口内验证 `/api/auth/login` Gateway 的真实 Cookie、Socket/Yjs 闭环，再决定是否扩大名单。

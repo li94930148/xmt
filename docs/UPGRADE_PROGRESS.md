@@ -1334,3 +1334,48 @@
 2. Room 权限入口目前只做基础输入边界，未改变既有业务权限模型；下一阶段必须接入真实 owner/permission/scope 规则。
 3. 生产 Flag 默认关闭且 NODE_ENV=production 硬性关闭；正式用户和 Socket 行为未切换。
 4. 下一阶段建议实现 Socket Coordinator、Refresh 后重连、连接到期治理和 Yjs 恢复契约，继续保持灰度范围受控。
+
+## Phase 2-C3-7-C：Socket Coordinator + Yjs Recovery Bridge 实施
+
+### 当前版本
+
+`v2.13.18`
+
+### 完成内容
+
+1. 新增 `src/auth/socket/` Coordinator、状态模型和 HTTP Auth Runtime Token Provider；Socket 内部不执行 Refresh。
+2. 实现临期刷新、Access Token 写入 `socket.auth.token`、主动 disconnect/connect 重建 handshake，以及单飞 refresh 协调。
+3. 固定恢复顺序：Socket handshake → Room JOIN → Yjs 恢复 → Awareness → typing → lock。
+4. 新增 `YjsRecoveryBridge`，在重连期间冻结 outbound CRDT/awareness，保留同一 Y.Doc，并在服务端 SYNC 后恢复发送。
+5. Session revoke/logout 会使 Coordinator 进入 expired 并销毁 Socket；默认不接入现有 legacy `useSocket`，生产 Bridge 仍关闭。
+
+### 修改文件
+
+- `src/auth/socket/socket-state.ts`
+- `src/auth/socket/socket-token-provider.ts`
+- `src/auth/socket/socket-coordinator.ts`
+- `src/auth/socket/index.ts`
+- `src/collaboration/yjs/SocketYjsProvider.ts`
+- `tests/auth/socket-coordinator.test.ts`
+- `tests/collaboration/yjs-auth-recovery.test.ts`
+- `package.json`
+- `docs/*`
+
+### 数据库变化
+
+无。未新增或修改数据库、migration、Socket/Yjs wire event、CRDT 协议或生产配置。
+
+### 测试结果
+
+- `npm run version:check`：通过（v2.13.18）
+- `npm run test:socket-coordinator`：通过
+- `npm run test:yjs-auth-recovery`：通过
+- `npm run check`：通过
+- `npm run build`：通过
+- Auth/Socket/Yjs 范围 ESLint：通过
+
+### 风险与下一阶段
+
+1. Coordinator 尚未接入正式 Web 登录或现有 `useSocket`，不会改变生产默认连接。
+2. Yjs 恢复仍复用现有 JOIN/SYNC/AWARENESS 事件，没有引入 wire event 或 ACK 协议；正式灰度前需做真实浏览器最终一致验证。
+3. 下一阶段建议实施 Bridge Coordinator 的受控接入、连接过期服务端治理、logout/session revoke 主动断开和多标签协调，继续保持 allowlist 与可回滚。

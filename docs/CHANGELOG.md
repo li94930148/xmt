@@ -1,5 +1,32 @@
 # XMT 系统更新日志
 
+## v2.13.18 - 2026-08-01
+
+### 新增
+
+- 新增 Socket Coordinator，协调 Access Token 临期刷新、重新握手和受控重连。
+- 新增 Room 恢复顺序与 Yjs Recovery Bridge，保留同一 Y.Doc 并在同步完成前冻结发送。
+
+### 优化
+
+- 断线恢复按 JOIN、Yjs SYNC、Awareness、typing、lock 的固定顺序执行，重复加入保持幂等边界。
+
+### 修复
+
+- 避免 Socket 重连期间提前发送 CRDT/协作状态，降低恢复窗口内的状态竞争风险。
+
+### 技术升级
+
+- 增加 Socket Coordinator 状态机：idle、connecting、authenticated、refreshing、reconnecting、expired。
+
+### 数据库变化
+
+- 无数据库表、字段、索引或 migration 变化。
+
+### 测试情况
+
+- 新增 Coordinator 与 Yjs 恢复契约测试，结果见 `UPGRADE_PROGRESS.md`。
+
 ## v2.13.17 - 2026-08-01
 
 ### 新增

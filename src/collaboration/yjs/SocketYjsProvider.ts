@@ -46,6 +46,7 @@ export class SocketYjsProvider {
   private lastTypingAt = 0;
   private destroyed = false;
   private synced = false;
+  private frozenForReconnect = false;
   hasInitializedContent = false;
 
   constructor({ socket, roomId, user, onSynced }: SocketYjsProviderOptions) {
@@ -67,6 +68,21 @@ export class SocketYjsProvider {
 
   get hasSynced() {
     return this.synced;
+  }
+
+  /** Pause outbound CRDT/awareness traffic until a new server SYNC is applied. */
+  freezeForReconnect() {
+    if (this.destroyed) return;
+    this.frozenForReconnect = true;
+    this.synced = false;
+    if (this.updateFlushTimer) clearTimeout(this.updateFlushTimer);
+    if (this.awarenessFlushTimer) clearTimeout(this.awarenessFlushTimer);
+  }
+
+  /** Re-enable outbound traffic after the normal SYNC event. */
+  resumeAfterSync() {
+    if (this.destroyed) return;
+    this.frozenForReconnect = false;
   }
 
   applyInitialContentOnce(contentJson: Record<string, unknown>, schema: Schema) {
@@ -130,7 +146,7 @@ export class SocketYjsProvider {
 
     const flushUpdates = () => {
       this.updateFlushTimer = null;
-      if (this.destroyed || this.pendingUpdates.length === 0) return;
+      if (this.destroyed || this.frozenForReconnect || !this.synced || this.pendingUpdates.length === 0) return;
       const update = this.pendingUpdates.length === 1
         ? this.pendingUpdates[0]
         : Y.mergeUpdates(this.pendingUpdates);
@@ -154,6 +170,10 @@ export class SocketYjsProvider {
       applyRemoteUpdate(payload);
       if (!this.synced) {
         this.synced = true;
+        this.resumeAfterSync();
+        if (this.pendingUpdates.length > 0 && !this.updateFlushTimer) {
+          this.updateFlushTimer = setTimeout(flushUpdates, 0);
+        }
         if (!this.isEmpty) {
           this.hasInitializedContent = true;
         }
@@ -186,7 +206,7 @@ export class SocketYjsProvider {
 
     const flushAwareness = () => {
       this.awarenessFlushTimer = null;
-      if (this.destroyed || this.pendingAwarenessClients.size === 0) return;
+      if (this.destroyed || this.frozenForReconnect || !this.synced || this.pendingAwarenessClients.size === 0) return;
       if (Date.now() - this.lastActivityAt > 30000) {
         this.pendingAwarenessClients.clear();
         return;
@@ -204,6 +224,7 @@ export class SocketYjsProvider {
       if (this.destroyed) return;
       this.connect();
     };
+    const handleDisconnect = () => this.freezeForReconnect();
 
     const handleDocumentLocked = () => {
       this.setTyping(false);
@@ -221,6 +242,7 @@ export class SocketYjsProvider {
     this.socket.on(COLLABORATION_EVENTS.DOC_LOCKED, handleDocumentLocked);
     this.socket.on(COLLABORATION_EVENTS.CONFLICT_DETECTED, handleConflictDetected);
     this.socket.on('connect', handleReconnect);
+    this.socket.on('disconnect', handleDisconnect);
 
     this.unsubscribers.push(() => this.doc.off('update', sendUpdate));
     this.unsubscribers.push(() => this.awareness.off('update', sendAwarenessUpdate));
@@ -230,6 +252,7 @@ export class SocketYjsProvider {
     this.unsubscribers.push(() => this.socket.off(COLLABORATION_EVENTS.DOC_LOCKED, handleDocumentLocked));
     this.unsubscribers.push(() => this.socket.off(COLLABORATION_EVENTS.CONFLICT_DETECTED, handleConflictDetected));
     this.unsubscribers.push(() => this.socket.off('connect', handleReconnect));
+    this.unsubscribers.push(() => this.socket.off('disconnect', handleDisconnect));
   }
 
   private connect() {

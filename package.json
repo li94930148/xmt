@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.13.16",
+  "version": "2.13.17",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -25,6 +25,8 @@
     "test:auth-events": "tsx tests/auth/auth-event.test.ts",
     "test:auth-metrics-exporter": "tsx tests/auth/auth-metrics-exporter.test.ts",
     "test:auth-observability": "tsx tests/auth/auth-observability-integration.test.ts",
+    "test:auth-socket-contract": "tsx tests/auth/socket-auth-contract.test.ts",
+    "test:auth-socket-bridge": "tsx tests/auth/socket-auth-bridge.test.ts",
     "test:auth-rollout-governance": "tsx tests/auth/auth-rollout-governance.test.ts",
     "audit:time": "tsx scripts/audit-time-fields.ts",
     "server:dev": "nodemon",

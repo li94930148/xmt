@@ -53,3 +53,4 @@ export { AuthRolloutRiskService } from './rollout/auth-rollout-risk.service.js';
 export { readAuthRolloutThresholdConfig } from './rollout/auth-rollout-threshold.config.js';
 export * from './events/index.js';
 export * from './metrics/index.js';
+export * from './socket/index.js';

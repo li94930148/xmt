@@ -13,6 +13,7 @@ import {
 } from '../yjs/documentStore.js';
 import { logCollaborationEvent } from '../analytics/collaborationLogger.js';
 import { canEdit, getDocLock, isReadOnly, releaseLock, setDocLocked } from '../control/collaborationGuard.js';
+import { authorizeSocketRoomJoin } from '../../modules/auth/socket/socket-auth.service.js';
 
 type RuntimeUser = CollaborationUserPresence & {
   socketId: string;
@@ -58,8 +59,16 @@ export function joinRoom(io: Server, socket: Socket, payload: CollaborationRoomP
   const roomId = String(payload?.roomId || '');
   if (!roomId || !payload?.user?.id) return;
 
+  const auth = socket.data.auth as { userId?: number } | undefined;
+  const socketUser = socket.data.user as { id?: number; name?: string; role?: string } | undefined;
+  const authenticatedUserId = Number(auth?.userId ?? socketUser?.id ?? 0);
+  if (!authorizeSocketRoomJoin({ userId: authenticatedUserId, roomId })) return;
+
   const user: RuntimeUser = {
     ...payload.user,
+    id: authenticatedUserId,
+    name: socketUser?.name || payload.user.name,
+    role: socketUser?.role || payload.user.role,
     socketId: socket.id,
     lastSeen: Date.now(),
     typing: false,

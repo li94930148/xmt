@@ -1282,3 +1282,55 @@
 2. v1 Access Token 当前无法通过 legacy `payload.userId` 链路建立身份。
 3. Yjs 重连保留本地 Doc 并重发 JOIN，但待发送更新缺少应用级 ACK，必须以 CRDT 状态向量验证最终一致。
 4. 下一阶段建议只实现纯 Auth Bridge middleware、Context mapper 和临时数据库契约测试，feature flag 默认关闭；不要同时切换前端或生产 Socket。
+
+## Phase 2-C3-7-B：Socket Auth Bridge 基础设施实施
+
+### 当前版本
+
+`v2.13.17`。本阶段实现认证基础设施，Feature Flag 默认关闭，生产环境保持 legacy。
+
+### 完成内容
+
+1. 新增 `api/modules/auth/socket/`：types、Zod schema、mapper、service、middleware、errors。
+2. 实现 `SocketAuthContext`，只允许 userId/sessionId/tokenType/authMode/issuedAt/expiresAt；不含 Token、Refresh、Cookie、密码或 role snapshot。
+3. Bridge 关闭时走 legacy 分支；开启后按显式 mode 分支，legacy 使用旧 JWT，v1-web 使用 v1 Access Token + ACTIVE Session + enabled user。
+4. 严格禁止 v1→legacy 或 legacy→v1 fallback，避免 token confusion。
+5. 接入现有 Socket middleware，不重写 Socket 初始化、Room、消息、Heartbeat 或 Collaboration 事件。
+6. Collaboration JOIN 使用服务端认证身份覆盖客户端 userId/name/role，新增 `authorizeSocketRoomJoin()` 预留入口但不改变业务权限规则。
+7. 新增 legacy/v1、错误分支、Session revoked、disabled user、Feature Flag 和 no-fallback 测试。
+
+### 修改文件
+
+- `api/modules/auth/socket/*`
+- `api/modules/auth/index.ts`
+- `api/app.ts`
+- `api/collaboration/core/roomManager.ts`
+- `.env.example`
+- `tests/auth/socket-auth-contract.test.ts`
+- `tests/auth/socket-auth-bridge.test.ts`
+- `docs/*`
+- `package.json`
+- `package-lock.json`
+
+### 数据库变化
+
+无。未新增或修改表、字段、索引或 migration。
+
+### 测试结果
+
+- `npm run version:check`：通过（v2.13.17）
+- `npm run test:auth`：通过，legacy Auth 行为保持冻结
+- `npm run test:auth-socket-contract`：通过
+- `npm run test:auth-socket-bridge`：通过
+- `npm run test:auth-events`：通过
+- `npm run test:auth-rollout`：通过
+- `npm run check`：通过
+- `npm run build`：通过
+- Auth 范围 ESLint：通过
+
+### 风险与下一阶段
+
+1. Bridge 当前只提供认证上下文；长连接到期主动断开、Access Refresh 后重连和 Yjs state-vector 恢复尚未实施。
+2. Room 权限入口目前只做基础输入边界，未改变既有业务权限模型；下一阶段必须接入真实 owner/permission/scope 规则。
+3. 生产 Flag 默认关闭且 NODE_ENV=production 硬性关闭；正式用户和 Socket 行为未切换。
+4. 下一阶段建议实现 Socket Coordinator、Refresh 后重连、连接到期治理和 Yjs 恢复契约，继续保持灰度范围受控。

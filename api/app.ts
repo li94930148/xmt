@@ -17,6 +17,7 @@ import { Server } from 'socket.io'
 import { initDatabase, closeDatabase } from './database/db.js'
 import { queryOne } from './database/utils.js'
 import { verifyToken } from './utils/jwt.js'
+import { verifyAccessTokenV1 } from './modules/auth/token.service.js'
 import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/socket.js'
 import { apiLimiter } from './middleware/rateLimit.js'
 import { parseTrustProxy } from './utils/trustProxy.js'
@@ -79,6 +80,13 @@ import {
 } from './collaboration/core/roomManager.js'
 import { autoSnapshot } from './collaboration/recovery/documentSnapshot.js'
 import { cleanupInactiveRooms } from './collaboration/yjs/documentStore.js'
+import { SessionService } from './modules/auth/session/session.service.js'
+import { SqliteSessionRepository } from './modules/auth/session/session.sqlite-repository.js'
+import {
+  SocketAuthService,
+  createSocketAuthMiddleware,
+  readSocketAuthBridgeEnabled,
+} from './modules/auth/socket/index.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -211,6 +219,26 @@ export const io = new Server(server, {
   allowRequest: (req, callback) => {
     callback(null, isAllowedRequestOrigin(req.headers.origin, req.headers.host))
   },
+})
+
+const socketAuthService = new SocketAuthService({
+  verifyLegacyToken: verifyToken,
+  verifyAccessTokenV1,
+  findUserById: async (userId) => {
+    const record = await queryOne<Record<string, unknown>>(
+      'SELECT id, username, role, name, enabled FROM users WHERE id = ?',
+      [userId],
+    )
+    if (!record) return null
+    return {
+      id: Number(record.id),
+      username: String(record.username),
+      role: String(record.role),
+      name: String(record.name),
+      enabled: Number(record.enabled),
+    }
+  },
+  sessionService: new SessionService({ repository: new SqliteSessionRepository() }),
 })
 
 type SocketHandshakeLike = {
@@ -414,51 +442,10 @@ app.use((req: Request, res: Response) => {
 
 setSocketIO(io)
 
-io.use(async (socket, next) => {
-  try {
-    const token =
-      typeof socket.handshake.auth?.token === 'string'
-        ? socket.handshake.auth.token
-        : typeof socket.handshake.headers.authorization === 'string'
-          ? socket.handshake.headers.authorization.replace(/^Bearer\s+/i, '')
-          : null
-
-    if (!token) {
-      logSocketAuthFailed('missing_token', socket)
-      return next(new Error('Authentication required'))
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      logSocketAuthFailed('invalid_token', socket)
-      return next(new Error('Invalid token'))
-    }
-
-    const user = await queryOne(`SELECT id, username, role, name, enabled FROM users WHERE id = ?`, [payload.userId])
-    if (!user) {
-      logSocketAuthFailed('invalid_token', socket)
-      return next(new Error('User not found'))
-    }
-
-    const record = user as Record<string, unknown>
-    if (Number(record.enabled) !== 1) {
-      logSocketAuthFailed('user_disabled', socket)
-      return next(new Error('User disabled'))
-    }
-
-    socket.data.user = {
-      id: Number(record.id),
-      username: String(record.username),
-      role: String(record.role),
-      name: String(record.name),
-    }
-
-    next()
-  } catch {
-    logSocketAuthFailed('auth_exception', socket)
-    next(new Error('Authentication failed'))
-  }
-})
+io.use(createSocketAuthMiddleware(socketAuthService, {
+  enabled: readSocketAuthBridgeEnabled(),
+  onFailure: (reason, socket) => logSocketAuthFailed(reason, socket),
+}))
 
 io.on('connection', (socket) => {
   const socketUser = socket.data.user as { id: number; role: string } | undefined

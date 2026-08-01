@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.17 - 2026-08-01
+
+- 新增 Socket Auth Bridge 模块与 SocketAuthContext Zod 契约。
+- 增加 legacy/v1-web 显式认证分支，严格禁止跨模式 fallback。
+- Collaboration JOIN 改为使用服务端认证身份覆盖客户端展示身份；预留 Room 权限入口。
+- Feature Flag 默认关闭，生产环境硬性保持关闭；Yjs 协议、正式 Login、数据库不变。
+
 ## 2.13.16 - 2026-07-31
 
 - 完成 Socket/Yjs 当前认证链路审计与 Auth Bridge 设计。

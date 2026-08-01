@@ -1,5 +1,32 @@
 # XMT 系统更新日志
 
+## v2.13.17 - 2026-08-01
+
+### 新增
+
+- 新增 Socket Auth Bridge 基础模块，支持旧认证和新 Web 会话认证的独立校验路径。
+- 新增 Socket Auth 契约与 Bridge 专项测试。
+
+### 优化
+
+- 协作加入房间时以服务端登录身份为准，避免客户端伪造展示身份。
+
+### 修复
+
+- 修复协作 presence 身份未与 Socket 认证身份绑定的基础风险。
+
+### 技术升级
+
+- 增加默认关闭的 Socket Bridge 开关和 Session ACTIVE 校验。
+
+### 数据库变化
+
+- 无数据库表、字段、索引或 migration 变化。
+
+### 测试情况
+
+- `test:auth-socket-contract` 与 `test:auth-socket-bridge` 通过，完整结果见 `UPGRADE_PROGRESS.md`。
+
 ## v2.13.16 - 2026-07-31
 
 ### 新增

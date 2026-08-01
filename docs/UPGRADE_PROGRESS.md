@@ -1551,3 +1551,30 @@
 1. 生产 Flag 默认关闭，生产不会进入 v1-web；本阶段不自动添加 allowlist。
 2. v1 分支依赖已有 v1 Auth Web 的 Origin、CSRF、Pepper 与审批配置；缺失 adapter 时安全回退 legacy。
 3. 下一阶段建议由已审批的专用 member 测试账号，在固定观察窗口内验证 `/api/auth/login` Gateway 的真实 Cookie、Socket/Yjs 闭环，再决定是否扩大名单。
+
+## Phase 2-C3-8-B3：Production Socket Bridge Controlled Enablement
+
+### 当前版本
+
+`v2.13.23`
+
+### 完成内容
+
+1. 生产 Socket Bridge 从环境硬关闭改为三重门禁：Bridge 开关、独立审批开关、Login allowlist 普通账号。
+2. 非名单、admin、director、未审批、禁用 Bridge 或非 allowlist 模式均保留 legacy；v1 Token 不降级为 legacy JWT。
+3. `/api/v1/auth-rollout/status` 增加 Socket Bridge 开启、审批、候选名单数量和当前模式。
+4. 新增 `auth:production-preflight`，只读检查版本、commit、SQLite、备份、Rollout 与 Socket Bridge。
+5. 新增生产 Gate 测试和生产门禁运行文档。
+
+### 数据库变化
+
+无。
+
+### 测试结果
+
+- `test:socket-production-gate` 通过；完整 Auth、Socket、Yjs、类型与构建结果见提交前验证。
+
+### 风险与下一阶段
+
+1. 代码只提供受控开启能力；生产变量仍默认关闭，未创建/启用测试账号，未扩大用户范围。
+2. 真实生产灰度前必须确认 v2.13.23 部署、备份、审批、专用 member 账号和观察窗口。

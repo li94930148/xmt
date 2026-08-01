@@ -17,6 +17,7 @@ export type LoginRolloutPolicyConfig = {
   percentageApproved: boolean;
   adminProtected: boolean;
   rollout: AuthRolloutService;
+  allowlistedUserIds: ReadonlySet<number>;
 };
 
 export function readLoginRolloutPolicyConfig(env: NodeJS.ProcessEnv = process.env): LoginRolloutPolicyConfig {
@@ -29,6 +30,7 @@ export function readLoginRolloutPolicyConfig(env: NodeJS.ProcessEnv = process.en
     percentageApproved: env.XMT_LOGIN_ROLLOUT_PERCENTAGE_APPROVED === 'true',
     adminProtected: env.XMT_LOGIN_ROLLOUT_ADMIN_PROTECTED !== 'false',
     rollout: new AuthRolloutService(rollout),
+    allowlistedUserIds: rollout.allowlistedUserIds,
   };
 }
 

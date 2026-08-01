@@ -85,6 +85,7 @@ import { SqliteSessionRepository } from './modules/auth/session/session.sqlite-r
 import {
   SocketAuthService,
   createSocketAuthMiddleware,
+  isSocketV1EligibleUser,
   readSocketAuthBridgeEnabled,
 } from './modules/auth/socket/index.js'
 
@@ -444,6 +445,7 @@ setSocketIO(io)
 
 io.use(createSocketAuthMiddleware(socketAuthService, {
   enabled: readSocketAuthBridgeEnabled(),
+  isV1EligibleUser: (user) => isSocketV1EligibleUser(user),
   onFailure: (reason, socket) => logSocketAuthFailed(reason, socket),
 }))
 

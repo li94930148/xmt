@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { sendV1Error, sendV1Success } from '../../../utils/response.js';
 import { authRolloutStatusQuerySchema } from '../../../../shared/schema/auth-rollout.schema.js';
+import { readSocketProductionBridgeGate } from '../socket/socket-production-gate.js';
 import {
   authMetricsService,
   authEventService,
@@ -32,6 +33,7 @@ export class AuthRolloutController {
     const risk = authRolloutRiskService.evaluate();
     return sendV1Success(req, res, {
       rollout: authRolloutStatusService.current(),
+      socketBridge: readSocketProductionBridgeGate(),
       diagnostic: {
         userId,
         ...authRolloutStatusService.diagnose({ id: userId }),

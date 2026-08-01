@@ -1,4 +1,10 @@
-export type AuthRolloutMode = 'disabled' | 'legacy' | 'internal' | 'allowlist' | 'percentage';
+import {
+  parseAuthRolloutUserIds,
+  resolveAuthRolloutRuntimeConfig,
+  type AuthRolloutMode,
+} from '../../../config/auth-rollout-runtime.js';
+
+export type { AuthRolloutMode } from '../../../config/auth-rollout-runtime.js';
 
 export type AuthRolloutConfig = {
   mode: AuthRolloutMode;
@@ -9,47 +15,18 @@ export type AuthRolloutConfig = {
   hashSalt: string;
 };
 
-const MODES = new Set<AuthRolloutMode>(['disabled', 'legacy', 'internal', 'allowlist', 'percentage']);
-
-export function parseAuthRolloutUserIds(value: string | undefined): ReadonlySet<number> {
-  const ids = new Set<number>();
-  for (const item of value?.split(',') ?? []) {
-    const id = Number(item.trim());
-    if (Number.isSafeInteger(id) && id > 0) ids.add(id);
-  }
-  return ids;
-}
-
-function parsePercentage(value: string | undefined): number {
-  const percentage = Number(value);
-  if (!Number.isFinite(percentage)) return 0;
-  return Math.min(100, Math.max(0, percentage));
-}
-
-function legacyCompatibleMode(env: NodeJS.ProcessEnv): AuthRolloutMode {
-  return env.XMT_AUTH_V1_ENABLED === 'true' && env.XMT_AUTH_WEB_ENABLED === 'true'
-    ? 'allowlist'
-    : 'legacy';
-}
+export { parseAuthRolloutUserIds };
 
 export function readAuthRolloutConfig(env: NodeJS.ProcessEnv = process.env): AuthRolloutConfig {
-  const requested = env.XMT_AUTH_ROLLOUT_MODE?.trim().toLowerCase() as AuthRolloutMode | undefined;
-  let mode = requested && MODES.has(requested) ? requested : legacyCompatibleMode(env);
-  const productionApproved = env.XMT_AUTH_ROLLOUT_APPROVED === 'true';
-  if (
-    env.NODE_ENV === 'production'
-    && mode !== 'disabled'
-    && mode !== 'legacy'
-    && (!productionApproved || mode !== 'allowlist')
-  ) mode = 'legacy';
+  const runtime = resolveAuthRolloutRuntimeConfig(env);
 
   return {
-    mode,
-    productionApproved,
-    allowlistedUserIds: parseAuthRolloutUserIds(env.XMT_AUTH_WEB_ALLOWLIST_USER_IDS),
-    internalUserIds: parseAuthRolloutUserIds(env.XMT_AUTH_ROLLOUT_INTERNAL_USER_IDS),
-    percentage: parsePercentage(env.XMT_AUTH_ROLLOUT_PERCENTAGE),
-    hashSalt: env.XMT_AUTH_ROLLOUT_HASH_SALT?.trim() || 'xmt-auth-rollout-v1',
+    mode: runtime.rolloutMode,
+    productionApproved: runtime.productionApproved,
+    allowlistedUserIds: runtime.allowlistedUserIds,
+    internalUserIds: runtime.internalUserIds,
+    percentage: runtime.percentage,
+    hashSalt: runtime.hashSalt,
   };
 }
 

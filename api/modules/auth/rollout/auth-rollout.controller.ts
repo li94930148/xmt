@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { sendV1Error, sendV1Success } from '../../../utils/response.js';
 import { authRolloutStatusQuerySchema } from '../../../../shared/schema/auth-rollout.schema.js';
 import { readSocketProductionBridgeGate } from '../socket/socket-production-gate.js';
+import { authRolloutRuntimeDiagnostics } from '../../../config/auth-rollout-runtime.js';
 import {
   authMetricsService,
   authEventService,
@@ -34,6 +35,7 @@ export class AuthRolloutController {
     return sendV1Success(req, res, {
       rollout: authRolloutStatusService.current(),
       socketBridge: readSocketProductionBridgeGate(),
+      runtime: authRolloutRuntimeDiagnostics(),
       diagnostic: {
         userId,
         ...authRolloutStatusService.diagnose({ id: userId }),

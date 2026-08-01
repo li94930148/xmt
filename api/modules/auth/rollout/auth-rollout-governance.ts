@@ -1,11 +1,18 @@
 import { authEventService, authMetricsRegistry, authMetricsService } from '../events/index.js';
-import { readAuthRolloutConfig } from './auth-rollout.config.js';
+import { authRolloutRuntimeConfig } from '../../../config/auth-rollout-runtime.js';
 import { AuthRolloutAuditService } from './auth-rollout-audit.service.js';
 import { AuthRolloutRiskService } from './auth-rollout-risk.service.js';
 import { AuthRolloutStatusService } from './auth-rollout.status.service.js';
 import { readAuthRolloutThresholdConfig } from './auth-rollout-threshold.config.js';
 
-const rolloutConfig = readAuthRolloutConfig();
+const rolloutConfig = {
+  mode: authRolloutRuntimeConfig.rolloutMode,
+  productionApproved: authRolloutRuntimeConfig.productionApproved,
+  allowlistedUserIds: authRolloutRuntimeConfig.allowlistedUserIds,
+  internalUserIds: authRolloutRuntimeConfig.internalUserIds,
+  percentage: authRolloutRuntimeConfig.percentage,
+  hashSalt: authRolloutRuntimeConfig.hashSalt,
+};
 const thresholds = readAuthRolloutThresholdConfig();
 
 export const authRolloutStatusService = new AuthRolloutStatusService(rolloutConfig);

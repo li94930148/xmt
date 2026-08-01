@@ -29,6 +29,17 @@ const aggregateSchema = z.object({
 }).strict();
 
 export const authRolloutStatusDataSchema = z.object({
+  runtime: z.object({
+    effectiveConfigSource: z.literal('pm2_process_env'),
+    effectiveAuthV1Enabled: z.boolean(),
+    effectiveAuthWebEnabled: z.boolean(),
+    effectiveLoginRolloutEnabled: z.boolean(),
+    effectiveRolloutMode: authRolloutModeSchema,
+    effectiveSocketBridgeEnabled: z.boolean(),
+    allowlistCount: z.number().int().nonnegative(),
+    processId: z.number().int().positive(),
+    loadedAt: z.string(),
+  }).strict(),
   rollout: z.object({
     mode: authRolloutModeSchema,
     enabled: z.boolean(),

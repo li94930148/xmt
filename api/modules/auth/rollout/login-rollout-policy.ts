@@ -1,5 +1,6 @@
 import { readAuthRolloutConfig, type AuthRolloutMode } from './auth-rollout.config.js';
 import { AuthRolloutService } from './auth-rollout.service.js';
+import { resolveAuthRolloutRuntimeConfig } from '../../../config/auth-rollout-runtime.js';
 
 export type LoginRolloutDecision = {
   mode: 'legacy' | 'v1-web';
@@ -21,14 +22,15 @@ export type LoginRolloutPolicyConfig = {
 };
 
 export function readLoginRolloutPolicyConfig(env: NodeJS.ProcessEnv = process.env): LoginRolloutPolicyConfig {
+  const runtime = resolveAuthRolloutRuntimeConfig(env);
   const rollout = readAuthRolloutConfig(env);
   return {
     environment: env.NODE_ENV,
-    enabled: env.XMT_LOGIN_ROLLOUT_ENABLED === 'true',
-    mode: rollout.mode,
+    enabled: runtime.loginRolloutEnabled,
+    mode: runtime.rolloutMode,
     productionApproved: rollout.productionApproved,
-    percentageApproved: env.XMT_LOGIN_ROLLOUT_PERCENTAGE_APPROVED === 'true',
-    adminProtected: env.XMT_LOGIN_ROLLOUT_ADMIN_PROTECTED !== 'false',
+    percentageApproved: runtime.percentageApproved,
+    adminProtected: runtime.adminProtected,
     rollout: new AuthRolloutService(rollout),
     allowlistedUserIds: rollout.allowlistedUserIds,
   };

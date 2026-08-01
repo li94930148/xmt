@@ -1,4 +1,5 @@
 import { createLoginRolloutPolicy, readLoginRolloutPolicyConfig } from '../rollout/login-rollout-policy.js';
+import { resolveAuthRolloutRuntimeConfig } from '../../../config/auth-rollout-runtime.js';
 
 export type SocketBridgeGateStatus = {
   socketBridgeEnabled: boolean;
@@ -8,9 +9,10 @@ export type SocketBridgeGateStatus = {
 };
 
 export function readSocketProductionBridgeGate(env: NodeJS.ProcessEnv = process.env): SocketBridgeGateStatus {
+  const runtime = resolveAuthRolloutRuntimeConfig(env);
   const loginPolicy = readLoginRolloutPolicyConfig(env);
-  const socketBridgeEnabled = env.XMT_SOCKET_AUTH_BRIDGE_ENABLED === 'true';
-  const socketBridgeApproval = env.XMT_SOCKET_BRIDGE_APPROVED === 'true';
+  const socketBridgeEnabled = runtime.socketBridgeEnabled;
+  const socketBridgeApproval = runtime.socketBridgeApproval;
   if (env.NODE_ENV !== 'production') {
     return {
       socketBridgeEnabled,

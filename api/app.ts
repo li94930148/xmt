@@ -32,6 +32,7 @@ import { authMetricsPrometheusExporter } from './modules/auth/events/index.js'
 import { createAuthMetricsHttpRouter, readAuthMetricsHttpConfig } from './modules/auth/metrics/index.js'
 import { openApiRouter } from './openapi.js'
 import { requestId } from './middleware/request-id.js'
+import { authRolloutRuntimeReadiness } from './config/auth-rollout-runtime.js'
 import { sendV1Error } from './utils/response.js'
 import usersRoutes from './routes/users.js'
 import messagesRoutes from './routes/messages.js'
@@ -296,6 +297,13 @@ app.use(requestId)
 app.use('/api', cors(corsOptions))
 app.use(express.json({ limit: '16mb', verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
 app.use(express.urlencoded({ extended: true, limit: '16mb' }))
+app.get('/internal/auth-rollout/runtime', (req, res) => {
+  const address = req.socket.remoteAddress || ''
+  const loopback = address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+  if (!loopback) return res.status(404).end()
+  res.setHeader('Cache-Control', 'no-store')
+  return res.json({ runtime: authRolloutRuntimeReadiness() })
+})
 app.use('/internal/metrics/auth', createAuthMetricsHttpRouter(
   authMetricsPrometheusExporter,
   readAuthMetricsHttpConfig(),

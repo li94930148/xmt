@@ -7,12 +7,12 @@ import { SqliteSessionRepository } from '../session/session.sqlite-repository.js
 import { readAuthWebConfig, type AuthWebConfig } from '../web/auth-web.config.js';
 import { SqliteAuthWebLoginRepository } from '../web/auth-web-login.sqlite-repository.js';
 import { CsrfService } from '../web/csrf.service.js';
-import { readAuthRolloutConfig } from '../rollout/auth-rollout.config.js';
 import { AuthRolloutService } from '../rollout/auth-rollout.service.js';
 import { authMetricsService } from '../events/index.js';
 import { AuthV1Controller } from './auth.v1.controller.js';
 import { createAuthV1Router } from './auth.v1.routes.js';
 import { AuthV1Service } from './auth.v1.service.js';
+import { resolveAuthRolloutRuntimeConfig } from '../../../config/auth-rollout-runtime.js';
 
 export function createAuthV1Module(
   refreshTokenPepper: string,
@@ -65,12 +65,7 @@ export function createAuthV1Module(
 }
 
 export function isAuthV1Enabled(env: NodeJS.ProcessEnv = process.env) {
-  const rollout = readAuthRolloutConfig(env);
-  if (env.NODE_ENV === 'production') {
-    return rollout.productionApproved && rollout.mode === 'allowlist';
-  }
-  return env.XMT_AUTH_V1_ENABLED === 'true'
-    || (rollout.mode !== 'disabled' && rollout.mode !== 'legacy');
+  return resolveAuthRolloutRuntimeConfig(env).authV1Enabled;
 }
 
 export { AuthV1Controller } from './auth.v1.controller.js';

@@ -1429,3 +1429,46 @@
 1. Coordinator 接入仍由前端开关控制，生产默认关闭；正式 Web 用户和 legacy Socket 未切换。
 2. 服务端生命周期辅助函数已提供，但本阶段未将撤销事件全量接入业务流程。
 3. 下一阶段建议在具备可运行 Playwright 浏览器的 CI/验收机上完成真实 Socket/Yjs 端到端验证，再考虑 allowlist 灰度。
+
+## Phase 2-C3-8-A：Auth + Socket + Yjs 真实浏览器闭环验证
+
+### 当前版本
+
+`v2.13.20`
+
+### 完成内容
+
+1. 诊断并修复 Playwright 浏览器环境：Playwright 1.60 期望缓存版本与本机缓存不一致，测试改为选择实际可用的 Chromium for Testing。
+2. 修复浏览器测试使用 `about:blank` 导致 BroadcastChannel 跨标签不互通的问题，改用同源本地 HTTP fixture。
+3. 新增 `tests/browser/auth-socket-yjs-e2e.spec.ts`，真实验证 v1-web 登录、HttpOnly Refresh Cookie、页面刷新恢复、Socket 重握手、Room JOIN、Yjs state vector、Awareness、Lock 和 Logout 同步。
+4. 通过真实 Playwright 双页面验证：Access Token 仅在内存，Refresh 后 Socket 重连并恢复 Room/Yjs，多标签只传播 logout 状态信号。
+
+### 修改文件
+
+- `tests/browser/auth-socket-yjs-e2e.spec.ts`
+- `tests/browser/socket-auth-recovery.spec.ts`
+- `package.json`
+- `package-lock.json`
+- `docs/*`
+
+### 数据库变化
+
+无。未修改数据库、正式 Login、Yjs wire event 或生产配置。
+
+### 测试结果
+
+- `npm run version:check`：通过（v2.13.20）
+- `npm run test:auth`：通过
+- `npm run test:auth-socket-bridge`：通过
+- `npm run test:socket-coordinator`：通过
+- `npm run test:yjs-auth-recovery`：通过
+- `npm run test:browser-auth-recovery`：通过
+- `npm run test:auth-socket-yjs-e2e`：通过（真实 Chromium）
+- `npm run check`：通过
+- `npm run build`：通过
+
+### 风险与下一阶段
+
+1. 本阶段验证使用本地临时 Auth/Socket 测试服务器，不代表生产 Socket 已切换。
+2. 生产仍保持 legacy，Coordinator 开关和 v1 Socket 继续关闭。
+3. 下一阶段建议在 CI 固化 Chromium 版本与 Playwright 浏览器缓存，再进行 allowlist 用户的受控 Socket/Yjs 灰度。

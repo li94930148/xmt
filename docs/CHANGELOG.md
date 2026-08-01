@@ -1,5 +1,32 @@
 # XMT 系统更新日志
 
+## v2.13.20 - 2026-08-01
+
+### 新增
+
+- 恢复本地 Playwright Chromium 执行环境，新增真实浏览器 Auth → Socket → Room → Yjs 闭环测试。
+- 覆盖 Cookie 恢复、页面刷新、Socket 重握手、Room/Yjs 状态恢复和多标签 logout 同步。
+
+### 优化
+
+- 浏览器测试自动使用本机实际缓存的 Chromium 版本，避免 Playwright 版本与缓存版本不一致。
+
+### 修复
+
+- 修复多标签浏览器测试使用 opaque `about:blank` 页面导致 BroadcastChannel 无法互通的问题。
+
+### 技术升级
+
+- 增加真实 Socket.IO 测试服务器与浏览器端 Refresh/重连验证夹具。
+
+### 数据库变化
+
+- 无数据库变化。
+
+### 测试情况
+
+- Playwright 真实浏览器闭环、浏览器恢复回归、Auth/Socket/Yjs 测试均通过。
+
 ## v2.13.19 - 2026-08-01
 
 ### 新增

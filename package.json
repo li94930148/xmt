@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.13.19",
+  "version": "2.13.20",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -30,6 +30,7 @@
     "test:socket-coordinator": "tsx tests/auth/socket-coordinator.test.ts",
     "test:yjs-auth-recovery": "tsx tests/collaboration/yjs-auth-recovery.test.ts",
     "test:browser-auth-recovery": "tsx tests/browser/socket-auth-recovery.spec.ts",
+    "test:auth-socket-yjs-e2e": "tsx tests/browser/auth-socket-yjs-e2e.spec.ts",
     "test:auth-rollout-governance": "tsx tests/auth/auth-rollout-governance.test.ts",
     "audit:time": "tsx scripts/audit-time-fields.ts",
     "server:dev": "nodemon",

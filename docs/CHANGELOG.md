@@ -1,5 +1,34 @@
 # XMT 系统更新日志
 
+## v2.13.19 - 2026-08-01
+
+### 新增
+
+- 新增 `XMT_SOCKET_COORDINATOR_ENABLED` 前端受控开关，默认关闭。
+- 新增 BroadcastChannel 多标签认证信号，只广播状态事件，不广播任何 Token。
+- 新增浏览器 Socket Auth Recovery 契约测试。
+
+### 优化
+
+- Coordinator 可在 Auth Runtime 提供时接管 Socket 创建、Token 临期刷新和重连。
+- 增加标准生命周期原因：`AUTH_EXPIRED`、`SESSION_REVOKED`、`USER_DISABLED`。
+
+### 修复
+
+- 避免多标签间传递 Access Token 或 Refresh Token。
+
+### 技术升级
+
+- 受控开关关闭时继续使用现有 legacy Socket 创建逻辑。
+
+### 数据库变化
+
+- 无数据库变化。
+
+### 测试情况
+
+- Coordinator、Yjs 恢复、Auth 回归和类型构建通过；Playwright 浏览器执行受本机浏览器运行环境限制时明确跳过并记录。
+
 ## v2.13.18 - 2026-08-01
 
 ### 新增

@@ -1,5 +1,5 @@
 import type { Socket } from 'socket.io';
-import { SocketAuthError } from './socket-auth.errors.js';
+import { SocketAuthError, type SocketAuthLifecycleReason } from './socket-auth.errors.js';
 import { SocketAuthService } from './socket-auth.service.js';
 
 type SocketLike = Socket & { data: Record<string, unknown> };
@@ -48,4 +48,9 @@ export function createSocketAuthMiddleware(
       return next(new Error(authError.message));
     }
   };
+}
+
+export function emitSocketAuthLifecycle(socket: Socket, reason: SocketAuthLifecycleReason): void {
+  socket.emit('auth:lifecycle', { reason });
+  socket.disconnect(true);
 }

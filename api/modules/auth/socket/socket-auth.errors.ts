@@ -8,6 +8,14 @@ export type SocketAuthErrorCode =
   | 'IDENTITY_MISMATCH'
   | 'HANDSHAKE_INVALID';
 
+export const SOCKET_AUTH_LIFECYCLE_REASONS = {
+  AUTH_EXPIRED: 'AUTH_EXPIRED',
+  SESSION_REVOKED: 'SESSION_REVOKED',
+  USER_DISABLED: 'USER_DISABLED',
+} as const;
+
+export type SocketAuthLifecycleReason = keyof typeof SOCKET_AUTH_LIFECYCLE_REASONS;
+
 export class SocketAuthError extends Error {
   constructor(
     readonly code: SocketAuthErrorCode,

@@ -1379,3 +1379,53 @@
 1. Coordinator 尚未接入正式 Web 登录或现有 `useSocket`，不会改变生产默认连接。
 2. Yjs 恢复仍复用现有 JOIN/SYNC/AWARENESS 事件，没有引入 wire event 或 ACK 协议；正式灰度前需做真实浏览器最终一致验证。
 3. 下一阶段建议实施 Bridge Coordinator 的受控接入、连接过期服务端治理、logout/session revoke 主动断开和多标签协调，继续保持 allowlist 与可回滚。
+
+## Phase 2-C3-7-D：Socket Coordinator 受控接入与真实浏览器一致性验证
+
+### 当前版本
+
+`v2.13.19`
+
+### 完成内容
+
+1. 新增 `VITE_XMT_SOCKET_COORDINATOR_ENABLED`，默认 `false`；关闭时完全保留现有 Socket 创建逻辑。
+2. 开启且存在 Auth Runtime 时，使用 Runtime Token Provider → Socket Coordinator → Socket.IO；Coordinator 负责临期刷新、更新 handshake token 与重连。
+3. 新增 BroadcastChannel 状态信号：`auth_changed`、`token_refreshed`、`logout`，严禁传递 Access/Refresh Token。
+4. 新增标准生命周期原因常量和服务端 `auth:lifecycle` 关闭辅助能力：`AUTH_EXPIRED`、`SESSION_REVOKED`、`USER_DISABLED`。
+5. 新增 Playwright 浏览器恢复契约，覆盖双标签信号、断线冻结、恢复同步与 logout 同步；本机 Playwright Chrome 无法启动时测试明确跳过并保留原因。
+
+### 修改文件
+
+- `src/auth/socket/socket-tab-coordinator.ts`
+- `src/auth/socket/socket-coordinator.ts`
+- `src/auth/socket/index.ts`
+- `src/hooks/useSocket.ts`
+- `api/modules/auth/socket/socket-auth.errors.ts`
+- `api/modules/auth/socket/socket-auth.middleware.ts`
+- `.env.example`
+- `tests/browser/socket-auth-recovery.spec.ts`
+- `tests/auth/socket-tab-coordinator.test.ts`
+- `package.json`
+- `package-lock.json`
+- `docs/*`
+
+### 数据库变化
+
+无。未修改数据库、Yjs wire event、CRDT 协议或 legacy 登录行为。
+
+### 测试结果
+
+- `npm run version:check`：通过（v2.13.19）
+- `npm run test:auth`：通过
+- `npm run test:auth-socket-bridge`：通过
+- `npm run test:socket-coordinator`：通过
+- `npm run test:yjs-auth-recovery`：通过
+- `npm run test:browser-auth-recovery`：浏览器运行环境不可启动，已安全跳过并记录，不伪造通过结果
+- `npm run check`：通过
+- `npm run build`：待最终提交前复跑
+
+### 风险与下一阶段
+
+1. Coordinator 接入仍由前端开关控制，生产默认关闭；正式 Web 用户和 legacy Socket 未切换。
+2. 服务端生命周期辅助函数已提供，但本阶段未将撤销事件全量接入业务流程。
+3. 下一阶段建议在具备可运行 Playwright 浏览器的 CI/验收机上完成真实 Socket/Yjs 端到端验证，再考虑 allowlist 灰度。

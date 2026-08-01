@@ -3,7 +3,7 @@ import { initialSocketCoordinatorState } from './socket-state';
 import type { SocketToken, SocketTokenProvider } from './socket-token-provider';
 
 type SocketLike = {
-  auth: Record<string, unknown>;
+  auth: Record<string, unknown> | ((callback: (data: object) => void) => void);
   connected: boolean;
   connect: () => unknown;
   disconnect: () => unknown;
@@ -57,6 +57,10 @@ export class SocketCoordinator {
 
   connect(): void {
     if (this.destroyed || this.state.status === 'expired') return;
+    const token = this.options.tokenProvider.getToken();
+    if (!token) { this.expire(); return; }
+    this.setAuthToken(token.accessToken);
+    this.scheduleExpiry(token);
     this.update({ status: 'connecting', lastError: null });
     this.options.socket.connect();
   }
@@ -69,7 +73,7 @@ export class SocketCoordinator {
         .then((token) => {
           if (!token) { this.expire(); return false; }
           this.scheduleExpiry(token);
-          this.options.socket.auth.token = token.accessToken;
+          this.setAuthToken(token.accessToken);
           this.update({ status: 'reconnecting', connected: false });
           this.options.socket.disconnect();
           this.options.socket.connect();
@@ -118,6 +122,11 @@ export class SocketCoordinator {
   }
 
   private clearExpiry() { if (this.expiryTimer) clearTimeout(this.expiryTimer); this.expiryTimer = null; }
+
+  private setAuthToken(token: string) {
+    if (typeof this.options.socket.auth === 'function') return;
+    this.options.socket.auth.token = token;
+  }
 
   private update(patch: Partial<SocketCoordinatorState>) {
     this.state = { ...this.state, ...patch };

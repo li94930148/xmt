@@ -1,6 +1,7 @@
 import { useAuthStore } from '../store';
 import type { User } from '../types';
 import { adaptLoginResponse, type AuthLoginResult } from '../auth/web/login-response-adapter';
+import { emitAuthLoginDebugTrace } from '../auth/web/auth-login-debug';
 
 const BASE_URL = '/api';
 
@@ -107,7 +108,12 @@ export async function login(username: string, password: string): Promise<AuthLog
     throw new LoginError('当前服务暂时不可用，请稍后再试。', 'server_unavailable', { status: response.status });
   }
 
-  return adaptLoginResponse(await response.json());
+  const payload = await response.json();
+  const responseKind = payload && typeof payload === 'object' && (payload as { success?: unknown }).success === true
+    ? 'v1-envelope'
+    : 'legacy';
+  emitAuthLoginDebugTrace('auth.response.received', { responseKind, status: response.status });
+  return adaptLoginResponse(payload);
 }
 
 export async function getMe(): Promise<User> {

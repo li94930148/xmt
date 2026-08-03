@@ -1,5 +1,6 @@
 import type { AuthSessionSummary, AuthV1User } from '../../../shared/schema/auth.schema';
 import type { User } from '../../types';
+import { emitAuthLoginDebugTrace } from './auth-login-debug';
 
 export type AuthLoginMode = 'legacy' | 'v1-web';
 
@@ -93,6 +94,7 @@ export function adaptLoginResponse(payload: unknown): AuthLoginResult {
   // The legacy branch is deliberately first and preserves its response contract.
   if (isRecord(payload.user) && isString(payload.token)) {
     const user = toLegacyUser(payload.user);
+    emitAuthLoginDebugTrace('auth.adapter.selected', { mode: 'legacy' });
     return {
       user,
       accessToken: payload.token,
@@ -104,6 +106,7 @@ export function adaptLoginResponse(payload: unknown): AuthLoginResult {
   if (payload.success !== true || !isRecord(payload.data)) throw new LoginResponseAdapterError();
   const data = payload.data;
   const user = toV1User(data.user);
+  emitAuthLoginDebugTrace('auth.adapter.selected', { mode: 'v1-web' });
   return {
     user,
     accessToken: requireString(data.accessToken, 'Access Token'),

@@ -2,6 +2,7 @@ import { AuthRuntime } from '../runtime/auth-runtime';
 import type { AuthLoginResult } from './login-response-adapter';
 import { toAuthV1User } from './login-response-adapter';
 import type { User } from '../../types';
+import { emitAuthLoginDebugTrace } from './auth-login-debug';
 
 const CSRF_COOKIE_NAME = '__Host-xmt_csrf';
 
@@ -44,18 +45,6 @@ async function refreshWebAccessToken(): Promise<string | null> {
 /** Singleton used by the Web login adapter. Access tokens never leave memory. */
 export const webAuthRuntime = new AuthRuntime({ refreshAccessToken: refreshWebAccessToken });
 
-type WebLoginDiagnosticEvent =
-  | 'auth.login.received'
-  | 'auth.runtime.updated'
-  | 'auth.redirect.started'
-  | 'auth.redirect.completed';
-
-function emitWebLoginDiagnostic(event: WebLoginDiagnosticEvent, metadata: Record<string, unknown> = {}) {
-  if (!import.meta.env.DEV && import.meta.env.MODE !== 'test') return;
-  // Development-only diagnostics intentionally exclude token and cookie material.
-  console.debug(`[xmt-auth] ${event}`, metadata);
-}
-
 function getExpiresAt(): number | null {
   const token = webAuthRuntime.getAccessToken();
   if (!token) return null;
@@ -71,14 +60,18 @@ function getExpiresAt(): number | null {
 
 export function activateWebAuthRuntime(result: AuthLoginResult): void {
   if (result.authMode !== 'v1-web') return;
-  webAuthRuntime.beginAuthentication();
-  emitWebLoginDiagnostic('auth.login.received', { mode: result.authMode, userId: result.user.id });
-  webAuthRuntime.authenticate(toAuthV1User(result.user), result.accessToken);
-  emitWebLoginDiagnostic('auth.runtime.updated', {
+  emitAuthLoginDebugTrace('auth.runtime.before', {
     mode: result.authMode,
-    userId: result.user.id,
+    status: webAuthRuntime.getState().status,
+    hasAccessToken: Boolean(webAuthRuntime.getAccessToken()),
+  });
+  webAuthRuntime.beginAuthentication();
+  webAuthRuntime.authenticate(toAuthV1User(result.user), result.accessToken);
+  emitAuthLoginDebugTrace('auth.runtime.after', {
+    mode: result.authMode,
     status: webAuthRuntime.getState().status,
     loginCompleted: webAuthRuntime.getState().loginCompleted,
+    hasAccessToken: Boolean(webAuthRuntime.getAccessToken()),
   });
   if (typeof window !== 'undefined') {
     window.__xmtAuthRuntime = {
@@ -98,17 +91,16 @@ export function completeWebLogin(
   activateWebAuthRuntime(result);
   updateApplicationAuthState(result.user, result.accessToken);
   webAuthRuntime.beginRedirect();
-  emitWebLoginDiagnostic('auth.redirect.started', {
+  emitAuthLoginDebugTrace('auth.redirect.start', {
     mode: result.authMode,
-    userId: result.user.id,
     loginCompleted: webAuthRuntime.getState().loginCompleted,
   });
 }
 
 export function completeWebLoginRedirect(userId: number): void {
-  emitWebLoginDiagnostic('auth.redirect.completed', {
+  emitAuthLoginDebugTrace('auth.redirect.end', {
     mode: 'v1-web',
-    userId,
+    hasUserId: userId > 0,
     status: webAuthRuntime.getState().status,
   });
 }

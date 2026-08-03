@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { User, Topic, Message } from '../types';
 import { defaultSystemSettings, ManagedSystemSettings } from '@/lib/systemSettings';
 
-export type AuthPersistence = 'local' | 'session';
+export type AuthPersistence = 'local' | 'session' | 'memory';
 
 const AUTH_USER_KEY = 'xmt_user';
 const AUTH_TOKEN_KEY = 'xmt_token';
@@ -12,7 +12,9 @@ interface AuthState {
   token: string | null;
   isLoggedIn: boolean;
   persistence: AuthPersistence;
+  authMode: 'legacy' | 'v1-web';
   login: (user: User, token: string, options?: { persist?: AuthPersistence }) => void;
+  loginV1: (user: User, accessToken: string) => void;
   logout: () => void;
 }
 
@@ -25,7 +27,7 @@ const loadFromStorage = () => {
         user: sessionUser ? JSON.parse(sessionUser) : null,
         token: sessionToken,
         isLoggedIn: true,
-        persistence: 'session' as AuthPersistence,
+        persistence: 'session' as AuthPersistence, authMode: 'legacy' as const,
       };
     }
 
@@ -35,17 +37,17 @@ const loadFromStorage = () => {
       user: userStr ? JSON.parse(userStr) : null,
       token: token || null,
       isLoggedIn: !!token,
-      persistence: token ? ('local' as AuthPersistence) : ('session' as AuthPersistence),
+      persistence: token ? ('local' as AuthPersistence) : ('session' as AuthPersistence), authMode: 'legacy' as const,
     };
   } catch {
-    return { user: null, token: null, isLoggedIn: false, persistence: 'session' as AuthPersistence };
+    return { user: null, token: null, isLoggedIn: false, persistence: 'session' as AuthPersistence, authMode: 'legacy' as const };
   }
 };
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   ...loadFromStorage(),
   login: (user, token, options) => {
-    const persist = options?.persist ?? get().persistence;
+    const persist = options?.persist ?? (get().authMode === 'v1-web' ? 'memory' : get().persistence);
     const storage = persist === 'local' ? localStorage : sessionStorage;
 
     localStorage.removeItem(AUTH_USER_KEY);
@@ -53,16 +55,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     sessionStorage.removeItem(AUTH_USER_KEY);
     sessionStorage.removeItem(AUTH_TOKEN_KEY);
 
-    storage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-    storage.setItem(AUTH_TOKEN_KEY, token);
-    set({ user, token, isLoggedIn: true, persistence: persist });
+    if (persist !== 'memory') {
+      storage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+      storage.setItem(AUTH_TOKEN_KEY, token);
+    }
+    set({ user, token, isLoggedIn: true, persistence: persist, authMode: persist === 'memory' ? 'v1-web' : 'legacy' });
+  },
+  loginV1: (user, accessToken) => {
+    localStorage.removeItem(AUTH_USER_KEY);
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    sessionStorage.removeItem(AUTH_USER_KEY);
+    sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    set({ user, token: accessToken, isLoggedIn: true, persistence: 'memory', authMode: 'v1-web' });
   },
   logout: () => {
     localStorage.removeItem(AUTH_USER_KEY);
     localStorage.removeItem(AUTH_TOKEN_KEY);
     sessionStorage.removeItem(AUTH_USER_KEY);
     sessionStorage.removeItem(AUTH_TOKEN_KEY);
-    set({ user: null, token: null, isLoggedIn: false, persistence: 'session' });
+    set({ user: null, token: null, isLoggedIn: false, persistence: 'session', authMode: 'legacy' });
   },
 }));
 

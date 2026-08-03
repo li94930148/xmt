@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.14.2",
+  "version": "2.14.3",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -24,6 +24,7 @@
     "test:auth-rollout": "tsx tests/auth/auth-rollout.test.ts",
     "test:login-rollout-policy": "tsx tests/auth/login-rollout-policy.test.ts",
     "test:login-gateway": "tsx tests/auth/login-gateway.test.ts",
+    "test:login-response-adapter": "tsx tests/auth/login-response-adapter.test.ts",
     "test:auth-events": "tsx tests/auth/auth-event.test.ts",
     "test:auth-metrics-exporter": "tsx tests/auth/auth-metrics-exporter.test.ts",
     "test:auth-observability": "tsx tests/auth/auth-observability-integration.test.ts",

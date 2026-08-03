@@ -1,5 +1,6 @@
 import { useAuthStore } from '../store';
 import type { User } from '../types';
+import { adaptLoginResponse, type AuthLoginResult } from '../auth/web/login-response-adapter';
 
 const BASE_URL = '/api';
 
@@ -64,7 +65,7 @@ function readRemainingAttempts(body: Record<string, unknown>) {
   return Number.isFinite(remainingAttempts) && remainingAttempts >= 0 ? Math.floor(remainingAttempts) : undefined;
 }
 
-export async function login(username: string, password: string): Promise<{ user: User; token: string; forceChangePassword?: boolean }> {
+export async function login(username: string, password: string): Promise<AuthLoginResult> {
   let response: Response;
 
   try {
@@ -89,7 +90,12 @@ export async function login(username: string, password: string): Promise<{ user:
       });
     }
 
-    const rawMessage = typeof body.message === 'string' ? body.message : '';
+    const v1Error = body.error && typeof body.error === 'object'
+      ? (body.error as { message?: unknown }).message
+      : undefined;
+    const rawMessage = typeof body.message === 'string'
+      ? body.message
+      : typeof v1Error === 'string' ? v1Error : '';
     if (response.status === 401 && rawMessage.includes('禁用')) {
       throw new LoginError('当前账号暂不可用，请联系管理员。', 'account_unavailable', { status: response.status });
     }
@@ -101,7 +107,7 @@ export async function login(username: string, password: string): Promise<{ user:
     throw new LoginError('当前服务暂时不可用，请稍后再试。', 'server_unavailable', { status: response.status });
   }
 
-  return response.json();
+  return adaptLoginResponse(await response.json());
 }
 
 export async function getMe(): Promise<User> {

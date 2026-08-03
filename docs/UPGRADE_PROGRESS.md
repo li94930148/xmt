@@ -1,5 +1,29 @@
 # XMT 升级阶段记录
 
+## Phase 2-C3-8-C3.4：Web Login Gateway v1 Response Adapter
+
+- 当前版本：v2.14.3
+
+### 完成内容
+
+1. 新增 Web 登录响应适配层，兼容 legacy `{ user, token }` 与 v1 Web API Contract envelope。
+2. v1 Access Token 进入 Auth Runtime 与内存登录态，不写入 localStorage 或 sessionStorage；Refresh 继续依赖 HttpOnly Cookie 与 CSRF。
+3. legacy 登录、JWT payload、7 天有效期、存储和错误行为保持不变。
+
+### 数据库变化
+
+无。
+
+### 测试结果
+
+- 版本一致性、登录响应适配器、legacy Auth、Login Gateway、Rollout、Web Runtime、Cookie/CSRF、Session、API Contract、Socket Bridge、Socket Coordinator、Yjs Recovery、类型检查和构建通过。
+- `test:auth-browser` 因本机 Playwright 缺少匹配 Chromium 并在系统 Chrome 启动时收到 `SIGABRT` 未通过；未更改测试绕过该问题。
+
+### 风险与下一阶段
+
+1. 本阶段未开启生产灰度，未修改 Auth、Socket 或 Yjs 服务端契约。
+2. 重新申请 C3.3 前，必须在部署后完成 legacy / allowlist 模拟浏览器回归、运行态一致性与审批检查。
+
 ## Phase 2-C3-8-C3.1：灰度配置来源统一与运行态门禁校验
 
 - 当前版本：v2.14.2

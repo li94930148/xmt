@@ -1,5 +1,20 @@
 # XMT 系统更新日志
 
+## v2.14.3 - 2026-08-03
+
+### 修复
+- 修复 Login Gateway 为 allowlist 用户返回 v1 Web 响应时，前端仍按 legacy token 字段解析而无法完成登录的问题。
+
+### 技术升级
+- 新增统一登录响应适配层；v1 Access Token 仅进入内存运行态，Refresh Token 继续不进入 JSON、日志或浏览器存储。
+
+### 数据库变化
+- 无。
+
+### 测试情况
+- 新增 legacy / v1 响应、缺失字段和 refresh 响应隔离测试；认证、Socket、Yjs、类型检查和构建通过。
+- 本机 Playwright Chromium 环境不匹配，浏览器回归待修复环境后复跑。
+
 ## v2.14.2 - 2026-08-01
 
 ### 优化

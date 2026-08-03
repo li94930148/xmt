@@ -45,6 +45,23 @@ async function refreshWebAccessToken(): Promise<string | null> {
 /** Singleton used by the Web login adapter. Access tokens never leave memory. */
 export const webAuthRuntime = new AuthRuntime({ refreshAccessToken: refreshWebAccessToken });
 
+export type WebAuthRuntimeTraceSnapshot = {
+  mode: string;
+  status: string;
+  loginCompleted: boolean;
+  hasAccessToken: boolean;
+};
+
+function getTraceSnapshot(): WebAuthRuntimeTraceSnapshot {
+  const state = webAuthRuntime.getState();
+  return {
+    mode: state.mode,
+    status: state.status,
+    loginCompleted: state.loginCompleted,
+    hasAccessToken: Boolean(webAuthRuntime.getAccessToken()),
+  };
+}
+
 function getExpiresAt(): number | null {
   const token = webAuthRuntime.getAccessToken();
   if (!token) return null;
@@ -64,6 +81,8 @@ export function activateWebAuthRuntime(result: AuthLoginResult): void {
     mode: result.authMode,
     status: webAuthRuntime.getState().status,
     hasAccessToken: Boolean(webAuthRuntime.getAccessToken()),
+    requestId: result.requestId ?? null,
+    loginAttemptId: result.loginAttemptId ?? null,
   });
   webAuthRuntime.beginAuthentication();
   webAuthRuntime.authenticate(toAuthV1User(result.user), result.accessToken);
@@ -72,12 +91,15 @@ export function activateWebAuthRuntime(result: AuthLoginResult): void {
     status: webAuthRuntime.getState().status,
     loginCompleted: webAuthRuntime.getState().loginCompleted,
     hasAccessToken: Boolean(webAuthRuntime.getAccessToken()),
+    requestId: result.requestId ?? null,
+    loginAttemptId: result.loginAttemptId ?? null,
   });
   if (typeof window !== 'undefined') {
     window.__xmtAuthRuntime = {
       getAccessToken: () => webAuthRuntime.getAccessToken(),
       refresh: () => webAuthRuntime.refresh(),
       getExpiresAt,
+      getTraceSnapshot,
     };
   }
 }
@@ -94,6 +116,8 @@ export function completeWebLogin(
   emitAuthLoginDebugTrace('auth.redirect.start', {
     mode: result.authMode,
     loginCompleted: webAuthRuntime.getState().loginCompleted,
+    requestId: result.requestId ?? null,
+    loginAttemptId: result.loginAttemptId ?? null,
   });
 }
 

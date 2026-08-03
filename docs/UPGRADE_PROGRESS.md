@@ -1,5 +1,30 @@
 # XMT 升级阶段记录
 
+## Phase 2-C3-8-C3.11：Gray Browser Observability Fixture
+
+- 当前版本：v2.14.6
+
+### 完成内容
+
+1. 新增灰度浏览器观测夹具，关联 requestId、loginAttemptId、响应类别、适配器模式、Runtime 快照与路由路径。
+2. 登录请求携带安全 requestId，v1 响应适配器兼容标准 API Contract 的 `meta.requestId`。
+3. 新增浏览器夹具显式观测开关；默认生产页面不记录前端认证 trace。
+4. 实现停止规则：HTTP 登录成功但未进入 `/` 时立即结束，不继续 Refresh、Socket、Yjs 或 Version Sync。
+
+### 数据库变化
+
+无。
+
+### 测试结果
+
+- `test:auth-browser`、`test:auth-login-navigation`、`test:auth-gray-browser-observer`、`test:browser-auth-recovery`、`test:auth`、`test:login-gateway`、类型检查、构建与版本一致性检查通过。
+
+### 风险与下一阶段
+
+1. 该夹具只在 Playwright 显式启用时采集安全字段，不记录 token、cookie、密码或 Session secret。
+2. 未开启生产灰度、未创建账号、未修改 Auth 配置、数据库、Socket 或 Yjs。
+3. 下一阶段 C3.12 可在审批后使用固定测试账号执行真实灰度；若停止规则触发，立即回滚并以观测结果定位。
+
 ## Phase 2-C3-8-C3.5：Browser Auth Full Regression
 
 - 当前版本：v2.14.4

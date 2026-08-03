@@ -6,6 +6,12 @@ export type AuthLoginDebugEvent =
   | 'auth.redirect.start'
   | 'auth.redirect.end';
 
+declare global {
+  interface Window {
+    __xmtAuthGrayBrowserObserver?: boolean;
+  }
+}
+
 /**
  * Development/test-only trace for diagnosing the login state transition.
  * Callers must pass only flow metadata: this helper must never receive tokens,
@@ -15,6 +21,7 @@ export function emitAuthLoginDebugTrace(
   event: AuthLoginDebugEvent,
   metadata: Readonly<Record<string, boolean | number | string | null>> = {},
 ): void {
-  if (!import.meta.env.DEV && import.meta.env.MODE !== 'test') return;
+  const observedByFixture = typeof window !== 'undefined' && window.__xmtAuthGrayBrowserObserver === true;
+  if (!import.meta.env.DEV && import.meta.env.MODE !== 'test' && !observedByFixture) return;
   console.debug(`[xmt-auth] ${event}`, metadata);
 }

@@ -11,7 +11,10 @@ export type AuthLoginResult = {
   forceChangePassword: boolean;
   session?: AuthSessionSummary;
   requestId?: string;
+  loginAttemptId?: string;
 };
+
+export type AuthLoginTraceContext = Pick<AuthLoginResult, 'requestId' | 'loginAttemptId'>;
 
 export class LoginResponseAdapterError extends Error {
   constructor(message = '登录响应格式无效') {
@@ -87,14 +90,22 @@ function toSession(value: unknown): AuthSessionSummary {
   };
 }
 
+function requestIdFromPayload(payload: Record<string, unknown>): string | undefined {
+  if (isString(payload.requestId)) return payload.requestId;
+  const meta = payload.meta;
+  return isRecord(meta) && isString(meta.requestId) ? meta.requestId : undefined;
+}
+
 /** Converts the two login contracts into a token-safe UI result. */
-export function adaptLoginResponse(payload: unknown): AuthLoginResult {
+export function adaptLoginResponse(payload: unknown, traceContext: AuthLoginTraceContext = {}): AuthLoginResult {
   if (!isRecord(payload)) throw new LoginResponseAdapterError();
 
   // The legacy branch is deliberately first and preserves its response contract.
   if (isRecord(payload.user) && isString(payload.token)) {
     const user = toLegacyUser(payload.user);
-    emitAuthLoginDebugTrace('auth.adapter.selected', { mode: 'legacy' });
+    emitAuthLoginDebugTrace('auth.adapter.selected', {
+      mode: 'legacy', requestId: traceContext.requestId ?? null, loginAttemptId: traceContext.loginAttemptId ?? null,
+    });
     return {
       user,
       accessToken: payload.token,
@@ -106,14 +117,18 @@ export function adaptLoginResponse(payload: unknown): AuthLoginResult {
   if (payload.success !== true || !isRecord(payload.data)) throw new LoginResponseAdapterError();
   const data = payload.data;
   const user = toV1User(data.user);
-  emitAuthLoginDebugTrace('auth.adapter.selected', { mode: 'v1-web' });
+  const requestId = traceContext.requestId ?? requestIdFromPayload(payload);
+  emitAuthLoginDebugTrace('auth.adapter.selected', {
+    mode: 'v1-web', requestId: requestId ?? null, loginAttemptId: traceContext.loginAttemptId ?? null,
+  });
   return {
     user,
     accessToken: requireString(data.accessToken, 'Access Token'),
     authMode: 'v1-web',
     forceChangePassword: user.force_change_password === true,
     session: toSession(data.session),
-    requestId: typeof payload.requestId === 'string' ? payload.requestId : undefined,
+    requestId,
+    loginAttemptId: traceContext.loginAttemptId,
   };
 }
 

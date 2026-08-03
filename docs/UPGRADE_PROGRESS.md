@@ -1,5 +1,27 @@
 # XMT 升级阶段记录
 
+## Phase 2-C3-8-C3.5：Browser Auth Full Regression
+
+- 当前版本：v2.14.4
+
+### 完成内容
+
+1. Auth 浏览器测试移除系统 Chrome 回退，强制使用项目 Playwright Chromium。
+2. 浏览器回归覆盖 legacy / v1 Web、Refresh Cookie、页面恢复、Socket、Yjs 与版本同步链路。
+
+### 数据库变化
+
+无。
+
+### 测试结果
+
+- `test:auth-browser`、`test:browser-auth-recovery`、`test:auth-socket-yjs-e2e`、`test:auth`、`test:login-gateway`、`test:auth-rollout`、类型检查、构建和版本一致性检查均通过。
+
+### 风险与下一阶段
+
+1. 本阶段不启用生产灰度、不连接生产环境。
+2. Chromium 回归已通过；重新申请 C3.3 前仍需新建审批记录、确认运行态与 readiness，不自动开启生产灰度。
+
 ## Phase 2-C3-8-C3.4：Web Login Gateway v1 Response Adapter
 
 - 当前版本：v2.14.3

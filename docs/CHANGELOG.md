@@ -1,5 +1,19 @@
 # XMT 系统更新日志
 
+## v2.14.4 - 2026-08-03
+
+### 修复
+- 修复本地 Auth 浏览器回归对系统 Chrome 的回退依赖，改为强制使用项目 Playwright Chromium。
+
+### 技术升级
+- 在受控浏览器运行环境中验证项目 Chromium 的启动与 Auth 浏览器回归链路。
+
+### 数据库变化
+- 无。
+
+### 测试情况
+- Auth 浏览器、Socket/Yjs 浏览器恢复、完整链路、legacy Auth、Login Gateway、Rollout、类型检查、构建和版本一致性检查通过。
+
 ## v2.14.3 - 2026-08-03
 
 ### 修复

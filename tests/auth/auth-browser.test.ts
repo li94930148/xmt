@@ -121,12 +121,13 @@ async function resetAndLogin(context: BrowserContext, page: Page) {
   return call<FixtureState>(page, 'window.authFixture.login()');
 }
 
-const systemChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const projectChromiumPath = chromium.executablePath();
+assert(fs.existsSync(projectChromiumPath), `项目 Playwright Chromium 不存在：${projectChromiumPath}`);
 const browser = await chromium.launch({
   headless: true,
-  ...(fs.existsSync(chromium.executablePath())
-    ? {}
-    : { executablePath: systemChromePath }),
+  // Do not fall back to a system browser: this suite must run against the
+  // Chromium revision installed for this project.
+  executablePath: projectChromiumPath,
 });
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 const consoleErrors: string[] = [];

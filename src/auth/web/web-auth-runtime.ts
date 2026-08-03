@@ -1,6 +1,7 @@
 import { AuthRuntime } from '../runtime/auth-runtime';
 import type { AuthLoginResult } from './login-response-adapter';
 import { toAuthV1User } from './login-response-adapter';
+import type { User } from '../../types';
 
 const CSRF_COOKIE_NAME = '__Host-xmt_csrf';
 
@@ -43,6 +44,18 @@ async function refreshWebAccessToken(): Promise<string | null> {
 /** Singleton used by the Web login adapter. Access tokens never leave memory. */
 export const webAuthRuntime = new AuthRuntime({ refreshAccessToken: refreshWebAccessToken });
 
+type WebLoginDiagnosticEvent =
+  | 'auth.login.received'
+  | 'auth.runtime.updated'
+  | 'auth.redirect.started'
+  | 'auth.redirect.completed';
+
+function emitWebLoginDiagnostic(event: WebLoginDiagnosticEvent, metadata: Record<string, unknown> = {}) {
+  if (!import.meta.env.DEV && import.meta.env.MODE !== 'test') return;
+  // Development-only diagnostics intentionally exclude token and cookie material.
+  console.debug(`[xmt-auth] ${event}`, metadata);
+}
+
 function getExpiresAt(): number | null {
   const token = webAuthRuntime.getAccessToken();
   if (!token) return null;
@@ -58,7 +71,15 @@ function getExpiresAt(): number | null {
 
 export function activateWebAuthRuntime(result: AuthLoginResult): void {
   if (result.authMode !== 'v1-web') return;
+  webAuthRuntime.beginAuthentication();
+  emitWebLoginDiagnostic('auth.login.received', { mode: result.authMode, userId: result.user.id });
   webAuthRuntime.authenticate(toAuthV1User(result.user), result.accessToken);
+  emitWebLoginDiagnostic('auth.runtime.updated', {
+    mode: result.authMode,
+    userId: result.user.id,
+    status: webAuthRuntime.getState().status,
+    loginCompleted: webAuthRuntime.getState().loginCompleted,
+  });
   if (typeof window !== 'undefined') {
     window.__xmtAuthRuntime = {
       getAccessToken: () => webAuthRuntime.getAccessToken(),
@@ -66,4 +87,28 @@ export function activateWebAuthRuntime(result: AuthLoginResult): void {
       getExpiresAt,
     };
   }
+}
+
+/** Completes v1 login before the caller begins the existing route transition. */
+export function completeWebLogin(
+  result: AuthLoginResult,
+  updateApplicationAuthState: (user: User, accessToken: string) => void,
+): void {
+  if (result.authMode !== 'v1-web') return;
+  activateWebAuthRuntime(result);
+  updateApplicationAuthState(result.user, result.accessToken);
+  webAuthRuntime.beginRedirect();
+  emitWebLoginDiagnostic('auth.redirect.started', {
+    mode: result.authMode,
+    userId: result.user.id,
+    loginCompleted: webAuthRuntime.getState().loginCompleted,
+  });
+}
+
+export function completeWebLoginRedirect(userId: number): void {
+  emitWebLoginDiagnostic('auth.redirect.completed', {
+    mode: 'v1-web',
+    userId,
+    status: webAuthRuntime.getState().status,
+  });
 }

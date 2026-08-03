@@ -106,6 +106,7 @@ export default function Layout() {
 
   const token = useAuthStore((state) => state.token);
   const user = useAuthStore((state) => state.user);
+  const authMode = useAuthStore((state) => state.authMode);
   const loginUser = useAuthStore((state) => state.login);
   const logout = useAuthStore((state) => state.logout);
 
@@ -197,6 +198,15 @@ export default function Layout() {
         return;
       }
 
+      // The v1 login response has already supplied the current user and its
+      // access token intentionally has a different contract from /api/auth/me.
+      // Calling the legacy endpoint here would reject the valid v1 token and
+      // immediately send the user back to the login page.
+      if (authMode === 'v1-web') {
+        setLoading(false);
+        return;
+      }
+
       try {
         const nextUser = await getMe();
         if (ignore) {
@@ -246,7 +256,7 @@ export default function Layout() {
     return () => {
       ignore = true;
     };
-  }, [loginUser, logout, navigate, setUnreadCount, token]);
+  }, [authMode, loginUser, logout, navigate, setUnreadCount, token]);
 
   useEffect(() => {
     if (user?.force_change_password && location.pathname !== '/notification-settings') {

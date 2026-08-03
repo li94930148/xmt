@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.14.4",
+  "version": "2.14.5",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -21,6 +21,7 @@
     "test:auth-web-runtime": "tsx tests/auth/auth-web-runtime.test.ts",
     "test:auth-web-cookie": "tsx tests/auth/auth-web-cookie.test.ts",
     "test:auth-browser": "tsx tests/auth/auth-browser.test.ts",
+    "test:auth-login-navigation": "tsx tests/auth/auth-login-navigation.spec.ts",
     "test:auth-rollout": "tsx tests/auth/auth-rollout.test.ts",
     "test:login-rollout-policy": "tsx tests/auth/login-rollout-policy.test.ts",
     "test:login-gateway": "tsx tests/auth/login-gateway.test.ts",

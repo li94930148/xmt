@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, getPublicSystemSettings, login } from '../api';
 import { LoginError } from '../api/auth';
-import { activateWebAuthRuntime } from '../auth/web/web-auth-runtime';
+import { completeWebLogin, completeWebLoginRedirect } from '../auth/web/web-auth-runtime';
 import { useAppStore, useAuthStore } from '../store';
 import { loadRememberedCredentials, persistRememberedCredentials } from '../utils/rememberedCredentials';
 import {
@@ -440,12 +440,15 @@ export default function Login() {
     try {
       const result = await login(username.trim(), password);
       if (result.authMode === 'v1-web') {
-        activateWebAuthRuntime(result);
-        authStore.loginV1(result.user, result.accessToken);
+        completeWebLogin(result, authStore.loginV1);
       } else {
         authStore.login(result.user, result.accessToken, { persist: remember ? 'local' : 'session' });
       }
-      await persistRememberedCredentials(remember, username.trim(), password);
+      try {
+        await persistRememberedCredentials(remember, username.trim(), password);
+      } catch {
+        // Remembering credentials is optional and must not invalidate a completed login.
+      }
 
       if (result.user.force_change_password || result.forceChangePassword) {
         setOldPwd(password);
@@ -461,6 +464,9 @@ export default function Login() {
         type: 'success',
       });
       navigate(resolveRedirectTarget(location.state), { replace: true });
+      if (result.authMode === 'v1-web') {
+        completeWebLoginRedirect(result.user.id);
+      }
     } catch (error) {
       const message = resolveLoginErrorMessage(error);
       setErrorMessage(message);

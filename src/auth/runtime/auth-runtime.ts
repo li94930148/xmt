@@ -33,12 +33,26 @@ export class AuthRuntime {
   }
 
   bootstrap(mode: AuthMode): void {
-    this.state = { mode, status: mode === 'v1-web' ? 'bootstrapping' : 'anonymous', user: null };
+    this.state = {
+      mode,
+      status: mode === 'v1-web' ? 'bootstrapping' : 'anonymous',
+      user: null,
+      loginCompleted: false,
+    };
+  }
+
+  beginAuthentication(): void {
+    this.state = { mode: 'v1-web', status: 'authenticating', user: null, loginCompleted: false };
   }
 
   authenticate(user: AuthV1User, accessToken: string): void {
     this.tokenStore.setToken(accessToken);
-    this.state = { mode: 'v1-web', status: 'authenticated', user };
+    this.state = { mode: 'v1-web', status: 'authenticated', user, loginCompleted: true };
+  }
+
+  beginRedirect(): void {
+    if (!this.state.loginCompleted || !this.state.user) return;
+    this.state = { ...this.state, status: 'redirecting' };
   }
 
   async refresh(): Promise<string | null> {
@@ -51,7 +65,7 @@ export class AuthRuntime {
         return null;
       }
       this.tokenStore.setToken(token);
-      this.state = { ...this.state, status: 'authenticated' };
+      this.state = { ...this.state, status: 'authenticated', loginCompleted: true };
       return token;
     } catch {
       this.expire();
@@ -61,7 +75,7 @@ export class AuthRuntime {
 
   expire(): void {
     this.tokenStore.clearToken();
-    this.state = { ...this.state, status: 'expired', user: null };
+    this.state = { ...this.state, status: 'expired', user: null, loginCompleted: false };
   }
 
   clear(): void {

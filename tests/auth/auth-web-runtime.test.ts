@@ -77,13 +77,21 @@ const runtime = new AuthRuntime({
   },
 });
 runtime.bootstrap('v1-web');
+assert.equal(runtime.getState().status, 'bootstrapping');
+assert.equal(runtime.getState().loginCompleted, false);
+runtime.beginAuthentication();
+assert.equal(runtime.getState().status, 'authenticating');
 runtime.authenticate(user, 'initial-access');
+assert.equal(runtime.getState().loginCompleted, true);
+runtime.beginRedirect();
+assert.equal(runtime.getState().status, 'redirecting');
 const [firstRefresh, secondRefresh] = await Promise.all([runtime.refresh(), runtime.refresh()]);
 assert.equal(firstRefresh, 'refreshed-access');
 assert.equal(secondRefresh, 'refreshed-access');
 assert.equal(refreshCalls, 1);
 assert.equal(runtime.getAccessToken(), 'refreshed-access');
 assert.equal(runtime.getState().status, 'authenticated');
+assert.equal(runtime.getState().loginCompleted, true);
 
 const failedRuntime = new AuthRuntime({ refreshAccessToken: async () => { throw new Error('offline'); } });
 failedRuntime.bootstrap('v1-web');
@@ -91,9 +99,10 @@ failedRuntime.authenticate(user, 'temporary-access');
 assert.equal(await failedRuntime.refresh(), null);
 assert.equal(failedRuntime.getState().status, 'expired');
 assert.equal(failedRuntime.getState().user, null);
+assert.equal(failedRuntime.getState().loginCompleted, false);
 assert.equal(failedRuntime.getAccessToken(), null);
 failedRuntime.clear();
-assert.deepEqual(failedRuntime.getState(), { mode: 'legacy', status: 'anonymous', user: null });
+assert.deepEqual(failedRuntime.getState(), { mode: 'legacy', status: 'anonymous', user: null, loginCompleted: false });
 
 let requestCalls = 0;
 let clientRefreshCalls = 0;

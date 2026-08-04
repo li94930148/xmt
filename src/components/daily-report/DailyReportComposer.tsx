@@ -1,4 +1,4 @@
-import { Save, Send } from 'lucide-react';
+import { Send } from 'lucide-react';
 import type { DailyReportItem, DailyReportStatus } from '../../api/dailyReports';
 import { ActionButton, GlassPanel } from '../studio';
 import { DailyReportStatusPill } from './DailyReportStatusPill';
@@ -7,10 +7,8 @@ import DailyReportRichSection from './DailyReportRichSection';
 type DailyReportComposerProps = {
   status?: DailyReportStatus;
   items: DailyReportItem[];
-  saving: boolean;
   submitting: boolean;
   onItemsChange: (items: DailyReportItem[]) => void;
-  onSave: () => void;
   onSubmit: () => void;
 };
 
@@ -20,8 +18,8 @@ const fields = [
   { key: 'coordination', title: '需要协调事项', placeholder: '记录需要他人或团队协助的事项' },
 ] as const;
 
-export default function DailyReportComposer({ status = 'draft', items, saving, submitting, onItemsChange, onSave, onSubmit }: DailyReportComposerProps) {
-  const readonly = status === 'submitted' || status === 'approved' || status === 'archived';
+export default function DailyReportComposer({ status = 'draft', items, submitting, onItemsChange, onSubmit }: DailyReportComposerProps) {
+  const readonly = status === 'approved' || status === 'archived';
   const getItem = (key: string) => items.find((item) => item.sectionKey === key);
   const update = (key: string, contentMd: string) => {
     const next = fields.map((field, index) => {
@@ -38,10 +36,6 @@ export default function DailyReportComposer({ status = 'draft', items, saving, s
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft px-5 py-4">
         <DailyReportStatusPill status={status} />
         <div className="flex flex-wrap gap-2">
-          <ActionButton onClick={onSave} disabled={readonly || saving}>
-            <Save className="h-4 w-4" />
-            {saving ? '保存中' : '保存草稿'}
-          </ActionButton>
           <ActionButton onClick={onSubmit} variant="primary" disabled={readonly || submitting}>
             <Send className="h-4 w-4" />
             {submitting ? '提交中' : '提交日报'}

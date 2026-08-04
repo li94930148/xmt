@@ -12,7 +12,8 @@ import { beijingToday, execute, queryAll, queryOne, runInTransaction } from '../
 import { createMessage } from '../utils/messageHelper.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const EDITABLE_STATUSES: DailyReportStatus[] = ['draft', 'rejected'];
+// 已提交日报允许本人重新编辑并再次提交，保留审核/归档记录不被覆盖。
+const EDITABLE_STATUSES: DailyReportStatus[] = ['draft', 'rejected', 'submitted'];
 const VALID_STATUSES: DailyReportStatus[] = ['draft', 'submitted', 'approved', 'rejected', 'archived'];
 const VALID_RISK_LEVELS: DailyReportRiskLevel[] = ['normal', 'warning', 'blocked'];
 const MAX_ARCHIVE_DAYS = 31;

@@ -1,52 +1,56 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Archive, Save } from 'lucide-react';
-import { getSummaryArchive, getMonthlyRecord, getYearlyRecord, saveMonthlyRecord, saveYearlyRecord, type SummaryArchive, type MonthlyRecord, type YearlyRecord } from '../../api/dailyReports';
+import { Archive, Eye } from 'lucide-react';
+import { getDailyReportArchive, getSummaryArchive, type DailyReport, type MonthlyRecord, type SummaryArchive, type YearlyRecord } from '../../api/dailyReports';
+import { getUsers } from '../../api/users';
+import type { User } from '../../types';
 import { ActionButton, EmptyState, GlassPanel } from '../studio';
 
-type Props = { canViewArchive: boolean };
+type Props = { canViewArchive: boolean; onView: (report: DailyReport) => void };
+type ArchiveKind = 'daily' | 'monthly' | 'yearly';
 
-function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {
-  return <label className="block"><span className="mb-2 block text-sm font-semibold text-studio-text-primary">{label}</span><textarea value={value} onChange={(event) => onChange(event.target.value)} rows={5} placeholder={placeholder} className="w-full resize-y rounded-card border border-studio-border-soft bg-white/[0.04] px-4 py-3 text-sm leading-6 text-studio-text-primary outline-none placeholder:text-studio-text-muted focus:border-studio-border-active" /></label>;
-}
-
-export default function DailyReportSummaryArchive({ canViewArchive }: Props) {
+export default function DailyReportSummaryArchive({ canViewArchive, onView }: Props) {
   const now = new Date();
+  const [kind, setKind] = useState<ArchiveKind>('daily');
   const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [monthly, setMonthly] = useState<MonthlyRecord>({ year, month, work_summary_md: '', key_projects_md: '', issues_plan_md: '' });
-  const [yearly, setYearly] = useState<YearlyRecord>({ year, annual_summary_md: '', achievements_md: '', shortcomings_md: '', next_year_plan_md: '' });
-  const [archive, setArchive] = useState<SummaryArchive | null>(null);
-  const [saving, setSaving] = useState<'monthly' | 'yearly' | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [start, setStart] = useState(new Date(now.getTime() - 6 * 86400000).toLocaleDateString('sv-SE'));
+  const [end, setEnd] = useState(now.toLocaleDateString('sv-SE'));
+  const [userId, setUserId] = useState('');
+  const [users, setUsers] = useState<User[]>([]);
+  const [daily, setDaily] = useState<DailyReport[]>([]);
+  const [summary, setSummary] = useState<SummaryArchive | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { if (canViewArchive) void getUsers({ page: 1, limit: 200 }).then((result) => setUsers(result.data || [])).catch(() => setUsers([])); }, [canViewArchive]);
 
   const load = useCallback(async () => {
+    if (!canViewArchive) return;
     setLoading(true);
     try {
-      const requests: [Promise<MonthlyRecord>, Promise<YearlyRecord>] = [getMonthlyRecord(year, month), getYearlyRecord(year)];
-      const [monthlyRecord, yearlyRecord] = await Promise.all(requests);
-      setMonthly((current) => ({ ...current, ...monthlyRecord, year, month }));
-      setYearly((current) => ({ ...current, ...yearlyRecord, year }));
-      if (canViewArchive) setArchive(await getSummaryArchive(year));
-    } finally {
-      setLoading(false);
-    }
-  }, [canViewArchive, month, year]);
+      if (kind === 'daily') {
+        const result = await getDailyReportArchive({ start, end, userId: userId ? Number(userId) : undefined });
+        setDaily(result.reports);
+      } else {
+        setSummary(await getSummaryArchive(year, userId ? Number(userId) : undefined));
+      }
+    } finally { setLoading(false); }
+  }, [canViewArchive, end, kind, start, userId, year]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const saveMonthly = async () => { setSaving('monthly'); try { setMonthly(await saveMonthlyRecord(year, month, monthly)); } finally { setSaving(null); } };
-  const saveYearly = async () => { setSaving('yearly'); try { setYearly(await saveYearlyRecord(year, yearly)); } finally { setSaving(null); } };
+  if (!canViewArchive) return <GlassPanel className="p-5"><EmptyState icon={Archive} title="仅管理员可查看归档" description="" /></GlassPanel>;
 
-  return <div className="space-y-5">
-    <GlassPanel className="flex flex-wrap items-end gap-3 p-5">
-      <label className="block"><span className="mb-2 block text-sm text-studio-text-muted">年份</span><input type="number" value={year} onChange={(event) => setYear(Number(event.target.value))} className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary" /></label>
-      <label className="block"><span className="mb-2 block text-sm text-studio-text-muted">月份</span><select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary">{Array.from({ length: 12 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} 月</option>)}</select></label>
-      <ActionButton onClick={() => void load()} disabled={loading}>刷新</ActionButton>
-    </GlassPanel>
-    <div className="grid gap-5 lg:grid-cols-2">
-      <GlassPanel className="space-y-4 p-5"><div className="flex items-center justify-between"><h2 className="text-base font-semibold text-studio-text-primary">月报</h2><ActionButton onClick={() => void saveMonthly()} disabled={saving !== null}><Save className="h-4 w-4" />{saving === 'monthly' ? '保存中' : '保存月报'}</ActionButton></div><Field label="工作总结" value={monthly.work_summary_md || ''} onChange={(value) => setMonthly((current) => ({ ...current, work_summary_md: value }))} placeholder="记录本月工作总结" /><Field label="重点项目" value={monthly.key_projects_md || ''} onChange={(value) => setMonthly((current) => ({ ...current, key_projects_md: value }))} placeholder="记录本月重点项目" /><Field label="问题与计划" value={monthly.issues_plan_md || ''} onChange={(value) => setMonthly((current) => ({ ...current, issues_plan_md: value }))} placeholder="记录问题和下一步计划" /></GlassPanel>
-      <GlassPanel className="space-y-4 p-5"><div className="flex items-center justify-between"><h2 className="text-base font-semibold text-studio-text-primary">年报</h2><ActionButton onClick={() => void saveYearly()} disabled={saving !== null}><Save className="h-4 w-4" />{saving === 'yearly' ? '保存中' : '保存年报'}</ActionButton></div><Field label="年度总结" value={yearly.annual_summary_md || ''} onChange={(value) => setYearly((current) => ({ ...current, annual_summary_md: value }))} placeholder="记录年度总结" /><Field label="主要成果" value={yearly.achievements_md || ''} onChange={(value) => setYearly((current) => ({ ...current, achievements_md: value }))} placeholder="记录主要成果" /><Field label="经验不足" value={yearly.shortcomings_md || ''} onChange={(value) => setYearly((current) => ({ ...current, shortcomings_md: value }))} placeholder="记录经验和不足" /><Field label="下一年度计划" value={yearly.next_year_plan_md || ''} onChange={(value) => setYearly((current) => ({ ...current, next_year_plan_md: value }))} placeholder="记录下一年度计划" /></GlassPanel>
+  const monthly = summary?.monthly || [];
+  const yearly = summary?.yearly || [];
+  const summaryRows: Array<MonthlyRecord | YearlyRecord> = kind === 'monthly' ? monthly : yearly;
+
+  return <GlassPanel className="overflow-hidden">
+    <div className="border-b border-studio-border-soft px-5 py-4"><h2 className="text-base font-semibold text-studio-text-primary">总结归档</h2><p className="mt-1 text-sm text-studio-text-muted">按类型、日期和成员筛选日报、月报、年报。</p></div>
+    <div className="flex flex-wrap items-end gap-3 border-b border-studio-border-soft px-5 py-4">
+      <div className="flex gap-2">{(['daily', 'monthly', 'yearly'] as const).map((value) => <button key={value} type="button" onClick={() => setKind(value)} className={`rounded-button px-3 py-2 text-sm font-semibold ${kind === value ? 'bg-studio-primary text-white' : 'border border-studio-border-soft text-studio-text-secondary'}`}>{value === 'daily' ? '日报' : value === 'monthly' ? '月报' : '年报'}</button>)}</div>
+      <label className="block"><span className="mb-2 block text-xs text-studio-text-muted">成员</span><select value={userId} onChange={(event) => setUserId(event.target.value)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary"><option value="">全部成员</option>{users.map((user) => <option key={user.id} value={String(user.id)}>{user.name || user.username}</option>)}</select></label>
+      {kind === 'daily' ? <><label className="block"><span className="mb-2 block text-xs text-studio-text-muted">开始日期</span><input type="date" value={start} onChange={(event) => setStart(event.target.value)} className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary" /></label><label className="block"><span className="mb-2 block text-xs text-studio-text-muted">结束日期</span><input type="date" value={end} onChange={(event) => setEnd(event.target.value)} className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary" /></label></> : <label className="block"><span className="mb-2 block text-xs text-studio-text-muted">年份</span><input type="number" value={year} onChange={(event) => setYear(Number(event.target.value))} className="w-28 rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary" /></label>}
+      <ActionButton onClick={() => void load()} disabled={loading}>查询</ActionButton>
     </div>
-    {canViewArchive ? <GlassPanel className="overflow-hidden"><div className="border-b border-studio-border-soft px-5 py-4"><h2 className="text-base font-semibold text-studio-text-primary">管理员总结归档</h2><p className="mt-1 text-sm text-studio-text-muted">查看全部成员的月报和年报。</p></div>{archive && (archive.monthly.length > 0 || archive.yearly.length > 0) ? <div className="grid gap-5 p-5 lg:grid-cols-2"><div><h3 className="mb-3 text-sm font-semibold text-studio-text-primary">月报</h3><div className="space-y-3">{archive.monthly.map((record) => <div key={record.id} className="rounded-card border border-studio-border-soft p-4"><p className="font-semibold text-studio-text-primary">{record.user_name || record.username} · {record.month} 月</p><p className="mt-2 whitespace-pre-wrap text-sm text-studio-text-secondary">{record.work_summary_md || '暂无内容'}</p></div>)}</div></div><div><h3 className="mb-3 text-sm font-semibold text-studio-text-primary">年报</h3><div className="space-y-3">{archive.yearly.map((record) => <div key={record.id} className="rounded-card border border-studio-border-soft p-4"><p className="font-semibold text-studio-text-primary">{record.user_name || record.username} · {record.year} 年</p><p className="mt-2 whitespace-pre-wrap text-sm text-studio-text-secondary">{record.annual_summary_md || '暂无内容'}</p></div>)}</div></div></div> : <div className="p-5"><EmptyState icon={Archive} title="暂无总结归档" description="当前年份还没有月报或年报。" /></div>}</GlassPanel> : null}
-  </div>;
+    {kind === 'daily' ? daily.length === 0 ? <div className="p-5"><EmptyState icon={Archive} title={loading ? '加载中' : '暂无日报归档'} description="当前筛选范围内没有日报记录。" /></div> : <div className="divide-y divide-studio-border-soft">{daily.map((report) => <div key={report.id} className="grid gap-3 px-5 py-4 md:grid-cols-[160px_140px_minmax(0,1fr)_90px] md:items-center"><div><div className="font-semibold text-studio-text-primary">{report.userName || report.username || `成员 ${report.userId}`}</div><div className="mt-1 text-xs text-studio-text-muted">{report.reportDate}</div></div><span className="text-sm text-studio-text-muted">{report.status === 'draft' ? '草稿' : '已提交'}</span><p className="line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{report.manualSummaryMd || report.items.map((item) => item.contentMd).filter(Boolean).join('\n') || '未填写内容'}</p><ActionButton onClick={() => onView(report)} className="px-3 py-2"><Eye className="h-4 w-4" />查看</ActionButton></div>)}</div> : summaryRows.length === 0 ? <div className="p-5"><EmptyState icon={Archive} title={loading ? '加载中' : '暂无归档'} description="当前筛选范围内没有记录。" /></div> : <div className="divide-y divide-studio-border-soft">{summaryRows.map((record) => <div key={record.id} className="px-5 py-4"><div className="font-semibold text-studio-text-primary">{record.user_name || record.username || '成员'} · {kind === 'monthly' ? `${(record as MonthlyRecord).month} 月` : `${record.year} 年`}</div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{kind === 'monthly' ? (record as MonthlyRecord).work_summary_md || '未填写内容' : (record as YearlyRecord).annual_summary_md || '未填写内容'}</p></div>)}</div>}
+  </GlassPanel>;
 }

@@ -196,6 +196,13 @@ function ensureCanManage(user: User) {
   }
 }
 
+async function ensureCanViewTeam(user: User) {
+  if (isManager(user) || await hasPermissionCode(user, 'report:daily:view_team')) {
+    return;
+  }
+  throw new DailyReportServiceError(403, 'FORBIDDEN', '无权限查看团队日报');
+}
+
 async function listDailyReportManagers() {
   return queryAll<{ id: number }>(
     `SELECT id
@@ -578,7 +585,7 @@ export async function submitDailyReport(user: User | undefined, reportId: number
 
 export async function listTeamDailyReports(user: User | undefined, filters: DailyReportListFilters) {
   assertAuthenticated(user);
-  ensureCanManage(user);
+  await ensureCanViewTeam(user);
   const reportDate = parseDate(filters.reportDate);
   const status = parseStatus(filters.status);
   const params: unknown[] = [reportDate];

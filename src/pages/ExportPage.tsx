@@ -101,9 +101,8 @@ export default function ExportPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               { label: '打开日报系统', path: '/daily-report' },
-              { label: '查看日报日历', path: '/daily-report/calendar' },
-              { label: '打开月度总结', path: '/daily-report/monthly' },
-              { label: '打开年度总结', path: '/daily-report/yearly' },
+              { label: '查看团队日报', path: '/daily-report/team' },
+              { label: '打开总结归档', path: '/daily-report/summary' },
             ].map((item) => (
               <Link key={item.path} to={item.path} className="rounded-card border border-studio-border-soft bg-white/[0.04] px-4 py-4 text-sm font-medium text-studio-text-primary transition hover:border-studio-border-active hover:bg-white/[0.08]">
                 {item.label}

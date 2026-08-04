@@ -115,6 +115,11 @@ export const navigationSections: NavigationSection[] = [
     icon: FileClock,
     items: [
       { id: 'daily-reports', label: '日报系统', icon: FileClock, path: '/daily-report' },
+      { id: 'daily-report-calendar', label: '日报日历', icon: Calendar, path: '/daily-report/calendar' },
+      { id: 'daily-report-monthly', label: '月度总结', icon: Calendar, path: '/daily-report/monthly' },
+      { id: 'daily-report-yearly', label: '年度总结', icon: Calendar, path: '/daily-report/yearly' },
+      { id: 'daily-report-team', label: '团队日报', icon: Users, path: '/daily-report/team', permissions: ['report:daily:view_team'] },
+      { id: 'daily-report-analytics', label: '日报数据分析', icon: BarChart3, path: '/daily-report/analytics', permissions: ['report:daily:view_analysis'] },
     ],
   },
   {

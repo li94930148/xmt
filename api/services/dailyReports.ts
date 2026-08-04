@@ -499,6 +499,44 @@ export async function saveDailyReportDraft(user: User | undefined, input: SaveDa
   return formatReport(row);
 }
 
+/** 自动保存只更新草稿内容，不递增版本，也不写入审计日志。 */
+export async function autosaveDailyReport(user: User | undefined, input: SaveDailyReportDraftInput) {
+  assertAuthenticated(user);
+  const reportDate = parseDate(input.reportDate);
+  const existing = await queryOne<DailyReportRow>(
+    `SELECT * FROM daily_reports WHERE user_id = ? AND report_date = ?`, [user.id, reportDate]
+  );
+  if (!existing) {
+    return { saved: false, report: null, message: '请先创建日报草稿' };
+  }
+  if (!EDITABLE_STATUSES.includes(String(existing.status) as DailyReportStatus)) {
+    throw new DailyReportServiceError(409, 'REPORT_LOCKED', '当前日报状态不可自动保存');
+  }
+
+  const manualSummary = String(input.manualSummaryMd || '').trim();
+  const riskLevel = parseRiskLevel(input.riskLevel);
+  const items = (input.items || []).map(normalizeItemInput);
+  await runInTransaction(async (tx) => {
+    await tx.execute(
+      `UPDATE daily_reports SET manual_summary_md = ?, risk_level = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
+      [manualSummary, riskLevel, Number(existing.id)]
+    );
+    await tx.execute(`DELETE FROM daily_report_items WHERE report_id = ?`, [Number(existing.id)]);
+    for (const item of items) {
+      await tx.execute(
+        `INSERT INTO daily_report_items (report_id, section_key, title, content_md, sort_order, meta_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+        [Number(existing.id), item.sectionKey, item.title || null, item.contentMd || null, item.sortOrder || 0, stringifyJson(item.meta)]
+      );
+    }
+  });
+  const row = await queryOne<DailyReportRow>(
+    `SELECT r.*, u.name AS user_name, u.username FROM daily_reports r LEFT JOIN users u ON u.id = r.user_id WHERE r.id = ?`,
+    [Number(existing.id)]
+  );
+  return { saved: true, report: await formatReport(row), message: '已保存' };
+}
+
 export async function submitDailyReport(user: User | undefined, reportId: number) {
   assertAuthenticated(user);
   const row = await queryOne<DailyReportRow>(`SELECT * FROM daily_reports WHERE id = ?`, [reportId]);

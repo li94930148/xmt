@@ -2,7 +2,7 @@
 
 ## Phase 2-C3-8-C3.11：Gray Browser Observability Fixture
 
-- 当前版本：v2.14.6
+- 当前版本：v2.14.7
 
 ### 完成内容
 
@@ -24,6 +24,17 @@
 1. 该夹具只在 Playwright 显式启用时采集安全字段，不记录 token、cookie、密码或 Session secret。
 2. 未开启生产灰度、未创建账号、未修改 Auth 配置、数据库、Socket 或 Yjs。
 3. 下一阶段 C3.12 可在审批后使用固定测试账号执行真实灰度；若停止规则触发，立即回滚并以观测结果定位。
+
+## v2.14.7 日报工作台 V2 发布（2026-08-04）
+
+- 已将日报工作台 V2 的迁移、API、页面路由、Tiptap 编辑器、模板权限和 30 秒自动保存发布到生产。
+- 生产数据库已执行 `006_daily_workspace_v2`，保留既有日报提交、审核和审计链路。
+- 生产验证：`npm run check`、`npm run build`、数据库迁移、API 健康检查通过。
+
+## v2.14.5 日报工作台 V2（2026-08-03）
+
+- 已完成日报工作台数据迁移、统计/总结 API、自动保存、路由和基础页面接入。
+- 保留 `daily_reports`、`daily_report_items`、`daily_report_templates`、`daily_report_audit_logs` 及既有提交审核链路。
 
 ## Phase 2-C3-8-C3.5：Browser Auth Full Regression
 

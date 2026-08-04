@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { CalendarDays, FileClock, RefreshCw, Users } from 'lucide-react';
 import {
   generateDailyReportDraft,
@@ -23,6 +24,7 @@ import DailyReportTeamBoard from '../components/daily-report/DailyReportTeamBoar
 import DailyReportArchiveList from '../components/daily-report/DailyReportArchiveList';
 import DailyReportReviewDialog from '../components/daily-report/DailyReportReviewDialog';
 import DailyReportDetailDrawer from '../components/daily-report/DailyReportDetailDrawer';
+import DailyReportAutoSave from '../components/daily-report/DailyReportAutoSave';
 import { getUsers } from '../api/users';
 import type { User } from '../types';
 
@@ -417,11 +419,18 @@ export default function DailyReportPage() {
               onSubmit={handleSubmit}
               onCreateDraft={handleCreateDraft}
             />
+            <div className="flex justify-end"><DailyReportAutoSave enabled={Boolean(myReport && (myReport.status === 'draft' || myReport.status === 'rejected'))} payload={{ reportDate, version: myReport?.version, manualSummaryMd: manualSummary, riskLevel, items }} /></div>
           </div>
 
           <GlassPanel className="h-fit p-5">
-            <h2 className="text-base font-semibold text-studio-text-primary">独立办公日报</h2>
-            <p className="mt-2 text-sm text-studio-text-muted">日报仅由员工手动填写，不读取抖音、选题、生产、发布或系统操作日志。</p>
+            <h2 className="text-base font-semibold text-studio-text-primary">工作面板</h2>
+            <p className="mt-2 text-sm text-studio-text-muted">日报仅由员工手动填写，不读取业务数据。</p>
+            <div className="mt-5 grid gap-2 text-sm">
+              <Link className="rounded-button bg-white/[0.04] px-3 py-2 text-studio-text-secondary hover:text-studio-text-primary" to="/daily-report/calendar">查看日报日历</Link>
+              <Link className="rounded-button bg-white/[0.04] px-3 py-2 text-studio-text-secondary hover:text-studio-text-primary" to="/daily-report/monthly">打开月度总结</Link>
+              <Link className="rounded-button bg-white/[0.04] px-3 py-2 text-studio-text-secondary hover:text-studio-text-primary" to="/daily-report/yearly">打开年度总结</Link>
+              {canManageDailyReport ? <Link className="rounded-button bg-white/[0.04] px-3 py-2 text-studio-text-secondary hover:text-studio-text-primary" to="/daily-report/analytics">团队数据分析</Link> : null}
+            </div>
           </GlassPanel>
         </div>
       ) : null}

@@ -83,6 +83,12 @@ export type DailyReportArchiveResponse = {
   reports: DailyReport[];
 };
 
+export type MonthlySummary = { year: number; month: number; days: number; submitted: number; rate: number; riskDays: number; keywords: Array<{ word: string; count: number }>; streaks: number; reports: Array<Record<string, unknown>> };
+export type YearlySummary = { year: number; totalDays: number; submitted: number; rate: number; months: Array<{ month: number; submitted: number; rate: number }>; keywords: Array<{ word: string; count: number }>; maxStreak: number };
+export type CalendarDay = { date: string; status: DailyReportStatus | null; riskLevel: string | null };
+export type TeamStats = { total: number; submitted: number; pending: number; notSubmitted: number; users: Array<{ id: number; name: string; status: DailyReportStatus | null; riskLevel: string | null; summary: string }> };
+export type ReportTemplate = { id: number; name: string; description?: string; sections: Array<{ key: string; title: string }>; isDefault?: boolean; sortOrder?: number; userId?: number | null };
+
 type ApiEnvelope<T> = {
   success: boolean;
   data: T;
@@ -177,3 +183,24 @@ export async function generateDailyReportDraft(payload: { date: string }) {
   });
   return readEnvelope<GenerateDraftResponse>(response, '生成自动草稿失败');
 }
+
+async function summaryRequest<T>(path: string, options?: RequestInit) {
+  const response = await fetch(`/api/report-summaries${path}`, { ...options, headers: { ...getAuthHeader(), ...(options?.body ? { 'Content-Type': 'application/json' } : {}) } });
+  return readEnvelope<T>(response, '加载日报工作台数据失败');
+}
+export const getMonthlySummary = (year: number, month: number) => summaryRequest<MonthlySummary>(`/monthly${buildQuery({ year, month })}`);
+export const getYearlySummary = (year: number) => summaryRequest<YearlySummary>(`/yearly${buildQuery({ year })}`);
+export const getCalendarData = (year: number, month: number) => summaryRequest<CalendarDay[]>(`/calendar${buildQuery({ year, month })}`);
+export const getTeamStats = (date: string) => summaryRequest<TeamStats>(`/team-stats${buildQuery({ date })}`);
+export async function getMonthlyNote(year: number, month: number) { const data = await summaryRequest<Record<string, any>>(`/monthly-note${buildQuery({ year, month })}`); return { ...data, contentMd: data.contentMd ?? data.content_md ?? '' }; }
+export async function saveMonthlyNote(year: number, month: number, contentMd: string) { return summaryRequest(`/monthly-note${buildQuery({ year, month })}`, { method: 'PUT', body: JSON.stringify({ contentMd }) }); }
+export async function getYearlyNote(year: number) { const data = await summaryRequest<Record<string, any>>(`/yearly-note${buildQuery({ year })}`); return { ...data, contentMd: data.contentMd ?? data.content_md ?? '' }; }
+export async function saveYearlyNote(year: number, contentMd: string) { return summaryRequest(`/yearly-note${buildQuery({ year })}`, { method: 'PUT', body: JSON.stringify({ contentMd }) }); }
+export async function autosaveReport(payload: SaveDailyReportDraftPayload) {
+  const response = await fetch(`${BASE_URL}/autosave`, { method: 'POST', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  return readEnvelope<{ saved: boolean; report: DailyReport | null; message: string }>(response, '自动保存失败');
+}
+export async function getReportTemplates() { const response = await fetch(`${BASE_URL}/templates`, { headers: getAuthHeader() }); return readEnvelope<ReportTemplate[]>(response, '加载模板失败'); }
+export async function createReportTemplate(payload: Omit<ReportTemplate, 'id'>) { const response = await fetch(`${BASE_URL}/templates`, { method: 'POST', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); return readEnvelope<ReportTemplate>(response, '创建模板失败'); }
+export async function updateReportTemplate(id: number, payload: Partial<ReportTemplate>) { const response = await fetch(`${BASE_URL}/templates/${id}`, { method: 'PUT', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); return readEnvelope<ReportTemplate>(response, '更新模板失败'); }
+export async function deleteReportTemplate(id: number) { const response = await fetch(`${BASE_URL}/templates/${id}`, { method: 'DELETE', headers: getAuthHeader() }); return readEnvelope<{ deleted: boolean }>(response, '删除模板失败'); }

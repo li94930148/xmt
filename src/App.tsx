@@ -96,6 +96,10 @@ const ExportPage = lazyWithRetry(() => import('@/pages/ExportPage'), 'ExportPage
 const PomodoroPage = lazyWithRetry(() => import('@/pages/PomodoroPage'), 'PomodoroPage');
 const BackupPage = lazyWithRetry(() => import('@/pages/BackupPage'), 'BackupPage');
 const DailyReportPage = lazyWithRetry(() => import('@/pages/DailyReportPage'), 'DailyReportPage');
+const DailyReportCalendarPage = lazyWithRetry(() => import('@/pages/DailyReportCalendarPage'), 'DailyReportCalendarPage');
+const DailyReportMonthlyPage = lazyWithRetry(() => import('@/pages/DailyReportMonthlyPage'), 'DailyReportMonthlyPage');
+const DailyReportYearlyPage = lazyWithRetry(() => import('@/pages/DailyReportYearlyPage'), 'DailyReportYearlyPage');
+const DailyReportAnalyticsPage = lazyWithRetry(() => import('@/pages/DailyReportAnalyticsPage'), 'DailyReportAnalyticsPage');
 const RetrospectivesPage = lazyWithRetry(() => import('@/pages/RetrospectivesPage'), 'RetrospectivesPage');
 const RetrospectiveDetailPage = lazyWithRetry(() => import('@/pages/RetrospectiveDetailPage'), 'RetrospectiveDetailPage');
 const SocialReview = lazyWithRetry(() => import('@/pages/SocialReview'), 'SocialReview');
@@ -224,6 +228,11 @@ export default function App() {
                   <Route path="/export" element={<ExportPage />} />
                 </Route>
                 <Route path="/daily-report" element={<DailyReportPage />} />
+                <Route path="/daily-report/team" element={<DailyReportPage />} />
+                <Route path="/daily-report/calendar" element={<DailyReportCalendarPage />} />
+                <Route path="/daily-report/monthly" element={<DailyReportMonthlyPage />} />
+                <Route path="/daily-report/yearly" element={<DailyReportYearlyPage />} />
+                <Route path="/daily-report/analytics" element={<DailyReportAnalyticsPage />} />
                 <Route element={<RoleGuard permissions={['user:view']} />}>
                   <Route path="/users" element={<Users />} />
                 </Route>

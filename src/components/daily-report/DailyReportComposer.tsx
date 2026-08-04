@@ -2,6 +2,7 @@ import { Plus, Save, Send } from 'lucide-react';
 import type { DailyReportItem, DailyReportRiskLevel, DailyReportStatus } from '../../api/dailyReports';
 import { ActionButton, GlassPanel } from '../studio';
 import { DailyReportRiskPill, DailyReportStatusPill } from './DailyReportStatusPill';
+import DailyReportRichSection from './DailyReportRichSection';
 
 type Section = {
   key: string;
@@ -146,14 +147,7 @@ export default function DailyReportComposer({
             return (
               <label key={section.key} className="block">
                 <span className="mb-2 block text-sm font-semibold text-studio-text-primary">{section.title}</span>
-                <textarea
-                  value={item.contentMd || ''}
-                  onChange={(event) => updateItem(section.key, event.target.value)}
-                  disabled={readonly}
-                  rows={5}
-                  className="w-full resize-y rounded-card border border-studio-border-soft bg-white/[0.04] px-4 py-3 text-sm leading-6 text-studio-text-primary outline-none transition placeholder:text-studio-text-muted focus:border-studio-border-active disabled:opacity-70"
-                  placeholder={`${section.title}...`}
-                />
+                <DailyReportRichSection value={item.contentMd || ''} onChange={(value) => updateItem(section.key, value)} disabled={readonly} placeholder={`${section.title}...`} />
               </label>
             );
           })}

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.15.3 - 2026-08-05
+
+- 建立 XMT Design System，统一颜色、字体、圆角、阴影和动效 token。
+- 首页指标接入数字变化动画与完成率进度动画，保留传媒 SaaS 的克制表达。
+- 升级页面过渡、空状态、加载状态、弹窗进入动效及侧边栏展开收缩体验。
+- 不修改后端 API、数据库、权限系统、Workflow Engine、Socket.IO、Yjs 或 Creator Agent。
+
 ## 2.13.17 - 2026-08-01
 
 - 新增 Socket Auth Bridge 模块与 SocketAuthContext Zod 契约。

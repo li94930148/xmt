@@ -38,6 +38,7 @@ import {
   StudioSkeletonCard,
 } from '../components/studio';
 import { formatBeijingDate } from '../lib/utils';
+import { ProgressBar } from '../design-system';
 
 const statusText: Record<TopicStatus, string> = {
   pending: '待审核',
@@ -242,7 +243,10 @@ export default function Home() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="本月完成" value={teamStats?.completed_count || 0} unit="选题" icon={CheckCircle2} tone="success" trend={{ label: '内容交付', up: true }} />
         <MetricCard title="逾期任务" value={teamStats?.overdue_count || 0} unit="项" icon={Clock3} tone="coral" trend={{ label: '需关注', up: false }} />
-        <MetricCard title="完成率" value={`${teamStats?.completion_rate || '0'}%`} unit="本月" icon={TrendingUp} tone="cyan" trend={{ label: '团队节奏', up: true }} />
+        <MotionCard className="p-5">
+          <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold text-studio-text-muted">完成率</p><p className="mt-3 text-3xl font-bold text-studio-text-primary xmt-data-number">{teamStats?.completion_rate || 0}%</p></div><div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-gradient-to-br from-studio-cyan to-studio-primary shadow-lg shadow-studio-cyan/20"><TrendingUp className="h-5 w-5 text-white" /></div></div>
+          <div className="mt-4"><ProgressBar value={Number(teamStats?.completion_rate || 0)} tone="success" label="本月团队节奏" /></div>
+        </MotionCard>
         <MetricCard title="播放量" value={(monthlyStats?.total_views || 0).toLocaleString()} unit="累计" icon={BarChart3} tone="violet" trend={{ label: '数据复盘', up: true }} />
       </div>
 

@@ -38,6 +38,7 @@ import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 import { useAppStore } from '../store';
 import { Topic } from '../types';
 import Pagination from '../components/Pagination';
+import TopicSpotlightCard from '../components/xmt-ui/TopicSpotlightCard';
 
 type SortField = 'title' | 'created_at' | 'deadline' | 'status' | 'submitted_at';
 type SortDir = 'asc' | 'desc';
@@ -168,6 +169,11 @@ export default function Topics() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
   }, [sortDir, sortField, topics]);
+
+  const spotlightTopics = useMemo(
+    () => sortedTopics.filter((topic) => topic.status === 'pending' || isOverdue(topic) || newTopicIds.has(topic.id)).slice(0, 3),
+    [newTopicIds, sortedTopics],
+  );
 
   const pendingCount = topics.filter((topic) => topic.status === 'pending').length;
   const activeCount = topics.filter((topic) => ['production', 'shooting', 'publishing'].includes(topic.status)).length;
@@ -386,6 +392,26 @@ export default function Topics() {
           <p className="mt-2 text-sm text-studio-text-secondary">优先排查交付风险</p>
         </GlassPanel>
       </div>
+
+      {spotlightTopics.length > 0 ? (
+        <section aria-labelledby="priority-topics-title" className="space-y-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-studio-cyan">Priority focus</p>
+            <h2 id="priority-topics-title" className="mt-1 text-lg font-semibold text-studio-text-primary">重点选题</h2>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            {spotlightTopics.map((topic) => (
+              <TopicSpotlightCard
+                key={topic.id}
+                topic={topic}
+                statusLabel={topicStatusLabel[topic.status] || topic.status}
+                formattedTime={formatBeijingTime(topic.submitted_at || topic.created_at)}
+                onOpen={() => navigate(`/topics/${topic.id}`)}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <GlassPanel className="p-4">
         <div className="grid gap-3 lg:grid-cols-[1fr_220px]">

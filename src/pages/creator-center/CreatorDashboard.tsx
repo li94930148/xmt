@@ -3,7 +3,8 @@ import { Activity, CalendarRange, Gauge, Heart, Play, Share2, Users, Video } fro
 import { useNavigate } from 'react-router-dom';
 import { createCreatorAgentBindingCode, getCreatorAgentStatus, getDouyinDashboard, getDouyinSyncLogs, type CreatorAgentStatus, type DouyinDashboardData } from '@/api/creatorCenter';
 import ImageFallback from '@/components/common/ImageFallback';
-import { AccountHeader, EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, Panel, asRecord, formatDate, formatNumber, num } from './shared';
+import CreatorProfileCard from '@/components/xmt-ui/CreatorProfileCard';
+import { EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, Panel, asRecord, formatDate, formatNumber, num } from './shared';
 
 function GrowthBlock({ title, data }: { title: string; data: DouyinDashboardData['growth_7d'] }) {
   return <div className="rounded-xl bg-studio-surface p-4">
@@ -50,7 +51,16 @@ export default function CreatorDashboard() {
 
   return <div className="mx-auto max-w-[1500px] space-y-6 pb-12">
     <PageHeader title="抖音数据驾驶舱" description="账号与内容表现概览" loading={loading} onRefresh={() => void load()} refreshLabel="刷新数据" actions={<span className={`inline-flex h-10 items-center rounded-lg px-3 text-sm ${agent?.online?'bg-emerald-500/10 text-emerald-500':'bg-amber-500/10 text-amber-600'}`}>{agent?.online?'采集端在线':'采集端离线'}</span>} />
-    <AccountHeader account={account} />
+    <CreatorProfileCard
+      avatarUrl={typeof account.avatar === 'string' ? account.avatar : undefined}
+      name={String(account.nickname || account.account_name || '抖音账号')}
+      uid={String(account.douyin_uid || account.account_id || account.platform_uid || '')}
+      dataStatus={data.data_status}
+      fansCount={data.metrics.fans_count}
+      worksCount={data.metrics.works_count}
+      playCount={data.metrics.play_count}
+      onViewWorks={() => navigate('/analytics/creator-center/works')}
+    />
     <Panel title="Creator Agent" description="本机采集设备与浏览器状态">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div><span className="text-xs text-studio-text-muted">设备</span><p className="mt-1 font-medium">{agent?.device_name||'尚未绑定'}</p></div><div><span className="text-xs text-studio-text-muted">浏览器</span><p className="mt-1 font-medium">{agent?.browser_type||'未就绪'} {agent?.browser_version||''}</p></div><div><span className="text-xs text-studio-text-muted">兼容状态</span><p className="mt-1 font-medium">{agent?.browser_compatibility||'未检测'}</p></div><div><span className="text-xs text-studio-text-muted">抖音登录</span><p className="mt-1 font-medium">{agent?.browser_login_status==='valid'?'正常':'未确认'}</p></div></div>
       <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" disabled={bindingBusy||!account.douyin_uid} className="h-10 rounded-lg bg-studio-cyan px-4 text-sm font-medium text-slate-950 disabled:cursor-not-allowed disabled:opacity-50" onClick={()=>{setBindingBusy(true);setBindingError('');void createCreatorAgentBindingCode(String(account.douyin_uid||'')).then(value=>setBinding({code:value.binding_code,expiresAt:value.expires_at})).catch(cause=>setBindingError(cause instanceof Error?cause.message:'绑定码创建失败')).finally(()=>setBindingBusy(false));}}>{bindingBusy?'正在创建…':'创建一次性绑定码'}</button>{binding?<div className="rounded-lg bg-studio-surface px-4 py-2"><code className="font-semibold">{binding.code}</code><span className="ml-3 text-xs text-studio-text-muted">15 分钟内有效，仅可使用一次</span></div>:null}</div>

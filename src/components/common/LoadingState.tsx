@@ -49,7 +49,7 @@ export default function LoadingState({
 
   return (
     <div className={`flex flex-col items-center justify-center gap-4 py-12 ${className}`.trim()}>
-      <SkeletonCard />
+      <div className="w-full max-w-xl"><SkeletonCard /></div>
       <p className={`text-sm ${styles.textSecondary}`}>{text}</p>
     </div>
   );

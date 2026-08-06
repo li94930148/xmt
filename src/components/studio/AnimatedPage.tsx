@@ -10,7 +10,7 @@ export default function AnimatedPage({ children, className = '' }: { children: R
   }
 
   return (
-    <motion.div initial="initial" animate="animate" exit="exit" variants={pageVariants} className={className}>
+    <motion.div initial="initial" animate="animate" exit="exit" variants={pageVariants} className={className} data-page-transition="xmt-300ms">
       {children}
     </motion.div>
   );

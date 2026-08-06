@@ -22,7 +22,7 @@ export default function EmptyState({
   return (
     <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
       <div
-        className={`mb-6 flex h-20 w-20 items-center justify-center rounded-2xl ${
+        className={`xmt-empty-illustration mb-6 flex h-20 w-20 items-center justify-center rounded-2xl ${
           styles.isDark ? 'bg-[#1e2030]' : 'bg-[#f1f3f5]'
         }`}
       >

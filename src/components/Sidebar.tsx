@@ -170,7 +170,7 @@ export default function Sidebar({
 
             {collapsed && !isMobile && sectionIndex > 0 ? <div className="mx-2 my-3 border-t border-studio-border-soft" /> : null}
 
-            <ul className={`${expanded && (!collapsed || isMobile) ? 'space-y-1' : 'hidden'} mt-1`}>
+            <ul className={`mt-1 overflow-hidden transition-[max-height,opacity,transform] duration-200 ${expanded && (!collapsed || isMobile) ? 'max-h-[36rem] translate-y-0 space-y-1 opacity-100' : 'max-h-0 -translate-y-1 opacity-0'}`}>
               {section.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = isNavigationItemActive(location.pathname, item.path);

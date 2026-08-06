@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import MotionCard from './MotionCard';
+import { AnimatedNumber } from '../../design-system';
 
 export default function MetricCard({
   title,
@@ -32,7 +33,7 @@ export default function MetricCard({
         <div className="min-w-0">
           <p className="text-xs font-semibold text-studio-text-muted">{title}</p>
           <div className="mt-3 flex flex-wrap items-baseline gap-2">
-            <p className="break-words text-3xl font-bold leading-tight tracking-normal text-studio-text-primary">{value}</p>
+            <p className="break-words text-3xl font-bold leading-tight tracking-normal text-studio-text-primary">{typeof value === 'number' ? <AnimatedNumber value={value} /> : value}</p>
             {unit ? <span className="text-xs font-medium leading-snug text-studio-text-muted">{unit}</span> : null}
           </div>
           {trend ? (

@@ -54,7 +54,7 @@ export default function BaseModal({
         }
       }}
     >
-      <div className={`w-full ${sizeClassMap[size]} ${styles.modal} ${className}`.trim()}>
+      <div className={`xmt-modal-enter w-full ${sizeClassMap[size]} ${styles.modal} ${className}`.trim()}>
         {title || description || showCloseButton ? (
           <div className={`flex items-start justify-between gap-4 border-b px-6 py-5 ${styles.border}`}>
             <div className="min-w-0 flex-1">

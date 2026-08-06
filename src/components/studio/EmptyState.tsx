@@ -17,7 +17,7 @@ export default function StudioEmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-panel border border-dashed border-studio-border-soft bg-white/[0.03] px-6 py-12 text-center">
-      <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-card border border-studio-border-soft bg-white/[0.05] text-studio-cyan">
+      <div className="xmt-empty-illustration mb-5 flex h-16 w-16 items-center justify-center rounded-card border border-studio-border-soft bg-white/[0.05] text-studio-cyan">
         <Icon className="h-7 w-7" />
       </div>
       <h3 className="text-base font-semibold text-studio-text-primary">{title}</h3>

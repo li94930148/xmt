@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.15.4 - 2026-08-06
+
+- 完成 XMTCard 在 Dashboard、Topics、Workflow 和 Creator 页面中的实际应用。
+- Dashboard 保留 AnimatedNumber 与 ProgressBar，并统一使用 XMTCard 的 hover 交互。
+- 不修改 API、数据库、权限系统、Workflow Engine、Socket.IO、Yjs 或 Creator Agent。
+
 ## 2.15.3 - 2026-08-05
 
 - 发布日期：2026-08-06；已完成生产环境部署与基础线上验证。

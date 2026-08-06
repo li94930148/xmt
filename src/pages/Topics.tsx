@@ -38,6 +38,7 @@ import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 import { useAppStore } from '../store';
 import { Topic } from '../types';
 import Pagination from '../components/Pagination';
+import XMTCard from '../design-system/components/XMTCard';
 
 type SortField = 'title' | 'created_at' | 'deadline' | 'status' | 'submitted_at';
 type SortDir = 'asc' | 'desc';
@@ -370,21 +371,21 @@ export default function Topics() {
       />
 
       <div className="grid gap-4 md:grid-cols-3">
-        <GlassPanel className="p-5">
+        <XMTCard className="p-5">
           <p className="text-xs font-semibold text-studio-text-muted">待审核选题</p>
           <p className="mt-3 text-3xl font-bold text-studio-text-primary">{pendingCount}</p>
           <p className="mt-2 text-sm text-studio-text-secondary">需要编导或管理者处理</p>
-        </GlassPanel>
-        <GlassPanel className="p-5">
+        </XMTCard>
+        <XMTCard className="p-5">
           <p className="text-xs font-semibold text-studio-text-muted">生产链路中</p>
           <p className="mt-3 text-3xl font-bold text-studio-text-primary">{activeCount}</p>
           <p className="mt-2 text-sm text-studio-text-secondary">创作、成片和发布阶段</p>
-        </GlassPanel>
-        <GlassPanel className="p-5">
+        </XMTCard>
+        <XMTCard className="p-5">
           <p className="text-xs font-semibold text-studio-text-muted">临期或逾期</p>
           <p className="mt-3 text-3xl font-bold text-studio-text-primary">{overdueCount}</p>
           <p className="mt-2 text-sm text-studio-text-secondary">优先排查交付风险</p>
-        </GlassPanel>
+        </XMTCard>
       </div>
 
       <GlassPanel className="p-4">
@@ -417,7 +418,7 @@ export default function Topics() {
         </div>
       </GlassPanel>
 
-      <GlassPanel className="overflow-hidden">
+      <XMTCard className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1080px]">
             <thead>
@@ -558,7 +559,7 @@ export default function Topics() {
         <div className="border-t border-studio-border-soft bg-white/[0.025]">
           <Pagination page={page} total={total} limit={limit} onChange={setPage} />
         </div>
-      </GlassPanel>
+      </XMTCard>
 
       {selected.size > 0 ? (
         <GlassPanel className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center gap-3 px-4 py-3">

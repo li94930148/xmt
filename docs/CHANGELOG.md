@@ -1,5 +1,13 @@
 # XMT 系统更新日志
 
+## v2.15.4 - 2026-08-06
+
+### XMTCard 应用补全
+
+- Dashboard 数据指标、Topics 统计与列表容器、Workflow 模板与节点、Creator 指标卡统一接入 XMTCard。
+- Dashboard 继续使用 AnimatedNumber 和 ProgressBar，数据请求与业务逻辑保持不变。
+- 保留现有权限过滤、Workflow 状态机、API、数据库、Socket.IO、Yjs 和 Creator Agent。
+
 ## v2.15.3 - 2026-08-05
 
 ### React Bits 风格 UI 体验升级

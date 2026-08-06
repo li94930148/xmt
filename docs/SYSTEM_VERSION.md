@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.15.3
+v2.15.4
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.15.3
 
 ## 本版本摘要
 
-本版本完成 XMT Design System 初始落地，并将克制的 React Bits 风格动效应用于首页指标、状态反馈、弹窗、页面过渡和 Sidebar。
+本版本完成 XMT Design System 组件在 Dashboard、Topics、Workflow 和 Creator 页面中的应用补全。

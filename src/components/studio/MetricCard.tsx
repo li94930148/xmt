@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
-import MotionCard from './MotionCard';
+import XMTCard from '../../design-system/components/XMTCard';
 import { AnimatedNumber } from '../../design-system';
 
 export default function MetricCard({
@@ -28,7 +28,7 @@ export default function MetricCard({
   };
 
   return (
-    <MotionCard className="p-5">
+    <XMTCard className="p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs font-semibold text-studio-text-muted">{title}</p>
@@ -47,6 +47,6 @@ export default function MetricCard({
           <Icon className="h-5 w-5 text-white" />
         </div>
       </div>
-    </MotionCard>
+    </XMTCard>
   );
 }

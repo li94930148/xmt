@@ -1,6 +1,18 @@
 # Changelog
 
+## 2.16.1 - 2026-08-07
+
+### 首页驾驶舱视觉增强
+
+- 将 Home 升级为品牌级内容生产驾驶舱，新增融合 Aurora 的 Hero 展示区域与核心指标入口。
+- MagicBento 调整为非对称大卡与辅助卡组合，强化内容生产指数、任务、选题、审核、发布、播放和 AI 入口层级。
+- 首页关键内容接入 AnimatedContent 进入动画，并启用 MagicBento 的 Spotlight、粒子、倾斜、磁吸和点击反馈。
+- 增加 WebGL 与减少动态效果偏好的降级机制，完成 1440 桌面端及 390×844 移动端适配。
+- 后端 API、数据库、权限系统、Workflow Engine、Socket.IO 与 Yjs 均保持不变。
+
 ## 2.16.0 - 2026-08-06
+
+### React Bits 原生体验升级
 
 - 正式接入 React Bits 官方 TypeScript + Tailwind 组件源码，建立 `src/components/reactbits` 第三方组件层与 `src/components/xmt-ui` 业务适配层。
 - Login 接入 Aurora 动态背景，并提供 WebGL 不可用时的静态渐变降级。
@@ -11,14 +23,19 @@
 
 ## 2.15.4 - 2026-08-06
 
-- 完成 XMTCard 在 Dashboard、Topics、Workflow 和 Creator 页面中的实际应用。
+### UI 应用补全升级
+
+- 完成 XMT 自研 Design System 与 XMTCard 在 Dashboard、Topics、Workflow 和 Creator 页面中的业务应用；本版本不属于 React Bits 官方组件集成。
 - Dashboard 保留 AnimatedNumber 与 ProgressBar，并统一使用 XMTCard 的 hover 交互。
 - 不修改 API、数据库、权限系统、Workflow Engine、Socket.IO、Yjs 或 Creator Agent。
 ## 2.15.3 - 2026-08-05
 
+### React Bits 风格 Design System 基础升级
+
 - 发布日期：2026-08-06；已完成生产环境部署与基础线上验证。
 
 - 建立 XMT Design System，统一颜色、字体、圆角、阴影和动效 token。
+- 新增 XMTTheme、XMTCard、AnimatedNumber 与 ProgressBar 基础组件。
 - 首页指标接入数字变化动画与完成率进度动画，保留传媒 SaaS 的克制表达。
 - 升级页面过渡、空状态、加载状态、弹窗进入动效及侧边栏展开收缩体验。
 - 不修改后端 API、数据库、权限系统、Workflow Engine、Socket.IO、Yjs 或 Creator Agent。

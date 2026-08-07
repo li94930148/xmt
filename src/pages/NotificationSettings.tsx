@@ -911,6 +911,18 @@ export default function NotificationSettings() {
                           <p className={`text-sm ${styles.textSecondary}`}>{change.description}</p>
                         </div>
                       ))}
+                      {entry.impactScope?.length ? (
+                        <div className={`border-t pt-4 ${styles.border}`}>
+                          <p className={`mb-2 text-xs font-medium ${styles.textMuted}`}>影响范围</p>
+                          <div className="flex flex-wrap gap-2">
+                            {entry.impactScope.map((scope) => (
+                              <span key={scope} className={`rounded-full border px-2.5 py-1 text-xs ${styles.border} ${styles.textSecondary}`}>
+                                {scope}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ))}

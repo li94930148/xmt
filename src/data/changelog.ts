@@ -2,6 +2,7 @@ export interface ChangelogEntry {
   version: string;
   date: string;
   title: string;
+  impactScope?: string[];
   changes: {
     type: 'feature' | 'improvement' | 'fix' | 'security';
     description: string;
@@ -9,6 +10,55 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  {
+    version: '2.16.1',
+    date: '2026-08-07',
+    title: '首页驾驶舱视觉增强',
+    impactScope: ['Home 首页', '前端视觉与交互', '桌面端与移动端'],
+    changes: [
+      { type: 'feature', description: '新增品牌级 Hero 区域，融合平台名称、内容生产驾驶舱标题、核心指标与主要业务入口。' },
+      { type: 'improvement', description: '增强 Aurora 动态背景，并提供 WebGL 不可用及减少动态效果偏好下的静态渐变降级。' },
+      { type: 'improvement', description: 'MagicBento 升级为非对称布局，以内容生产指数作为主视觉大卡，并配置任务、选题、审核、发布、播放和 AI 辅助卡。' },
+      { type: 'improvement', description: '启用 Spotlight、粒子、3D 倾斜、磁吸、点击反馈与 AnimatedContent 动态进入动画。' },
+      { type: 'security', description: '后端 API、数据库、权限、Workflow Engine、Socket.IO 与 Yjs 保持不变。' },
+    ],
+  },
+  {
+    version: '2.16.0',
+    date: '2026-08-06',
+    title: 'React Bits 原生体验升级',
+    impactScope: ['Login', 'Home / Dashboard', 'Topics 重点内容', 'Creator Dashboard'],
+    changes: [
+      { type: 'feature', description: '正式接入 React Bits 官方 TypeScript + Tailwind 组件源码。' },
+      { type: 'feature', description: '接入 AuroraBackground、MagicBento、AnimatedContent、SpotlightCard 与 ProfileCard。' },
+      { type: 'improvement', description: '完成 Login、Dashboard、Topics 重点内容与 Creator 展示体验升级。' },
+      { type: 'security', description: '后端 API、数据库、权限、Workflow Engine、Socket.IO 与 Yjs 保持不变。' },
+    ],
+  },
+  {
+    version: '2.15.4',
+    date: '2026-08-06',
+    title: 'UI 应用补全升级',
+    impactScope: ['Dashboard', 'Topics', 'Workflow', 'Creator'],
+    changes: [
+      { type: 'improvement', description: '将 XMT 自研 Design System 实际应用到核心业务页面，不作为 React Bits 官方组件集成。' },
+      { type: 'improvement', description: '统一 Dashboard 卡片体系并优化 Topics 页面统计卡与核心列表卡片。' },
+      { type: 'improvement', description: '统一 Workflow 模板、节点和流程预览视觉，并优化 Creator 指标卡展示。' },
+      { type: 'security', description: '业务数据、权限规则与 Workflow 状态机保持不变。' },
+    ],
+  },
+  {
+    version: '2.15.3',
+    date: '2026-08-05',
+    title: 'React Bits 风格 Design System 基础升级',
+    impactScope: ['XMT Design System', 'Dashboard 基础指标', 'Sidebar', 'Modal / Loading / EmptyState'],
+    changes: [
+      { type: 'feature', description: '建立 XMT Design System 基础层，新增 XMTTheme 与 XMTCard。' },
+      { type: 'feature', description: '新增 AnimatedNumber 与 ProgressBar，统一指标数字和进度展示。' },
+      { type: 'improvement', description: '优化页面基础动效以及 Sidebar 展开收缩体验。' },
+      { type: 'improvement', description: '统一 Modal、Loading 与 EmptyState 的视觉和进入反馈。' },
+    ],
+  },
   {
     version: '2.13.2',
     date: '2026-07-30',

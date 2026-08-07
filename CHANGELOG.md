@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.16.1 - 2026-08-07
+
+- 将 Home 升级为品牌级内容生产驾驶舱，新增融合 Aurora 的 Hero 展示区域与核心指标入口。
+- MagicBento 调整为非对称大卡与辅助卡组合，强化内容生产指数、任务、选题、审核、发布、播放和 AI 入口层级。
+- 首页关键内容接入 AnimatedContent 进入动画，并启用 MagicBento 的 Spotlight、粒子、倾斜、磁吸和点击反馈。
+- 增加 WebGL 与减少动态效果偏好的降级机制，完成 1440 桌面端及 390×844 移动端适配。
+- 后端 API、数据库、权限系统、Workflow Engine、Socket.IO 与 Yjs 均保持不变。
+
 ## 2.16.0 - 2026-08-06
 
 - 正式接入 React Bits 官方 TypeScript + Tailwind 组件源码，建立 `src/components/reactbits` 第三方组件层与 `src/components/xmt-ui` 业务适配层。

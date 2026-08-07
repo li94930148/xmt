@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
@@ -13,10 +13,8 @@ import {
   FileText,
   Flame,
   Lightbulb,
-  MessageSquareText,
   PenLine,
   Send,
-  Sparkles,
   Timer,
   TrendingUp,
   Users,
@@ -60,30 +58,17 @@ const statusTone: Record<TopicStatus, 'primary' | 'cyan' | 'violet' | 'coral' | 
   completed: 'success',
 };
 
-const dailyQuotes = [
-  { text: '好的内容不是堆满信息，而是在正确的时间推动下一步。', author: '内容工作台' },
-  { text: '今天先让生产链路流动起来，灵感会在协作里变清晰。', author: '内容节奏手记' },
-  { text: '选题、创作、发布、复盘，每一步都应该被看见。', author: '团队协作记录' },
-  { text: '创意需要锋芒，执行需要秩序。', author: '新媒体工作台' },
-];
-
-function getDailyQuote() {
-  const today = new Date();
-  const dayOfYear = Math.floor((today.getTime() - new Date(today.getFullYear(), 0, 0).getTime()) / 86400000);
-  return dailyQuotes[dayOfYear % dailyQuotes.length];
-}
-
 export default function Home() {
   const [teamStats, setTeamStats] = useState<TeamStats | null>(null);
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStats | null>(null);
   const [pendingTopics, setPendingTopics] = useState<Topic[]>([]);
   const [recentTopics, setRecentTopics] = useState<Topic[]>([]);
+  const [todayTopicCount, setTodayTopicCount] = useState(0);
   const [hotInspirations, setHotInspirations] = useState<Inspiration[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const { permissions, loading: permissionsLoading } = usePermission();
-  const dailyQuote = getDailyQuote();
   const canViewAnalytics = user?.role === 'admin' || permissions.includes('*') || permissions.includes('analytics:view');
 
   useEffect(() => {
@@ -104,7 +89,11 @@ export default function Home() {
         if (team.status === 'fulfilled' && team.value) setTeamStats(team.value);
         if (monthly.status === 'fulfilled' && monthly.value) setMonthlyStats(monthly.value);
         if (pending.status === 'fulfilled') setPendingTopics(pending.value.data.slice(0, 5));
-        if (recent.status === 'fulfilled') setRecentTopics(recent.value.data.slice(0, 6));
+        if (recent.status === 'fulfilled') {
+          const today = formatBeijingDate(new Date().toISOString());
+          setTodayTopicCount(recent.value.data.filter((topic) => formatBeijingDate(topic.created_at) === today).length);
+          setRecentTopics(recent.value.data.slice(0, 6));
+        }
         if (inspirations.status === 'fulfilled') {
           setHotInspirations([...inspirations.value.data].sort((a, b) => (b.votes || 0) - (a.votes || 0)).slice(0, 6));
         }
@@ -148,6 +137,8 @@ export default function Home() {
     }
   };
 
+  const handleDashboardNavigate = useCallback((path: string) => navigate(path), [navigate]);
+
   if (loading) {
     return (
       <PageShell>
@@ -164,90 +155,16 @@ export default function Home() {
 
   return (
     <PageShell>
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.8fr)]">
-        <XMTCard className="studio-edge-line overflow-hidden p-6 md:p-7" glow>
-          <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-studio-cyan/25 bg-studio-cyan/10 px-3 py-1 text-xs font-semibold text-studio-cyan">
-                <Sparkles className="h-3.5 w-3.5" />
-                今日内容节奏
-              </div>
-              <h1 className="text-3xl font-bold tracking-normal text-studio-text-primary md:text-4xl">
-                {user?.name || '伙伴'}，今天优先让内容链路往前走。
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-studio-text-secondary">
-                优先处理待审核与待发布内容，继续推进今天的内容节奏。
-              </p>
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <ActionButton onClick={() => navigate('/topics')} variant="primary">
-                  <FileText className="h-4 w-4" />
-                  进入选题池
-                </ActionButton>
-                <ActionButton onClick={() => navigate('/daily-report')}>
-                  <FileClock className="h-4 w-4" />
-                  今日日报
-                </ActionButton>
-                <span className="text-xs text-studio-text-muted">
-                  {new Date().toLocaleDateString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' })}
-                </span>
-              </div>
-            </div>
-            <div className="w-full rounded-card border border-studio-border-soft bg-white/[0.05] p-4 lg:max-w-[240px]">
-              <p className="text-xs font-semibold text-studio-text-muted">今日主线</p>
-              <div className="mt-4 space-y-3">
-                {rhythm.slice(0, 3).map((item) => (
-                  <button key={item.label} onClick={() => navigate(item.path)} className="flex w-full items-center justify-between gap-3 rounded-button bg-white/[0.04] px-3 py-2 text-left transition hover:bg-white/[0.08]">
-                    <span className="text-sm text-studio-text-secondary">{item.label}</span>
-                    <span className="text-lg font-bold text-studio-text-primary">{item.value}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="pointer-events-none absolute right-0 top-0 h-48 w-48 rounded-full bg-studio-cyan/10 blur-3xl" />
-          <div className="pointer-events-none absolute bottom-0 left-1/3 h-32 w-64 rounded-full bg-studio-violet/10 blur-3xl" />
-        </XMTCard>
-
-        <GlassPanel className="p-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-studio-amber/15 text-studio-amber">
-              <MessageSquareText className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-studio-text-primary">每日一言</h2>
-              <p className="text-xs text-studio-text-muted">开始前看一眼</p>
-            </div>
-          </div>
-          <blockquote className="mt-5 text-sm leading-6 text-studio-text-secondary">“{dailyQuote.text}”</blockquote>
-          <p className="mt-3 text-right text-xs text-studio-text-muted">- {dailyQuote.author}</p>
-        </GlassPanel>
-      </div>
-
       <DashboardBento
         pendingTopics={pendingTopics.length}
         inProduction={rhythm.find((item) => item.label === '进行中稿件')?.value || 0}
         toPublish={rhythm.find((item) => item.label === '今日待发布')?.value || 0}
+        todayTopics={todayTopicCount}
         completionRate={Number(teamStats?.completion_rate || 0)}
         totalViews={monthlyStats?.total_views || 0}
         hotInspirations={hotInspirations.length}
+        onNavigate={handleDashboardNavigate}
       />
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {rhythm.map((item) => (
-          <XMTCard key={item.label} className="p-5" onClick={() => navigate(item.path)}>
-            <button className="flex w-full items-center gap-4 text-left">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] border border-studio-border-soft bg-white/[0.05]">
-                <item.icon className="h-5 w-5 text-studio-cyan" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-studio-text-primary">{item.label}</p>
-                <p className="mt-1 text-xs text-studio-text-muted">点击进入处理</p>
-              </div>
-              <span className="text-2xl font-bold text-studio-text-primary">{item.value}</span>
-            </button>
-          </XMTCard>
-        ))}
-      </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="本月完成" value={teamStats?.completed_count || 0} unit="选题" icon={CheckCircle2} tone="success" trend={{ label: '内容交付', up: true }} />

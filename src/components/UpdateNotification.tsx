@@ -74,6 +74,19 @@ export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateN
             发布日期：{latestVersion.date}
           </p>
 
+          {latestVersion.impactScope?.length ? (
+            <div className="mb-5">
+              <p className={`mb-2 text-xs font-medium ${styles.textMuted}`}>影响范围</p>
+              <div className="flex flex-wrap gap-2">
+                {latestVersion.impactScope.map((scope) => (
+                  <span key={scope} className={`rounded-full border px-2.5 py-1 text-xs ${styles.border} ${styles.textSecondary}`}>
+                    {scope}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {/* 更新内容列表 */}
           <div className="space-y-3">
             {latestVersion.changes.slice(0, 6).map((change, index) => (

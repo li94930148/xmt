@@ -22,6 +22,8 @@
     "test:auth-web-cookie": "tsx tests/auth/auth-web-cookie.test.ts",
     "test:auth-browser": "tsx tests/auth/auth-browser.test.ts",
     "test:auth-login-navigation": "tsx tests/auth/auth-login-navigation.spec.ts",
+    "test:auth-production-build-runtime": "tsx tests/auth/auth-production-build-runtime.spec.ts",
+    "test:auth-gray-browser-observer": "tsx tests/auth/auth-gray-browser-observer.spec.ts",
     "test:auth-rollout": "tsx tests/auth/auth-rollout.test.ts",
     "test:login-rollout-policy": "tsx tests/auth/login-rollout-policy.test.ts",
     "test:login-gateway": "tsx tests/auth/login-gateway.test.ts",

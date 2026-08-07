@@ -8,6 +8,7 @@ type CoordinatorRuntime = {
   getAccessToken: () => string | null;
   refresh: () => Promise<string | null>;
   getExpiresAt: () => number | null;
+  getTraceSnapshot?: () => { mode: string; status: string; loginCompleted: boolean; hasAccessToken: boolean };
 };
 
 declare global {

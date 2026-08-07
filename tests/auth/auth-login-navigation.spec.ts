@@ -98,6 +98,11 @@ const browser = await chromium.launch({ headless: true, executablePath: projectC
 async function loginAndAssert(username: string, expectedV1: boolean) {
   const context = await browser.newContext();
   const page = await context.newPage();
+  const traceEvents: string[] = [];
+  page.on('console', (message) => {
+    const text = message.text();
+    if (text.includes('[xmt-auth]')) traceEvents.push(text);
+  });
   try {
     await page.goto(`${baseUrl}/login`);
     await page.getByPlaceholder('输入用户名').fill(username);
@@ -116,6 +121,18 @@ async function loginAndAssert(username: string, expectedV1: boolean) {
     });
     assert.equal(runtimeState.hasRuntime, expectedV1);
     assert.equal(runtimeState.hasAccessToken, expectedV1);
+    if (expectedV1) {
+      for (const trace of [
+        'auth.response.received',
+        'auth.adapter.selected',
+        'auth.runtime.before',
+        'auth.runtime.after',
+        'auth.redirect.start',
+        'auth.redirect.end',
+      ]) {
+        assert(traceEvents.some((event) => event.includes(trace)), `Missing development trace: ${trace}`);
+      }
+    }
   } finally {
     await context.close();
   }

@@ -224,6 +224,8 @@ export default function App() {
                   <Route path="/export" element={<ExportPage />} />
                 </Route>
                 <Route path="/daily-report" element={<DailyReportPage />} />
+                <Route path="/daily-report/team" element={<DailyReportPage />} />
+                <Route path="/daily-report/summary" element={<DailyReportPage />} />
                 <Route element={<RoleGuard permissions={['user:view']} />}>
                   <Route path="/users" element={<Users />} />
                 </Route>

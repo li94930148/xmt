@@ -1953,6 +1953,33 @@ async function runTimeMigrations() {
     });
   }
 
+  const dailyWorkspacePermissionSyncKey = 'daily_workspace_permission_sync_20260803';
+  const dailyWorkspacePermissionSync = await db.execute({ sql: `SELECT value FROM app_meta WHERE key = ?`, args: [dailyWorkspacePermissionSyncKey] });
+  if (dailyWorkspacePermissionSync.rows.length === 0) {
+    const workspacePermissions: Array<[string, string]> = [
+      ['report:daily:view_analysis', '查看日报数据分析'],
+      ['report:template:create', '创建日报模板'],
+      ['report:template:update', '编辑日报模板'],
+      ['report:template:delete', '删除日报模板'],
+    ];
+    for (const [code, name] of workspacePermissions) {
+      await db.execute({ sql: `INSERT OR IGNORE INTO permissions (code, name, module) VALUES (?, ?, 'report')`, args: [code, name] });
+    }
+    const roles = await db.execute(`SELECT id, code FROM roles WHERE code IN ('admin', 'director', 'member', 'editor')`);
+    const permissionRows = await db.execute({ sql: `SELECT id, code FROM permissions WHERE code IN (${workspacePermissions.map(() => '?').join(',')})`, args: workspacePermissions.map(([code]) => code) });
+    const permissionIds = new Map(permissionRows.rows.map((row) => [String((row as any).code), Number((row as any).id)]));
+    for (const role of roles.rows) {
+      const roleCode = String((role as any).code);
+      const roleId = Number((role as any).id);
+      const codes = roleCode === 'admin' || roleCode === 'director' ? workspacePermissions.map(([code]) => code) : [];
+      for (const code of codes) {
+        const permissionId = permissionIds.get(code);
+        if (permissionId) await db.execute({ sql: `INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, args: [roleId, permissionId] });
+      }
+    }
+    await db.execute({ sql: `INSERT INTO app_meta (key, value, created_at) VALUES (?, 'done', datetime('now', '+8 hours'))`, args: [dailyWorkspacePermissionSyncKey] });
+  }
+
   const retroSeedSyncKey = 'retro_seed_sync_20260702';
   const retroSeedSync = await db.execute({
     sql: `SELECT value FROM app_meta WHERE key = ?`,

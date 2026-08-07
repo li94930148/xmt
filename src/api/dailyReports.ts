@@ -83,6 +83,11 @@ export type DailyReportArchiveResponse = {
   reports: DailyReport[];
 };
 
+export type MonthlyRecord = { id?: number; year: number; month: number; work_summary_md: string; key_projects_md: string; issues_plan_md: string; user_name?: string; username?: string };
+export type YearlyRecord = { id?: number; year: number; annual_summary_md: string; achievements_md: string; shortcomings_md: string; next_year_plan_md: string; user_name?: string; username?: string };
+export type SummaryArchive = { year: number; monthly: MonthlyRecord[]; yearly: YearlyRecord[] };
+export type ReportTemplate = { id: number; name: string; description?: string; sections: Array<{ key: string; title: string }>; isDefault?: boolean; sortOrder?: number; userId?: number | null };
+
 type ApiEnvelope<T> = {
   success: boolean;
   data: T;
@@ -169,11 +174,12 @@ export async function getDailyReportArchive(params: { start: string; end: string
   return readEnvelope<DailyReportArchiveResponse>(response, '加载日报归档失败');
 }
 
-export async function generateDailyReportDraft(payload: { date: string }) {
-  const response = await fetch(`${BASE_URL}/generate-draft`, {
-    method: 'POST',
-    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return readEnvelope<GenerateDraftResponse>(response, '生成自动草稿失败');
+async function summaryRequest<T>(path: string, options?: RequestInit) {
+  const response = await fetch(`/api/report-summaries${path}`, { ...options, headers: { ...getAuthHeader(), ...(options?.body ? { 'Content-Type': 'application/json' } : {}) } });
+  return readEnvelope<T>(response, '加载日报总结失败');
 }
+export const getMonthlyRecord = (year: number, month: number) => summaryRequest<MonthlyRecord>(`/monthly${buildQuery({ year, month })}`);
+export const saveMonthlyRecord = (year: number, month: number, payload: Partial<MonthlyRecord>) => summaryRequest<MonthlyRecord>(`/monthly${buildQuery({ year, month })}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const getYearlyRecord = (year: number) => summaryRequest<YearlyRecord>(`/yearly${buildQuery({ year })}`);
+export const saveYearlyRecord = (year: number, payload: Partial<YearlyRecord>) => summaryRequest<YearlyRecord>(`/yearly${buildQuery({ year })}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const getSummaryArchive = (year: number, userId?: number) => summaryRequest<SummaryArchive>(`/archive${buildQuery({ year, userId })}`);

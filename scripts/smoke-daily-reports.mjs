@@ -34,6 +34,22 @@ async function request(method, path, token, body, expected) {
   return payload?.data;
 }
 
+async function summaryRequest(method, path, token, body, expected) {
+  const response = await fetch(`${API_BASE_URL.replace(/\/api$/, '')}/api/report-summaries${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const payload = await response.json().catch(() => null);
+  const ok = expected.includes(response.status);
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${method} /api/report-summaries${path} -> ${response.status}`);
+  if (!ok) throw new Error(`Unexpected status ${response.status} for ${method} ${path}`);
+  return payload?.data;
+}
+
 async function main() {
   await request('GET', `/me?date=${smokeDate}`, TOKEN, null, [200]);
   await request('GET', '/me?date=bad-date', TOKEN, null, [400]);
@@ -72,6 +88,14 @@ async function main() {
   await request('GET', `/archive?start=${smokeDate}&end=${smokeDate}`, TOKEN, null, [200]);
   await request('GET', '/archive?start=2099-01-01&end=2099-02-15', TOKEN, null, [400]);
   await request('GET', `/team?date=${smokeDate}`, TOKEN, null, [200, 403]);
+  await summaryRequest('PUT', `/monthly?year=2099&month=1`, TOKEN, {
+    workSummaryMd: '轻量化日报回归测试', keyProjectsMd: '日报重构', issuesPlanMd: '继续验证',
+  }, [200]);
+  await summaryRequest('GET', `/monthly?year=2099&month=1`, TOKEN, null, [200]);
+  await summaryRequest('PUT', `/yearly?year=2099`, TOKEN, {
+    annualSummaryMd: '年度回归测试', achievementsMd: '完成验证', shortcomingsMd: '无', nextYearPlanMd: '继续维护',
+  }, [200]);
+  await summaryRequest('GET', `/yearly?year=2099`, TOKEN, null, [200]);
 
   if (ADMIN_TOKEN) {
     await request('GET', `/team?date=${smokeDate}`, ADMIN_TOKEN, null, [200]);

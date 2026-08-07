@@ -1,6 +1,7 @@
 import { useAuthStore } from '../store';
 import type { User } from '../types';
 import { adaptLoginResponse, type AuthLoginResult } from '../auth/web/login-response-adapter';
+import { emitAuthLoginDebugTrace } from '../auth/web/auth-login-debug';
 
 const BASE_URL = '/api';
 
@@ -65,13 +66,21 @@ function readRemainingAttempts(body: Record<string, unknown>) {
   return Number.isFinite(remainingAttempts) && remainingAttempts >= 0 ? Math.floor(remainingAttempts) : undefined;
 }
 
+function createLoginAttemptId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `xmt-login-${crypto.randomUUID()}`;
+  }
+  return `xmt-login-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export async function login(username: string, password: string): Promise<AuthLoginResult> {
   let response: Response;
+  const loginAttemptId = createLoginAttemptId();
 
   try {
     response = await fetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Request-ID': loginAttemptId },
       body: JSON.stringify({ username, password }),
     });
   } catch {
@@ -107,7 +116,15 @@ export async function login(username: string, password: string): Promise<AuthLog
     throw new LoginError('当前服务暂时不可用，请稍后再试。', 'server_unavailable', { status: response.status });
   }
 
-  return adaptLoginResponse(await response.json());
+  const payload = await response.json();
+  const responseKind = payload && typeof payload === 'object' && (payload as { success?: unknown }).success === true
+    ? 'v1-envelope'
+    : 'legacy';
+  const requestId = response.headers.get('X-Request-ID') ?? undefined;
+  emitAuthLoginDebugTrace('auth.response.received', {
+    responseKind, status: response.status, requestId: requestId ?? null, loginAttemptId,
+  });
+  return adaptLoginResponse(payload, { requestId, loginAttemptId });
 }
 
 export async function getMe(): Promise<User> {

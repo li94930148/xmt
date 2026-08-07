@@ -1,5 +1,65 @@
 # XMT 升级阶段记录
 
+## v2.15.1 日报填写与归档交互优化（2026-08-04）
+
+- 我的日报固定当天填写，移除日期选择和保存草稿按钮，改为直接提交。
+- 修复已提交日报本人无法输入的问题，允许本人修改后再次提交。
+- 月报、年报并入我的日报，通过记录类型切换。
+- 总结归档新增日报、月报、年报筛选及成员、日期/年份筛选。
+
+### 验证结果
+
+- `npm run version:check`、`npm run check`、`npm run build` 通过。
+- 日报相关文件定向 lint 通过；全量 lint 的既有问题未纳入本次修改。
+
+## Phase 2-C3-8-C3.11：Gray Browser Observability Fixture
+
+- 当前版本：v2.15.1
+
+### 完成内容
+
+1. 新增灰度浏览器观测夹具，关联 requestId、loginAttemptId、响应类别、适配器模式、Runtime 快照与路由路径。
+2. 登录请求携带安全 requestId，v1 响应适配器兼容标准 API Contract 的 `meta.requestId`。
+3. 新增浏览器夹具显式观测开关；默认生产页面不记录前端认证 trace。
+4. 实现停止规则：HTTP 登录成功但未进入 `/` 时立即结束，不继续 Refresh、Socket、Yjs 或 Version Sync。
+
+### 数据库变化
+
+无。
+
+### 测试结果
+
+- `test:auth-browser`、`test:auth-login-navigation`、`test:auth-gray-browser-observer`、`test:browser-auth-recovery`、`test:auth`、`test:login-gateway`、类型检查、构建与版本一致性检查通过。
+
+### 风险与下一阶段
+
+1. 该夹具只在 Playwright 显式启用时采集安全字段，不记录 token、cookie、密码或 Session secret。
+2. 未开启生产灰度、未创建账号、未修改 Auth 配置、数据库、Socket 或 Yjs。
+3. 下一阶段 C3.12 可在审批后使用固定测试账号执行真实灰度；若停止规则触发，立即回滚并以观测结果定位。
+
+## v2.15.0 日报系统轻量化重构（2026-08-04）
+
+- 日报系统重构为我的日报、团队日报、总结归档三个入口。
+- 移除统计、趋势、排名、自动分析、风险等级、关键数据和日历展示。
+- 新增月报、年报结构化表单；管理员可查看全部日报/月报/年报，成员可查看团队公开日报。
+- 保留既有日报、日报条目、月报、年报和审计数据，新增迁移 `007_daily_lightweight_refactor`。
+
+### 验证结果
+
+- `npm run version:check`、`npm run check`、`npm run build` 通过。
+- 日报保存、提交、修改、团队查看、管理员归档和权限隔离完成回归验证。
+
+## v2.14.7 日报工作台 V2 发布（2026-08-04）
+
+- 已将日报工作台 V2 的迁移、API、页面路由、Tiptap 编辑器、模板权限和 30 秒自动保存发布到生产。
+- 生产数据库已执行 `006_daily_workspace_v2`，保留既有日报提交、审核和审计链路。
+- 生产验证：`npm run check`、`npm run build`、数据库迁移、API 健康检查通过。
+
+## v2.14.5 日报工作台 V2（2026-08-03）
+
+- 已完成日报工作台数据迁移、统计/总结 API、自动保存、路由和基础页面接入。
+- 保留 `daily_reports`、`daily_report_items`、`daily_report_templates`、`daily_report_audit_logs` 及既有提交审核链路。
+
 ## Phase 2-C3-8-C3.5：Browser Auth Full Regression
 
 - 当前版本：v2.14.4

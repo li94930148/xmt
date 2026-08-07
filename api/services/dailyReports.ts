@@ -12,7 +12,8 @@ import { beijingToday, execute, queryAll, queryOne, runInTransaction } from '../
 import { createMessage } from '../utils/messageHelper.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const EDITABLE_STATUSES: DailyReportStatus[] = ['draft', 'rejected'];
+// 已提交日报允许本人重新编辑并再次提交，保留审核/归档记录不被覆盖。
+const EDITABLE_STATUSES: DailyReportStatus[] = ['draft', 'rejected', 'submitted'];
 const VALID_STATUSES: DailyReportStatus[] = ['draft', 'submitted', 'approved', 'rejected', 'archived'];
 const VALID_RISK_LEVELS: DailyReportRiskLevel[] = ['normal', 'warning', 'blocked'];
 const MAX_ARCHIVE_DAYS = 31;
@@ -194,6 +195,13 @@ function ensureCanManage(user: User) {
   if (!isManager(user)) {
     throw new DailyReportServiceError(403, 'FORBIDDEN', '无权限操作团队日报');
   }
+}
+
+async function ensureCanViewTeam(user: User) {
+  if (isManager(user) || await hasPermissionCode(user, 'report:daily:view_team')) {
+    return;
+  }
+  throw new DailyReportServiceError(403, 'FORBIDDEN', '无权限查看团队日报');
 }
 
 async function listDailyReportManagers() {
@@ -499,6 +507,44 @@ export async function saveDailyReportDraft(user: User | undefined, input: SaveDa
   return formatReport(row);
 }
 
+/** 自动保存只更新草稿内容，不递增版本，也不写入审计日志。 */
+export async function autosaveDailyReport(user: User | undefined, input: SaveDailyReportDraftInput) {
+  assertAuthenticated(user);
+  const reportDate = parseDate(input.reportDate);
+  const existing = await queryOne<DailyReportRow>(
+    `SELECT * FROM daily_reports WHERE user_id = ? AND report_date = ?`, [user.id, reportDate]
+  );
+  if (!existing) {
+    return { saved: false, report: null, message: '请先创建日报草稿' };
+  }
+  if (!EDITABLE_STATUSES.includes(String(existing.status) as DailyReportStatus)) {
+    throw new DailyReportServiceError(409, 'REPORT_LOCKED', '当前日报状态不可自动保存');
+  }
+
+  const manualSummary = String(input.manualSummaryMd || '').trim();
+  const riskLevel = parseRiskLevel(input.riskLevel);
+  const items = (input.items || []).map(normalizeItemInput);
+  await runInTransaction(async (tx) => {
+    await tx.execute(
+      `UPDATE daily_reports SET manual_summary_md = ?, risk_level = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
+      [manualSummary, riskLevel, Number(existing.id)]
+    );
+    await tx.execute(`DELETE FROM daily_report_items WHERE report_id = ?`, [Number(existing.id)]);
+    for (const item of items) {
+      await tx.execute(
+        `INSERT INTO daily_report_items (report_id, section_key, title, content_md, sort_order, meta_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+        [Number(existing.id), item.sectionKey, item.title || null, item.contentMd || null, item.sortOrder || 0, stringifyJson(item.meta)]
+      );
+    }
+  });
+  const row = await queryOne<DailyReportRow>(
+    `SELECT r.*, u.name AS user_name, u.username FROM daily_reports r LEFT JOIN users u ON u.id = r.user_id WHERE r.id = ?`,
+    [Number(existing.id)]
+  );
+  return { saved: true, report: await formatReport(row), message: '已保存' };
+}
+
 export async function submitDailyReport(user: User | undefined, reportId: number) {
   assertAuthenticated(user);
   const row = await queryOne<DailyReportRow>(`SELECT * FROM daily_reports WHERE id = ?`, [reportId]);
@@ -540,7 +586,7 @@ export async function submitDailyReport(user: User | undefined, reportId: number
 
 export async function listTeamDailyReports(user: User | undefined, filters: DailyReportListFilters) {
   assertAuthenticated(user);
-  ensureCanManage(user);
+  await ensureCanViewTeam(user);
   const reportDate = parseDate(filters.reportDate);
   const status = parseStatus(filters.status);
   const params: unknown[] = [reportDate];

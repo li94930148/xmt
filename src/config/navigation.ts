@@ -115,6 +115,8 @@ export const navigationSections: NavigationSection[] = [
     icon: FileClock,
     items: [
       { id: 'daily-reports', label: '日报系统', icon: FileClock, path: '/daily-report' },
+      { id: 'daily-report-team', label: '团队日报', icon: Users, path: '/daily-report/team', permissions: ['report:daily:view_team'] },
+      { id: 'daily-report-summary', label: '总结归档', icon: Archive, path: '/daily-report/summary' },
     ],
   },
   {

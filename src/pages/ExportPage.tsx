@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { BarChart3, Download, FileBarChart, FileClock, Loader2, CalendarRange, Sparkles } from 'lucide-react';
 import { exportAnalytics, exportTopics, getWeeklyReport } from '../api';
 import { useAppStore } from '../store';
@@ -95,9 +96,19 @@ export default function ExportPage() {
               <h2 className="text-base font-semibold text-studio-text-primary">日报</h2>
               <p className="mt-1 text-sm text-studio-text-muted">预留个人日清、团队摘要、阻塞项和明日计划。</p>
             </div>
-            <StatusPill tone="primary">规划中</StatusPill>
+            <StatusPill tone="success">已上线</StatusPill>
           </div>
-          <EmptyState icon={FileClock} title="日报能力规划中" description="这里只做 UI 入口预留，不新增日报后端逻辑。" />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: '打开日报系统', path: '/daily-report' },
+              { label: '查看团队日报', path: '/daily-report/team' },
+              { label: '打开总结归档', path: '/daily-report/summary' },
+            ].map((item) => (
+              <Link key={item.path} to={item.path} className="rounded-card border border-studio-border-soft bg-white/[0.04] px-4 py-4 text-sm font-medium text-studio-text-primary transition hover:border-studio-border-active hover:bg-white/[0.08]">
+                {item.label}
+              </Link>
+            ))}
+          </div>
         </GlassPanel>
       ) : null}
 

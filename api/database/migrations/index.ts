@@ -4,6 +4,8 @@ import { resourceUsagePermissionsMigration } from './003_resource_usage_permissi
 import { productionResourcePermissionsMigration } from './004_production_resource_permissions';
 import { authSessionFoundationMigration } from './005_auth_session_foundation';
 import type { DatabaseMigration } from './types';
+import { dailyWorkspaceV2Migration } from './006_daily_workspace_v2';
+import { dailyLightweightRefactorMigration } from './007_daily_lightweight_refactor';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -11,4 +13,6 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceUsagePermissionsMigration,
   productionResourcePermissionsMigration,
   authSessionFoundationMigration,
+  dailyWorkspaceV2Migration,
+  dailyLightweightRefactorMigration,
 ];

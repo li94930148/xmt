@@ -97,7 +97,6 @@ export {
   getContentOSState,
 } from './contentOrchestrator';
 export {
-  generateDailyReportDraft,
   getDailyReportArchive,
   getMyDailyReport,
   getTeamDailyReports,

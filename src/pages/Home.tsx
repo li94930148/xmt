@@ -38,6 +38,7 @@ import {
 } from '../components/studio';
 import { formatBeijingDate } from '../lib/utils';
 import { ProgressBar, XMTCard } from '../design-system';
+import DashboardBento from '../components/xmt-ui/DashboardBento';
 
 const statusText: Record<TopicStatus, string> = {
   pending: '待审核',
@@ -221,6 +222,15 @@ export default function Home() {
           <p className="mt-3 text-right text-xs text-studio-text-muted">- {dailyQuote.author}</p>
         </GlassPanel>
       </div>
+
+      <DashboardBento
+        pendingTopics={pendingTopics.length}
+        inProduction={rhythm.find((item) => item.label === '进行中稿件')?.value || 0}
+        toPublish={rhythm.find((item) => item.label === '今日待发布')?.value || 0}
+        completionRate={Number(teamStats?.completion_rate || 0)}
+        totalViews={monthlyStats?.total_views || 0}
+        hotInspirations={hotInspirations.length}
+      />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {rhythm.map((item) => (

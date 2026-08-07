@@ -11,6 +11,7 @@ import {
   defaultSystemSettings,
   ManagedSystemSettings,
 } from '@/lib/systemSettings';
+import LoginHero from '../components/xmt-ui/LoginHero';
 
 
 function formatRetryAfter(seconds?: number) {
@@ -556,6 +557,7 @@ export default function Login() {
       return (
         <StyleShell>
           <div className="relative min-h-screen overflow-hidden bg-[#050508]">
+            <LoginHero />
             <div className="absolute inset-0">
               <div className="absolute left-[15%] top-[8%] h-[700px] w-[700px] rounded-full bg-amber-500/[0.07] blur-[200px]" />
               <div className="absolute right-[10%] top-[12%] h-[500px] w-[500px] rounded-full bg-yellow-600/[0.05] blur-[180px]" />
@@ -591,6 +593,7 @@ export default function Login() {
       return (
         <StyleShell>
           <div className="relative min-h-screen overflow-hidden bg-white pb-20">
+            <LoginHero />
             <div className="min-h-screen lg:grid lg:grid-cols-2">
               <div className="relative hidden bg-[#0c0f1a] lg:flex lg:flex-col lg:justify-between overflow-hidden p-12 xl:p-16">
                 <div className={`relative z-10 transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
@@ -639,6 +642,7 @@ export default function Login() {
     return (
       <StyleShell>
         <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+          <LoginHero />
           <div
             className="pointer-events-none fixed inset-0 z-50 opacity-[0.03]"
             style={{

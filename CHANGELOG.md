@@ -1,11 +1,19 @@
 # Changelog
 
+## 2.16.0 - 2026-08-06
+
+- 正式接入 React Bits 官方 TypeScript + Tailwind 组件源码，建立 `src/components/reactbits` 第三方组件层与 `src/components/xmt-ui` 业务适配层。
+- Login 接入 Aurora 动态背景，并提供 WebGL 不可用时的静态渐变降级。
+- Home 驾驶舱接入 MagicBento，Dashboard 数据展示接入 AnimatedContent。
+- Topics 的重点选题接入 SpotlightCard，保留普通高频列表原有展示方式。
+- Creator Dashboard 接入 ProfileCard，仅展示已同步的真实账号和内容数据，并适配桌面与移动端布局。
+- 后端 API、数据库、权限系统、Workflow Engine、Socket.IO 与 Yjs 均保持不变。
+
 ## 2.15.4 - 2026-08-06
 
 - 完成 XMTCard 在 Dashboard、Topics、Workflow 和 Creator 页面中的实际应用。
 - Dashboard 保留 AnimatedNumber 与 ProgressBar，并统一使用 XMTCard 的 hover 交互。
 - 不修改 API、数据库、权限系统、Workflow Engine、Socket.IO、Yjs 或 Creator Agent。
-
 ## 2.15.3 - 2026-08-05
 
 - 发布日期：2026-08-06；已完成生产环境部署与基础线上验证。

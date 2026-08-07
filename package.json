@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.15.3",
+  "version": "2.15.5",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -13,6 +13,7 @@
     "test:time": "tsx scripts/time-contract-test.ts",
     "test:rate-limit": "tsx scripts/rate-limit-contract-test.ts",
     "test:topics": "tsx tests/topics/topics.test.ts",
+    "test:socket": "tsx tests/socket-lifecycle-observability.test.ts",
     "test:api-contract": "tsx tests/api-contract/api-contract.test.ts",
     "test:auth": "tsx tests/auth/auth.test.ts",
     "test:auth-session-migration": "tsx tests/auth/session-migration.test.ts",

@@ -7,6 +7,7 @@ import EmptyState from '../components/EmptyState';
 import { ConfirmModal, FormModal, LoadingState, PageHeader } from '../components/common';
 import { buildWorkflowRuntimeContext, getExplainability, runTransitionCheck } from '@shared/workflow/workflow_runtime';
 import { mapDecisionToUI, mapExplainToUI } from '../components/workflow/WorkflowUIBridge';
+import XMTCard from '../design-system/components/XMTCard';
 
 interface WorkflowTemplate {
   id: number;
@@ -392,7 +393,7 @@ export default function WorkflowDesigner() {
       ) : (
         <div className="grid gap-4">
           {templates.map((template) => (
-            <div key={template.id} className={`rounded-2xl p-4 ${styles.card}`}>
+            <XMTCard key={template.id} className={`p-4 ${styles.card}`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div
@@ -443,7 +444,7 @@ export default function WorkflowDesigner() {
                   ) : null}
                 </div>
               </div>
-            </div>
+            </XMTCard>
           ))}
         </div>
       )}
@@ -495,7 +496,7 @@ export default function WorkflowDesigner() {
 
             <div className="space-y-3">
               {formData.nodes.map((node, index) => (
-                <div
+                <XMTCard
                   key={index}
                   className={`rounded-xl border p-4 ${getNodeCardClass(node)}`}
                   data-policy-reason={getNodePolicyResult(node)?.reason}
@@ -629,7 +630,7 @@ export default function WorkflowDesigner() {
                       {getStatusLabel(node.status_to)}
                     </span>
                   </div>
-                </div>
+                </XMTCard>
               ))}
 
               {formData.nodes.length === 0 ? (
@@ -646,12 +647,12 @@ export default function WorkflowDesigner() {
               <div className="flex flex-wrap items-center gap-2">
                 {formData.nodes.map((node, index) => (
                   <div key={index} className="flex items-center gap-2">
-                    <div className={`rounded-lg border px-3 py-2 ${styles.bgTertiary} ${styles.border}`}>
+                    <XMTCard className={`px-3 py-2 ${styles.bgTertiary} ${styles.border}`}>
                       <p className={`text-xs font-medium ${styles.textPrimary}`}>{node.name || `节点${index + 1}`}</p>
                       <p className={`text-xs ${styles.textMuted}`}>
                         {getStatusLabel(node.status_from)} → {getStatusLabel(node.status_to)}
                       </p>
-                    </div>
+                    </XMTCard>
                     {index < formData.nodes.length - 1 ? (
                       <ArrowRight className="w-4 h-4 flex-shrink-0 text-theme-text-muted" />
                     ) : null}
@@ -679,4 +680,3 @@ export default function WorkflowDesigner() {
     </div>
   );
 }
-

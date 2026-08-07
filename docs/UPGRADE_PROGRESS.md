@@ -1,5 +1,13 @@
 # XMT 升级阶段记录
 
+## Phase 2-C3-8-C3.12-R1：Socket 生命周期观测
+
+- 当前本地版本：v2.15.5；生产只读基线为 v2.15.3。
+- 新增无敏感 Socket 生命周期事件、Session ID unknown A-E 分类和 loopback-only 运行摘要。
+- 生产保持 legacy，Auth v1、Auth Web、Login Rollout、Socket Bridge 与 allowlist 均关闭。
+- 本地 Socket、Coordinator、Yjs、类型、构建和版本检查通过。
+- 生产旧日志仍有 52 条 `Session ID unknown`；观测代码尚未发布，当前不能做可信分类，因此继续阻塞 Auth 灰度。
+
 ## v2.15.1 日报填写与归档交互优化（2026-08-04）
 
 - 我的日报固定当天填写，移除日期选择和保存草稿按钮，改为直接提交。
@@ -22,7 +30,6 @@
 2. 登录请求携带安全 requestId，v1 响应适配器兼容标准 API Contract 的 `meta.requestId`。
 3. 新增浏览器夹具显式观测开关；默认生产页面不记录前端认证 trace。
 4. 实现停止规则：HTTP 登录成功但未进入 `/` 时立即结束，不继续 Refresh、Socket、Yjs 或 Version Sync。
-
 ### 数据库变化
 
 无。
@@ -59,6 +66,9 @@
 
 - 已完成日报工作台数据迁移、统计/总结 API、自动保存、路由和基础页面接入。
 - 保留 `daily_reports`、`daily_report_items`、`daily_report_templates`、`daily_report_audit_logs` 及既有提交审核链路。
+### 下一阶段
+
+发布稳定性补丁后，在 legacy 下完成至少 24 小时 Socket/PM2 观察，再申请 C3.12-A。
 
 ## Phase 2-C3-8-C3.5：Browser Auth Full Regression
 

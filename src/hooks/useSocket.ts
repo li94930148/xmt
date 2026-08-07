@@ -70,6 +70,7 @@ export function useSocket() {
     globalUserId = user.id;
     globalToken = token;
     setSocket(nextSocket);
+    let reconnectAttempt = 0;
 
     if (coordinatorEnabled && runtime) {
       const coordinator = new SocketCoordinator({
@@ -86,6 +87,10 @@ export function useSocket() {
     }
 
     nextSocket.on('connect', () => {
+      if (reconnectAttempt > 0) {
+        nextSocket.emit('socket:lifecycle:reconnect', { attempt: reconnectAttempt });
+        reconnectAttempt = 0;
+      }
       console.info('[Socket] connected:', nextSocket.id);
       setSocketRevision((revision) => revision + 1);
       setSocket(nextSocket);
@@ -99,6 +104,10 @@ export function useSocket() {
     nextSocket.on('disconnect', (reason) => {
       console.info('[Socket] disconnected:', reason);
       setSocketRevision((revision) => revision + 1);
+    });
+
+    nextSocket.io.on('reconnect_attempt', (attempt) => {
+      reconnectAttempt = Number.isInteger(attempt) ? attempt : 0;
     });
 
     nextSocket.on('new_message', (message) => {

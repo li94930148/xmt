@@ -32,13 +32,12 @@ import {
   EmptyState,
   GlassPanel,
   MetricCard,
-  MotionCard,
   PageShell,
   StatusPill,
   StudioSkeletonCard,
 } from '../components/studio';
 import { formatBeijingDate } from '../lib/utils';
-import { ProgressBar } from '../design-system';
+import { ProgressBar, XMTCard } from '../design-system';
 
 const statusText: Record<TopicStatus, string> = {
   pending: '待审核',
@@ -165,7 +164,7 @@ export default function Home() {
   return (
     <PageShell>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.8fr)]">
-        <MotionCard className="studio-edge-line overflow-hidden p-6 md:p-7" glow>
+        <XMTCard className="studio-edge-line overflow-hidden p-6 md:p-7" glow>
           <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-studio-cyan/25 bg-studio-cyan/10 px-3 py-1 text-xs font-semibold text-studio-cyan">
@@ -206,7 +205,7 @@ export default function Home() {
           </div>
           <div className="pointer-events-none absolute right-0 top-0 h-48 w-48 rounded-full bg-studio-cyan/10 blur-3xl" />
           <div className="pointer-events-none absolute bottom-0 left-1/3 h-32 w-64 rounded-full bg-studio-violet/10 blur-3xl" />
-        </MotionCard>
+        </XMTCard>
 
         <GlassPanel className="p-5">
           <div className="flex items-center gap-3">
@@ -225,7 +224,7 @@ export default function Home() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {rhythm.map((item) => (
-          <MotionCard key={item.label} className="p-5" onClick={() => navigate(item.path)}>
+          <XMTCard key={item.label} className="p-5" onClick={() => navigate(item.path)}>
             <button className="flex w-full items-center gap-4 text-left">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] border border-studio-border-soft bg-white/[0.05]">
                 <item.icon className="h-5 w-5 text-studio-cyan" />
@@ -236,17 +235,17 @@ export default function Home() {
               </div>
               <span className="text-2xl font-bold text-studio-text-primary">{item.value}</span>
             </button>
-          </MotionCard>
+          </XMTCard>
         ))}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="本月完成" value={teamStats?.completed_count || 0} unit="选题" icon={CheckCircle2} tone="success" trend={{ label: '内容交付', up: true }} />
         <MetricCard title="逾期任务" value={teamStats?.overdue_count || 0} unit="项" icon={Clock3} tone="coral" trend={{ label: '需关注', up: false }} />
-        <MotionCard className="p-5">
+        <XMTCard className="p-5">
           <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold text-studio-text-muted">完成率</p><p className="mt-3 text-3xl font-bold text-studio-text-primary xmt-data-number">{teamStats?.completion_rate || 0}%</p></div><div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-gradient-to-br from-studio-cyan to-studio-primary shadow-lg shadow-studio-cyan/20"><TrendingUp className="h-5 w-5 text-white" /></div></div>
           <div className="mt-4"><ProgressBar value={Number(teamStats?.completion_rate || 0)} tone="success" label="本月团队节奏" /></div>
-        </MotionCard>
+        </XMTCard>
         <MetricCard title="播放量" value={(monthlyStats?.total_views || 0).toLocaleString()} unit="累计" icon={BarChart3} tone="violet" trend={{ label: '数据复盘', up: true }} />
       </div>
 

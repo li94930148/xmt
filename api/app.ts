@@ -13,7 +13,8 @@ import { fileURLToPath } from 'url'
 import http from 'http'
 import https from 'https'
 import fs from 'fs'
-import { Server } from 'socket.io'
+import { Server, type Socket } from 'socket.io'
+import { SocketLifecycleObserver } from './observability/socket-lifecycle-observability.js'
 import { initDatabase, closeDatabase } from './database/db.js'
 import { queryOne } from './database/utils.js'
 import { verifyToken } from './utils/jwt.js'
@@ -224,6 +225,8 @@ export const io = new Server(server, {
   },
 })
 
+const socketLifecycleObserver = new SocketLifecycleObserver()
+
 const socketAuthService = new SocketAuthService({
   verifyLegacyToken: verifyToken,
   verifyAccessTokenV1,
@@ -258,6 +261,19 @@ function getSocketTransport(socket: { conn?: { transport?: { name?: string } } }
   return socket.conn?.transport?.name || 'unknown'
 }
 
+function getEngineConnectionId(socket: Socket): string | undefined {
+  return (socket.conn as unknown as { id?: string }).id
+}
+
+function getEngineRequestTransport(requestUrl?: string): string {
+  if (!requestUrl) return 'unknown'
+  try {
+    return new URL(requestUrl, 'http://socket.local').searchParams.get('transport') || 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
 function logSocketAuthFailed(
   reason: string,
   socket: { id?: string; handshake?: SocketHandshakeLike; conn?: { transport?: { name?: string } } },
@@ -275,12 +291,21 @@ io.engine.on('connection_error', (error: Error & {
   context?: unknown
   req?: http.IncomingMessage
 }) => {
+  const context = error.context as { status?: unknown } | undefined
+  const status = typeof context?.status === 'number' ? context.status : null
+  const category = socketLifecycleObserver.engineConnectionError({
+    code: error.code,
+    message: error.message,
+    requestUrl: error.req?.url,
+    httpStatus: status,
+    proxied: Boolean(error.req?.headers['x-forwarded-proto']),
+  })
   console.warn('[Socket][engine connection_error]', {
     code: error.code,
     message: error.message,
-    context: error.context,
-    origin: error.req?.headers?.origin,
-    url: error.req?.url,
+    category,
+    transport: getEngineRequestTransport(error.req?.url),
+    httpStatus: status,
   })
 })
 
@@ -304,6 +329,14 @@ app.get('/internal/auth-rollout/runtime', (req, res) => {
   if (!loopback) return res.status(404).end()
   res.setHeader('Cache-Control', 'no-store')
   return res.json({ runtime: authRolloutRuntimeReadiness() })
+})
+
+app.get('/internal/socket-lifecycle/summary', (req, res) => {
+  const address = req.socket.remoteAddress || ''
+  const loopback = address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+  if (!loopback) return res.status(404).end()
+  res.setHeader('Cache-Control', 'no-store')
+  res.json({ summary: socketLifecycleObserver.getSummary() })
 })
 app.use('/internal/metrics/auth', createAuthMetricsHttpRouter(
   authMetricsPrometheusExporter,
@@ -467,12 +500,12 @@ io.on('connection', (socket) => {
     return
   }
 
-  console.info('[Socket] connected', {
-    socketId: socket.id,
-    userId: socket.data.user?.id,
-    origin: socket.handshake.headers.origin,
+  const connectionId = socketLifecycleObserver.connected({
+    engineSid: getEngineConnectionId(socket),
     transport: socket.conn.transport.name,
   })
+  socket.data.socketLifecycleConnectionId = connectionId
+  socket.conn.on('upgrade', (transport) => socketLifecycleObserver.upgraded(getEngineConnectionId(socket), transport.name))
 
   socket.join(`user_${socketUser.id}`)
 
@@ -542,12 +575,13 @@ io.on('connection', (socket) => {
   })
 
   socket.on('disconnect', (reason) => {
-    console.info('[Socket] disconnected', {
-      socketId: socket.id,
-      userId: socket.data.user?.id,
-      reason,
-    })
+    socketLifecycleObserver.disconnected({ engineSid: getEngineConnectionId(socket), reason })
     leaveAllRooms(io, socket)
+  })
+
+  socket.on('socket:lifecycle:reconnect', (payload: unknown) => {
+    const attempt = typeof payload === 'object' && payload !== null ? (payload as { attempt?: unknown }).attempt : 0
+    socketLifecycleObserver.reconnect(getEngineConnectionId(socket), attempt)
   })
 })
 

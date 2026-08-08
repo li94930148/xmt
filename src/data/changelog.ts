@@ -11,6 +11,18 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.17.1',
+    date: '2026-08-08',
+    title: 'React Bits 浅色主题与字体兼容修复',
+    impactScope: ['外观与动效设置', 'React Bits 按钮与文本适配层', '业务正文排版'],
+    changes: [
+      { type: 'fix', description: '修复浅色模式中 React Bits 按钮的文字、边框与高光对比。' },
+      { type: 'fix', description: '修复 SpecularButton 主题色，以及 GlareHover、ClickSpark、Magnet 的尺寸与布局。' },
+      { type: 'fix', description: '修复文本动画裁切；用户字号不再改变 html rem 基准。' },
+      { type: 'improvement', description: '新增深色、浅色双主题真实预览与仅开发环境可见的主题兼容矩阵。' },
+    ],
+  },
+  {
     version: '2.17.0',
     date: '2026-08-08',
     title: 'React Bits 原生动效主题系统',

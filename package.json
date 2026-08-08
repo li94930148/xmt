@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.17.0",
+  "version": "2.17.1",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -52,6 +52,7 @@
     "test:daily-reports": "node scripts/smoke-daily-reports.mjs",
     "test:retrospectives": "node scripts/smoke-retrospectives.mjs",
     "test:e2e": "node scripts/e2e-smoke.mjs",
+    "test:reactbits-theme": "tsx tests/browser/reactbits-theme-compatibility.spec.ts",
     "test:anonymous-feedback": "tsx scripts/test-anonymous-feedback.ts",
     "smoke:navigation": "tsx scripts/smoke-navigation.mjs",
     "test:douyin:webhook": "node scripts/test-douyin-webhook-challenge.mjs",

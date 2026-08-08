@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.17.1 - 2026-08-08
+
+### React Bits 浅色主题与字体兼容修复
+
+- 修复 React Bits 按钮在浅色模式下的文字、边框与高光对比；分别适配 primary、secondary、ghost、danger、icon 与 AI 变体。
+- 为 SpecularButton 传入主题颜色参数，并修复 GlareHover、ClickSpark 与 Magnet 的尺寸和布局约束。
+- 为文本动画增加语义字号与外层裁切安全区；全局字号改为仅作用于业务正文，不再改变 `html` 的 rem 基准。
+- 外观中心新增同一草稿配置的深色、浅色真实预览及仅开发环境可见的兼容矩阵。
+
 ## 2.17.0 - 2026-08-08
 
 ### React Bits 原生动效主题系统

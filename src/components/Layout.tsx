@@ -137,7 +137,9 @@ export default function Layout() {
 
   useEffect(() => {
     document.documentElement.style.setProperty('--system-font-size', `${fontSize}px`);
-    document.documentElement.style.fontSize = `${fontSize}px`;
+    // Keep the browser root at 16px: Tailwind spacing and React Bits internals
+    // use rem units and must not scale with the user's body-text preference.
+    document.documentElement.style.fontSize = '';
   }, [fontSize]);
 
   useEffect(() => {
@@ -428,7 +430,7 @@ export default function Layout() {
           </div>
         </Topbar>
 
-        <main className="px-4 py-4 sm:px-6 sm:py-6">
+        <main className="xmt-business-content px-4 py-4 sm:px-6 sm:py-6" style={{ fontSize: 'var(--system-font-size)' }}>
           <div className="mx-auto w-full max-w-7xl space-y-4">
             <Breadcrumbs />
             <AnimatedPage className="min-h-[calc(100vh-8rem)]">

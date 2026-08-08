@@ -7,7 +7,12 @@ const clone = (value: ReactBitsAppearanceConfig) => JSON.parse(JSON.stringify(va
 const setPath = (config: ReactBitsAppearanceConfig, path: string, value: unknown) => { const next = clone(config) as Record<string, any>; const keys = path.split('.'); let cursor: Record<string, any> = next; keys.slice(0, -1).forEach((key) => { cursor = cursor[key]; }); cursor[keys.at(-1)!] = value; return next as ReactBitsAppearanceConfig; };
 export const useReactBitsAppearanceStore = create<Store>((set, get) => ({
   config: clone(defaultReactBitsAppearanceConfig), draftConfig: clone(defaultReactBitsAppearanceConfig),
-  setDraftField: (path, value) => set((state) => ({ draftConfig: setPath(state.draftConfig, path, value) })),
+  setDraftField: (path, value) => set((state) => {
+    const next = setPath(state.draftConfig, path, value);
+    // Draft updates originate from native selects. Reject malformed values before
+    // they reach a live React Bits preview and can invalidate a lazy registry entry.
+    return parseReactBitsAppearanceConfig(next) ? { draftConfig: next } : {};
+  }),
   applyPreset: (id) => { const found = reactBitsPresets.find((item) => item.id === id); if (found) set({ draftConfig: clone(found.config) }); },
   save: () => { const config = clone(get().draftConfig); localStorage.setItem(REACT_BITS_APPEARANCE_KEY, JSON.stringify(config)); set({ config }); },
   reset: () => set({ draftConfig: clone(defaultReactBitsAppearanceConfig) }),

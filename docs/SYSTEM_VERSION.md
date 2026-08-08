@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.15.4
+v2.17.0
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.15.4
 
 ## 本版本摘要
 
-本版本完成 XMT Design System 组件在 Dashboard、Topics、Workflow 和 Creator 页面中的应用补全。
+本版本完成 React Bits 原生动效主题系统、官方来源清单和本地外观配置中心。

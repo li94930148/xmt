@@ -12,6 +12,7 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime } from '../lib/utils';
 import { getRoleDisplayName } from '../lib/roles';
+import { ReactBitsAppearancePanel } from '@/features/reactbits-appearance/ReactBitsAppearancePanel';
 import { useDesktopNotification } from '../hooks/useDesktopNotification';
 import { isSecureContext } from '../utils/notification';
 import { changelog, getChangeTypeLabel, getChangeTypeColor } from '../data/changelog';
@@ -75,7 +76,7 @@ const tabMeta = {
   notifications: { label: '通知偏好', icon: Bell },
   profile: { label: '个人资料', icon: User },
   password: { label: '账号安全', icon: Lock },
-  appearance: { label: '个人偏好', icon: Palette },
+  appearance: { label: '外观与动效', icon: Palette },
   system: { label: '系统设置', icon: Monitor },
   branding: { label: '品牌设置', icon: Tag },
   login: { label: '登录页设置', icon: Sparkles },
@@ -442,8 +443,8 @@ export default function NotificationSettings() {
         </p>
       </div>
 
-      <div className="flex gap-6">
-        <div className={`w-56 flex-shrink-0 self-start ${styles.card} p-2`}>
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <div className={`w-full flex-shrink-0 self-start lg:w-56 ${styles.card} p-2`}>
           {tabs.map((key) => {
             const meta = tabMeta[key];
             const Icon = meta.icon;
@@ -463,7 +464,7 @@ export default function NotificationSettings() {
           })}
         </div>
 
-        <div className={`flex-1 ${styles.card} p-6`}>
+        <div className={`min-w-0 flex-1 ${styles.card} p-4 sm:p-6`}>
           {activeTab === 'notifications' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
@@ -654,7 +655,7 @@ export default function NotificationSettings() {
           {activeTab === 'appearance' && (
             <div className="space-y-6">
               <div>
-                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>个人偏好</h2>
+                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>外观与动效</h2>
                 <p className={`mt-1 text-sm ${styles.textMuted}`}>这些设置仅保存在当前浏览器，不会影响其他管理员设备。</p>
               </div>
 
@@ -692,6 +693,8 @@ export default function NotificationSettings() {
                   </div>
                 </button>
               </div>
+
+              <ReactBitsAppearancePanel />
 
               <button onClick={handleSaveAppearance} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary}`}>
                 <Save className="h-4 w-4" /> 保存个人偏好

@@ -11,6 +11,18 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.17.0',
+    date: '2026-08-08',
+    title: 'React Bits 原生动效主题系统',
+    impactScope: ['外观与动效设置', 'Login', 'Home', '通用 ActionButton', '当前浏览器本地配置'],
+    changes: [
+      { type: 'feature', description: '新增 React Bits 原生动效外观中心、六套官方组件预设和自由搭配能力。' },
+      { type: 'feature', description: '支持背景、标题、数字、按钮、卡片、内容进入和导航风格的实时预览、导入导出与恢复默认。' },
+      { type: 'improvement', description: '新增 reduced-motion、移动端低强度、单主背景限制与 WebGL 静态 fallback。' },
+      { type: 'security', description: '所有动效均来自 React Bits 官方 TS + Tailwind 源码；后端 API、数据库、权限、Workflow、Socket.IO 与 Yjs 保持不变。' },
+    ],
+  },
+  {
     version: '2.16.1',
     date: '2026-08-07',
     title: '首页驾驶舱视觉增强',

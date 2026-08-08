@@ -1,0 +1,4 @@
+import { Suspense, type ReactNode } from 'react';
+import { revealRegistry } from './componentRegistry';
+import { useEffectiveReactBitsAppearanceConfig } from './ReactBitsAppearancePreviewContext';
+export function ReactBitsRevealSlot({ children, className = '' }: { children: ReactNode; className?: string }) { const config = useEffectiveReactBitsAppearanceConfig(); const id = config.reveal.component; const mode = config.motionMode; if (id === 'none' || mode === 'off') return <div className={className}>{children}</div>; const Reveal = revealRegistry[id as keyof typeof revealRegistry]; return <Suspense fallback={<div className={className}>{children}</div>}><Reveal {...({ className, distance: mode === 'reduced' ? 8 : 22, duration: mode === 'reduced' ? 0.35 : 0.65, delay: 0.08, threshold: 0.15 } as any)}>{children}</Reveal></Suspense>; }

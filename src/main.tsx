@@ -4,6 +4,7 @@ import App from './App'
 import './index.css'
 import './styles/print.css'
 import './utils/apiInterceptor'
+import { ReactBitsAppearanceProvider } from './features/reactbits-appearance/ReactBitsAppearanceProvider'
 
 // 创建 QueryClient 实例
 const queryClient = new QueryClient({
@@ -19,6 +20,6 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={queryClient}>
-    <App />
+    <ReactBitsAppearanceProvider><App /></ReactBitsAppearanceProvider>
   </QueryClientProvider>
 )

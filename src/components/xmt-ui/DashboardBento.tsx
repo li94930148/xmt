@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { ArrowRight, CalendarDays, Clock3, PenLine, Play, Send } from 'lucide-react';
 import AnimatedContent from '../reactbits/AnimatedContent';
 import Aurora from '../reactbits/AuroraBackground';
 import MagicBento, { type BentoCardProps } from '../reactbits/MagicBento';
+import { ReactBitsBackgroundSlot } from '@/features/reactbits-appearance/ReactBitsBackgroundSlot';
+import { ReactBitsTextSlot } from '@/features/reactbits-appearance/ReactBitsTextSlot';
+import { ReactBitsButtonSlot } from '@/features/reactbits-appearance/ReactBitsButtonSlot';
 
 type DashboardBentoProps = {
   pendingTopics: number;
@@ -14,15 +17,6 @@ type DashboardBentoProps = {
   hotInspirations: number;
   onNavigate: (path: string) => void;
 };
-
-function supportsWebGL2() {
-  try {
-    const canvas = document.createElement('canvas');
-    return Boolean(canvas.getContext('webgl2'));
-  } catch {
-    return false;
-  }
-}
 
 function formatCompact(value: number) {
   return new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
@@ -38,13 +32,6 @@ export default function DashboardBento({
   hotInspirations,
   onNavigate,
 }: DashboardBentoProps) {
-  const [auroraEnabled, setAuroraEnabled] = useState(false);
-
-  useEffect(() => {
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    setAuroraEnabled(!reducedMotion && supportsWebGL2());
-  }, []);
-
   const todayTasks = pendingTopics + inProduction + toPublish;
   const cards = useMemo<BentoCardProps[]>(() => [
     {
@@ -114,15 +101,7 @@ export default function DashboardBento({
 
   return (
     <section aria-labelledby="home-showcase-title" className="relative isolate overflow-hidden rounded-[32px] border border-slate-700/70 bg-[#030b18] px-4 py-5 text-white shadow-[0_32px_90px_rgba(4,12,30,0.3)] sm:px-6 sm:py-7 lg:px-8 lg:py-8">
-      <div className="pointer-events-none absolute inset-0 -z-20">
-        {auroraEnabled ? (
-          <div className="absolute inset-x-0 top-0 h-[430px] opacity-80">
-            <Aurora colorStops={['#22d3ee', '#4f46e5', '#a855f7']} amplitude={1.15} blend={0.62} speed={0.75} />
-          </div>
-        ) : (
-          <div className="h-full w-full bg-[radial-gradient(circle_at_78%_8%,rgba(34,211,238,0.23),transparent_32%),radial-gradient(circle_at_90%_22%,rgba(126,34,206,0.22),transparent_35%),linear-gradient(145deg,#020817,#071325)]" />
-        )}
-      </div>
+      <ReactBitsBackgroundSlot page="home" className="-z-20 opacity-80" fallbackClassName="bg-[radial-gradient(circle_at_78%_8%,rgba(34,211,238,0.23),transparent_32%),radial-gradient(circle_at_90%_22%,rgba(126,34,206,0.22),transparent_35%),linear-gradient(145deg,#020817,#071325)]" />
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(100deg,rgba(2,8,23,0.98)_0%,rgba(2,8,23,0.9)_43%,rgba(2,8,23,0.38)_76%,rgba(2,8,23,0.72)_100%)]" />
       <div className="pointer-events-none absolute inset-0 -z-10 opacity-30 [background-image:linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] [background-size:48px_48px]" />
 
@@ -130,16 +109,14 @@ export default function DashboardBento({
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(480px,0.9fr)] lg:items-end">
           <div className="max-w-3xl">
             <p className="text-sm font-semibold tracking-[0.08em] text-cyan-300">岚曜 XMT 新媒体协作平台</p>
-            <h1 id="home-showcase-title" className="mt-4 text-[clamp(2.45rem,5vw,4.9rem)] font-black leading-[0.98] tracking-[-0.05em] text-white">
-              内容生产驾驶舱
-            </h1>
+            <div id="home-showcase-title" role="heading" aria-level={1} className="mt-4 text-[clamp(2.45rem,5vw,4.9rem)] font-black leading-[0.98] tracking-[-0.05em] text-white"><ReactBitsTextSlot semantic="brand-title" className="text-inherit">内容生产驾驶舱</ReactBitsTextSlot></div>
             <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
               让选题、创作、发布与复盘在同一节奏里前进。
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
-              <button type="button" onClick={() => onNavigate('/topics')} className="inline-flex h-12 items-center gap-2 rounded-xl bg-cyan-400 px-5 text-sm font-semibold text-slate-950 shadow-[0_12px_35px_rgba(34,211,238,0.28)] transition duration-300 hover:-translate-y-0.5 hover:bg-cyan-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300">
+              <ReactBitsButtonSlot type="button" variant="primary" onClick={() => onNavigate('/topics')} className="h-12 rounded-xl bg-cyan-400 text-slate-950">
                 进入选题池 <ArrowRight className="h-4 w-4" />
-              </button>
+              </ReactBitsButtonSlot>
               <button type="button" onClick={() => onNavigate('/calendar')} className="inline-flex h-12 items-center gap-2 rounded-xl border border-white/20 bg-white/[0.06] px-5 text-sm font-semibold text-white backdrop-blur-md transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/50 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300">
                 查看今日排期 <CalendarDays className="h-4 w-4" />
               </button>

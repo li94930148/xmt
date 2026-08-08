@@ -11,6 +11,17 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.17.2',
+    date: '2026-08-08',
+    title: 'React Bits 认证态兼容测试补充',
+    impactScope: ['本地认证态兼容测试', 'React Bits 外观设置验证'],
+    changes: [
+      { type: 'fix', description: '认证态测试仅从临时 XMT_E2E 环境变量读取专用测试账号，不提供明文 fallback。' },
+      { type: 'improvement', description: '补充登录后双主题、六套预设、字号、视口、按钮、配置持久化与恢复默认验证。' },
+      { type: 'security', description: '测试目标限制为 localhost 或 127.0.0.1，不连接生产环境。' },
+    ],
+  },
+  {
     version: '2.17.1',
     date: '2026-08-08',
     title: 'React Bits 浅色主题与字体兼容修复',

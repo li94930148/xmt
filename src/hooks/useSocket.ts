@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { useAuthStore, useMessageStore } from '../store';
 import { notifyDesktop } from '../utils/notification';
 import { SocketCoordinator, createRuntimeTokenProvider, readSocketCoordinatorEnabled, SocketTabCoordinator } from '../auth/socket';
+import { SocketClientLifecycleDiagnostics } from '../observability/socket-client-lifecycle';
 
 type CoordinatorRuntime = {
   getAccessToken: () => string | null;
@@ -20,6 +21,7 @@ let globalUserId: number | null = null;
 let globalToken: string | null = null;
 let globalCoordinator: SocketCoordinator | null = null;
 let globalTabs: SocketTabCoordinator | null = null;
+let globalLifecycleDiagnostics: SocketClientLifecycleDiagnostics | null = null;
 
 export function useSocket() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -44,6 +46,8 @@ export function useSocket() {
     if (globalSocket) {
       globalCoordinator?.destroy();
       globalCoordinator = null;
+      globalLifecycleDiagnostics?.destroyed('identity_changed');
+      globalLifecycleDiagnostics = null;
       globalSocket.disconnect();
       globalSocket = null;
     }
@@ -69,6 +73,9 @@ export function useSocket() {
     globalSocket = nextSocket;
     globalUserId = user.id;
     globalToken = token;
+    const lifecycleDiagnostics = new SocketClientLifecycleDiagnostics(import.meta.env.DEV);
+    globalLifecycleDiagnostics = lifecycleDiagnostics;
+    lifecycleDiagnostics.created();
     setSocket(nextSocket);
     let reconnectAttempt = 0;
 
@@ -87,6 +94,7 @@ export function useSocket() {
     }
 
     nextSocket.on('connect', () => {
+      lifecycleDiagnostics.connected();
       if (reconnectAttempt > 0) {
         nextSocket.emit('socket:lifecycle:reconnect', { attempt: reconnectAttempt });
         reconnectAttempt = 0;
@@ -102,12 +110,14 @@ export function useSocket() {
     });
 
     nextSocket.on('disconnect', (reason) => {
+      lifecycleDiagnostics.disconnected(reason);
       console.info('[Socket] disconnected:', reason);
       setSocketRevision((revision) => revision + 1);
     });
 
     nextSocket.io.on('reconnect_attempt', (attempt) => {
       reconnectAttempt = Number.isInteger(attempt) ? attempt : 0;
+      lifecycleDiagnostics.reconnectAttempt(attempt);
     });
 
     nextSocket.on('new_message', (message) => {
@@ -135,6 +145,8 @@ export function useSocket() {
 
   useEffect(() => {
     if (!isLoggedIn && globalSocket) {
+      globalLifecycleDiagnostics?.destroyed('logout');
+      globalLifecycleDiagnostics = null;
       globalSocket.disconnect();
       globalSocket = null;
       globalCoordinator?.destroy();

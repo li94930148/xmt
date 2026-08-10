@@ -1731,3 +1731,28 @@
 
 1. 代码只提供受控开启能力；生产变量仍默认关闭，未创建/启用测试账号，未扩大用户范围。
 2. 真实生产灰度前必须确认 v2.13.23 部署、备份、审批、专用 member 账号和观察窗口。
+
+## Phase 2-C3-12-R5：Socket Polling SID Lifecycle Investigation
+
+### 当前版本
+
+`v2.17.3`
+
+### 完成内容
+
+1. 审计客户端单例、页面刷新、StrictMode、logout/login 与 polling 参数链路。
+2. 新增开发环境 Socket 生命周期诊断，不记录 token、Cookie、用户或 Socket ID。
+3. Chromium 真实 Socket.IO polling 夹具覆盖刷新、关开标签、断网恢复、可见性与重新登录。
+
+### 数据库变化
+
+无。
+
+### 测试结果
+
+- Socket、客户端诊断、Chromium 恢复、Coordinator、Yjs 恢复、类型检查、构建与版本检查通过。
+
+### 风险与下一阶段
+
+1. B 类事件与旧 polling SID 的延迟请求相符，但生产频率仍需在 legacy 下继续观测。
+2. 当前不进入 C3.12-A；禁止开启 Auth 灰度。

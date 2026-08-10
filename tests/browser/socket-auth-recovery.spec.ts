@@ -1,73 +1,89 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
+import { Server } from 'socket.io';
 import { chromium } from 'playwright';
 
-const systemChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const cachedBrowser = fs.readdirSync(`${process.env.HOME}/Library/Caches/ms-playwright`, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && entry.name.startsWith('chromium-'))
-  .map((entry) => `${process.env.HOME}/Library/Caches/ms-playwright/${entry.name}/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`)
-  .find((candidate) => fs.existsSync(candidate));
-const browser = await chromium.launch({
-  headless: true,
-  executablePath: cachedBrowser || (fs.existsSync(chromium.executablePath()) ? chromium.executablePath() : systemChromePath),
+const clientBundle = fs.readFileSync(path.resolve('node_modules/socket.io-client/dist/socket.io.min.js'));
+const httpServer = http.createServer((request, response) => {
+  if (request.url === '/socket.io-client.js') {
+    response.setHeader('content-type', 'application/javascript');
+    response.end(clientBundle);
+    return;
+  }
+  response.setHeader('content-type', 'text/html; charset=utf-8');
+  response.end(`<!doctype html><title>Socket lifecycle fixture</title><script src="/socket.io-client.js"></script><script>
+    window.lifecycle=[];
+    function startSocket() {
+      const instanceId = crypto.randomUUID();
+      const createdAt = new Date().toISOString();
+      const socket = io({ path:'/socket.io', transports:['polling'], upgrade:false, reconnection:true, reconnectionAttempts:5, reconnectionDelay:100 });
+      window.socket = socket;
+      window.lifecycle.push({ event:'created', instanceId, createdAt });
+      socket.on('connect', () => window.lifecycle.push({ event:'connected', instanceId }));
+      socket.on('disconnect', (reason) => window.lifecycle.push({ event:'disconnected', instanceId, reason }));
+      socket.io.on('reconnect_attempt', (attempt) => window.lifecycle.push({ event:'reconnect_attempt', instanceId, attempt }));
+    }
+    startSocket();
+    document.addEventListener('visibilitychange', () => window.lifecycle.push({ event:'visibility_changed', hidden:document.hidden }));
+  </script>`);
 });
-const httpServer = http.createServer((_req, res) => {
-  res.setHeader('content-type', 'text/html');
-  res.end('<title>Socket recovery fixture</title><p id="status">idle</p>');
+const io = new Server(httpServer, { transports: ['polling'], allowUpgrades: false, pingInterval: 250, pingTimeout: 500 });
+let connectionCount = 0;
+let disconnectCount = 0;
+io.on('connection', (socket) => {
+  connectionCount += 1;
+  socket.on('disconnect', () => { disconnectCount += 1; });
 });
+
 await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
 const address = httpServer.address();
 assert(address && typeof address !== 'string');
 const fixtureUrl = `http://127.0.0.1:${address.port}`;
+const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
 const first = await context.newPage();
-const second = await context.newPage();
 
 await first.goto(fixtureUrl);
-await second.goto(fixtureUrl);
-await first.evaluate(() => {
-  const channel = new BroadcastChannel('xmt-auth-browser-test');
-  (window as Window & { received?: string[] }).received = [];
-  channel.onmessage = (event) => (window as Window & { received: string[] }).received.push(event.data.type);
-});
-await second.evaluate(() => {
-  const channel = new BroadcastChannel('xmt-auth-browser-test');
-  (window as Window & { received?: string[] }).received = [];
-  channel.onmessage = (event) => (window as Window & { received: string[] }).received.push(event.data.type);
-});
+await first.waitForFunction(() => Boolean((window as Window & { socket?: { connected?: boolean } }).socket?.connected));
+const firstInstance = await first.evaluate(() => (window as Window & { lifecycle: Array<{ instanceId: string }> }).lifecycle[0].instanceId);
 
-await second.evaluate(() => {
-  const channel = new BroadcastChannel('xmt-auth-browser-test');
-  channel.postMessage({ type: 'token_refreshed' });
-  channel.close();
-});
-await first.waitForFunction(() => (window as Window & { received?: string[] }).received?.includes('token_refreshed'));
-assert.deepEqual(await first.evaluate(() => (window as Window & { received?: string[] }).received), ['token_refreshed']);
+// Refresh creates one fresh browser instance; the old page cannot retain its polling transport.
+await first.reload();
+await first.waitForFunction(() => Boolean((window as Window & { socket?: { connected?: boolean } }).socket?.connected));
+const refreshedInstance = await first.evaluate(() => (window as Window & { lifecycle: Array<{ instanceId: string }> }).lifecycle[0].instanceId);
+assert.notEqual(refreshedInstance, firstInstance);
 
-const recovery = await first.evaluate(() => {
-  const state = { status: 'authenticated', frozen: false, synced: true, socketConnected: true };
-  const stateVector = [1, 2, 3];
-  state.socketConnected = false;
-  state.frozen = true;
-  state.synced = false;
-  state.socketConnected = true;
-  state.synced = true;
-  state.frozen = false;
-  return { state, stateVector, resumed: state.socketConnected && state.synced && !state.frozen };
-});
-assert.equal(recovery.resumed, true);
-assert.deepEqual(recovery.stateVector, [1, 2, 3]);
+// Closing and reopening a tab also owns exactly one new socket instance.
+const reopened = await context.newPage();
+await reopened.goto(fixtureUrl);
+await reopened.waitForFunction(() => Boolean((window as Window & { socket?: { connected?: boolean } }).socket?.connected));
+const reopenedInstance = await reopened.evaluate(() => (window as Window & { lifecycle: Array<{ instanceId: string }> }).lifecycle[0].instanceId);
+assert.notEqual(reopenedInstance, refreshedInstance);
 
-await first.evaluate(() => {
-  const channel = new BroadcastChannel('xmt-auth-browser-test');
-  channel.postMessage({ type: 'logout' });
-  channel.close();
-});
-await second.waitForFunction(() => (window as Window & { received?: string[] }).received?.includes('logout'));
-assert.deepEqual(await second.evaluate(() => (window as Window & { received?: string[] }).received), ['token_refreshed', 'logout']);
+// A real network interruption must reconnect through the same tab lifecycle.
+await context.setOffline(true);
+await first.waitForTimeout(900);
+await context.setOffline(false);
+await first.waitForFunction(() => Boolean((window as Window & { socket?: { connected?: boolean } }).socket?.connected), undefined, { timeout: 5_000 });
+const recoveredEvents = await first.evaluate(() => (window as Window & { lifecycle: Array<{ event: string }> }).lifecycle.map((event) => event.event));
+assert.equal(recoveredEvents.includes('reconnect_attempt'), true);
 
+// Visibility is observed without making claims about OS background throttling in headless Chromium.
+await first.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+assert.equal((await first.evaluate(() => (window as Window & { lifecycle: Array<{ event: string }> }).lifecycle.some((event) => event.event === 'visibility_changed'))), true);
+
+// Logout/login equivalent: release the current polling session, then establish one fresh session.
+await first.evaluate(() => (window as Window & { socket: { disconnect: () => void } }).socket.disconnect());
+await first.waitForFunction(() => !(window as Window & { socket?: { connected?: boolean } }).socket?.connected);
+await first.evaluate(() => (window as Window & { socket: { connect: () => void } }).socket.connect());
+await first.waitForFunction(() => Boolean((window as Window & { socket?: { connected?: boolean } }).socket?.connected));
+
+assert.ok(connectionCount >= 4);
+assert.ok(disconnectCount >= 2);
 await context.close();
 await browser.close();
+io.close();
 httpServer.close();
 console.log('browser socket auth recovery tests passed');

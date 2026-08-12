@@ -54,6 +54,10 @@ const legacy = await sync({
 });
 assert.equal(legacy.success, true, 'v2.10.1 payload should remain compatible');
 
+process.env.XMT_CREATOR_AGENT_V1_ONLY = 'true';
+await assert.rejects(() => sync({ platform: 'douyin', account, contents: [] }), /仅接受 protocol_version=1/);
+delete process.env.XMT_CREATOR_AGENT_V1_ONLY;
+
 const works = Array.from({ length: 12 }, (_, index) => ({
   aweme_id: `73900000000000000${String(index).padStart(2, '0')}`,
   title: `标准作品 ${index + 1}`,

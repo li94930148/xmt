@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  check-build:
+  fast-gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,5 +16,29 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run version:check
       - run: npm run check
       - run: npm run build
+
+  core-security-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:topics
+      - run: npm run test:api-contract
+      - run: npm run test:auth
+      - run: npm run test:rbac-invariant
+      - run: npm run test:auth-session-service
+      - run: npm run test:login-gateway
+      - run: npm run test:socket
+      - run: npm run test:socket-client-lifecycle
+      - run: npm run test:socket-coordinator
+      - run: npm run test:yjs-auth-recovery
+      - run: npm run test:collaboration-access
+      - run: npm run test:deploy-safety
+      - run: npm run test:creator-sync-v2102

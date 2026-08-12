@@ -1,0 +1,44 @@
+# XMT v2.18 安全与发布可靠性审计
+
+审计日期：2026-08-12。结论以当前工作区代码为准；未连接或修改生产环境。
+
+## 已实施
+
+### COLLAB-01（P0）协作文档未按资源范围授权
+
+- 证据：原 `authorizeSocketRoomJoin` 只校验正整数用户 ID 与非空房间；`roomManager` 在 JOIN 时立即发送 Yjs state，UPDATE 与 awareness 未要求已加入房间。
+- 风险：已登录用户可猜测 `production:<id>` 或 `shooting:<id>` 读取状态并广播写入。
+- 处理：新增 `CollaborationAccessPolicy`，仅解析两类严格房间格式；JOIN 需 view，UPDATE 需 edit 且已 JOIN，awareness 与 typing 需已 JOIN。服务端身份覆盖客户端 payload。
+- 数据库/生产配置：无 schema 或生产配置变化。
+
+### RBAC-01（P0）主角色与多角色映射可分叉
+
+- 证据：`POST /api/roles/user/:userId` 原允许空 `role_ids`，先删除 `user_roles` 后未更新 `users.role`；而前后端管理员 bypass 依赖 `users.role`。
+- 风险：管理员权限撤销后仍可能保持全权限。
+- 处理：拒绝空、重复、非法和不存在角色；先验证用户与角色，再单事务替换映射并同步首个角色为主角色，提交后清缓存。
+- 数据库/生产配置：无 schema 或生产配置变化。
+
+### DEPLOY-01（P0）WAL 备份 fallback 与失败部署滞留
+
+- 证据：`deploy/xmt-safe-deploy.sh` 在无 `sqlite3` 时复制主 `.db`，且健康检查失败只退出。
+- 风险：WAL 已提交数据可能未进入副本，新代码故障可使服务停在不可用版本。
+- 处理：`sqlite3` 现在为强制依赖；使用 `.backup`、`quick_check` 和可打开验证；记录 previous/target SHA，部署后的任意失败自动恢复上一应用提交并重新健康检查。数据库不自动回滚。
+
+## 已实施的 P1
+
+- `RBAC-02`：角色与权限映射创建/替换改为完整事务，拒绝重复和不存在的权限 ID。
+- `BACKUP-01`：备份下载、删除只接受严格的 XMT 备份文件名，并校验解析路径仍在备份目录内。
+- `CI-01`：PR/main 增加 version、Auth、Socket、Yjs、Topic、API Contract 与协作访问策略的核心安全门禁；需要真实凭据的 smoke 不进入每次 PR。
+
+## 仅完成评估，未在本阶段修改
+
+- Creator Agent 客户端当前上传 `protocol_version=1`、timestamp、nonce、HMAC 和 AES-GCM。服务端现在以 `XMT_CREATOR_AGENT_V1_ONLY=true` 提供可逆拒绝开关，并记录不含凭据的 legacy 协议遥测；默认继续兼容缺失版本和 legacy `/report`，直到生产绑定 Agent 状态有证据可支持强制启用。
+- 正式 migrations 已有 runner 与 checksum 记录，但 `initDatabase` 仍同时承载大量 compat ALTER/seed；建议下一阶段将新增演进限定到 versioned migration，并要求 expand-only/向后兼容审查。
+- 前端构建基线：Silk route chunk 843.49 kB（gzip 227.02 kB）、editor chunks 210–379 kB；现有 reduced-motion CSS 已覆盖。应先建立 route chunk、Canvas 残留、移动端与编辑输入延迟预算，不凭感觉删减视觉能力。
+- Auth v1 生产证据仍为 legacy、门禁关闭且观察样本不足；新增 `npm run ops:auth-readiness` 只读检查 PM2、RSS、heap、Socket 生命周期、health 和 SQLite。它不会重启进程、修改配置或写入数据库；本阶段未启用任何 Auth/Login/Socket 灰度，结论为 **INSUFFICIENT_DATA**。
+
+## 剩余风险
+
+- 新协作策略已有 policy 级测试；尚未建立完整 Socket.IO 黑盒测试来覆盖所有 JOIN/UPDATE/awareness 事件排列。
+- 定时备份仍建议增加 `flock` 与定期 restore 演练。
+- 部署脚本的迁移兼容门禁应在下一阶段结合明确 migration runner 启动方式实施。

@@ -11,12 +11,20 @@ const router = Router();
 
 const DB_PATH = getDatabasePath();
 const BACKUP_DIR = path.join(path.dirname(DB_PATH), 'backups');
+const BACKUP_NAME = /^xmt-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.db$/;
 
 // 确保备份目录存在
 function ensureBackupDir() {
   if (!fs.existsSync(BACKUP_DIR)) {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
   }
+}
+
+function resolveBackupPath(name: unknown): string | null {
+  if (typeof name !== 'string' || !BACKUP_NAME.test(name) || path.basename(name) !== name) return null;
+  const backupDirectory = path.resolve(BACKUP_DIR);
+  const candidate = path.resolve(backupDirectory, name);
+  return path.dirname(candidate) === backupDirectory ? candidate : null;
 }
 
 // 创建备份
@@ -74,7 +82,8 @@ router.get('/list', authenticate, requirePermission('system:backup'), (req, res)
 // 下载备份
 router.get('/download/:name', authenticate, requirePermission('system:backup'), (req, res) => {
   try {
-    const filePath = path.join(BACKUP_DIR, req.params.name);
+    const filePath = resolveBackupPath(req.params.name);
+    if (!filePath) return res.status(400).json({ message: '备份文件名无效' });
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ message: '备份文件不存在' });
     }
@@ -87,7 +96,8 @@ router.get('/download/:name', authenticate, requirePermission('system:backup'), 
 // 删除备份
 router.delete('/:name', authenticate, requirePermission('system:backup'), (req, res) => {
   try {
-    const filePath = path.join(BACKUP_DIR, req.params.name);
+    const filePath = resolveBackupPath(req.params.name);
+    if (!filePath) return res.status(400).json({ message: '备份文件名无效' });
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ message: '备份文件不存在' });
     }

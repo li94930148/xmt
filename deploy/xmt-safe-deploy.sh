@@ -15,6 +15,9 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3001/api/health}"
 HOME_URL="${HOME_URL:-http://127.0.0.1:3001/}"
 PORT="${PORT:-3001}"
 BRANCH="${BRANCH:-main}"
+PREVIOUS_SHA=""
+TARGET_SHA=""
+DEPLOY_STARTED=0
 
 log() {
   printf '[xmt-safe-deploy] %s\n' "$*"
@@ -59,14 +62,31 @@ backup_database() {
   local backup_file="$BACKUP_DIR/xmt-$(date +%Y%m%d-%H%M%S).db"
 
   log "Backing up database before deploy"
-  if command -v sqlite3 >/dev/null 2>&1; then
-    sqlite3 "$DB_PATH" ".backup '$backup_file'"
-  else
-    cp -p "$DB_PATH" "$backup_file"
-  fi
+  sqlite3 "$DB_PATH" ".backup '$backup_file'"
 
   [ -s "$backup_file" ] || fail "Database backup is empty: $backup_file"
+  sqlite3 "$backup_file" "PRAGMA quick_check;" | grep -qx "ok" || fail "Database backup quick_check failed: $backup_file"
+  sqlite3 "$backup_file" "SELECT count(*) FROM sqlite_master;" >/dev/null || fail "Database backup cannot be opened: $backup_file"
   log "Database backup created: $backup_file"
+}
+
+rollback_code() {
+  local failed_status="${1:-$?}"
+  if [ "$DEPLOY_STARTED" -ne 1 ] || [ -z "$PREVIOUS_SHA" ]; then
+    exit "$failed_status"
+  fi
+  trap - ERR
+  log "Deploy failed; rolling application code back to $PREVIOUS_SHA (database is intentionally not rolled back)"
+  git checkout --detach "$PREVIOUS_SHA" || true
+  npm ci || true
+  pm2 restart "$PM2_APP" --update-env || true
+  pm2 save || true
+  if check_health && check_home_fallback; then
+    log "Application code rollback completed and health checks passed"
+  else
+    log "Application rollback could not be verified; manual intervention is required"
+  fi
+  exit "$failed_status"
 }
 
 check_health() {
@@ -92,6 +112,7 @@ require_command npm
 require_command pm2
 require_command curl
 require_command systemctl
+require_command sqlite3
 
 [ "$(id -u)" -eq 0 ] || fail "Run as root so the production script can manage app files and PM2 safely"
 [ -d "$APP_DIR" ] || fail "APP_DIR does not exist: $APP_DIR"
@@ -100,10 +121,17 @@ require_command systemctl
 cd "$APP_DIR"
 backup_database
 
+PREVIOUS_SHA="$(git rev-parse HEAD)"
+log "Previous application commit: $PREVIOUS_SHA"
+trap rollback_code ERR
+
 log "Fetching and updating code"
 git fetch origin "$BRANCH"
 git checkout "$BRANCH"
 git pull --ff-only origin "$BRANCH"
+TARGET_SHA="$(git rev-parse HEAD)"
+DEPLOY_STARTED=1
+log "Target application commit: $TARGET_SHA"
 
 log "Installing dependencies"
 npm ci
@@ -124,11 +152,13 @@ log "Waiting for backend restart"
 sleep 3
 
 if ! check_health; then
-  fail "Deploy failed because /api/health did not pass"
+  log "Deploy failed because /api/health did not pass"
+  rollback_code 1
 fi
 
 if ! check_home_fallback; then
-  fail "Deploy failed because backend home fallback did not pass"
+  log "Deploy failed because backend home fallback did not pass"
+  rollback_code 1
 fi
 
 log "Deploy completed successfully"

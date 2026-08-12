@@ -33,6 +33,10 @@ assert.equal(await collaborationAccessPolicy.canViewDocument(outsider, `producti
 assert.equal(await collaborationAccessPolicy.canEditDocument(outsider, `shooting:${shootingId}`), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(disabledOwner, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(owner, 'production:999999'), false);
+assert.equal(await collaborationAccessPolicy.canViewDocument(undefined, `production:${productionId}`), false);
+assert.equal(await collaborationAccessPolicy.canManageDocument({ id: 99, role: 'admin', enabled: true } as never, `production:${productionId}`), true);
+assert.equal(await collaborationAccessPolicy.canManageDocument({ id: 99, role: 'director', enabled: true } as never, `production:${productionId}`), true);
+assert.equal(await collaborationAccessPolicy.canManageDocument(owner, `production:${productionId}`), false);
 
 const broadcasts: Array<{ event: string; payload: unknown }> = [];
 const fakeIo = { to: () => ({ emit: (event: string, payload: unknown) => broadcasts.push({ event, payload }) }) } as never;
@@ -44,10 +48,21 @@ const fakeSocket = {
   to: () => ({ emit: (event: string, payload: unknown) => broadcasts.push({ event, payload }) }),
 } as never;
 const roomId = `production:${productionId}`;
+const beforeContent = await (await import('../../api/database/utils.js')).queryOne<{ content: string }>('SELECT content FROM production WHERE id = ?', [productionId]);
 await handleDocumentUpdate(fakeIo, fakeSocket, { roomId, update: [] });
 handleAwarenessUpdate(fakeSocket, { roomId, update: [] });
 handleTyping(fakeIo, fakeSocket, { roomId, typing: true });
 assert.equal(broadcasts.some((item) => item.event === 'collaboration:update' || item.event === 'collaboration:awareness-update' || item.event === 'collaboration:typing'), false);
+assert.equal((await (await import('../../api/database/utils.js')).queryOne<{ content: string }>('SELECT content FROM production WHERE id = ?', [productionId]))?.content, beforeContent?.content);
+const deniedSocket = { ...fakeSocket, id: 'collaboration-denied-socket', data: { user: { ...outsider, name: 'Outsider' }, auth: { userId: outsiderId } }, emit: () => undefined } as never;
+await joinRoom(fakeIo, deniedSocket, { roomId, user: { id: ownerId, name: 'forged owner', role: 'admin', color: '#000' } });
+assert.equal(Boolean((deniedSocket.data.collaborationRooms as Set<string> | undefined)?.has(roomId)), false);
+const anonymousSocket = { ...fakeSocket, id: 'collaboration-anonymous-socket', data: {}, emit: () => undefined } as never;
+await joinRoom(fakeIo, anonymousSocket, { roomId, user: { id: ownerId, name: 'Owner', role: 'member', color: '#000' } });
+assert.equal(Boolean((anonymousSocket.data.collaborationRooms as Set<string> | undefined)?.has(roomId)), false);
+const disabledReconnect = { ...fakeSocket, id: 'collaboration-disabled-reconnect', data: { user: { ...disabledOwner, name: 'Disabled' }, auth: { userId: ownerId } }, emit: () => undefined } as never;
+await joinRoom(fakeIo, disabledReconnect, { roomId, user: { id: ownerId, name: 'Disabled', role: 'member', color: '#000' } });
+assert.equal(Boolean((disabledReconnect.data.collaborationRooms as Set<string> | undefined)?.has(roomId)), false);
 await joinRoom(fakeIo, fakeSocket, { roomId, user: { id: outsiderId, name: 'forged', role: 'admin', color: '#000' } });
 assert.equal((fakeSocket.data.collaborationRooms as Set<string>).has(roomId), true);
 assert.equal(emitted.some((item) => item.event === 'collaboration:sync'), true);

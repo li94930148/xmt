@@ -40,5 +40,7 @@ jobs:
       - run: npm run test:socket-coordinator
       - run: npm run test:yjs-auth-recovery
       - run: npm run test:collaboration-access
+      - run: npm run test:collaboration-socket-authorization
+      - run: npm run test:auth-readiness
       - run: npm run test:deploy-safety
       - run: npm run test:creator-sync-v2102

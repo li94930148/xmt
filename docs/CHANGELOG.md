@@ -4,9 +4,9 @@
 
 ### 新增
 
-- 协作文档服务端访问策略与生产/成片房间授权回归测试。
+- 协作文档服务端访问策略、只读参与者边界与真实 Socket.IO/Yjs 房间授权黑盒测试。
 - GitHub Actions 核心安全契约门禁。
-- 只读 Auth 生产准入检查，以及 Creator Agent v1 协议退役开关与遥测。
+- 逐项 PASS/FAIL/UNKNOWN 的只读 Auth 生产准入检查，以及 Creator Agent v1 协议退役开关与遥测。
 
 ### 优化
 
@@ -24,7 +24,7 @@
 
 ### 测试情况
 
-- 协作访问策略、Auth、Socket、Yjs、API Contract、Topic、类型检查和安全部署脚本语法检查通过。
+- 协作访问策略、真实 Socket.IO 授权黑盒、Auth readiness、Auth、Socket、Yjs、API Contract、Topic、类型检查和安全部署脚本语法检查通过。
 
 ## v2.18.0 - 2026-08-12
 

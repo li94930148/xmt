@@ -190,6 +190,8 @@ if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
   console.log('[HTTP] 桌面通知功能需要 HTTPS，运行 node scripts/generate-cert.mjs 生成证书')
 }
 
+export { server }
+
 const allowedOrigins = parseConfiguredOrigins(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGINS)
 
 function isAllowedRequestOrigin(origin?: string, hostHeader?: string) {

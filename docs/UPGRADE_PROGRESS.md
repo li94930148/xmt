@@ -3,13 +3,13 @@
 ## v2.18.1 安全、权限与发布可靠性硬化（2026-08-12）
 
 - 当前版本：v2.18.1。
-- 协作文档房间改为服务器解析 production/shooting 资源范围；未授权、未知格式、未加入房间的同步事件被拒绝。
+- 协作文档房间改为服务器解析 production/shooting 资源范围；未授权、未知格式、未加入房间的同步事件被拒绝；非特权参与者可查看但不能写入实时文档。
 - 角色分配和权限映射改为验证后事务提交，主角色与 `user_roles` 保持同步。
 - 安全部署强制 SQLite 在线备份及校验，健康失败自动恢复上一应用提交；备份文件名不再接受任意路径。
-- GitHub Actions 增加核心安全契约门禁。
-- Auth 准入只读脚本提供 GO / NO-GO / INSUFFICIENT_DATA 结论；Creator Agent 旧协议保留默认兼容，并可用环境开关受控拒绝。
+- GitHub Actions 增加真实 Socket.IO 协作授权黑盒与核心安全契约门禁。
+- Auth 准入只读脚本逐项输出 PASS / FAIL / UNKNOWN，并以 GO / NO-GO / INSUFFICIENT_DATA 三态结论；Creator Agent 旧协议保留默认兼容，并可用环境开关受控拒绝。
 - 数据库变化：无 schema 变化。
-- 验证：协作访问策略、Auth、Socket、Yjs、API Contract、Topic、版本、类型、构建、shell 语法和 Git whitespace 通过。
+- 验证：协作访问策略、真实 Socket.IO 授权黑盒、Auth readiness、Auth、Socket、Yjs、API Contract、Topic、版本、类型、构建、shell 语法和 Git whitespace 通过。
 - 生产状态：未部署生产；Auth v1 与 Socket Bridge 继续保持 legacy，准入为 INSUFFICIENT_DATA。
 
 ## Phase 2-C3-8-C3.12-R1：Socket 生命周期观测

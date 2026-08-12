@@ -18,22 +18,26 @@ export class CollaborationAccessPolicy {
     return scope ? { document, scope } : null;
   }
 
-  private hasDocumentScope(user: User, scope: { creator_id: number | null; assignee_id: number | null; participant_id?: number | null }) {
+  private hasViewScope(user: User, scope: { creator_id: number | null; assignee_id: number | null; participant_id?: number | null }) {
     return user.role === 'admin' || user.role === 'director' || Number(scope.creator_id) === user.id || Number(scope.assignee_id) === user.id || Number(scope.participant_id) === user.id;
+  }
+
+  private hasEditScope(user: User, scope: { creator_id: number | null; assignee_id: number | null }) {
+    return Number(scope.creator_id) === user.id || Number(scope.assignee_id) === user.id;
   }
 
   async canViewDocument(user: User | undefined, roomId: unknown): Promise<boolean> {
     if (!user || user.enabled === false) return false;
     const resolved = await this.scope(roomId);
-    return Boolean(resolved && this.hasDocumentScope(user, resolved.scope));
+    return Boolean(resolved && this.hasViewScope(user, resolved.scope));
   }
 
   async canEditDocument(user: User | undefined, roomId: unknown): Promise<boolean> {
     if (!user || user.enabled === false) return false;
     const resolved = await this.scope(roomId);
     if (!resolved) return false;
-    if (user.role === 'admin' || user.role === 'editor' || user.role === 'copywriter' || user.role === 'post_production' || user.role === 'camera') return true;
-    return this.hasDocumentScope(user, resolved.scope);
+    if (user.role === 'admin' || user.role === 'director' || user.role === 'editor' || user.role === 'copywriter' || user.role === 'post_production' || user.role === 'camera') return true;
+    return this.hasEditScope(user, resolved.scope);
   }
 
   async canManageDocument(user: User | undefined, roomId: unknown): Promise<boolean> {

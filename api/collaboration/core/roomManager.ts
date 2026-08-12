@@ -14,6 +14,8 @@ import {
 import { logCollaborationEvent } from '../analytics/collaborationLogger.js';
 import { canEdit, getDocLock, isReadOnly, releaseLock, setDocLocked } from '../control/collaborationGuard.js';
 import { authorizeSocketRoomJoin } from '../../modules/auth/socket/socket-auth.service.js';
+import { collaborationAccessPolicy } from '../access/CollaborationAccessPolicy.js';
+import type { User } from '../../types/index.js';
 
 type RuntimeUser = CollaborationUserPresence & {
   socketId: string;
@@ -55,20 +57,30 @@ export function broadcastUserList(io: Server, roomId: string) {
   });
 }
 
-export function joinRoom(io: Server, socket: Socket, payload: CollaborationRoomPayload) {
+function socketUser(socket: Socket): User | undefined {
+  const value = socket.data.user as User | undefined;
+  return value?.id && value.enabled !== false ? value : undefined;
+}
+
+function hasJoinedRoom(socket: Socket, roomId: string) {
+  return Boolean((socket.data.collaborationRooms as Set<string> | undefined)?.has(roomId));
+}
+
+export async function joinRoom(io: Server, socket: Socket, payload: CollaborationRoomPayload) {
   const roomId = String(payload?.roomId || '');
   if (!roomId || !payload?.user?.id) return;
 
   const auth = socket.data.auth as { userId?: number } | undefined;
-  const socketUser = socket.data.user as { id?: number; name?: string; role?: string } | undefined;
-  const authenticatedUserId = Number(auth?.userId ?? socketUser?.id ?? 0);
+  const authenticated = socketUser(socket);
+  const authenticatedUserId = Number(auth?.userId ?? authenticated?.id ?? 0);
   if (!authorizeSocketRoomJoin({ userId: authenticatedUserId, roomId })) return;
+  if (!authenticated || authenticated.id !== authenticatedUserId || !await collaborationAccessPolicy.canViewDocument(authenticated, roomId)) return;
 
   const user: RuntimeUser = {
     ...payload.user,
     id: authenticatedUserId,
-    name: socketUser?.name || payload.user.name,
-    role: socketUser?.role || payload.user.role,
+    name: authenticated.name || payload.user.name,
+    role: authenticated.role,
     socketId: socket.id,
     lastSeen: Date.now(),
     typing: false,
@@ -134,13 +146,13 @@ export function heartbeat(io: Server, socket: Socket, roomId: string) {
   broadcastUserList(io, roomId);
 }
 
-export function handleDocumentUpdate(io: Server, socket: Socket, payload: CollaborationUpdatePayload) {
+export async function handleDocumentUpdate(io: Server, socket: Socket, payload: CollaborationUpdatePayload) {
   const roomId = String(payload?.roomId || '');
   if (!roomId || !Array.isArray(payload?.update)) return;
-  const socketUser = socket.data.user as { id?: number | string } | undefined;
-  const userId = String(socketUser?.id ?? 'unknown');
+  const authenticated = socketUser(socket);
+  const userId = String(authenticated?.id ?? 'unknown');
 
-  if (!canEdit(userId, roomId)) {
+  if (!authenticated || !hasJoinedRoom(socket, roomId) || !await collaborationAccessPolicy.canEditDocument(authenticated, roomId) || !canEdit(userId, roomId)) {
     const lock = getDocLock(roomId);
     const conflictPayload = {
       roomId,
@@ -165,14 +177,14 @@ export function handleDocumentUpdate(io: Server, socket: Socket, payload: Collab
 
 export function handleAwarenessUpdate(socket: Socket, payload: CollaborationUpdatePayload) {
   const roomId = String(payload?.roomId || '');
-  if (!roomId || !Array.isArray(payload?.update)) return;
+  if (!roomId || !Array.isArray(payload?.update) || !hasJoinedRoom(socket, roomId)) return;
   socket.to(roomId).emit(COLLABORATION_EVENTS.AWARENESS_UPDATE, payload);
 }
 
 export function handleTyping(io: Server, socket: Socket, payload: CollaborationTypingPayload) {
   const roomId = String(payload?.roomId || '');
   const user = rooms.get(roomId)?.get(socket.id);
-  if (!roomId || !user) return;
+  if (!roomId || !user || !hasJoinedRoom(socket, roomId)) return;
   if (isReadOnly(roomId)) return;
 
   user.typing = Boolean(payload.typing);

@@ -5,6 +5,29 @@ import { queryOne, queryAll, execute, executeInsert, runInTransaction } from '..
 
 const router = Router();
 
+function uniquePositiveIds(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value.map((item) => Number(item));
+  if (ids.some((id) => !Number.isInteger(id) || id <= 0) || new Set(ids).size !== ids.length) return null;
+    return ids;
+}
+
+function nonEmptyUniquePositiveIds(value: unknown): number[] | null {
+  const ids = uniquePositiveIds(value);
+  return ids && ids.length > 0 ? ids : null;
+}
+
+async function assertRolesExist(ids: number[]) {
+  const found = await queryAll<{ id: number }>(`SELECT id FROM roles WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+  return found.length === ids.length;
+}
+
+async function assertPermissionsExist(ids: number[]) {
+  if (ids.length === 0) return true;
+  const found = await queryAll<{ id: number }>(`SELECT id FROM permissions WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+  return found.length === ids.length;
+}
+
 router.get('/', authenticate, requirePermission('system:role'), async (_req, res) => {
   try {
     const roles = await queryAll(`
@@ -50,21 +73,24 @@ router.post('/user/:userId', authenticate, requirePermission('system:role'), asy
     const { role_ids } = req.body;
     const userId = req.params.userId;
 
-    if (!role_ids || !Array.isArray(role_ids)) {
-      return res.status(400).json({ message: '请提供角色ID列表' });
+    const roleIds = nonEmptyUniquePositiveIds(role_ids);
+    if (!roleIds) {
+      return res.status(400).json({ message: '角色ID列表必须为非空、非重复的正整数数组' });
     }
+    const user = await queryOne<{ id: number }>('SELECT id FROM users WHERE id = ?', [userId]);
+    if (!user) return res.status(404).json({ message: '用户不存在' });
+    if (!await assertRolesExist(roleIds)) return res.status(400).json({ message: '角色ID不存在' });
 
     await runInTransaction(async (tx) => {
+      const primaryRole = await tx.queryOne<{ code: string }>(`SELECT code FROM roles WHERE id = ?`, [roleIds[0]]);
+      if (!primaryRole) throw new Error('主角色不存在');
       await tx.execute(`DELETE FROM user_roles WHERE user_id = ?`, [userId]);
 
-      for (const roleId of role_ids) {
+      for (const roleId of roleIds) {
         await tx.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [userId, roleId]);
       }
 
-      const primaryRole = await tx.queryOne(`SELECT code FROM roles WHERE id = ?`, [role_ids[0]]);
-      if (primaryRole) {
-        await tx.execute(`UPDATE users SET role = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [primaryRole.code, userId]);
-      }
+      await tx.execute(`UPDATE users SET role = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [primaryRole.code, userId]);
     });
 
     clearPermissionCache(Number(userId));
@@ -104,16 +130,15 @@ router.post('/', authenticate, requirePermission('system:role'), async (req, res
       return res.status(400).json({ message: '角色编码已存在' });
     }
 
-    const roleId = await executeInsert(
-      `INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, 0)`,
-      [code, name, description || '']
-    );
+    const permissionIds = permission_ids === undefined ? [] : uniquePositiveIds(permission_ids);
+    if (permission_ids !== undefined && !permissionIds) return res.status(400).json({ message: '权限ID列表必须为非空、非重复的正整数数组' });
+    if (permissionIds && !await assertPermissionsExist(permissionIds)) return res.status(400).json({ message: '权限ID不存在' });
 
-    if (permission_ids && Array.isArray(permission_ids)) {
-      for (const permId of permission_ids) {
-        await execute(`INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, [roleId, permId]);
-      }
-    }
+    const roleId = await runInTransaction(async (tx) => {
+      const id = await tx.executeInsert(`INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, 0)`, [code, name, description || '']);
+      for (const permId of permissionIds || []) await tx.execute(`INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, [id, permId]);
+      return id;
+    });
 
     clearPermissionCache();
     res.json({ message: '角色创建成功', id: roleId });
@@ -130,16 +155,17 @@ router.put('/:id', authenticate, requirePermission('system:role'), async (req, r
     const role = await queryOne(`SELECT * FROM roles WHERE id = ?`, [roleId]);
     if (!role) return res.status(404).json({ message: '角色不存在' });
 
-    if (name) {
-      await execute(`UPDATE roles SET name = ?, description = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [name, description || '', roleId]);
-    }
+    const permissionIds = permission_ids === undefined ? undefined : uniquePositiveIds(permission_ids);
+    if (permission_ids !== undefined && !permissionIds) return res.status(400).json({ message: '权限ID列表必须为非空、非重复的正整数数组' });
+    if (permissionIds && !await assertPermissionsExist(permissionIds)) return res.status(400).json({ message: '权限ID不存在' });
 
-    if (permission_ids && Array.isArray(permission_ids)) {
-      await execute(`DELETE FROM role_permissions WHERE role_id = ?`, [roleId]);
-      for (const permId of permission_ids) {
-        await execute(`INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, [roleId, permId]);
+    await runInTransaction(async (tx) => {
+      if (name) await tx.execute(`UPDATE roles SET name = ?, description = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [name, description || '', roleId]);
+      if (permissionIds) {
+        await tx.execute(`DELETE FROM role_permissions WHERE role_id = ?`, [roleId]);
+        for (const permId of permissionIds) await tx.execute(`INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, [roleId, permId]);
       }
-    }
+    });
 
     clearPermissionCache();
     res.json({ message: '角色更新成功' });

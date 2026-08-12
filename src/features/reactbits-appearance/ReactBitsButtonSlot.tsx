@@ -26,6 +26,7 @@ function SpecularButtonAdapter({ children, buttonProps, className, light, varian
       if (value == null) button.removeAttribute(name);
       else button.setAttribute(name, String(value));
     });
+    button.dataset.reactbitsButton = variant;
   }, [buttonProps]);
   return <span ref={wrapperRef} className="inline-flex w-fit max-w-full align-middle"><SpecularButton {...({
     type: buttonProps.type || 'button', disabled: buttonProps.disabled, onClick: buttonProps.onClick, className,
@@ -46,7 +47,7 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
   const interaction = heavyAllowed ? config.buttonInteraction.component : 'none';
   const common = 'inline-flex min-h-10 w-fit max-w-full shrink-0 items-center justify-center gap-2 rounded-button border px-4 py-2.5 text-sm font-semibold leading-[1.25] align-middle transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50';
   const variantClasses: Record<ReactBitsButtonVariant, string> = {
-    primary: light ? 'border-blue-700 bg-blue-600 text-white shadow-sm shadow-blue-600/25 hover:bg-blue-700' : 'border-cyan-300/35 bg-studio-primary text-white shadow-sm shadow-cyan-400/15 hover:bg-blue-500',
+    primary: light ? 'border-blue-700 bg-blue-600 text-white shadow-sm shadow-blue-600/25 hover:bg-blue-700' : 'border-blue-400/45 bg-blue-600 text-white shadow-sm shadow-blue-500/20 hover:bg-blue-500',
     ai: light ? 'border-violet-700 bg-violet-600 text-white shadow-sm shadow-violet-500/25 hover:bg-violet-700' : 'border-violet-300/35 bg-violet-600 text-white shadow-sm shadow-violet-400/15 hover:bg-violet-500',
     secondary: light ? 'border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50' : 'border-slate-500/45 bg-slate-900/70 text-slate-100 hover:bg-slate-800',
     ghost: light ? 'border-transparent bg-transparent text-slate-700 hover:bg-slate-200/70' : 'border-transparent bg-transparent text-slate-100 hover:bg-white/10',
@@ -59,7 +60,7 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
   if (heavyAllowed && surface === 'specular-button') button = <Suspense fallback={button}><SpecularButtonAdapter buttonProps={props} className={base} light={light} variant={variant}>{children}</SpecularButtonAdapter></Suspense>;
   if (heavyAllowed && surface === 'border-glow') button = <Suspense fallback={button}><BorderGlow className="inline-flex w-fit max-w-full rounded-button" backgroundColor={light ? '#FFFFFF' : '#0F172A'} glowColor={light ? '215 90 48' : '190 90 60'} borderRadius={14}>{button}</BorderGlow></Suspense>;
   if (heavyAllowed && surface === 'electric-border') button = <Suspense fallback={button}><ElectricBorder className="inline-flex w-fit max-w-full overflow-visible" color={light ? '#2563EB' : '#67E8F9'} borderRadius={14}>{button}</ElectricBorder></Suspense>;
-  if (heavyAllowed && surface === 'star-border') button = <Suspense fallback={button}><StarBorder as="button" {...({ type: props.type || 'button', disabled: props.disabled, onClick: props.onClick, title: props.title, 'aria-label': props['aria-label'], 'aria-describedby': props['aria-describedby'], name: props.name, value: props.value, form: props.form, className: 'inline-flex w-fit max-w-full align-middle', color: light ? '#2563EB' : '#67E8F9', speed: '4s' } as any)}>{children}</StarBorder></Suspense>;
+  if (heavyAllowed && surface === 'star-border') button = <Suspense fallback={button}><StarBorder as="button" {...({ type: props.type || 'button', disabled: props.disabled, onClick: props.onClick, title: props.title, 'aria-label': props['aria-label'], 'aria-describedby': props['aria-describedby'], name: props.name, value: props.value, form: props.form, 'data-reactbits-button': variant, className: 'inline-flex w-fit max-w-full align-middle', color: light ? '#2563EB' : '#67E8F9', speed: '4s' } as any)}>{children}</StarBorder></Suspense>;
   if (interaction === 'magnet') button = <Suspense fallback={button}><Magnet padding={20} magnetStrength={3} disabled={props.disabled} wrapperClassName="inline-flex w-fit max-w-full align-middle" innerClassName="inline-flex w-fit max-w-full">{button}</Magnet></Suspense>;
   if (interaction === 'click-spark') button = <span className="relative inline-flex w-fit max-w-full align-middle"><Suspense fallback={button}><ClickSpark sparkColor={light ? '#1D4ED8' : '#DBEAFE'} sparkSize={8} sparkRadius={18} sparkCount={8} duration={400}>{button}</ClickSpark></Suspense></span>;
   if (interaction === 'glare-hover') button = <span className="inline-flex w-fit max-w-full align-middle"><Suspense fallback={button}><GlareHover width="fit-content" height="auto" background="transparent" borderColor="transparent" borderRadius="inherit" glareColor={light ? '#2563EB' : '#A5B4FC'} glareOpacity={0.38} className="inline-flex w-fit max-w-full align-middle">{button}</GlareHover></Suspense></span>;

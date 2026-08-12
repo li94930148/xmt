@@ -2,7 +2,21 @@
 
 ## 当前版本
 
-v2.17.3
+v2.18.0
+
+## React Bits 场景化视觉编排与全系统体验升级
+
+- 建立 React Bits 官方组件、Typed Adapter、Semantic Slot 与 Page Scene 的统一视觉架构，页面视觉与业务逻辑进一步解耦。
+- 首页、选题、日报、Creator、Analytics、Workflow、Editor 与 Settings / Appearance Center 完成场景化视觉升级。
+- 提供岚曜极光、深空科技、丝绸创意、线性协作、极简无扰、自由搭配六套视觉方案，支持页面应用范围、动效级别、深浅主题、界面字号与高级参数。
+- Appearance Center 完成 Scene Preview、配置导入导出、恢复默认、持久化与页面范围控制；高级设置默认折叠。
+- 完善表单 accessible name、preset aria-pressed 与折叠语义，修复主题 select 的可访问名称问题。
+- 优化 Silk 动态背景生命周期与 React Three Fiber 兼容处理，动效关闭、路由切换和 reload 后不残留背景 Canvas。
+- Editor 接入轻量 Scene 外壳，编辑区域保持无 WebGL 干扰，不改变编辑、选区、保存与协作逻辑。
+- Workflow 完成安全视觉升级，strict control 与 Workflow Engine 原有业务判定保持不变。
+- 增加场景浏览器自动化回归，覆盖 Canvas 生命周期、路由切换、动效开关、配置恢复及桌面、平板、移动端视口。
+
+影响范围：前端视觉、Appearance Center 与浏览器回归验证；不修改 Backend、API、权限、Workflow Engine、Socket.IO、Yjs 或 Database。
 
 ## 实时连接排查增强
 

@@ -18,9 +18,13 @@ export interface BentoCardProps {
   label?: string;
   textAutoHide?: boolean;
   disableAnimations?: boolean;
+  progress?: number;
+  ariaLabel?: string;
+  onClick?: () => void;
 }
 
 export interface BentoProps {
+  cards?: BentoCardProps[];
   textAutoHide?: boolean;
   enableStars?: boolean;
   enableSpotlight?: boolean;
@@ -122,6 +126,8 @@ const ParticleCard: React.FC<{
   enableTilt?: boolean;
   clickEffect?: boolean;
   enableMagnetism?: boolean;
+  ariaLabel?: string;
+  onClick?: () => void;
 }> = ({
   children,
   className = '',
@@ -131,7 +137,9 @@ const ParticleCard: React.FC<{
   glowColor = DEFAULT_GLOW_COLOR,
   enableTilt = true,
   clickEffect = false,
-  enableMagnetism = false
+  enableMagnetism = false,
+  ariaLabel,
+  onClick
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const particlesRef = useRef<HTMLDivElement[]>([]);
@@ -353,6 +361,11 @@ const ParticleCard: React.FC<{
       ref={cardRef}
       className={`${className} relative overflow-hidden`}
       style={{ ...style, position: 'relative', overflow: 'hidden' }}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={ariaLabel}
+      onClick={onClick}
+      onKeyDown={event => { if (onClick && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClick(); } }}
     >
       {children}
     </div>
@@ -526,6 +539,7 @@ const useMobileDetection = () => {
 };
 
 const MagicBento: React.FC<BentoProps> = ({
+  cards = cardData,
   textAutoHide = true,
   enableStars = true,
   enableSpotlight = true,
@@ -684,7 +698,7 @@ const MagicBento: React.FC<BentoProps> = ({
 
       <BentoCardGrid gridRef={gridRef}>
         <div className="card-responsive grid gap-2">
-          {cardData.map((card, index) => {
+          {cards.map((card, index) => {
             const baseClassName = `card flex flex-col justify-between relative aspect-[4/3] min-h-[200px] w-full max-w-full p-5 rounded-[20px] border border-solid font-light overflow-hidden transition-colors duration-300 ease-in-out hover:-translate-y-0.5 hover:shadow-[0_8px_25px_rgba(0,0,0,0.15)] ${
               enableBorderGlow ? 'card--border-glow' : ''
             }`;
@@ -711,6 +725,8 @@ const MagicBento: React.FC<BentoProps> = ({
                   enableTilt={enableTilt}
                   clickEffect={clickEffect}
                   enableMagnetism={enableMagnetism}
+                  ariaLabel={card.ariaLabel}
+                  onClick={card.onClick}
                 >
                   <div className="card__header flex justify-between gap-3 relative text-white">
                     <span className="card__label text-base">{card.label}</span>
@@ -724,6 +740,7 @@ const MagicBento: React.FC<BentoProps> = ({
                     >
                       {card.description}
                     </p>
+                    {typeof card.progress === 'number' ? <div className="card__progress"><div className="card__progress-track"><div className="card__progress-fill" style={{ width: `${Math.max(0, Math.min(100, card.progress))}%` }} /></div><p className="mt-2 text-xs text-white/55">已完成 {Math.max(0, Math.min(100, card.progress))}%</p></div> : null}
                   </div>
                 </ParticleCard>
               );
@@ -734,6 +751,11 @@ const MagicBento: React.FC<BentoProps> = ({
                 key={index}
                 className={baseClassName}
                 style={cardStyle}
+                role={card.onClick ? 'button' : undefined}
+                tabIndex={card.onClick ? 0 : undefined}
+                aria-label={card.ariaLabel}
+                onClick={card.onClick}
+                onKeyDown={event => { if (card.onClick && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); card.onClick(); } }}
                 ref={el => {
                   if (!el) return;
 
@@ -854,6 +876,7 @@ const MagicBento: React.FC<BentoProps> = ({
                   <p className={`card__description text-xs leading-5 opacity-90 ${textAutoHide ? 'text-clamp-2' : ''}`}>
                     {card.description}
                   </p>
+                  {typeof card.progress === 'number' ? <div className="card__progress"><div className="card__progress-track"><div className="card__progress-fill" style={{ width: `${Math.max(0, Math.min(100, card.progress))}%` }} /></div><p className="mt-2 text-xs text-white/55">已完成 {Math.max(0, Math.min(100, card.progress))}%</p></div> : null}
                 </div>
               </div>
             );

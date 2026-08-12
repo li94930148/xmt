@@ -1,8 +1,9 @@
 import { Suspense } from 'react';
 import { backgroundRegistry } from './componentRegistry';
 import { useEffectiveReactBitsAppearanceConfig } from './ReactBitsAppearancePreviewContext';
+import { ReactBitsSlotErrorBoundary } from './ReactBitsSlotErrorBoundary';
 import type { AppearancePage } from './types';
-export function ReactBitsBackgroundSlot({ page, className = '', fallbackClassName = '' }: { page: AppearancePage; className?: string; fallbackClassName?: string }) {
+export function ReactBitsBackgroundSlot({ page, className = '', fallbackClassName = '', previewMode = false, forceRender = false }: { page: AppearancePage; className?: string; fallbackClassName?: string; previewMode?: boolean; forceRender?: boolean }) {
   const config = useEffectiveReactBitsAppearanceConfig();
   const component = config.background.component;
   // DarkVeil's registry shader requires a WebGL program variant that is not
@@ -10,10 +11,18 @@ export function ReactBitsBackgroundSlot({ page, className = '', fallbackClassNam
   // but use the documented static background fallback rather than letting it
   // bubble into the application error boundary.
   const unsupportedWebGLPath = component === 'dark-veil';
-  const disabled = config.motionMode === 'off' || !config.applyTo[page] || component === 'none' || (page === 'editor') || unsupportedWebGLPath;
-  if (disabled || typeof window === 'undefined' || !window.WebGLRenderingContext) return <div aria-hidden className={`absolute inset-0 ${fallbackClassName}`} />;
+  const disabled = config.motionMode === 'off' || (!forceRender && !config.applyTo[page]) || component === 'none' || (!previewMode && page === 'editor') || unsupportedWebGLPath || typeof window === 'undefined' || !window.WebGLRenderingContext;
+  const shouldRenderDynamic = !disabled;
+  const shouldRenderSilk = shouldRenderDynamic && component === 'silk';
+
   const Background = backgroundRegistry[component as keyof typeof backgroundRegistry];
-  if (!Background) return <div aria-hidden className={`absolute inset-0 ${fallbackClassName}`} />;
+  const SilkBackground = backgroundRegistry.silk;
   const low = config.motionMode === 'reduced' || config.background.intensity === 'low' || window.innerWidth < 640;
-  return <Suspense fallback={<div aria-hidden className={`absolute inset-0 ${fallbackClassName}`} />}><div aria-hidden className={`pointer-events-none absolute inset-0 overflow-hidden ${className}`}><Background {...({ amplitude: low ? 0.45 : 0.9, speed: low ? 0.25 : 0.7, particleCount: low ? 40 : 120, color: '#6b8cff', colors: ['#5c7cfa', '#22d3ee', '#a78bfa'], items: ['XMT', '协作', '创作', '洞察'] } as any)} /></div></Suspense>;
+  const fallback = <div aria-hidden className={`absolute inset-0 ${fallbackClassName}`} />;
+  const dynamicIntensity = low ? 'low' : config.background.intensity;
+  return <div aria-hidden className={`pointer-events-none absolute inset-0 overflow-hidden ${className}`}>
+    {fallback}
+    {component === 'silk' && shouldRenderSilk && SilkBackground ? <ReactBitsSlotErrorBoundary componentName="silk" fallback={fallback}><Suspense fallback={fallback}><SilkBackground intensity={dynamicIntensity} /></Suspense></ReactBitsSlotErrorBoundary> : null}
+    {component !== 'silk' && shouldRenderDynamic && Background ? <ReactBitsSlotErrorBoundary componentName={component} fallback={fallback}><Suspense fallback={fallback}><Background intensity={dynamicIntensity} /></Suspense></ReactBitsSlotErrorBoundary> : null}
+  </div>;
 }

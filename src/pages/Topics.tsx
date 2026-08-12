@@ -40,6 +40,10 @@ import { Topic } from '../types';
 import Pagination from '../components/Pagination';
 import XMTCard from '../design-system/components/XMTCard';
 import TopicSpotlightCard from '../components/xmt-ui/TopicSpotlightCard';
+import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
+import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
+import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCardSlot';
+import { ReactBitsRevealSlot } from '../features/reactbits-appearance/ReactBitsRevealSlot';
 
 type SortField = 'title' | 'created_at' | 'deadline' | 'status' | 'submitted_at';
 type SortDir = 'asc' | 'desc';
@@ -362,9 +366,9 @@ export default function Topics() {
   };
 
   return (
-    <PageShell>
+    <ReactBitsPageScene page="topics" fallbackClassName="bg-gradient-to-br from-slate-950/30 to-indigo-950/20"><PageShell>
       <PageHeader
-        title="选题管理"
+        title={<ReactBitsHeadingSlot>选题管理</ReactBitsHeadingSlot>}
         description="从提报、审核到生产流转，快速判断每个内容节点卡在哪一步、谁负责、下一步做什么。"
         actions={
           canCreateTopic ? (
@@ -376,23 +380,23 @@ export default function Topics() {
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <XMTCard className="p-5">
+      <ReactBitsRevealSlot className="block"><div className="grid gap-4 md:grid-cols-3">
+        <ReactBitsCardSlot semantic="topic-card" className="p-5">
           <p className="text-xs font-semibold text-studio-text-muted">待审核选题</p>
           <p className="mt-3 text-3xl font-bold text-studio-text-primary">{pendingCount}</p>
           <p className="mt-2 text-sm text-studio-text-secondary">需要编导或管理者处理</p>
-        </XMTCard>
-        <XMTCard className="p-5">
+        </ReactBitsCardSlot>
+        <ReactBitsCardSlot semantic="topic-card" className="p-5">
           <p className="text-xs font-semibold text-studio-text-muted">生产链路中</p>
           <p className="mt-3 text-3xl font-bold text-studio-text-primary">{activeCount}</p>
           <p className="mt-2 text-sm text-studio-text-secondary">创作、成片和发布阶段</p>
-        </XMTCard>
-        <XMTCard className="p-5">
+        </ReactBitsCardSlot>
+        <ReactBitsCardSlot semantic="topic-card" className="p-5">
           <p className="text-xs font-semibold text-studio-text-muted">临期或逾期</p>
           <p className="mt-3 text-3xl font-bold text-studio-text-primary">{overdueCount}</p>
           <p className="mt-2 text-sm text-studio-text-secondary">优先排查交付风险</p>
-        </XMTCard>
-      </div>
+        </ReactBitsCardSlot>
+      </div></ReactBitsRevealSlot>
 
       {spotlightTopics.length > 0 ? (
         <section aria-labelledby="priority-topics-title" className="space-y-3">
@@ -619,6 +623,6 @@ export default function Topics() {
         cancelText="取消"
         description={deleteTarget ? `确定要删除选题“${deleteTarget.title}”吗？` : ''}
       />
-    </PageShell>
+    </PageShell></ReactBitsPageScene>
   );
 }

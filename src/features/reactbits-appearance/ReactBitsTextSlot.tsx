@@ -30,7 +30,7 @@ export function ReactBitsTextSlot({ semantic, children, className = '', value, t
   const theme = themeOverride ?? appTheme;
   const narrow = useNarrowViewport();
   const id = semantic === 'metric' ? config.numberText.component : config.headingText.component;
-  const safeClassName = twMerge(semanticClasses[semantic], className);
+  const safeClassName = twMerge(semanticClasses[semantic], semantic === 'brand-title' && 'overflow-visible leading-[1.08]', className);
   const fallback = <span className={safeClassName}>{children}</span>;
   const canAnimate = id !== 'none' && config.motionMode !== 'off' && semantic !== 'section-title';
   const trueFocusAllowed = id === 'true-focus' && (semantic === 'brand-title' || semantic === 'ai-label') && !narrow;
@@ -52,11 +52,14 @@ export function ReactBitsTextSlot({ semantic, children, className = '', value, t
               : id === 'blur-text'
                 ? { text: children, className: safeClassName, delay: 55, animateBy: 'words', direction: 'top' }
                 : id === 'split-text'
-                  ? { text: children, className: safeClassName, delay: 55, duration: 0.55, tag: semantic === 'brand-title' ? 'h1' : 'span', textAlign: 'left' }
+                  ? { text: children, className: safeClassName, delay: 55, duration: 0.55, tag: 'span', textAlign: 'left' }
                   : id === 'decrypted-text'
                     // The official component applies className to every character;
                     // keep character spans inline and style only its parent wrapper.
                     ? { text: children, className: 'inline', parentClassName: safeClassName }
                   : { text: children, className: safeClassName };
-  return <span className="reactbits-text-safe inline-block max-w-full min-w-0 overflow-visible align-baseline" style={{ paddingBlock: '0.12em', marginBlock: '-0.12em' }}><Suspense fallback={fallback}><Component {...(props as any)} /></Suspense></span>;
+  const safetyStyle = semantic === 'brand-title'
+    ? { display: 'block', paddingTop: '0.08em', paddingBottom: '0.14em', marginBlock: 0 }
+    : { paddingBlock: '0.12em', marginBlock: '-0.12em' };
+  return <span className="reactbits-text-safe inline-block max-w-full min-w-0 overflow-visible align-baseline" style={safetyStyle}><Suspense fallback={fallback}><Component {...(props as any)} /></Suspense></span>;
 }

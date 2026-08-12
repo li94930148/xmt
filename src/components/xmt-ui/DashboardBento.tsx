@@ -1,11 +1,10 @@
 import { useMemo } from 'react';
 import { ArrowRight, CalendarDays, Clock3, PenLine, Play, Send } from 'lucide-react';
-import AnimatedContent from '../reactbits/AnimatedContent';
-import Aurora from '../reactbits/AuroraBackground';
-import MagicBento, { type BentoCardProps } from '../reactbits/MagicBento';
+import { XMTMagicBentoAdapter, type BentoCardProps } from '@/features/reactbits-appearance/adapters/cards/XMTMagicBentoAdapter';
 import { ReactBitsBackgroundSlot } from '@/features/reactbits-appearance/ReactBitsBackgroundSlot';
 import { ReactBitsTextSlot } from '@/features/reactbits-appearance/ReactBitsTextSlot';
 import { ReactBitsButtonSlot } from '@/features/reactbits-appearance/ReactBitsButtonSlot';
+import { ReactBitsRevealSlot } from '@/features/reactbits-appearance/ReactBitsRevealSlot';
 
 type DashboardBentoProps = {
   pendingTopics: number;
@@ -105,11 +104,11 @@ export default function DashboardBento({
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(100deg,rgba(2,8,23,0.98)_0%,rgba(2,8,23,0.9)_43%,rgba(2,8,23,0.38)_76%,rgba(2,8,23,0.72)_100%)]" />
       <div className="pointer-events-none absolute inset-0 -z-10 opacity-30 [background-image:linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] [background-size:48px_48px]" />
 
-      <AnimatedContent distance={36} duration={0.8} threshold={0.03}>
+      <ReactBitsRevealSlot className="block">
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(480px,0.9fr)] lg:items-end">
           <div className="max-w-3xl">
             <p className="text-sm font-semibold tracking-[0.08em] text-cyan-300">岚曜 XMT 新媒体协作平台</p>
-            <div id="home-showcase-title" role="heading" aria-level={1} className="mt-4 text-[clamp(2.45rem,5vw,4.9rem)] font-black leading-[0.98] tracking-[-0.05em] text-white"><ReactBitsTextSlot semantic="brand-title" className="text-inherit">内容生产驾驶舱</ReactBitsTextSlot></div>
+            <h1 id="home-showcase-title" className="mt-4 text-[clamp(2.45rem,5vw,4.9rem)] font-black leading-[1.08] tracking-[-0.05em] text-white"><ReactBitsTextSlot semantic="brand-title" className="text-inherit">内容生产驾驶舱</ReactBitsTextSlot></h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
               让选题、创作、发布与复盘在同一节奏里前进。
             </p>
@@ -117,13 +116,13 @@ export default function DashboardBento({
               <ReactBitsButtonSlot type="button" variant="primary" onClick={() => onNavigate('/topics')} className="h-12 rounded-xl bg-cyan-400 text-slate-950">
                 进入选题池 <ArrowRight className="h-4 w-4" />
               </ReactBitsButtonSlot>
-              <button type="button" onClick={() => onNavigate('/calendar')} className="inline-flex h-12 items-center gap-2 rounded-xl border border-white/20 bg-white/[0.06] px-5 text-sm font-semibold text-white backdrop-blur-md transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/50 hover:bg-white/[0.1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300">
+              <ReactBitsButtonSlot type="button" variant="secondary" onClick={() => onNavigate('/calendar')} className="h-12 rounded-xl border-white/20 bg-white/[0.06] text-white">
                 查看今日排期 <CalendarDays className="h-4 w-4" />
-              </button>
+              </ReactBitsButtonSlot>
             </div>
           </div>
 
-          <AnimatedContent distance={24} delay={0.16} duration={0.72} threshold={0.03}>
+          <ReactBitsRevealSlot className="block">
             <div className="grid grid-cols-2 overflow-hidden rounded-2xl border border-white/15 bg-slate-950/45 shadow-[0_18px_60px_rgba(2,8,23,0.35)] backdrop-blur-xl sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
               {heroMetrics.map((metric) => (
                 <button key={metric.label} type="button" disabled={!metric.path} onClick={() => metric.path && onNavigate(metric.path)} className="group min-w-0 border-b border-r border-white/10 p-4 text-left transition hover:bg-white/[0.08] disabled:cursor-default sm:border-b-0 lg:border-b xl:border-b-0">
@@ -133,37 +132,29 @@ export default function DashboardBento({
                 </button>
               ))}
             </div>
-          </AnimatedContent>
+          </ReactBitsRevealSlot>
         </div>
-      </AnimatedContent>
+      </ReactBitsRevealSlot>
 
-      <AnimatedContent className="mt-8" distance={30} delay={0.24} duration={0.78} threshold={0.02}>
+      <ReactBitsRevealSlot className="mt-8 block">
         <div className="xmt-home-bento">
-          <MagicBento
+          <XMTMagicBentoAdapter
             cards={cards}
-            glowColor="34, 211, 238"
-            particleCount={10}
-            spotlightRadius={340}
-            enableStars
-            enableSpotlight
-            enableBorderGlow
-            enableTilt
-            enableMagnetism
-            clickEffect
           />
           <style>{`
             .xmt-home-bento .bento-section { width: 100%; max-width: none; padding: 0; }
             .xmt-home-bento .card-responsive { width: 100%; margin: 0; padding: 0; gap: 14px; }
-            .xmt-home-bento .card { aspect-ratio: auto; min-height: 164px; border-color: rgba(148, 163, 184, 0.2) !important; }
+            .xmt-home-bento .card { aspect-ratio: auto; min-width: 0; min-height: clamp(176px, 14vw, 210px); border-color: rgba(148, 163, 184, 0.2) !important; }
             .xmt-home-bento .card[role="button"] { cursor: pointer; }
             .xmt-home-bento .card__label { color: rgba(226, 232, 240, 0.76); font-size: 0.78rem; font-weight: 650; letter-spacing: 0.04em; }
-            .xmt-home-bento .card__title { color: #fff; font-size: clamp(1.65rem, 2.8vw, 2.45rem); font-weight: 760; letter-spacing: -0.04em; }
-            .xmt-home-bento .card__description { color: rgba(203, 213, 225, 0.76); }
+            .xmt-home-bento .card__title { display: block; max-width: 100%; overflow: visible; white-space: nowrap; padding-block: .08em; color: #fff; font-size: clamp(1.65rem, 2.8vw, 2.45rem); font-weight: 760; line-height: 1.12; letter-spacing: -0.04em; }
+            .xmt-home-bento .card__description { margin-top: .7rem; color: rgba(203, 213, 225, 0.76); }
             .xmt-home-bento .card__progress { margin-top: 22px; }
             .xmt-home-bento .card__progress-track { height: 7px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, 0.2); }
             .xmt-home-bento .card__progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22d3ee, #818cf8, #c084fc); box-shadow: 0 0 24px rgba(34, 211, 238, 0.55); }
             .xmt-home-bento .card:first-child { min-height: 360px; background-image: radial-gradient(circle at 15% 100%, rgba(34,211,238,.2), transparent 38%), radial-gradient(circle at 90% 15%, rgba(129,140,248,.22), transparent 42%); }
-            .xmt-home-bento .card:first-child .card__title { font-size: clamp(4.75rem, 9vw, 7.8rem); line-height: .9; color: #67e8f9; text-shadow: 0 0 38px rgba(34,211,238,.28); }
+            .xmt-home-bento .card:not(:first-child):not(:nth-child(3)):not(:nth-child(4)):not(:nth-child(5)):not(:nth-child(6)) { min-height: clamp(190px, 16vw, 230px); }
+            .xmt-home-bento .card:first-child .card__title { font-size: clamp(4.75rem, 9vw, 7.8rem); line-height: 1.12; color: #67e8f9; text-shadow: 0 0 38px rgba(34,211,238,.28); }
             @media (min-width: 600px) {
               .xmt-home-bento .card-responsive { grid-template-columns: repeat(2, minmax(0, 1fr)); }
               .xmt-home-bento .card:first-child, .xmt-home-bento .card:nth-child(2), .xmt-home-bento .card:nth-child(7) { grid-column: span 2; }
@@ -177,12 +168,12 @@ export default function DashboardBento({
             }
             @media (max-width: 599px) {
               .xmt-home-bento .card-responsive { width: 100%; padding: 0; }
-              .xmt-home-bento .card { min-height: 148px; }
+              .xmt-home-bento .card { min-height: 176px; }
               .xmt-home-bento .card:first-child { min-height: 300px; }
             }
           `}</style>
         </div>
-      </AnimatedContent>
+      </ReactBitsRevealSlot>
     </section>
   );
 }

@@ -8,6 +8,11 @@ import { ConfirmModal, FormModal, LoadingState, PageHeader } from '../components
 import { buildWorkflowRuntimeContext, getExplainability, runTransitionCheck } from '@shared/workflow/workflow_runtime';
 import { mapDecisionToUI, mapExplainToUI } from '../components/workflow/WorkflowUIBridge';
 import XMTCard from '../design-system/components/XMTCard';
+import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
+import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
+import { ReactBitsMetricSlot } from '../features/reactbits-appearance/slots/ReactBitsMetricSlot';
+import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCardSlot';
+import { ReactBitsButtonSlot } from '../features/reactbits-appearance/ReactBitsButtonSlot';
 
 interface WorkflowTemplate {
   id: number;
@@ -363,37 +368,40 @@ export default function WorkflowDesigner() {
   }
 
   return (
+    <ReactBitsPageScene page="workflow" fallbackClassName="bg-gradient-to-br from-slate-950/30 to-indigo-950/20">
     <div className="space-y-6">
       <PageHeader
-        title="审批流设计"
+        title={<ReactBitsHeadingSlot>审批流设计</ReactBitsHeadingSlot>}
         description="自定义选题审批流程"
         actions={
           hasPermission('system:template') ? (
-            <button
+            <ReactBitsButtonSlot
+              variant="primary"
               onClick={() => {
                 setShowCreateForm(true);
                 setFormData({ name: '', description: '', nodes: [] });
               }}
-              className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary}`}
+              className="rounded-xl"
             >
               <Plus className="w-4 h-4" />
               新建模板
-            </button>
+            </ReactBitsButtonSlot>
           ) : null
         }
       />
 
       {templates.length === 0 ? (
-        <div className={styles.card}>
+        <ReactBitsCardSlot semantic="workflow-summary" className={styles.card}>
           <EmptyState
             title="暂无审批流模板"
             description="当前还没有可用的审批流模板，创建后会显示在这里。"
           />
-        </div>
+        </ReactBitsCardSlot>
       ) : (
         <div className="grid gap-4">
           {templates.map((template) => (
-            <XMTCard key={template.id} className={`p-4 ${styles.card}`}>
+            <ReactBitsCardSlot key={template.id} semantic="workflow-summary">
+            <XMTCard className={`p-4 ${styles.card}`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div
@@ -419,8 +427,8 @@ export default function WorkflowDesigner() {
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-4 text-sm">
-                    <span className={styles.textMuted}>{template.node_count} 个节点</span>
-                    <span className={styles.textMuted}>{template.topic_count} 个选题使用</span>
+                    <span className={styles.textMuted}><ReactBitsMetricSlot value={template.node_count}>{String(template.node_count)}</ReactBitsMetricSlot> 个节点</span>
+                    <span className={styles.textMuted}><ReactBitsMetricSlot value={template.topic_count}>{String(template.topic_count)}</ReactBitsMetricSlot> 个选题使用</span>
                   </div>
                   {hasPermission('system:template') ? (
                     <div className="flex items-center gap-2">
@@ -445,6 +453,7 @@ export default function WorkflowDesigner() {
                 </div>
               </div>
             </XMTCard>
+            </ReactBitsCardSlot>
           ))}
         </div>
       )}
@@ -678,5 +687,6 @@ export default function WorkflowDesigner() {
         }
       />
     </div>
+    </ReactBitsPageScene>
   );
 }

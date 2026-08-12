@@ -14,7 +14,7 @@ export const useReactBitsAppearanceStore = create<Store>((set, get) => ({
     return parseReactBitsAppearanceConfig(next) ? { draftConfig: next } : {};
   }),
   applyPreset: (id) => { const found = reactBitsPresets.find((item) => item.id === id); if (found) set({ draftConfig: clone(found.config) }); },
-  save: () => { const config = clone(get().draftConfig); localStorage.setItem(REACT_BITS_APPEARANCE_KEY, JSON.stringify(config)); set({ config }); },
+  save: () => { const config = clone(get().draftConfig); localStorage.setItem(REACT_BITS_APPEARANCE_KEY, JSON.stringify(config)); set({ config }); window.dispatchEvent(new CustomEvent('xmt-reactbits-appearance-changed', { detail: config })); },
   reset: () => set({ draftConfig: clone(defaultReactBitsAppearanceConfig) }),
   importConfig: (raw) => { try { const parsed = parseReactBitsAppearanceConfig(JSON.parse(raw)); if (!parsed) return false; set({ draftConfig: parsed }); return true; } catch { return false; } },
   exportConfig: () => JSON.stringify(get().draftConfig, null, 2),

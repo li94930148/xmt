@@ -10,6 +10,11 @@ import DailyReportSummaryForm from '../components/daily-report/DailyReportSummar
 import DailyReportTeamBoard from '../components/daily-report/DailyReportTeamBoard';
 import DailyReportSummaryArchive from '../components/daily-report/DailyReportSummaryArchive';
 import DailyReportDetailDrawer from '../components/daily-report/DailyReportDetailDrawer';
+import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
+import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
+import { ReactBitsNavigationSlot } from '../features/reactbits-appearance/slots/ReactBitsNavigationSlot';
+import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCardSlot';
+import { ReactBitsRevealSlot } from '../features/reactbits-appearance/ReactBitsRevealSlot';
 
 type TabKey = 'mine' | 'team' | 'summary';
 type EntryType = 'daily' | 'monthly' | 'yearly';
@@ -63,12 +68,12 @@ export default function DailyReportPage() {
 
   const tabs = useMemo(() => [{ key: 'mine' as const, label: '我的日报', icon: FileClock, visible: true }, { key: 'team' as const, label: '团队日报', icon: Users, visible: canViewTeam }, { key: 'summary' as const, label: '总结归档', icon: Archive, visible: true }], [canViewTeam]);
 
-  return <PageShell>
-    <PageHeader title="日报" description="记录每天的工作、计划和需要协调的事项。" actions={<ActionButton onClick={() => tab === 'mine' ? void loadMine() : tab === 'team' ? void loadTeam() : undefined}><RefreshCw className="h-4 w-4" />刷新</ActionButton>} />
-    <GlassPanel className="p-2"><div className="flex flex-wrap gap-2">{tabs.filter((item) => item.visible).map((item) => { const Icon = item.icon; return <button key={item.key} type="button" onClick={() => setTab(item.key)} className={`inline-flex items-center gap-2 rounded-button px-4 py-2.5 text-sm font-semibold ${tab === item.key ? 'bg-studio-primary text-white' : 'text-studio-text-secondary hover:bg-white/[0.06]'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></GlassPanel>
-    {tab === 'mine' ? <div className="space-y-5"><GlassPanel className="flex flex-wrap items-center gap-4 p-5"><label className="block"><span className="mb-2 block text-sm text-studio-text-muted">记录类型</span><select value={entryType} onChange={(event) => setEntryType(event.target.value as EntryType)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary"><option value="daily">日报</option><option value="monthly">月报</option><option value="yearly">年报</option></select></label>{entryType === 'daily' ? <span className="text-sm text-studio-text-muted">{loading ? '加载中...' : report ? '今日日报' : '今天还没有日报'}</span> : <span className="text-sm text-studio-text-muted">填写并提交个人{entryType === 'monthly' ? '月报' : '年报'}</span>}</GlassPanel>{entryType === 'daily' ? <DailyReportComposer status={report?.status || 'draft'} items={items} submitting={submitting} onItemsChange={setItems} onSubmit={() => void submit()} /> : <DailyReportSummaryForm kind={entryType} />}</div> : null}
+  return <ReactBitsPageScene page="dailyReport"><PageShell>
+    <PageHeader title={<ReactBitsHeadingSlot>日报</ReactBitsHeadingSlot>} description="记录每天的工作、计划和需要协调的事项。" actions={<ActionButton onClick={() => tab === 'mine' ? void loadMine() : tab === 'team' ? void loadTeam() : undefined}><RefreshCw className="h-4 w-4" />刷新</ActionButton>} />
+    <ReactBitsNavigationSlot semantic="page-tabs"><GlassPanel className="p-2"><div className="flex flex-wrap gap-2">{tabs.filter((item) => item.visible).map((item) => { const Icon = item.icon; return <button key={item.key} type="button" onClick={() => setTab(item.key)} className={`inline-flex items-center gap-2 rounded-button px-4 py-2.5 text-sm font-semibold ${tab === item.key ? 'bg-studio-primary text-white' : 'text-studio-text-secondary hover:bg-white/[0.06]'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></GlassPanel></ReactBitsNavigationSlot>
+    {tab === 'mine' ? <ReactBitsRevealSlot className="block"><ReactBitsCardSlot semantic="report-card" className="space-y-5"><GlassPanel className="flex flex-wrap items-center gap-4 p-5"><label className="block"><span className="mb-2 block text-sm text-studio-text-muted">记录类型</span><select value={entryType} onChange={(event) => setEntryType(event.target.value as EntryType)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary"><option value="daily">日报</option><option value="monthly">月报</option><option value="yearly">年报</option></select></label>{entryType === 'daily' ? <span className="text-sm text-studio-text-muted">{loading ? '加载中...' : report ? '今日日报' : '今天还没有日报'}</span> : <span className="text-sm text-studio-text-muted">填写并提交个人{entryType === 'monthly' ? '月报' : '年报'}</span>}</GlassPanel>{entryType === 'daily' ? <DailyReportComposer status={report?.status || 'draft'} items={items} submitting={submitting} onItemsChange={setItems} onSubmit={() => void submit()} /> : <DailyReportSummaryForm kind={entryType} />}</ReactBitsCardSlot></ReactBitsRevealSlot> : null}
     {tab === 'team' ? <DailyReportTeamBoard date={teamDate} reports={teamReports} loading={teamLoading} error={teamError} onDateChange={setTeamDate} onRefresh={loadTeam} onView={setDetail} /> : null}
     {tab === 'summary' ? <DailyReportSummaryArchive canViewArchive={canViewArchive} onView={setDetail} /> : null}
     <DailyReportDetailDrawer report={detail} onClose={() => setDetail(null)} />
-  </PageShell>;
+  </PageShell></ReactBitsPageScene>;
 }

@@ -11,6 +11,20 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.18.0',
+    date: '2026-08-12',
+    title: 'React Bits 场景化视觉编排与全系统体验升级',
+    impactScope: ['Home', 'Topics', 'Daily Report', 'Creator', 'Analytics', 'Workflow', 'Editor', 'Settings / Appearance Center'],
+    changes: [
+      { type: 'feature', description: '建立 React Bits 官方组件、Typed Adapter、Semantic Slot 与 Page Scene 的统一视觉架构。' },
+      { type: 'feature', description: '提供岚曜极光、深空科技、丝绸创意、线性协作、极简无扰、自由搭配六套视觉方案。' },
+      { type: 'feature', description: 'Appearance Center 支持 Scene Preview、配置导入导出、恢复默认、持久化与页面应用范围控制。' },
+      { type: 'improvement', description: '优化多页面视觉表现、响应式体验、字号、深浅主题、motionMode 与 Canvas 生命周期管理。' },
+      { type: 'fix', description: '修复 Silk / React Three Fiber 生命周期兼容、动效关闭后的 Canvas 残留风险及 Settings 主题 select 可访问名称问题。' },
+      { type: 'security', description: 'Workflow Engine、Backend、API、权限、Socket.IO、Yjs 与数据库保持不变。' },
+    ],
+  },
+  {
     version: '2.17.2',
     date: '2026-08-08',
     title: 'React Bits 认证态兼容测试补充',

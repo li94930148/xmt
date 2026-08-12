@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.18.0 - 2026-08-12
+
+### 新增
+
+- 建立 React Bits Scene 场景化页面编排体系与页面级视觉应用范围。
+- 新增岚曜极光、深空科技、丝绸创意、线性协作、极简无扰、自由搭配六套视觉方案。
+- Appearance Center 支持 Scene Preview、配置导入导出、恢复默认与持久化。
+- 增加 Persistent-Off、Guard-Only 与关键 Scene 浏览器自动化回归。
+
+### 优化
+
+- 优化 Home、Topics、Daily Report、Creator、Analytics、Workflow、Editor 的视觉表现与响应式体验。
+- 完善字号、深浅主题、motionMode 与 Canvas owner/lifecycle 管理。
+- Appearance Center 高级设置默认折叠，页面应用范围与设置语义更清晰。
+
+### 修复
+
+- 修复 Silk / React Three Fiber 生命周期兼容与动效关闭后的 Canvas 残留风险。
+- 修复 Settings 主题 select accessible name、React Bits locator、A11Y 与视觉裁切问题。
+
+### 技术说明
+
+- Workflow Engine、Backend、API、permissions、Socket.IO、Yjs 与 Database 未修改。
+
 ## 2.17.2 - 2026-08-08
 
 ### React Bits 认证态兼容测试补充

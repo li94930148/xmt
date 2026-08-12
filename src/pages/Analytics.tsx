@@ -28,6 +28,11 @@ import {
   Calendar,
 } from 'lucide-react';
 import { getCurrentBeijingDateTimeString } from '../lib/utils';
+import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCardSlot';
+import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
+import { ReactBitsMetricSlot } from '../features/reactbits-appearance/slots/ReactBitsMetricSlot';
+import { ReactBitsNavigationSlot } from '../features/reactbits-appearance/slots/ReactBitsNavigationSlot';
+import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
 
 type TabType = 'overview' | 'export' | 'report';
 
@@ -186,8 +191,9 @@ export default function Analytics() {
   ];
 
   return (
+    <ReactBitsPageScene page="analytics">
     <div className="space-y-6">
-      <div className={`flex items-center gap-1 rounded-xl p-1 ${styles.bgTertiary} w-fit`}>
+      <ReactBitsNavigationSlot semantic="analytics-dimensions" className={`flex items-center gap-1 rounded-xl p-1 ${styles.bgTertiary} w-fit`}>
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (
@@ -205,7 +211,7 @@ export default function Analytics() {
             </button>
           );
         })}
-      </div>
+      </ReactBitsNavigationSlot>
 
       {activeTab === 'export' ? <DataExport /> : null}
       {activeTab === 'report' ? <WeeklyReport /> : null}
@@ -213,7 +219,7 @@ export default function Analytics() {
       {activeTab === 'overview' ? (
         <>
           <PageHeader
-            title="数据复盘"
+            title={<ReactBitsHeadingSlot semantic="page-title">数据复盘</ReactBitsHeadingSlot>}
             description="查看团队和个人在当前周期内的数据表现"
             actions={
               <div className="flex items-center gap-3">
@@ -269,14 +275,15 @@ export default function Analytics() {
             {statCards.map((card, index) => {
               const Icon = card.icon;
               return (
-                <div
+                <ReactBitsCardSlot
                   key={index}
+                  semantic="analytics-metric"
                   className={`${styles.card} p-5 hover:shadow-soft-lg transition-all duration-300 hover:-translate-y-0.5 group`}
                 >
                   <div className="flex items-start justify-between">
                     <div>
                       <p className={`${styles.textMuted} text-xs font-semibold uppercase tracking-wider`}>{card.title}</p>
-                      <p className={`mt-3 text-3xl font-bold tracking-tight ${styles.textPrimary}`}>{card.value}</p>
+                      <p className={`mt-3 text-3xl font-bold tracking-tight ${styles.textPrimary}`}><ReactBitsMetricSlot value={typeof card.value === 'number' ? card.value : undefined}>{String(card.value)}</ReactBitsMetricSlot></p>
                       <p className="mt-1 text-xs" style={{ color: card.color }}>
                         {card.unit}
                       </p>
@@ -288,7 +295,7 @@ export default function Analytics() {
                       <Icon className="w-6 h-6" style={{ color: card.color }} />
                     </div>
                   </div>
-                </div>
+                </ReactBitsCardSlot>
               );
             })}
           </div>
@@ -300,13 +307,13 @@ export default function Analytics() {
                 {metricCards.map((item) => {
                   const Icon = item.icon;
                   return (
-                    <div key={item.label} className={`${styles.bgTertiary} rounded-lg p-4`}>
+                    <ReactBitsCardSlot key={item.label} semantic="analytics-metric" className={`${styles.bgTertiary} rounded-lg p-4`}>
                       <div className="mb-2 flex items-center gap-2">
                         <Icon className={`w-5 h-5 ${item.color}`} />
                         <span className={`${styles.textSecondary} text-sm`}>{item.label}</span>
                       </div>
-                      <p className={`text-2xl font-bold ${styles.textPrimary}`}>{item.value}</p>
-                    </div>
+                      <p className={`text-2xl font-bold ${styles.textPrimary}`}><ReactBitsMetricSlot>{item.value}</ReactBitsMetricSlot></p>
+                    </ReactBitsCardSlot>
                   );
                 })}
               </div>
@@ -403,7 +410,7 @@ export default function Analytics() {
             </div>
           </div>
 
-          <CollaborationHeatmap topics={allTopics} />
+          <div data-analytics-runtime="heatmap"><CollaborationHeatmap topics={allTopics} /></div>
 
           <FormModal
             open={showCreateModal}
@@ -488,5 +495,6 @@ export default function Analytics() {
         </>
       ) : null}
     </div>
+    </ReactBitsPageScene>
   );
 }

@@ -1,5 +1,28 @@
 # XMT 系统更新日志
 
+## v2.18.0 - 2026-08-12
+
+### 新增
+
+- React Bits Scene 场景化页面编排体系与页面级视觉应用范围。
+- 岚曜极光、深空科技、丝绸创意、线性协作、极简无扰、自由搭配六套视觉方案。
+- Settings Scene Preview、配置导入导出、恢复默认与持久化能力。
+- Persistent-Off、Guard-Only 与关键场景浏览器自动化回归。
+
+### 优化
+
+- Home、Topics、Daily Report、Creator、Analytics、Workflow、Editor 页面视觉表现、响应式体验、字号、深浅主题与 motionMode。
+- Canvas owner/lifecycle 管理与 Appearance Center 信息架构。
+
+### 修复
+
+- Silk / React Three Fiber 生命周期兼容问题与动效关闭后的 Canvas 残留风险。
+- Settings 主题 select accessible name、React Bits locator、A11Y 与视觉裁切问题。
+
+### 技术说明
+
+- Workflow Engine、Backend、API、permissions、Socket.IO、Yjs 与 Database 未修改。
+
 ## v2.17.3 - 2026-08-10
 
 ### 新增

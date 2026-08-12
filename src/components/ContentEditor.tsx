@@ -17,6 +17,7 @@ import {
   type ContentEditorSaveStatus,
 } from '../editor/contracts/contentEditorAdapter';
 import { RuntimeHandleBridge } from '../editor/runtime/RuntimeHandleBridge';
+import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
 
 export type ContentEditorMode = 'rich' | 'legacy' | 'readonly';
 
@@ -210,6 +211,7 @@ export default function ContentEditor({
 
   if (mode === 'legacy') {
     return (
+      <ReactBitsPageScene page="editor" className="!isolate" fallbackClassName="bg-transparent">
       <div className={className} style={wrapperStyle}>
         <RichTextEditor
           value={value}
@@ -218,10 +220,12 @@ export default function ContentEditor({
           placeholder={placeholder}
         />
       </div>
+      </ReactBitsPageScene>
     );
   }
 
   return (
+    <ReactBitsPageScene page="editor" className="!isolate" fallbackClassName="bg-transparent">
     <div className={className} style={wrapperStyle}>
       {mode === 'rich' && collaborationEnabled && (
         <div className="flex flex-wrap items-center gap-2 border-b border-gray-200/60 px-4 py-2 text-xs dark:border-gray-800/80">
@@ -268,5 +272,6 @@ export default function ContentEditor({
         )}
       </ContentEditorRuntime>
     </div>
+    </ReactBitsPageScene>
   );
 }

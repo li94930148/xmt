@@ -661,15 +661,15 @@ export default function NotificationSettings() {
 
               <div className="grid gap-6 md:grid-cols-2">
                 <div>
-                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>主题</label>
-                  <select value={appearanceTheme} onChange={(event) => setAppearanceTheme(event.target.value as 'light' | 'dark')} className={`w-full px-4 py-2.5 ${styles.input}`}>
+                <label htmlFor="appearance-theme" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>主题</label>
+                  <select id="appearance-theme" aria-label="主题" value={appearanceTheme} onChange={(event) => setAppearanceTheme(event.target.value as 'light' | 'dark')} className={`w-full px-4 py-2.5 ${styles.input}`}>
                     <option value="dark">深色模式</option>
                     <option value="light">浅色模式</option>
                   </select>
                 </div>
                 <div>
-                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>界面字号</label>
-                  <select value={fontSize} onChange={(event) => setFontSize(parseInt(event.target.value, 10))} className={`w-full px-4 py-2.5 ${styles.input}`}>
+                  <label htmlFor="interface-font-size" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>界面字号</label>
+                  <select id="interface-font-size" value={fontSize} onChange={(event) => setFontSize(parseInt(event.target.value, 10))} className={`w-full px-4 py-2.5 ${styles.input}`}>
                     {[14, 16, 18, 20, 22, 24].map((size) => (
                       <option key={size} value={size}>{size}px</option>
                     ))}

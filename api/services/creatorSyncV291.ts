@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import { execute, queryOne, runInTransaction } from '../database/utils.js';
 import { creatorInsightService } from './creatorInsights.js';
 import { persistDouyinContractV2102, persistNormalizedDouyinSync } from './douyinDataCenter.js';
+import { requireCreatorAgentV1 } from './creatorAgentProtocol.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentRow = { id: number; user_id: number; platform: string; account_id: string; token_hash: string };
@@ -21,6 +22,7 @@ async function openEnvelope(body: JsonRecord, authorization?: string) {
   const agent = await queryOne<AgentRow>('SELECT id,user_id,platform,account_id,token_hash FROM creator_agents WHERE id=?', [Number(body.agent_id)]);
   if (!token || !agent || !(await bcrypt.compare(token, agent.token_hash))) throw Object.assign(new Error('Agent 身份认证失败'), { statusCode: 401 });
   if (body.platform !== agent.platform || text(body.account_id) !== agent.account_id) throw Object.assign(new Error('Agent 设备或平台账号绑定不匹配'), { statusCode: 403 });
+  requireCreatorAgentV1(body, 'data-sync');
   const expected = crypto.createHmac('sha256', token).update(canonical(body)).digest('hex'); const supplied = text(body.signature);
   if (supplied.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(supplied))) throw Object.assign(new Error('上传签名验证失败'), { statusCode: 401 });
   if (body.protocol_version === 1) {

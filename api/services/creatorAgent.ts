@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import bcrypt from "bcrypt";
+import { requireCreatorAgentV1 } from './creatorAgentProtocol.js';
 import {
   execute,
   executeInsert,
@@ -100,6 +101,7 @@ export async function acceptCreatorAgentReport(
     throw Object.assign(new Error("Agent 设备或平台账号绑定不匹配"), {
       statusCode: 403,
     });
+  requireCreatorAgentV1(body, 'report');
   const expected = crypto
     .createHmac("sha256", token)
     .update(canonical(body))

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.18.1 - 2026-08-12
+
+### Security and release reliability
+
+- Enforced resource-scoped Socket.IO collaboration authorization, including a view-only boundary for non-privileged participants.
+- Added real Socket.IO/Yjs authorization black-box coverage to the CI security contract.
+- Made role/permission updates atomic and aligned the primary role with role mappings.
+- Made SQLite deployment backups verifiable and deployment failures roll back the application revision.
+- Added explainable Auth readiness decisions: `GO`, `NO-GO`, or `INSUFFICIENT_DATA` with per-check status.
+
+### Database changes
+
+- No schema changes.
+
 ## 2.18.0 - 2026-08-12
 
 ### 新增

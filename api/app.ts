@@ -83,6 +83,8 @@ import {
 } from './collaboration/core/roomManager.js'
 import { autoSnapshot } from './collaboration/recovery/documentSnapshot.js'
 import { cleanupInactiveRooms } from './collaboration/yjs/documentStore.js'
+import { collaborationAccessPolicy } from './collaboration/access/CollaborationAccessPolicy.js'
+import type { User } from './types/index.js'
 import { SessionService } from './modules/auth/session/session.service.js'
 import { SqliteSessionRepository } from './modules/auth/session/session.sqlite-repository.js'
 import {
@@ -187,6 +189,8 @@ if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
   console.log('[HTTP] 未检测到 certs/ 目录下的证书，HTTP 模式启动')
   console.log('[HTTP] 桌面通知功能需要 HTTPS，运行 node scripts/generate-cert.mjs 生成证书')
 }
+
+export { server }
 
 const allowedOrigins = parseConfiguredOrigins(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGINS)
 
@@ -337,6 +341,15 @@ app.get('/internal/socket-lifecycle/summary', (req, res) => {
   if (!loopback) return res.status(404).end()
   res.setHeader('Cache-Control', 'no-store')
   res.json({ summary: socketLifecycleObserver.getSummary() })
+})
+
+app.get('/internal/ops/runtime', (req, res) => {
+  const address = req.socket.remoteAddress || ''
+  const loopback = address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+  if (!loopback) return res.status(404).end()
+  const memory = process.memoryUsage()
+  res.setHeader('Cache-Control', 'no-store')
+  res.json({ uptimeSeconds: process.uptime(), memory: { rss: memory.rss, heapUsed: memory.heapUsed, heapTotal: memory.heapTotal } })
 })
 app.use('/internal/metrics/auth', createAuthMetricsHttpRouter(
   authMetricsPrometheusExporter,
@@ -533,7 +546,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on(COLLABORATION_EVENTS.JOIN, (payload) => {
-    joinCollaborationRoom(io, socket, payload)
+    void joinCollaborationRoom(io, socket, payload)
   })
 
   socket.on(COLLABORATION_EVENTS.LEAVE, (payload) => {
@@ -547,7 +560,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on(COLLABORATION_EVENTS.UPDATE, (payload) => {
-    handleDocumentUpdate(io, socket, payload)
+    void handleDocumentUpdate(io, socket, payload)
   })
 
   socket.on(COLLABORATION_EVENTS.AWARENESS_UPDATE, (payload) => {
@@ -559,19 +572,21 @@ io.on('connection', (socket) => {
   })
 
   socket.on(COLLABORATION_EVENTS.DOC_LOCKED, (payload) => {
-    const socketUser = socket.data.user as { id?: number; role?: string } | undefined
-    if (socketUser?.role !== 'admin' && socketUser?.role !== 'director') return
-    const roomId = String(payload?.roomId || payload?.docId || '')
-    if (!roomId) return
-    lockCollaborationRoom(io, roomId, String(payload?.reason || 'Document locked'), String(socketUser.id || 'system'))
+    void (async () => {
+      const socketUser = socket.data.user as User | undefined
+      const roomId = String(payload?.roomId || payload?.docId || '')
+      if (!socketUser || !await collaborationAccessPolicy.canManageDocument(socketUser, roomId)) return
+      lockCollaborationRoom(io, roomId, String(payload?.reason || 'Document locked'), String(socketUser.id))
+    })()
   })
 
   socket.on(COLLABORATION_EVENTS.DOC_UNLOCKED, (payload) => {
-    const socketUser = socket.data.user as { id?: number; role?: string } | undefined
-    if (socketUser?.role !== 'admin' && socketUser?.role !== 'director') return
-    const roomId = String(payload?.roomId || payload?.docId || '')
-    if (!roomId) return
-    unlockCollaborationRoom(io, roomId, String(socketUser.id || 'system'))
+    void (async () => {
+      const socketUser = socket.data.user as User | undefined
+      const roomId = String(payload?.roomId || payload?.docId || '')
+      if (!socketUser || !await collaborationAccessPolicy.canManageDocument(socketUser, roomId)) return
+      unlockCollaborationRoom(io, roomId, String(socketUser.id))
+    })()
   })
 
   socket.on('disconnect', (reason) => {

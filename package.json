@@ -52,6 +52,7 @@
     "test:auth-gray-readiness": "tsx tests/auth/auth-gray-readiness.test.ts",
     "test:auth-runtime-config": "tsx tests/auth/auth-runtime-config.test.ts",
     "test:socket-coordinator": "tsx tests/auth/socket-coordinator.test.ts",
+    "test:origin-policy": "tsx tests/security/origin-policy.test.ts",
     "test:yjs-auth-recovery": "tsx tests/collaboration/yjs-auth-recovery.test.ts",
     "test:collaboration-access": "tsx tests/collaboration/collaboration-access-policy.test.ts",
     "test:collaboration-socket-authorization": "tsx tests/collaboration/collaboration-socket-authorization.test.ts",

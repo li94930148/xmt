@@ -22,6 +22,7 @@ import { verifyAccessTokenV1 } from './modules/auth/token.service.js'
 import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/socket.js'
 import { apiLimiter } from './middleware/rateLimit.js'
 import { parseTrustProxy } from './utils/trustProxy.js'
+import { isAllowedRequestOrigin, parseConfiguredOrigins } from './security/origin-policy.js'
 import authRoutes from './routes/auth.js'
 import topicsRoutes from './routes/topics.js'
 import topicResourcesRoutes from './routes/topic-resources.js'
@@ -99,45 +100,6 @@ const APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'packa
 
 const app: express.Application = express()
 
-const DEFAULT_ALLOWED_ORIGINS = [
-  // Capacitor Android's local asset server. Keep this explicit: never use a
-  // wildcard origin together with credentials.
-  'http://localhost',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://localhost:5174',
-  'http://127.0.0.1:5174',
-]
-
-function parseConfiguredOrigins(value?: string) {
-  if (!value) {
-    return new Set(DEFAULT_ALLOWED_ORIGINS.map((origin) => origin.toLowerCase()))
-  }
-
-  return new Set(
-    value
-      .split(',')
-      .map((origin) => origin.trim().toLowerCase())
-      .filter(Boolean),
-  )
-}
-
-function normalizeOrigin(origin: string) {
-  try {
-    const url = new URL(origin)
-    if (!/^https?:$/i.test(url.protocol)) {
-      return null
-    }
-
-    return {
-      origin: url.origin.toLowerCase(),
-      hostname: url.hostname.toLowerCase(),
-    }
-  } catch {
-    return null
-  }
-}
-
 // Production is client -> Caddy -> Node: trust exactly one proxy hop. Do not use `true`,
 // which would let a public client supply an arbitrary X-Forwarded-For address.
 app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY))
@@ -164,30 +126,17 @@ export { server }
 
 const allowedOrigins = parseConfiguredOrigins(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGINS)
 
-function isAllowedRequestOrigin(origin?: string) {
-  if (!origin) return true
-
-  const normalizedOrigin = normalizeOrigin(origin)
-  if (!normalizedOrigin) return false
-
-  if (allowedOrigins.has(normalizedOrigin.origin)) {
-    return true
-  }
-
-  return false
-}
-
 export const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (isAllowedRequestOrigin(origin)) return callback(null, true)
+      if (isAllowedRequestOrigin(origin, allowedOrigins)) return callback(null, true)
       callback(new Error('CORS not allowed'))
     },
     methods: ['GET', 'POST'],
     credentials: true,
   },
   allowRequest: (req, callback) => {
-    callback(null, isAllowedRequestOrigin(req.headers.origin))
+    callback(null, isAllowedRequestOrigin(req.headers.origin, allowedOrigins))
   },
 })
 
@@ -278,7 +227,7 @@ io.engine.on('connection_error', (error: Error & {
 const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
   callback(null, {
     origin: (origin, allow) => {
-      if (isAllowedRequestOrigin(origin)) return allow(null, true)
+      if (isAllowedRequestOrigin(origin, allowedOrigins)) return allow(null, true)
       allow(new Error('CORS not allowed'))
     },
     credentials: true,

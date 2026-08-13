@@ -6,17 +6,6 @@ import { SocketCoordinator, createRuntimeTokenProvider, readSocketCoordinatorEna
 import { SocketClientLifecycleDiagnostics } from '../observability/socket-client-lifecycle';
 import { getSocketBaseUrl, isNative } from '@/platform/runtime';
 
-type CoordinatorRuntime = {
-  getAccessToken: () => string | null;
-  refresh: () => Promise<string | null>;
-  getExpiresAt: () => number | null;
-  getTraceSnapshot?: () => { mode: string; status: string; loginCompleted: boolean; hasAccessToken: boolean };
-};
-
-declare global {
-  interface Window { __xmtAuthRuntime?: CoordinatorRuntime; }
-}
-
 let globalSocket: Socket | null = null;
 let globalUserId: number | null = null;
 let globalToken: string | null = null;

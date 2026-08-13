@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Menu, Moon, Search, Settings, Sun, User, LogOut, ChevronRight } from 'lucide-react';
-import { getMe, getPublicSystemSettings, getUnreadCount, mobileRefresh, registerMobileDevice, revokeMobileDevice } from '../api';
+import { getMe, getPublicSystemSettings, getUnreadCount, registerMobileDevice, revokeMobileDevice } from '../api';
 import { useAuthStore, useAppStore, useMessageStore } from '../store';
 import { buildBreadcrumbs } from '../config/navigation';
 import Sidebar from './Sidebar';
@@ -17,6 +17,7 @@ import { AnimatedPage, AppShell, Topbar } from '@/components/studio';
 import { MobileShell } from '@/components/mobile/MobileShell';
 import { isAndroid } from '@/platform/runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
+import { installNativeAuthRuntime, refreshNativeSession } from '@/auth/native/native-auth-runtime';
 import { apiFetch } from '@/api/transport';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
@@ -28,48 +29,6 @@ interface Notification {
   title: string;
   message: string;
   type: 'success' | 'error' | 'warning' | 'info';
-}
-
-let nativeRefreshInFlight: Promise<string | null> | null = null;
-
-function readAccessTokenExpiry(token: string | null) {
-  if (!token) return null;
-  try {
-    const payload = token.split('.')[1];
-    if (!payload) return null;
-    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: unknown };
-    return typeof decoded.exp === 'number' ? decoded.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * A single native refresh path is shared by app-resume and SocketCoordinator.
- * It never persists the access token; only the rotated refresh credential is
- * written back to Android Keystore.
- */
-function refreshNativeAccessToken() {
-  if (nativeRefreshInFlight) return nativeRefreshInFlight;
-  nativeRefreshInFlight = (async () => {
-    const refreshToken = await nativeRefreshCredentials.get();
-    const profile = nativeUserProfile.get() ?? useAuthStore.getState().user;
-    if (!refreshToken || !profile) return null;
-    try {
-      const next = await mobileRefresh(refreshToken);
-      await nativeRefreshCredentials.set(next.refreshToken);
-      useAuthStore.getState().loginV1(profile, next.accessToken);
-      return next.accessToken;
-    } catch {
-      await nativeRefreshCredentials.clear().catch(() => undefined);
-      nativeUserProfile.clear();
-      useAuthStore.getState().logout();
-      return null;
-    } finally {
-      nativeRefreshInFlight = null;
-    }
-  })();
-  return nativeRefreshInFlight;
 }
 
 function NotificationItem({ notification }: { notification: Notification }) {
@@ -179,21 +138,7 @@ export default function Layout() {
 
   useEffect(() => {
     if (!isAndroid()) return;
-    const runtime = {
-      getAccessToken: () => useAuthStore.getState().token,
-      refresh: refreshNativeAccessToken,
-      getExpiresAt: () => readAccessTokenExpiry(useAuthStore.getState().token),
-      getTraceSnapshot: () => ({
-        mode: 'android-native',
-        status: useAuthStore.getState().isLoggedIn ? 'authenticated' : 'anonymous',
-        loginCompleted: useAuthStore.getState().isLoggedIn,
-        hasAccessToken: Boolean(useAuthStore.getState().token),
-      }),
-    };
-    window.__xmtAuthRuntime = runtime;
-    return () => {
-      if (window.__xmtAuthRuntime === runtime) delete window.__xmtAuthRuntime;
-    };
+    return installNativeAuthRuntime();
   }, []);
 
   // Android intentionally keeps access tokens out of WebView storage. Recreate it
@@ -203,7 +148,7 @@ export default function Layout() {
     let cancelled = false;
     void (async () => {
       try {
-        const nextAccessToken = await refreshNativeAccessToken();
+        const nextAccessToken = await refreshNativeSession();
         if (!nextAccessToken || cancelled) return;
       } catch {
         await nativeRefreshCredentials.clear().catch(() => undefined);

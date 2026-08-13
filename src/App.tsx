@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import Layout from '@/components/Layout';
@@ -7,6 +7,9 @@ import RealtimeToast from '@/components/RealtimeToast';
 import RoleGuard from '@/components/RoleGuard';
 import NotFound from '@/pages/NotFound';
 import { isAndroid } from '@/platform/runtime';
+import { useAuthStore } from '@/store';
+import { installNativeAuthRuntime, refreshNativeSession } from '@/auth/native/native-auth-runtime';
+import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
 
 function applyTheme(theme: 'light' | 'dark') {
   const root = document.documentElement;
@@ -127,6 +130,42 @@ function PageLoading() {
   );
 }
 
+/**
+ * Runs before route guards so a cold Android start can exchange the Keystore
+ * refresh credential for an in-memory access token. Layout is protected, so
+ * placing this there would always redirect a restored session to /login first.
+ */
+function NativeSessionBootstrap({ children }: { children: React.ReactNode }) {
+  const token = useAuthStore((state) => state.token);
+  const tokenAtBoot = useRef(token);
+  const [ready, setReady] = useState(() => !isAndroid());
+
+  useEffect(() => {
+    if (!isAndroid()) return;
+    const removeRuntime = installNativeAuthRuntime();
+    let cancelled = false;
+
+    void (async () => {
+      if (!tokenAtBoot.current) {
+        try {
+          await refreshNativeSession();
+        } catch {
+          await nativeRefreshCredentials.clear().catch(() => undefined);
+          nativeUserProfile.clear();
+        }
+      }
+      if (!cancelled) setReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+      removeRuntime();
+    };
+  }, []);
+
+  return ready ? children : <PageLoading />;
+}
+
 export default function App() {
   useEffect(() => {
     const savedTheme = (localStorage.getItem('xmt_theme') as 'light' | 'dark') || 'dark';
@@ -137,8 +176,9 @@ export default function App() {
     <ErrorBoundary>
       <RealtimeToast />
       <Router>
-        <Suspense fallback={<PageLoading />}>
-          <Routes>
+        <NativeSessionBootstrap>
+          <Suspense fallback={<PageLoading />}>
+            <Routes>
             <Route path="/login" element={<Login />} />
 
             <Route element={<ProtectedRoute />}>
@@ -259,8 +299,9 @@ export default function App() {
             </Route>
 
             <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
+            </Routes>
+          </Suspense>
+        </NativeSessionBootstrap>
       </Router>
     </ErrorBoundary>
   );

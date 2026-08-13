@@ -17,7 +17,6 @@ import { AnimatedPage, AppShell, Topbar } from '@/components/studio';
 import { MobileShell } from '@/components/mobile/MobileShell';
 import { isAndroid } from '@/platform/runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
-import { installNativeAuthRuntime, refreshNativeSession } from '@/auth/native/native-auth-runtime';
 import { apiFetch } from '@/api/transport';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
@@ -135,28 +134,6 @@ export default function Layout() {
     if (!isAndroid() || !token) return;
     void registerMobileDevice().catch(() => undefined);
   }, [token]);
-
-  useEffect(() => {
-    if (!isAndroid()) return;
-    return installNativeAuthRuntime();
-  }, []);
-
-  // Android intentionally keeps access tokens out of WebView storage. Recreate it
-  // from the Android Keystore credential at application start and rotate it once.
-  useEffect(() => {
-    if (!isAndroid() || token) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const nextAccessToken = await refreshNativeSession();
-        if (!nextAccessToken || cancelled) return;
-      } catch {
-        await nativeRefreshCredentials.clear().catch(() => undefined);
-        nativeUserProfile.clear();
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [loginUser, token]);
 
   // The global transport redirects after a 401. Native refresh credentials are
   // intentionally outside WebView storage, so clear them explicitly on the same

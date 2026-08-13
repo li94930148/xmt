@@ -56,6 +56,7 @@
     "test:mobile-safe-draft": "tsx tests/platform/safe-draft.test.ts",
     "test:mobile-network": "tsx tests/platform/network.test.ts",
     "test:mobile-deep-link": "tsx tests/mobile/deep-link.test.ts",
+    "test:android-runtime": "tsx tests/mobile/android-runtime-contract.test.ts",
     "test:mobile-device-registry": "tsx tests/notifications/mobile-device-registry.test.ts",
     "test:yjs-auth-recovery": "tsx tests/collaboration/yjs-auth-recovery.test.ts",
     "test:collaboration-access": "tsx tests/collaboration/collaboration-access-policy.test.ts",

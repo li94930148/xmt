@@ -2,5 +2,5 @@
 
 1. 安装 Node 22、JDK 21、Android Studio/SDK，设置 `ANDROID_HOME`。
 2. 设置 `JAVA_HOME`（JDK 21）和 `ANDROID_HOME`（Android SDK），运行 `npm ci` 与 `npm run mobile:doctor`。
-3. 为 Android 调试设置 `VITE_API_BASE_URL` 与 `VITE_SOCKET_BASE_URL`；正式环境只能使用 HTTPS/WSS。
+3. 为 Android 调试设置 `VITE_API_BASE_URL` 与 `VITE_SOCKET_BASE_URL`；正式环境只能使用 HTTPS/WSS。若仅在本机通过 HTTP 联调，构建 Debug APK 前额外显式设置 `VITE_ANDROID_ALLOW_CLEARTEXT=true`。该开关只配合 `src/debug` 的 Android 配置生效，Release APK 仍固定禁止明文网络。
 4. 执行 `npm run mobile:sync`，以 `npm run mobile:android` 打开 Android Studio，或运行 `npm run mobile:apk:debug`。

@@ -5,6 +5,7 @@ export type RuntimeEnvironment = 'web-development' | 'web-production' | 'android
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 const isAndroidDevelopmentOverride = () => import.meta.env.DEV && import.meta.env.VITE_APP_PLATFORM === 'android';
+const allowsAndroidDebugCleartext = () => import.meta.env.VITE_ANDROID_ALLOW_CLEARTEXT === 'true';
 
 export const isAndroid = () => Capacitor.getPlatform() === 'android' || isAndroidDevelopmentOverride();
 export const isNative = () => Capacitor.isNativePlatform() || isAndroidDevelopmentOverride();
@@ -37,7 +38,7 @@ export async function openExternalUrl(url: string) {
 export function assertNativeEndpointSecurity() {
   if (!isNative() || import.meta.env.DEV) return;
   const endpoint = getApiBaseUrl();
-  if (!/^https:\/\//i.test(endpoint)) {
-    throw new Error('Android 正式构建必须配置 HTTPS 的 VITE_API_BASE_URL。');
+  if (!/^https:\/\//i.test(endpoint) && !allowsAndroidDebugCleartext()) {
+    throw new Error('Android 构建必须配置 HTTPS 的 VITE_API_BASE_URL；本机调试请同时显式设置 VITE_ANDROID_ALLOW_CLEARTEXT=true。');
   }
 }

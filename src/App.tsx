@@ -59,6 +59,9 @@ const MobileMessages = lazyWithRetry(() => import('@/pages/mobile/MobileMessages
 const MobileMe = lazyWithRetry(() => import('@/pages/mobile/MobileMe'), 'MobileMe');
 const MobileDaily = lazyWithRetry(() => import('@/pages/mobile/MobileDaily'), 'MobileDaily');
 const MobileTopicDetail = lazyWithRetry(() => import('@/pages/mobile/MobileTopicDetail'), 'MobileTopicDetail');
+const MobileWorkHub = lazyWithRetry(() => import('@/pages/mobile/MobileWorkHub'), 'MobileWorkHub');
+const MobileProduction = lazyWithRetry(() => import('@/pages/mobile/MobileProduction'), 'MobileProduction');
+const MobileProductionEditor = lazyWithRetry(() => import('@/pages/mobile/MobileProductionEditor'), 'MobileProductionEditor');
 const TopicDetail = lazyWithRetry(() => import('@/pages/TopicDetail'), 'TopicDetail');
 const AddTopic = lazyWithRetry(() => import('@/pages/AddTopic'), 'AddTopic');
 const Production = lazyWithRetry(() => import('@/pages/Production'), 'Production');
@@ -146,8 +149,10 @@ export default function App() {
                   <Route path="/topics/add" element={<AddTopic />} />
                 </Route>
                 <Route path="/topics/:id" element={isAndroid() ? <MobileTopicDetail /> : <TopicDetail />} />
-                <Route path="/production" element={<Production />} />
-                <Route path="/production/:id" element={<ProductionDetail />} />
+                <Route path="/production" element={isAndroid() ? <MobileWorkHub /> : <Production />} />
+                <Route path="/production/content" element={isAndroid() ? <MobileProduction /> : <Production />} />
+                <Route path="/production/content/:id" element={isAndroid() ? <MobileProductionEditor /> : <ProductionDetail />} />
+                <Route path="/production/:id" element={isAndroid() ? <MobileProductionEditor /> : <ProductionDetail />} />
                 <Route path="/shooting/:id" element={<ShootingDetail />} />
                 <Route path="/publishing/:id" element={<PublishingDetail />} />
                 <Route path="/resources" element={<Resources />} />

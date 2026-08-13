@@ -1,6 +1,8 @@
 import { Save, Send } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { getMyDailyReport, saveDailyReportDraft, submitDailyReport, type DailyReport, type DailyReportItem } from '@/api/dailyReports';
+import { clearSafeDraft, readSafeDraftValue, writeSafeDraft } from '@/platform/safe-draft';
+import { useNetworkState } from '@/platform/network';
 
 const sections = [
   { key: 'today', title: '今日工作', placeholder: '记录今天完成或推进的工作' },
@@ -23,6 +25,7 @@ export default function MobileDaily() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  const networkState = useNetworkState();
   const readonly = report?.status === 'approved' || report?.status === 'archived';
 
   const load = useCallback(async () => {
@@ -30,7 +33,9 @@ export default function MobileDaily() {
     try {
       const result = await getMyDailyReport(reportDate);
       setReport(result.report);
-      setItems(toItems(result.report));
+      const recovered = readSafeDraftValue<DailyReportItem[]>(`daily:${reportDate}`);
+      setItems(recovered ?? toItems(result.report));
+      if (recovered) setNotice('已恢复本地草稿，请确认后保存或提交。');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '加载日报失败');
     } finally {
@@ -39,12 +44,14 @@ export default function MobileDaily() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (!loading) writeSafeDraft(`daily:${reportDate}`, items); }, [items, loading]);
 
   const persist = async (submit: boolean) => {
     if (!items.some((item) => item.contentMd.trim())) {
       setNotice('请至少填写一项内容');
       return;
     }
+    if (networkState === 'offline') { setNotice('当前离线，内容已保存在本地草稿，恢复网络后再提交。'); return; }
     setSaving(true);
     setNotice('');
     try {
@@ -52,6 +59,7 @@ export default function MobileDaily() {
       const next = submit ? await submitDailyReport(saved.id) : saved;
       setReport(next);
       setItems(toItems(next));
+      clearSafeDraft(`daily:${reportDate}`);
       setNotice(submit ? '日报已提交' : '草稿已保存');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '保存日报失败');

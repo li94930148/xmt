@@ -4,6 +4,7 @@ import { Bell, FileText, Home, LogOut, Settings, BriefcaseBusiness } from 'lucid
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { User } from '@/types';
 import { isAndroid } from '@/platform/runtime';
+import { useNetworkState } from '@/platform/network';
 
 const tabs = [
   { path: '/', label: '首页', icon: Home },
@@ -17,6 +18,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
   const location = useLocation();
   const navigate = useNavigate();
   const current = useMemo(() => tabs.find((tab) => tab.path === '/' ? location.pathname === '/' : location.pathname.startsWith(tab.path)), [location.pathname]);
+  const networkState = useNetworkState();
 
   useEffect(() => {
     if (!isAndroid()) return;
@@ -54,6 +56,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
       <div><p className="text-xs text-studio-text-muted">XMT 移动办公</p><h1 className="text-base font-semibold">{current?.label ?? '工作台'}</h1></div>
       <button onClick={onLogout} aria-label="退出登录" className="flex h-11 w-11 items-center justify-center rounded-xl text-studio-text-secondary"><LogOut className="h-5 w-5" /></button>
     </header>
+    {networkState !== 'online' ? <div role="status" className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-300">{networkState === 'offline' ? '网络不可用，正在使用本地内容与草稿。' : '网络已恢复，正在重新连接。'}</div> : null}
     <main className="min-h-[calc(100dvh-8.5rem)] px-4 py-4 pb-28" style={{ fontSize: 'var(--system-font-size)' }}>
       <div className="mx-auto w-full max-w-xl"><Outlet /></div>
     </main>

@@ -39,6 +39,7 @@ jobs:
       - run: npm run test:socket-client-lifecycle
       - run: npm run test:socket-coordinator
       - run: npm run test:origin-policy
+      - run: npm run test:mobile-safe-draft
       - run: npm run test:yjs-auth-recovery
       - run: npm run test:collaboration-access
       - run: npm run test:collaboration-socket-authorization

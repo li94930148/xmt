@@ -16,8 +16,10 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3001/api/health}"
 HOME_URL="${HOME_URL:-http://127.0.0.1:3001/}"
 PORT="${PORT:-3001}"
 BRANCH="${BRANCH:-main}"
+TARGET_SHA_EXPECTED="${TARGET_SHA_EXPECTED:-}"
 PREVIOUS_SHA=""
 TARGET_SHA=""
+BACKUP_FILE=""
 DEPLOY_STARTED=0
 
 log() {
@@ -82,6 +84,7 @@ backup_database() {
   sqlite3 "$backup_file" "PRAGMA quick_check;" | grep -qx "ok" || fail "Database backup quick_check failed: $backup_file"
   sqlite3 "$backup_file" "SELECT count(*) FROM sqlite_master;" >/dev/null || fail "Database backup cannot be opened: $backup_file"
   log "Database backup created: $backup_file"
+  BACKUP_FILE="$backup_file"
   rm -rf "$lock_directory"
   trap - RETURN
 }
@@ -138,6 +141,7 @@ require_command sqlite3
 [ "$(id -u)" -eq 0 ] || fail "Run as root so the production script can manage app files and PM2 safely"
 [ -d "$APP_DIR" ] || fail "APP_DIR does not exist: $APP_DIR"
 [ -d "$APP_DIR/.git" ] || fail "APP_DIR is not a Git checkout: $APP_DIR"
+[[ "$TARGET_SHA_EXPECTED" =~ ^[0-9a-f]{40}$ ]] || fail "Set TARGET_SHA_EXPECTED to the exact 40-character target commit"
 
 cd "$APP_DIR"
 pm2 jlist | node -e "let s='';const n='$PM2_APP';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).filter(x=>x.name===n);if(p.length!==1){console.error('Expected exactly one PM2 app instance, found '+p.length);process.exit(1)}})" || fail "Single-instance runtime gate failed"
@@ -148,13 +152,19 @@ log "Previous application commit: $PREVIOUS_SHA"
 
 log "Fetching and updating code"
 git fetch origin "$BRANCH" || fail "Unable to fetch target branch"
+RESOLVED_TARGET_SHA="$(git rev-parse "origin/$BRANCH")"
+[ "$RESOLVED_TARGET_SHA" = "$TARGET_SHA_EXPECTED" ] || fail "Target branch does not match TARGET_SHA_EXPECTED"
 git checkout "$BRANCH" || fail "Unable to check out target branch"
-if ! git pull --ff-only origin "$BRANCH"; then restore_worktree_without_restart; fail "Unable to fast-forward target branch"; fi
+if ! git merge --ff-only "$RESOLVED_TARGET_SHA"; then restore_worktree_without_restart; fail "Unable to fast-forward target branch"; fi
 TARGET_SHA="$(git rev-parse HEAD)"
+[ "$TARGET_SHA" = "$TARGET_SHA_EXPECTED" ] || { restore_worktree_without_restart; fail "Checked-out target does not match TARGET_SHA_EXPECTED"; }
 log "Target application commit: $TARGET_SHA"
 
 log "Installing target dependencies without restarting the live application"
 if ! npm ci; then restore_worktree_without_restart; fail "Dependency installation failed"; fi
+
+log "Running non-destructive restore drill for deployment backup"
+if ! npm run ops:backup-restore-drill -- --backup="$BACKUP_FILE"; then restore_worktree_without_restart; fail "Deployment backup restore drill failed"; fi
 
 log "Checking migration rollback compatibility before service restart"
 if ! npm run migration:check; then restore_worktree_without_restart; fail "Migration compatibility gate did not return GO"; fi

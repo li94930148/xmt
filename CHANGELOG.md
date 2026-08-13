@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.18.3 - 2026-08-13
+
+### Deployment safety
+
+- Require an exact target SHA for safe deployment and run the deployment backup restore drill before any service restart.
+
 ## 2.18.2 - 2026-08-12
 
 ### Operations reliability

@@ -9,6 +9,9 @@ assert.match(script, /PRAGMA quick_check/);
 assert.match(script, /mkdir -m 0700 "\$lock_directory"/);
 assert.match(script, /printf '%s:%s\\n' "\$\$"/);
 assert.match(script, /PREVIOUS_SHA="\$\(git rev-parse HEAD\)"/);
+assert.match(script, /TARGET_SHA_EXPECTED/);
+assert.match(script, /Target branch does not match TARGET_SHA_EXPECTED/);
+assert.match(script, /Checked-out target does not match TARGET_SHA_EXPECTED/);
 assert.match(script, /trap rollback_code ERR/);
 assert.match(script, /git checkout --detach "\$PREVIOUS_SHA"/);
 assert.match(script, /rollback_code 1/);
@@ -16,6 +19,7 @@ assert.match(script, /Installing target dependencies without restarting the live
 assert.match(script, /restore_worktree_without_restart/);
 assert.match(script, /npm ci; then restore_worktree_without_restart/);
 assert.ok(script.indexOf('npm ci; then restore_worktree_without_restart') < script.indexOf('npm run migration:check'), 'target dependencies install before migration gate');
+assert.ok(script.indexOf('ops:backup-restore-drill') < script.indexOf('npm run migration:check'), 'restore drill before migration gate');
 assert.ok(script.indexOf('npm run migration:check') < script.lastIndexOf('pm2 restart'), 'migration gate before the target PM2 restart');
 assert.doesNotMatch(script, /cp -p "\$DB_PATH"/);
 console.log('safe deploy hardening static tests passed');

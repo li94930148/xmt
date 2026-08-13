@@ -100,6 +100,9 @@ const APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'packa
 const app: express.Application = express()
 
 const DEFAULT_ALLOWED_ORIGINS = [
+  // Capacitor Android's local asset server. Keep this explicit: never use a
+  // wildcard origin together with credentials.
+  'http://localhost',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:5174',
@@ -119,25 +122,6 @@ function parseConfiguredOrigins(value?: string) {
   )
 }
 
-function isPrivateNetworkHost(hostname: string) {
-  const normalized = hostname.toLowerCase()
-
-  if (normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1') {
-    return true
-  }
-
-  const parts = normalized.split('.').map((part) => Number(part))
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
-    return false
-  }
-
-  const [first, second] = parts
-  if (first === 10 || first === 127) return true
-  if (first === 192 && second === 168) return true
-  if (first === 172 && second >= 16 && second <= 31) return true
-  return false
-}
-
 function normalizeOrigin(origin: string) {
   try {
     const url = new URL(origin)
@@ -149,19 +133,6 @@ function normalizeOrigin(origin: string) {
       origin: url.origin.toLowerCase(),
       hostname: url.hostname.toLowerCase(),
     }
-  } catch {
-    return null
-  }
-}
-
-function normalizeHostHeader(hostHeader?: string) {
-  if (!hostHeader) return null
-  const trimmed = hostHeader.trim().toLowerCase()
-  if (!trimmed) return null
-
-  try {
-    const url = new URL(`http://${trimmed}`)
-    return url.host.toLowerCase()
   } catch {
     return null
   }
@@ -193,7 +164,7 @@ export { server }
 
 const allowedOrigins = parseConfiguredOrigins(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGINS)
 
-function isAllowedRequestOrigin(origin?: string, hostHeader?: string) {
+function isAllowedRequestOrigin(origin?: string) {
   if (!origin) return true
 
   const normalizedOrigin = normalizeOrigin(origin)
@@ -203,15 +174,7 @@ function isAllowedRequestOrigin(origin?: string, hostHeader?: string) {
     return true
   }
 
-  const normalizedHost = normalizeHostHeader(hostHeader)
-  if (normalizedHost && normalizedOrigin.origin === `http://${normalizedHost}`) {
-    return true
-  }
-  if (normalizedHost && normalizedOrigin.origin === `https://${normalizedHost}`) {
-    return true
-  }
-
-  return isPrivateNetworkHost(normalizedOrigin.hostname)
+  return false
 }
 
 export const io = new Server(server, {
@@ -224,7 +187,7 @@ export const io = new Server(server, {
     credentials: true,
   },
   allowRequest: (req, callback) => {
-    callback(null, isAllowedRequestOrigin(req.headers.origin, req.headers.host))
+    callback(null, isAllowedRequestOrigin(req.headers.origin))
   },
 })
 
@@ -315,7 +278,7 @@ io.engine.on('connection_error', (error: Error & {
 const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
   callback(null, {
     origin: (origin, allow) => {
-      if (isAllowedRequestOrigin(origin, req.headers.host)) return allow(null, true)
+      if (isAllowedRequestOrigin(origin)) return allow(null, true)
       allow(new Error('CORS not allowed'))
     },
     credentials: true,

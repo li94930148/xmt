@@ -145,9 +145,22 @@ export async function mobileLogin(username: string, password: string): Promise<A
   return { ...adaptLoginResponse(payload), refreshToken };
 }
 
-export async function getMe(): Promise<User> {
+/** Rotates the Keystore-held credential and keeps the new access token in memory only. */
+export async function mobileRefresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+  const response = await apiFetch('/v1/auth/mobile/refresh', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }),
+  });
+  if (!response.ok) throw new Error('移动会话已失效');
+  const payload = await response.json() as { data?: { accessToken?: unknown; refreshToken?: unknown } };
+  const accessToken = payload.data?.accessToken;
+  const replacement = payload.data?.refreshToken;
+  if (typeof accessToken !== 'string' || typeof replacement !== 'string') throw new Error('移动会话响应无效');
+  return { accessToken, refreshToken: replacement };
+}
+
+export async function getMe(accessToken?: string): Promise<User> {
   const response = await fetch(`${BASE_URL}/auth/me`, {
-    headers: getAuthHeader(),
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : getAuthHeader(),
   });
   if (!response.ok) throw new Error('获取用户信息失败');
   return response.json();

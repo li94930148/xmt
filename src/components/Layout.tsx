@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Menu, Moon, Search, Settings, Sun, User, LogOut, ChevronRight } from 'lucide-react';
-import { getMe, getPublicSystemSettings, getUnreadCount } from '../api';
+import { getMe, getPublicSystemSettings, getUnreadCount, mobileRefresh } from '../api';
 import { useAuthStore, useAppStore, useMessageStore } from '../store';
 import { buildBreadcrumbs } from '../config/navigation';
 import Sidebar from './Sidebar';
@@ -16,7 +16,7 @@ import { applyDocumentBranding } from '@/lib/systemSettings';
 import { AnimatedPage, AppShell, Topbar } from '@/components/studio';
 import { MobileShell } from '@/components/mobile/MobileShell';
 import { isAndroid } from '@/platform/runtime';
-import { nativeRefreshCredentials } from '@/auth/native/secure-credentials';
+import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
 import { apiFetch } from '@/api/transport';
 
 declare const __APP_VERSION__: string;
@@ -127,6 +127,27 @@ export default function Layout() {
   const setUnreadCount = useMessageStore((state) => state.setUnreadCount);
 
   useSocket();
+
+  // Android intentionally keeps access tokens out of WebView storage. Recreate it
+  // from the Android Keystore credential at application start and rotate it once.
+  useEffect(() => {
+    if (!isAndroid() || token) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const refreshToken = await nativeRefreshCredentials.get();
+        const profile = nativeUserProfile.get();
+        if (!refreshToken || !profile) return;
+        const next = await mobileRefresh(refreshToken);
+        await nativeRefreshCredentials.set(next.refreshToken);
+        if (!cancelled) loginUser(profile, next.accessToken, { persist: 'memory' });
+      } catch {
+        await nativeRefreshCredentials.clear().catch(() => undefined);
+        nativeUserProfile.clear();
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loginUser, token]);
 
   useKeyboardShortcuts({
     onCommandPalette: useCallback(() => setShowCmdPalette((value) => !value), []),
@@ -293,6 +314,7 @@ export default function Layout() {
     if (isAndroid() && token) {
       void apiFetch('/v1/auth/mobile/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
       void nativeRefreshCredentials.clear().catch(() => undefined);
+      nativeUserProfile.clear();
     }
     logout();
     navigate('/login', { replace: true });

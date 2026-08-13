@@ -11,6 +11,7 @@ export async function initializeNativeLifecycle(onResume: () => void) {
   await SplashScreen.hide().catch(() => undefined);
   const listeners = await Promise.all([
     App.addListener('appStateChange', ({ isActive }) => { if (isActive) onResume(); }),
+    App.addListener('appUrlOpen', ({ url }) => window.dispatchEvent(new CustomEvent('xmt-deep-link', { detail: { url } }))),
     Network.addListener('networkStatusChange', (status) => window.dispatchEvent(new CustomEvent('xmt-network-status', { detail: status }))),
     Keyboard.addListener('keyboardWillShow', ({ keyboardHeight }) => document.documentElement.style.setProperty('--xmt-keyboard-height', `${keyboardHeight}px`)),
     Keyboard.addListener('keyboardWillHide', () => document.documentElement.style.setProperty('--xmt-keyboard-height', '0px')),

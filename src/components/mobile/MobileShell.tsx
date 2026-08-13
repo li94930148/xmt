@@ -33,6 +33,22 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
     return () => { void listener.then((handle) => handle.remove()); };
   }, [location.pathname, navigate]);
 
+  useEffect(() => {
+    const onDeepLink = (event: Event) => {
+      try {
+        const url = new URL((event as CustomEvent<{ url?: string }>).detail?.url ?? '');
+        if (url.protocol !== 'xmt:') return;
+        const path = url.host === 'messages' ? '/messages'
+          : url.host === 'daily-report' ? '/daily-report'
+            : url.host === 'topics' ? `/topics${url.pathname}`
+              : url.host === 'production' ? `/production${url.pathname}` : null;
+        if (path) navigate(path);
+      } catch { /* Ignore invalid external URLs. */ }
+    };
+    window.addEventListener('xmt-deep-link', onDeepLink);
+    return () => window.removeEventListener('xmt-deep-link', onDeepLink);
+  }, [navigate]);
+
   return <div className="min-h-dvh bg-studio-bg text-theme-text" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
     <header className="sticky top-0 z-30 flex min-h-14 items-center justify-between border-b border-studio-border-soft bg-studio-surface/95 px-4 backdrop-blur">
       <div><p className="text-xs text-studio-text-muted">XMT 移动办公</p><h1 className="text-base font-semibold">{current?.label ?? '工作台'}</h1></div>

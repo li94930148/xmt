@@ -4,7 +4,7 @@ import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, getPublicSystemSettings, login } from '../api';
 import { mobileLogin } from '../api/auth';
 import { isAndroid } from '@/platform/runtime';
-import { nativeRefreshCredentials } from '@/auth/native/secure-credentials';
+import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
 import { LoginError } from '../api/auth';
 import { completeWebLogin, completeWebLoginRedirect } from '../auth/web/web-auth-runtime';
 import { useAppStore, useAuthStore } from '../store';
@@ -445,6 +445,7 @@ export default function Login() {
       const result = isAndroid() ? await mobileLogin(username.trim(), password) : await login(username.trim(), password);
       if (isAndroid()) {
         await nativeRefreshCredentials.set((result as typeof result & { refreshToken: string }).refreshToken);
+        nativeUserProfile.set(result.user);
         authStore.loginV1(result.user, result.accessToken);
       } else if (result.authMode === 'v1-web') {
         completeWebLogin(result, authStore.loginV1);

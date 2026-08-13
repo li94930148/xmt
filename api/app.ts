@@ -23,6 +23,8 @@ import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/soc
 import { apiLimiter } from './middleware/rateLimit.js'
 import { parseTrustProxy } from './utils/trustProxy.js'
 import { isAllowedRequestOrigin, parseConfiguredOrigins } from './security/origin-policy.js'
+import { requireDirectLoopback } from './security/internal-access.js'
+import { resolveServerBinding } from './config/server-bind.js'
 import authRoutes from './routes/auth.js'
 import topicsRoutes from './routes/topics.js'
 import topicResourcesRoutes from './routes/topic-resources.js'
@@ -242,26 +244,18 @@ app.use(requestId)
 app.use('/api', cors(corsOptions))
 app.use(express.json({ limit: '16mb', verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
 app.use(express.urlencoded({ extended: true, limit: '16mb' }))
+app.use('/internal', requireDirectLoopback)
 app.get('/internal/auth-rollout/runtime', (req, res) => {
-  const address = req.socket.remoteAddress || ''
-  const loopback = address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
-  if (!loopback) return res.status(404).end()
   res.setHeader('Cache-Control', 'no-store')
   return res.json({ runtime: authRolloutRuntimeReadiness() })
 })
 
 app.get('/internal/socket-lifecycle/summary', (req, res) => {
-  const address = req.socket.remoteAddress || ''
-  const loopback = address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
-  if (!loopback) return res.status(404).end()
   res.setHeader('Cache-Control', 'no-store')
   res.json({ summary: socketLifecycleObserver.getSummary() })
 })
 
 app.get('/internal/ops/runtime', (req, res) => {
-  const address = req.socket.remoteAddress || ''
-  const loopback = address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
-  if (!loopback) return res.status(404).end()
   const memory = process.memoryUsage()
   res.setHeader('Cache-Control', 'no-store')
   res.json({ uptimeSeconds: process.uptime(), memory: { rss: memory.rss, heapUsed: memory.heapUsed, heapTotal: memory.heapTotal } })
@@ -519,11 +513,7 @@ io.on('connection', (socket) => {
 export async function startServer() {
   await initDatabase()
 
-  const PORT = Number.parseInt(process.env.PORT || '3001', 10)
-  const HOST = process.env.HOST || '0.0.0.0'
-  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
-    throw new Error(`Invalid PORT value: ${process.env.PORT}`)
-  }
+  const { port: PORT, host: HOST } = resolveServerBinding()
 
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {

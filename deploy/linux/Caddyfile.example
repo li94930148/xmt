@@ -1,8 +1,9 @@
 app.example.com {
     encode zstd gzip
-    # Metrics are scraped directly from the private Node listener. Never proxy
-    # the internal endpoint through the public site.
-    respond /internal/metrics/auth 404
+    # Node independently rejects proxied internal requests. Caddy is the
+    # second layer: no /internal route is ever public.
+    @internal path /internal/*
+    respond @internal 404
     reverse_proxy 127.0.0.1:3001
 
     header {

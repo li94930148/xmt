@@ -22,5 +22,9 @@ assert.ok(script.indexOf('npm ci; then restore_worktree_without_restart') < scri
 assert.ok(script.indexOf('npm run version:check') < script.indexOf('ops:backup-restore-drill'), 'version gate before restore drill');
 assert.ok(script.indexOf('ops:backup-restore-drill') < script.indexOf('npm run migration:check'), 'restore drill before migration gate');
 assert.ok(script.indexOf('npm run migration:check') < script.lastIndexOf('pm2 restart'), 'migration gate before the target PM2 restart');
+assert.match(script, /Production requires XMT_RUNTIME_ENV_FILE/);
+assert.ok(script.indexOf('ops:runtime-env-check') < script.lastIndexOf('pm2 restart'), 'runtime env gate before PM2 restart');
+assert.ok(script.indexOf('ops:runtime-env-readback') > script.lastIndexOf('pm2 restart'), 'runtime readback after PM2 restart');
+assert.ok(script.indexOf('ops:internal-exposure-check') > script.lastIndexOf('pm2 restart'), 'public internal gate after PM2 restart');
 assert.doesNotMatch(script, /cp -p "\$DB_PATH"/);
 console.log('safe deploy hardening static tests passed');

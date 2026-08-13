@@ -1,5 +1,9 @@
 # XMT Mobile 发布
 
+Production Mobile Auth rollout requires the controlled runtime configuration in
+`docs/PRODUCTION_RUNTIME_ENV.md`. The first gray user must be a non-admin
+internal test account unless a human explicitly approves an admin exception.
+
 版本以 `package.json` 为准。Android 的 `versionName` 必须一致，`versionCode` 必须递增。构建前配置 Java 21 和 Android SDK：
 
 ```bash

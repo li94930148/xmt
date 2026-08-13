@@ -21,6 +21,7 @@ PREVIOUS_SHA=""
 TARGET_SHA=""
 BACKUP_FILE=""
 DEPLOY_STARTED=0
+RUNTIME_ENV_SOURCE=""
 
 log() {
   printf '[xmt-safe-deploy] %s\n' "$*"
@@ -131,6 +132,16 @@ check_home_fallback() {
   curl -fsS --max-time 10 "$HOME_URL" >/dev/null
 }
 
+prepare_runtime_environment() {
+  local runtime_env_file node_env
+  runtime_env_file="$(pm2 jlist | node -e "let s='';const n='$PM2_APP';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).find(x=>x.name===n);process.stdout.write(String(p?.pm2_env?.env?.XMT_RUNTIME_ENV_FILE||''))})")"
+  node_env="$(pm2 jlist | node -e "let s='';const n='$PM2_APP';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).find(x=>x.name===n);process.stdout.write(String(p?.pm2_env?.env?.NODE_ENV||''))})")"
+  if [ "$node_env" = "production" ] && [ -z "$runtime_env_file" ]; then fail "Production requires XMT_RUNTIME_ENV_FILE as the authoritative runtime configuration source"; fi
+  [ -n "$runtime_env_file" ] || return 0
+  export XMT_RUNTIME_ENV_FILE="$runtime_env_file"
+  RUNTIME_ENV_SOURCE="runtime_env_file"
+}
+
 require_command git
 require_command npm
 require_command pm2
@@ -166,6 +177,10 @@ if ! npm ci; then restore_worktree_without_restart; fail "Dependency installatio
 log "Checking target version consistency before service restart"
 if ! npm run version:check; then restore_worktree_without_restart; fail "Version consistency gate failed"; fi
 
+log "Checking authoritative runtime environment before service restart"
+prepare_runtime_environment
+if ! npm run ops:runtime-env-check; then restore_worktree_without_restart; fail "Runtime environment gate failed"; fi
+
 log "Running non-destructive restore drill for deployment backup"
 if ! npm run ops:backup-restore-drill -- --backup="$BACKUP_FILE"; then restore_worktree_without_restart; fail "Deployment backup restore drill failed"; fi
 
@@ -198,5 +213,11 @@ if ! check_home_fallback; then
   log "Deploy failed because backend home fallback did not pass"
   rollback_code 1
 fi
+
+log "Reading back effective runtime configuration after restart"
+if ! XMT_EXPECTED_RUNTIME_SOURCE="$RUNTIME_ENV_SOURCE" npm run ops:runtime-env-readback; then rollback_code 1; fi
+
+log "Checking public internal route exposure"
+if ! npm run ops:internal-exposure-check; then rollback_code 1; fi
 
 log "Deploy completed successfully"

@@ -30,7 +30,7 @@ export default function MobileProductionEditor() {
       if (id && id !== 'new') { const result = await getProductionById(Number(id)); setProduction(result); setTopicId(String(result.topic_id)); setContent(readSafeDraftValue<string>(draftKey) ?? result.content ?? ''); }
       if (!id || id === 'new') setContent(readSafeDraftValue<string>(draftKey) ?? '');
     } catch (error) { setNotice(error instanceof Error ? error.message : '加载稿件失败'); } finally { setLoading(false); }
-  }, [id]);
+  }, [draftKey, id]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (!loading && content) writeSafeDraft(draftKey, content); }, [content, draftKey, loading]);
 

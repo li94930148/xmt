@@ -1,5 +1,11 @@
 # XMT 系统更新日志
 
+## v2.19.1 - 2026-08-13
+
+### 安全
+
+- 新增 Android Mobile Auth/Mobile Socket 独立生产 allowlist 准入，并关闭 Generic V1 Login 灰度旁路。
+
 ## v2.19.0 - 2026-08-13
 
 ### 新增

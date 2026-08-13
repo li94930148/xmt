@@ -2,11 +2,13 @@ import type { Socket } from 'socket.io';
 import { SocketAuthError, type SocketAuthLifecycleReason } from './socket-auth.errors.js';
 import { SocketAuthService } from './socket-auth.service.js';
 import { readSocketProductionBridgeGate } from './socket-production-gate.js';
+import { resolveAuthRolloutRuntimeConfig } from '../../../config/auth-rollout-runtime.js';
 
 type SocketLike = Socket & { data: Record<string, unknown> };
 
 export function readSocketAuthBridgeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return readSocketProductionBridgeGate(env).socketBridgeEnabled;
+  const runtime = resolveAuthRolloutRuntimeConfig(env);
+  return readSocketProductionBridgeGate(env).socketBridgeEnabled || runtime.mobileSocketEnabled;
 }
 
 export function getSocketHandshake(socket: SocketLike) {
@@ -24,6 +26,7 @@ export function createSocketAuthMiddleware(
   options: {
     enabled: boolean;
     isV1EligibleUser?: (user: { id: number; role: string }) => boolean;
+    isMobileEligibleUser?: (user: { id: number; role: string }) => boolean;
     onFailure?: (reason: string, socket: Socket) => void;
   },
 ) {
@@ -36,14 +39,16 @@ export function createSocketAuthMiddleware(
 
     try {
       const requestedMode = handshake.mode;
-      const mode = options.enabled
-        ? (requestedMode === undefined ? 'legacy' : requestedMode)
-        : 'legacy';
+      const mode = requestedMode === undefined ? 'legacy' : requestedMode;
+      if (mode !== 'legacy' && !options.enabled) throw new SocketAuthError('AUTH_INVALID', 'Authentication not allowed');
       const identity = await service.authenticate({
         token: handshake.token,
         mode,
       });
       if (mode === 'v1-web' && options.isV1EligibleUser && !options.isV1EligibleUser(identity.user)) {
+        throw new SocketAuthError('AUTH_INVALID', 'Authentication not allowed');
+      }
+      if (mode === 'v1-mobile' && options.isMobileEligibleUser && !options.isMobileEligibleUser(identity.user)) {
         throw new SocketAuthError('AUTH_INVALID', 'Authentication not allowed');
       }
       socket.data.auth = identity.auth;

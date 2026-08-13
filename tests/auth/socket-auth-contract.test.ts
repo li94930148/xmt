@@ -24,7 +24,7 @@ const service = new SocketAuthService({
 
 const legacy = await service.authenticate({ token: 'legacy-token', mode: 'legacy' });
 assert.deepEqual(legacy.auth, {
-  userId: 7, sessionId: null, tokenType: 'legacy', authMode: 'legacy', issuedAt: future - 600, expiresAt: future,
+  userId: 7, sessionId: null, tokenType: 'legacy', authMode: 'legacy', clientType: null, issuedAt: future - 600, expiresAt: future,
 });
 assert.equal(legacy.user.role, 'director', 'role comes from the current database user');
 
@@ -33,9 +33,18 @@ assert.equal(access.auth.sessionId, 'session-7');
 assert.equal(access.auth.tokenType, 'access');
 assert.equal(access.auth.authMode, 'v1-web');
 
-const mobileAccess = await service.authenticate({ token: 'access-token', mode: 'v1-mobile' });
+await rejects('IDENTITY_MISMATCH', { token: 'access-token', mode: 'v1-mobile' });
+
+const androidService = new SocketAuthService({
+  verifyLegacyToken: () => null,
+  verifyAccessTokenV1: (token) => token === 'access-token' ? { sub: '7', sid: 'session-7', iat: future - 600, exp: future } : null,
+  findUserById: async () => user,
+  sessionService: { getSession: async () => ({ state: 'ACTIVE' as const, session: { ...session, clientType: 'android' } }) },
+});
+const mobileAccess = await androidService.authenticate({ token: 'access-token', mode: 'v1-mobile' });
 assert.equal(mobileAccess.auth.sessionId, 'session-7');
 assert.equal(mobileAccess.auth.tokenType, 'access');
+assert.equal(mobileAccess.auth.authMode, 'v1-mobile');
 
 async function rejects(code: string, input: unknown) {
   await assert.rejects(() => service.authenticate(input), (error: unknown) => error instanceof SocketAuthError && error.code === code);

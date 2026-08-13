@@ -31,6 +31,7 @@ export class SocketAuthService {
       sessionId: null,
       tokenType: 'legacy',
       authMode: 'legacy',
+      clientType: null,
       issuedAt: typeof temporal.iat === 'number' ? temporal.iat : 0,
       expiresAt: typeof temporal.exp === 'number' ? temporal.exp : 0,
     }, null);
@@ -53,11 +54,16 @@ export class SocketAuthService {
       throw new SocketAuthError('IDENTITY_MISMATCH', 'Authentication identity mismatch');
     }
 
+    const expectedClientType = input.mode === 'v1-mobile' ? 'android' : 'web';
+    if (sessionResult.session.clientType !== expectedClientType) {
+      throw new SocketAuthError('IDENTITY_MISMATCH', 'Authentication client type mismatch');
+    }
     return this.finishIdentity({
       userId,
       sessionId: payload.sid,
       tokenType: 'access',
-      authMode: 'v1-web',
+      authMode: input.mode,
+      clientType: sessionResult.session.clientType as 'web' | 'ios' | 'android',
       issuedAt: payload.iat,
       expiresAt: payload.exp,
     }, sessionResult.session);

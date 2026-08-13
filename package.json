@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.19.0",
+  "version": "2.19.1",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -51,6 +51,7 @@
     "auth:gray-readiness": "tsx scripts/auth-gray-readiness-check.ts",
     "test:auth-gray-readiness": "tsx tests/auth/auth-gray-readiness.test.ts",
     "test:auth-runtime-config": "tsx tests/auth/auth-runtime-config.test.ts",
+    "test:mobile-production-gate": "tsx tests/auth/mobile-production-gate.test.ts",
     "test:socket-coordinator": "tsx tests/auth/socket-coordinator.test.ts",
     "test:origin-policy": "tsx tests/security/origin-policy.test.ts",
     "test:mobile-safe-draft": "tsx tests/platform/safe-draft.test.ts",

@@ -31,10 +31,10 @@ const sessionId = await sessionService.createSession({ userId, clientType: 'andr
 const v1Authorization = { authorization: `Bearer ${createAccessTokenV1({ userId, sessionId })}` };
 
 try {
-  const created = await fetch(`${baseUrl}/mobile-devices`, { method: 'POST', headers: { 'content-type': 'application/json', ...authorization }, body: JSON.stringify({ platform: 'android', deviceId: 'device-1', pushToken: 'token-one', appVersion: '2.19.0' }) });
+  const created = await fetch(`${baseUrl}/mobile-devices`, { method: 'POST', headers: { 'content-type': 'application/json', ...authorization }, body: JSON.stringify({ platform: 'android', deviceId: 'device-1', pushToken: 'token-one', appVersion: '2.19.1' }) });
   assert.equal(created.status, 204);
   const stored = await queryOne<Record<string, unknown>>('SELECT push_token, app_version, revoked_at FROM mobile_devices WHERE user_id = ? AND device_id = ?', [userId, 'device-1']);
-  assert.deepEqual({ pushToken: stored?.push_token, appVersion: stored?.app_version, revokedAt: stored?.revoked_at }, { pushToken: 'token-one', appVersion: '2.19.0', revokedAt: null });
+  assert.deepEqual({ pushToken: stored?.push_token, appVersion: stored?.app_version, revokedAt: stored?.revoked_at }, { pushToken: 'token-one', appVersion: '2.19.1', revokedAt: null });
   const updated = await fetch(`${baseUrl}/mobile-devices`, { method: 'POST', headers: { 'content-type': 'application/json', ...v1Authorization }, body: JSON.stringify({ platform: 'android', deviceId: 'device-1', pushToken: 'token-two', appVersion: '2.19.1' }) });
   assert.equal(updated.status, 204);
   assert.equal((await queryOne<Record<string, unknown>>('SELECT push_token FROM mobile_devices WHERE user_id = ? AND device_id = ?', [userId, 'device-1']))?.push_token, 'token-two');

@@ -53,6 +53,6 @@ export function createAuthV1Router(
   router.post('/mobile/login', controller.mobileLogin);
   router.post('/mobile/refresh', controller.mobileRefresh);
   router.post('/mobile/logout', authenticate, controller.mobileLogout);
-  router.get('/mobile/session', authenticate, controller.sessions);
+  router.get('/mobile/session', authenticate, controller.mobileSession);
   return router;
 }

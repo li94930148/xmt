@@ -16,4 +16,12 @@ assert.equal(isAllowedRequestOrigin('https://office.example.com:443', production
 assert.equal(isAllowedRequestOrigin('https://admin.example.com', production), true);
 assert.equal(isAllowedRequestOrigin('http://office.example.com', production), false);
 
+const mobileProduction = parseConfiguredOrigins('https://lanyaomedia.com,http://localhost');
+assert.equal(isAllowedRequestOrigin('https://lanyaomedia.com', mobileProduction), true);
+assert.equal(isAllowedRequestOrigin('http://localhost', mobileProduction), true);
+assert.equal(isAllowedRequestOrigin('http://localhost:5173', mobileProduction), false);
+assert.equal(isAllowedRequestOrigin('http://127.0.0.1:5174', mobileProduction), false);
+assert.equal(isAllowedRequestOrigin('http://47.104.77.65', mobileProduction), false);
+assert.equal(isAllowedRequestOrigin('https://evil.example', mobileProduction), false);
+
 console.log('Origin policy contract tests passed');

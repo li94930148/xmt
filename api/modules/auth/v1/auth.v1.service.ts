@@ -23,7 +23,9 @@ export type AuthV1ErrorCode =
   | 'SESSION_REVOKED'
   | 'REFRESH_INVALID'
   | 'REFRESH_REUSED'
-  | 'WEB_NOT_ALLOWED';
+  | 'WEB_NOT_ALLOWED'
+  | 'MOBILE_NOT_ALLOWED'
+  | 'CLIENT_TYPE_MISMATCH';
 
 export class AuthV1ServiceError extends Error {
   constructor(public readonly code: AuthV1ErrorCode) {
@@ -43,6 +45,7 @@ type AuthV1ServiceDependencies = {
 export type AuthV1Identity = {
   userId: number;
   sessionId: string;
+  clientType: string;
 };
 
 const ACCESS_TOKEN_EXPIRES_IN = 900 as const;
@@ -154,6 +157,13 @@ export class AuthV1Service {
     }
   }
 
+  async loginMobile(input: LoginV1RequestInput, userAgentSummary: string | null, isEligible: (user: { id: number; enabled: boolean }) => boolean): Promise<LoginV1Data> {
+    const user = await this.validateCredentials(input);
+    // This check intentionally precedes any session or refresh-token creation.
+    if (!isEligible(user)) throw new AuthV1ServiceError('MOBILE_NOT_ALLOWED');
+    return this.createSessionForUser(user, input, userAgentSummary);
+  }
+
   async refresh(refreshToken: string): Promise<RefreshData> {
     const provisional = await this.dependencies.refreshTokenService.consumeRefreshToken(refreshToken);
     if (provisional.status === 'SECURITY_EVENT') throw new AuthV1ServiceError('REFRESH_REUSED');
@@ -175,12 +185,27 @@ export class AuthV1Service {
     };
   }
 
+  async refreshMobile(refreshToken: string, isEligible: (user: { id: number; enabled: boolean }) => boolean): Promise<RefreshData> {
+    const sessionId = await this.dependencies.refreshTokenService.findRefreshTokenSessionId(refreshToken);
+    if (!sessionId) throw new AuthV1ServiceError('REFRESH_INVALID');
+    const lookup = await this.dependencies.sessionService.getSession(sessionId);
+    if (!lookup.session || lookup.state !== 'ACTIVE' || lookup.session.clientType !== 'android') {
+      throw new AuthV1ServiceError('REFRESH_INVALID');
+    }
+    const user = await this.dependencies.authRepository.findUserById(lookup.session.userId);
+    if (!user || !user.enabled || !isEligible(user)) {
+      await this.dependencies.sessionService.revokeSession(sessionId, 'security_event');
+      throw new AuthV1ServiceError('MOBILE_NOT_ALLOWED');
+    }
+    return this.refresh(refreshToken);
+  }
+
   async resolveWebRefreshIdentity(refreshToken: string): Promise<AuthV1Identity> {
     const sessionId = await this.dependencies.refreshTokenService.findRefreshTokenSessionId(refreshToken);
     if (!sessionId) throw new AuthV1ServiceError('REFRESH_INVALID');
     const lookup = await this.dependencies.sessionService.getSession(sessionId);
     if (!lookup.session || lookup.state !== 'ACTIVE') throw new AuthV1ServiceError('REFRESH_INVALID');
-    return { sessionId, userId: lookup.session.userId };
+    return { sessionId, userId: lookup.session.userId, clientType: lookup.session.clientType };
   }
 
   async refreshWeb(refreshToken: string): Promise<{ data: RefreshWebData; refreshToken: string }> {
@@ -201,7 +226,7 @@ export class AuthV1Service {
 
     const user = await this.dependencies.authRepository.findUserById(lookup.session.userId);
     if (!user || !user.enabled) throw new AuthV1ServiceError('AUTH_REQUIRED');
-    return { userId: user.id, sessionId: lookup.session.id };
+    return { userId: user.id, sessionId: lookup.session.id, clientType: lookup.session.clientType };
   }
 
   async logout(identity: AuthV1Identity): Promise<void> {
@@ -211,6 +236,26 @@ export class AuthV1Service {
   async sessions(identity: AuthV1Identity): Promise<AuthSessionSummary[]> {
     const sessions = await this.dependencies.sessionService.findActiveSessionsByUserId(identity.userId);
     return sessions.map((session) => sessionSummary(session, identity.sessionId));
+  }
+
+  async mobileSession(identity: AuthV1Identity, isEligible: (user: { id: number; enabled: boolean }) => boolean): Promise<AuthSessionSummary[]> {
+    const user = await this.dependencies.authRepository.findUserById(identity.userId);
+    if (identity.clientType !== 'android' || !user || !isEligible(user)) throw new AuthV1ServiceError('MOBILE_NOT_ALLOWED');
+    return this.sessions(identity);
+  }
+
+  private async createSessionForUser(user: Awaited<ReturnType<AuthV1Service['validateCredentials']>>, input: LoginV1RequestInput, userAgentSummary: string | null): Promise<LoginV1Data> {
+    const sessionId = await this.dependencies.sessionService.createSession({
+      userId: user.id, clientType: input.client.type, deviceName: input.client.deviceName, userAgentSummary, appVersion: input.client.appVersion,
+    });
+    const lookup = await this.dependencies.sessionService.getSession(sessionId);
+    if (!lookup.session || lookup.state !== 'ACTIVE') throw new AuthV1ServiceError('SESSION_EXPIRED');
+    try {
+      const refreshToken = await this.dependencies.refreshTokenService.createRefreshToken({ sessionId, generation: 0, expiresAt: lookup.session.absoluteExpiresAt });
+      const accessToken = createAccessTokenV1({ userId: user.id, sessionId });
+      await this.dependencies.authRepository.recordLogin(user);
+      return { user: { id: user.id, username: user.username, name: user.name, email: user.email, role: user.role, forceChangePassword: user.forceChangePassword }, accessToken, refreshToken, expiresIn: ACCESS_TOKEN_EXPIRES_IN, session: sessionSummary(lookup.session, sessionId) };
+    } catch (error) { await this.dependencies.sessionService.revokeSession(sessionId, 'security_event'); throw error; }
   }
 
   private async validateCredentials(input: LoginV1RequestInput) {

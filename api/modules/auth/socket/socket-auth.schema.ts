@@ -4,7 +4,8 @@ export const socketAuthContextSchema = z.object({
   userId: z.number().int().positive(),
   sessionId: z.string().min(1).nullable(),
   tokenType: z.enum(['legacy', 'access']),
-  authMode: z.enum(['legacy', 'v1-web']),
+  authMode: z.enum(['legacy', 'v1-web', 'v1-mobile']),
+  clientType: z.enum(['web', 'ios', 'android']).nullable(),
   issuedAt: z.number().int().nonnegative(),
   expiresAt: z.number().int().positive(),
 }).strict();

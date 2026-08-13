@@ -1,5 +1,5 @@
 import { createLoginRolloutPolicy, readLoginRolloutPolicyConfig } from '../rollout/login-rollout-policy.js';
-import { resolveAuthRolloutRuntimeConfig } from '../../../config/auth-rollout-runtime.js';
+import { isMobileAuthEligibleUser, resolveAuthRolloutRuntimeConfig } from '../../../config/auth-rollout-runtime.js';
 
 export type SocketBridgeGateStatus = {
   socketBridgeEnabled: boolean;
@@ -34,4 +34,9 @@ export function readSocketProductionBridgeGate(env: NodeJS.ProcessEnv = process.
 export function isSocketV1EligibleUser(user: { id: number; role?: string | null }, env: NodeJS.ProcessEnv = process.env): boolean {
   const decision = createLoginRolloutPolicy(env).decide(user);
   return decision.mode === 'v1-web' && decision.reason === 'allowlist';
+}
+
+export function isMobileSocketEligibleUser(user: { id: number; enabled?: number | boolean }, env: NodeJS.ProcessEnv = process.env): boolean {
+  const runtime = resolveAuthRolloutRuntimeConfig(env);
+  return runtime.mobileSocketEnabled && isMobileAuthEligibleUser(user, env);
 }

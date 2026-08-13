@@ -10,6 +10,7 @@ export type SocketAuthContext = {
   sessionId: string | null;
   tokenType: SocketTokenType;
   authMode: SocketAuthMode;
+  clientType: 'web' | 'ios' | 'android' | null;
   issuedAt: number;
   expiresAt: number;
 };

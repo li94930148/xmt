@@ -11,6 +11,13 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.1', date: '2026-08-13', title: '移动认证生产准入安全热修',
+    impactScope: ['Android', '认证', 'Socket.IO'],
+    changes: [
+      { type: 'security', description: '新增独立 Mobile allowlist、刷新持续准入和 Mobile Socket 授权。' },
+    ],
+  },
+  {
     version: '2.19.0', date: '2026-08-13', title: 'Android 移动办公客户端',
     impactScope: ['Android', '认证', '实时协作'],
     changes: [

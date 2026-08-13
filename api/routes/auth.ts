@@ -9,7 +9,7 @@ import { authRolloutRuntimeConfig } from '../config/auth-rollout-runtime.js';
 
 const authModule = createAuthModule();
 const loginRolloutEnabled = authRolloutRuntimeConfig.loginRolloutEnabled;
-const authV1Module = loginRolloutEnabled && isAuthV1Enabled() && process.env.XMT_AUTH_REFRESH_PEPPER?.trim()
+const authV1Module = isAuthV1Enabled() && process.env.XMT_AUTH_REFRESH_PEPPER?.trim()
   ? createAuthV1Module(process.env.XMT_AUTH_REFRESH_PEPPER.trim())
   : null;
 const loginGateway = new LoginGatewayController({

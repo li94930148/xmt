@@ -19,6 +19,7 @@ import type { CsrfService } from '../web/csrf.service.js';
 import type { AuthMetricsService } from '../events/auth-metrics.service.js';
 import type { AuthRolloutService } from '../rollout/auth-rollout.service.js';
 import { AuthV1ServiceError, type AuthV1Identity, type AuthV1Service } from './auth.v1.service.js';
+import { isMobileAuthEligibleUser } from '../../../config/auth-rollout-runtime.js';
 
 function serviceError(req: Request, res: Response, error: AuthV1ServiceError) {
   if (error.code === 'INVALID_CREDENTIALS' || error.code === 'ACCOUNT_DISABLED') {
@@ -53,6 +54,9 @@ function serviceError(req: Request, res: Response, error: AuthV1ServiceError) {
   }
   if (error.code === 'WEB_NOT_ALLOWED') {
     return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '当前账号不在测试范围内' }, 403);
+  }
+  if (error.code === 'MOBILE_NOT_ALLOWED' || error.code === 'CLIENT_TYPE_MISMATCH') {
+    return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '当前账号未开放移动端登录' }, 403);
   }
   return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '未登录或登录已失效' }, 401);
 }
@@ -121,6 +125,10 @@ export class AuthV1Controller {
         ? req.headers['user-agent'].slice(0, 255)
         : null;
       res.setHeader('Cache-Control', 'no-store');
+      // Generic V1 login is never a production fallback when Web V1 is disabled.
+      if (process.env.NODE_ENV === 'production' && !this.webOptions?.enabled) {
+        return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '当前登录入口未开放' }, 403);
+      }
       if (this.webOptions?.enabled) {
         if (!hasTrustedOrigin(req, this.webOptions)) {
           return sendV1Error(req, res, { code: 'PERMISSION_DENIED', message: '请求来源不受信任' }, 403);
@@ -149,13 +157,13 @@ export class AuthV1Controller {
     }
   };
 
-  /** Native credentials never use browser cookies or the web rollout allowlist. */
+  /** Native credentials use their own allowlist; they never inherit Web eligibility. */
   mobileLogin = async (req: Request, res: Response) => {
     try {
       const input = loginV1RequestSchema.parse({ ...req.body, client: { ...req.body?.client, type: 'android' } });
       const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, 255) : null;
       res.setHeader('Cache-Control', 'no-store');
-      return sendV1Success(req, res, await this.service.login(input, userAgent));
+      return sendV1Success(req, res, await this.service.loginMobile(input, userAgent, (user) => isMobileAuthEligibleUser(user)));
     } catch (error) { return controllerError(req, res, error); }
   };
 
@@ -223,7 +231,7 @@ export class AuthV1Controller {
     try {
       res.setHeader('Cache-Control', 'no-store');
       const input = refreshRequestSchema.parse(req.body);
-      return sendV1Success(req, res, await this.service.refresh(input.refreshToken));
+      return sendV1Success(req, res, await this.service.refreshMobile(input.refreshToken, (user) => isMobileAuthEligibleUser(user)));
     } catch (error) { return controllerError(req, res, error); }
   };
 
@@ -261,9 +269,18 @@ export class AuthV1Controller {
   mobileLogout = async (_req: Request, res: Response) => {
     try {
       res.setHeader('Cache-Control', 'no-store');
-      await this.service.logout(identity(res));
+      const current = identity(res);
+      if (current.clientType !== 'android') throw new AuthV1ServiceError('CLIENT_TYPE_MISMATCH');
+      // Deliberately do not consult the allowlist: a removed user may still revoke.
+      await this.service.logout(current);
       return sendV1Success(_req, res, null);
     } catch (error) { return controllerError(_req, res, error); }
+  };
+
+  mobileSession = async (req: Request, res: Response) => {
+    try {
+      return sendV1Success(req, res, await this.service.mobileSession(identity(res), (user) => isMobileAuthEligibleUser(user)));
+    } catch (error) { return controllerError(req, res, error); }
   };
 
   sessions = async (req: Request, res: Response) => {

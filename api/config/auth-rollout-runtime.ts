@@ -14,6 +14,10 @@ export type AuthRolloutRuntimeConfig = {
   adminProtected: boolean;
   socketBridgeEnabled: boolean;
   socketBridgeApproval: boolean;
+  mobileAuthEnabled: boolean;
+  mobileAuthApproved: boolean;
+  mobileSocketEnabled: boolean;
+  mobileAllowlistedUserIds: ReadonlySet<number>;
   observationWindowMinutes: number;
   allowlistedUserIds: ReadonlySet<number>;
   internalUserIds: ReadonlySet<number>;
@@ -45,8 +49,15 @@ export function createAuthRolloutRuntimeConfig(env: NodeJS.ProcessEnv = process.
   const baseMode = isProduction && rawMode !== 'legacy' && rawMode !== 'disabled' && (!productionApproved || rawMode !== 'allowlist')
     ? 'legacy'
     : rawMode;
-  const authV1Enabled = env.XMT_AUTH_V1_ENABLED === 'true' && (!isProduction || (productionApproved && baseMode === 'allowlist'));
+  const mobileAuthApproved = env.XMT_MOBILE_AUTH_APPROVED === 'true';
+  const mobileAuthRequested = env.XMT_MOBILE_AUTH_ENABLED === 'true';
+  const mobileAllowlistedUserIds = parseAuthRolloutUserIds(env.XMT_MOBILE_AUTH_ALLOWLIST_USER_IDS);
+  const webV1Approved = productionApproved && baseMode === 'allowlist';
+  // V1 may be mounted for either independently approved surface. This does not
+  // make the generic endpoint eligible; its controller remains web-gated.
+  const authV1Enabled = env.XMT_AUTH_V1_ENABLED === 'true' && (!isProduction || webV1Approved || (mobileAuthRequested && mobileAuthApproved));
   const authWebEnabled = authV1Enabled && env.XMT_AUTH_WEB_ENABLED === 'true' && baseMode !== 'legacy' && baseMode !== 'disabled';
+  const mobileAuthEnabled = authV1Enabled && (mobileAuthRequested || !isProduction) && (!isProduction || mobileAuthApproved);
   const effectiveRolloutMode = authWebEnabled ? baseMode : 'legacy';
   const loginRolloutEnabled = env.XMT_LOGIN_ROLLOUT_ENABLED === 'true';
   const socketBridgeApproval = env.XMT_SOCKET_BRIDGE_APPROVED === 'true';
@@ -54,12 +65,16 @@ export function createAuthRolloutRuntimeConfig(env: NodeJS.ProcessEnv = process.
   const socketBridgeEnabled = isProduction
     ? socketRequested && loginRolloutEnabled && baseMode === 'allowlist' && socketBridgeApproval
     : socketRequested;
+  const mobileSocketRequested = env.XMT_MOBILE_SOCKET_ENABLED === 'true';
+  const mobileSocketApproved = env.XMT_MOBILE_SOCKET_APPROVED === 'true';
+  const mobileSocketEnabled = mobileAuthEnabled && mobileSocketRequested && (!isProduction || mobileSocketApproved);
   return {
     source: 'pm2_process_env', loadedAt: new Date().toISOString(), processId: process.pid,
     authV1Enabled, authWebEnabled, loginRolloutEnabled, rolloutMode: baseMode, effectiveRolloutMode, productionApproved,
     percentageApproved: env.XMT_LOGIN_ROLLOUT_PERCENTAGE_APPROVED === 'true',
     adminProtected: env.XMT_LOGIN_ROLLOUT_ADMIN_PROTECTED !== 'false',
-    socketBridgeEnabled, socketBridgeApproval,
+    socketBridgeEnabled, socketBridgeApproval, mobileAuthEnabled, mobileAuthApproved, mobileSocketEnabled,
+    mobileAllowlistedUserIds,
     observationWindowMinutes: percentage(env.XMT_AUTH_GRAY_WINDOW_MINUTES),
     allowlistedUserIds: parseAuthRolloutUserIds(env.XMT_AUTH_WEB_ALLOWLIST_USER_IDS),
     internalUserIds: parseAuthRolloutUserIds(env.XMT_AUTH_ROLLOUT_INTERNAL_USER_IDS),
@@ -79,6 +94,19 @@ export function resolveAuthRolloutRuntimeConfig(env?: NodeJS.ProcessEnv): AuthRo
   return env === undefined || env === process.env ? authRolloutRuntimeConfig : createAuthRolloutRuntimeConfig(env);
 }
 
+/** First-phase native rollout is intentionally allowlist-only and fail-closed. */
+export function isMobileAuthEligibleUser(
+  user: { id: number; enabled?: boolean | number },
+  env?: NodeJS.ProcessEnv,
+): boolean {
+  const runtime = resolveAuthRolloutRuntimeConfig(env);
+  const userEnabled = user.enabled === undefined || user.enabled === true || user.enabled === 1;
+  // Development/test modules may be created directly. Production alone is
+  // fail-closed and requires the complete explicit approval tuple.
+  if ((env ?? process.env).NODE_ENV !== 'production') return userEnabled;
+  return runtime.mobileAuthEnabled && userEnabled && runtime.mobileAllowlistedUserIds.has(user.id);
+}
+
 export function authRolloutRuntimeDiagnostics(runtime = authRolloutRuntimeConfig) {
   return {
     effectiveConfigSource: runtime.source,
@@ -87,6 +115,10 @@ export function authRolloutRuntimeDiagnostics(runtime = authRolloutRuntimeConfig
     effectiveLoginRolloutEnabled: runtime.loginRolloutEnabled,
     effectiveRolloutMode: runtime.effectiveRolloutMode,
     effectiveSocketBridgeEnabled: runtime.socketBridgeEnabled,
+    effectiveMobileAuthEnabled: runtime.mobileAuthEnabled,
+    mobileAuthApproved: runtime.mobileAuthApproved,
+    mobileAllowlistCount: runtime.mobileAllowlistedUserIds.size,
+    effectiveMobileSocketEnabled: runtime.mobileSocketEnabled,
     allowlistCount: runtime.allowlistedUserIds.size,
     processId: runtime.processId,
     loadedAt: runtime.loadedAt,
@@ -98,6 +130,7 @@ export function authRolloutRuntimeReadiness(runtime = authRolloutRuntimeConfig) 
     ...authRolloutRuntimeDiagnostics(runtime),
     socketBridgeApproval: runtime.socketBridgeApproval,
     allowlistedUserIds: [...runtime.allowlistedUserIds],
+    mobileAllowlistedUserIds: [...runtime.mobileAllowlistedUserIds],
     observationWindowMinutes: runtime.observationWindowMinutes,
   };
 }

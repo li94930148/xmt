@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.19.1 - 2026-08-13
+
+### Mobile Auth production gate
+
+- Added an independently approved Android allowlist gate for login, refresh, session and Socket.IO.
+- Closed the production generic V1-login fallback when Web V1 is not enabled.
+
 ## 2.19.0 - 2026-08-13
 
 ### Android 移动办公

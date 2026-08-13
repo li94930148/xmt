@@ -2,9 +2,11 @@
 
 ## 当前版本
 
-v2.19.0
+v2.19.1
 
 ## Android 移动办公升级
+
+- 增加 Mobile Auth 独立 allowlist、刷新持续准入检查和 Mobile Socket 独立授权；不改变 Legacy Web 登录。
 
 - 新增 Capacitor Android Runtime、移动导航和安全网络配置。
 - 新增 Android Keystore 刷新凭据保护，以及复用 Auth V1 会话与轮换机制的移动认证合同。

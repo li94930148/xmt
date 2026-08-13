@@ -3,7 +3,7 @@ import { createSocketAuthMiddleware, readSocketAuthBridgeEnabled } from '../../a
 import { SocketAuthService } from '../../api/modules/auth/socket/socket-auth.service.js';
 
 const future = Math.floor(Date.now() / 1000) + 600;
-const session = { id: 'bridge-session', userId: 9 } as never;
+const session = { id: 'bridge-session', userId: 9, clientType: 'web' } as never;
 let legacyCalls = 0;
 let v1Calls = 0;
 const service = new SocketAuthService({
@@ -30,9 +30,7 @@ assert.equal(readSocketAuthBridgeEnabled({ XMT_SOCKET_AUTH_BRIDGE_ENABLED: 'true
 assert.equal(readSocketAuthBridgeEnabled({ XMT_SOCKET_AUTH_BRIDGE_ENABLED: 'true', NODE_ENV: 'production' }), false);
 
 const disabled = socket('legacy', 'v1-web');
-assert.equal((await runMiddleware(disabled, false)).error, undefined, 'disabled bridge preserves legacy behavior');
-assert.equal(disabled.data.auth.authMode, 'legacy');
-assert.equal(disabled.data.auth.sessionId, null);
+assert.ok((await runMiddleware(disabled, false)).error, 'disabled bridge rejects explicit V1 mode rather than downgrading it to legacy');
 
 const legacy = socket('legacy', 'legacy');
 assert.equal((await runMiddleware(legacy, true)).error, undefined);
@@ -47,6 +45,6 @@ const failedV1 = socket('legacy', 'v1-web');
 const failedResult = await runMiddleware(failedV1, true);
 assert.ok(failedResult.error);
 assert.equal(v1Calls > 0, true);
-assert.equal(legacyCalls >= 2, true);
+assert.equal(legacyCalls >= 1, true);
 
 console.log('Socket Auth Bridge tests passed');

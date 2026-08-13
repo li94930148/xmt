@@ -49,6 +49,7 @@ jobs:
       - run: npm run test:daily-report-permissions
       - run: npm run test:android-runtime
       - run: npm run test:mobile-auth-runtime
+      - run: npm run test:mobile-production-gate
       - run: npm run test:yjs-auth-recovery
       - run: npm run test:collaboration-access
       - run: npm run test:collaboration-socket-authorization

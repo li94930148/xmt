@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.19.0
+v2.19.1
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.19.0
 
 ## 本版本摘要
 
-本版本新增 Android 移动办公客户端、Capacitor 构建体系与安全移动认证基础设施。
+本版本增加 Android Mobile Auth 与 Mobile Socket 的独立生产 allowlist 准入门禁。

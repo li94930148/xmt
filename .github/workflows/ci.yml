@@ -43,6 +43,7 @@ jobs:
       - run: npm run test:mobile-safe-draft
       - run: npm run test:mobile-network
       - run: npm run test:mobile-message-category
+      - run: npm run test:mobile-back-button
       - run: npm run test:mobile-deep-link
       - run: npm run test:mobile-device-registry
       - run: npm run test:daily-report-permissions

@@ -2,10 +2,12 @@ import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 
 export type RuntimeEnvironment = 'web-development' | 'web-production' | 'android-development' | 'android-production';
+export type BackButtonAction = 'navigate-back' | 'warn-exit' | 'exit-app';
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 const isAndroidDevelopmentOverride = () => import.meta.env.DEV && import.meta.env.VITE_APP_PLATFORM === 'android';
 const allowsAndroidDebugCleartext = () => import.meta.env.VITE_ANDROID_ALLOW_CLEARTEXT === 'true';
+const mobileRootPaths = new Set(['/', '/topics', '/production', '/messages', '/me']);
 
 export const isAndroid = () => Capacitor.getPlatform() === 'android' || isAndroidDevelopmentOverride();
 export const isNative = () => Capacitor.isNativePlatform() || isAndroidDevelopmentOverride();
@@ -41,4 +43,11 @@ export function assertNativeEndpointSecurity() {
   if (!/^https:\/\//i.test(endpoint) && !allowsAndroidDebugCleartext()) {
     throw new Error('Android 构建必须配置 HTTPS 的 VITE_API_BASE_URL；本机调试请同时显式设置 VITE_ANDROID_ALLOW_CLEARTEXT=true。');
   }
+}
+
+/** Decides Android back behavior without binding React navigation to native APIs. */
+export function handleBackButton(pathname: string, lastBackAt: number, now = Date.now()): { action: BackButtonAction; nextBackAt: number } {
+  if (!mobileRootPaths.has(pathname)) return { action: 'navigate-back', nextBackAt: lastBackAt };
+  if (now - lastBackAt < 1800) return { action: 'exit-app', nextBackAt: 0 };
+  return { action: 'warn-exit', nextBackAt: now };
 }

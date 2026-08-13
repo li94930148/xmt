@@ -3,7 +3,7 @@ import { App } from '@capacitor/app';
 import { Bell, FileText, Home, LogOut, Settings, BriefcaseBusiness } from 'lucide-react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { User } from '@/types';
-import { isAndroid } from '@/platform/runtime';
+import { handleBackButton, isAndroid } from '@/platform/runtime';
 import { useNetworkState } from '@/platform/network';
 import { resolveMobileDeepLink } from '@/platform/deep-link';
 
@@ -25,12 +25,13 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
     if (!isAndroid()) return;
     let lastBack = 0;
     const listener = App.addListener('backButton', () => {
-      if (location.pathname !== '/' && location.pathname !== '/topics' && location.pathname !== '/production' && location.pathname !== '/messages' && location.pathname !== '/me') {
+      const decision = handleBackButton(location.pathname, lastBack);
+      lastBack = decision.nextBackAt;
+      if (decision.action === 'navigate-back') {
         navigate(-1);
         return;
       }
-      if (Date.now() - lastBack < 1800) void App.exitApp();
-      lastBack = Date.now();
+      if (decision.action === 'exit-app') { void App.exitApp(); return; }
       window.dispatchEvent(new CustomEvent('xmt-toast', { detail: { message: '再次返回将退出 XMT' } }));
     });
     return () => { void listener.then((handle) => handle.remove()); };

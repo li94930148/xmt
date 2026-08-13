@@ -2,6 +2,9 @@ import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, getPublicSystemSettings, login } from '../api';
+import { mobileLogin } from '../api/auth';
+import { isAndroid } from '@/platform/runtime';
+import { nativeRefreshCredentials } from '@/auth/native/secure-credentials';
 import { LoginError } from '../api/auth';
 import { completeWebLogin, completeWebLoginRedirect } from '../auth/web/web-auth-runtime';
 import { useAppStore, useAuthStore } from '../store';
@@ -439,8 +442,11 @@ export default function Login() {
     loginRequestInFlight.current = true;
     setLoading(true);
     try {
-      const result = await login(username.trim(), password);
-      if (result.authMode === 'v1-web') {
+      const result = isAndroid() ? await mobileLogin(username.trim(), password) : await login(username.trim(), password);
+      if (isAndroid()) {
+        await nativeRefreshCredentials.set((result as typeof result & { refreshToken: string }).refreshToken);
+        authStore.loginV1(result.user, result.accessToken);
+      } else if (result.authMode === 'v1-web') {
         completeWebLogin(result, authStore.loginV1);
       } else {
         authStore.login(result.user, result.accessToken, { persist: remember ? 'local' : 'session' });

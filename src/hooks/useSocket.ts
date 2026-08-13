@@ -4,6 +4,7 @@ import { useAuthStore, useMessageStore } from '../store';
 import { notifyDesktop } from '../utils/notification';
 import { SocketCoordinator, createRuntimeTokenProvider, readSocketCoordinatorEnabled, SocketTabCoordinator } from '../auth/socket';
 import { SocketClientLifecycleDiagnostics } from '../observability/socket-client-lifecycle';
+import { getSocketBaseUrl, isNative } from '@/platform/runtime';
 
 type CoordinatorRuntime = {
   getAccessToken: () => string | null;
@@ -52,14 +53,13 @@ export function useSocket() {
       globalSocket = null;
     }
 
-    // 当前 http://47.104.77.65 生产环境先使用 polling 稳定运行；
-    // 后续切换 https://lanyaomedia.com 后，再恢复 transports: ['polling', 'websocket'] 和 upgrade。
     const coordinatorEnabled = readSocketCoordinatorEnabled(import.meta.env);
     const runtime = window.__xmtAuthRuntime;
-    const nextSocket = io(window.location.origin, {
+    const nextSocket = io(getSocketBaseUrl(), {
       path: '/socket.io',
-      transports: ['polling'],
-      upgrade: false,
+      // Native networks can block a websocket upgrade. Keep polling as a secure fallback.
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: 5,
@@ -115,6 +115,17 @@ export function useSocket() {
       setSocketRevision((revision) => revision + 1);
     });
 
+    const onNetworkStatus = (event: Event) => {
+      const online = (event as CustomEvent<{ connected?: boolean }>).detail?.connected;
+      if (online && !nextSocket.connected) nextSocket.connect();
+      if (online === false && isNative()) nextSocket.disconnect();
+    };
+    const onResume = () => {
+      if (!nextSocket.connected) nextSocket.connect();
+    };
+    window.addEventListener('xmt-network-status', onNetworkStatus);
+    window.addEventListener('xmt-app-resume', onResume);
+
     nextSocket.io.on('reconnect_attempt', (attempt) => {
       reconnectAttempt = Number.isInteger(attempt) ? attempt : 0;
       lifecycleDiagnostics.reconnectAttempt(attempt);
@@ -139,7 +150,8 @@ export function useSocket() {
     });
 
     return () => {
-      // 单例模式下由登录态变化统一断开
+      window.removeEventListener('xmt-network-status', onNetworkStatus);
+      window.removeEventListener('xmt-app-resume', onResume);
     };
   }, [addMessage, isLoggedIn, setUnreadCount, token, user]);
 

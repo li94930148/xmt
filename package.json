@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.18.4",
+  "version": "2.19.0",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -125,10 +125,25 @@
     "creator-agent:sync": "npm --prefix agent run sync",
     "test:creator-agent:cross-platform": "npm --prefix agent run test:cross-platform",
     "test:creator-agent:binding": "tsx scripts/creator-agent-binding-test.ts",
-    "audit:douyin-legacy-tokens": "tsx scripts/audit-legacy-douyin-tokens.ts"
+    "audit:douyin-legacy-tokens": "tsx scripts/audit-legacy-douyin-tokens.ts",
+    "mobile:sync": "npm run build && npx cap sync android",
+    "mobile:android": "npx cap open android",
+    "mobile:apk:debug": "npm run mobile:sync && cd android && ./gradlew assembleDebug",
+    "mobile:apk:release": "npm run mobile:sync && cd android && ./gradlew assembleRelease",
+    "mobile:doctor": "tsx scripts/mobile-doctor.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/browser": "^8.0.4",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/keyboard": "^8.0.5",
+    "@capacitor/network": "^8.0.1",
+    "@capacitor/share": "^8.0.1",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.3",
     "@gsap/react": "^2.1.2",
     "@libsql/client": "^0.17.3",
     "@react-three/fiber": "^8.17.14",
@@ -185,6 +200,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@eslint/js": "^9.25.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",

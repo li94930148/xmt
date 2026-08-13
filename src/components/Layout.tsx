@@ -14,6 +14,10 @@ import { usePermission } from '../hooks/usePermission';
 import { getRoleDisplayName } from '../lib/roles';
 import { applyDocumentBranding } from '@/lib/systemSettings';
 import { AnimatedPage, AppShell, Topbar } from '@/components/studio';
+import { MobileShell } from '@/components/mobile/MobileShell';
+import { isAndroid } from '@/platform/runtime';
+import { nativeRefreshCredentials } from '@/auth/native/secure-credentials';
+import { apiFetch } from '@/api/transport';
 
 declare const __APP_VERSION__: string;
 
@@ -286,9 +290,13 @@ export default function Layout() {
   }, [navigate]);
 
   const handleLogout = useCallback(() => {
+    if (isAndroid() && token) {
+      void apiFetch('/v1/auth/mobile/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
+      void nativeRefreshCredentials.clear().catch(() => undefined);
+    }
     logout();
     navigate('/login', { replace: true });
-  }, [logout, navigate]);
+  }, [logout, navigate, token]);
 
   const settingsMenuLabel = hasPermission('system:settings') ? '设置中心' : '个人设置';
 
@@ -307,6 +315,10 @@ export default function Layout() {
   }
 
   const sidebarWidth = sidebarCollapsed ? '72px' : '232px';
+
+  if (isAndroid()) {
+    return <MobileShell user={user} unreadCount={unreadCount} onLogout={handleLogout} />;
+  }
 
   return (
     <AppShell

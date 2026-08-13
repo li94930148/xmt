@@ -2,6 +2,9 @@ import { useAuthStore } from '../store';
 import type { User } from '../types';
 import { adaptLoginResponse, type AuthLoginResult } from '../auth/web/login-response-adapter';
 import { emitAuthLoginDebugTrace } from '../auth/web/auth-login-debug';
+import { apiFetch } from './transport';
+
+declare const __APP_VERSION__: string;
 
 const BASE_URL = '/api';
 
@@ -125,6 +128,21 @@ export async function login(username: string, password: string): Promise<AuthLog
     responseKind, status: response.status, requestId: requestId ?? null, loginAttemptId,
   });
   return adaptLoginResponse(payload, { requestId, loginAttemptId });
+}
+
+export async function mobileLogin(username: string, password: string): Promise<AuthLoginResult & { refreshToken: string }> {
+  let response: Response;
+  try {
+    response = await apiFetch('/v1/auth/mobile/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, client: { type: 'android', deviceName: 'XMT Android', appVersion: __APP_VERSION__ } }),
+    });
+  } catch { throw new LoginError('当前网络不可用，请检查连接后重试。', 'server_unavailable'); }
+  if (!response.ok) throw new LoginError(response.status === 401 ? '用户名或密码不正确，请检查后重试。' : '当前服务暂时不可用，请稍后再试。', response.status === 401 ? 'invalid_credentials' : 'server_unavailable', { status: response.status });
+  const payload = await response.json() as { data?: { refreshToken?: unknown } };
+  const refreshToken = payload.data?.refreshToken;
+  if (typeof refreshToken !== 'string' || refreshToken.length < 32) throw new LoginError('移动认证响应无效，请重试。', 'server_unavailable');
+  return { ...adaptLoginResponse(payload), refreshToken };
 }
 
 export async function getMe(): Promise<User> {

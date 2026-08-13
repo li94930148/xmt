@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.0', date: '2026-08-13', title: 'Android 移动办公客户端',
+    impactScope: ['Android', '认证', '实时协作'],
+    changes: [
+      { type: 'feature', description: '新增 Capacitor Android 工程、移动办公壳与底部导航。' },
+      { type: 'security', description: '新增 Android Keystore 刷新凭据保护和 HTTPS/WSS 运行时约束。' },
+    ],
+  },
+  {
     version: '2.18.4',
     date: '2026-08-13',
     title: '正式部署版本 Gate 补齐',

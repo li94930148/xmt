@@ -1,0 +1,19 @@
+import { App } from '@capacitor/app';
+import { Network } from '@capacitor/network';
+import { Keyboard } from '@capacitor/keyboard';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { SplashScreen } from '@capacitor/splash-screen';
+import { isNative } from './runtime';
+
+export async function initializeNativeLifecycle(onResume: () => void) {
+  if (!isNative()) return () => undefined;
+  await StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined);
+  await SplashScreen.hide().catch(() => undefined);
+  const listeners = await Promise.all([
+    App.addListener('appStateChange', ({ isActive }) => { if (isActive) onResume(); }),
+    Network.addListener('networkStatusChange', (status) => window.dispatchEvent(new CustomEvent('xmt-network-status', { detail: status }))),
+    Keyboard.addListener('keyboardWillShow', ({ keyboardHeight }) => document.documentElement.style.setProperty('--xmt-keyboard-height', `${keyboardHeight}px`)),
+    Keyboard.addListener('keyboardWillHide', () => document.documentElement.style.setProperty('--xmt-keyboard-height', '0px')),
+  ]);
+  return () => listeners.forEach((listener) => listener.remove());
+}

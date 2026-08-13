@@ -34,6 +34,7 @@ jobs:
       - run: npm run test:auth
       - run: npm run test:rbac-invariant
       - run: npm run test:auth-session-service
+      - run: npm run test:auth-v1
       - run: npm run test:login-gateway
       - run: npm run test:socket
       - run: npm run test:socket-client-lifecycle

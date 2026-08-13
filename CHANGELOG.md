@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.18.2 - 2026-08-12
+
+### Operations reliability
+
+- Added a shared backup lock, non-destructive restore drill, and migration rollback-compatibility gate.
+- Expanded version consistency checks across runtime, UI, and release documentation.
+
 ## 2.18.1 - 2026-08-12
 
 ### Security and release reliability

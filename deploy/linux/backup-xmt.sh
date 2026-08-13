@@ -5,6 +5,7 @@ PROJECT_DIR="${PROJECT_DIR:-/opt/xmt}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/xmt}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 DATABASE="${XMT_DB_PATH:-$PROJECT_DIR/data/xmt.db}"
+LOCK_PATH="${XMT_BACKUP_LOCK_PATH:-$(dirname "$DATABASE")/.xmt-backup.lock}.d"
 
 if [[ ! -f "$DATABASE" ]]; then
   echo "Database not found: $DATABASE" >&2
@@ -13,14 +14,30 @@ fi
 
 install -d -m 0750 "$BACKUP_DIR"
 
-timestamp="$(date +%Y%m%d-%H%M%S)"
+timestamp="$(date +%Y%m%d-%H%M%S)-$$"
 temporary="$BACKUP_DIR/.xmt-$timestamp.db"
 destination="$BACKUP_DIR/xmt-$timestamp.db.gz"
 
 cleanup() {
   rm -f "$temporary"
+  rm -rf "$LOCK_PATH"
 }
 trap cleanup EXIT
+
+process_start_time() {
+  awk '{print $22}' "/proc/$1/stat" 2>/dev/null || true
+}
+
+if ! mkdir -m 0700 "$LOCK_PATH" 2>/dev/null; then
+  [[ -d "$LOCK_PATH" && ! -L "$LOCK_PATH" ]] || { echo '{"decision":"FAIL","reason":"LOCK_BUSY"}' >&2; exit 75; }
+  owner="$(cat "$LOCK_PATH/owner" 2>/dev/null || true)"; IFS=: read -r owner_pid owner_start <<< "$owner"
+  actual_start="$(process_start_time "$owner_pid")"
+  if [[ "$owner_pid" =~ ^[0-9]+$ ]] && { ! kill -0 "$owner_pid" 2>/dev/null || { [[ -n "$owner_start" && -n "$actual_start" && "$owner_start" != "$actual_start" ]]; }; }; then rm -rf "$LOCK_PATH"; mkdir -m 0700 "$LOCK_PATH" || exit 75; else
+    echo '{"decision":"FAIL","reason":"LOCK_BUSY"}' >&2
+    exit 75
+  fi
+fi
+printf '%s:%s\n' "$$" "$(process_start_time "$$")" > "$LOCK_PATH/owner"
 
 sqlite3 "$DATABASE" ".timeout 10000" ".backup '$temporary'"
 gzip -c "$temporary" > "$destination"

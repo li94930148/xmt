@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-restore-drill-test-'));
+const complete = path.join(directory, 'xmt.db'); const incomplete = path.join(directory, 'incomplete.db'); const damaged = path.join(directory, 'damaged.db');
+const required = ['users', 'roles', 'permissions', 'database_migrations', 'topics', 'production'];
+execFileSync('sqlite3', [complete, `${required.map((name) => `CREATE TABLE ${name} (id INTEGER);`).join('')}`]);
+execFileSync('sqlite3', [incomplete, 'CREATE TABLE users (id INTEGER);']); fs.writeFileSync(damaged, Buffer.alloc(512, 0xff));
+const drill = (file: string) => spawnSync('npx', ['tsx', 'scripts/backup-restore-drill.ts', `--backup=${file}`], { cwd: process.cwd(), encoding: 'utf8' });
+const liveBefore = fs.readFileSync(complete);
+assert.equal(drill(complete).status, 0, 'a supplied live database path is copied, never restored in place');
+assert.deepEqual(fs.readFileSync(complete), liveBefore, 'restore drill never modifies its input database');
+assert.notEqual(drill(incomplete).status, 0);
+assert.notEqual(drill(damaged).status, 0);
+assert.equal(fs.existsSync(complete), true);
+fs.rmSync(directory, { recursive: true, force: true });
+console.log('backup restore drill tests passed');

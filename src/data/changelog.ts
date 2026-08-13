@@ -11,6 +11,16 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.18.2',
+    date: '2026-08-12',
+    title: '运维可靠性与仓库治理硬化',
+    impactScope: ['备份与恢复演练', '部署迁移 Gate', '版本治理'],
+    changes: [
+      { type: 'improvement', description: '备份关键流程增加跨进程互斥与非破坏恢复演练。' },
+      { type: 'security', description: '部署前增加迁移兼容性检查，避免不可安全回退的演进自动上线。' },
+    ],
+  },
+  {
     version: '2.18.0',
     date: '2026-08-12',
     title: 'React Bits 场景化视觉编排与全系统体验升级',

@@ -10,6 +10,7 @@ set -Eeuo pipefail
 APP_DIR="${APP_DIR:-/www/wwwroot/xmt}"
 DB_PATH="${DB_PATH:-$APP_DIR/data/xmt.db}"
 BACKUP_DIR="${BACKUP_DIR:-$APP_DIR/emergency-backup}"
+BACKUP_LOCK_PATH="${XMT_BACKUP_LOCK_PATH:-$(dirname "$DB_PATH")/.xmt-backup.lock}"
 PM2_APP="${PM2_APP:-xmt-api}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3001/api/health}"
 HOME_URL="${HOME_URL:-http://127.0.0.1:3001/}"
@@ -55,19 +56,34 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
 }
 
+process_start_time() {
+  awk '{print $22}' "/proc/$1/stat" 2>/dev/null || true
+}
+
 backup_database() {
   [ -f "$DB_PATH" ] || fail "Database file not found; refusing deploy without backup: $DB_PATH"
 
   install -d -m 0750 "$BACKUP_DIR"
-  local backup_file="$BACKUP_DIR/xmt-$(date +%Y%m%d-%H%M%S).db"
+  local backup_file="$BACKUP_DIR/xmt-$(date +%Y%m%d-%H%M%S)-$$.db"
 
   log "Backing up database before deploy"
-  sqlite3 "$DB_PATH" ".backup '$backup_file'"
+  local lock_directory="${BACKUP_LOCK_PATH}.d"
+  if ! mkdir -m 0700 "$lock_directory" 2>/dev/null; then
+    [[ -d "$lock_directory" && ! -L "$lock_directory" ]] || fail "Database backup lock is busy"
+    local owner="$(cat "$lock_directory/owner" 2>/dev/null || true)" owner_pid owner_start actual_start
+    IFS=: read -r owner_pid owner_start <<< "$owner"; actual_start="$(process_start_time "$owner_pid")"
+    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && { ! kill -0 "$owner_pid" 2>/dev/null || { [[ -n "$owner_start" && -n "$actual_start" && "$owner_start" != "$actual_start" ]]; }; }; then rm -rf "$lock_directory"; mkdir -m 0700 "$lock_directory" || fail "Database backup lock recovery failed"; else fail "Database backup lock is busy"; fi
+  fi
+  trap 'rm -rf "$lock_directory"' RETURN
+  printf '%s:%s\n' "$$" "$(process_start_time "$$")" > "$lock_directory/owner"
+  sqlite3 "$DB_PATH" ".backup '$backup_file'" || fail "Database backup failed"
 
   [ -s "$backup_file" ] || fail "Database backup is empty: $backup_file"
   sqlite3 "$backup_file" "PRAGMA quick_check;" | grep -qx "ok" || fail "Database backup quick_check failed: $backup_file"
   sqlite3 "$backup_file" "SELECT count(*) FROM sqlite_master;" >/dev/null || fail "Database backup cannot be opened: $backup_file"
   log "Database backup created: $backup_file"
+  rm -rf "$lock_directory"
+  trap - RETURN
 }
 
 rollback_code() {
@@ -87,6 +103,11 @@ rollback_code() {
     log "Application rollback could not be verified; manual intervention is required"
   fi
   exit "$failed_status"
+}
+
+restore_worktree_without_restart() {
+  log "Preparation failed; restoring checked-out files to $PREVIOUS_SHA without restarting the live application"
+  git checkout --detach "$PREVIOUS_SHA" || true
 }
 
 check_health() {
@@ -119,26 +140,30 @@ require_command sqlite3
 [ -d "$APP_DIR/.git" ] || fail "APP_DIR is not a Git checkout: $APP_DIR"
 
 cd "$APP_DIR"
+pm2 jlist | node -e "let s='';const n='$PM2_APP';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).filter(x=>x.name===n);if(p.length!==1){console.error('Expected exactly one PM2 app instance, found '+p.length);process.exit(1)}})" || fail "Single-instance runtime gate failed"
 backup_database
 
 PREVIOUS_SHA="$(git rev-parse HEAD)"
 log "Previous application commit: $PREVIOUS_SHA"
-trap rollback_code ERR
 
 log "Fetching and updating code"
-git fetch origin "$BRANCH"
-git checkout "$BRANCH"
-git pull --ff-only origin "$BRANCH"
+git fetch origin "$BRANCH" || fail "Unable to fetch target branch"
+git checkout "$BRANCH" || fail "Unable to check out target branch"
+if ! git pull --ff-only origin "$BRANCH"; then restore_worktree_without_restart; fail "Unable to fast-forward target branch"; fi
 TARGET_SHA="$(git rev-parse HEAD)"
-DEPLOY_STARTED=1
 log "Target application commit: $TARGET_SHA"
 
-log "Installing dependencies"
-npm ci
+log "Installing target dependencies without restarting the live application"
+if ! npm ci; then restore_worktree_without_restart; fail "Dependency installation failed"; fi
 
-log "Running local verification"
-npm run check
-npm run build
+log "Checking migration rollback compatibility before service restart"
+if ! npm run migration:check; then restore_worktree_without_restart; fail "Migration compatibility gate did not return GO"; fi
+
+log "Running target verification before service restart"
+if ! npm run check || ! npm run build; then restore_worktree_without_restart; fail "Target verification failed"; fi
+
+DEPLOY_STARTED=1
+trap rollback_code ERR
 
 log "Restarting PM2 app: $PM2_APP"
 pm2 describe "$PM2_APP" >/dev/null || fail "PM2 app not found: $PM2_APP"

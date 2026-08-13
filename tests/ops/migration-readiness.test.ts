@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createClient } from '@libsql/client';
+import { databaseMigrations } from '../../api/database/migrations/index.js';
+import { assessMigrationReadiness } from '../../api/modules/ops/migration-readiness-decision.js';
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-migration-readiness-test-'));
+const database = path.join(directory, 'xmt.db');
+const client = createClient({ url: `file:${database}` });
+await client.execute('CREATE TABLE database_migrations (version TEXT PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, status TEXT NOT NULL)');
+for (const migration of databaseMigrations) await client.execute({ sql: 'INSERT INTO database_migrations (version, name, checksum, status) VALUES (?, ?, ?, ?)', args: [migration.version, migration.name, migration.checksum, 'applied'] });
+await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?', args: ['001'] });
+const run = () => spawnSync('npx', ['tsx', 'scripts/migration-readiness.ts'], { cwd: process.cwd(), env: { ...process.env, XMT_DB_PATH: database }, encoding: 'utf8' });
+assert.equal(run().status, 0, 'safe expand migration may proceed');
+await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?', args: ['006'] });
+const review = run(); assert.notEqual(review.status, 0); assert.match(review.stdout, /REVIEW_REQUIRED/);
+await client.execute({ sql: 'INSERT INTO database_migrations (version, name, checksum, status) VALUES (?, ?, ?, ?)', args: ['006', databaseMigrations.find((migration) => migration.version === '006')!.name, 'invalid', 'applied'] });
+const failed = run(); assert.notEqual(failed.status, 0); assert.match(failed.stdout, /NO-GO/);
+const sample = [{ version: 'test', name: 'test', checksum: 'checksum' }];
+assert.equal(assessMigrationReadiness(sample, {}, []).decision, 'NO-GO', 'unknown metadata blocks deployment');
+assert.equal(assessMigrationReadiness(sample, { test: 'BLOCKED_FOR_ROLLBACK' }, []).decision, 'NO-GO', 'destructive migration blocks rollback safety');
+client.close(); fs.rmSync(directory, { recursive: true, force: true });
+console.log('migration readiness tests passed');

@@ -53,7 +53,6 @@ import creatorAgentRoutes from './routes/creator-agent.js'
 // Legacy social-review routes are intentionally not mounted during the Douyin OpenAPI migration.
 import { isRemoteLoginSessionOwner } from './services/social-review/serverBrowserService.js'
 import backupRoutes from './routes/backup.js'
-import { createBackup, cleanOldBackups } from './routes/backup.js'
 import rolesRoutes from './routes/roles.js'
 import permissionsRoutes from './routes/permissions.js'
 import workflowTemplatesRoutes from './routes/workflow-templates.js'
@@ -623,6 +622,10 @@ export async function startServer() {
     })
   })
 
+  if (Number(process.env.XMT_WEB_INSTANCE_COUNT || '1') > 1) {
+    console.warn('[Ops] XMT Web/Socket runtime is single-instance only; disable duplicate job scheduling before scaling out')
+  }
+
   autoSnapshot(30000, (snapshot) => {
     io.to(snapshot.docId).emit(COLLABORATION_EVENTS.SNAPSHOT_CREATED, {
       docId: snapshot.docId,
@@ -636,30 +639,8 @@ export async function startServer() {
     cleanupInactiveRooms()
   }, 60 * 1000)
 
-  // 启动时自动备份一次
-  try {
-    const name = await createBackup()
-    console.log(`[Backup] 启动备份: ${name}`)
-    cleanOldBackups()
-  } catch (e) {
-    console.warn('[Backup] 启动备份失败:', e)
-  }
-
-  // 每天凌晨3点自动备份
-  setInterval(() => {
-    void (async () => {
-    const now = new Date()
-    if (now.getHours() === 3 && now.getMinutes() === 0) {
-      try {
-        const name = await createBackup()
-        console.log(`[Backup] 定时备份: ${name}`)
-        cleanOldBackups()
-      } catch (e) {
-        console.warn('[Backup] 定时备份失败:', e)
-      }
-    }
-    })()
-  }, 60 * 1000)
+  // Backups are intentionally scheduled by the locked systemd/CLI entrypoint,
+  // not by every Web process. API backups remain permission guarded and locked.
 
 }
 

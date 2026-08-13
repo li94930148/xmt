@@ -57,6 +57,7 @@ const Topics = lazyWithRetry(() => import('@/pages/Topics'), 'Topics');
 const MobileTopics = lazyWithRetry(() => import('@/pages/mobile/MobileTopics'), 'MobileTopics');
 const MobileMessages = lazyWithRetry(() => import('@/pages/mobile/MobileMessages'), 'MobileMessages');
 const MobileMe = lazyWithRetry(() => import('@/pages/mobile/MobileMe'), 'MobileMe');
+const MobileNotificationSettings = lazyWithRetry(() => import('@/pages/mobile/MobileNotificationSettings'), 'MobileNotificationSettings');
 const MobileDaily = lazyWithRetry(() => import('@/pages/mobile/MobileDaily'), 'MobileDaily');
 const MobileTopicDetail = lazyWithRetry(() => import('@/pages/mobile/MobileTopicDetail'), 'MobileTopicDetail');
 const MobileAddTopic = lazyWithRetry(() => import('@/pages/mobile/MobileAddTopic'), 'MobileAddTopic');
@@ -171,7 +172,7 @@ export default function App() {
                 <Route path="/achievements" element={<Achievements />} />
                 <Route path="/anonymous-feedback" element={<AnonymousFeedback />} />
                 <Route path="/me" element={<MobileMe />} />
-                <Route path="/notification-settings" element={<NotificationSettings />} />
+                <Route path="/notification-settings" element={isAndroid() ? <MobileNotificationSettings /> : <NotificationSettings />} />
                 <Route path="/pomodoro" element={<PomodoroPage />} />
                 <Route element={<RoleGuard permissions={['workflow:shooting']} />}>
                   <Route path="/shooting" element={<Shooting />} />

@@ -11,7 +11,7 @@ export const socketAuthContextSchema = z.object({
 
 export const socketAuthHandshakeSchema = z.object({
   token: z.string().min(1),
-  mode: z.enum(['legacy', 'v1-web']).default('legacy'),
+  mode: z.enum(['legacy', 'v1-web', 'v1-mobile']).default('legacy'),
   contractVersion: z.number().int().positive().optional(),
 }).strict();
 

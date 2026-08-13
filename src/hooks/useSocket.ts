@@ -18,6 +18,7 @@ export function useSocket() {
   const [, setSocketRevision] = useState(0);
   const user = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
+  const authMode = useAuthStore((state) => state.authMode);
   const isLoggedIn = useAuthStore((state) => state.isLoggedIn);
   const setUnreadCount = useMessageStore((state) => state.setUnreadCount);
   const addMessage = useMessageStore((state) => state.addMessage);
@@ -55,6 +56,9 @@ export function useSocket() {
       reconnectionDelay: 1000,
       auth: {
         token,
+        // Android credentials always come from Mobile Auth v1. Explicitly state
+        // the protocol so the server never attempts legacy JWT verification.
+        mode: isNative() ? 'v1-mobile' : authMode === 'v1-web' ? 'v1-web' : 'legacy',
       },
       autoConnect: !coordinatorEnabled || !runtime,
     });
@@ -142,7 +146,7 @@ export function useSocket() {
       window.removeEventListener('xmt-network-status', onNetworkStatus);
       window.removeEventListener('xmt-app-resume', onResume);
     };
-  }, [addMessage, isLoggedIn, setUnreadCount, token, user]);
+  }, [addMessage, authMode, isLoggedIn, setUnreadCount, token, user]);
 
   useEffect(() => {
     if (!isLoggedIn && globalSocket) {

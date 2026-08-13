@@ -15,9 +15,9 @@ export class SocketAuthService {
   async authenticate(handshake: unknown): Promise<SocketAuthIdentity> {
     const parsed = socketAuthHandshakeSchema.safeParse(handshake);
     if (!parsed.success) throw new SocketAuthError('HANDSHAKE_INVALID');
-    return parsed.data.mode === 'v1-web'
-      ? this.authenticateV1(parsed.data)
-      : this.authenticateLegacy(parsed.data);
+    return parsed.data.mode === 'legacy'
+      ? this.authenticateLegacy(parsed.data)
+      : this.authenticateV1(parsed.data);
   }
 
   async authenticateLegacy(input: SocketAuthHandshake): Promise<SocketAuthIdentity> {

@@ -191,13 +191,16 @@ function getEngineRequestTransport(requestUrl?: string): string {
 
 function logSocketAuthFailed(
   reason: string,
-  socket: { id?: string; handshake?: SocketHandshakeLike; conn?: { transport?: { name?: string } } },
+  socket: { id?: string; handshake?: SocketHandshakeLike & { auth?: unknown }; conn?: { transport?: { name?: string } } },
 ) {
+  const auth = socket.handshake?.auth as Record<string, unknown> | undefined
   console.warn('[Socket][auth failed]', {
     reason,
     socketId: socket.id,
     origin: getSocketOrigin(socket),
     transport: getSocketTransport(socket),
+    hasToken: typeof auth?.token === 'string' && auth.token.length > 0,
+    authMode: typeof auth?.mode === 'string' ? auth.mode : null,
   })
 }
 

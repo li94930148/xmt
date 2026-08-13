@@ -33,12 +33,17 @@ assert.equal(access.auth.sessionId, 'session-7');
 assert.equal(access.auth.tokenType, 'access');
 assert.equal(access.auth.authMode, 'v1-web');
 
+const mobileAccess = await service.authenticate({ token: 'access-token', mode: 'v1-mobile' });
+assert.equal(mobileAccess.auth.sessionId, 'session-7');
+assert.equal(mobileAccess.auth.tokenType, 'access');
+
 async function rejects(code: string, input: unknown) {
   await assert.rejects(() => service.authenticate(input), (error: unknown) => error instanceof SocketAuthError && error.code === code);
 }
 
 await rejects('AUTH_INVALID', { token: 'access-token', mode: 'legacy' });
 await rejects('AUTH_INVALID', { token: 'legacy-token', mode: 'v1-web' });
+await rejects('AUTH_INVALID', { token: 'legacy-token', mode: 'v1-mobile' });
 await rejects('AUTH_INVALID', { token: 'refresh-token-raw', mode: 'v1-web' });
 
 const disabledService = new SocketAuthService({

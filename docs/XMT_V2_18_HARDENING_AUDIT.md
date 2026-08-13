@@ -43,6 +43,6 @@
 ## 剩余风险
 
 - 协作策略现有真实 Socket.IO 黑盒测试，使用实际认证、JOIN、Yjs SYNC/UPDATE、awareness、typing 和临时测试数据库；覆盖越权、伪造身份、只读参与者、未 JOIN 写入、非法房间及断线后 disabled 重连。授权在每次连接和每次协作事件执行；在线已加入 Socket 的即时撤权仍不是本阶段能力。
-- 定时备份仍建议增加 `flock` 与定期 restore 演练。
-- 部署脚本的迁移兼容门禁应在下一阶段结合明确 migration runner 启动方式实施。
+- API、部署和 systemd 备份通过同一目录锁协议互斥，锁持有者异常退出后以本机 PID 存活性回收。该协议的边界是单台主机；未来跨主机运行前必须替换为共享协调锁。`npm run ops:backup-restore-drill -- --backup=<绝对路径>` 可做非破坏性演练。
+- 部署脚本已在目标代码检出后、依赖安装和服务重启前执行 `npm run migration:check`；`REVIEW_REQUIRED`、`NO-GO` 或数据库信息不足都会终止无人值守部署，且不会执行 down migration。
 - Web/Socket 协作状态仍是单实例运行态。部署脚本要求 PM2 目标应用恰好一个实例；未来横向扩容需先引入共享 Socket/协作状态与 leader/外部任务调度。

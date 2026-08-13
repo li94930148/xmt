@@ -19,6 +19,7 @@ assert.match(script, /Installing target dependencies without restarting the live
 assert.match(script, /restore_worktree_without_restart/);
 assert.match(script, /npm ci; then restore_worktree_without_restart/);
 assert.ok(script.indexOf('npm ci; then restore_worktree_without_restart') < script.indexOf('npm run migration:check'), 'target dependencies install before migration gate');
+assert.ok(script.indexOf('npm run version:check') < script.indexOf('ops:backup-restore-drill'), 'version gate before restore drill');
 assert.ok(script.indexOf('ops:backup-restore-drill') < script.indexOf('npm run migration:check'), 'restore drill before migration gate');
 assert.ok(script.indexOf('npm run migration:check') < script.lastIndexOf('pm2 restart'), 'migration gate before the target PM2 restart');
 assert.doesNotMatch(script, /cp -p "\$DB_PATH"/);

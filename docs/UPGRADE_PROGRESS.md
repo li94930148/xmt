@@ -1,5 +1,10 @@
 # XMT 升级阶段记录
 
+## v2.18.4 版本 Gate 补齐（2026-08-13）
+
+- 正式部署在 Restore Drill、迁移 Gate 和 PM2 restart 前执行 `npm run version:check`。
+- 数据库变化：无 schema 或 migration 变化；生产尚未部署。
+
 ## v2.18.3 部署 Gate 修复（2026-08-13）
 
 - 正式部署入口要求 `TARGET_SHA_EXPECTED`，避免将未知的后续 main 提交部署到生产。

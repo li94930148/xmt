@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.18.4 - 2026-08-13
+
+### Deployment safety
+
+- Run version consistency validation before the deployment backup restore drill and any service restart.
+
 ## 2.18.3 - 2026-08-13
 
 ### Deployment safety

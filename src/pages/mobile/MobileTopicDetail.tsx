@@ -1,13 +1,16 @@
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Clock3, FolderOpen, Save } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getTopic, updateTopic } from '@/api';
 import type { Topic } from '@/types';
+import { getTopicResources, type TopicResource } from '@/api/topics';
+import { readSafeDraftValue, writeSafeDraft } from '@/platform/safe-draft';
 
 export default function MobileTopicDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [topic, setTopic] = useState<Topic | null>(null);
+  const [resources, setResources] = useState<TopicResource[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(true);
@@ -22,8 +25,16 @@ export default function MobileTopicDetail() {
       setTopic(result);
       setTitle(result.title);
       setDescription(result.description ?? '');
+      writeSafeDraft(`topic:${id}:view`, result);
+      void getTopicResources(Number(id)).then(setResources).catch(() => undefined);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '加载选题失败');
+      const cached = readSafeDraftValue<Topic>(`topic:${id}:view`);
+      if (cached) {
+        setTopic(cached); setTitle(cached.title); setDescription(cached.description ?? '');
+        setNotice('当前显示最近缓存内容；恢复网络后会自动获取最新数据。');
+      } else {
+        setNotice(error instanceof Error ? error.message : '加载选题失败');
+      }
     } finally {
       setLoading(false);
     }
@@ -53,9 +64,12 @@ export default function MobileTopicDetail() {
     <button type="button" onClick={() => navigate('/topics')} className="inline-flex min-h-11 items-center gap-2 text-sm text-studio-cyan"><ArrowLeft className="h-4 w-4" />返回选题</button>
     {loading ? <p className="text-sm text-studio-text-muted">正在加载选题…</p> : topic ? <>
       <div className="flex items-center justify-between rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><span className="text-sm text-studio-text-muted">当前状态</span><span className="rounded-full bg-studio-primary/15 px-3 py-1 text-sm text-studio-cyan">{topic.status}</span></div>
+      <div className="grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl border border-studio-border-soft p-3"><p className="text-xs text-studio-text-muted">创建人</p><p className="mt-1 truncate">{topic.creator_name ?? '—'}</p></div><div className="rounded-xl border border-studio-border-soft p-3"><p className="text-xs text-studio-text-muted">更新时间</p><p className="mt-1 truncate">{topic.updated_at || '—'}</p></div></div>
       <label className="block rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><span className="mb-2 block text-sm font-semibold">选题标题</span><input value={title} onChange={(event) => setTitle(event.target.value)} className="min-h-11 w-full rounded-xl border border-studio-border-soft bg-studio-bg px-3 text-sm outline-none focus:border-studio-cyan" /></label>
       <label className="block rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><span className="mb-2 block text-sm font-semibold">选题说明</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-40 w-full resize-y rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm leading-6 outline-none focus:border-studio-cyan" placeholder="补充选题背景、目标受众和创作思路" /></label>
       <div className="grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl border border-studio-border-soft p-3"><p className="text-xs text-studio-text-muted">负责人</p><p className="mt-1">{topic.assignee_name ?? '未分配'}</p></div><div className="rounded-xl border border-studio-border-soft p-3"><p className="text-xs text-studio-text-muted">截止日期</p><p className="mt-1">{topic.deadline || '未设置'}</p></div></div>
+      <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><h2 className="inline-flex items-center gap-2 text-sm font-semibold"><FolderOpen className="h-4 w-4 text-studio-cyan" />关联资料</h2>{resources.length ? <div className="mt-3 space-y-2">{resources.map((resource) => <p key={resource.id} className="truncate rounded-lg bg-studio-bg px-3 py-2 text-sm">{resource.title}</p>)}</div> : <p className="mt-2 text-sm text-studio-text-muted">暂无关联资料</p>}</section>
+      {topic.history?.length ? <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><h2 className="inline-flex items-center gap-2 text-sm font-semibold"><Clock3 className="h-4 w-4 text-studio-cyan" />协作动态</h2><div className="mt-3 space-y-3">{topic.history.slice(0, 5).map((record) => <div key={record.id} className="border-l border-studio-border-soft pl-3 text-sm"><p>{record.operator_name ?? '成员'} · {record.action}</p><p className="mt-1 text-xs text-studio-text-muted">{record.comment || record.created_at}</p></div>)}</div></section> : null}
       {notice ? <p role="status" className="px-1 text-sm text-studio-text-secondary">{notice}</p> : null}
       <button type="button" disabled={saving} onClick={() => void save()} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-studio-primary text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" />{saving ? '保存中…' : '保存修改'}</button>
     </> : <p className="text-sm text-studio-text-secondary">未找到该选题。</p>}

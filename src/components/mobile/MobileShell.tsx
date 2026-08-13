@@ -51,7 +51,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
     return () => window.removeEventListener('xmt-deep-link', onDeepLink);
   }, [navigate]);
 
-  return <div className="min-h-dvh bg-studio-bg text-theme-text" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+  return <div className="min-h-dvh bg-studio-bg text-theme-text" style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
     <header className="sticky top-0 z-30 flex min-h-14 items-center justify-between border-b border-studio-border-soft bg-studio-surface/95 px-4 backdrop-blur">
       <div><p className="text-xs text-studio-text-muted">XMT 移动办公</p><h1 className="text-base font-semibold">{current?.label ?? '工作台'}</h1></div>
       <button onClick={onLogout} aria-label="退出登录" className="flex h-11 w-11 items-center justify-center rounded-xl text-studio-text-secondary"><LogOut className="h-5 w-5" /></button>
@@ -60,7 +60,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
     <main className="min-h-[calc(100dvh-8.5rem)] px-4 py-4 pb-28" style={{ fontSize: 'var(--system-font-size)' }}>
       <div className="mx-auto w-full max-w-xl"><Outlet /></div>
     </main>
-    <nav aria-label="移动主导航" className="fixed inset-x-0 bottom-0 z-40 flex border-t border-studio-border-soft bg-studio-surface/95 px-2 pt-2 backdrop-blur" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 8px)' }}>
+    <nav aria-label="移动主导航" className="fixed inset-x-0 bottom-0 z-40 flex border-t border-studio-border-soft bg-studio-surface/95 px-2 pt-2 backdrop-blur" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 8px)', paddingLeft: 'max(env(safe-area-inset-left), 8px)', paddingRight: 'max(env(safe-area-inset-right), 8px)' }}>
       {tabs.map((tab) => {
         const Icon = tab.icon; const active = current?.path === tab.path;
         return <button key={tab.path} onClick={() => navigate(tab.path)} className={`relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-xs ${active ? 'text-studio-cyan' : 'text-studio-text-muted'}`}>

@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.18.3',
+    date: '2026-08-13',
+    title: '正式部署 Gate 修复',
+    impactScope: ['部署脚本'],
+    changes: [
+      { type: 'fix', description: '正式部署固定精确目标 SHA，并在服务重启前验证在线备份可进行非破坏恢复演练。' },
+    ],
+  },
+  {
     version: '2.18.2',
     date: '2026-08-12',
     title: '运维可靠性与仓库治理硬化',

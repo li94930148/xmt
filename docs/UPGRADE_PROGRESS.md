@@ -1,5 +1,11 @@
 # XMT 升级阶段记录
 
+## v2.18.3 部署 Gate 修复（2026-08-13）
+
+- 正式部署入口要求 `TARGET_SHA_EXPECTED`，避免将未知的后续 main 提交部署到生产。
+- 在目标依赖安装后、迁移 gate 与 PM2 restart 前，对刚完成的在线 SQLite 备份执行非破坏 Restore Drill。
+- 数据库变化：无 schema 或 migration 变化；生产尚未部署。
+
 ## v2.18.2 运维可靠性与仓库治理硬化（2026-08-12）
 
 - 当前版本：v2.18.2。

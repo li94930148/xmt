@@ -37,12 +37,23 @@ export async function openExternalUrl(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-export function assertNativeEndpointSecurity() {
-  if (!isNative() || import.meta.env.DEV) return;
+export function getNativeEndpointConfigurationError(): string | null {
+  if (!isNative() || import.meta.env.DEV) return null;
   const endpoint = getApiBaseUrl();
   if (!/^https:\/\//i.test(endpoint) && !allowsAndroidDebugCleartext()) {
-    throw new Error('Android 构建必须配置 HTTPS 的 VITE_API_BASE_URL；本机调试请同时显式设置 VITE_ANDROID_ALLOW_CLEARTEXT=true。');
+    return 'Android 构建必须配置 HTTPS 的 VITE_API_BASE_URL；本机调试请同时显式设置 VITE_ANDROID_ALLOW_CLEARTEXT=true。';
   }
+  return null;
+}
+
+/**
+ * Keep the shell renderable when an artifact is missing its endpoint config.
+ * Requests remain blocked by Android's HTTPS policy; the login UI can report
+ * the configuration issue instead of leaving users with a blank screen.
+ */
+export function assertNativeEndpointSecurity() {
+  const error = getNativeEndpointConfigurationError();
+  if (error) console.error(`[XMT] ${error}`);
 }
 
 /** Decides Android back behavior without binding React navigation to native APIs. */

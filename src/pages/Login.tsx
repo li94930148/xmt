@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, getPublicSystemSettings, login } from '../api';
 import { mobileLogin } from '../api/auth';
-import { isAndroid } from '@/platform/runtime';
+import { getNativeEndpointConfigurationError, isAndroid } from '@/platform/runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
 import { LoginError } from '../api/auth';
 import { completeWebLogin, completeWebLoginRedirect } from '../auth/web/web-auth-runtime';
@@ -354,7 +354,10 @@ export default function Login() {
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [changePwdLoading, setChangePwdLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  // A packaged Android build may be opened before its API endpoint is supplied.
+  // Show the actionable configuration issue in the login shell instead of failing
+  // during application bootstrap and leaving a blank native screen.
+  const [errorMessage, setErrorMessage] = useState(() => getNativeEndpointConfigurationError() || '');
   const loginRequestInFlight = useRef(false);
 
   useEffect(() => {

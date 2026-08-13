@@ -18,6 +18,8 @@ assert.match(manifest, /android:usesCleartextTraffic="false"/);
 assert.match(debugManifest, /android:usesCleartextTraffic="true"/);
 assert.match(debugManifest, /tools:replace="android:usesCleartextTraffic"/);
 assert.match(runtime, /VITE_ANDROID_ALLOW_CLEARTEXT/);
+assert.match(runtime, /getNativeEndpointConfigurationError/);
+assert.match(read('src/pages/Login.tsx'), /getNativeEndpointConfigurationError/);
 assert.match(manifest, /android:launchMode="singleTask"/);
 for (const host of ['topics', 'production', 'messages', 'daily-report']) {
   assert.match(manifest, new RegExp(`<data android:scheme="xmt" android:host="${host}"`));

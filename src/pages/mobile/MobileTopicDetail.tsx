@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getTopic, updateTopic, updateTopicStatus } from '@/api';
 import type { Topic, TopicStatus } from '@/types';
 import { getTopicResources, type TopicResource } from '@/api/topics';
-import { readSafeDraftValue, writeSafeDraft } from '@/platform/safe-draft';
+import { clearSafeDraft, readSafeDraftValue, writeSafeDraft } from '@/platform/safe-draft';
 import { useNetworkState } from '@/platform/network';
 
 const nextStatus: Partial<Record<TopicStatus, TopicStatus>> = {
@@ -16,6 +16,7 @@ const statusLabel: Partial<Record<TopicStatus, string>> = {
 const statusName: Record<TopicStatus, string> = {
   pending: '待审核', approved: '已通过', rejected: '已驳回', production: '创作中', shooting: '拍摄中', publishing: '发布中', completed: '已完成',
 };
+type TopicEditDraft = Pick<Topic, 'title' | 'description'>;
 
 export default function MobileTopicDetail() {
   const { id } = useParams<{ id: string }>();
@@ -24,6 +25,7 @@ export default function MobileTopicDetail() {
   const [resources, setResources] = useState<TopicResource[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [edited, setEdited] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
@@ -35,8 +37,11 @@ export default function MobileTopicDetail() {
     try {
       const result = await getTopic(Number(id));
       setTopic(result);
-      setTitle(result.title);
-      setDescription(result.description ?? '');
+      const recovered = readSafeDraftValue<TopicEditDraft>(`topic:${id}:edit`);
+      setTitle(recovered?.title ?? result.title);
+      setDescription(recovered?.description ?? result.description ?? '');
+      setEdited(Boolean(recovered));
+      if (recovered) setNotice('已恢复未提交的本地修改；确认后再保存到服务器。');
       writeSafeDraft(`topic:${id}:view`, result);
       void getTopicResources(Number(id)).then(setResources).catch(() => undefined);
     } catch (error) {
@@ -53,10 +58,19 @@ export default function MobileTopicDetail() {
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!id || loading || !edited || !title.trim()) return;
+    writeSafeDraft<TopicEditDraft>(`topic:${id}:edit`, { title, description });
+  }, [description, edited, id, loading, title]);
 
   const save = async () => {
     if (!topic || !title.trim()) {
       setNotice('选题标题不能为空');
+      return;
+    }
+    if (networkState !== 'online') {
+      writeSafeDraft<TopicEditDraft>(`topic:${id}:edit`, { title, description });
+      setNotice('当前网络未恢复，修改已保存为本地草稿，尚未提交。');
       return;
     }
     setSaving(true);
@@ -64,6 +78,8 @@ export default function MobileTopicDetail() {
     try {
       await updateTopic(topic.id, { title: title.trim(), description });
       setTopic((current) => current ? { ...current, title: title.trim(), description } : current);
+      clearSafeDraft(`topic:${id}:edit`);
+      setEdited(false);
       setNotice('已保存');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '保存选题失败');
@@ -91,8 +107,8 @@ export default function MobileTopicDetail() {
     {loading ? <p className="text-sm text-studio-text-muted">正在加载选题…</p> : topic ? <>
       <div className="flex items-center justify-between rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><span className="text-sm text-studio-text-muted">当前状态</span><span className="rounded-full bg-studio-primary/15 px-3 py-1 text-sm text-studio-cyan">{topic.status}</span></div>
       <div className="grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl border border-studio-border-soft p-3"><p className="text-xs text-studio-text-muted">创建人</p><p className="mt-1 truncate">{topic.creator_name ?? '—'}</p></div><div className="rounded-xl border border-studio-border-soft p-3"><p className="text-xs text-studio-text-muted">更新时间</p><p className="mt-1 truncate">{topic.updated_at || '—'}</p></div></div>
-      <label className="block rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><span className="mb-2 block text-sm font-semibold">选题标题</span><input value={title} onChange={(event) => setTitle(event.target.value)} className="min-h-11 w-full rounded-xl border border-studio-border-soft bg-studio-bg px-3 text-sm outline-none focus:border-studio-cyan" /></label>
-      <label className="block rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><span className="mb-2 block text-sm font-semibold">选题说明</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-40 w-full resize-y rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm leading-6 outline-none focus:border-studio-cyan" placeholder="补充选题背景、目标受众和创作思路" /></label>
+      <label className="block rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><span className="mb-2 block text-sm font-semibold">选题标题</span><input value={title} onChange={(event) => { setEdited(true); setTitle(event.target.value); }} className="min-h-11 w-full rounded-xl border border-studio-border-soft bg-studio-bg px-3 text-sm outline-none focus:border-studio-cyan" /></label>
+      <label className="block rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><span className="mb-2 block text-sm font-semibold">选题说明</span><textarea value={description} onChange={(event) => { setEdited(true); setDescription(event.target.value); }} className="min-h-40 w-full resize-y rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm leading-6 outline-none focus:border-studio-cyan" placeholder="补充选题背景、目标受众和创作思路" /></label>
       <div className="grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl border border-studio-border-soft p-3"><p className="text-xs text-studio-text-muted">负责人</p><p className="mt-1">{topic.assignee_name ?? '未分配'}</p></div><div className="rounded-xl border border-studio-border-soft p-3"><p className="text-xs text-studio-text-muted">截止日期</p><p className="mt-1">{topic.deadline || '未设置'}</p></div></div>
       <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><h2 className="inline-flex items-center gap-2 text-sm font-semibold"><FolderOpen className="h-4 w-4 text-studio-cyan" />关联资料</h2>{resources.length ? <div className="mt-3 space-y-2">{resources.map((resource) => <p key={resource.id} className="truncate rounded-lg bg-studio-bg px-3 py-2 text-sm">{resource.title}</p>)}</div> : <p className="mt-2 text-sm text-studio-text-muted">暂无关联资料</p>}</section>
       {topic.history?.length ? <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><h2 className="inline-flex items-center gap-2 text-sm font-semibold"><Clock3 className="h-4 w-4 text-studio-cyan" />协作动态</h2><div className="mt-3 space-y-3">{topic.history.slice(0, 5).map((record) => <div key={record.id} className="border-l border-studio-border-soft pl-3 text-sm"><p>{record.operator_name ?? '成员'} · {record.action}</p><p className="mt-1 text-xs text-studio-text-muted">{record.comment || record.created_at}</p></div>)}</div></section> : null}

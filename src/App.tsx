@@ -55,6 +55,9 @@ const Home = lazyWithRetry(() => import('@/pages/Home'), 'Home');
 const MobileHome = lazyWithRetry(() => import('@/pages/mobile/MobileHome'), 'MobileHome');
 const Topics = lazyWithRetry(() => import('@/pages/Topics'), 'Topics');
 const MobileTopics = lazyWithRetry(() => import('@/pages/mobile/MobileTopics'), 'MobileTopics');
+const MobileMessages = lazyWithRetry(() => import('@/pages/mobile/MobileMessages'), 'MobileMessages');
+const MobileMe = lazyWithRetry(() => import('@/pages/mobile/MobileMe'), 'MobileMe');
+const MobileDaily = lazyWithRetry(() => import('@/pages/mobile/MobileDaily'), 'MobileDaily');
 const TopicDetail = lazyWithRetry(() => import('@/pages/TopicDetail'), 'TopicDetail');
 const AddTopic = lazyWithRetry(() => import('@/pages/AddTopic'), 'AddTopic');
 const Production = lazyWithRetry(() => import('@/pages/Production'), 'Production');
@@ -154,12 +157,13 @@ export default function App() {
                 <Route path="/asset-center/search" element={<ResourceSearch />} />
                 <Route path="/asset-center/projects" element={<ResourceLibrary fixedLibraryType="project" />} />
                 <Route path="/asset-center/media" element={<ResourceLibrary fixedLibraryType="media" />} />
-                <Route path="/messages" element={<Messages />} />
+                <Route path="/messages" element={isAndroid() ? <MobileMessages /> : <Messages />} />
                 <Route path="/kanban" element={<Kanban />} />
                 <Route path="/calendar" element={<CalendarPage />} />
                 <Route path="/inspirations" element={<Inspirations />} />
                 <Route path="/achievements" element={<Achievements />} />
                 <Route path="/anonymous-feedback" element={<AnonymousFeedback />} />
+                <Route path="/me" element={<MobileMe />} />
                 <Route path="/notification-settings" element={<NotificationSettings />} />
                 <Route path="/pomodoro" element={<PomodoroPage />} />
                 <Route element={<RoleGuard permissions={['workflow:shooting']} />}>
@@ -226,7 +230,7 @@ export default function App() {
                 <Route element={<RoleGuard permissions={['export:data']} />}>
                   <Route path="/export" element={<ExportPage />} />
                 </Route>
-                <Route path="/daily-report" element={<DailyReportPage />} />
+                <Route path="/daily-report" element={isAndroid() ? <MobileDaily /> : <DailyReportPage />} />
                 <Route path="/daily-report/team" element={<DailyReportPage />} />
                 <Route path="/daily-report/summary" element={<DailyReportPage />} />
                 <Route element={<RoleGuard permissions={['user:view']} />}>

@@ -10,7 +10,7 @@ const tabs = [
   { path: '/topics', label: '选题', icon: FileText },
   { path: '/production', label: '工作', icon: BriefcaseBusiness },
   { path: '/messages', label: '消息', icon: Bell },
-  { path: '/notification-settings', label: '我的', icon: Settings },
+  { path: '/me', label: '我的', icon: Settings },
 ];
 
 export function MobileShell({ user, unreadCount, onLogout }: { user: User | null; unreadCount: number; onLogout: () => void }) {
@@ -22,7 +22,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
     if (!isAndroid()) return;
     let lastBack = 0;
     const listener = App.addListener('backButton', () => {
-      if (location.pathname !== '/' && location.pathname !== '/topics' && location.pathname !== '/production' && location.pathname !== '/messages' && location.pathname !== '/notification-settings') {
+      if (location.pathname !== '/' && location.pathname !== '/topics' && location.pathname !== '/production' && location.pathname !== '/messages' && location.pathname !== '/me') {
         navigate(-1);
         return;
       }

@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.18.4',
+    date: '2026-08-13',
+    title: '正式部署版本 Gate 补齐',
+    impactScope: ['部署脚本'],
+    changes: [
+      { type: 'fix', description: '正式部署在服务重启前验证版本事实源一致。' },
+    ],
+  },
+  {
     version: '2.18.3',
     date: '2026-08-13',
     title: '正式部署 Gate 修复',

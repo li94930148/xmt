@@ -47,4 +47,5 @@
 - 精确 SHA 的 CI 状态查询将 `RATE_LIMITED` 与 `NETWORK_ERROR` 作为不可用状态单独报告，绝不将其推断为 CI 失败或成功。
 - 部署脚本在目标代码检出和 `npm ci` 后、服务重启前执行 `npm run migration:check`；依赖安装、迁移 gate 或构建失败时只恢复工作树，不重启仍在运行的旧服务。`REVIEW_REQUIRED`、`NO-GO` 或数据库信息不足都会终止无人值守部署，且不会执行 down migration。
 - v2.18.3 修复部署入口：要求显式 `TARGET_SHA_EXPECTED` 并对远端解析结果与检出结果双重校验；使用本次在线备份在重启前执行 Restore Drill，失败时旧服务继续运行。
+- v2.18.4 补齐部署前版本一致性 Gate；版本事实源不一致时在服务重启前停止并恢复工作树。
 - Web/Socket 协作状态仍是单实例运行态。部署脚本要求 PM2 目标应用恰好一个实例；未来横向扩容需先引入共享 Socket/协作状态与 leader/外部任务调度。

@@ -163,6 +163,9 @@ log "Target application commit: $TARGET_SHA"
 log "Installing target dependencies without restarting the live application"
 if ! npm ci; then restore_worktree_without_restart; fail "Dependency installation failed"; fi
 
+log "Checking target version consistency before service restart"
+if ! npm run version:check; then restore_worktree_without_restart; fail "Version consistency gate failed"; fi
+
 log "Running non-destructive restore drill for deployment backup"
 if ! npm run ops:backup-restore-drill -- --backup="$BACKUP_FILE"; then restore_worktree_without_restart; fail "Deployment backup restore drill failed"; fi
 

@@ -8,6 +8,7 @@ import {
   type LegacyCurrentUserResult,
   type LegacyLoginInput,
   type LegacyLoginResult,
+  type LegacyUpdateProfileInput,
 } from './auth.types.js';
 
 export type AuthServiceDependencies = {
@@ -90,6 +91,21 @@ export class AuthService {
     await this.dependencies.repository.updatePassword(userId, passwordHash);
     await this.dependencies.repository.clearForceChangePassword(userId);
     await this.dependencies.repository.writeActivityLog(userId, 'change_password', 'auth', '用户修改了密码');
+  }
+
+  async updateProfile(input: LegacyUpdateProfileInput): Promise<LegacyCurrentUserResult> {
+    if (!input.userId) throw new AuthServiceError('INVALID_CREDENTIALS');
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    const email = typeof input.email === 'string' ? input.email.trim() : '';
+    if (!name || name.length > 100 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      throw new AuthServiceError('INVALID_PROFILE');
+    }
+    const user = await this.dependencies.repository.findUserById(input.userId);
+    if (!user) throw new AuthServiceError('USER_NOT_FOUND');
+    if (!user.enabled) throw new AuthServiceError('ACCOUNT_DISABLED');
+    await this.dependencies.repository.updateProfile(user.id, { name, email });
+    await this.dependencies.repository.writeActivityLog(user.id, 'update_profile', 'auth', '用户更新了个人资料');
+    return this.getCurrentUser(user.id);
   }
 
   async logout(): Promise<void> {

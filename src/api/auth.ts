@@ -166,6 +166,19 @@ export async function getMe(accessToken?: string): Promise<User> {
   return response.json();
 }
 
+export async function updateMyProfile(data: { name: string; email: string }): Promise<User> {
+  const response = await fetch(`${BASE_URL}/auth/profile`, {
+    method: 'PUT',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || '更新个人资料失败');
+  }
+  return response.json();
+}
+
 export async function changePassword(oldPassword: string, newPassword: string): Promise<{ message: string }> {
   const response = await fetch(`${BASE_URL}/auth/change-password`, {
     method: 'POST',

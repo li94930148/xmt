@@ -40,6 +40,12 @@ export type LegacyChangePasswordInput = {
   newPassword?: unknown;
 };
 
+export type LegacyUpdateProfileInput = {
+  userId?: number;
+  name?: unknown;
+  email?: unknown;
+};
+
 export type AuthServiceErrorCode =
   | 'MISSING_CREDENTIALS'
   | 'INVALID_CREDENTIALS'
@@ -47,7 +53,8 @@ export type AuthServiceErrorCode =
   | 'USER_NOT_FOUND'
   | 'MISSING_PASSWORDS'
   | 'NEW_PASSWORD_TOO_SHORT'
-  | 'OLD_PASSWORD_INCORRECT';
+  | 'OLD_PASSWORD_INCORRECT'
+  | 'INVALID_PROFILE';
 
 export class AuthServiceError extends Error {
   constructor(public readonly code: AuthServiceErrorCode) {

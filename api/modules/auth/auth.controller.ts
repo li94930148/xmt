@@ -78,6 +78,21 @@ export class AuthController {
     }
   };
 
+  updateProfile = async (req: Request, res: Response) => {
+    try {
+      const result = await this.service.updateProfile({ userId: req.user?.id, name: req.body.name, email: req.body.email });
+      return res.json(result);
+    } catch (error) {
+      if (error instanceof AuthServiceError) {
+        if (error.code === 'INVALID_PROFILE') return res.status(400).json({ message: '请填写有效的姓名和邮箱' });
+        if (error.code === 'USER_NOT_FOUND') return res.status(404).json({ message: '用户不存在' });
+        if (error.code === 'ACCOUNT_DISABLED') return res.status(401).json({ message: '账号已被禁用' });
+        return res.status(401).json({ message: '未登录' });
+      }
+      return res.status(500).json({ message: '更新个人资料失败' });
+    }
+  };
+
   logout = async (_req: Request, res: Response) => {
     await this.service.logout();
     res.json({ message: '登出成功' });

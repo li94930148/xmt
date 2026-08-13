@@ -48,6 +48,14 @@ export class SqliteAuthRepository implements AuthRepository {
     ]);
   }
 
+  async updateProfile(userId: number, profile: { name: string; email: string }): Promise<void> {
+    await execute("UPDATE users SET name = ?, email = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", [
+      profile.name,
+      profile.email,
+      userId,
+    ]);
+  }
+
   async clearForceChangePassword(userId: number): Promise<void> {
     await execute('UPDATE users SET force_change_password = 0 WHERE id = ?', [userId]);
   }

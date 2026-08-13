@@ -1,6 +1,6 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { useAuthStore, useAppStore } from '../store';
-import { changePassword, updateUser, getSystemSettings, updateSystemSettings } from '../api';
+import { changePassword, updateMyProfile, getSystemSettings, updateSystemSettings } from '../api';
 import {
   createBackup,
   getBackupList,
@@ -274,8 +274,8 @@ export default function NotificationSettings() {
 
     setProfileSaving(true);
     try {
-      await updateUser(authStore.user.id, { name: profileName, email: profileEmail });
-      authStore.login({ ...authStore.user, name: profileName, email: profileEmail }, authStore.token!);
+      const profile = await updateMyProfile({ name: profileName, email: profileEmail });
+      authStore.login({ ...authStore.user, name: profile.name, email: profile.email }, authStore.token!);
       appStore.addNotification({ title: '保存成功', message: '个人资料已更新', type: 'success' });
     } catch (error) {
       appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });

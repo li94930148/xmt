@@ -226,6 +226,23 @@ async function changePasswordFreezeTests(token: string) {
   return (await newPasswordLogin.json() as { token: string }).token;
 }
 
+async function profileFreezeTests(token: string) {
+  const response = await fetch(`${baseUrl}/api/auth/profile`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '移动办公成员', email: 'mobile-profile@example.invalid' }),
+  });
+  assert.equal(response.status, 200);
+  const profile = await response.json() as { name: string; email: string };
+  assert.deepEqual({ name: profile.name, email: profile.email }, { name: '移动办公成员', email: 'mobile-profile@example.invalid' });
+  const invalid = await fetch(`${baseUrl}/api/auth/profile`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '', email: 'invalid-email' }),
+  });
+  assert.equal(invalid.status, 400);
+}
+
 async function logoutFreezeTest(token: string) {
   const headers = { authorization: `Bearer ${token}` };
   const logout = await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', headers });
@@ -242,6 +259,7 @@ try {
   await loginFailureTests();
   await authenticateFreezeTests(token);
   await getMeFreezeTests(token);
+  await profileFreezeTests(token);
   const tokenAfterPasswordChange = await changePasswordFreezeTests(token);
   await logoutFreezeTest(tokenAfterPasswordChange);
   console.log('Auth legacy behavior freeze tests passed');

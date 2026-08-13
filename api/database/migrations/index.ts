@@ -6,6 +6,7 @@ import { authSessionFoundationMigration } from './005_auth_session_foundation';
 import type { DatabaseMigration } from './types';
 import { dailyWorkspaceV2Migration } from './006_daily_workspace_v2';
 import { dailyLightweightRefactorMigration } from './007_daily_lightweight_refactor';
+import { mobileDeviceRegistryMigration } from './008_mobile_device_registry';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -15,4 +16,5 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   authSessionFoundationMigration,
   dailyWorkspaceV2Migration,
   dailyLightweightRefactorMigration,
+  mobileDeviceRegistryMigration,
 ];

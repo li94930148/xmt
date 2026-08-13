@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Menu, Moon, Search, Settings, Sun, User, LogOut, ChevronRight } from 'lucide-react';
-import { getMe, getPublicSystemSettings, getUnreadCount, mobileRefresh } from '../api';
+import { getMe, getPublicSystemSettings, getUnreadCount, mobileRefresh, registerMobileDevice, revokeMobileDevice } from '../api';
 import { useAuthStore, useAppStore, useMessageStore } from '../store';
 import { buildBreadcrumbs } from '../config/navigation';
 import Sidebar from './Sidebar';
@@ -127,6 +127,11 @@ export default function Layout() {
   const setUnreadCount = useMessageStore((state) => state.setUnreadCount);
 
   useSocket();
+
+  useEffect(() => {
+    if (!isAndroid() || !token) return;
+    void registerMobileDevice().catch(() => undefined);
+  }, [token]);
 
   // Android intentionally keeps access tokens out of WebView storage. Recreate it
   // from the Android Keystore credential at application start and rotate it once.
@@ -312,6 +317,7 @@ export default function Layout() {
 
   const handleLogout = useCallback(() => {
     if (isAndroid() && token) {
+      void revokeMobileDevice().catch(() => undefined);
       void apiFetch('/v1/auth/mobile/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
       void nativeRefreshCredentials.clear().catch(() => undefined);
       nativeUserProfile.clear();

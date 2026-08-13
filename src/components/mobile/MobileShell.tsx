@@ -5,6 +5,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { User } from '@/types';
 import { isAndroid } from '@/platform/runtime';
 import { useNetworkState } from '@/platform/network';
+import { resolveMobileDeepLink } from '@/platform/deep-link';
 
 const tabs = [
   { path: '/', label: '首页', icon: Home },
@@ -37,15 +38,8 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
 
   useEffect(() => {
     const onDeepLink = (event: Event) => {
-      try {
-        const url = new URL((event as CustomEvent<{ url?: string }>).detail?.url ?? '');
-        if (url.protocol !== 'xmt:') return;
-        const path = url.host === 'messages' ? '/messages'
-          : url.host === 'daily-report' ? '/daily-report'
-            : url.host === 'topics' ? `/topics${url.pathname}`
-              : url.host === 'production' ? `/production${url.pathname}` : null;
-        if (path) navigate(path);
-      } catch { /* Ignore invalid external URLs. */ }
+      const path = resolveMobileDeepLink((event as CustomEvent<{ url?: string }>).detail?.url ?? '');
+      if (path) navigate(path);
     };
     window.addEventListener('xmt-deep-link', onDeepLink);
     return () => window.removeEventListener('xmt-deep-link', onDeepLink);

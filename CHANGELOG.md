@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.19.0 - 2026-08-13
+
+### Android 移动办公
+
+- 新增 Capacitor Android 工程、移动底部导航、Safe Area、网络/前后台与返回键适配。
+- 增加平台运行时、HTTPS/WSS 端点配置、Android Keystore 刷新凭据存储与 Mobile Auth 合同。
+
 ## 2.18.4 - 2026-08-13
 
 ### Deployment safety

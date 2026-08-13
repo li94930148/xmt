@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Menu, Moon, Search, Settings, Sun, User, LogOut, ChevronRight } from 'lucide-react';
-import { getMe, getPublicSystemSettings, getUnreadCount } from '../api';
+import { getMe, getPublicSystemSettings, getUnreadCount, registerMobileDevice, revokeMobileDevice } from '../api';
 import { useAuthStore, useAppStore, useMessageStore } from '../store';
 import { buildBreadcrumbs } from '../config/navigation';
 import Sidebar from './Sidebar';
@@ -14,6 +14,12 @@ import { usePermission } from '../hooks/usePermission';
 import { getRoleDisplayName } from '../lib/roles';
 import { applyDocumentBranding } from '@/lib/systemSettings';
 import { AnimatedPage, AppShell, Topbar } from '@/components/studio';
+import { MobileShell } from '@/components/mobile/MobileShell';
+import { isAndroid } from '@/platform/runtime';
+import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
+import { apiFetch } from '@/api/transport';
+import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
 
 declare const __APP_VERSION__: string;
 
@@ -124,6 +130,24 @@ export default function Layout() {
 
   useSocket();
 
+  useEffect(() => {
+    if (!isAndroid() || !token) return;
+    void registerMobileDevice().catch(() => undefined);
+  }, [token]);
+
+  // The global transport redirects after a 401. Native refresh credentials are
+  // intentionally outside WebView storage, so clear them explicitly on the same
+  // event to prevent a revoked session from being retried after the next launch.
+  useEffect(() => {
+    if (!isAndroid()) return;
+    const clearNativeSession = () => {
+      void nativeRefreshCredentials.clear().catch(() => undefined);
+      nativeUserProfile.clear();
+    };
+    window.addEventListener('xmt-auth-expired', clearNativeSession);
+    return () => window.removeEventListener('xmt-auth-expired', clearNativeSession);
+  }, []);
+
   useKeyboardShortcuts({
     onCommandPalette: useCallback(() => setShowCmdPalette((value) => !value), []),
     onShowHelp: useCallback(() => setShowHelp(true), []),
@@ -141,6 +165,15 @@ export default function Layout() {
     // use rem units and must not scale with the user's body-text preference.
     document.documentElement.style.fontSize = '';
   }, [fontSize]);
+
+  // Keep Android system bars readable as the shared XMT theme changes. This
+  // remains a real-native-only effect so browser and Android UI preview modes
+  // never attempt to call a Capacitor plugin.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    void StatusBar.setStyle({ style: theme === 'dark' ? Style.Light : Style.Dark });
+    void StatusBar.setBackgroundColor({ color: theme === 'dark' ? '#0b1018' : '#f7f9fc' });
+  }, [theme]);
 
   useEffect(() => {
     let cancelled = false;
@@ -286,9 +319,15 @@ export default function Layout() {
   }, [navigate]);
 
   const handleLogout = useCallback(() => {
+    if (isAndroid() && token) {
+      void revokeMobileDevice().catch(() => undefined);
+      void apiFetch('/v1/auth/mobile/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
+      void nativeRefreshCredentials.clear().catch(() => undefined);
+      nativeUserProfile.clear();
+    }
     logout();
     navigate('/login', { replace: true });
-  }, [logout, navigate]);
+  }, [logout, navigate, token]);
 
   const settingsMenuLabel = hasPermission('system:settings') ? '设置中心' : '个人设置';
 
@@ -307,6 +346,10 @@ export default function Layout() {
   }
 
   const sidebarWidth = sidebarCollapsed ? '72px' : '232px';
+
+  if (isAndroid()) {
+    return <MobileShell user={user} unreadCount={unreadCount} onLogout={handleLogout} />;
+  }
 
   return (
     <AppShell

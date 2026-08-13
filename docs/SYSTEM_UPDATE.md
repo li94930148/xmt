@@ -2,7 +2,12 @@
 
 ## 当前版本
 
-v2.18.4
+v2.19.0
+
+## Android 移动办公升级
+
+- 新增 Capacitor Android Runtime、移动导航和安全网络配置。
+- 新增 Android Keystore 刷新凭据保护，以及复用 Auth V1 会话与轮换机制的移动认证合同。
 
 ## 安全与发布可靠性升级
 

@@ -149,6 +149,16 @@ export class AuthV1Controller {
     }
   };
 
+  /** Native credentials never use browser cookies or the web rollout allowlist. */
+  mobileLogin = async (req: Request, res: Response) => {
+    try {
+      const input = loginV1RequestSchema.parse({ ...req.body, client: { ...req.body?.client, type: 'android' } });
+      const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, 255) : null;
+      res.setHeader('Cache-Control', 'no-store');
+      return sendV1Success(req, res, await this.service.login(input, userAgent));
+    } catch (error) { return controllerError(req, res, error); }
+  };
+
   refresh = async (req: Request, res: Response) => {
     let migrationUserId: number | undefined;
     const refreshStartedAt = process.hrtime.bigint();
@@ -209,6 +219,14 @@ export class AuthV1Controller {
     }
   };
 
+  mobileRefresh = async (req: Request, res: Response) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const input = refreshRequestSchema.parse(req.body);
+      return sendV1Success(req, res, await this.service.refresh(input.refreshToken));
+    } catch (error) { return controllerError(req, res, error); }
+  };
+
   logout = async (req: Request, res: Response) => {
     try {
       res.setHeader('Cache-Control', 'no-store');
@@ -238,6 +256,14 @@ export class AuthV1Controller {
     } catch (error) {
       return controllerError(req, res, error);
     }
+  };
+
+  mobileLogout = async (_req: Request, res: Response) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      await this.service.logout(identity(res));
+      return sendV1Success(_req, res, null);
+    } catch (error) { return controllerError(_req, res, error); }
   };
 
   sessions = async (req: Request, res: Response) => {

@@ -34,10 +34,21 @@ jobs:
       - run: npm run test:auth
       - run: npm run test:rbac-invariant
       - run: npm run test:auth-session-service
+      - run: npm run test:auth-v1
       - run: npm run test:login-gateway
       - run: npm run test:socket
       - run: npm run test:socket-client-lifecycle
       - run: npm run test:socket-coordinator
+      - run: npm run test:origin-policy
+      - run: npm run test:mobile-safe-draft
+      - run: npm run test:mobile-network
+      - run: npm run test:mobile-message-category
+      - run: npm run test:mobile-back-button
+      - run: npm run test:mobile-deep-link
+      - run: npm run test:mobile-device-registry
+      - run: npm run test:daily-report-permissions
+      - run: npm run test:android-runtime
+      - run: npm run test:mobile-auth-runtime
       - run: npm run test:yjs-auth-recovery
       - run: npm run test:collaboration-access
       - run: npm run test:collaboration-socket-authorization
@@ -49,3 +60,24 @@ jobs:
       - run: npm run test:migration-readiness
       - run: npm run test:version-governance
       - run: npm run test:creator-sync-v2102
+
+  android-debug-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npm run check
+      - run: npm run mobile:sync
+      - run: cd android && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xmt-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk

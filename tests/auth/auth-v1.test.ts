@@ -84,12 +84,14 @@ try {
   assert.equal(isAuthV1Enabled({ XMT_AUTH_V1_ENABLED: 'true', NODE_ENV: 'production' }), false);
   assert.equal(isAuthV1Enabled({
     NODE_ENV: 'production',
+    XMT_AUTH_V1_ENABLED: 'true',
     XMT_AUTH_ROLLOUT_MODE: 'allowlist',
     XMT_AUTH_ROLLOUT_APPROVED: 'true',
     XMT_AUTH_WEB_ALLOWLIST_USER_IDS: String(userId),
   }), true);
   assert.equal(isAuthV1Enabled({
     NODE_ENV: 'production',
+    XMT_AUTH_V1_ENABLED: 'true',
     XMT_AUTH_ROLLOUT_MODE: 'percentage',
     XMT_AUTH_ROLLOUT_APPROVED: 'true',
     XMT_AUTH_ROLLOUT_PERCENTAGE: '100',
@@ -129,6 +131,43 @@ try {
   );
   assert(persisted);
   assert.notEqual(persisted.token_hash, login.data.refreshToken);
+
+  const mobileLoginResponse = await postJson(`${baseUrl}/api/v1/auth/mobile/login`, {
+    username: 'auth-v1-user',
+    password,
+    client: { type: 'web', deviceName: 'Android Contract Device', appVersion: '2.19.0' },
+  });
+  assert.equal(mobileLoginResponse.status, 200);
+  assert.equal(mobileLoginResponse.headers.get('cache-control'), 'no-store');
+  const mobileLogin = loginV1ResponseSchema.parse(await mobileLoginResponse.json());
+  assert.equal(mobileLogin.data.session.clientType, 'android');
+  assert(verifyAccessTokenV1(mobileLogin.data.accessToken));
+
+  const mobileRefreshResponse = await postJson(`${baseUrl}/api/v1/auth/mobile/refresh`, {
+    refreshToken: mobileLogin.data.refreshToken,
+  });
+  assert.equal(mobileRefreshResponse.status, 200);
+  const mobileRefresh = refreshResponseSchema.parse(await mobileRefreshResponse.json());
+  assert.notEqual(mobileRefresh.data.refreshToken, mobileLogin.data.refreshToken);
+  assert.equal(mobileRefresh.data.session.id, mobileLogin.data.session.id);
+
+  const mobileReplay = await postJson(`${baseUrl}/api/v1/auth/mobile/refresh`, {
+    refreshToken: mobileLogin.data.refreshToken,
+  });
+  assert.equal(mobileReplay.status, 401);
+  assert.equal(apiErrorSchema.parse(await mobileReplay.json()).error.code, 'AUTH_REFRESH_REUSED');
+
+  const mobileLogoutLoginResponse = await postJson(`${baseUrl}/api/v1/auth/mobile/login`, {
+    username: 'auth-v1-user', password, client: { type: 'android' },
+  });
+  const mobileLogoutLogin = loginV1ResponseSchema.parse(await mobileLogoutLoginResponse.json());
+  const mobileLogoutResponse = await postJson(`${baseUrl}/api/v1/auth/mobile/logout`, {}, mobileLogoutLogin.data.accessToken);
+  assert.equal(mobileLogoutResponse.status, 200);
+  const mobileAfterLogout = await fetch(`${baseUrl}/api/v1/auth/mobile/session`, {
+    headers: { authorization: `Bearer ${mobileLogoutLogin.data.accessToken}` },
+  });
+  assert.equal(mobileAfterLogout.status, 401);
+  assert.equal(apiErrorSchema.parse(await mobileAfterLogout.json()).error.code, 'AUTH_SESSION_REVOKED');
 
   const refreshResponse = await postJson(`${baseUrl}/api/v1/auth/refresh`, {
     refreshToken: login.data.refreshToken,

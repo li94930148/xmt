@@ -4,13 +4,14 @@ import { authenticate } from '../../middleware/auth.js';
 import { passwordChangeLimiter } from '../../middleware/rateLimit.js';
 import type { AuthController } from './auth.controller.js';
 
-type LegacyAuthHandlers = Pick<AuthController, 'login' | 'logout' | 'getMe' | 'changePassword'>;
+type LegacyAuthHandlers = Pick<AuthController, 'login' | 'logout' | 'getMe' | 'changePassword' | 'updateProfile'>;
 
 export function createLegacyAuthRouter(controller: LegacyAuthHandlers) {
   const router = express.Router();
   router.post('/login', loginIpLimiter, loginAccountLimiter, logFailedLogin, controller.login);
   router.post('/logout', authenticate, controller.logout);
   router.get('/me', authenticate, controller.getMe);
+  router.put('/profile', authenticate, controller.updateProfile);
   router.post('/change-password', passwordChangeLimiter, authenticate, controller.changePassword);
   return router;
 }

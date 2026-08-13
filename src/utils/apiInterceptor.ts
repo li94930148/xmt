@@ -4,6 +4,8 @@
  * - 网络断开提示
  */
 
+import { getApiBaseUrl, isNative } from '@/platform/runtime';
+
 let isRedirecting = false;
 
 // 包装 fetch，自动处理 401
@@ -21,14 +23,20 @@ function resolveRequestUrl(input: Parameters<typeof fetch>[0]) {
   return input.url;
 }
 
+function resolveRuntimeRequest(input: Parameters<typeof fetch>[0]): Parameters<typeof fetch>[0] {
+  if (!isNative() || typeof input !== 'string' || !input.startsWith('/api')) return input;
+  return `${getApiBaseUrl()}${input.slice('/api'.length)}`;
+}
+
 function isAuthRedirectCandidate(url: string) {
   return !url.includes('/api/auth/login');
 }
 
 window.fetch = async function (...args: Parameters<typeof fetch>): Promise<Response> {
   try {
-    const response = await originalFetch.apply(this, args);
-    const requestUrl = resolveRequestUrl(args[0]);
+    const request = resolveRuntimeRequest(args[0]);
+    const response = await originalFetch.call(this, request, args[1]);
+    const requestUrl = resolveRequestUrl(request);
 
     // Token 过期或未授权，跳转登录
     if (response.status === 401 && !isRedirecting && isAuthRedirectCandidate(requestUrl)) {

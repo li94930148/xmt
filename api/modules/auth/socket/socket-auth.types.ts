@@ -2,7 +2,7 @@ import type { JwtPayload } from '../token.service.js';
 import type { AuthSessionRecord } from '../session/session.types.js';
 import type { SessionService } from '../session/session.service.js';
 
-export type SocketAuthMode = 'legacy' | 'v1-web';
+export type SocketAuthMode = 'legacy' | 'v1-web' | 'v1-mobile';
 export type SocketTokenType = 'legacy' | 'access';
 
 export type SocketAuthContext = {

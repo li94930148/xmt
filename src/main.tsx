@@ -5,6 +5,11 @@ import './index.css'
 import './styles/print.css'
 import './utils/apiInterceptor'
 import { ReactBitsAppearanceProvider } from './features/reactbits-appearance/ReactBitsAppearanceProvider'
+import { assertNativeEndpointSecurity } from './platform/runtime'
+import { initializeNativeLifecycle } from './platform/lifecycle'
+
+assertNativeEndpointSecurity()
+void initializeNativeLifecycle(() => window.dispatchEvent(new Event('xmt-app-resume')))
 
 // 创建 QueryClient 实例
 const queryClient = new QueryClient({

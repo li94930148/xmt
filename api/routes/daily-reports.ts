@@ -57,7 +57,7 @@ router.get('/me', async (req, res) => {
   }
 });
 
-router.post('/draft', async (req, res) => {
+router.post('/draft', requirePermission('report:daily:submit'), async (req, res) => {
   try {
     const result = await saveDailyReportDraft(req.user, req.body as SaveDailyReportDraftInput);
     res.json({ success: true, data: result });
@@ -66,7 +66,7 @@ router.post('/draft', async (req, res) => {
   }
 });
 
-router.post('/autosave', async (req, res) => {
+router.post('/autosave', requirePermission('report:daily:submit'), async (req, res) => {
   try {
     const result = await autosaveDailyReport(req.user, req.body);
     res.json({ success: true, data: result });
@@ -112,7 +112,7 @@ router.delete('/templates/:id', requirePermission('report:template:delete'), asy
   } catch (error) { handleDailyReportError(error, res); }
 });
 
-router.post('/:id/submit', async (req, res) => {
+router.post('/:id/submit', requirePermission('report:daily:submit'), async (req, res) => {
   try {
     const result = await submitDailyReport(req.user, parseId(req.params.id));
     res.json({ success: true, data: result });

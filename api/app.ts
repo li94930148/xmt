@@ -22,6 +22,7 @@ import { verifyAccessTokenV1 } from './modules/auth/token.service.js'
 import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/socket.js'
 import { apiLimiter } from './middleware/rateLimit.js'
 import { parseTrustProxy } from './utils/trustProxy.js'
+import { isAllowedRequestOrigin, parseConfiguredOrigins } from './security/origin-policy.js'
 import authRoutes from './routes/auth.js'
 import topicsRoutes from './routes/topics.js'
 import topicResourcesRoutes from './routes/topic-resources.js'
@@ -99,74 +100,6 @@ const APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'packa
 
 const app: express.Application = express()
 
-const DEFAULT_ALLOWED_ORIGINS = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://localhost:5174',
-  'http://127.0.0.1:5174',
-]
-
-function parseConfiguredOrigins(value?: string) {
-  if (!value) {
-    return new Set(DEFAULT_ALLOWED_ORIGINS.map((origin) => origin.toLowerCase()))
-  }
-
-  return new Set(
-    value
-      .split(',')
-      .map((origin) => origin.trim().toLowerCase())
-      .filter(Boolean),
-  )
-}
-
-function isPrivateNetworkHost(hostname: string) {
-  const normalized = hostname.toLowerCase()
-
-  if (normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1') {
-    return true
-  }
-
-  const parts = normalized.split('.').map((part) => Number(part))
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
-    return false
-  }
-
-  const [first, second] = parts
-  if (first === 10 || first === 127) return true
-  if (first === 192 && second === 168) return true
-  if (first === 172 && second >= 16 && second <= 31) return true
-  return false
-}
-
-function normalizeOrigin(origin: string) {
-  try {
-    const url = new URL(origin)
-    if (!/^https?:$/i.test(url.protocol)) {
-      return null
-    }
-
-    return {
-      origin: url.origin.toLowerCase(),
-      hostname: url.hostname.toLowerCase(),
-    }
-  } catch {
-    return null
-  }
-}
-
-function normalizeHostHeader(hostHeader?: string) {
-  if (!hostHeader) return null
-  const trimmed = hostHeader.trim().toLowerCase()
-  if (!trimmed) return null
-
-  try {
-    const url = new URL(`http://${trimmed}`)
-    return url.host.toLowerCase()
-  } catch {
-    return null
-  }
-}
-
 // Production is client -> Caddy -> Node: trust exactly one proxy hop. Do not use `true`,
 // which would let a public client supply an arbitrary X-Forwarded-For address.
 app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY))
@@ -193,38 +126,17 @@ export { server }
 
 const allowedOrigins = parseConfiguredOrigins(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGINS)
 
-function isAllowedRequestOrigin(origin?: string, hostHeader?: string) {
-  if (!origin) return true
-
-  const normalizedOrigin = normalizeOrigin(origin)
-  if (!normalizedOrigin) return false
-
-  if (allowedOrigins.has(normalizedOrigin.origin)) {
-    return true
-  }
-
-  const normalizedHost = normalizeHostHeader(hostHeader)
-  if (normalizedHost && normalizedOrigin.origin === `http://${normalizedHost}`) {
-    return true
-  }
-  if (normalizedHost && normalizedOrigin.origin === `https://${normalizedHost}`) {
-    return true
-  }
-
-  return isPrivateNetworkHost(normalizedOrigin.hostname)
-}
-
 export const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (isAllowedRequestOrigin(origin)) return callback(null, true)
+      if (isAllowedRequestOrigin(origin, allowedOrigins)) return callback(null, true)
       callback(new Error('CORS not allowed'))
     },
     methods: ['GET', 'POST'],
     credentials: true,
   },
   allowRequest: (req, callback) => {
-    callback(null, isAllowedRequestOrigin(req.headers.origin, req.headers.host))
+    callback(null, isAllowedRequestOrigin(req.headers.origin, allowedOrigins))
   },
 })
 
@@ -279,13 +191,16 @@ function getEngineRequestTransport(requestUrl?: string): string {
 
 function logSocketAuthFailed(
   reason: string,
-  socket: { id?: string; handshake?: SocketHandshakeLike; conn?: { transport?: { name?: string } } },
+  socket: { id?: string; handshake?: SocketHandshakeLike & { auth?: unknown }; conn?: { transport?: { name?: string } } },
 ) {
+  const auth = socket.handshake?.auth as Record<string, unknown> | undefined
   console.warn('[Socket][auth failed]', {
     reason,
     socketId: socket.id,
     origin: getSocketOrigin(socket),
     transport: getSocketTransport(socket),
+    hasToken: typeof auth?.token === 'string' && auth.token.length > 0,
+    authMode: typeof auth?.mode === 'string' ? auth.mode : null,
   })
 }
 
@@ -315,7 +230,7 @@ io.engine.on('connection_error', (error: Error & {
 const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
   callback(null, {
     origin: (origin, allow) => {
-      if (isAllowedRequestOrigin(origin, req.headers.host)) return allow(null, true)
+      if (isAllowedRequestOrigin(origin, allowedOrigins)) return allow(null, true)
       allow(new Error('CORS not allowed'))
     },
     credentials: true,

@@ -45,6 +45,12 @@ test-results/
 # HTTPS certificates
 certs/
 
+# Android release-signing material (must be supplied outside the repository)
+*.jks
+*.keystore
+*.p12
+*.pfx
+
 # Database files and local production data
 data/
 *.db

@@ -2,6 +2,9 @@ import { useAuthStore } from '../store';
 import type { User } from '../types';
 import { adaptLoginResponse, type AuthLoginResult } from '../auth/web/login-response-adapter';
 import { emitAuthLoginDebugTrace } from '../auth/web/auth-login-debug';
+import { apiFetch } from './transport';
+
+declare const __APP_VERSION__: string;
 
 const BASE_URL = '/api';
 
@@ -127,11 +130,52 @@ export async function login(username: string, password: string): Promise<AuthLog
   return adaptLoginResponse(payload, { requestId, loginAttemptId });
 }
 
-export async function getMe(): Promise<User> {
+export async function mobileLogin(username: string, password: string): Promise<AuthLoginResult & { refreshToken: string }> {
+  let response: Response;
+  try {
+    response = await apiFetch('/v1/auth/mobile/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, client: { type: 'android', deviceName: 'XMT Android', appVersion: __APP_VERSION__ } }),
+    });
+  } catch { throw new LoginError('当前网络不可用，请检查连接后重试。', 'server_unavailable'); }
+  if (!response.ok) throw new LoginError(response.status === 401 ? '用户名或密码不正确，请检查后重试。' : '当前服务暂时不可用，请稍后再试。', response.status === 401 ? 'invalid_credentials' : 'server_unavailable', { status: response.status });
+  const payload = await response.json() as { data?: { refreshToken?: unknown } };
+  const refreshToken = payload.data?.refreshToken;
+  if (typeof refreshToken !== 'string' || refreshToken.length < 32) throw new LoginError('移动认证响应无效，请重试。', 'server_unavailable');
+  return { ...adaptLoginResponse(payload), refreshToken };
+}
+
+/** Rotates the Keystore-held credential and keeps the new access token in memory only. */
+export async function mobileRefresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+  const response = await apiFetch('/v1/auth/mobile/refresh', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }),
+  });
+  if (!response.ok) throw new Error('移动会话已失效');
+  const payload = await response.json() as { data?: { accessToken?: unknown; refreshToken?: unknown } };
+  const accessToken = payload.data?.accessToken;
+  const replacement = payload.data?.refreshToken;
+  if (typeof accessToken !== 'string' || typeof replacement !== 'string') throw new Error('移动会话响应无效');
+  return { accessToken, refreshToken: replacement };
+}
+
+export async function getMe(accessToken?: string): Promise<User> {
   const response = await fetch(`${BASE_URL}/auth/me`, {
-    headers: getAuthHeader(),
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : getAuthHeader(),
   });
   if (!response.ok) throw new Error('获取用户信息失败');
+  return response.json();
+}
+
+export async function updateMyProfile(data: { name: string; email: string }): Promise<User> {
+  const response = await fetch(`${BASE_URL}/auth/profile`, {
+    method: 'PUT',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || '更新个人资料失败');
+  }
   return response.json();
 }
 

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import Layout from '@/components/Layout';
@@ -6,6 +6,10 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import RealtimeToast from '@/components/RealtimeToast';
 import RoleGuard from '@/components/RoleGuard';
 import NotFound from '@/pages/NotFound';
+import { isAndroid } from '@/platform/runtime';
+import { useAuthStore } from '@/store';
+import { installNativeAuthRuntime, refreshNativeSession } from '@/auth/native/native-auth-runtime';
+import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
 
 function applyTheme(theme: 'light' | 'dark') {
   const root = document.documentElement;
@@ -51,7 +55,18 @@ function lazyWithRetry<T extends React.ComponentType<object>>(
 
 const Login = lazyWithRetry(() => import('@/pages/Login'), 'Login');
 const Home = lazyWithRetry(() => import('@/pages/Home'), 'Home');
+const MobileHome = lazyWithRetry(() => import('@/pages/mobile/MobileHome'), 'MobileHome');
 const Topics = lazyWithRetry(() => import('@/pages/Topics'), 'Topics');
+const MobileTopics = lazyWithRetry(() => import('@/pages/mobile/MobileTopics'), 'MobileTopics');
+const MobileMessages = lazyWithRetry(() => import('@/pages/mobile/MobileMessages'), 'MobileMessages');
+const MobileMe = lazyWithRetry(() => import('@/pages/mobile/MobileMe'), 'MobileMe');
+const MobileNotificationSettings = lazyWithRetry(() => import('@/pages/mobile/MobileNotificationSettings'), 'MobileNotificationSettings');
+const MobileDaily = lazyWithRetry(() => import('@/pages/mobile/MobileDaily'), 'MobileDaily');
+const MobileTopicDetail = lazyWithRetry(() => import('@/pages/mobile/MobileTopicDetail'), 'MobileTopicDetail');
+const MobileAddTopic = lazyWithRetry(() => import('@/pages/mobile/MobileAddTopic'), 'MobileAddTopic');
+const MobileWorkHub = lazyWithRetry(() => import('@/pages/mobile/MobileWorkHub'), 'MobileWorkHub');
+const MobileProduction = lazyWithRetry(() => import('@/pages/mobile/MobileProduction'), 'MobileProduction');
+const MobileProductionEditor = lazyWithRetry(() => import('@/pages/mobile/MobileProductionEditor'), 'MobileProductionEditor');
 const TopicDetail = lazyWithRetry(() => import('@/pages/TopicDetail'), 'TopicDetail');
 const AddTopic = lazyWithRetry(() => import('@/pages/AddTopic'), 'AddTopic');
 const Production = lazyWithRetry(() => import('@/pages/Production'), 'Production');
@@ -115,6 +130,42 @@ function PageLoading() {
   );
 }
 
+/**
+ * Runs before route guards so a cold Android start can exchange the Keystore
+ * refresh credential for an in-memory access token. Layout is protected, so
+ * placing this there would always redirect a restored session to /login first.
+ */
+function NativeSessionBootstrap({ children }: { children: React.ReactNode }) {
+  const token = useAuthStore((state) => state.token);
+  const tokenAtBoot = useRef(token);
+  const [ready, setReady] = useState(() => !isAndroid());
+
+  useEffect(() => {
+    if (!isAndroid()) return;
+    const removeRuntime = installNativeAuthRuntime();
+    let cancelled = false;
+
+    void (async () => {
+      if (!tokenAtBoot.current) {
+        try {
+          await refreshNativeSession();
+        } catch {
+          await nativeRefreshCredentials.clear().catch(() => undefined);
+          nativeUserProfile.clear();
+        }
+      }
+      if (!cancelled) setReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+      removeRuntime();
+    };
+  }, []);
+
+  return ready ? children : <PageLoading />;
+}
+
 export default function App() {
   useEffect(() => {
     const savedTheme = (localStorage.getItem('xmt_theme') as 'light' | 'dark') || 'dark';
@@ -125,22 +176,25 @@ export default function App() {
     <ErrorBoundary>
       <RealtimeToast />
       <Router>
-        <Suspense fallback={<PageLoading />}>
-          <Routes>
+        <NativeSessionBootstrap>
+          <Suspense fallback={<PageLoading />}>
+            <Routes>
             <Route path="/login" element={<Login />} />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<Layout />}>
-                <Route path="/" element={<Home />} />
-                <Route path="/home" element={<Home />} />
-                <Route path="/dashboard" element={<Home />} />
-                <Route path="/topics" element={<Topics />} />
+                <Route path="/" element={isAndroid() ? <MobileHome /> : <Home />} />
+                <Route path="/home" element={isAndroid() ? <MobileHome /> : <Home />} />
+                <Route path="/dashboard" element={isAndroid() ? <MobileHome /> : <Home />} />
+                <Route path="/topics" element={isAndroid() ? <MobileTopics /> : <Topics />} />
                 <Route element={<RoleGuard permissions={['topic:create']} />}>
-                  <Route path="/topics/add" element={<AddTopic />} />
+                  <Route path="/topics/add" element={isAndroid() ? <MobileAddTopic /> : <AddTopic />} />
                 </Route>
-                <Route path="/topics/:id" element={<TopicDetail />} />
-                <Route path="/production" element={<Production />} />
-                <Route path="/production/:id" element={<ProductionDetail />} />
+                <Route path="/topics/:id" element={isAndroid() ? <MobileTopicDetail /> : <TopicDetail />} />
+                <Route path="/production" element={isAndroid() ? <MobileWorkHub /> : <Production />} />
+                <Route path="/production/content" element={isAndroid() ? <MobileProduction /> : <Production />} />
+                <Route path="/production/content/:id" element={isAndroid() ? <MobileProductionEditor /> : <ProductionDetail />} />
+                <Route path="/production/:id" element={isAndroid() ? <MobileProductionEditor /> : <ProductionDetail />} />
                 <Route path="/shooting/:id" element={<ShootingDetail />} />
                 <Route path="/publishing/:id" element={<PublishingDetail />} />
                 <Route path="/resources" element={<Resources />} />
@@ -151,13 +205,14 @@ export default function App() {
                 <Route path="/asset-center/search" element={<ResourceSearch />} />
                 <Route path="/asset-center/projects" element={<ResourceLibrary fixedLibraryType="project" />} />
                 <Route path="/asset-center/media" element={<ResourceLibrary fixedLibraryType="media" />} />
-                <Route path="/messages" element={<Messages />} />
+                <Route path="/messages" element={isAndroid() ? <MobileMessages /> : <Messages />} />
                 <Route path="/kanban" element={<Kanban />} />
                 <Route path="/calendar" element={<CalendarPage />} />
                 <Route path="/inspirations" element={<Inspirations />} />
                 <Route path="/achievements" element={<Achievements />} />
                 <Route path="/anonymous-feedback" element={<AnonymousFeedback />} />
-                <Route path="/notification-settings" element={<NotificationSettings />} />
+                <Route path="/me" element={<MobileMe />} />
+                <Route path="/notification-settings" element={isAndroid() ? <MobileNotificationSettings /> : <NotificationSettings />} />
                 <Route path="/pomodoro" element={<PomodoroPage />} />
                 <Route element={<RoleGuard permissions={['workflow:shooting']} />}>
                   <Route path="/shooting" element={<Shooting />} />
@@ -223,7 +278,7 @@ export default function App() {
                 <Route element={<RoleGuard permissions={['export:data']} />}>
                   <Route path="/export" element={<ExportPage />} />
                 </Route>
-                <Route path="/daily-report" element={<DailyReportPage />} />
+                <Route path="/daily-report" element={isAndroid() ? <MobileDaily /> : <DailyReportPage />} />
                 <Route path="/daily-report/team" element={<DailyReportPage />} />
                 <Route path="/daily-report/summary" element={<DailyReportPage />} />
                 <Route element={<RoleGuard permissions={['user:view']} />}>
@@ -244,8 +299,9 @@ export default function App() {
             </Route>
 
             <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
+            </Routes>
+          </Suspense>
+        </NativeSessionBootstrap>
       </Router>
     </ErrorBoundary>
   );

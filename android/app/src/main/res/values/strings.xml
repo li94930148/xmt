@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">XMT</string>
+    <string name="title_activity_main">XMT</string>
+    <string name="package_name">com.lanyaomedia.xmt</string>
+    <string name="custom_url_scheme">com.lanyaomedia.xmt</string>
+</resources>

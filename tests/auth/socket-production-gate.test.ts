@@ -40,4 +40,9 @@ let middlewareError: Error | undefined;
 await middleware(socket as never, (error?: Error) => { middlewareError = error; });
 assert(middlewareError, 'protected role is rejected by the Socket bridge');
 
+const mobileSocket = { handshake: { auth: { token: 'v1-access', mode: 'v1-mobile' }, headers: {} }, data: {} };
+middlewareError = undefined;
+await middleware(mobileSocket as never, (error?: Error) => { middlewareError = error; });
+assert.equal(middlewareError, undefined, 'mobile v1 sessions bypass the web-only rollout allowlist');
+
 console.log('socket production gate tests passed');

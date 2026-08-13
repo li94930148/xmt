@@ -3,10 +3,12 @@ import { Network } from '@capacitor/network';
 import { Keyboard } from '@capacitor/keyboard';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen';
-import { isNative } from './runtime';
+import { Capacitor } from '@capacitor/core';
 
 export async function initializeNativeLifecycle(onResume: () => void) {
-  if (!isNative()) return () => undefined;
+  // `VITE_APP_PLATFORM=android` is a UI-development override. Native plugin
+  // listeners must only run inside an actual Capacitor runtime.
+  if (!Capacitor.isNativePlatform()) return () => undefined;
   await StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined);
   await SplashScreen.hide().catch(() => undefined);
   const listeners = await Promise.all([

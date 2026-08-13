@@ -83,6 +83,7 @@ export default function Toolbar({
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [compact, setCompact] = useState(false);
 
   // 检测工具栏宽度，自动折叠
   useEffect(() => {
@@ -91,6 +92,7 @@ export default function Toolbar({
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         setCollapsed(entry.contentRect.width < 700);
+        setCompact(entry.contentRect.width < 480);
       }
     });
     observer.observe(el);
@@ -114,7 +116,7 @@ export default function Toolbar({
   if (!editor) return null;
 
   const btnClass = (active?: boolean) =>
-    `p-1.5 rounded transition-colors ${
+    `inline-flex min-h-10 min-w-10 items-center justify-center rounded transition-colors ${
       active
         ? isDark
           ? 'bg-blue-600 text-white'
@@ -124,10 +126,10 @@ export default function Toolbar({
           : 'text-gray-600 hover:bg-gray-200'
     }`;
 
-  const divider = <div className={`w-px h-6 mx-1 shrink-0 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />;
+  const divider = <div className={`editor-toolbar-divider w-px h-6 mx-1 shrink-0 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />;
 
   const groupLabel = (text: string) => (
-    <span className={`text-[10px] font-medium uppercase tracking-wider select-none ${
+    <span className={`editor-group-label text-[10px] font-medium uppercase tracking-wider select-none ${
       isDark ? 'text-gray-500' : 'text-gray-400'
     }`}>
       {text}
@@ -529,12 +531,12 @@ export default function Toolbar({
   return (
     <div
       ref={toolbarRef}
-      className={`editor-toolbar shrink-0 flex items-center flex-wrap gap-1 px-3 py-2 border-b ${
+      className={`editor-toolbar shrink-0 flex items-center flex-wrap gap-1 px-3 py-2 border-b ${compact ? 'editor-toolbar-compact' : ''} ${
         isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
       }`}
     >
       {/* 文件组 */}
-      <div className="flex items-center gap-0.5 relative" ref={fileMenuRef}>
+      <div className={`flex items-center gap-0.5 relative ${compact ? 'hidden' : ''}`} ref={fileMenuRef}>
         {groupLabel('文件')}
         <button onClick={handlePrint} className={btnClass()} title="打印">
           <Printer className="w-4 h-4" />
@@ -562,7 +564,7 @@ export default function Toolbar({
         )}
       </div>
 
-      {divider}
+      {!compact && divider}
 
       {coreButtons}
 
@@ -635,7 +637,7 @@ export default function Toolbar({
 
       {/* 右侧：高级功能 */}
       <div className="flex-1" />
-      <div className="flex items-center gap-0.5">
+      <div className={`flex items-center gap-0.5 ${compact ? 'hidden' : ''}`}>
         {groupLabel('高级')}
         {onToggleToc && (
           <button
@@ -656,6 +658,7 @@ export default function Toolbar({
           </button>
         )}
       </div>
+      <style>{`.editor-toolbar-compact .editor-group-label{display:none}.editor-toolbar-compact .editor-toolbar-divider{display:none}`}</style>
     </div>
   );
 }

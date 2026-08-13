@@ -4,9 +4,10 @@ import { Browser } from '@capacitor/browser';
 export type RuntimeEnvironment = 'web-development' | 'web-production' | 'android-development' | 'android-production';
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
+const isAndroidDevelopmentOverride = () => import.meta.env.DEV && import.meta.env.VITE_APP_PLATFORM === 'android';
 
-export const isNative = () => Capacitor.isNativePlatform();
-export const isAndroid = () => Capacitor.getPlatform() === 'android';
+export const isAndroid = () => Capacitor.getPlatform() === 'android' || isAndroidDevelopmentOverride();
+export const isNative = () => Capacitor.isNativePlatform() || isAndroidDevelopmentOverride();
 export const isWeb = () => !isNative();
 
 export function getRuntimeEnvironment(): RuntimeEnvironment {

@@ -1,0 +1,10 @@
+import { Plus, Search } from 'lucide-react';
+import { useDeferredValue, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useTopics } from '@/hooks/useTopics';
+
+export default function MobileTopics() {
+  const navigate = useNavigate(); const [search, setSearch] = useState(''); const deferredSearch = useDeferredValue(search);
+  const { data, isLoading, refetch, isFetching } = useTopics({ search: deferredSearch || undefined, page: 1, limit: 50 });
+  return <div className="space-y-4"><div className="flex gap-2"><label className="flex min-h-11 flex-1 items-center gap-2 rounded-xl border border-studio-border-soft bg-studio-surface px-3"><Search className="h-4 w-4 text-studio-text-muted" /><input value={search} onChange={(event) => setSearch(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" placeholder="搜索选题" /></label><button onClick={() => navigate('/topics/add')} aria-label="新建选题" className="flex h-11 w-11 items-center justify-center rounded-xl bg-studio-primary text-white"><Plus className="h-5 w-5" /></button></div><button onClick={() => void refetch()} className="min-h-11 text-sm text-studio-cyan">{isFetching ? '刷新中…' : '下拉刷新不可用时，点击刷新'}</button>{isLoading ? <p className="text-sm text-studio-text-muted">正在加载选题…</p> : <div className="space-y-3">{(data?.data ?? []).map((topic) => <button key={topic.id} onClick={() => navigate(`/topics/${topic.id}`)} className="w-full rounded-2xl border border-studio-border-soft bg-studio-surface p-4 text-left"><div className="flex items-start justify-between gap-3"><h2 className="line-clamp-2 text-base font-semibold">{topic.title}</h2><span className="shrink-0 rounded-full bg-studio-primary/15 px-2 py-1 text-xs text-studio-cyan">{topic.status}</span></div><p className="mt-2 line-clamp-2 text-sm text-studio-text-secondary">{topic.description || '暂无选题说明'}</p><div className="mt-3 flex items-center justify-between text-xs text-studio-text-muted"><span>{topic.assignee_name ?? '未分配负责人'}</span><span>{topic.deadline || '未设置截止日期'}</span></div></button>)}</div>}</div>;
+}

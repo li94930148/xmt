@@ -6,6 +6,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import RealtimeToast from '@/components/RealtimeToast';
 import RoleGuard from '@/components/RoleGuard';
 import NotFound from '@/pages/NotFound';
+import { isAndroid } from '@/platform/runtime';
 
 function applyTheme(theme: 'light' | 'dark') {
   const root = document.documentElement;
@@ -51,7 +52,9 @@ function lazyWithRetry<T extends React.ComponentType<object>>(
 
 const Login = lazyWithRetry(() => import('@/pages/Login'), 'Login');
 const Home = lazyWithRetry(() => import('@/pages/Home'), 'Home');
+const MobileHome = lazyWithRetry(() => import('@/pages/mobile/MobileHome'), 'MobileHome');
 const Topics = lazyWithRetry(() => import('@/pages/Topics'), 'Topics');
+const MobileTopics = lazyWithRetry(() => import('@/pages/mobile/MobileTopics'), 'MobileTopics');
 const TopicDetail = lazyWithRetry(() => import('@/pages/TopicDetail'), 'TopicDetail');
 const AddTopic = lazyWithRetry(() => import('@/pages/AddTopic'), 'AddTopic');
 const Production = lazyWithRetry(() => import('@/pages/Production'), 'Production');
@@ -131,10 +134,10 @@ export default function App() {
 
             <Route element={<ProtectedRoute />}>
               <Route element={<Layout />}>
-                <Route path="/" element={<Home />} />
-                <Route path="/home" element={<Home />} />
-                <Route path="/dashboard" element={<Home />} />
-                <Route path="/topics" element={<Topics />} />
+                <Route path="/" element={isAndroid() ? <MobileHome /> : <Home />} />
+                <Route path="/home" element={isAndroid() ? <MobileHome /> : <Home />} />
+                <Route path="/dashboard" element={isAndroid() ? <MobileHome /> : <Home />} />
+                <Route path="/topics" element={isAndroid() ? <MobileTopics /> : <Topics />} />
                 <Route element={<RoleGuard permissions={['topic:create']} />}>
                   <Route path="/topics/add" element={<AddTopic />} />
                 </Route>

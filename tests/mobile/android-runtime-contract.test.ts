@@ -20,6 +20,13 @@ assert.match(debugManifest, /tools:replace="android:usesCleartextTraffic"/);
 assert.match(runtime, /VITE_ANDROID_ALLOW_CLEARTEXT/);
 assert.match(runtime, /getNativeEndpointConfigurationError/);
 assert.match(read('src/pages/Login.tsx'), /getNativeEndpointConfigurationError/);
+const errorBoundary = read('src/components/ErrorBoundary.tsx');
+assert.match(errorBoundary, /window\.location\.reload/);
+assert.match(errorBoundary, /复制诊断信息/);
+assert.match(errorBoundary, /import\.meta\.env\.DEV/);
+const layout = read('src/components/Layout.tsx');
+assert.match(layout, /StatusBar\.setStyle/);
+assert.match(layout, /StatusBar\.setBackgroundColor/);
 assert.match(manifest, /android:launchMode="singleTask"/);
 for (const host of ['topics', 'production', 'messages', 'daily-report']) {
   assert.match(manifest, new RegExp(`<data android:scheme="xmt" android:host="${host}"`));

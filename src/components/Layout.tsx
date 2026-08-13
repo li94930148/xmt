@@ -18,6 +18,8 @@ import { MobileShell } from '@/components/mobile/MobileShell';
 import { isAndroid } from '@/platform/runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
 import { apiFetch } from '@/api/transport';
+import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
 
 declare const __APP_VERSION__: string;
 
@@ -184,6 +186,15 @@ export default function Layout() {
     // use rem units and must not scale with the user's body-text preference.
     document.documentElement.style.fontSize = '';
   }, [fontSize]);
+
+  // Keep Android system bars readable as the shared XMT theme changes. This
+  // remains a real-native-only effect so browser and Android UI preview modes
+  // never attempt to call a Capacitor plugin.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    void StatusBar.setStyle({ style: theme === 'dark' ? Style.Light : Style.Dark });
+    void StatusBar.setBackgroundColor({ color: theme === 'dark' ? '#0b1018' : '#f7f9fc' });
+  }, [theme]);
 
   useEffect(() => {
     let cancelled = false;

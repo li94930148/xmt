@@ -1,7 +1,9 @@
+import { getRuntimeEnvironmentMetadata } from './runtime-env-loader.js';
+
 export type AuthRolloutMode = 'disabled' | 'legacy' | 'internal' | 'allowlist' | 'percentage';
 
 export type AuthRolloutRuntimeConfig = {
-  source: 'pm2_process_env';
+  source: 'runtime_env_file' | 'pm2_process_env' | 'development_env';
   loadedAt: string;
   processId: number;
   authV1Enabled: boolean;
@@ -40,6 +42,7 @@ function percentage(value: string | undefined): number {
 }
 
 export function createAuthRolloutRuntimeConfig(env: NodeJS.ProcessEnv = process.env): AuthRolloutRuntimeConfig {
+  const runtimeEnvironment = getRuntimeEnvironmentMetadata(env);
   const isProduction = env.NODE_ENV === 'production';
   const requested = env.XMT_AUTH_ROLLOUT_MODE?.trim().toLowerCase() as AuthRolloutMode | undefined;
   const rawMode = requested && MODES.has(requested)
@@ -69,7 +72,7 @@ export function createAuthRolloutRuntimeConfig(env: NodeJS.ProcessEnv = process.
   const mobileSocketApproved = env.XMT_MOBILE_SOCKET_APPROVED === 'true';
   const mobileSocketEnabled = mobileAuthEnabled && mobileSocketRequested && (!isProduction || mobileSocketApproved);
   return {
-    source: 'pm2_process_env', loadedAt: new Date().toISOString(), processId: process.pid,
+    source: runtimeEnvironment.source, loadedAt: runtimeEnvironment.loadedAt, processId: process.pid,
     authV1Enabled, authWebEnabled, loginRolloutEnabled, rolloutMode: baseMode, effectiveRolloutMode, productionApproved,
     percentageApproved: env.XMT_LOGIN_ROLLOUT_PERCENTAGE_APPROVED === 'true',
     adminProtected: env.XMT_LOGIN_ROLLOUT_ADMIN_PROTECTED !== 'false',
@@ -129,8 +132,6 @@ export function authRolloutRuntimeReadiness(runtime = authRolloutRuntimeConfig) 
   return {
     ...authRolloutRuntimeDiagnostics(runtime),
     socketBridgeApproval: runtime.socketBridgeApproval,
-    allowlistedUserIds: [...runtime.allowlistedUserIds],
-    mobileAllowlistedUserIds: [...runtime.mobileAllowlistedUserIds],
     observationWindowMinutes: runtime.observationWindowMinutes,
   };
 }

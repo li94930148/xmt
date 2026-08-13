@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.2', date: '2026-08-13', title: '内部接口与生产运行时配置硬化',
+    impactScope: ['生产安全', '部署运行时'],
+    changes: [
+      { type: 'security', description: '统一保护 /internal Direct Loopback 边界并拒绝反向代理转发访问。' },
+      { type: 'security', description: '建立生产运行环境确定性加载、回读与公网暴露部署门禁。' },
+    ],
+  },
+  {
     version: '2.19.1', date: '2026-08-13', title: '移动认证生产准入安全热修',
     impactScope: ['Android', '认证', 'Socket.IO'],
     changes: [

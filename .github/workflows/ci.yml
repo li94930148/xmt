@@ -40,6 +40,10 @@ jobs:
       - run: npm run test:socket-client-lifecycle
       - run: npm run test:socket-coordinator
       - run: npm run test:origin-policy
+      - run: npm run test:internal-access
+      - run: npm run test:runtime-env
+      - run: npm run test:production-bind
+      - run: npm run test:internal-exposure-gate
       - run: npm run test:mobile-safe-draft
       - run: npm run test:mobile-network
       - run: npm run test:mobile-message-category

@@ -58,6 +58,7 @@ const MobileTopics = lazyWithRetry(() => import('@/pages/mobile/MobileTopics'), 
 const MobileMessages = lazyWithRetry(() => import('@/pages/mobile/MobileMessages'), 'MobileMessages');
 const MobileMe = lazyWithRetry(() => import('@/pages/mobile/MobileMe'), 'MobileMe');
 const MobileDaily = lazyWithRetry(() => import('@/pages/mobile/MobileDaily'), 'MobileDaily');
+const MobileTopicDetail = lazyWithRetry(() => import('@/pages/mobile/MobileTopicDetail'), 'MobileTopicDetail');
 const TopicDetail = lazyWithRetry(() => import('@/pages/TopicDetail'), 'TopicDetail');
 const AddTopic = lazyWithRetry(() => import('@/pages/AddTopic'), 'AddTopic');
 const Production = lazyWithRetry(() => import('@/pages/Production'), 'Production');
@@ -144,7 +145,7 @@ export default function App() {
                 <Route element={<RoleGuard permissions={['topic:create']} />}>
                   <Route path="/topics/add" element={<AddTopic />} />
                 </Route>
-                <Route path="/topics/:id" element={<TopicDetail />} />
+                <Route path="/topics/:id" element={isAndroid() ? <MobileTopicDetail /> : <TopicDetail />} />
                 <Route path="/production" element={<Production />} />
                 <Route path="/production/:id" element={<ProductionDetail />} />
                 <Route path="/shooting/:id" element={<ShootingDetail />} />

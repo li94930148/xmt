@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.18.1",
+  "version": "2.18.2",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -40,6 +40,13 @@
     "test:production-version-sync": "tsx tests/workflow-production-version-sync.test.ts",
     "auth:production-preflight": "tsx scripts/auth-production-preflight.ts",
     "ops:auth-readiness": "tsx scripts/ops-auth-readiness.ts",
+    "ops:backup-restore-drill": "tsx scripts/backup-restore-drill.ts",
+    "migration:check": "tsx scripts/migration-readiness.ts",
+    "ops:ci-status": "tsx scripts/ci-status.ts",
+    "test:ops-ci-status": "tsx tests/ops/ci-status-decision.test.ts",
+    "test:backup-lock": "tsx tests/ops/backup-lock.test.ts",
+    "test:backup-restore-drill": "tsx tests/ops/backup-restore-drill.test.ts",
+    "test:migration-readiness": "tsx tests/ops/migration-readiness.test.ts",
     "auth:gray-readiness": "tsx scripts/auth-gray-readiness-check.ts",
     "test:auth-gray-readiness": "tsx tests/auth/auth-gray-readiness.test.ts",
     "test:auth-runtime-config": "tsx tests/auth/auth-runtime-config.test.ts",

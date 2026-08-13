@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import fs from 'fs';
@@ -6,12 +7,13 @@ import path from 'path';
 import { beijingNow } from '../database/utils';
 import { getDatabasePath } from '../database/path';
 import { db } from '../database/db';
+import { BackupLockBusyError, withBackupLock } from '../database/backup-lock.js';
 
 const router = Router();
 
 const DB_PATH = getDatabasePath();
 const BACKUP_DIR = path.join(path.dirname(DB_PATH), 'backups');
-const BACKUP_NAME = /^xmt-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.db$/;
+const BACKUP_NAME = /^xmt-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d+-[a-f0-9]{8})?\.db$/;
 
 // 确保备份目录存在
 function ensureBackupDir() {
@@ -29,8 +31,9 @@ function resolveBackupPath(name: unknown): string | null {
 
 // 创建备份
 async function createBackup(): Promise<string> {
+  return withBackupLock(async () => {
   ensureBackupDir();
-  const dateStr = beijingNow().replace(/[: ]/g, '-');
+  const dateStr = `${beijingNow().replace(/[: ]/g, '-')}-${process.pid}-${randomUUID().slice(0, 8)}`;
   const backupName = `xmt-${dateStr}.db`;
   const backupPath = path.join(BACKUP_DIR, backupName);
   const temporaryPath = `${backupPath}.tmp`;
@@ -46,6 +49,7 @@ async function createBackup(): Promise<string> {
   fs.renameSync(temporaryPath, backupPath);
 
   return backupName;
+  });
 }
 
 // 手动创建备份
@@ -54,6 +58,7 @@ router.post('/create', authenticate, requirePermission('system:backup'), async (
     const name = await createBackup();
     res.json({ message: '备份创建成功', name });
   } catch (error) {
+    if (error instanceof BackupLockBusyError) return res.status(409).json({ message: '备份正在进行', code: 'LOCK_BUSY' });
     res.status(500).json({ message: '备份创建失败', error: (error as Error).message });
   }
 });

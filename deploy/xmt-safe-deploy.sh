@@ -10,6 +10,7 @@ set -Eeuo pipefail
 APP_DIR="${APP_DIR:-/www/wwwroot/xmt}"
 DB_PATH="${DB_PATH:-$APP_DIR/data/xmt.db}"
 BACKUP_DIR="${BACKUP_DIR:-$APP_DIR/emergency-backup}"
+BACKUP_LOCK_PATH="${XMT_BACKUP_LOCK_PATH:-$(dirname "$DB_PATH")/.xmt-backup.lock}"
 PM2_APP="${PM2_APP:-xmt-api}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3001/api/health}"
 HOME_URL="${HOME_URL:-http://127.0.0.1:3001/}"
@@ -59,15 +60,24 @@ backup_database() {
   [ -f "$DB_PATH" ] || fail "Database file not found; refusing deploy without backup: $DB_PATH"
 
   install -d -m 0750 "$BACKUP_DIR"
-  local backup_file="$BACKUP_DIR/xmt-$(date +%Y%m%d-%H%M%S).db"
+  local backup_file="$BACKUP_DIR/xmt-$(date +%Y%m%d-%H%M%S)-$$.db"
 
   log "Backing up database before deploy"
-  sqlite3 "$DB_PATH" ".backup '$backup_file'"
+  local lock_directory="${BACKUP_LOCK_PATH}.d"
+  if ! mkdir "$lock_directory" 2>/dev/null; then
+    local owner="$(cat "$lock_directory/owner" 2>/dev/null || true)"
+    if [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; then rm -rf "$lock_directory"; mkdir "$lock_directory" || fail "Database backup lock recovery failed"; else fail "Database backup lock is busy"; fi
+  fi
+  trap 'rm -rf "$lock_directory"' RETURN
+  printf '%s\n' "$$" > "$lock_directory/owner"
+  sqlite3 "$DB_PATH" ".backup '$backup_file'" || fail "Database backup failed"
 
   [ -s "$backup_file" ] || fail "Database backup is empty: $backup_file"
   sqlite3 "$backup_file" "PRAGMA quick_check;" | grep -qx "ok" || fail "Database backup quick_check failed: $backup_file"
   sqlite3 "$backup_file" "SELECT count(*) FROM sqlite_master;" >/dev/null || fail "Database backup cannot be opened: $backup_file"
   log "Database backup created: $backup_file"
+  rm -rf "$lock_directory"
+  trap - RETURN
 }
 
 rollback_code() {
@@ -119,6 +129,7 @@ require_command sqlite3
 [ -d "$APP_DIR/.git" ] || fail "APP_DIR is not a Git checkout: $APP_DIR"
 
 cd "$APP_DIR"
+pm2 jlist | node -e "let s='';const n='$PM2_APP';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).filter(x=>x.name===n);if(p.length!==1){console.error('Expected exactly one PM2 app instance, found '+p.length);process.exit(1)}})" || fail "Single-instance runtime gate failed"
 backup_database
 
 PREVIOUS_SHA="$(git rev-parse HEAD)"
@@ -132,6 +143,9 @@ git pull --ff-only origin "$BRANCH"
 TARGET_SHA="$(git rev-parse HEAD)"
 DEPLOY_STARTED=1
 log "Target application commit: $TARGET_SHA"
+
+log "Checking migration rollback compatibility before dependency install or restart"
+npm run migration:check || fail "Migration compatibility gate did not return GO"
 
 log "Installing dependencies"
 npm ci

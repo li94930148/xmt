@@ -29,6 +29,9 @@
 - `RBAC-02`：角色与权限映射创建/替换改为完整事务，拒绝重复和不存在的权限 ID。
 - `BACKUP-01`：备份下载、删除只接受严格的 XMT 备份文件名，并校验解析路径仍在备份目录内。
 - `CI-01`：PR/main 增加 version、Auth、Socket、Yjs、Topic、API Contract、协作访问策略和真实 Socket.IO 授权黑盒的核心安全门禁；需要真实凭据的 smoke 不进入每次 PR。
+- `OPS-01`：`main` 已启用单一 Branch Protection：必须经 PR、严格要求 `fast-gate` 和 `core-security-contract`、管理员也不得绕过、禁止 force push 与删除；单维护者不要求额外批准。
+- `OPS-02`：API、systemd 与部署备份使用共享目录锁协议；Web 进程不再自行启动/定时备份，避免多实例与运维 timer 重复执行。
+- `OPS-03`：新增默认非破坏性 restore drill 与 migration compatibility Gate。历史 migration checksum 不变；未审查或阻止代码回滚的待执行 migration 默认阻止无人值守部署。
 
 ## 仅完成评估，未在本阶段修改
 
@@ -42,3 +45,4 @@
 - 协作策略现有真实 Socket.IO 黑盒测试，使用实际认证、JOIN、Yjs SYNC/UPDATE、awareness、typing 和临时测试数据库；覆盖越权、伪造身份、只读参与者、未 JOIN 写入、非法房间及断线后 disabled 重连。授权在每次连接和每次协作事件执行；在线已加入 Socket 的即时撤权仍不是本阶段能力。
 - 定时备份仍建议增加 `flock` 与定期 restore 演练。
 - 部署脚本的迁移兼容门禁应在下一阶段结合明确 migration runner 启动方式实施。
+- Web/Socket 协作状态仍是单实例运行态。部署脚本要求 PM2 目标应用恰好一个实例；未来横向扩容需先引入共享 Socket/协作状态与 leader/外部任务调度。

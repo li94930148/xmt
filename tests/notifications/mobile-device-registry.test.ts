@@ -41,6 +41,10 @@ try {
   const revoked = await fetch(`${baseUrl}/mobile-devices/device-1`, { method: 'DELETE', headers: authorization });
   assert.equal(revoked.status, 204);
   assert.equal(typeof (await queryOne<Record<string, unknown>>('SELECT revoked_at FROM mobile_devices WHERE user_id = ? AND device_id = ?', [userId, 'device-1']))?.revoked_at, 'string');
+  const channels = await fetch(`${baseUrl}/channels`, { headers: authorization });
+  assert.equal(channels.status, 200);
+  const androidPush = (await channels.json()).find((channel: { id: string }) => channel.id === 'android_push');
+  assert.equal(androidPush.enabled, false);
   console.log('Mobile device registry contract tests passed');
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

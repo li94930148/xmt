@@ -8,6 +8,10 @@ function boundedString(value: unknown, maxLength: number) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
 
+function isAndroidPushEnabled() {
+  return process.env.XMT_ANDROID_PUSH_ENABLED === 'true';
+}
+
 // Registration prepares a device for a future push provider. No token is logged
 // and no notification is sent from this endpoint.
 router.post('/mobile-devices', authenticate, async (req, res) => {
@@ -87,7 +91,7 @@ router.get('/channels', authenticate, async (req, res) => {
     { id: 'web', name: '站内通知', description: '通过站内消息中心接收通知' },
     { id: 'email', name: '邮件通知', description: '通过邮件接收通知（需配置邮箱）' },
     { id: 'webhook', name: 'Webhook', description: '通过 HTTP 回调接收通知' },
-    { id: 'android_push', name: 'Android 推送', description: '需要管理员启用推送提供方并配置 Firebase。' },
+    { id: 'android_push', name: 'Android 推送', enabled: isAndroidPushEnabled(), description: isAndroidPushEnabled() ? 'Android 推送提供方已启用。' : '需由管理员启用 XMT_ANDROID_PUSH_ENABLED 并配置 Firebase。' },
   ]);
 });
 

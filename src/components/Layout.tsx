@@ -154,6 +154,19 @@ export default function Layout() {
     return () => { cancelled = true; };
   }, [loginUser, token]);
 
+  // The global transport redirects after a 401. Native refresh credentials are
+  // intentionally outside WebView storage, so clear them explicitly on the same
+  // event to prevent a revoked session from being retried after the next launch.
+  useEffect(() => {
+    if (!isAndroid()) return;
+    const clearNativeSession = () => {
+      void nativeRefreshCredentials.clear().catch(() => undefined);
+      nativeUserProfile.clear();
+    };
+    window.addEventListener('xmt-auth-expired', clearNativeSession);
+    return () => window.removeEventListener('xmt-auth-expired', clearNativeSession);
+  }, []);
+
   useKeyboardShortcuts({
     onCommandPalette: useCallback(() => setShowCmdPalette((value) => !value), []),
     onShowHelp: useCallback(() => setShowHelp(true), []),

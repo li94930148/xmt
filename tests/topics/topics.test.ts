@@ -138,6 +138,17 @@ async function serviceTests() {
     () => invalidStateService.auditTopic({ id: testUserId, role: 'admin' }, 20, { status: 'approved', comment: '' }),
     'TOPIC_INVALID_TRANSITION',
   );
+
+  const pendingStateService = new TopicService({
+    repository: fakeRepository({ ...ownedByOther, creator_id: testUserId }) as never,
+    policy: currentTopicPolicy,
+    notify: () => undefined,
+    broadcast: () => undefined,
+  });
+  await expectServiceError(
+    () => pendingStateService.transitionTopic({ id: testUserId, role: 'admin' }, 20, { status: 'approved' }),
+    'TOPIC_INVALID_TRANSITION',
+  );
 }
 
 async function apiTests() {

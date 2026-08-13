@@ -173,6 +173,9 @@ export class TopicService {
     if (!this.dependencies.policy.canEditTopic(actor, topic)) {
       throw new TopicServiceError('TOPIC_FORBIDDEN', '无权限修改此选题状态');
     }
+    if (topic.status === 'pending') {
+      throw new TopicServiceError('TOPIC_INVALID_TRANSITION', '待审核选题只能通过审核操作变更状态');
+    }
     if (!isValidTransition(topic.status, input.status)) {
       throw new TopicServiceError(
         'TOPIC_INVALID_TRANSITION',

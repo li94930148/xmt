@@ -1,8 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { queryOne } from '../database/utils';
 import { verifyToken } from '../utils/jwt';
+import { verifyAccessTokenV1 } from '../modules/auth/token.service';
+import { SessionService } from '../modules/auth/session/session.service';
+import { SqliteSessionRepository } from '../modules/auth/session/session.sqlite-repository';
 import { User } from '../types';
 import { sendV1Error } from '../utils/response';
+
+const sessionService = new SessionService({ repository: new SqliteSessionRepository() });
 
 /* eslint-disable @typescript-eslint/no-namespace */
 declare global {
@@ -33,16 +38,36 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   }
   
   try {
-    const payload = verifyToken(token);
-    
-    if (!payload) {
+    const legacyPayload = verifyToken(token);
+    let userId = Number(legacyPayload?.userId);
+
+    // The legacy verifier deliberately does not constrain issuer/audience, so it can
+    // decode a V1 token without producing a legacy userId. Recognise V1 explicitly
+    // and check its server-side session before allowing it onto legacy business APIs.
+    if (!Number.isSafeInteger(userId) || userId <= 0) {
+      const accessPayload = verifyAccessTokenV1(token);
+      if (accessPayload) {
+        const sessionResult = await sessionService.getSession(accessPayload.sid);
+        const sessionUserId = Number(accessPayload.sub);
+        if (
+          sessionResult.state === 'ACTIVE' &&
+          sessionResult.session?.userId === sessionUserId &&
+          Number.isSafeInteger(sessionUserId) &&
+          sessionUserId > 0
+        ) {
+          userId = sessionUserId;
+        }
+      }
+    }
+
+    if (!Number.isSafeInteger(userId) || userId <= 0) {
       if (req.originalUrl.startsWith('/api/v1/')) {
         return sendV1Error(req, res, { code: 'AUTH_REQUIRED', message: '登录已过期，请重新登录' }, 401);
       }
       return res.status(401).json({ message: '登录已过期，请重新登录' });
     }
     
-    const result = await queryOne(`SELECT * FROM users WHERE id = ?`, [payload.userId]);
+    const result = await queryOne(`SELECT * FROM users WHERE id = ?`, [userId]);
     
     if (!result) {
       if (req.originalUrl.startsWith('/api/v1/')) {

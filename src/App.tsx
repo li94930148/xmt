@@ -59,6 +59,7 @@ const MobileMessages = lazyWithRetry(() => import('@/pages/mobile/MobileMessages
 const MobileMe = lazyWithRetry(() => import('@/pages/mobile/MobileMe'), 'MobileMe');
 const MobileDaily = lazyWithRetry(() => import('@/pages/mobile/MobileDaily'), 'MobileDaily');
 const MobileTopicDetail = lazyWithRetry(() => import('@/pages/mobile/MobileTopicDetail'), 'MobileTopicDetail');
+const MobileAddTopic = lazyWithRetry(() => import('@/pages/mobile/MobileAddTopic'), 'MobileAddTopic');
 const MobileWorkHub = lazyWithRetry(() => import('@/pages/mobile/MobileWorkHub'), 'MobileWorkHub');
 const MobileProduction = lazyWithRetry(() => import('@/pages/mobile/MobileProduction'), 'MobileProduction');
 const MobileProductionEditor = lazyWithRetry(() => import('@/pages/mobile/MobileProductionEditor'), 'MobileProductionEditor');
@@ -146,7 +147,7 @@ export default function App() {
                 <Route path="/dashboard" element={isAndroid() ? <MobileHome /> : <Home />} />
                 <Route path="/topics" element={isAndroid() ? <MobileTopics /> : <Topics />} />
                 <Route element={<RoleGuard permissions={['topic:create']} />}>
-                  <Route path="/topics/add" element={<AddTopic />} />
+                  <Route path="/topics/add" element={isAndroid() ? <MobileAddTopic /> : <AddTopic />} />
                 </Route>
                 <Route path="/topics/:id" element={isAndroid() ? <MobileTopicDetail /> : <TopicDetail />} />
                 <Route path="/production" element={isAndroid() ? <MobileWorkHub /> : <Production />} />

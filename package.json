@@ -47,6 +47,7 @@
     "test:backup-lock": "tsx tests/ops/backup-lock.test.ts",
     "test:backup-restore-drill": "tsx tests/ops/backup-restore-drill.test.ts",
     "test:migration-readiness": "tsx tests/ops/migration-readiness.test.ts",
+    "test:version-governance": "node tests/ops/version-governance.test.mjs",
     "auth:gray-readiness": "tsx scripts/auth-gray-readiness-check.ts",
     "test:auth-gray-readiness": "tsx tests/auth/auth-gray-readiness.test.ts",
     "test:auth-runtime-config": "tsx tests/auth/auth-runtime-config.test.ts",

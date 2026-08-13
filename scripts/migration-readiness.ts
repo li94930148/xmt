@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createClient } from '@libsql/client';
 import { databaseMigrations } from '../api/database/migrations/index.js';
 import { migrationPolicies } from '../api/database/migrations/policy.js';
+import { assessMigrationReadiness } from '../api/modules/ops/migration-readiness-decision.js';
 
 type Status = 'PASS' | 'FAIL' | 'UNKNOWN';
 const dbPath = process.env.XMT_DB_PATH || path.join(process.cwd(), 'data/xmt.db');
@@ -13,21 +14,11 @@ else {
   const client = createClient({ url: `file:${dbPath}` });
   try {
     const records = await client.execute('SELECT version, name, checksum, status FROM database_migrations');
-    const applied = new Map(records.rows.map((row) => [String(row.version), row]));
-    let review = false; let failed = false;
-    for (const migration of databaseMigrations) {
-      const policy = migrationPolicies[migration.version]; const existing = applied.get(migration.version);
-      if (!policy) { failed = true; checks[`migration_${migration.version}`] = { status: 'FAIL', reason: '缺少兼容性分类' }; continue; }
-      if (existing && (String(existing.status) !== 'applied' || String(existing.name) !== migration.name || String(existing.checksum) !== migration.checksum)) {
-        failed = true; checks[`migration_${migration.version}`] = { status: 'FAIL', reason: '已应用迁移状态或校验和不一致' }; continue;
-      }
-      if (!existing && policy === 'BLOCKED_FOR_ROLLBACK') { failed = true; checks[`migration_${migration.version}`] = { status: 'FAIL', reason: '迁移阻止应用代码回滚' }; continue; }
-      if (!existing && policy === 'REVIEW_REQUIRED') { review = true; checks[`migration_${migration.version}`] = { status: 'UNKNOWN', reason: '迁移需要人工兼容性审查' }; continue; }
-      checks[`migration_${migration.version}`] = { status: 'PASS' };
-    }
+    const assessment = assessMigrationReadiness(databaseMigrations, migrationPolicies, records.rows.map((row) => ({ version: String(row.version), name: String(row.name), checksum: String(row.checksum), status: String(row.status) })));
+    Object.assign(checks, assessment.checks);
     checks.database = { status: 'PASS' };
-    result(failed ? 'NO-GO' : review ? 'REVIEW_REQUIRED' : 'GO');
-    if (failed || review) process.exitCode = 1;
+    result(assessment.decision);
+    if (assessment.decision !== 'GO') process.exitCode = 1;
   } catch (error) { checks.database = { status: 'UNKNOWN', reason: error instanceof Error ? error.message : String(error) }; result('INSUFFICIENT_DATA'); process.exitCode = 1; }
   finally { client.close(); }
 }

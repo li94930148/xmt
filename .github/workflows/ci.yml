@@ -47,4 +47,5 @@ jobs:
       - run: npm run test:backup-lock
       - run: npm run test:backup-restore-drill
       - run: npm run test:migration-readiness
+      - run: npm run test:version-governance
       - run: npm run test:creator-sync-v2102

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '@libsql/client';
 import { databaseMigrations } from '../../api/database/migrations/index.js';
+import { assessMigrationReadiness } from '../../api/modules/ops/migration-readiness-decision.js';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-migration-readiness-test-'));
 const database = path.join(directory, 'xmt.db');
@@ -18,5 +19,8 @@ await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?',
 const review = run(); assert.notEqual(review.status, 0); assert.match(review.stdout, /REVIEW_REQUIRED/);
 await client.execute({ sql: 'INSERT INTO database_migrations (version, name, checksum, status) VALUES (?, ?, ?, ?)', args: ['006', databaseMigrations.find((migration) => migration.version === '006')!.name, 'invalid', 'applied'] });
 const failed = run(); assert.notEqual(failed.status, 0); assert.match(failed.stdout, /NO-GO/);
+const sample = [{ version: 'test', name: 'test', checksum: 'checksum' }];
+assert.equal(assessMigrationReadiness(sample, {}, []).decision, 'NO-GO', 'unknown metadata blocks deployment');
+assert.equal(assessMigrationReadiness(sample, { test: 'BLOCKED_FOR_ROLLBACK' }, []).decision, 'NO-GO', 'destructive migration blocks rollback safety');
 client.close(); fs.rmSync(directory, { recursive: true, force: true });
 console.log('migration readiness tests passed');

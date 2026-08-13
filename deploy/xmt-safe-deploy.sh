@@ -56,6 +56,10 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
 }
 
+process_start_time() {
+  awk '{print $22}' "/proc/$1/stat" 2>/dev/null || true
+}
+
 backup_database() {
   [ -f "$DB_PATH" ] || fail "Database file not found; refusing deploy without backup: $DB_PATH"
 
@@ -64,12 +68,14 @@ backup_database() {
 
   log "Backing up database before deploy"
   local lock_directory="${BACKUP_LOCK_PATH}.d"
-  if ! mkdir "$lock_directory" 2>/dev/null; then
-    local owner="$(cat "$lock_directory/owner" 2>/dev/null || true)"
-    if [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; then rm -rf "$lock_directory"; mkdir "$lock_directory" || fail "Database backup lock recovery failed"; else fail "Database backup lock is busy"; fi
+  if ! mkdir -m 0700 "$lock_directory" 2>/dev/null; then
+    [[ -d "$lock_directory" && ! -L "$lock_directory" ]] || fail "Database backup lock is busy"
+    local owner="$(cat "$lock_directory/owner" 2>/dev/null || true)" owner_pid owner_start actual_start
+    IFS=: read -r owner_pid owner_start <<< "$owner"; actual_start="$(process_start_time "$owner_pid")"
+    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && { ! kill -0 "$owner_pid" 2>/dev/null || { [[ -n "$owner_start" && -n "$actual_start" && "$owner_start" != "$actual_start" ]]; }; }; then rm -rf "$lock_directory"; mkdir -m 0700 "$lock_directory" || fail "Database backup lock recovery failed"; else fail "Database backup lock is busy"; fi
   fi
   trap 'rm -rf "$lock_directory"' RETURN
-  printf '%s\n' "$$" > "$lock_directory/owner"
+  printf '%s:%s\n' "$$" "$(process_start_time "$$")" > "$lock_directory/owner"
   sqlite3 "$DB_PATH" ".backup '$backup_file'" || fail "Database backup failed"
 
   [ -s "$backup_file" ] || fail "Database backup is empty: $backup_file"
@@ -97,6 +103,11 @@ rollback_code() {
     log "Application rollback could not be verified; manual intervention is required"
   fi
   exit "$failed_status"
+}
+
+restore_worktree_without_restart() {
+  log "Preparation failed; restoring checked-out files to $PREVIOUS_SHA without restarting the live application"
+  git checkout --detach "$PREVIOUS_SHA" || true
 }
 
 check_health() {
@@ -134,25 +145,25 @@ backup_database
 
 PREVIOUS_SHA="$(git rev-parse HEAD)"
 log "Previous application commit: $PREVIOUS_SHA"
-trap rollback_code ERR
 
 log "Fetching and updating code"
-git fetch origin "$BRANCH"
-git checkout "$BRANCH"
-git pull --ff-only origin "$BRANCH"
+git fetch origin "$BRANCH" || fail "Unable to fetch target branch"
+git checkout "$BRANCH" || fail "Unable to check out target branch"
+if ! git pull --ff-only origin "$BRANCH"; then restore_worktree_without_restart; fail "Unable to fast-forward target branch"; fi
 TARGET_SHA="$(git rev-parse HEAD)"
-DEPLOY_STARTED=1
 log "Target application commit: $TARGET_SHA"
 
-log "Checking migration rollback compatibility before dependency install or restart"
-npm run migration:check || fail "Migration compatibility gate did not return GO"
+log "Installing target dependencies without restarting the live application"
+if ! npm ci; then restore_worktree_without_restart; fail "Dependency installation failed"; fi
 
-log "Installing dependencies"
-npm ci
+log "Checking migration rollback compatibility before service restart"
+if ! npm run migration:check; then restore_worktree_without_restart; fail "Migration compatibility gate did not return GO"; fi
 
-log "Running local verification"
-npm run check
-npm run build
+log "Running target verification before service restart"
+if ! npm run check || ! npm run build; then restore_worktree_without_restart; fail "Target verification failed"; fi
+
+DEPLOY_STARTED=1
+trap rollback_code ERR
 
 log "Restarting PM2 app: $PM2_APP"
 pm2 describe "$PM2_APP" >/dev/null || fail "PM2 app not found: $PM2_APP"

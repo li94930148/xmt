@@ -15,5 +15,10 @@ assert.equal(fs.existsSync(`${lock}.d`), false);
 fs.mkdirSync(`${lock}.d`); fs.writeFileSync(path.join(`${lock}.d`, 'owner'), '99999999');
 await withBackupLock(async () => undefined, lock);
 assert.equal(fs.existsSync(`${lock}.d`), false);
+if (fs.existsSync('/proc/self/stat')) {
+  fs.mkdirSync(`${lock}.d`); fs.writeFileSync(path.join(`${lock}.d`, 'owner'), `${process.pid}:not-the-current-start-time`);
+  await withBackupLock(async () => undefined, lock);
+  assert.equal(fs.existsSync(`${lock}.d`), false);
+}
 fs.rmSync(directory, { recursive: true, force: true });
 console.log('backup lock tests passed');

@@ -1,8 +1,12 @@
 export type CiDecision = 'PASS' | 'FAIL' | 'IN_PROGRESS' | 'NO_RUN' | 'UNAVAILABLE';
 export type CiJob = { name: string; status: string; conclusion?: string | null };
 
+export function unavailableCiStatus(apiStatus: 'NETWORK_ERROR' | 'RATE_LIMITED' = 'NETWORK_ERROR', reason?: string) {
+  return { decision: 'UNAVAILABLE' as const, checks: { api: apiStatus }, ...(reason ? { reason } : {}) };
+}
+
 export function assessCiStatus(sha: string, runs: Array<{ head_sha: string; name: string; status: string; conclusion?: string | null; jobs?: CiJob[] }> | null): { decision: CiDecision; checks: Record<string, string>; reason?: string } {
-  if (!runs) return { decision: 'UNAVAILABLE', checks: { api: 'UNKNOWN' }, reason: 'GitHub API unavailable' };
+  if (!runs) return unavailableCiStatus();
   const run = runs.find((item) => item.head_sha === sha && item.name === 'CI');
   if (!run) return { decision: 'NO_RUN', checks: { run: 'MISSING' }, reason: 'No CI run for exact SHA' };
   const jobs = run.jobs || [];

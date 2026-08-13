@@ -1,11 +1,15 @@
-import { assessCiStatus } from '../api/modules/ops/ci-status-decision.js';
+import { assessCiStatus, unavailableCiStatus } from '../api/modules/ops/ci-status-decision.js';
 const sha = process.argv[2];
 if (!sha || !/^[a-f0-9]{7,64}$/i.test(sha)) throw new Error('用法: npm run ops:ci-status -- <commit-sha>');
 const headers: Record<string, string> = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
 if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
 try {
   const response = await fetch(`https://api.github.com/repos/li94930148/xmt/actions/runs?head_sha=${sha}&per_page=100`, { headers, signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) throw new Error(`GitHub API HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`GitHub API HTTP ${response.status}`) as Error & { apiStatus?: 'RATE_LIMITED' };
+    if (response.status === 429 || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')) error.apiStatus = 'RATE_LIMITED';
+    throw error;
+  }
   const payload = await response.json() as { workflow_runs?: Array<{ id: number; head_sha: string; name: string; status: string; conclusion?: string | null }> };
   const runs = payload.workflow_runs || []; const ci = runs.find((run) => run.head_sha === sha && run.name === 'CI');
   if (!ci) { console.log(JSON.stringify({ sha, ...assessCiStatus(sha, []) }, null, 2)); process.exitCode = 1; }
@@ -15,4 +19,8 @@ try {
     const assessment = assessCiStatus(sha, [{ ...ci, jobs }]);
     console.log(JSON.stringify({ sha, runId: ci.id, ...assessment }, null, 2)); if (assessment.decision !== 'PASS') process.exitCode = 1;
   }
-} catch (error) { console.log(JSON.stringify({ sha, ...assessCiStatus(sha, null), reason: error instanceof Error ? error.message : String(error) }, null, 2)); process.exitCode = 1; }
+} catch (error) {
+  const reason = error instanceof Error ? error.message : String(error);
+  const apiStatus = error instanceof Error && (error as Error & { apiStatus?: 'RATE_LIMITED' }).apiStatus === 'RATE_LIMITED' ? 'RATE_LIMITED' : 'NETWORK_ERROR';
+  console.log(JSON.stringify({ sha, ...unavailableCiStatus(apiStatus, reason) }, null, 2)); process.exitCode = 1;
+}

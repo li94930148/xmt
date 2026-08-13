@@ -6,8 +6,9 @@ import type { Message } from '@/types';
 import { useMessageStore } from '@/store';
 import { useNetworkState } from '@/platform/network';
 import { readSafeDraftValue, writeSafeDraft } from '@/platform/safe-draft';
+import { getMobileMessageCategory } from '@/platform/message-category';
 
-type Filter = 'all' | 'unread' | 'work' | 'system';
+type Filter = 'all' | 'unread' | 'workflow' | 'collaboration' | 'system';
 const cacheKey = 'messages:recent';
 
 export default function MobileMessages() {
@@ -33,7 +34,11 @@ export default function MobileMessages() {
     } finally { setLoading(false); }
   }, [setUnread]);
   useEffect(() => { void load(); }, [load]);
-  const visible = useMemo(() => items.filter((item) => filter === 'unread' ? !item.read : filter === 'work' ? Boolean(item.link) : filter === 'system' ? !item.link : true), [filter, items]);
+  const visible = useMemo(() => items.filter((item) => {
+    if (filter === 'all') return true;
+    if (filter === 'unread') return !item.read;
+    return getMobileMessageCategory(item) === filter;
+  }), [filter, items]);
   const markRead = async (item: Message) => {
     if (!item.read) {
       if (networkState !== 'online') { setNotice('当前网络未恢复，未读状态尚未同步。'); }
@@ -58,5 +63,5 @@ export default function MobileMessages() {
       setUnread(0);
     } catch (error) { setNotice(error instanceof Error ? error.message : '标记全部已读失败'); }
   };
-  return <div className="space-y-4"><div className="flex items-center justify-between"><p className="text-sm text-studio-text-muted">未读 {items.filter((item) => !item.read).length} 条</p><div className="flex items-center gap-3"><button type="button" onClick={() => void load()} className="min-h-11 text-sm text-studio-cyan">刷新</button><button type="button" disabled={networkState !== 'online'} onClick={() => void markAll()} className="inline-flex min-h-11 items-center gap-2 text-sm text-studio-cyan disabled:opacity-50"><CheckCheck className="h-4 w-4" />全部已读</button></div></div><div className="flex gap-2 overflow-x-auto pb-1">{([['all','全部'],['unread','未读'],['work','工作流'],['system','系统']] as const).map(([key,label]) => <button type="button" key={key} onClick={() => setFilter(key)} className={`min-h-10 shrink-0 rounded-full px-4 text-sm ${filter === key ? 'bg-studio-primary text-white' : 'border border-studio-border-soft text-studio-text-secondary'}`}>{label}</button>)}</div>{notice ? <p role="status" className="text-sm text-studio-text-secondary">{notice}</p> : null}{loading ? <p className="text-sm text-studio-text-muted">正在同步消息…</p> : visible.length === 0 ? <div className="rounded-2xl border border-studio-border-soft p-8 text-center"><Inbox className="mx-auto h-7 w-7 text-studio-text-muted" /><p className="mt-3 text-sm text-studio-text-secondary">暂无消息</p></div> : <div className="space-y-2">{visible.map((item) => <button type="button" key={item.id} onClick={() => void markRead(item)} className={`w-full rounded-2xl border p-4 text-left ${item.read ? 'border-studio-border-soft bg-studio-surface' : 'border-studio-primary/35 bg-studio-primary/[0.08]'}`}><div className="flex gap-3"><Bell className="mt-0.5 h-5 w-5 shrink-0 text-studio-cyan" /><div className="min-w-0"><p className="text-sm font-semibold">{item.title}</p><p className="mt-1 line-clamp-2 text-sm text-studio-text-secondary">{item.content}</p></div></div></button>)}</div>}</div>;
+  return <div className="space-y-4"><div className="flex items-center justify-between"><p className="text-sm text-studio-text-muted">未读 {items.filter((item) => !item.read).length} 条</p><div className="flex items-center gap-3"><button type="button" onClick={() => void load()} className="min-h-11 text-sm text-studio-cyan">刷新</button><button type="button" disabled={networkState !== 'online'} onClick={() => void markAll()} className="inline-flex min-h-11 items-center gap-2 text-sm text-studio-cyan disabled:opacity-50"><CheckCheck className="h-4 w-4" />全部已读</button></div></div><div className="flex gap-2 overflow-x-auto pb-1">{([['all','全部'],['unread','未读'],['workflow','工作流'],['collaboration','协作'],['system','系统']] as const).map(([key,label]) => <button type="button" key={key} onClick={() => setFilter(key)} className={`min-h-10 shrink-0 rounded-full px-4 text-sm ${filter === key ? 'bg-studio-primary text-white' : 'border border-studio-border-soft text-studio-text-secondary'}`}>{label}</button>)}</div>{notice ? <p role="status" className="text-sm text-studio-text-secondary">{notice}</p> : null}{loading ? <p className="text-sm text-studio-text-muted">正在同步消息…</p> : visible.length === 0 ? <div className="rounded-2xl border border-studio-border-soft p-8 text-center"><Inbox className="mx-auto h-7 w-7 text-studio-text-muted" /><p className="mt-3 text-sm text-studio-text-secondary">暂无消息</p></div> : <div className="space-y-2">{visible.map((item) => <button type="button" key={item.id} onClick={() => void markRead(item)} className={`w-full rounded-2xl border p-4 text-left ${item.read ? 'border-studio-border-soft bg-studio-surface' : 'border-studio-primary/35 bg-studio-primary/[0.08]'}`}><div className="flex gap-3"><Bell className="mt-0.5 h-5 w-5 shrink-0 text-studio-cyan" /><div className="min-w-0"><p className="text-sm font-semibold">{item.title}</p><p className="mt-1 line-clamp-2 text-sm text-studio-text-secondary">{item.content}</p></div></div></button>)}</div>}</div>;
 }

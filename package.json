@@ -55,6 +55,7 @@
     "test:origin-policy": "tsx tests/security/origin-policy.test.ts",
     "test:mobile-safe-draft": "tsx tests/platform/safe-draft.test.ts",
     "test:mobile-network": "tsx tests/platform/network.test.ts",
+    "test:mobile-message-category": "tsx tests/platform/message-category.test.ts",
     "test:mobile-deep-link": "tsx tests/mobile/deep-link.test.ts",
     "test:android-runtime": "tsx tests/mobile/android-runtime-contract.test.ts",
     "test:mobile-device-registry": "tsx tests/notifications/mobile-device-registry.test.ts",

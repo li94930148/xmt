@@ -27,6 +27,9 @@ assert.match(errorBoundary, /import\.meta\.env\.DEV/);
 const layout = read('src/components/Layout.tsx');
 assert.match(layout, /StatusBar\.setStyle/);
 assert.match(layout, /StatusBar\.setBackgroundColor/);
+assert.match(layout, /window\.__xmtAuthRuntime = runtime/);
+assert.match(layout, /refreshNativeAccessToken/);
+assert.match(layout, /nativeRefreshInFlight/);
 assert.match(manifest, /android:launchMode="singleTask"/);
 for (const host of ['topics', 'production', 'messages', 'daily-report']) {
   assert.match(manifest, new RegExp(`<data android:scheme="xmt" android:host="${host}"`));

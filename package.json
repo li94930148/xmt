@@ -58,6 +58,7 @@
     "test:mobile-deep-link": "tsx tests/mobile/deep-link.test.ts",
     "test:android-runtime": "tsx tests/mobile/android-runtime-contract.test.ts",
     "test:mobile-device-registry": "tsx tests/notifications/mobile-device-registry.test.ts",
+    "test:daily-report-permissions": "tsx tests/daily/daily-report-permissions.test.ts",
     "test:yjs-auth-recovery": "tsx tests/collaboration/yjs-auth-recovery.test.ts",
     "test:collaboration-access": "tsx tests/collaboration/collaboration-access-policy.test.ts",
     "test:collaboration-socket-authorization": "tsx tests/collaboration/collaboration-socket-authorization.test.ts",

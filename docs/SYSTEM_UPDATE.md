@@ -2,9 +2,11 @@
 
 ## 当前版本
 
-v2.19.2
+v2.19.3
 
 ## Android 移动办公升级
+
+- 修复 Android Capacitor/WebView 的 `https://localhost` 本地资源 Origin 准入；生产 CORS 仅显式允许 `https://lanyaomedia.com`、`http://localhost` 与 `https://localhost`。
 
 - 增加 Mobile Auth 独立 allowlist、刷新持续准入检查和 Mobile Socket 独立授权；不改变 Legacy Web 登录。
 

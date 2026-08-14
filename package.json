@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.19.2",
+  "version": "2.19.3",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -57,6 +57,7 @@
     "test:mobile-production-gate": "tsx tests/auth/mobile-production-gate.test.ts",
     "test:socket-coordinator": "tsx tests/auth/socket-coordinator.test.ts",
     "test:origin-policy": "tsx tests/security/origin-policy.test.ts",
+    "test:origin-cors": "tsx tests/security/origin-cors-contract.test.ts",
     "test:mobile-safe-draft": "tsx tests/platform/safe-draft.test.ts",
     "test:mobile-network": "tsx tests/platform/network.test.ts",
     "test:mobile-message-category": "tsx tests/platform/message-category.test.ts",

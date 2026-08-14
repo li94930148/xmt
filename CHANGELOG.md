@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.19.3 - 2026-08-14
+
+### Security
+
+- Allow the exact Android Capacitor/WebView local asset origin `https://localhost` alongside `http://localhost`.
+- Add HTTP CORS and preflight regression coverage while rejecting localhost ports, LAN IPs, lookalikes, and wildcards.
+
 ## 2.19.2 - 2026-08-13
 
 ### 安全

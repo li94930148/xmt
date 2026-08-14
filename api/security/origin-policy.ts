@@ -1,7 +1,8 @@
 export const DEFAULT_ALLOWED_ORIGINS = [
-  // Capacitor Android's local asset server. Keep this explicit: never use a
-  // wildcard origin together with credentials.
+  // Capacitor Android/WebView local asset servers may use either scheme.
+  // Keep both exact origins explicit; never use a wildcard with credentials.
   'http://localhost',
+  'https://localhost',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:5174',

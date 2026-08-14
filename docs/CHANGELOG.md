@@ -1,5 +1,10 @@
 # XMT 系统更新日志
 
+## v2.19.5 - 2026-08-14
+
+- 修复 Android Capacitor/WebView 的 `https://localhost` 本地资源 Origin CORS 准入。
+- 增加 HTTPS localhost 的 HTTP CORS 与 preflight 回归合同，继续拒绝任意端口、局域网 IP 和 wildcard。
+
 ## v2.19.4 - 2026-08-14
 
 - 修复正式部署的公网 Internal Exposure 检查未读取权威运行时文件的问题，并为服务重启后的健康检查加入有界重试。

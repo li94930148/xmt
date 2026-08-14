@@ -2,7 +2,12 @@
 
 ## 当前版本
 
-v2.19.4
+v2.19.5
+
+## Android HTTPS Localhost Origin 兼容修复
+
+- 精确允许 Android Capacitor/WebView 的 `https://localhost` 本地资源 Origin，继续允许 `http://localhost`。
+- 生产 CORS 仅允许 `https://lanyaomedia.com`、`http://localhost` 与 `https://localhost`，不放宽开发端口、局域网 IP 或 wildcard。
 
 ## 部署门禁可靠性修复
 

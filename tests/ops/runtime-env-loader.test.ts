@@ -11,7 +11,7 @@ fs.writeFileSync(envFile, [
   'XMT_MOBILE_AUTH_ENABLED=true',
   'XMT_MOBILE_AUTH_APPROVED=true',
   'XMT_MOBILE_AUTH_ALLOWLIST_USER_IDS=42',
-  'ALLOWED_ORIGINS=https://lanyaomedia.com,http://localhost',
+  'ALLOWED_ORIGINS=https://lanyaomedia.com,http://localhost,https://localhost',
   'XMT_AUTH_REFRESH_PEPPER=not-printed',
 ].join('\n'), { mode: 0o600 });
 

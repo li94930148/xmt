@@ -11,6 +11,13 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.5', date: '2026-08-14', title: 'Android HTTPS Localhost Origin 热修',
+    impactScope: ['Android', 'CORS', '生产运行时'],
+    changes: [
+      { type: 'security', description: '精确允许 Android Capacitor/WebView 的 https://localhost 本地资源 Origin，并保持拒绝任意端口、局域网 IP 与 wildcard。' },
+    ],
+  },
+  {
     version: '2.19.4', date: '2026-08-14', title: '部署门禁可靠性修复',
     impactScope: ['生产部署', '运行时安全'],
     changes: [

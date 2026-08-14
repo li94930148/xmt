@@ -15,6 +15,8 @@ PM2_APP="${PM2_APP:-xmt-api}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3001/api/health}"
 HOME_URL="${HOME_URL:-http://127.0.0.1:3001/}"
 PORT="${PORT:-3001}"
+HEALTH_RETRY_ATTEMPTS="${HEALTH_RETRY_ATTEMPTS:-12}"
+HEALTH_RETRY_DELAY_SECONDS="${HEALTH_RETRY_DELAY_SECONDS:-2}"
 BRANCH="${BRANCH:-main}"
 TARGET_SHA_EXPECTED="${TARGET_SHA_EXPECTED:-}"
 PREVIOUS_SHA=""
@@ -116,11 +118,17 @@ restore_worktree_without_restart() {
 
 check_health() {
   log "Checking API health: $HEALTH_URL"
-  local health_body
-  if health_body="$(curl -fsS --max-time 10 "$HEALTH_URL")"; then
-    log "Health check succeeded: $health_body"
-    return 0
-  fi
+  local health_body attempt
+  for ((attempt = 1; attempt <= HEALTH_RETRY_ATTEMPTS; attempt++)); do
+    if health_body="$(curl -fsS --max-time 10 "$HEALTH_URL")"; then
+      log "Health check succeeded: $health_body"
+      return 0
+    fi
+    if [ "$attempt" -lt "$HEALTH_RETRY_ATTEMPTS" ]; then
+      log "Health check is not ready (attempt $attempt/$HEALTH_RETRY_ATTEMPTS); waiting ${HEALTH_RETRY_DELAY_SECONDS}s"
+      sleep "$HEALTH_RETRY_DELAY_SECONDS"
+    fi
+  done
 
   log "Health check failed; collecting diagnostics"
   print_diagnostics
@@ -153,6 +161,8 @@ require_command sqlite3
 [ -d "$APP_DIR" ] || fail "APP_DIR does not exist: $APP_DIR"
 [ -d "$APP_DIR/.git" ] || fail "APP_DIR is not a Git checkout: $APP_DIR"
 [[ "$TARGET_SHA_EXPECTED" =~ ^[0-9a-f]{40}$ ]] || fail "Set TARGET_SHA_EXPECTED to the exact 40-character target commit"
+[[ "$HEALTH_RETRY_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || fail "HEALTH_RETRY_ATTEMPTS must be a positive integer"
+[[ "$HEALTH_RETRY_DELAY_SECONDS" =~ ^[0-9]+$ ]] || fail "HEALTH_RETRY_DELAY_SECONDS must be a non-negative integer"
 
 cd "$APP_DIR"
 pm2 jlist | node -e "let s='';const n='$PM2_APP';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s).filter(x=>x.name===n);if(p.length!==1){console.error('Expected exactly one PM2 app instance, found '+p.length);process.exit(1)}})" || fail "Single-instance runtime gate failed"

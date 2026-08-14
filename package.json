@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.19.4",
+  "version": "2.19.5",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -148,7 +148,8 @@
     "mobile:android": "npx cap open android",
     "mobile:apk:debug": "npm run mobile:sync && cd android && ./gradlew assembleDebug",
     "mobile:apk:release": "npm run mobile:sync && cd android && ./gradlew assembleRelease",
-    "mobile:doctor": "tsx scripts/mobile-doctor.ts"
+    "mobile:doctor": "tsx scripts/mobile-doctor.ts",
+    "test:editor-format-painter": "tsx --test tests/editor/format-painter.test.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",

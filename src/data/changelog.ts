@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.5', date: '2026-08-14', title: '编辑器 Word 式格式刷',
+    impactScope: ['编辑器', '协作编辑'],
+    changes: [
+      { type: 'feature', description: '新增单次和连续格式刷，支持文字样式、颜色、高亮、标题、对齐与首行缩进。' },
+      { type: 'improvement', description: '格式应用使用独立 ProseMirror transaction，链接、批注和业务 metadata 不会复制。' },
+    ],
+  },
+  {
     version: '2.19.4', date: '2026-08-14', title: '部署门禁可靠性修复',
     impactScope: ['生产部署', '运行时安全'],
     changes: [

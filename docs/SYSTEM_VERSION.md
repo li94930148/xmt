@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.19.2
+v2.19.3
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.19.2
 
 ## 本版本摘要
 
-本版本增加 Android Mobile Auth 与 Mobile Socket 的独立生产 allowlist 准入门禁。
+本版本修复日报在 Glass Surface 外观下的宽屏表单布局。

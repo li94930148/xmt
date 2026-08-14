@@ -11,6 +11,13 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.3', date: '2026-08-14', title: '日报 Glass Surface 布局修复',
+    impactScope: ['日报', '界面布局'],
+    changes: [
+      { type: 'fix', description: '修复宽屏日报卡片将多个区块横向挤压的问题。' },
+    ],
+  },
+  {
     version: '2.19.2', date: '2026-08-13', title: '内部接口与生产运行时配置硬化',
     impactScope: ['生产安全', '部署运行时'],
     changes: [

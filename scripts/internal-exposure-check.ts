@@ -1,4 +1,7 @@
-const publicBaseUrl = process.env.XMT_PUBLIC_BASE_URL?.replace(/\/$/, '');
+import { inspectRuntimeEnvironment } from '../api/config/runtime-env-loader.js';
+
+const { variables } = inspectRuntimeEnvironment();
+const publicBaseUrl = variables.XMT_PUBLIC_BASE_URL?.replace(/\/$/, '');
 if (!publicBaseUrl) throw new Error('Set XMT_PUBLIC_BASE_URL for the public internal exposure gate');
 
 const paths = [

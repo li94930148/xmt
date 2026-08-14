@@ -11,6 +11,13 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.4', date: '2026-08-14', title: '部署门禁可靠性修复',
+    impactScope: ['生产部署', '运行时安全'],
+    changes: [
+      { type: 'fix', description: '公网内部路由检查读取权威运行时文件，并为重启健康检查加入受限重试。' },
+    ],
+  },
+  {
     version: '2.19.3', date: '2026-08-14', title: '日报 Glass Surface 布局修复',
     impactScope: ['日报', '界面布局'],
     changes: [

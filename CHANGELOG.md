@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.19.6 - 2026-08-14
+
+### Fixes
+
+- Android Capacitor HTTPS localhost Origin 以精确 allowlist 方式进入 CORS 策略；拒绝任意端口、局域网与 lookalike 来源。
+- 新增真实 HTTP CORS 合同测试，覆盖 HTTPS localhost 的 GET、OPTIONS、credentials 与恶意 Origin 拒绝。
+
 ## 2.19.5 - 2026-08-14
 
 ### 新增

@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.6', date: '2026-08-14', title: 'Android HTTPS localhost Origin 兼容',
+    impactScope: ['Android', 'CORS', '运行时安全'],
+    changes: [
+      { type: 'fix', description: '精确允许 Capacitor WebView 的 HTTPS localhost Origin，并拒绝任意端口、局域网与 lookalike 来源。' },
+      { type: 'security', description: '新增真实 HTTP CORS 合同测试，验证 GET、OPTIONS、credentials 与恶意 Origin 不反射。' },
+    ],
+  },
+  {
     version: '2.19.5', date: '2026-08-14', title: '编辑器 Word 式格式刷',
     impactScope: ['编辑器', '协作编辑'],
     changes: [

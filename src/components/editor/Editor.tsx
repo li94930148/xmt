@@ -21,6 +21,7 @@ import BubbleMenuBar from './BubbleMenu';
 import EditorContextMenu from './ContextMenu';
 import TableOfContents from './TableOfContents';
 import { createEditorExtensions } from './extensions/editorExtensions';
+import type { FormatPainterMode } from './formatPainter';
 
 interface EditorProps {
   value: string;
@@ -76,6 +77,7 @@ export default function Editor({
   const containerRef = useRef<HTMLDivElement>(null);
   const [wordCount, setWordCount] = useState(0);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [formatPainterMode, setFormatPainterMode] = useState<FormatPainterMode>('idle');
   const baseExtensions = useMemo(() => createEditorExtensions(placeholder), [placeholder]);
 
   // 立即保存（仅 Ctrl+S 触发）
@@ -430,6 +432,7 @@ export default function Editor({
               showToc={showToc}
               onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
               isFullscreen={isFullscreen}
+              onFormatPainterModeChange={setFormatPainterMode}
             />
           )}
         </div>
@@ -490,7 +493,7 @@ export default function Editor({
           )}
 
           <div className="relative min-h-full min-w-0 max-w-full">
-            <EditorContent editor={editor} />
+            <EditorContent editor={editor} className={formatPainterMode === 'idle' ? undefined : 'cursor-copy'} />
           </div>
         </div>
 

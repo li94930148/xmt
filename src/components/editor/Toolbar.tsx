@@ -3,7 +3,7 @@
  * 分组布局：文件 | 编辑 | 标题 | 文字 | 颜色 | 段落 | 插入 | 高级
  * 支持响应式折叠、dark mode、高亮/文字颜色选择器、导出
  */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { CommandProps } from '@tiptap/core';
 import { Editor } from '@tiptap/react';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
@@ -20,8 +20,9 @@ import {
   ChevronDown, Maximize, Minimize,
   PanelRight, PanelRightClose,
   Download, FileText, FileCode, FileJson,
-  MoreHorizontal, IndentIncrease,
+  MoreHorizontal, IndentIncrease, Paintbrush,
 } from 'lucide-react';
+import { captureFormatSnapshot, createFormatPainterTransaction, type FormatPainterMode, type FormatSnapshot } from './formatPainter';
 
 interface ToolbarProps {
   editor: Editor | null;
@@ -30,6 +31,7 @@ interface ToolbarProps {
   showToc?: boolean;
   onToggleFullscreen?: () => void;
   isFullscreen?: boolean;
+  onFormatPainterModeChange?: (mode: FormatPainterMode) => void;
 }
 
 const HIGHLIGHT_COLORS = [
@@ -69,6 +71,7 @@ export default function Toolbar({
   showToc,
   onToggleFullscreen,
   isFullscreen,
+  onFormatPainterModeChange,
 }: ToolbarProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const [showHeadingDropdown, setShowHeadingDropdown] = useState(false);
@@ -84,6 +87,89 @@ export default function Toolbar({
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [compact, setCompact] = useState(false);
+  const [formatPainterMode, setFormatPainterMode] = useState<FormatPainterMode>('idle');
+  const formatPainterModeRef = useRef<FormatPainterMode>('idle');
+  const formatSnapshotRef = useRef<FormatSnapshot | null>(null);
+  const singleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressDoubleClickRef = useRef(false);
+  const applyingFormatRef = useRef(false);
+
+  const setPainterMode = useCallback((mode: FormatPainterMode) => {
+    formatPainterModeRef.current = mode;
+    setFormatPainterMode(mode);
+    onFormatPainterModeChange?.(mode);
+  }, [onFormatPainterModeChange]);
+
+  const stopFormatPainter = useCallback(() => {
+    if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current);
+    singleClickTimerRef.current = null;
+    formatSnapshotRef.current = null;
+    setPainterMode('idle');
+  }, [setPainterMode]);
+
+  const startFormatPainter = useCallback((mode: Exclude<FormatPainterMode, 'idle'>) => {
+    if (!editor) return;
+    const snapshot = captureFormatSnapshot(editor.state);
+    if (!snapshot) return;
+    formatSnapshotRef.current = snapshot;
+    setPainterMode(mode);
+  }, [editor, setPainterMode]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const applyTargetSelection = () => {
+      const mode = formatPainterModeRef.current;
+      const snapshot = formatSnapshotRef.current;
+      if (mode === 'idle' || !snapshot || applyingFormatRef.current) return;
+      if (editor.state.selection.empty) return;
+      applyingFormatRef.current = true;
+      try {
+        const tr = createFormatPainterTransaction(editor.state, snapshot);
+        if (!tr) return;
+        editor.view.dispatch(tr);
+        if (mode === 'single') stopFormatPainter();
+      } finally {
+        applyingFormatRef.current = false;
+      }
+    };
+    editor.on('selectionUpdate', applyTargetSelection);
+    return () => {
+      editor.off('selectionUpdate', applyTargetSelection);
+    };
+  }, [editor, stopFormatPainter]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && formatPainterModeRef.current !== 'idle') stopFormatPainter();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [stopFormatPainter]);
+
+  useEffect(() => () => stopFormatPainter(), [stopFormatPainter]);
+
+  const handleFormatPainterClick = () => {
+    if (formatPainterModeRef.current !== 'idle') {
+      suppressDoubleClickRef.current = true;
+      stopFormatPainter();
+      return;
+    }
+    if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current);
+    singleClickTimerRef.current = setTimeout(() => {
+      singleClickTimerRef.current = null;
+      startFormatPainter('single');
+    }, 220);
+  };
+
+  const handleFormatPainterDoubleClick = () => {
+    if (suppressDoubleClickRef.current) {
+      suppressDoubleClickRef.current = false;
+      return;
+    }
+    if (singleClickTimerRef.current) clearTimeout(singleClickTimerRef.current);
+    singleClickTimerRef.current = null;
+    startFormatPainter('persistent');
+  };
 
   // 检测工具栏宽度，自动折叠
   useEffect(() => {
@@ -307,6 +393,17 @@ export default function Toolbar({
         </button>
         <button onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} className={btnClass()} title="重做 (Ctrl+Y)">
           <Redo className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={handleFormatPainterClick}
+          onDoubleClick={handleFormatPainterDoubleClick}
+          className={btnClass(formatPainterMode !== 'idle')}
+          title={formatPainterMode === 'persistent' ? '格式刷：连续应用中，按 Esc 退出' : formatPainterMode === 'single' ? '格式刷：选择目标文字应用格式' : '格式刷'}
+          aria-pressed={formatPainterMode !== 'idle'}
+        >
+          <Paintbrush className="w-4 h-4" />
         </button>
       </div>
 

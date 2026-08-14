@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.19.5
+v2.19.6
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.19.5
 
 ## 本版本摘要
 
-本版本新增编辑器 Word 式格式刷，支持单次及连续格式复制，并保持协作、撤销与自动保存链路。
+本版本修复 Android Capacitor WebView 的 HTTPS localhost 精确 CORS Origin 兼容；不放宽端口、局域网或 lookalike 来源。

@@ -2,7 +2,12 @@
 
 ## 当前版本
 
-v2.19.5
+v2.19.6
+
+## Android HTTPS localhost Origin 兼容
+
+- Android Capacitor/WebView 的 `https://localhost` 以精确 CORS allowlist 支持；不使用 wildcard，不允许任意 localhost 端口、局域网 IP 或 lookalike 域名。
+- 增加真实 HTTP GET / OPTIONS CORS 合同测试，确认 ACAO、credentials 及恶意 Origin 拒绝。
 
 ## 编辑器格式刷
 

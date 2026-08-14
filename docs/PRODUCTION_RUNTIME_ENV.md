@@ -30,3 +30,10 @@ requires all public `/internal/*` routes to return `404`.
 
 The first Mobile gray user must be a non-admin internal test user. An admin can
 only be selected after explicit human approval; automation must not select one.
+
+For Android Capacitor production access, configure the exact origins below; do
+not include development ports, LAN addresses, or wildcards:
+
+```bash
+ALLOWED_ORIGINS=https://lanyaomedia.com,http://localhost,https://localhost
+```

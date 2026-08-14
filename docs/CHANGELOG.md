@@ -1,5 +1,10 @@
 # XMT 系统更新日志
 
+## v2.19.6 - 2026-08-14
+
+- 修复 Android Capacitor WebView `https://localhost` 的精确 CORS Origin 兼容，同时拒绝任意端口、局域网地址与伪造域名。
+- 新增 HTTPS localhost 的真实 HTTP GET / OPTIONS CORS 合同测试，验证 credentials 与恶意 Origin 不反射。
+
 ## v2.19.5 - 2026-08-14
 
 - 新增编辑器 Word 式格式刷：支持单次与连续应用、Esc 退出、字符级与段落级格式复制，以及独立撤销。

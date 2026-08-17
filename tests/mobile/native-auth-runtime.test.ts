@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { MobileRefreshError } from '../../src/api/auth.ts';
 import { createNativeAuthRuntime, readAccessTokenExpiry } from '../../src/auth/native/native-auth-runtime.ts';
 
 const encoded = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -38,6 +39,7 @@ assert.equal(storedRefreshToken, 'refresh-after-rotation');
 assert.equal(loginCalls, 1);
 assert.equal(runtime.getExpiresAt(), 1_800_000_000_000);
 assert.equal(runtime.getTraceSnapshot().status, 'authenticated');
+runtime.stop();
 
 const invalidRuntime = createNativeAuthRuntime({
   getAccessToken: () => null,
@@ -48,7 +50,7 @@ const invalidRuntime = createNativeAuthRuntime({
   clearUser: () => { clearCalls += 1; },
   login: () => { throw new Error('失效会话不得重新登录'); },
   logout: () => { logoutCalls += 1; },
-  refreshRequest: async () => { throw new Error('refresh revoked'); },
+  refreshRequest: async () => { throw new MobileRefreshError('refresh revoked', true, 401, 'AUTH_REFRESH_INVALID'); },
 });
 
 assert.equal(await invalidRuntime.refresh(), null);

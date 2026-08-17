@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.19.6
+v2.19.7
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.19.6
 
 ## 本版本摘要
 
-本版本修复 Android Capacitor WebView 的 HTTPS localhost 精确 CORS Origin 兼容；不放宽端口、局域网或 lookalike 来源。
+本版本修复 Android Native Auth 的 access token 自动续期；Native Runtime 不再依赖默认关闭的 Socket Coordinator，且不放宽既有 CORS、安全存储或灰度准入边界。

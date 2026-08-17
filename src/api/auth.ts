@@ -33,6 +33,19 @@ export class LoginError extends Error {
   }
 }
 
+/** Mobile refresh failures preserve terminal-auth semantics for the native scheduler. */
+export class MobileRefreshError extends Error {
+  constructor(
+    message: string,
+    public readonly terminal: boolean,
+    public readonly status?: number,
+    public readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'MobileRefreshError';
+  }
+}
+
 function getAuthHeader(): Record<string, string> {
   const token = useAuthStore.getState().token;
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -147,14 +160,25 @@ export async function mobileLogin(username: string, password: string): Promise<A
 
 /** Rotates the Keystore-held credential and keeps the new access token in memory only. */
 export async function mobileRefresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
-  const response = await apiFetch('/v1/auth/mobile/refresh', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }),
-  });
-  if (!response.ok) throw new Error('移动会话已失效');
+  let response: Response;
+  try {
+    response = await apiFetch('/v1/auth/mobile/refresh', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }),
+    });
+  } catch {
+    throw new MobileRefreshError('移动网络暂不可用', false);
+  }
+  if (!response.ok) {
+    const body = await readJson(response);
+    const code = body.error && typeof body.error === 'object' ? String((body.error as { code?: unknown }).code || '') : '';
+    const terminal = response.status === 401 && ['AUTH_REFRESH_INVALID', 'AUTH_REFRESH_REUSED', 'AUTH_SESSION_REVOKED', 'AUTH_SESSION_EXPIRED'].includes(code)
+      || response.status === 403 && code === 'PERMISSION_DENIED';
+    throw new MobileRefreshError(terminal ? '移动会话已失效' : '移动认证服务暂不可用', terminal, response.status, code || undefined);
+  }
   const payload = await response.json() as { data?: { accessToken?: unknown; refreshToken?: unknown } };
   const accessToken = payload.data?.accessToken;
   const replacement = payload.data?.refreshToken;
-  if (typeof accessToken !== 'string' || typeof replacement !== 'string') throw new Error('移动会话响应无效');
+  if (typeof accessToken !== 'string' || typeof replacement !== 'string') throw new MobileRefreshError('移动会话响应无效', false, response.status);
   return { accessToken, refreshToken: replacement };
 }
 

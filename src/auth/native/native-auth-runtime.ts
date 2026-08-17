@@ -1,4 +1,4 @@
-import { mobileRefresh } from '@/api';
+import { mobileRefresh, MobileRefreshError } from '@/api/auth';
 import { useAuthStore } from '@/store';
 import { nativeRefreshCredentials, nativeUserProfile } from './secure-credentials';
 
@@ -14,6 +14,11 @@ export type NativeAuthRuntime = {
   refresh: () => Promise<string | null>;
   getExpiresAt: () => number | null;
   getTraceSnapshot: () => NativeAuthTrace;
+  start: () => void;
+  stop: () => void;
+  onAccessTokenChanged: () => void;
+  onResume: () => Promise<string | null>;
+  onNetworkOnline: () => Promise<string | null>;
 };
 
 export type NativeAuthRuntimeDependencies = {
@@ -26,11 +31,18 @@ export type NativeAuthRuntimeDependencies = {
   login: (user: NonNullable<ReturnType<typeof nativeUserProfile.get>>, token: string) => void;
   logout: () => void;
   refreshRequest: typeof mobileRefresh;
+  now?: () => number;
+  setTimer?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>;
+  clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
+  refreshLeadMs?: number;
+  retryBaseMs?: number;
+  maxTransientRetries?: number;
 };
 
 declare global {
   interface Window {
-    __xmtAuthRuntime?: NativeAuthRuntime;
+    __xmtAuthRuntime?: Omit<NativeAuthRuntime, 'start' | 'stop' | 'onAccessTokenChanged' | 'onResume' | 'onNetworkOnline'>
+      & Partial<Pick<NativeAuthRuntime, 'start' | 'stop' | 'onAccessTokenChanged' | 'onResume' | 'onNetworkOnline'>>;
   }
 }
 
@@ -48,7 +60,34 @@ export function readAccessTokenExpiry(token: string | null) {
 
 /** Creates one refresh queue so app-resume and Socket reconnect never rotate twice. */
 export function createNativeAuthRuntime(dependencies: NativeAuthRuntimeDependencies): NativeAuthRuntime {
+  const MAX_TIMER_DELAY_MS = 2_147_000_000;
   let refreshInFlight: Promise<string | null> | null = null;
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let transientRetries = 0;
+  const now = dependencies.now ?? Date.now;
+  const setTimer = dependencies.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
+  const clearTimer = dependencies.clearTimer ?? ((timer) => clearTimeout(timer));
+  const refreshLeadMs = dependencies.refreshLeadMs ?? 60_000;
+  const retryBaseMs = dependencies.retryBaseMs ?? 30_000;
+  const maxTransientRetries = dependencies.maxTransientRetries ?? 3;
+
+  const clearRefreshTimer = () => {
+    if (refreshTimer) clearTimer(refreshTimer);
+    refreshTimer = null;
+  };
+  const schedule = (delay: number) => {
+    clearRefreshTimer();
+    refreshTimer = setTimer(() => { refreshTimer = null; void ensureFreshToken(); }, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, delay)));
+  };
+  const scheduleForCurrentToken = () => {
+    clearRefreshTimer();
+    const expiry = readAccessTokenExpiry(dependencies.getAccessToken());
+    if (!expiry) return;
+    const delay = expiry - now() - refreshLeadMs;
+    if (delay <= 0) { void ensureFreshToken(); return; }
+    schedule(delay);
+  };
+  const isTerminal = (error: unknown) => error instanceof MobileRefreshError && error.terminal;
 
   const refresh = () => {
     if (refreshInFlight) return refreshInFlight;
@@ -60,17 +99,32 @@ export function createNativeAuthRuntime(dependencies: NativeAuthRuntimeDependenc
         const next = await dependencies.refreshRequest(refreshToken);
         await dependencies.setRefreshToken(next.refreshToken);
         dependencies.login(user, next.accessToken);
+        transientRetries = 0;
+        scheduleForCurrentToken();
         return next.accessToken;
-      } catch {
-        await dependencies.clearRefreshToken().catch(() => undefined);
-        dependencies.clearUser();
-        dependencies.logout();
+      } catch (error) {
+        if (isTerminal(error)) {
+          clearRefreshTimer();
+          await dependencies.clearRefreshToken().catch(() => undefined);
+          dependencies.clearUser();
+          dependencies.logout();
+        } else if (transientRetries < maxTransientRetries) {
+          transientRetries += 1;
+          schedule(retryBaseMs * 2 ** (transientRetries - 1));
+        }
         return null;
       } finally {
         refreshInFlight = null;
       }
     })();
     return refreshInFlight;
+  };
+
+  const ensureFreshToken = () => {
+    const expiry = readAccessTokenExpiry(dependencies.getAccessToken());
+    if (!expiry || expiry - now() <= refreshLeadMs) return refresh();
+    scheduleForCurrentToken();
+    return Promise.resolve(dependencies.getAccessToken());
   };
 
   return {
@@ -86,6 +140,11 @@ export function createNativeAuthRuntime(dependencies: NativeAuthRuntimeDependenc
         hasAccessToken: Boolean(accessToken),
       };
     },
+    start: scheduleForCurrentToken,
+    stop: clearRefreshTimer,
+    onAccessTokenChanged: () => { transientRetries = 0; scheduleForCurrentToken(); },
+    onResume: ensureFreshToken,
+    onNetworkOnline: ensureFreshToken,
   };
 }
 
@@ -113,7 +172,22 @@ export function refreshNativeSession() {
 export function installNativeAuthRuntime() {
   if (!installedRuntime) installedRuntime = createNativeAuthRuntime(runtimeDependencies());
   window.__xmtAuthRuntime = installedRuntime;
+  installedRuntime.start();
+  const onResume = () => { void installedRuntime?.onResume(); };
+  const onNetwork = (event: Event) => {
+    if ((event as CustomEvent<{ connected?: boolean }>).detail?.connected) void installedRuntime?.onNetworkOnline();
+  };
+  window.addEventListener('xmt-app-resume', onResume);
+  window.addEventListener('xmt-network-status', onNetwork);
+  const unsubscribe = useAuthStore.subscribe((state, previous) => {
+    if (state.token !== previous.token) installedRuntime?.onAccessTokenChanged();
+    if (!state.isLoggedIn) installedRuntime?.stop();
+  });
   return () => {
+    window.removeEventListener('xmt-app-resume', onResume);
+    window.removeEventListener('xmt-network-status', onNetwork);
+    unsubscribe();
+    installedRuntime?.stop();
     if (window.__xmtAuthRuntime === installedRuntime) delete window.__xmtAuthRuntime;
   };
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.19.9 - 2026-08-17
+
+### Fixes
+
+- 修复 Android Native Auth 在真实 Mobile Login 后未可靠建立自动续期调度的问题；服务端 `expiresIn` 成为主要 Token Lifetime Contract。
+- 登录/刷新显式通知 Native Runtime，增加 scheduler trace、generation guard，以及 Resume、visible、network online 的低频补偿。
+- 新增真实 V1 响应与 Store 集成、双 refresh 生命周期和 cleanup 回归测试；Android Production Endpoint Contract 保持不变。
+
 ## 2.19.8 - 2026-08-17
 
 ### Fixes

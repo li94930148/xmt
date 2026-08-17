@@ -1,5 +1,10 @@
 # XMT 系统更新日志
 
+## v2.19.9 - 2026-08-17
+
+- 修复 Android Native Auth 真实登录后 scheduler 未可靠建立的问题，以服务端 `expiresIn` 建立主要到期合同并在登录/刷新时显式绑定。
+- 新增安全 scheduler diagnostics、generation guard 与 Resume/Network 补偿；不改动生产端点、RBAC、会话并发或 900 秒服务端 TTL。
+
 ## v2.19.8 - 2026-08-17
 
 - 修复 clean Android build 未确定性注入生产 API / Socket 地址的问题；新增独立 Production Build Profile 与 APK 构建元数据。

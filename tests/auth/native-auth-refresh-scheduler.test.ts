@@ -23,7 +23,7 @@ class Clock {
   get size() { return this.timers.size; }
 }
 
-function fixture(clock: Clock, refreshRequest: () => Promise<{ accessToken: string; refreshToken: string }>) {
+function fixture(clock: Clock, refreshRequest: () => Promise<{ accessToken: string; refreshToken: string; expiresIn: number }>) {
   let access = token(900);
   let refresh = 'refresh-0';
   let logoutCalls = 0;
@@ -49,7 +49,7 @@ function fixture(clock: Clock, refreshRequest: () => Promise<{ accessToken: stri
 
 const clock = new Clock();
 let refreshCalls = 0;
-const first = fixture(clock, async () => ({ accessToken: token(1800 + Math.floor(clock.now / 1000)), refreshToken: `refresh-${++refreshCalls}` }));
+const first = fixture(clock, async () => ({ accessToken: token(1800 + Math.floor(clock.now / 1000)), refreshToken: `refresh-${++refreshCalls}`, expiresIn: 900 }));
 first.runtime.start();
 assert.equal(clock.size, 1, 'healthy token schedules a lead-time refresh');
 await clock.advance(840_000);
@@ -63,7 +63,7 @@ assert.equal(refreshCalls, 1, 'healthy resume/network events do not refresh');
 const nearClock = new Clock();
 nearClock.now = 850_000;
 let concurrentCalls = 0;
-const near = fixture(nearClock, async () => { concurrentCalls += 1; await new Promise((resolve) => setTimeout(resolve, 5)); return { accessToken: token(1800), refreshToken: 'rotated' }; });
+const near = fixture(nearClock, async () => { concurrentCalls += 1; await new Promise((resolve) => setTimeout(resolve, 5)); return { accessToken: token(1800), refreshToken: 'rotated', expiresIn: 900 }; });
 await Promise.all([near.runtime.onResume(), near.runtime.onNetworkOnline(), near.runtime.onResume()]);
 assert.equal(concurrentCalls, 1, 'resume and network recovery share one refresh flight');
 
@@ -83,7 +83,7 @@ assert.equal(terminal.state().logoutCalls, 1, 'terminal failure logs out');
 assert.equal(terminal.state().clearCalls, 2, 'terminal failure clears user and Keystore credential');
 
 const cleanupClock = new Clock();
-const cleanup = fixture(cleanupClock, async () => ({ accessToken: token(1800), refreshToken: 'unused' }));
+const cleanup = fixture(cleanupClock, async () => ({ accessToken: token(1800), refreshToken: 'unused', expiresIn: 900 }));
 cleanup.runtime.start();
 cleanup.runtime.stop();
 assert.equal(cleanupClock.size, 0, 'stop clears the scheduled refresh');

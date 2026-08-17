@@ -2,7 +2,13 @@
 
 ## 当前版本
 
-v2.19.8
+v2.19.9
+
+## Android Native Auth Refresh Runtime Integration
+
+- Android Mobile Login 和 Refresh 保留并验证服务端 `expiresIn`；Native Runtime 用它建立主要到期时间和提前 60 秒的 refresh 调度。
+- 登录完成后显式绑定 scheduler，JWT `exp` 仅作为回退；前台恢复、可见性与网络恢复均会检查非敏感 expiry state。
+- trace 只暴露 scheduler 状态、时间和结果，不暴露 access token、refresh token 或凭据。
 
 ## Android Production Endpoint Build Contract
 

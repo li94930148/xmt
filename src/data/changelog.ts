@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.9', date: '2026-08-17', title: 'Android Native Auth 真实续期调度',
+    impactScope: ['Android', '认证', '运行时安全'],
+    changes: [
+      { type: 'fix', description: '服务端 expiresIn 成为 Android Native Auth 的主要 Token Lifetime Contract，真实登录后显式建立自动续期调度。' },
+      { type: 'security', description: '新增不含凭据值的 scheduler trace、generation guard 与前后台、可见性、网络恢复补偿。' },
+    ],
+  },
+  {
     version: '2.19.8', date: '2026-08-17', title: 'Android 生产端点构建合同',
     impactScope: ['Android', '构建安全', 'API 运行时'],
     changes: [

@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.19.8
+v2.19.9
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.19.8
 
 ## 本版本摘要
 
-本版本建立 Android Production Endpoint Build Contract：生产 APK 固定打包公开 HTTPS API/Socket 地址与 build manifest；Native endpoint 缺失或错误时 fail-closed，Web same-origin `/api` 行为不变。
+本版本修复 Android Native Auth 真实登录后的自动续期调度：以服务端 `expiresIn` 作为主要 lifetime 合同，登录/刷新显式绑定 scheduler，并提供非敏感诊断状态与生命周期补偿。

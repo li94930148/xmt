@@ -433,6 +433,11 @@ export default function Login() {
   const handleSubmit = useCallback(async (event: FormEvent) => {
     event.preventDefault();
     if (loginRequestInFlight.current) return;
+    const endpointConfigurationError = getNativeEndpointConfigurationError();
+    if (endpointConfigurationError) {
+      setErrorMessage(endpointConfigurationError);
+      return;
+    }
     setErrorMessage('');
 
     if (!username.trim() || !password.trim()) {

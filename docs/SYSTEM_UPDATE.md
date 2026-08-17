@@ -2,7 +2,14 @@
 
 ## 当前版本
 
-v2.19.7
+v2.19.8
+
+## Android Production Endpoint Build Contract
+
+- 正式 Android 构建固定注入 `https://lanyaomedia.com/api` 与 `https://lanyaomedia.com`，不依赖 shell export、个人 `.env` 或历史工作目录。
+- 构建产物与 APK 均包含非敏感 build manifest；CI 验证 dist、Capacitor assets 与 APK 的实际 endpoint。
+- Native Production endpoint 缺失、relative `/api`、localhost、局域网或 HTTP 均 fail-closed；HTTP 200 HTML 不再可被作为 API Health / 移动认证成功响应。
+- Web Production 与 Web Development 继续使用 same-origin `/api`，不受 Android 构建合同影响。
 
 ## Android Native Auth 自动续期修复
 

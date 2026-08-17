@@ -51,6 +51,8 @@ jobs:
       - run: npm run test:mobile-back-button
       - run: npm run test:mobile-deep-link
       - run: npm run test:mobile-device-registry
+      - run: npm run test:android-endpoint-contract
+      - run: npm run test:mobile-health-response-contract
       - run: npm run test:daily-report-permissions
       - run: npm run test:android-runtime
       - run: npm run test:mobile-auth-runtime
@@ -82,8 +84,10 @@ jobs:
           java-version: '21'
       - run: npm ci
       - run: npm run check
-      - run: npm run mobile:sync
+      - run: npm run mobile:sync:production
+      - run: npm run test:android-build-endpoints
       - run: cd android && ./gradlew assembleDebug
+      - run: npm run test:apk-endpoint-artifact
       - uses: actions/upload-artifact@v4
         with:
           name: xmt-android-debug

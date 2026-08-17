@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 类型 | 说明 |
 | --- | --- | --- | --- |
+| [v2.19.8](./v2.19.8-android-production-endpoint-build-contract.md) | 2026-08-17 | PATCH 修复 | Android Production Endpoint Build Contract 与 APK 产物校验 |
 | [v2.12.0](./v2.12.0.md) | 2026-07-29 | MINOR 架构升级 | API Contract、requestId、OpenAPI、api-client 基础 |
 | [v2.11.0](./v2.11.0.md) | 2026-07-29 | MINOR 架构升级 | Topic 模块化基础、兼容 legacy、可选 API v1 |
 | [v2.10.3](./v2.10.3.md) | 2026-07-29 | PATCH 修复 | 粉丝解析、封面保留、两行三列布局 |

@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.19.7",
+  "version": "2.19.8",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -146,11 +146,21 @@
     "test:creator-agent:cross-platform": "npm --prefix agent run test:cross-platform",
     "test:creator-agent:binding": "tsx scripts/creator-agent-binding-test.ts",
     "audit:douyin-legacy-tokens": "tsx scripts/audit-legacy-douyin-tokens.ts",
-    "mobile:sync": "npm run build && npx cap sync android",
+    "mobile:build:production": "node scripts/mobile-build.mjs production",
+    "mobile:sync:production": "node scripts/mobile-build.mjs production --sync",
+    "mobile:apk:debug:production": "npm run mobile:sync:production && cd android && ./gradlew assembleDebug",
+    "mobile:apk:release:production": "npm run mobile:sync:production && cd android && ./gradlew assembleRelease",
+    "mobile:build:development": "node scripts/mobile-build.mjs development",
+    "mobile:sync:development": "node scripts/mobile-build.mjs development --sync",
+    "mobile:sync": "npm run mobile:sync:development",
     "mobile:android": "npx cap open android",
-    "mobile:apk:debug": "npm run mobile:sync && cd android && ./gradlew assembleDebug",
-    "mobile:apk:release": "npm run mobile:sync && cd android && ./gradlew assembleRelease",
+    "mobile:apk:debug": "npm run mobile:apk:debug:production",
+    "mobile:apk:release": "npm run mobile:apk:release:production",
     "mobile:doctor": "tsx scripts/mobile-doctor.ts",
+    "test:android-endpoint-contract": "tsx tests/mobile/android-endpoint-contract.test.ts",
+    "test:mobile-health-response-contract": "tsx tests/mobile/mobile-health-response-contract.test.ts",
+    "test:android-build-endpoints": "tsx tests/mobile/android-build-endpoints.test.ts",
+    "test:apk-endpoint-artifact": "node tests/mobile/apk-endpoint-artifact-contract.test.mjs",
     "test:editor-format-painter": "tsx --test tests/editor/format-painter.test.ts"
   },
   "dependencies": {

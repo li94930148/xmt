@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.19.8 - 2026-08-17
+
+### Fixes
+
+- Android Production Build 固定注入 `https://lanyaomedia.com/api` 与 `https://lanyaomedia.com`，不再依赖开发者 shell 或未提交环境文件。
+- Native Production 缺失或错误 endpoint 时 fail-closed；移动端 API Health 与认证响应拒绝 HTTP 200 HTML 假成功。
+- 新增构建 manifest、Build Output/APK 端点校验，并将正式 Android 产物合同加入 CI。
+
 ## 2.19.7 - 2026-08-17
 
 ### Fixes

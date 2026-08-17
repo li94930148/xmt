@@ -1,5 +1,10 @@
 # XMT 系统更新日志
 
+## v2.19.8 - 2026-08-17
+
+- 修复 clean Android build 未确定性注入生产 API / Socket 地址的问题；新增独立 Production Build Profile 与 APK 构建元数据。
+- Native Production endpoint 缺失、相对 `/api`、localhost 或 HTTP 地址均 fail-closed；HTTP 200 HTML 不再被接受为移动 API 健康响应。
+
 ## v2.19.7 - 2026-08-17
 
 - 修复 Android Native Auth 在 access token 临期时没有独立自动续期的问题；登录、冷启动、前后台恢复和网络恢复均由 Native Runtime 自主检查。

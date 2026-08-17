@@ -12,13 +12,14 @@ const runtime = read('src/platform/runtime.ts');
 const debugManifest = read('android/app/src/debug/AndroidManifest.xml');
 
 assert.match(capacitorConfig, /appId:\s*'com\.lanyaomedia\.xmt'/);
-assert.match(buildGradle, /versionCode\s+21907/);
-assert.match(buildGradle, /versionName\s+"2\.19\.7"/);
+assert.match(buildGradle, /versionCode\s+21908/);
+assert.match(buildGradle, /versionName\s+"2\.19\.8"/);
 assert.match(manifest, /android:usesCleartextTraffic="false"/);
 assert.match(debugManifest, /android:usesCleartextTraffic="true"/);
 assert.match(debugManifest, /tools:replace="android:usesCleartextTraffic"/);
 assert.match(runtime, /VITE_ANDROID_ALLOW_CLEARTEXT/);
 assert.match(runtime, /getNativeEndpointConfigurationError/);
+assert.match(runtime, /NativeEndpointConfigurationError/);
 assert.match(read('src/pages/Login.tsx'), /getNativeEndpointConfigurationError/);
 const errorBoundary = read('src/components/ErrorBoundary.tsx');
 assert.match(errorBoundary, /window\.location\.reload/);

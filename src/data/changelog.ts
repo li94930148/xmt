@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.8', date: '2026-08-17', title: 'Android 生产端点构建合同',
+    impactScope: ['Android', '构建安全', 'API 运行时'],
+    changes: [
+      { type: 'fix', description: '正式 Android 构建固定注入生产 API/Socket 地址，并将非敏感构建元数据随 APK 打包。' },
+      { type: 'security', description: 'Native Production 缺失或错误端点时 fail-closed；API Health 不再接受 HTTP 200 HTML。' },
+    ],
+  },
+  {
     version: '2.19.7', date: '2026-08-17', title: 'Android Native Auth 自动续期修复',
     impactScope: ['Android', '认证', '运行时安全'],
     changes: [

@@ -3,6 +3,7 @@ import type { User } from '../types';
 import { adaptLoginResponse, type AuthLoginResult } from '../auth/web/login-response-adapter';
 import { emitAuthLoginDebugTrace } from '../auth/web/auth-login-debug';
 import { apiFetch } from './transport';
+import { readJsonApiResponse } from '@/platform/api-health';
 
 declare const __APP_VERSION__: string;
 
@@ -152,7 +153,12 @@ export async function mobileLogin(username: string, password: string): Promise<A
     });
   } catch { throw new LoginError('当前网络不可用，请检查连接后重试。', 'server_unavailable'); }
   if (!response.ok) throw new LoginError(response.status === 401 ? '用户名或密码不正确，请检查后重试。' : '当前服务暂时不可用，请稍后再试。', response.status === 401 ? 'invalid_credentials' : 'server_unavailable', { status: response.status });
-  const payload = await response.json() as { data?: { refreshToken?: unknown } };
+  let payload: { data?: { refreshToken?: unknown } };
+  try {
+    payload = await readJsonApiResponse(response);
+  } catch {
+    throw new LoginError('移动认证响应无效，请安装正确版本后重试。', 'server_unavailable', { status: response.status });
+  }
   const refreshToken = payload.data?.refreshToken;
   if (typeof refreshToken !== 'string' || refreshToken.length < 32) throw new LoginError('移动认证响应无效，请重试。', 'server_unavailable');
   return { ...adaptLoginResponse(payload), refreshToken };
@@ -175,7 +181,12 @@ export async function mobileRefresh(refreshToken: string): Promise<{ accessToken
       || response.status === 403 && code === 'PERMISSION_DENIED';
     throw new MobileRefreshError(terminal ? '移动会话已失效' : '移动认证服务暂不可用', terminal, response.status, code || undefined);
   }
-  const payload = await response.json() as { data?: { accessToken?: unknown; refreshToken?: unknown } };
+  let payload: { data?: { accessToken?: unknown; refreshToken?: unknown } };
+  try {
+    payload = await readJsonApiResponse(response);
+  } catch {
+    throw new MobileRefreshError('移动认证响应无效', false, response.status, 'INVALID_API_RESPONSE');
+  }
   const accessToken = payload.data?.accessToken;
   const replacement = payload.data?.refreshToken;
   if (typeof accessToken !== 'string' || typeof replacement !== 'string') throw new MobileRefreshError('移动会话响应无效', false, response.status);

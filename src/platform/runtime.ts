@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
+import { getNativeEndpointConfigurationErrorFor } from './native-endpoint-contract';
 
 export type RuntimeEnvironment = 'web-development' | 'web-production' | 'android-development' | 'android-production';
 export type BackButtonAction = 'navigate-back' | 'warn-exit' | 'exit-app';
@@ -8,6 +9,15 @@ const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 const isAndroidDevelopmentOverride = () => import.meta.env.DEV && import.meta.env.VITE_APP_PLATFORM === 'android';
 const allowsAndroidDebugCleartext = () => import.meta.env.VITE_ANDROID_ALLOW_CLEARTEXT === 'true';
 const mobileRootPaths = new Set(['/', '/topics', '/production', '/messages', '/me']);
+
+export class NativeEndpointConfigurationError extends Error {
+  readonly code = 'ANDROID_PRODUCTION_ENDPOINT_INVALID';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'NativeEndpointConfigurationError';
+  }
+}
 
 export const isAndroid = () => Capacitor.getPlatform() === 'android' || isAndroidDevelopmentOverride();
 export const isNative = () => Capacitor.isNativePlatform() || isAndroidDevelopmentOverride();
@@ -20,13 +30,16 @@ export function getRuntimeEnvironment(): RuntimeEnvironment {
 
 /** Native builds must set HTTPS/WSS endpoints at build time; web retains same-origin defaults. */
 export function getApiBaseUrl(): string {
+  const error = getNativeEndpointConfigurationError();
+  if (error) throw new NativeEndpointConfigurationError(error);
   const configured = import.meta.env.VITE_API_BASE_URL?.trim();
   if (configured) return trimTrailingSlash(configured);
-  if (isNative()) return '/api';
   return '/api';
 }
 
 export function getSocketBaseUrl(): string {
+  const error = getNativeEndpointConfigurationError();
+  if (error) throw new NativeEndpointConfigurationError(error);
   const configured = import.meta.env.VITE_SOCKET_BASE_URL?.trim();
   if (configured) return trimTrailingSlash(configured);
   return isWeb() ? window.location.origin : getApiBaseUrl().replace(/\/api$/, '');
@@ -38,12 +51,13 @@ export async function openExternalUrl(url: string) {
 }
 
 export function getNativeEndpointConfigurationError(): string | null {
-  if (!isNative() || import.meta.env.DEV) return null;
-  const endpoint = getApiBaseUrl();
-  if (!/^https:\/\//i.test(endpoint) && !allowsAndroidDebugCleartext()) {
-    return 'Android 构建必须配置 HTTPS 的 VITE_API_BASE_URL；本机调试请同时显式设置 VITE_ANDROID_ALLOW_CLEARTEXT=true。';
-  }
-  return null;
+  return getNativeEndpointConfigurationErrorFor({
+    native: isNative(),
+    development: import.meta.env.DEV,
+    apiBaseUrl: import.meta.env.VITE_API_BASE_URL,
+    socketBaseUrl: import.meta.env.VITE_SOCKET_BASE_URL,
+    allowCleartext: allowsAndroidDebugCleartext(),
+  });
 }
 
 /**

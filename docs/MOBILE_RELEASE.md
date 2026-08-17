@@ -17,7 +17,8 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 
 ```bash
 npm ci
-npm run mobile:apk:debug
+npm run mobile:apk:debug:production
+npm run test:android-build-endpoints
 apksigner verify --verbose android/app/build/outputs/apk/debug/app-debug.apk
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -27,7 +28,8 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ## Unsigned Release APK：Release 构建验证
 
 ```bash
-npm run mobile:apk:release
+npm run mobile:apk:release:production
+npm run test:android-build-endpoints
 apksigner verify --verbose android/app/build/outputs/apk/release/app-release-unsigned.apk
 ```
 
@@ -48,4 +50,4 @@ apksigner sign \
 apksigner verify --verbose --print-certs app-release-signed.apk
 ```
 
-生成 AAB 时，在同一受控签名配置下执行 `./gradlew bundleRelease`。发布前还必须核对 applicationId、版本、证书指纹、HTTPS API/Socket 地址和 Release 清单的 `usesCleartextTraffic=false`。
+生成 AAB 时，在同一受控签名配置下执行 `./gradlew bundleRelease`。发布前还必须核对 applicationId、版本、证书指纹、`xmt-mobile-build.json` 中的 HTTPS API/Socket 地址和 Release 清单的 `usesCleartextTraffic=false`。生产 APK 端点必须通过 `npm run test:apk-endpoint-artifact` 验证。

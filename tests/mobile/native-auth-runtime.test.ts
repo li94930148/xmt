@@ -27,8 +27,9 @@ const runtime = createNativeAuthRuntime({
   refreshRequest: async () => {
     refreshCalls += 1;
     await new Promise((resolve) => setTimeout(resolve, 5));
-    return { accessToken: tokenWithExpiry, refreshToken: 'refresh-after-rotation' };
+    return { accessToken: tokenWithExpiry, refreshToken: 'refresh-after-rotation', expiresIn: 900 };
   },
+  now: () => 0,
 });
 
 const [firstRefresh, secondRefresh] = await Promise.all([runtime.refresh(), runtime.refresh()]);
@@ -37,7 +38,8 @@ assert.equal(secondRefresh, tokenWithExpiry);
 assert.equal(refreshCalls, 1, '并发恢复必须只轮换一次 refresh credential');
 assert.equal(storedRefreshToken, 'refresh-after-rotation');
 assert.equal(loginCalls, 1);
-assert.equal(runtime.getExpiresAt(), 1_800_000_000_000);
+assert.equal(runtime.getExpiresAt(), 900_000);
+assert.equal(runtime.getTraceSnapshot().expirySource, 'server_expires_in');
 assert.equal(runtime.getTraceSnapshot().status, 'authenticated');
 runtime.stop();
 

@@ -144,7 +144,17 @@ export async function login(username: string, password: string): Promise<AuthLog
   return adaptLoginResponse(payload, { requestId, loginAttemptId });
 }
 
-export async function mobileLogin(username: string, password: string): Promise<AuthLoginResult & { refreshToken: string }> {
+export type MobileLoginResult = AuthLoginResult & { refreshToken: string; expiresIn: number };
+export type MobileRefreshResult = { accessToken: string; refreshToken: string; expiresIn: number };
+
+function requireMobileExpiresIn(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) <= 0 || Number(value) > 7 * 24 * 60 * 60) {
+    throw new MobileRefreshError('移动认证响应有效期无效', false, undefined, 'INVALID_EXPIRES_IN');
+  }
+  return Number(value);
+}
+
+export async function mobileLogin(username: string, password: string): Promise<MobileLoginResult> {
   let response: Response;
   try {
     response = await apiFetch('/v1/auth/mobile/login', {
@@ -153,7 +163,7 @@ export async function mobileLogin(username: string, password: string): Promise<A
     });
   } catch { throw new LoginError('当前网络不可用，请检查连接后重试。', 'server_unavailable'); }
   if (!response.ok) throw new LoginError(response.status === 401 ? '用户名或密码不正确，请检查后重试。' : '当前服务暂时不可用，请稍后再试。', response.status === 401 ? 'invalid_credentials' : 'server_unavailable', { status: response.status });
-  let payload: { data?: { refreshToken?: unknown } };
+  let payload: { data?: { refreshToken?: unknown; expiresIn?: unknown } };
   try {
     payload = await readJsonApiResponse(response);
   } catch {
@@ -161,11 +171,16 @@ export async function mobileLogin(username: string, password: string): Promise<A
   }
   const refreshToken = payload.data?.refreshToken;
   if (typeof refreshToken !== 'string' || refreshToken.length < 32) throw new LoginError('移动认证响应无效，请重试。', 'server_unavailable');
-  return { ...adaptLoginResponse(payload), refreshToken };
+  try {
+    const result = adaptLoginResponse(payload);
+    return { ...result, refreshToken, expiresIn: requireMobileExpiresIn(payload.data?.expiresIn) };
+  } catch {
+    throw new LoginError('移动认证响应有效期无效，请重试。', 'server_unavailable');
+  }
 }
 
 /** Rotates the Keystore-held credential and keeps the new access token in memory only. */
-export async function mobileRefresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+export async function mobileRefresh(refreshToken: string): Promise<MobileRefreshResult> {
   let response: Response;
   try {
     response = await apiFetch('/v1/auth/mobile/refresh', {
@@ -181,7 +196,7 @@ export async function mobileRefresh(refreshToken: string): Promise<{ accessToken
       || response.status === 403 && code === 'PERMISSION_DENIED';
     throw new MobileRefreshError(terminal ? '移动会话已失效' : '移动认证服务暂不可用', terminal, response.status, code || undefined);
   }
-  let payload: { data?: { accessToken?: unknown; refreshToken?: unknown } };
+  let payload: { data?: { accessToken?: unknown; refreshToken?: unknown; expiresIn?: unknown } };
   try {
     payload = await readJsonApiResponse(response);
   } catch {
@@ -190,7 +205,7 @@ export async function mobileRefresh(refreshToken: string): Promise<{ accessToken
   const accessToken = payload.data?.accessToken;
   const replacement = payload.data?.refreshToken;
   if (typeof accessToken !== 'string' || typeof replacement !== 'string') throw new MobileRefreshError('移动会话响应无效', false, response.status);
-  return { accessToken, refreshToken: replacement };
+  return { accessToken, refreshToken: replacement, expiresIn: requireMobileExpiresIn(payload.data?.expiresIn) };
 }
 
 export async function getMe(accessToken?: string): Promise<User> {

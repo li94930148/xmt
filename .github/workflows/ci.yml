@@ -57,6 +57,7 @@ jobs:
       - run: npm run test:android-runtime
       - run: npm run test:mobile-auth-runtime
       - run: npm run test:native-auth-refresh-scheduler
+      - run: npm run test:native-auth-runtime-integration
       - run: npm run test:mobile-production-gate
       - run: npm run test:yjs-auth-recovery
       - run: npm run test:collaboration-access

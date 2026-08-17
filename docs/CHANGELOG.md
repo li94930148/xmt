@@ -1,5 +1,10 @@
 # XMT 系统更新日志
 
+## v2.19.7 - 2026-08-17
+
+- 修复 Android Native Auth 在 access token 临期时没有独立自动续期的问题；登录、冷启动、前后台恢复和网络恢复均由 Native Runtime 自主检查。
+- 保持 refresh single-flight；瞬时网络失败保留 Keystore 凭据并受限重试，终态认证失败才清理会话。
+
 ## v2.19.6 - 2026-08-14
 
 - 修复 Android Capacitor WebView `https://localhost` 的精确 CORS Origin 兼容，同时拒绝任意端口、局域网地址与伪造域名。

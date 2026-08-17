@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.7', date: '2026-08-17', title: 'Android Native Auth 自动续期修复',
+    impactScope: ['Android', '认证', '运行时安全'],
+    changes: [
+      { type: 'fix', description: 'Native Runtime 独立安排 access token 临期 refresh，不再依赖可选 Socket Coordinator。' },
+      { type: 'security', description: '瞬时网络失败保留 Keystore refresh credential 并有界重试；终态认证失败才清理会话。' },
+    ],
+  },
+  {
     version: '2.19.6', date: '2026-08-14', title: 'Android HTTPS localhost Origin 兼容',
     impactScope: ['Android', 'CORS', '运行时安全'],
     changes: [

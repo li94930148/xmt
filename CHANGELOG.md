@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.19.7 - 2026-08-17
+
+### Fixes
+
+- Android Native Auth 独立调度 access token 临期 refresh，不再依赖默认关闭的 Socket Coordinator。
+- 区分终态认证失败与瞬时网络失败：后者保留 Keystore refresh credential，并采用有界重试及生命周期补偿。
+
 ## 2.19.6 - 2026-08-14
 
 ### Fixes

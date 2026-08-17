@@ -2,7 +2,12 @@
 
 ## 当前版本
 
-v2.19.6
+v2.19.7
+
+## Android Native Auth 自动续期修复
+
+- Native Runtime 自己在 access token 临期前刷新，不依赖可选 Socket Coordinator。
+- 前后台恢复与网络恢复会补偿检查；瞬时网络错误保留 Android Keystore 中的 refresh credential，并使用有界重试。
 
 ## Android HTTPS localhost Origin 兼容
 

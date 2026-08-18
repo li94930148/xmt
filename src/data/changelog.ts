@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.20.0', date: '2026-08-18', title: 'Creator Collector Scrapling First',
+    impactScope: ['Creator Agent', '抖音采集', '本地安全'],
+    changes: [
+      { type: 'feature', description: '新增 Scrapling Python Worker 与抖音能力清单采集。' },
+      { type: 'security', description: '本地 Worker 仅输出脱敏 JSON 协议事件，不记录会话凭据。' },
+    ],
+  },
+  {
     version: '2.19.8', date: '2026-08-17', title: 'Android 生产端点构建合同',
     impactScope: ['Android', '构建安全', 'API 运行时'],
     changes: [

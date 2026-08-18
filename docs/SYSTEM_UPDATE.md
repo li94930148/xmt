@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.19.8
+v2.20.0
 
 ## Android Production Endpoint Build Contract
 

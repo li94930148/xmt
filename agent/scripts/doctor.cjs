@@ -1,4 +1,42 @@
-const fs=require('node:fs');const os=require('node:os');const path=require('node:path');const{discoverBrowsers}=require('../dist-desktop/core/browser/discovery.js');
-const dataDir=process.platform==='darwin'?path.join(os.homedir(),'Library','Application Support','XMT Creator Agent'):path.join(process.env.LOCALAPPDATA||process.env.APPDATA||os.homedir(),'XMT Creator Agent');const configPath=path.join(dataDir,'config.json'),tokenPath=path.join(dataDir,'agent-token.bin'),logDir=path.join(dataDir,'logs');
-const readJson=file=>{try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}};const config=readJson(configPath),browsers=discoverBrowsers();const selected=browsers.find(item=>item.id===config?.browserConfig?.id);let writable=false;try{fs.mkdirSync(dataDir,{recursive:true});fs.accessSync(dataDir,fs.constants.W_OK);writable=true;}catch{}
-async function run(){let server={ok:false,value:config?.serverUrl||'未配置'},clockSkewMs=null;if(config?.serverUrl){try{const response=await fetch(`${config.serverUrl.replace(/\/$/,'')}/api/health`,{signal:AbortSignal.timeout(3000)});const body=await response.json();server={ok:response.ok,value:`HTTP ${response.status}`};if(body.time)clockSkewMs=Date.now()-Date.parse(body.time);}catch(error){server={ok:false,value:error instanceof Error?error.message:String(error)};}}const checks={node:{ok:Number(process.versions.node.split('.')[0])>=22,value:process.version},platform:{ok:['darwin','win32'].includes(process.platform),value:`${process.platform}/${process.arch}`},directories:{ok:writable,value:{data:dataDir,config:configPath,logs:logDir,writable}},browsers:{ok:browsers.length>0,value:browsers.map(item=>({id:item.id,name:item.displayName,type:item.browserType,engine:item.engine,runtime:item.runtime,version:item.version||'unknown',compatibility:item.compatibilityStatus}))},selectedBrowser:{ok:Boolean(selected),value:selected?{id:selected.id,name:selected.displayName,type:selected.browserType,engine:selected.engine,runtime:selected.runtime,sessionMode:config.browserConfig.sessionMode,compatibility:config.browserConfig.compatibilityStatus||selected.compatibilityStatus}:'未选择'},playwright:{ok:true,value:{chromium:browsers.some(item=>item.id==='playwright:chromium'),firefox:browsers.some(item=>item.id==='playwright:firefox'),webkit:browsers.some(item=>item.id==='playwright:webkit')}},server,binding:{ok:Boolean(config&&fs.existsSync(tokenPath)),value:config&&fs.existsSync(tokenPath)?{agentId:String(config.agentId).slice(0,4)+'…',credentialPermissions:(fs.statSync(tokenPath).mode&0o777).toString(8)}:'未绑定'},protocol:{ok:true,value:1},agentVersion:{ok:true,value:'2.11.0-agent'},douyinLogin:{ok:true,value:'需由运行中的 Agent 会话检测'},lastHeartbeat:{ok:true,value:'服务端状态接口提供'},lastSync:{ok:true,value:'Agent 本地任务库提供'},clockSkewMs:{ok:clockSkewMs===null||Math.abs(clockSkewMs)<300000,value:clockSkewMs}};console.log(JSON.stringify(checks,null,2));process.exitCode=Object.entries(checks).filter(([name])=>!['selectedBrowser','server','binding'].includes(name)).every(([,item])=>item.ok)?0:1;}void run();
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { discoverBrowsers } = require('../dist-desktop/core/browser/discovery.js');
+
+const dataDir = process.platform === 'darwin'
+  ? path.join(os.homedir(), 'Library', 'Application Support', 'XMT Creator Agent')
+  : path.join(process.env.LOCALAPPDATA || process.env.APPDATA || os.homedir(), 'XMT Creator Agent');
+const configPath = path.join(dataDir, 'config.json');
+const tokenPath = path.join(dataDir, 'agent-token.bin');
+const logDir = path.join(dataDir, 'logs');
+const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+const config = readJson(configPath);
+const browsers = discoverBrowsers();
+const selected = browsers.find(item => item.id === config?.browserConfig?.id);
+
+async function run() {
+  let writable = false;
+  try { fs.mkdirSync(dataDir, { recursive: true }); fs.accessSync(dataDir, fs.constants.W_OK); writable = true; } catch {}
+  let server = { ok: false, value: config?.serverUrl || '未配置' };
+  let clockSkewMs = null;
+  if (config?.serverUrl) try {
+    const response = await fetch(`${config.serverUrl.replace(/\/$/, '')}/api/health`, { signal: AbortSignal.timeout(3000) });
+    const body = await response.json();
+    server = { ok: response.ok, value: `HTTP ${response.status}` };
+    if (body.time) clockSkewMs = Date.now() - Date.parse(body.time);
+  } catch (error) { server = { ok: false, value: error instanceof Error ? error.message : String(error) }; }
+  const checks = {
+    node: { ok: Number(process.versions.node.split('.')[0]) >= 22, value: process.version },
+    platform: { ok: ['darwin', 'win32'].includes(process.platform), value: `${process.platform}/${process.arch}` },
+    directories: { ok: writable, value: { data: dataDir, config: configPath, logs: logDir, writable } },
+    browsers: { ok: browsers.length > 0, value: browsers.map(item => ({ id: item.id, name: item.displayName, type: item.browserType, engine: item.engine, runtime: item.runtime, version: item.version || 'unknown', compatibility: item.compatibilityStatus })) },
+    selectedBrowser: { ok: Boolean(selected), value: selected ? { id: selected.id, name: selected.displayName, type: selected.browserType, engine: selected.engine, runtime: selected.runtime, sessionMode: config.browserConfig.sessionMode, compatibility: config.browserConfig.compatibilityStatus || selected.compatibilityStatus } : '未选择' },
+    playwright: { ok: true, value: { chromium: browsers.some(item => item.id === 'playwright:chromium'), firefox: browsers.some(item => item.id === 'playwright:firefox'), webkit: browsers.some(item => item.id === 'playwright:webkit') } },
+    server,
+    binding: { ok: Boolean(config && fs.existsSync(tokenPath)), value: config && fs.existsSync(tokenPath) ? { agentId: String(config.agentId).slice(0, 4) + '…', credentialPermissions: (fs.statSync(tokenPath).mode & 0o777).toString(8) } : '未绑定' },
+    protocol: { ok: true, value: 1 }, agentVersion: { ok: true, value: '2.12.0-agent' }, douyinLogin: { ok: true, value: '需由运行中的 Agent 会话检测' }, lastHeartbeat: { ok: true, value: '服务端状态接口提供' }, lastSync: { ok: true, value: 'Agent 本地任务库提供' }, clockSkewMs: { ok: clockSkewMs === null || Math.abs(clockSkewMs) < 300000, value: clockSkewMs },
+  };
+  console.log(JSON.stringify(checks, null, 2));
+  process.exitCode = Object.entries(checks).filter(([name]) => !['selectedBrowser', 'server', 'binding'].includes(name)).every(([, item]) => item.ok) ? 0 : 1;
+}
+void run();

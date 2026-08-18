@@ -16,6 +16,13 @@ agent/profiles/
 agent/browser-cache/
 agent/diagnostics/
 agent/downloads/
+agent/dist-desktop/
+agent/dist-renderer/
+collector/.venv*/
+collector/**/__pycache__/
+collector/.pytest_cache/
+collector/.mypy_cache/
+collector/.ruff_cache/
 agent/**/*response*.json
 agent/**/*network*.json
 playwright-report/

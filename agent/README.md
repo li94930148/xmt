@@ -1,5 +1,7 @@
 # XMT Creator Agent
 
+当前版本：`v2.12.0-agent`。运营数据采集已切换为 Scrapling First：Electron 仅管理独立 Profile、Worker 进程和加密同步；Python Worker 使用 Scrapling `AsyncDynamicSession` 采集抖音 Creator Center 的用户可见数据。Worker 仅通过 stdin/stdout JSON Lines 通信，不开放 localhost 服务，也不输出 Cookie、Token 或完整 URL 到日志。
+
 Creator Agent 在用户自己的 macOS 或 Windows 电脑上读取抖音创作者中心的只读运营数据。Linux 服务器不登录抖音、不保存浏览器会话，只负责设备认证、数据校验、入库和展示。
 
 ## 安全边界

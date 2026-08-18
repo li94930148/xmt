@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.19.8
+v2.20.0
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.19.8
 
 ## 本版本摘要
 
-本版本建立 Android Production Endpoint Build Contract：生产 APK 固定打包公开 HTTPS API/Socket 地址与 build manifest；Native endpoint 缺失或错误时 fail-closed，Web same-origin `/api` 行为不变。
+本版本将 Creator Collector 切换为 Scrapling First：采集在用户本机专用 Chrome Profile 中运行，通过 Python Worker 返回脱敏后的运营数据与能力清单；未完成真实登录 POC 前不会部署生产。

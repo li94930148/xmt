@@ -13,6 +13,9 @@ export function ReactBitsCardSlot({ children, semantic, className = '' }: { chil
   const wanted = config.card.component;
   const supported = wanted === 'glass-surface' ? 'glass' : wanted === 'spotlight-card' ? 'spotlight' : safeSurface(semantic);
   if (import.meta.env.DEV && supported === safeSurface(semantic) && wanted !== 'spotlight-card' && wanted !== 'glass-surface' && !warned.has(`${wanted}:${semantic}`)) { warned.add(`${wanted}:${semantic}`); console.warn(`[React Bits] ${wanted} 不适用于 ${semantic}，已使用安全官方映射。`); }
-  if (supported === 'glass') return <GlassSurface className={className} width="100%" height="auto" borderRadius={16} backgroundOpacity={0.14}>{children}</GlassSurface>;
+  // GlassSurface centers its immediate children. Report cards contain several
+  // stacked panels, so give that surface one full-width flow wrapper instead
+  // of letting the panels become flex-row siblings on wide screens.
+  if (supported === 'glass') return <GlassSurface className={className} width="100%" height="auto" borderRadius={16} backgroundOpacity={0.14}>{semantic === 'report-card' ? <div className={`w-full ${className}`}>{children}</div> : children}</GlassSurface>;
   return <SpotlightCard className={className} spotlightColor="rgba(77, 214, 255, 0.18)">{children}</SpotlightCard>;
 }

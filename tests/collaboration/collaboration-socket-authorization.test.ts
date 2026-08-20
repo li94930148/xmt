@@ -106,6 +106,15 @@ try {
   await Promise.all([noUpdate, noAwareness, noTyping]);
   assert.deepEqual(Array.from(getRuntimeDocumentState(roomId)), stateBeforeUnjoined);
 
+  // Malformed but byte-shaped Yjs updates are rejected at the socket input boundary.
+  const stateBeforeMalformed = Array.from(getRuntimeDocumentState(roomId));
+  const noMalformedBroadcast = expectNoEvent(ownerB, 'collaboration:update');
+  const rejected = waitFor(ownerA, 'collaboration:conflict-detected') as Promise<{ reason?: string }>;
+  ownerA.emit('collaboration:update', { roomId, update: [1] }); // Y.applyUpdate would throw Unexpected end of array.
+  assert.equal((await rejected).reason, 'Invalid collaboration update');
+  await noMalformedBroadcast;
+  assert.deepEqual(Array.from(getRuntimeDocumentState(roomId)), stateBeforeMalformed);
+
   // I/J: malformed and unknown documents cannot produce SYNC or join an adapter room.
   for (const invalidRoomId of ['production:abc', 'production:-1', 'production:0', 'shooting:abc', 'topic:1', 'admin:1', 'production:1:2', '', 'production:999999999']) {
     const candidate = await authenticatedSocket(ownerId); sockets.push(candidate);

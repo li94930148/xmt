@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.9', date: '2026-08-20', title: '权限、编辑器与认证安全硬化',
+    impactScope: ['权限', '编辑器', '协作', '认证', 'Android'],
+    changes: [
+      { type: 'security', description: '限制角色授予上限，统一净化富文本渲染，并拒绝畸形协作 update。' },
+      { type: 'security', description: 'Webhook fail-closed；禁用账号立即撤销会话并断开实时连接。' },
+      { type: 'fix', description: 'Legacy Web 与 Android HTTP 401 复用既有 refresh runtime 后只重试一次。' },
+    ],
+  },
+  {
     version: '2.19.8', date: '2026-08-17', title: 'Android 生产端点构建合同',
     impactScope: ['Android', '构建安全', 'API 运行时'],
     changes: [

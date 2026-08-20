@@ -3,20 +3,24 @@ import bcrypt from 'bcrypt';
 import { queryOne, queryAll, execute, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { clearPermissionCache, requirePermission } from '../middleware/permissions';
+import { SqliteSessionRepository } from '../modules/auth/session/session.sqlite-repository.js';
+import { SessionService } from '../modules/auth/session/session.service.js';
+import { assertAssignableRole, getAssignableRoles } from '../services/role-assignment.service.js';
+import { disconnectUserSockets } from '../utils/socket.js';
 
 const router = express.Router();
 
 async function getRoleByCode(roleCode: string) {
-  return queryOne(`SELECT id, code, name FROM roles WHERE code = ?`, [roleCode]);
+  return queryOne<{ id: number; code: string; name: string }>(`SELECT id, code, name FROM roles WHERE code = ?`, [roleCode]);
 }
 
 // 固定路由必须放在 /:id 之前，否则 Express 会把 assignable-roles 当成用户 id。
-router.get('/assignable-roles', authenticate, requirePermission('user:create', 'user:update'), async (_req, res) => {
+router.get('/assignable-roles', authenticate, requirePermission('user:create', 'user:update'), async (req, res) => {
   try {
-    const roles = await queryAll(`SELECT id, code, name FROM roles ORDER BY id`);
+    const roles = await getAssignableRoles({ id: req.user!.id, role: req.user!.role });
     res.json(roles);
   } catch (error) {
-    res.status(500).json({ message: '获取可分配角色失败', error });
+    res.status(500).json({ message: '获取可分配角色失败' });
   }
 });
 
@@ -135,6 +139,12 @@ router.post('/', authenticate, requirePermission('user:create'), async (req, res
     if (!targetRole) {
       return res.status(400).json({ message: '所选角色不存在' });
     }
+    try {
+      await assertAssignableRole({ id: req.user!.id, role: req.user!.role }, targetRole);
+    } catch (error) {
+      if ((error as Error).name === 'RoleAssignmentForbiddenError') return res.status(403).json({ message: '无权授予该角色' });
+      throw error;
+    }
     
     const hashedPassword = await bcrypt.hash(password, 10);
     
@@ -152,7 +162,7 @@ router.post('/', authenticate, requirePermission('user:create'), async (req, res
     
     res.json({ message: '用户创建成功', userId });
   } catch (error) {
-    res.status(500).json({ message: '创建用户失败', error });
+    res.status(500).json({ message: '创建用户失败' });
   }
 });
 
@@ -171,6 +181,12 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
       targetRole = await getRoleByCode(role);
       if (!targetRole) {
         return res.status(400).json({ message: '所选角色不存在' });
+      }
+      try {
+        await assertAssignableRole({ id: req.user!.id, role: req.user!.role }, targetRole);
+      } catch (error) {
+        if ((error as Error).name === 'RoleAssignmentForbiddenError') return res.status(403).json({ message: '无权授予该角色' });
+        throw error;
       }
     }
     
@@ -206,6 +222,12 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
     if (role) {
       clearPermissionCache(Number(id));
     }
+
+    const identityChanged = Boolean(role) || (enabled !== undefined && !Boolean(enabled));
+    if (enabled !== undefined && !Boolean(enabled)) {
+      await new SessionService({ repository: new SqliteSessionRepository() }).revokeUserSessions(Number(id), 'user_disabled');
+    }
+    if (identityChanged) disconnectUserSockets(Number(id));
     
     await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
       req.user?.id, 'update', 'user', `更新用户: ${user.username}`
@@ -213,7 +235,7 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
     
     res.json({ message: '用户更新成功' });
   } catch (error) {
-    res.status(500).json({ message: '更新用户失败', error });
+    res.status(500).json({ message: '更新用户失败' });
   }
 });
 

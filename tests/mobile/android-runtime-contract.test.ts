@@ -12,8 +12,8 @@ const runtime = read('src/platform/runtime.ts');
 const debugManifest = read('android/app/src/debug/AndroidManifest.xml');
 
 assert.match(capacitorConfig, /appId:\s*'com\.lanyaomedia\.xmt'/);
-assert.match(buildGradle, /versionCode\s+21908/);
-assert.match(buildGradle, /versionName\s+"2\.19\.8"/);
+assert.match(buildGradle, /versionCode\s+21909/);
+assert.match(buildGradle, /versionName\s+"2\.19\.9"/);
 assert.match(manifest, /android:usesCleartextTraffic="false"/);
 assert.match(debugManifest, /android:usesCleartextTraffic="true"/);
 assert.match(debugManifest, /tools:replace="android:usesCleartextTraffic"/);

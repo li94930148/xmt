@@ -27,6 +27,7 @@ import { getTimelineView, recordTimelineEvent } from '../editor/timeline/unified
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime } from '../lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
@@ -679,7 +680,7 @@ export default function ProductionDetail() {
               <div
                 className={`editor-content-preview production-preview tiptap prose max-w-none leading-relaxed text-studio-text-primary ${isDark ? 'prose-invert' : ''}`}
                 dangerouslySetInnerHTML={{
-                  __html: normalizeLegacyEditorHtmlTheme(
+                  __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(
                     selectedVersion?.contentMarkdown ||
                       normalizeVersionContent(
                         (production as ProductionType & {
@@ -689,7 +690,7 @@ export default function ProductionDetail() {
                           (production as ProductionType & { content_markdown?: string }).content_markdown,
                         production.content,
                       ),
-                  ),
+                  )),
                 }}
               />
             </div>

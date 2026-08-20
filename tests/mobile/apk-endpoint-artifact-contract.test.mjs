@@ -7,6 +7,6 @@ import { validateAndroidProductionEndpoints } from '../../scripts/mobile-build-c
 const apk = path.resolve(process.cwd(), process.argv[2] || 'android/app/build/outputs/apk/debug/app-debug.apk');
 assert.ok(fs.existsSync(apk), `APK not found: ${apk}`);
 const manifest = JSON.parse(execFileSync('unzip', ['-p', apk, 'assets/public/xmt-mobile-build.json'], { encoding: 'utf8' }));
-assert.deepEqual(manifest, { version: '2.19.8', versionCode: 21908, platform: 'android', target: 'production', apiBaseUrl: 'https://lanyaomedia.com/api', socketBaseUrl: 'https://lanyaomedia.com' });
+assert.deepEqual(manifest, { version: '2.19.9', versionCode: 21909, platform: 'android', target: 'production', apiBaseUrl: 'https://lanyaomedia.com/api', socketBaseUrl: 'https://lanyaomedia.com' });
 assert.equal(validateAndroidProductionEndpoints(manifest), null);
 console.log('APK endpoint artifact contract tests passed');

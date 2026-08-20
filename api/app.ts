@@ -470,7 +470,9 @@ io.on('connection', (socket) => {
   })
 
   socket.on(COLLABORATION_EVENTS.UPDATE, (payload) => {
-    void handleDocumentUpdate(io, socket, payload)
+    void handleDocumentUpdate(io, socket, payload).catch(() => {
+      socket.emit(COLLABORATION_EVENTS.CONFLICT_DETECTED, { reason: 'Invalid collaboration update', timestamp: Date.now() })
+    })
   })
 
   socket.on(COLLABORATION_EVENTS.AWARENESS_UPDATE, (payload) => {

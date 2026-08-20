@@ -20,6 +20,12 @@ export function getSocketIO(): Server | null {
   return ioInstance;
 }
 
+/** Disconnects only a user's live connections after a security-relevant identity change. */
+export function disconnectUserSockets(userId: number) {
+  if (!ioInstance) return;
+  ioInstance.in(`user_${userId}`).disconnectSockets(true);
+}
+
 /**
  * 向指定用户推送实时通知
  */

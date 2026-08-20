@@ -1,5 +1,12 @@
 # XMT 系统更新日志
 
+## v2.19.9 - 2026-08-20
+
+- 修复用户管理的角色提权边界：非管理员不能授予 admin 或超过自身有效权限集合的角色。
+- 富文本与 Markdown 预览新增统一 HTML 安全净化；畸形协作 Yjs update 被拒绝且不会影响 API 进程。
+- Webhook 采用 fail-closed 验签；账号禁用立即撤销 Auth V1 会话并断开在线 Socket。
+- Legacy Web / Android HTTP 401 接入既有 refresh runtime；安全回归合同进入 CI。
+
 ## v2.19.8 - 2026-08-17
 
 - 修复 clean Android build 未确定性注入生产 API / Socket 地址的问题；新增独立 Production Build Profile 与 APK 构建元数据。

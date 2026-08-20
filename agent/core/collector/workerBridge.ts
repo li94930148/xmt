@@ -6,6 +6,16 @@ import path from 'node:path';
 
 export type WorkerEvent = { id: string; event: 'started'|'progress'|'login_required'|'capture'|'export'|'warning'|'error'|'completed'|'cancelled'; data: Record<string, unknown> };
 type Pending = { resolve: (value: WorkerEvent) => void; reject: (reason: Error) => void; timer: NodeJS.Timeout };
+export type CollectorRuntimeCode = 'READY'|'RUNTIME_ROOT_NOT_FOUND'|'PYTHON_NOT_FOUND'|'WORKER_NOT_FOUND';
+export type CollectorRuntime = { code: CollectorRuntimeCode; collector: string; python: string; worker: string; requirements: string; available: boolean };
+export function resolveCollectorRuntime(root: string, platform = process.platform): CollectorRuntime {
+  const collector = path.join(root, 'collector');
+  const python = process.env.XMT_COLLECTOR_PYTHON || (platform === 'win32' ? path.join(collector, '.venv', 'Scripts', 'python.exe') : path.join(collector, '.venv', 'bin', 'python'));
+  const worker = path.join(collector, 'xmt_collector', 'runtime', 'worker.py');
+  const requirements = path.join(collector, 'requirements.lock');
+  const code: CollectorRuntimeCode = !fs.existsSync(collector) ? 'RUNTIME_ROOT_NOT_FOUND' : !fs.existsSync(python) ? 'PYTHON_NOT_FOUND' : !fs.existsSync(worker) ? 'WORKER_NOT_FOUND' : 'READY';
+  return { code, collector, python, worker, requirements, available: code === 'READY' && fs.existsSync(requirements) };
+}
 
 export class ScraplingWorkerBridge {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -14,15 +24,12 @@ export class ScraplingWorkerBridge {
   constructor(private readonly root: string, private readonly onDiagnostic: (message: string) => void = () => undefined) {}
 
   onEvent(listener: (event: WorkerEvent) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  runtime() {
-    const collector = path.join(this.root, 'collector');
-    const python = process.env.XMT_COLLECTOR_PYTHON || path.join(collector, '.venv', 'bin', 'python');
-    return { python, worker: path.join(collector, 'xmt_collector', 'runtime', 'worker.py'), available: fs.existsSync(python) && fs.existsSync(path.join(collector, 'xmt_collector', 'runtime', 'worker.py')) };
-  }
+  runtime() { return resolveCollectorRuntime(this.root); }
   async start() {
     if (this.child) return;
     const runtime = this.runtime();
-    if (!runtime.available) throw new Error('Scrapling Collector 未安装：请使用 Python 3.10+ 在 collector/.venv 安装 requirements.lock。');
+    this.onDiagnostic(`collector_runtime code=${runtime.code} collector=${runtime.collector} python=${runtime.python}`);
+    if (!runtime.available) throw new Error(`${runtime.code}: 未找到 Collector Python Runtime：${runtime.python}`);
     this.child = spawn(runtime.python, [runtime.worker], { cwd: path.join(this.root, 'collector'), env: { ...process.env, PYTHONPATH: path.join(this.root, 'collector') }, stdio: 'pipe' });
     this.child.stderr.setEncoding('utf8'); this.child.stderr.on('data', value => this.onDiagnostic(`Collector: ${String(value).trim().slice(0, 500)}`));
     this.child.once('exit', (code, signal) => { const error = new Error(`Scrapling Worker 已退出（code=${code ?? 'none'}, signal=${signal ?? 'none'}）`); for (const item of this.pending.values()) { clearTimeout(item.timer); item.reject(error); } this.pending.clear(); this.child = null; });

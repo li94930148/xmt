@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import path from 'node:path';
-import { ScraplingWorkerBridge } from './workerBridge.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import { ScraplingWorkerBridge, resolveCollectorRuntime } from './workerBridge.js';
 import { ScraplingCreatorCollector } from './scrapling.js';
 
 test('Scrapling Worker 支持 health 与受控 shutdown', async () => {
@@ -11,6 +13,22 @@ test('Scrapling Worker 支持 health 与受控 shutdown', async () => {
   assert.equal(health.event, 'completed');
   assert.equal(health.data.ready, true);
   await bridge.shutdown();
+});
+
+test('Collector runtime resolver 覆盖开发、打包和缺失 Python', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-runtime-'));
+  try {
+    const collector = path.join(root, 'collector');
+    fs.mkdirSync(path.join(collector, '.venv', 'bin'), { recursive: true });
+    fs.mkdirSync(path.join(collector, '.venv', 'Scripts'), { recursive: true });
+    fs.mkdirSync(path.join(collector, 'xmt_collector', 'runtime'), { recursive: true });
+    fs.writeFileSync(path.join(collector, '.venv', 'bin', 'python'), ''); fs.writeFileSync(path.join(collector, '.venv', 'Scripts', 'python.exe'), '');
+    fs.writeFileSync(path.join(collector, 'xmt_collector', 'runtime', 'worker.py'), ''); fs.writeFileSync(path.join(collector, 'requirements.lock'), '');
+    assert.equal(resolveCollectorRuntime(root, 'darwin').code, 'READY');
+    assert.equal(resolveCollectorRuntime(root, 'win32').code, 'READY');
+    fs.rmSync(path.join(collector, '.venv', 'bin', 'python'));
+    assert.equal(resolveCollectorRuntime(root, 'darwin').code, 'PYTHON_NOT_FOUND');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('Scrapling 使用 BrowserSession 已解析的非 default Profile', async () => {

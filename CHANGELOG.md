@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.19.9 - 2026-08-20
+
+### Security
+
+- 限制用户角色授予上限，非管理员不能创建或修改为 admin。
+- 所有富文本和 Markdown 预览在最终 DOM 渲染前统一净化；畸形 Yjs 更新只拒绝当前消息。
+- Douyin Webhook 缺 Secret 或签名非法时一律拒绝；Legacy JWT 固定 HS256。
+- 禁用账号吊销 Auth V1 会话并断开该用户实时连接；角色变化也会强制重连。
+
+### Fixes
+
+- Legacy Web 和 Native HTTP 401 复用既有 refresh runtime 后仅重试一次。
+- Production build 不再注入 react-dev-locator，新增安全合同进入 CI。
+
 ## 2.19.8 - 2026-08-17
 
 ### Fixes

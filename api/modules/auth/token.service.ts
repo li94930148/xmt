@@ -44,7 +44,7 @@ export class LegacyJwtTokenService implements TokenService {
 
   verify(token: string): JwtPayload | null {
     try {
-      return jwt.verify(token, JWT_SECRET) as unknown as JwtPayload;
+      return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as unknown as JwtPayload;
     } catch {
       return null;
     }

@@ -9,6 +9,7 @@ import {
 import {
   applyRuntimeDocumentUpdate,
   getRuntimeDocumentState,
+  isValidCollaborationUpdate,
   touchRuntimeDocument,
 } from '../yjs/documentStore.js';
 import { logCollaborationEvent } from '../analytics/collaborationLogger.js';
@@ -148,7 +149,10 @@ export function heartbeat(io: Server, socket: Socket, roomId: string) {
 
 export async function handleDocumentUpdate(io: Server, socket: Socket, payload: CollaborationUpdatePayload) {
   const roomId = String(payload?.roomId || '');
-  if (!roomId || !Array.isArray(payload?.update)) return;
+  if (!roomId || !isValidCollaborationUpdate(payload?.update)) {
+    socket.emit(COLLABORATION_EVENTS.CONFLICT_DETECTED, { roomId, reason: 'Invalid collaboration update', timestamp: Date.now() });
+    return;
+  }
   const authenticated = socketUser(socket);
   const userId = String(authenticated?.id ?? 'unknown');
 
@@ -171,8 +175,13 @@ export async function handleDocumentUpdate(io: Server, socket: Socket, payload: 
     return;
   }
 
-  const version = applyRuntimeDocumentUpdate(roomId, payload.update, { userId });
-  socket.to(roomId).emit(COLLABORATION_EVENTS.UPDATE, { ...payload, version });
+  try {
+    const version = applyRuntimeDocumentUpdate(roomId, payload.update, { userId });
+    socket.to(roomId).emit(COLLABORATION_EVENTS.UPDATE, { ...payload, version });
+  } catch (error) {
+    console.warn('[Collaboration] rejected malformed Yjs update', { roomId, userId, message: error instanceof Error ? error.message : 'unknown error' });
+    socket.emit(COLLABORATION_EVENTS.CONFLICT_DETECTED, { roomId, reason: 'Invalid collaboration update', timestamp: Date.now() });
+  }
 }
 
 export function handleAwarenessUpdate(socket: Socket, payload: CollaborationUpdatePayload) {

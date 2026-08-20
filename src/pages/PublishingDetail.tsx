@@ -7,6 +7,7 @@ import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { PageShell } from '../components/studio';
 
 interface PublishingDetailData {
@@ -404,7 +405,7 @@ export default function PublishingDetail() {
             <div className="p-6">
               <div
                 className={`editor-content-preview tiptap max-w-none ${styles.textPrimary} leading-relaxed prose ${styles.isDark ? 'prose-invert' : ''}`}
-                dangerouslySetInnerHTML={{ __html: normalizeLegacyEditorHtmlTheme(displayContent) }}
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(displayContent)) }}
               />
               {!scriptContent && (
                 <div className={`text-center py-8 ${styles.textMuted}`}>

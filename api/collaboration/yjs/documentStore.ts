@@ -24,6 +24,15 @@ const documents = new Map<string, RuntimeDocumentRecord>();
 const MAX_SNAPSHOTS_PER_DOC = 20;
 const MAX_UPDATE_SIZE = 500 * 1024;
 const MAX_UPDATES_PER_DOC = 1000;
+/** Input boundary limit. Retains room for normal full-document Yjs updates without trusting transport limits alone. */
+export const MAX_COLLAB_UPDATE_BYTES = 500 * 1024;
+
+export function isValidCollaborationUpdate(update: unknown): update is number[] {
+  return Array.isArray(update)
+    && update.length > 0
+    && update.length <= MAX_COLLAB_UPDATE_BYTES
+    && update.every((value) => Number.isInteger(value) && value >= 0 && value <= 255);
+}
 
 export function getRuntimeDocumentRecord(roomId: string) {
   let record = documents.get(roomId);

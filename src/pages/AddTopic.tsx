@@ -7,6 +7,7 @@ import { ChevronLeft, FileText, List, Calendar, User as UserIcon, Send, Save, Ey
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingDate } from '../lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 
 export default function AddTopic() {
   const navigate = useNavigate();
@@ -238,7 +239,7 @@ export default function AddTopic() {
             </div>
             <div className="p-6">
               {showPreview ? (
-                <div className={`editor-content-preview ${styles.bgTertiary} rounded-lg p-6 min-h-[400px] ${styles.textPrimary}`} dangerouslySetInnerHTML={{ __html: normalizeLegacyEditorHtmlTheme(formData.outline) }}></div>
+                <div className={`editor-content-preview ${styles.bgTertiary} rounded-lg p-6 min-h-[400px] ${styles.textPrimary}`} dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(formData.outline)) }}></div>
               ) : (
                 <ContentEditor
                   value={formData.outline}

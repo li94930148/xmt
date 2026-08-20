@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.19.8",
+  "version": "2.19.9",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -161,7 +161,13 @@
     "test:mobile-health-response-contract": "tsx tests/mobile/mobile-health-response-contract.test.ts",
     "test:android-build-endpoints": "tsx tests/mobile/android-build-endpoints.test.ts",
     "test:apk-endpoint-artifact": "node tests/mobile/apk-endpoint-artifact-contract.test.mjs",
-    "test:editor-format-painter": "tsx --test tests/editor/format-painter.test.ts"
+    "test:editor-format-painter": "tsx --test tests/editor/format-painter.test.ts",
+    "test:user-role-assignment-security": "tsx tests/auth/user-role-assignment-security.test.ts",
+    "test:html-sanitization": "tsx tests/security/html-sanitization.test.ts",
+    "test:yjs-invalid-update": "tsx tests/collaboration/yjs-invalid-update.test.ts",
+    "test:douyin-webhook-security": "tsx tests/security/douyin-webhook-security.test.ts",
+    "test:user-session-revocation": "tsx tests/auth/user-session-revocation.test.ts",
+    "test:auth-401-recovery": "tsx tests/auth/auth-401-recovery.test.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",
@@ -203,11 +209,13 @@
     "bcrypt": "^6.0.0",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
+    "dompurify": "^3.4.14",
     "dotenv": "^17.2.1",
     "express": "^4.21.2",
     "express-rate-limit": "^8.5.2",
     "framer-motion": "^12.42.0",
     "gsap": "^3.13.0",
+    "jsdom": "^26.1.0",
     "jsonwebtoken": "^9.0.3",
     "lowlight": "^3.3.0",
     "lucide-react": "^0.542.0",
@@ -234,6 +242,7 @@
     "@capacitor/cli": "^8.5.0",
     "@eslint/js": "^9.25.0",
     "@types/cors": "^2.8.19",
+    "@types/dompurify": "^3.0.5",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/lowlight": "^0.0.7",

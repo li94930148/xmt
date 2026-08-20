@@ -2,6 +2,7 @@
 import { authenticate } from '../middleware/auth';
 import { clearPermissionCache, requirePermission } from '../middleware/permissions';
 import { queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
+import { assertAssignableRoles, assertPermissionsWithinActorCeiling, getRolesByIds } from '../services/role-assignment.service.js';
 
 const router = Router();
 
@@ -80,6 +81,13 @@ router.post('/user/:userId', authenticate, requirePermission('system:role'), asy
     const user = await queryOne<{ id: number }>('SELECT id FROM users WHERE id = ?', [userId]);
     if (!user) return res.status(404).json({ message: '用户不存在' });
     if (!await assertRolesExist(roleIds)) return res.status(400).json({ message: '角色ID不存在' });
+    const targetRoles = await getRolesByIds(roleIds);
+    try {
+      await assertAssignableRoles({ id: req.user!.id, role: req.user!.role }, targetRoles);
+    } catch (error) {
+      if ((error as Error).name === 'RoleAssignmentForbiddenError') return res.status(403).json({ message: '无权授予该角色' });
+      throw error;
+    }
 
     await runInTransaction(async (tx) => {
       const primaryRole = await tx.queryOne<{ code: string }>(`SELECT code FROM roles WHERE id = ?`, [roleIds[0]]);
@@ -133,6 +141,12 @@ router.post('/', authenticate, requirePermission('system:role'), async (req, res
     const permissionIds = permission_ids === undefined ? [] : uniquePositiveIds(permission_ids);
     if (permission_ids !== undefined && !permissionIds) return res.status(400).json({ message: '权限ID列表必须为非空、非重复的正整数数组' });
     if (permissionIds && !await assertPermissionsExist(permissionIds)) return res.status(400).json({ message: '权限ID不存在' });
+    try {
+      await assertPermissionsWithinActorCeiling({ id: req.user!.id, role: req.user!.role }, permissionIds || []);
+    } catch (error) {
+      if ((error as Error).name === 'RolePermissionCeilingForbiddenError') return res.status(403).json({ message: '无权授予超出自身范围的权限' });
+      throw error;
+    }
 
     const roleId = await runInTransaction(async (tx) => {
       const id = await tx.executeInsert(`INSERT INTO roles (code, name, description, is_system) VALUES (?, ?, ?, 0)`, [code, name, description || '']);
@@ -158,6 +172,14 @@ router.put('/:id', authenticate, requirePermission('system:role'), async (req, r
     const permissionIds = permission_ids === undefined ? undefined : uniquePositiveIds(permission_ids);
     if (permission_ids !== undefined && !permissionIds) return res.status(400).json({ message: '权限ID列表必须为非空、非重复的正整数数组' });
     if (permissionIds && !await assertPermissionsExist(permissionIds)) return res.status(400).json({ message: '权限ID不存在' });
+    if (permissionIds) {
+      try {
+        await assertPermissionsWithinActorCeiling({ id: req.user!.id, role: req.user!.role }, permissionIds);
+      } catch (error) {
+        if ((error as Error).name === 'RolePermissionCeilingForbiddenError') return res.status(403).json({ message: '无权授予超出自身范围的权限' });
+        throw error;
+      }
+    }
 
     await runInTransaction(async (tx) => {
       if (name) await tx.execute(`UPDATE roles SET name = ?, description = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [name, description || '', roleId]);

@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.10', date: '2026-08-20', title: '认证与角色权限安全补充',
+    impactScope: ['认证', '权限', 'Android'],
+    changes: [
+      { type: 'security', description: 'Legacy 401 Recovery 仅接受精确可信 Origin，拒绝伪同源、错误端口和 HTTP 降级地址。' },
+      { type: 'security', description: '角色批量授予与角色权限定义在写入前执行调用者有效权限上限检查，避免自举提权。' },
+      { type: 'fix', description: '新增认证 Origin 与角色权限安全回归合同，并纳入核心安全 CI 门禁。' },
+    ],
+  },
+  {
     version: '2.19.9', date: '2026-08-20', title: '权限、编辑器与认证安全硬化',
     impactScope: ['权限', '编辑器', '协作', '认证', 'Android'],
     changes: [

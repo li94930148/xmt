@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.19.9",
+  "version": "2.19.10",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -167,7 +167,8 @@
     "test:yjs-invalid-update": "tsx tests/collaboration/yjs-invalid-update.test.ts",
     "test:douyin-webhook-security": "tsx tests/security/douyin-webhook-security.test.ts",
     "test:user-session-revocation": "tsx tests/auth/user-session-revocation.test.ts",
-    "test:auth-401-recovery": "tsx tests/auth/auth-401-recovery.test.ts"
+    "test:auth-401-recovery": "tsx tests/auth/auth-401-recovery.test.ts",
+    "test:role-management-security": "tsx tests/auth/role-management-security.test.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",

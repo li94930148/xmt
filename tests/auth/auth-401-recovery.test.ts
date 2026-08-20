@@ -63,4 +63,19 @@ let excludedRefreshes = 0;
 const excluded = createApiFetchInterceptor(async () => new Response('', { status: 401 }), baseDependencies({ refreshWeb: async () => { excludedRefreshes += 1; return 'never'; } }));
 for (const path of [`${origin}/api/v1/users`, `${origin}/api/auth/login`, `${origin}/api/auth/logout`, `${origin}/api/auth/refresh`, `${origin}/api/v1/auth/refresh`, 'https://external.test/api/topics']) await excluded(path);
 assert.equal(excludedRefreshes, 0);
+
+// Exact URL.origin comparison rejects lookalikes, ports and protocol downgrades without leaking a fresh bearer.
+const hostileRequests: Request[] = []; let hostileRefreshes = 0; let hostileUpdates = 0; let hostileExpires = 0;
+const hostileWeb = createApiFetchInterceptor(async (request) => { hostileRequests.push((request as Request).clone()); return new Response('', { status: 401 }); }, baseDependencies({ refreshWeb: async () => { hostileRefreshes += 1; return 'fresh-token'; }, updateAccessToken: () => { hostileUpdates += 1; }, expireSession: () => { hostileExpires += 1; } }));
+for (const url of ['https://xmt.test.evil/api/topics', 'https://xmt.test.attacker.com/api/topics', 'https://xmt.test:444/api/topics', 'http://xmt.test/api/topics']) await hostileWeb(url);
+assert.equal(hostileRefreshes, 0); assert.equal(hostileUpdates, 0); assert.equal(hostileExpires, 0);
+assert.ok(hostileRequests.every((request) => request.headers.get('authorization') !== 'Bearer fresh-token' && request.headers.get('authorization') !== 'Bearer new-web-token'));
+
+const nativeOrigin = 'https://lanyaomedia.com'; const nativeHostileRequests: Request[] = []; let nativeHostileRefreshes = 0;
+const hostileNative = createApiFetchInterceptor(async (request) => { nativeHostileRequests.push((request as Request).clone()); return new Response('', { status: 401 }); }, baseDependencies({ native: () => true, apiBaseUrl: () => `${nativeOrigin}/api`, refreshNative: async () => { nativeHostileRefreshes += 1; return 'native-fresh'; } }));
+for (const url of ['https://lanyaomedia.com.evil/api/topics', 'https://lanyaomedia.com:444/api/topics', 'http://lanyaomedia.com/api/topics']) await hostileNative(url);
+assert.equal(nativeHostileRefreshes, 0);
+assert.ok(nativeHostileRequests.every((request) => request.headers.get('authorization') !== 'Bearer native-fresh'));
+const nativeExact = createApiFetchInterceptor(async (request) => (request as Request).headers.get('authorization') === 'Bearer native-fresh' ? new Response('ok') : new Response('', { status: 401 }), baseDependencies({ native: () => true, apiBaseUrl: () => `${nativeOrigin}/api`, refreshNative: async () => 'native-fresh' }));
+assert.equal((await nativeExact(`${nativeOrigin}/api/topics`)).status, 200);
 console.log('Auth 401 recovery behavior tests passed');

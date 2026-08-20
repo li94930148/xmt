@@ -47,8 +47,11 @@ class Worker:
             self.stopping = True
             for adapter in self.running.values():
                 adapter.cancel()
-            for task in self.tasks.values():
+            tasks = list(self.tasks.values())
+            for task in tasks:
                 task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
             self.emit(request.id, "completed", {"shutdown": True})
         elif request.method in {"login", "collect", "start"}:
             if request.id in self.tasks:

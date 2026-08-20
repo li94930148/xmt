@@ -47,3 +47,26 @@ def test_worker_accepts_health_while_collection_task_is_running():
         await asyncio.sleep(0)
 
     asyncio.run(scenario())
+
+
+def test_worker_shutdown_waits_for_running_collection_cleanup():
+    async def scenario():
+        worker = Worker()
+        events = []
+        worker.emit = lambda request_id, name, data: events.append((request_id, name, data))  # type: ignore[method-assign]
+
+        async def waits_for_cancellation(request_id, params, method):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await asyncio.sleep(0)
+                raise
+
+        worker.collect = waits_for_cancellation  # type: ignore[method-assign]
+        await worker.handle('{"id":"job","method":"collect","params":{}}')
+        await asyncio.sleep(0)
+        await worker.handle('{"id":"stop","method":"shutdown","params":{}}')
+        assert any(event[0] == "stop" and event[1] == "completed" for event in events)
+        assert worker.tasks == {}
+
+    asyncio.run(scenario())

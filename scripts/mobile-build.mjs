@@ -10,14 +10,15 @@ const contractError = target === 'production' ? validateAndroidProductionEndpoin
 if (contractError) throw new Error(contractError);
 
 const root = process.cwd();
-const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const gradle = fs.readFileSync(path.join(root, 'android/app/build.gradle'), 'utf8');
 const versionCode = Number(gradle.match(/versionCode\s+(\d+)/)?.[1]);
+const version = gradle.match(/versionName\s+"([^"]+)"/)?.[1];
 if (!Number.isInteger(versionCode)) throw new Error('ANDROID_VERSION_CODE_MISSING');
+if (!version) throw new Error('ANDROID_VERSION_NAME_MISSING');
 
 const publicDir = path.join(root, 'public');
 const manifestPath = path.join(publicDir, 'xmt-mobile-build.json');
-const manifest = createAndroidBuildManifest({ version: pkg.version, versionCode, profile });
+const manifest = createAndroidBuildManifest({ version, versionCode, profile });
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const run = (args) => {
   const result = spawnSync(npm, args, {

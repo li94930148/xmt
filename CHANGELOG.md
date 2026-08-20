@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.20.0 - 2026-08-18
+
+### 新增
+
+- Creator Collector 切换为 Scrapling First Python Worker，使用独立 Profile 和脱敏能力清单。
+
+### 技术升级
+
+- Creator Agent 升级至 2.12.0-agent，移除旧 Node Collector 与已提交构建产物。
 ## 2.19.10 - 2026-08-20
 
 ### Security
@@ -425,3 +434,12 @@
 - 远程光标用户名改为编辑区行侧动态标签，不再覆盖正文。
 - 标签仅在远程光标活跃时短暂显示，支持多人光标、滚动与窗口尺寸变化，并保持 pointer-events 隔离。
 - 保持既有 Yjs 同步、断线重连、版本历史与撤销链路不变。
+## 2.20.0 - 2026-08-18
+
+### 新增
+
+- Creator Collector 切换为 Scrapling First 本地 Worker，增加脱敏 XHR 与能力清单。
+
+### 技术升级
+
+- Creator Agent 升级为 2.12.0-agent；移除旧 Node Playwright Collector 和已提交构建产物。

@@ -1,5 +1,5 @@
 import type { CreatorSnapshot, CreatorWork } from '../types.js';
-import type { PageCapability } from '../explorer/pageExplorer.js';
+import type { PageCapability } from '../collector/capabilities.js';
 
 type JsonRecord = Record<string, unknown>;
 const record = (value: unknown): JsonRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};

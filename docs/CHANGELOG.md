@@ -1,5 +1,9 @@
 # XMT 系统更新日志
 
+## v2.20.0 - 2026-08-18
+
+- Creator Collector 切换为 Scrapling First Python Worker，使用独立 Profile 和脱敏能力清单。
+- Creator Agent 升级至 v2.12.0-agent，移除旧 Node Collector 与已提交构建产物。
 ## v2.19.10 - 2026-08-20
 
 - v2.19.9 安全补充：Legacy 401 Recovery 改用精确 URL Origin，拒绝伪同源、错误端口与 HTTP 降级，防止新 Bearer Token 泄漏。
@@ -948,3 +952,28 @@
 ### 测试情况
 
 - Auth 行为冻结测试、Topic 测试、API Contract 测试、类型检查、Auth 范围 lint、版本一致性检查和生产构建均已执行；详细结果见 `UPGRADE_PROGRESS.md`。
+## v2.20.0 - 2026-08-18
+
+### 新增
+
+- 新增 Scrapling First Python Collector、JSON Lines Worker Bridge、能力 Manifest 与敏感字段脱敏。
+
+### 优化
+
+- Creator Agent 采集链路改为独立 Python Worker 与真实 Chrome 专用 Profile。
+
+### 修复
+
+- 无。
+
+### 技术升级
+
+- Creator Agent 升级至 v2.12.0-agent，锁定 Scrapling 0.4.14。
+
+### 数据库变化
+
+- 无。
+
+### 测试情况
+
+- Python 单测、Agent check/build、Worker Bridge 合同测试通过；正式账号登录及导出待人工扫码验证。

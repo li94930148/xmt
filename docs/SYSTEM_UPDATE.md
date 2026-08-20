@@ -2,7 +2,15 @@
 
 ## 当前版本
 
-v2.19.10
+v2.19.11
+
+## v2.19.11 Creator Agent 上传协议安全收口
+
+v2.19.11 不是重新实现 Creator Agent 上传链路。`/data-sync` 原已具备 V1 timestamp 与 nonce 防重放；本版关闭 legacy protocol fallback，并退役无现行调用者的 `/report` 上传入口。
+
+- `/data-sync` 永久要求 `protocol_version=1`，不再受 runtime flag 控制。
+- HMAC 继续按显式字段顺序覆盖 protocol、Agent 绑定、timestamp、nonce、采集时间与密文数据；时间窗、严格 UUID nonce 与签名均通过后，才原子预留 nonce。
+- `/api/creator-agent/report` 返回 410，提示客户端使用 `/data-sync`；无数据库迁移、无 Creator 业务数据删除。
 
 ## v2.19.10 安全补充
 

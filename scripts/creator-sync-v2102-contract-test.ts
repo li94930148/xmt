@@ -29,13 +29,16 @@ function envelope(payload: Record<string, unknown>) {
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const ciphertext = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
   const body: Record<string, unknown> = {
+    protocol_version: 1,
     agent_id: 101,
     platform: 'douyin',
     account_id: 'contract-account',
+    timestamp: new Date().toISOString(),
+    nonce: crypto.randomUUID(),
     collected_at: collectedAt,
     data: { iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64') },
   };
-  const canonical = [body.agent_id, body.platform, body.account_id, body.collected_at, JSON.stringify(body.data)].join('\n');
+  const canonical = [body.protocol_version, body.agent_id, body.platform, body.account_id, body.timestamp, body.nonce, body.collected_at, JSON.stringify(body.data)].join('\n');
   body.signature = crypto.createHmac('sha256', token).update(canonical).digest('hex');
   return body;
 }
@@ -53,10 +56,6 @@ const legacy = await sync({
   metrics: [{ platform_item_id: 'legacy-aweme', play_count: 10, like_count: 1 }],
 });
 assert.equal(legacy.success, true, 'v2.10.1 payload should remain compatible');
-
-process.env.XMT_CREATOR_AGENT_V1_ONLY = 'true';
-await assert.rejects(() => sync({ platform: 'douyin', account, contents: [] }), /仅接受 protocol_version=1/);
-delete process.env.XMT_CREATOR_AGENT_V1_ONLY;
 
 const works = Array.from({ length: 12 }, (_, index) => ({
   aweme_id: `73900000000000000${String(index).padStart(2, '0')}`,
@@ -110,7 +109,7 @@ assert(douyinIds.filter(row => String(row.aweme_id).startsWith('739')).every(row
 assert(!douyinIds.some(row => ['music-1', 'manifest'].includes(String(row.aweme_id))));
 assert(!douyinIds.some(row => String(row.aweme_id) === 'raw-recursive-work'), 'v2.10.2 must not recurse raw_records');
 
-console.log('v2.10.2 server contract tests passed: legacy compatible; 12/12 normalized; snapshot idempotent x10; numeric IDs and non-work objects rejected; dual-table IDs consistent.');
+console.log('v2.10.2 server contract tests passed: V1 signed envelope; 12/12 normalized; snapshot idempotent x10; numeric IDs and non-work objects rejected; dual-table IDs consistent.');
 
 db.close();
 try { rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch {}

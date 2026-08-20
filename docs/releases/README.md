@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 类型 | 说明 |
 | --- | --- | --- | --- |
+| [v2.19.11](./v2.19.11-creator-agent-protocol-hardening.md) | 2026-08-20 | PATCH 安全修复 | Creator Agent 上传协议与防重放边界收口 |
 | [v2.19.10](./v2.19.10-p1-security-followup.md) | 2026-08-20 | PATCH 安全补充 | 认证 Origin 与角色权限边界 P1 补丁 |
 | [v2.19.9](./v2.19.9-security-hardening.md) | 2026-08-20 | PATCH 安全修复 | 权限、XSS、协作、Webhook 与认证边界硬化 |
 | [v2.19.8](./v2.19.8-android-production-endpoint-build-contract.md) | 2026-08-17 | PATCH 修复 | Android Production Endpoint Build Contract 与 APK 产物校验 |

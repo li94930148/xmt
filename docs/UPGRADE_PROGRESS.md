@@ -1,5 +1,13 @@
 # XMT 升级阶段记录
 
+## v2.19.10 P1 安全补充（2026-08-20）
+
+- 从 v2.19.9 main 基线移植 PR #22 遗留的认证 Origin 与角色权限边界 P1 修复。
+- Legacy 401 Recovery 改为精确 URL Origin 校验；角色批量授予和角色 `permission_ids` 在事务前执行有效权限上限检查。
+- 数据库变化：无 schema 或 migration 变化；生产未部署。
+- 验证：认证、RBAC、Web/Native Auth、Android runtime 与 endpoint 合同按发布门禁执行。
+- 风险：等待新 PR 的 CI 与代码审查；在 v2.19.10 合并前不得部署 v2.19.9。
+
 ## v2.18.4 版本 Gate 补齐（2026-08-13）
 
 - 正式部署在 Restore Drill、迁移 Gate 和 PM2 restart 前执行 `npm run version:check`。

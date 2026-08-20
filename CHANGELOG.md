@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.19.10 - 2026-08-20
+
+### Security
+
+- Legacy 401 Recovery 使用精确 URL Origin 验证，避免将新 Bearer Token 发送到伪同源、错误端口或 HTTP 地址。
+- 角色批量授予和角色权限定义在事务前执行调用者权限上限检查，拒绝自举提权。
+
+### Fixes
+
+- 增加认证 Origin 与角色权限安全回归合同，并纳入核心安全 CI。
+
 ## 2.19.9 - 2026-08-20
 
 ### Security

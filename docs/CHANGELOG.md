@@ -4,6 +4,18 @@
 
 - Creator Collector 切换为 Scrapling First Python Worker，使用独立 Profile 和脱敏能力清单。
 - Creator Agent 升级至 v2.12.0-agent，移除旧 Node Collector 与已提交构建产物。
+## v2.19.10 - 2026-08-20
+
+- v2.19.9 安全补充：Legacy 401 Recovery 改用精确 URL Origin，拒绝伪同源、错误端口与 HTTP 降级，防止新 Bearer Token 泄漏。
+- `/api/roles/user/:userId` 在事务前完整验证所有角色；角色创建和修改的 `permission_ids` 受调用者有效权限上限约束。
+- 新增认证 Origin、角色授予与角色权限上限回归测试，并纳入核心安全 CI 门禁。
+
+## v2.19.9 - 2026-08-20
+
+- 修复用户管理的角色提权边界：非管理员不能授予 admin 或超过自身有效权限集合的角色。
+- 富文本与 Markdown 预览新增统一 HTML 安全净化；畸形协作 Yjs update 被拒绝且不会影响 API 进程。
+- Webhook 采用 fail-closed 验签；账号禁用立即撤销 Auth V1 会话并断开在线 Socket。
+- Legacy Web / Android HTTP 401 接入既有 refresh runtime；安全回归合同进入 CI。
 
 ## v2.19.8 - 2026-08-17
 

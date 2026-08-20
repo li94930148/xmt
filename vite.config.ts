@@ -11,7 +11,7 @@ const hasCerts = fs.existsSync(path.resolve(__dirname, 'certs/server.key'))
 const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'))
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
@@ -50,7 +50,7 @@ export default defineConfig({
     react({
       babel: {
         plugins: [
-          'react-dev-locator',
+          ...(mode === 'development' ? ['react-dev-locator'] : []),
         ],
       },
     }),
@@ -84,4 +84,4 @@ export default defineConfig({
       },
     }
   }
-})
+}))

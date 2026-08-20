@@ -13,6 +13,7 @@ import { getCurrentTopicEditorModePolicy } from '../editor/topic/topicEditorMode
 import { useTopicDetailLeaveGuard } from '../hooks/useTopicDetailLeaveGuard';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { usePermission } from '../hooks/usePermission';
 import { STATUS_COLORS, STATUS_TEXT } from '../constants';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
@@ -618,7 +619,7 @@ export default function TopicDetail() {
               />
             )
           ) : (
-            <div className={`editor-content-preview tiptap ${styles.bgTertiary} rounded-lg p-6 ${styles.textPrimary} min-h-[200px] leading-relaxed`} dangerouslySetInnerHTML={{ __html: normalizeLegacyEditorHtmlTheme(scriptContent || '暂无大纲内容') }}></div>
+            <div className={`editor-content-preview tiptap ${styles.bgTertiary} rounded-lg p-6 ${styles.textPrimary} min-h-[200px] leading-relaxed`} dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(scriptContent || '暂无大纲内容')) }}></div>
           )}
         </div>
 

@@ -9,6 +9,30 @@
 ### 技术升级
 
 - Creator Agent 升级至 2.12.0-agent，移除旧 Node Collector 与已提交构建产物。
+## 2.19.10 - 2026-08-20
+
+### Security
+
+- Legacy 401 Recovery 使用精确 URL Origin 验证，避免将新 Bearer Token 发送到伪同源、错误端口或 HTTP 地址。
+- 角色批量授予和角色权限定义在事务前执行调用者权限上限检查，拒绝自举提权。
+
+### Fixes
+
+- 增加认证 Origin 与角色权限安全回归合同，并纳入核心安全 CI。
+
+## 2.19.9 - 2026-08-20
+
+### Security
+
+- 限制用户角色授予上限，非管理员不能创建或修改为 admin。
+- 所有富文本和 Markdown 预览在最终 DOM 渲染前统一净化；畸形 Yjs 更新只拒绝当前消息。
+- Douyin Webhook 缺 Secret 或签名非法时一律拒绝；Legacy JWT 固定 HS256。
+- 禁用账号吊销 Auth V1 会话并断开该用户实时连接；角色变化也会强制重连。
+
+### Fixes
+
+- Legacy Web 和 Native HTTP 401 复用既有 refresh runtime 后仅重试一次。
+- Production build 不再注入 react-dev-locator，新增安全合同进入 CI。
 
 ## 2.19.8 - 2026-08-17
 

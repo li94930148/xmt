@@ -69,6 +69,19 @@ jobs:
       - run: npm run test:migration-readiness
       - run: npm run test:version-governance
       - run: npm run test:creator-sync-v2102
+      - run: npm run test:auth-web-cookie
+      - run: npm run test:auth-web-runtime
+      - run: npm run test:auth-socket-contract
+      - run: npm run test:auth-socket-bridge
+      - run: npm run test:socket-production-gate
+      - run: npm run test:creator-agent:binding
+      - run: npm run test:user-role-assignment-security
+      - run: npm run test:html-sanitization
+      - run: npm run test:yjs-invalid-update
+      - run: npm run test:douyin-webhook-security
+      - run: npm run test:user-session-revocation
+      - run: npm run test:auth-401-recovery
+      - run: npm run test:role-management-security
 
   android-debug-apk:
     runs-on: ubuntu-latest

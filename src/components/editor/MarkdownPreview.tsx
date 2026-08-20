@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 import { markdownToHtml } from '../../utils/markdown';
 import { useAppStore } from '../../store';
 import { normalizeLegacyEditorHtmlTheme } from '../../utils/editorTheme';
+import { sanitizeHtml } from '../../utils/sanitizeHtml';
 
 interface MarkdownPreviewProps {
   markdown: string;
@@ -16,7 +17,7 @@ export default function MarkdownPreview({ markdown, className }: MarkdownPreview
   const appStore = useAppStore();
   const isDark = appStore.theme === 'dark';
 
-  const html = useMemo(() => normalizeLegacyEditorHtmlTheme(markdownToHtml(markdown)), [markdown]);
+  const html = useMemo(() => sanitizeHtml(normalizeLegacyEditorHtmlTheme(markdownToHtml(markdown))), [markdown]);
 
   return (
     <div

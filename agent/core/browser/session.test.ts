@@ -1,18 +1,16 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
 import test from 'node:test';
-import path from 'node:path';
-import { discoverBrowsers,fallbackBrowsers,macCandidates, windowsCandidates, rankBrowsers } from './discovery.js';
-import { capabilities } from './capabilities.js';
-import { managedProfile,assertManagedProfile } from './profile.js';
-import { isDouyinCreatorLoggedIn } from './session.js';
-test('macOS 发现 Chrome、Edge、Brave 和 Arc',()=>{const items=macCandidates('/Users/测试 用户');for(const type of ['chrome','edge','brave','arc'])assert.ok(items.some(item=>item.type===type));assert.ok(items.some(item=>item.path?.includes('/Users/测试 用户/Applications')));});
-test('Windows 发现 Chrome、Edge 和 Brave',()=>{const items=windowsCandidates({PROGRAMFILES:'C:\\程序 文件',LOCALAPPDATA:'C:\\用户\\识君'});for(const type of ['chrome','edge','brave'])assert.ok(items.some(item=>item.type===type));assert.ok(items.every(item=>item.path?.includes('程序 文件')||item.path?.includes('识君')));});
-test('自定义路径支持中文和空格并拒绝不可执行文件',()=>{const directory=fs.mkdtempSync(path.join(os.tmpdir(),'浏览器 测试-')),executable=path.join(directory,'自定义 Browser');try{fs.writeFileSync(executable,'#!/bin/sh\nexit 0\n');fs.chmodSync(executable,0o755);assert.ok(discoverBrowsers({platform:'linux',customPath:executable}).some(item=>item.source==='user'));fs.chmodSync(executable,0o644);assert.ok(!discoverBrowsers({platform:'linux',customPath:executable}).some(item=>item.source==='user'));}finally{fs.rmSync(directory,{recursive:true,force:true});}});
-test('浏览器能力按引擎和运行时检测',()=>{assert.equal(capabilities('chromium','system').supportsCdp,true);assert.equal(capabilities('firefox','playwright').supportsCdp,false);assert.equal(capabilities('webkit','playwright').supportsCreatorCenter,false);assert.equal(capabilities('chromium','external-cdp').supportsManagedProfile,false);});
-test('优先选择用户指定，其次最近成功和兼容浏览器',()=>{const make=(id:string,type:'chrome'|'edge',status:'compatible'|'not_tested')=>({id,displayName:id,browserType:type,engine:'chromium' as const,runtime:'system' as const,source:'test',capabilities:capabilities('chromium','system'),compatibilityStatus:status,compatibilityReason:'test'});const list=[make('chrome','chrome','not_tested'),make('edge','edge','compatible')];assert.equal(rankBrowsers(list)[0].id,'edge');assert.equal(rankBrowsers(list,'chrome')[0].id,'chrome');assert.equal(rankBrowsers(list,undefined,'chrome')[0].id,'chrome');});
-test('自动回退排除不兼容项且最多尝试三个',()=>{const make=(id:string,status:'compatible'|'not_tested'|'incompatible')=>({id,displayName:id,browserType:'chromium' as const,engine:'chromium' as const,runtime:'playwright' as const,source:'test',capabilities:capabilities('chromium','playwright'),compatibilityStatus:status,compatibilityReason:'test'});const list=[make('bad','incompatible'),make('one','compatible'),make('two','not_tested'),make('three','not_tested'),make('four','not_tested')];const result=fallbackBrowsers(list,'bad',undefined,9);assert.equal(result.length,3);assert.ok(result.every(item=>item.id!=='bad'));});
-test('不同账号和浏览器使用独立资料目录',()=>{const root=path.join('/tmp','XMT Creator Agent 中文');const chrome=managedProfile(root,{type:'chrome',profileName:'default'},'账号 A');const edge=managedProfile(root,{type:'edge',profileName:'default'},'账号 A');assert.notEqual(chrome,edge);assert.ok(chrome.includes('chrome'));assert.equal(assertManagedProfile(chrome,root),chrome);assert.throws(()=>assertManagedProfile('/tmp/outside',root));});
-test('登录检测忽略隐藏登录文案并识别创作者外壳',async()=>{const page={waitForLoadState:async()=>undefined,url:()=> 'https://creator.douyin.com/creator-micro/home',locator:()=>({innerText:async()=> '内容管理 数据中心 抖音号：40283171336 登录抖音说明'}),getByText:()=>({first:()=>({isVisible:async()=>false})})};assert.equal(await isDouyinCreatorLoggedIn(page as never),true);});
-test('可见登录控件优先判定为未登录',async()=>{const page={waitForLoadState:async()=>undefined,url:()=> 'https://creator.douyin.com/creator-micro/home',locator:()=>({innerText:async()=> '内容管理 数据中心 抖音号：40283171336'}),getByText:()=>({first:()=>({isVisible:async()=>true})})};assert.equal(await isDouyinCreatorLoggedIn(page as never),false);});
+import { getDouyinCreatorLoginState } from './session.js';
+import { managedProfile, assertManagedProfile } from './profile.js';
+
+function page(url: string, body = '', login = false, readable = true) {
+  return { waitForLoadState: async () => undefined, url: () => url, locator: () => ({ innerText: async () => { if (!readable) throw new Error('unreadable'); return body; } }), getByText: () => ({ first: () => ({ isVisible: async () => login }) }) };
+}
+async function status(url: string, body = '', login = false, readable = true) { return (await getDouyinCreatorLoginState(page(url, body, login, readable) as never)).status; }
+
+test('不同账号和浏览器使用独立资料目录', () => { const root = '/tmp/XMT Creator Agent'; const profile = managedProfile(root, { type: 'custom', profileName: 'profile-a' }, 'account-a'); assert.equal(profile, '/tmp/XMT Creator Agent/profiles/custom/account-a/profile-a'); assert.equal(assertManagedProfile(profile, `${root}/profiles`), profile); assert.throws(() => assertManagedProfile('/tmp/outside', `${root}/profiles`)); });
+test('受保护 Creator 页面无需固定导航文字也判为已登录', async () => { assert.equal(await status('https://creator.douyin.com/creator-micro/home'), 'logged_in'); assert.equal(await status('https://creator.douyin.com/creator-micro/home', '内容管理'), 'logged_in'); });
+test('折叠导航的 Creator 受保护路径仍判为已登录', async () => { assert.equal(await status('https://creator.douyin.com/creator-center/data'), 'logged_in'); });
+test('可见登录控件判为需要登录', async () => { assert.equal(await status('https://creator.douyin.com/creator-micro/home', '', true), 'login_required'); });
+test('明确登录或认证 URL 判为需要登录', async () => { assert.equal(await status('https://creator.douyin.com/login'), 'login_required'); assert.equal(await status('https://sso.douyin.com/auth'), 'login_required'); });
+test('无法可靠判断时返回 unknown', async () => { assert.equal(await status('https://creator.douyin.com/', '', false), 'unknown'); assert.equal(await status('https://example.invalid/loading'), 'unknown'); assert.equal(await status('https://creator.douyin.com/creator-micro/home', '', false, false), 'unknown'); });

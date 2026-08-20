@@ -4,9 +4,9 @@ import type { CollectionMode, CreatorSnapshot, CreatorWork } from '../types.js';
 import { ScraplingWorkerBridge } from './workerBridge.js';
 
 export class ScraplingCreatorCollector {
-  constructor(private readonly bridge: ScraplingWorkerBridge, private readonly dataRoot: string, private readonly accountId: string, private readonly browserType: string) {}
+  constructor(private readonly bridge: ScraplingWorkerBridge, private readonly profilePath: string, private readonly outputRoot: string, private readonly accountId: string) {}
   async collect(options: { collectionMode?: CollectionMode } = {}): Promise<CreatorSnapshot> {
-    const result = await this.bridge.request('collect', { platform: 'douyin', accountId: this.accountId, scope: options.collectionMode || 'full_snapshot', profilePath: path.join(this.dataRoot, 'profiles', this.browserType, this.accountId, 'default'), outputPath: path.join(this.dataRoot, 'collector', 'douyin', this.accountId) }, 180_000);
+    const result = await this.bridge.request('collect', { platform: 'douyin', accountId: this.accountId, scope: options.collectionMode || 'full_snapshot', profilePath: this.profilePath, outputPath: path.join(this.outputRoot, 'collector', 'douyin', this.accountId) }, 180_000);
     const data = result.data as { xhrResponses?: number; works?: Array<Record<string, unknown>>; pages?: number };
     if (!data.xhrResponses) throw new Error('未捕获到抖音 XHR，已停止同步以避免用空结果覆盖数据。');
     const works: CreatorWork[] = (data.works || []).map(work => ({ aweme_id: String(work.item_id || ''), item_id: String(work.item_id || ''), title: String(work.title || ''), cover_url: String(work.cover_uri || ''), publish_time: String(work.published_at || ''), video_url: '', metrics: (work.metrics || {}) as CreatorWork['metrics'], ...work }));

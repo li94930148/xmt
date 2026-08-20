@@ -81,6 +81,7 @@ jobs:
       - run: npm run test:douyin-webhook-security
       - run: npm run test:user-session-revocation
       - run: npm run test:auth-401-recovery
+      - run: npm run test:role-management-security
 
   android-debug-apk:
     runs-on: ubuntu-latest

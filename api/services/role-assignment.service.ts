@@ -3,6 +3,14 @@ import { queryAll } from '../database/utils.js';
 export type RoleAssignmentActor = { id: number; role?: string | null };
 export type AssignableRole = { id: number; code: string; name: string };
 
+export async function getRolesByIds(roleIds: number[]): Promise<AssignableRole[]> {
+  if (roleIds.length === 0) return [];
+  return queryAll<AssignableRole>(
+    `SELECT id, code, name FROM roles WHERE id IN (${roleIds.map(() => '?').join(',')})`,
+    roleIds,
+  );
+}
+
 async function rolePermissions(roleId: number): Promise<Set<string>> {
   const rows = await queryAll<{ code: string }>(
     `SELECT p.code
@@ -52,6 +60,25 @@ export async function assertAssignableRole(actor: RoleAssignmentActor, targetRol
   if (!await canAssignRole(actor, targetRole)) {
     const error = new Error('ROLE_ASSIGNMENT_FORBIDDEN');
     error.name = 'RoleAssignmentForbiddenError';
+    throw error;
+  }
+}
+
+/** Validates every role before a write transaction so multi-role assignment is atomic. */
+export async function assertAssignableRoles(actor: RoleAssignmentActor, targetRoles: AssignableRole[]): Promise<void> {
+  for (const targetRole of targetRoles) await assertAssignableRole(actor, targetRole);
+}
+
+/** Non-admin role managers can only define roles with permissions they already hold. */
+export async function assertPermissionsWithinActorCeiling(actor: RoleAssignmentActor, permissionIds: number[]): Promise<void> {
+  if (actor.role === 'admin' || permissionIds.length === 0) return;
+  const rows = await queryAll<{ code: string }>(
+    `SELECT code FROM permissions WHERE id IN (${permissionIds.map(() => '?').join(',')})`,
+    permissionIds,
+  );
+  if (!isSubset(new Set(rows.map((row) => row.code)), await actorPermissions(actor.id))) {
+    const error = new Error('ROLE_PERMISSION_CEILING_FORBIDDEN');
+    error.name = 'RolePermissionCeilingForbiddenError';
     throw error;
   }
 }

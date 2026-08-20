@@ -42,8 +42,16 @@ function resolveRuntimeRequest(input: FetchInput, native: boolean, apiBaseUrl: s
 }
 
 function isRecoverableLegacyApi(request: Request, dependencies: ApiInterceptorDependencies) {
-  if (!request.url.startsWith(dependencies.origin) && !(dependencies.native() && request.url.startsWith(dependencies.apiBaseUrl()))) return false;
-  const path = new URL(request.url).pathname;
+  let requestUrl: URL;
+  let allowedOrigin: string;
+  try {
+    requestUrl = new URL(request.url);
+    allowedOrigin = new URL(dependencies.native() ? dependencies.apiBaseUrl() : dependencies.origin).origin;
+  } catch {
+    return false;
+  }
+  if (requestUrl.origin !== allowedOrigin) return false;
+  const path = requestUrl.pathname;
   return path.startsWith('/api/')
     && !path.startsWith('/api/v1/')
     && !['/api/auth/login', '/api/auth/logout', '/api/auth/refresh', '/api/v1/auth/refresh', '/api/v1/auth/mobile/refresh'].includes(path);

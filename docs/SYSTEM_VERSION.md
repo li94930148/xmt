@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.19.10
+v2.19.11
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.19.10
 
 ## 本版本摘要
 
-本版本是 v2.19.9 的安全补充版本，关闭认证 Origin 与角色权限绕过问题；Android 生产端点合同保持不变。
+本版本关闭 Creator Agent legacy protocol downgrade 与旧 `/report` 上传入口，保留既有 V1 防重放合同；Android 生产端点合同保持不变。

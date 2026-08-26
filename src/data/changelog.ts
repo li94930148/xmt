@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.19.11', date: '2026-08-20', title: 'Creator Agent 上传协议安全收口',
+    impactScope: ['Creator Agent', '上传安全', 'Android'],
+    changes: [
+      { type: 'security', description: 'Creator Agent /data-sync 固定只接受 protocol_version=1，HMAC 覆盖 timestamp 与 nonce，并以原子预留拒绝重放。' },
+      { type: 'security', description: '旧 /report 上传入口已退役并返回 410，关闭 legacy protocol 防重放旁路。' },
+    ],
+  },
+  {
     version: '2.19.10', date: '2026-08-20', title: '认证与角色权限安全补充',
     impactScope: ['认证', '权限', 'Android'],
     changes: [

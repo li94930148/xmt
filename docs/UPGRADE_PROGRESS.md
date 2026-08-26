@@ -1,5 +1,11 @@
 # XMT 升级阶段记录
 
+## v2.19.11 Creator Agent 上传协议安全收口（2026-08-20）
+
+- `/data-sync` 原有 V1 timestamp、nonce、HMAC 与 AES-GCM 防重放合同保持有效；本次关闭可选 legacy protocol fallback。
+- 旧 `/report` 无现行客户端调用，已退役为 410；复用既有 `creator_agent_nonces`，无 schema migration、无业务数据删除。
+- 验证：新增重放安全合同覆盖 nonce 原子性、时间窗、验签顺序、篡改与 `/report` 退役；等待 PR CI 与审查，未部署生产。
+
 ## v2.19.10 P1 安全补充（2026-08-20）
 
 - 从 v2.19.9 main 基线移植 PR #22 遗留的认证 Origin 与角色权限边界 P1 修复。

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.19.11 - 2026-08-20
+
+### Security
+
+- Creator Agent `/data-sync` 现在永久要求 `protocol_version=1`，签名覆盖 timestamp 与 nonce，并在验签后以原子 nonce 预留拒绝重放。
+- 退役未被现行客户端使用的旧 `/api/creator-agent/report` 上传入口，统一返回 410，关闭旧协议旁路。
+
+### Tests
+
+- 新增 Creator Agent 上传防重放安全合同并纳入核心安全 CI。
+
 ## 2.19.10 - 2026-08-20
 
 ### Security

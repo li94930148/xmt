@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.19.10",
+  "version": "2.19.11",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -135,6 +135,7 @@
     "verify:douyin:data": "tsx scripts/verify-douyin-data.ts",
     "test:creator-access-platform": "tsx scripts/creator-access-platform-test.ts",
     "test:creator-sync-v2102": "tsx scripts/creator-sync-v2102-contract-test.ts",
+    "test:creator-agent-replay-security": "tsx tests/security/creator-agent-replay-security.test.ts",
     "test:v2102-storage": "tsx scripts/v2102-storage-visibility-test.ts",
     "creator-agent:doctor": "npm --prefix agent run doctor",
     "creator-agent:browser:list": "npm --prefix agent run browser:list --",

@@ -1,5 +1,10 @@
 # XMT 系统更新日志
 
+## v2.19.11 - 2026-08-20
+
+- Creator Agent `/data-sync` 固定要求 V1 信封，HMAC 覆盖 timestamp、nonce 与业务字段；有效签名后才原子预留 `(agent_id, nonce)`。
+- 已退役旧 `/api/creator-agent/report` 上传入口，返回 410；无数据库迁移、无 Creator 业务数据删除。
+
 ## v2.19.10 - 2026-08-20
 
 - v2.19.9 安全补充：Legacy 401 Recovery 改用精确 URL Origin，拒绝伪同源、错误端口与 HTTP 降级，防止新 Bearer Token 泄漏。

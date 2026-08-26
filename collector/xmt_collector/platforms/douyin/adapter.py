@@ -115,14 +115,19 @@ class DouyinAdapter:
                             if not enabled or exports:
                                 continue
                             try:
+                                export_id = "export1" if page_name == "内容管理" else "export2"
+                                started = datetime.now(timezone.utc)
+                                await self.emit("export", {"checkpoint": f"{export_id}:start", "page": page_name, "action": label})
                                 async with page.expect_download(timeout=15_000) as download_info:
                                     await target.click()
+                                await self.emit("export", {"checkpoint": f"{export_id}:download-start", "page": page_name, "action": label})
                                 download = await download_info.value
                                 temp = self.run_root / "downloads" / download.suggested_filename
                                 temp.parent.mkdir(parents=True, exist_ok=True)
                                 await download.save_as(str(temp))
                                 receipt = run.save_export(temp, {"page": page_name, "source": "official_download", "suggestedFilename": download.suggested_filename})
                                 exports.append(receipt)
+                                await self.emit("export", {"checkpoint": f"{export_id}:complete", "page": page_name, "action": label, "filename": receipt["storedFilename"], "size": receipt["size"], "sha256": receipt["sha256"], "workbookValid": receipt["workbookValid"], "sheetNames": receipt["sheetNames"], "duration_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000)})
                                 interactions.append({"action": "export_downloaded", "target": label, "filename": receipt["storedFilename"], "sha256": receipt["sha256"], "checkpoint": "export-download"})
                             except Exception:
                                 # The button may open a server-side export dialog. Record the

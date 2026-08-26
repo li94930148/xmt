@@ -2,7 +2,13 @@
 
 ## 当前版本
 
-v2.20.0
+v2.20.1
+
+## v2.20.1 Creator Collector 验收完善
+
+- 修复 works SQLite 非标量字段持久化，并保持对象状态以 JSON 字符串安全保存。
+- 增加本机 Creator Collector 无 UI CLI E2E 入口，复用正式任务 Runner。
+- 增加官方导出阶段结构化观测与 XLSX workbook 校验，支持连续双导出稳定性验收。
 
 ## v2.19.10 安全补充
 

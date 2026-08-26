@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -23,4 +25,10 @@ class ManifestWriter:
         target = self.run_root / "exports" / source.name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
-        return {**sanitize(metadata), "storedFilename": target.name, "size": target.stat().st_size, "sha256": hashlib.sha256(target.read_bytes()).hexdigest()}
+        with zipfile.ZipFile(target) as workbook:
+            if "xl/workbook.xml" not in workbook.namelist():
+                raise ValueError("EXPORT_XLSX_INVALID: missing xl/workbook.xml")
+            sheet_names = re.findall(r'<sheet[^>]+name="([^"]+)"', workbook.read("xl/workbook.xml").decode("utf-8"))
+        if not sheet_names:
+            raise ValueError("EXPORT_XLSX_INVALID: workbook contains no sheets")
+        return {**sanitize(metadata), "storedFilename": target.name, "size": target.stat().st_size, "sha256": hashlib.sha256(target.read_bytes()).hexdigest(), "workbookValid": True, "sheetNames": sheet_names}

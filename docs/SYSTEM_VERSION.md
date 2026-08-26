@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.20.0
+v2.20.1
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.20.0
 
 ## 本版本摘要
 
-本版本将 Creator Collector 切换为 Scrapling First：采集在用户本机专用 Chrome Profile 中运行，通过 Python Worker 返回脱敏后的运营数据与能力清单；未完成真实登录 POC 前不会部署生产。
+本版本完善 Creator Collector 的本机无 UI E2E 验收：复用正式任务 Runner、现有专用 Chrome Profile 与加密上传链路，并记录官方导出阶段；不改变生产部署。

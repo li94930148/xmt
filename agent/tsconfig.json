@@ -4,5 +4,5 @@
     "outDir": "dist-desktop", "rootDir": ".", "strict": true, "esModuleInterop": true,
     "jsx": "react-jsx", "lib": ["ES2022", "DOM", "DOM.Iterable"], "types": ["node"], "skipLibCheck": true
   },
-  "include": ["core/**/*.ts", "desktop/main.ts", "desktop/preload.ts", "desktop/types.ts"]
+  "include": ["core/**/*.ts", "desktop/main.ts", "desktop/preload.ts", "desktop/types.ts", "desktop/collectorE2E.ts"]
 }

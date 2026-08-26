@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.20.1', date: '2026-08-26', title: 'Creator Collector 无 UI E2E 验收',
+    impactScope: ['Creator Agent', '抖音采集'],
+    changes: [
+      { type: 'fix', description: '修复 works SQLite 非标量字段持久化。' },
+      { type: 'feature', description: '新增无 UI CLI E2E 入口与官方双导出连续验收。' },
+    ],
+  },
+  {
     version: '2.20.0', date: '2026-08-18', title: 'Creator Collector Scrapling First',
     impactScope: ['Creator Agent', '抖音采集', '本地安全'],
     changes: [

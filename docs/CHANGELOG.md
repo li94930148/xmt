@@ -1,5 +1,9 @@
 # XMT 系统更新日志
 
+## v2.20.1 - 2026-08-26
+
+- 修复 works SQLite 非标量字段持久化，新增无 UI CLI E2E 入口与官方双导出验收。
+
 ## v2.20.0 - 2026-08-18
 
 - Creator Collector 切换为 Scrapling First Python Worker，使用独立 Profile 和脱敏能力清单。
@@ -977,3 +981,6 @@
 ### 测试情况
 
 - Python 单测、Agent check/build、Worker Bridge 合同测试通过；正式账号登录及导出待人工扫码验证。
+## v2.20.1 - 2026-08-26
+
+- 修复 works SQLite 非标量字段持久化；新增无 UI CLI E2E 入口与官方双导出验收。

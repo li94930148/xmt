@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.20.0",
+  "version": "2.20.1",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -162,6 +162,7 @@
     "test:android-build-endpoints": "tsx tests/mobile/android-build-endpoints.test.ts",
     "test:apk-endpoint-artifact": "node tests/mobile/apk-endpoint-artifact-contract.test.mjs",
     "test:editor-format-painter": "tsx --test tests/editor/format-painter.test.ts",
+    "agent:collector-e2e": "npm --prefix agent run collector:e2e --",
     "test:user-role-assignment-security": "tsx tests/auth/user-role-assignment-security.test.ts",
     "test:html-sanitization": "tsx tests/security/html-sanitization.test.ts",
     "test:yjs-invalid-update": "tsx tests/collaboration/yjs-invalid-update.test.ts",

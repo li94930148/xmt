@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { acceptCreatorAgentReport, bindCreatorAgent, createCreatorAgentBindingCode, getCreatorCenterData, heartbeatCreatorAgent, registerCreatorAgent } from '../services/creatorAgent.js';
+import { bindCreatorAgent, createCreatorAgentBindingCode, getCreatorCenterData, heartbeatCreatorAgent, registerCreatorAgent } from '../services/creatorAgent.js';
 import { getUnifiedCreatorCenterData } from '../services/creatorDataCenter.js';
 import { acceptCreatorDataSync } from '../services/creatorSyncV291.js';
 import { creatorInsightService, getCreatorInsights } from '../services/creatorInsights.js';
@@ -27,12 +27,7 @@ router.post('/register',authenticate,requirePermission('creator:data:manage'),as
 });
 router.post('/binding-codes',authenticate,requirePermission('creator:data:manage'),async(req,res)=>{try{if(!canManageCreatorData(req.user!.role))return res.status(403).json({message:'仅管理员或负责人可创建设备绑定码'});res.status(201).json(await createCreatorAgentBindingCode(req.user!.id,String(req.body?.account_id||''),Number(req.body?.ttl_minutes)||10));}catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({message:error instanceof Error?error.message:'绑定码创建失败'});}});
 router.post('/bind',async(req,res)=>{try{res.status(201).json(await bindCreatorAgent(String(req.body?.binding_code||''),req.body?.device||{}));}catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({message:error instanceof Error?error.message:'设备绑定失败'});}});
-router.post('/report',async(req,res)=>{
-  try{
-    if(process.env.NODE_ENV==='production'&&!req.secure)return res.status(426).json({success:false,message:'Creator Agent 仅允许通过 HTTPS 上传'});
-    res.status(201).json(await acceptCreatorAgentReport(req.body||{},req.header('authorization')));
-  }catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'上传失败'});}
-});
+router.post('/report',(_req,res)=>res.status(410).json({success:false,message:'Creator Agent /report 已停止使用，请升级客户端并使用 /data-sync'}));
 router.post('/heartbeat',async(req,res)=>{try{res.json(await heartbeatCreatorAgent(req.body||{},req.header('authorization')));}catch(error){res.status(Number((error as {statusCode?:number}).statusCode||500)).json({success:false,message:error instanceof Error?error.message:'心跳失败'});}});
 router.post('/data-sync',async(req,res)=>{
   try{

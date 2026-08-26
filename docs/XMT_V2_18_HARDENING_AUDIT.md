@@ -36,6 +36,10 @@
 ## 仅完成评估，未在本阶段修改
 
 - Creator Agent 客户端当前上传 `protocol_version=1`、timestamp、nonce、HMAC 和 AES-GCM。服务端现在以 `XMT_CREATOR_AGENT_V1_ONLY=true` 提供可逆拒绝开关，并记录不含凭据的 legacy 协议遥测；默认继续兼容缺失版本和 legacy `/report`，直到生产绑定 Agent 状态有证据可支持强制启用。
+
+### 后续 Resolution（v2.19.11）
+
+代码复核确认 `/data-sync` V1 已有 replay protection；遗留风险仅为 legacy protocol fallback 与 legacy `/report` 入口。v2.19.11 已将 `/data-sync` 改为永久 fail-closed V1，并将无现行客户端调用的 `/report` 退役为 410。无新增 nonce 表、无数据库迁移、无 Creator 业务数据删除。
 - 正式 migrations 已有 runner 与 checksum 记录，但 `initDatabase` 仍同时承载大量 compat ALTER/seed；建议下一阶段将新增演进限定到 versioned migration，并要求 expand-only/向后兼容审查。
 - 前端构建基线：Silk route chunk 843.49 kB（gzip 227.02 kB）、editor chunks 210–379 kB；现有 reduced-motion CSS 已覆盖。应先建立 route chunk、Canvas 残留、移动端与编辑输入延迟预算，不凭感觉删减视觉能力。
 - Auth v1 生产证据仍为 legacy、门禁关闭且观察样本不足；`npm run ops:auth-readiness` 以 PM2、RSS、heap、Socket 生命周期、health、SQLite 和业务样本窗口生成逐项 `PASS/FAIL/UNKNOWN`。仅可信异常为 `NO-GO`，数据缺失为 `INSUFFICIENT_DATA`；它不会重启进程、修改配置或写入数据库。本阶段未启用任何 Auth/Login/Socket 灰度。

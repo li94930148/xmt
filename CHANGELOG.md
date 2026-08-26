@@ -7,15 +7,16 @@
 - 修复 works SQLite 非标量字段持久化。
 - 增加 Creator Collector 无 UI CLI E2E 入口、官方导出观测与连续双导出验收。
 
-## 2.20.0 - 2026-08-18
+## 2.19.11 - 2026-08-20
 
-### 新增
+### Security
 
-- Creator Collector 切换为 Scrapling First Python Worker，使用独立 Profile 和脱敏能力清单。
+- Creator Agent `/data-sync` 现在永久要求 `protocol_version=1`，签名覆盖 timestamp 与 nonce，并在验签后以原子 nonce 预留拒绝重放。
+- 退役未被现行客户端使用的旧 `/api/creator-agent/report` 上传入口，统一返回 410，关闭旧协议旁路。
 
-### 技术升级
+### Tests
 
-- Creator Agent 升级至 2.12.0-agent，移除旧 Node Collector 与已提交构建产物。
+- 新增 Creator Agent 上传防重放安全合同并纳入核心安全 CI。
 ## 2.19.10 - 2026-08-20
 
 ### Security

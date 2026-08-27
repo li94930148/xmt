@@ -41,7 +41,7 @@ export type CreatorSnapshot = {
   platform: 'douyin'; source: 'local_creator_center'; collected_at: string;
   contract_version: '2.10.2'; snapshot_id: string; collection_mode: CollectionMode;
   collection_stats: DouyinCollectionStats;
-  account: { nickname: string; avatar: string; uid: string; fans_count: number | null; [key: string]: unknown };
+  account: { nickname: string; avatar: string; uid: string; fans_count: number | null; metadata_observed?: Record<string, boolean>; [key: string]: unknown };
   works: CreatorWork[]; work_details: CreatorWorkDetail[];
   dashboard: Record<string, unknown>; content_analysis: Record<string, unknown>; fans: Record<string, unknown>;
   raw: { api_map: Array<{ page: string; url: string; method: string; responseKeys: string[] }>; captures: NetworkCapture[] };

@@ -9,6 +9,7 @@ export type NormalizedDouyinAccount = {
   following_count: number;
   works_count: number;
   total_likes: number;
+  metadata_observed: Record<'nickname'|'avatar'|'fans_count'|'following_count'|'works_count'|'total_likes', boolean>;
 };
 
 export type NormalizedDouyinWork = {
@@ -252,6 +253,8 @@ export class DouyinDataNormalizer {
     const snapshotId = text(payload.snapshot_id || record(payload.sync_task).snapshot_id);
     if (!snapshotId) throw Object.assign(new Error('v2.10.2 缺少 snapshot_id'), { statusCode: 400 });
     const fanPaths = ['fans_count', 'follower_count', 'followers'];
+    const suppliedObserved = record(suppliedAccount.metadata_observed);
+    const observed = (key: 'nickname'|'avatar'|'fans_count'|'following_count'|'works_count'|'total_likes', paths: string[]) => suppliedObserved[key] === true || (suppliedObserved[key] !== false && hasPathValue(suppliedAccount, paths));
     return {
       contract_version: '2.10.2',
       collection_mode: collectionMode,
@@ -261,10 +264,18 @@ export class DouyinDataNormalizer {
         nickname: text(firstPath(suppliedAccount, ['nickname', 'nick_name', 'account_name'])),
         avatar: imageUrl(firstPath(suppliedAccount, ['avatar', 'avatar_thumb', 'avatar_url'])),
         fans_count: number(firstPath(suppliedAccount, fanPaths)),
-        fans_count_available: hasPathValue(suppliedAccount, fanPaths),
+        fans_count_available: observed('fans_count', fanPaths),
         following_count: number(firstPath(suppliedAccount, ['following_count', 'follow_count', 'following'])),
         works_count: number(firstPath(suppliedAccount, ['works_count', 'aweme_count', 'video_count'])) || normalizedWorks.length,
         total_likes: number(firstPath(suppliedAccount, ['total_likes', 'total_favorited', 'favoriting_count'])),
+        metadata_observed: {
+          nickname: observed('nickname', ['nickname', 'nick_name', 'account_name']),
+          avatar: observed('avatar', ['avatar', 'avatar_thumb', 'avatar_url']),
+          fans_count: observed('fans_count', fanPaths),
+          following_count: observed('following_count', ['following_count', 'follow_count', 'following']),
+          works_count: observed('works_count', ['works_count', 'aweme_count', 'video_count']),
+          total_likes: observed('total_likes', ['total_likes', 'total_favorited', 'favoriting_count']),
+        },
       },
       works: normalizedWorks,
       summary: {
@@ -308,6 +319,7 @@ export class DouyinDataNormalizer {
         following_count: number(fromAccount(['following_count', 'follow_count', 'following'])),
         works_count: number(fromAccount(['works_count', 'aweme_count', 'video_count'])) || normalizedWorks.length,
         total_likes: number(fromAccount(['total_likes', 'total_favorited', 'favoriting_count'])),
+        metadata_observed: { nickname: Boolean(text(fromAccount(['nickname', 'nick_name', 'account_name', 'user_name']))), avatar: Boolean(avatar), fans_count: hasPathValue(suppliedAccount, fanPaths) || hasPathValue(discoveredAccount, fanPaths), following_count: hasPathValue(suppliedAccount, ['following_count', 'follow_count', 'following']) || hasPathValue(discoveredAccount, ['following_count', 'follow_count', 'following']), works_count: hasPathValue(suppliedAccount, ['works_count', 'aweme_count', 'video_count']) || hasPathValue(discoveredAccount, ['works_count', 'aweme_count', 'video_count']), total_likes: hasPathValue(suppliedAccount, ['total_likes', 'total_favorited', 'favoriting_count']) || hasPathValue(discoveredAccount, ['total_likes', 'total_favorited', 'favoriting_count']) },
       },
       works: normalizedWorks,
       api_count: rawRecords.length,

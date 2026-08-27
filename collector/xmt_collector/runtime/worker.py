@@ -84,7 +84,7 @@ class Worker:
         try:
             result = await adapter.collect(account_id, str(params.get("scope", "audit")))
             self.emit(request_id, "capture", {"xhrResponses": result["manifest"]["xhrResponses"]})
-            self.emit(request_id, "completed", {"pages": len(result["capability"]["pages"]), "tabs": sum(len(page["tabs"]) for page in result["capability"]["pages"]), "xhrResponses": result["manifest"]["xhrResponses"], "exports": len(result["manifest"]["exports"]), "manifest": result["manifest"], "capability": result["capability"], "works": result["works"]})
+            self.emit(request_id, "completed", {"pages": len(result["capability"]["pages"]), "tabs": sum(len(page["tabs"]) for page in result["capability"]["pages"]), "xhrResponses": result["manifest"]["xhrResponses"], "exports": len(result["manifest"]["exports"]), "manifest": result["manifest"], "capability": result["capability"], "works": result["works"], "account": result["account"], "collectionCompleteness": result["collectionCompleteness"]})
         except LoginRequired:
             self.emit(request_id, "login_required", {"code": "WAITING_FOR_USER_LOGIN", "message": "请在 Creator Agent 专用 Chrome 中正常扫码或完成验证码后重试。"})
         except asyncio.CancelledError:

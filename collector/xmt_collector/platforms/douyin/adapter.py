@@ -12,7 +12,8 @@ from scrapling.fetchers import AsyncDynamicSession
 
 from xmt_collector.capture.schema import acceptance_evidence, classify, evidence
 from xmt_collector.manifest.writer import ManifestWriter
-from xmt_collector.platforms.douyin.normalizer import find_work_candidates, normalize_work
+from xmt_collector.platforms.douyin.normalizer import find_work_candidates, normalize_account_metadata, normalize_work
+from xmt_collector.platforms.douyin.pagination import ScrollProgress, advance_scroll
 from xmt_collector.security.sanitizer import sanitize
 
 CREATOR_ORIGIN = "https://creator.douyin.com"
@@ -39,6 +40,7 @@ class DouyinAdapter:
         run = ManifestWriter(self.run_root)
         captured: list[dict[str, Any]] = []
         capability = {"platform": "douyin", "pages": []}
+        completeness: dict[str, Any] = {"mode": "not_applicable", "exhausted": scope != "full_snapshot", "iterations": 0, "uniqueWorks": 0, "stopReason": "not_full_snapshot"}
         async with AsyncDynamicSession(
             max_pages=1,
             headless=False,
@@ -59,7 +61,7 @@ class DouyinAdapter:
 
                 login_required = False
                 async def inspect(page: Any) -> None:
-                    nonlocal login_required
+                    nonlocal login_required, completeness
                     observed_xhr = 0
 
                     def observe_response(response: Any) -> None:
@@ -94,10 +96,25 @@ class DouyinAdapter:
                             target = page.get_by_text(label, exact=True).first
                             if await target.is_visible():
                                 await click_audited(target, "click", label, "content-filter")
-                        for _ in range(3):
-                            await page.mouse.wheel(0, 900)
-                            await page.wait_for_timeout(1_000)
-                        interactions.append({"action": "limited_scroll", "target": "内容管理", "count": 3, "checkpoint": "content-scroll"})
+                        if scope == "full_snapshot":
+                            progress, max_iterations = ScrollProgress(), 60
+                            while progress.iterations < max_iterations:
+                                self._assert_not_cancelled()
+                                before_xhr = observed_xhr
+                                before = await page.evaluate("() => ({top: window.scrollY, height: document.documentElement.scrollHeight, viewport: window.innerHeight})")
+                                await page.mouse.wheel(0, max(900, int(before["viewport"] * 0.8)))
+                                await page.wait_for_timeout(1_000)
+                                after = await page.evaluate("() => ({top: window.scrollY, height: document.documentElement.scrollHeight, viewport: window.innerHeight})")
+                                at_bottom = after["top"] + after["viewport"] >= after["height"] - 2
+                                progressed = observed_xhr > before_xhr or after["height"] > before["height"] or after["top"] > before["top"]
+                                progress, exhausted = advance_scroll(progress, at_bottom=at_bottom, progressed=progressed)
+                                if exhausted:
+                                    completeness = {"mode": "scroll", "exhausted": True, "iterations": progress.iterations, "uniqueWorks": 0, "stopReason": "stable_no_new_items", "stableCycles": progress.stable_cycles}
+                                    break
+                            else:
+                                completeness = {"mode": "scroll", "exhausted": False, "iterations": progress.iterations, "uniqueWorks": 0, "stopReason": "safety_cap", "stableCycles": progress.stable_cycles}
+                                raise RuntimeError("FULL_SNAPSHOT_INCOMPLETE: scroll safety cap reached without exhaustion evidence")
+                            interactions.append({"action": "scroll_to_exhaustion", "target": "内容管理", "iterations": progress.iterations, "checkpoint": "content-scroll", "collectionCompleteness": completeness})
                     if page_name == "数据中心":
                         for label in [text for text in discovered["tabs"] if text.strip()][:9]:
                             target = page.get_by_text(label.strip(), exact=True).first
@@ -176,12 +193,15 @@ class DouyinAdapter:
         (self.run_root / "xhr" / "schema-report.md").write_text(schema_markdown, encoding="utf-8")
         all_exports = [item for page in capability["pages"] for item in page["exports"]]
         candidates = [candidate for capture in captured for candidate in find_work_candidates(capture.get("response"))]
-        works = [work for work in (normalize_work(candidate) for candidate in candidates) if work["item_id"]]
+        works_by_id = {work["item_id"]: work for work in (normalize_work(candidate) for candidate in candidates) if work["item_id"]}
+        works = list(works_by_id.values())
+        completeness["uniqueWorks"] = len(works)
+        account = normalize_account_metadata(captured)
         audit = acceptance_evidence(captured, works)
         run.write_json("audit/acceptance-evidence.json", audit)
-        manifest = {"platform": "douyin", "account": account_id, "scope": scope, "captured_at": datetime.now(timezone.utc).isoformat(), "xhrResponses": len(captured), "exports": all_exports}
+        manifest = {"platform": "douyin", "account": account_id, "scope": scope, "captured_at": datetime.now(timezone.utc).isoformat(), "xhrResponses": len(captured), "exports": all_exports, "collectionCompleteness": completeness}
         run.write_json("manifest.json", manifest)
-        return {"manifest": manifest, "capability": capability, "captures": captured, "works": works}
+        return {"manifest": manifest, "capability": capability, "captures": captured, "works": works, "account": account, "collectionCompleteness": completeness}
 
     def cancel(self) -> None:
         self.cancelled = True

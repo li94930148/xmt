@@ -33,7 +33,7 @@ test('Collector runtime resolver 覆盖开发、打包和缺失 Python', () => {
 
 test('Scrapling 使用 BrowserSession 已解析的非 default Profile', async () => {
   let received: Record<string, unknown> | undefined;
-  const bridge = { request: async (_event: string, data: Record<string, unknown>) => { received = data; return { data: { xhrResponses: 1, works: [] } }; } } as unknown as ScraplingWorkerBridge;
+  const bridge = { request: async (_event: string, data: Record<string, unknown>) => { received = data; return { data: { xhrResponses: 1, works: [], collectionCompleteness: { exhausted: true } } }; } } as unknown as ScraplingWorkerBridge;
   const profilePath = '/tmp/XMT Creator Agent/profiles/custom/account-a/profile-a';
   await new ScraplingCreatorCollector(bridge, profilePath, '/tmp/XMT Creator Agent', 'account-a').collect();
   assert.equal(received?.profilePath, profilePath);

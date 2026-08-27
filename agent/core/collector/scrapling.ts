@@ -33,6 +33,8 @@ export class ScraplingCreatorCollector {
       xhrResponses?: number;
       works?: Array<Record<string, unknown>>;
       pages?: number;
+      account?: Record<string, unknown>;
+      collectionCompleteness?: Record<string, unknown>;
     };
     if (!data.xhrResponses)
       throw new Error("未捕获到抖音 XHR，已停止同步以避免用空结果覆盖数据。");
@@ -46,6 +48,12 @@ export class ScraplingCreatorCollector {
       metrics: (work.metrics || {}) as CreatorWork["metrics"],
       ...work,
     }));
+    const workerAccount = data.account || {};
+    const observed = (workerAccount.metadata_observed || {}) as Record<string, boolean>;
+    const metadata = (key: string) => observed[key] === true ? workerAccount[key] : undefined;
+    if ((options.collectionMode || "full_snapshot") === "full_snapshot" && data.collectionCompleteness?.exhausted !== true) {
+      throw new Error("FULL_SNAPSHOT_INCOMPLETE: 未获得作品列表耗尽证据。");
+    }
     return {
       schema_version: 1,
       protocol_version: 1,
@@ -67,9 +75,13 @@ export class ScraplingCreatorCollector {
       collected_at: new Date().toISOString(),
       account: {
         uid: this.accountId,
-        nickname: "",
-        avatar: "",
-        fans_count: null,
+        nickname: typeof metadata("nickname") === "string" ? String(metadata("nickname")) : "",
+        avatar: typeof metadata("avatar") === "string" ? String(metadata("avatar")) : "",
+        fans_count: typeof metadata("fans_count") === "number" ? Number(metadata("fans_count")) : null,
+        following_count: metadata("following_count"),
+        works_count: metadata("works_count"),
+        total_likes: metadata("total_likes"),
+        metadata_observed: observed,
       },
       works,
       work_details: [],

@@ -57,3 +57,29 @@ def find_work_candidates(value: Any) -> list[dict[str, Any]]:
         for child in value:
             found.extend(find_work_candidates(child))
     return found
+
+
+def normalize_account_metadata(captures: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return only fields actually observed in sanitized Creator responses."""
+    fields = ("nickname", "avatar", "fans_count", "following_count", "works_count", "total_likes")
+    result: dict[str, Any] = {"metadata_observed": {field: False for field in fields}}
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for field in fields:
+                candidate = value.get(field)
+                if candidate not in (None, "") and not result["metadata_observed"][field]:
+                    if field == "avatar" and isinstance(candidate, dict):
+                        candidate = candidate.get("url") or candidate.get("uri")
+                    if candidate not in (None, ""):
+                        result[field] = candidate
+                        result["metadata_observed"][field] = True
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    for capture in captures:
+        visit(capture.get("response"))
+    return result

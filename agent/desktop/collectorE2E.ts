@@ -66,7 +66,10 @@ async function main() {
       repositoryRoot: path.resolve(__dirname, "../../.."),
       profilePath,
       token,
-      mode: requireExports ? "metrics_refresh" : "full_snapshot",
+      // Official exports are an additional acceptance requirement, not a reason
+      // to weaken the collection scope. Post-review E2E must prove full snapshot
+      // exhaustion and export lifecycle in the same run.
+      mode: "full_snapshot",
       checkpoint,
     });
     checkpoint("round:complete", {

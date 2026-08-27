@@ -136,7 +136,8 @@ jobs:
           python-version: '3.11'
       - run: npm ci
       - run: npm --prefix agent ci
+      - run: python -m venv collector/.venv
+      - run: collector/.venv/bin/python -m pip install -r collector/requirements.lock
       - run: npm --prefix agent run test:collector-bridge
       - run: npm --prefix agent run test:collector-cli-export-assertion
-      - run: python -m pip install -r collector/requirements.lock
-      - run: python -m pytest collector/tests -q
+      - run: collector/.venv/bin/python -m pytest collector/tests -q

@@ -2,7 +2,15 @@
 
 ## 当前版本
 
-v2.20.1
+v2.20.2
+
+## v2.20.2 主线收口与 Android Native Auth 续期修复
+
+- V1 登录响应保留服务端 `expiresIn`；Android 真实登录完成后显式通知 Native Runtime 安排 refresh。
+- refresh 成功后按新 Token 生命周期重新调度，并保留 JWT `exp` 回退、前后台/网络恢复补偿、single-flight 和旧定时器代际保护。
+- 新增真实 Auth Store 的登录到连续两轮 refresh 集成合同，并进入核心安全 CI。
+- XMT / Android 统一为 2.20.2 / 22002；Creator Agent 仍为 2.12.1-agent，无数据库迁移或生产配置变更。
+- 归档 v2.17.2 Socket 业务时段只读观察报告；已由 v2.19.3 合入的日报布局不重复迁移。
 
 ## v2.20.1 Creator Collector 验收完善
 

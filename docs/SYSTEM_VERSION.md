@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.20.1
+v2.20.2
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.20.1
 
 ## 本版本摘要
 
-本版本完善 Creator Collector 的本机无 UI E2E 验收，并继承 Creator Agent V1 防重放合同与 `/report` 退役安全基线；不改变生产部署。
+本版本在 v2.20.1 Scrapling First Collector 基线上补回 Android Native Auth 真实登录续期调度，并归档历史 Socket 生产观察报告；无数据库迁移，Creator Agent 保持 v2.12.1-agent。

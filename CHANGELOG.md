@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.20.2 - 2026-08-27
+
+### 修复
+
+- 恢复此前未进入主线的 Android Native Auth 真实续期调度：V1 登录保留服务端 `expiresIn`，移动登录完成后显式绑定 Token 生命周期。
+- refresh 成功后按新生命周期重新调度；JWT `exp` 仅作回退，并补齐前后台、网络恢复、可见性与延迟定时器补偿。
+- 增加调度代际保护、single-flight 与真实登录到连续两轮 refresh 的集成合同，防止重复刷新和旧定时器回流。
+- 归档 v2.17.2 Socket 业务时段只读观察报告；日报布局代码已由 v2.19.3 合入，不重复迁移旧实现。
+
+### 版本与兼容性
+
+- XMT 与 Android 统一升级至 v2.20.2 / 22002；Creator Agent 保持 v2.12.1-agent。
+- 无数据库迁移，不改变 RBAC、Session concurrency、生产端点、Creator 上传协议或 Scrapling Collector 合同。
+
 ## 2.20.1 - 2026-08-26
 
 ### 修复与验收

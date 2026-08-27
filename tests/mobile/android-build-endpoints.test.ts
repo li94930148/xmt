@@ -4,7 +4,7 @@ import path from 'node:path';
 import { validateAndroidProductionEndpoints } from '../../scripts/mobile-build-contract.mjs';
 
 const root = process.cwd();
-const expected = { version: '2.19.11', versionCode: 21911, platform: 'android', target: 'production', apiBaseUrl: 'https://lanyaomedia.com/api', socketBaseUrl: 'https://lanyaomedia.com' };
+const expected = { version: '2.20.2', versionCode: 22002, platform: 'android', target: 'production', apiBaseUrl: 'https://lanyaomedia.com/api', socketBaseUrl: 'https://lanyaomedia.com' };
 for (const relative of ['dist/xmt-mobile-build.json', 'android/app/src/main/assets/public/xmt-mobile-build.json']) {
   const artifact = JSON.parse(fs.readFileSync(path.join(root, relative), 'utf8'));
   assert.deepEqual(artifact, expected, `${relative} must contain the deterministic production build contract`);

@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.20.2', date: '2026-08-27', title: '主线收口与移动认证续期修复',
+    impactScope: ['Android', '认证', '版本治理'],
+    changes: [
+      { type: 'fix', description: 'Android 真实登录显式绑定服务端 Token 生命周期，并在 refresh 后重新安排下一周期。' },
+      { type: 'security', description: '补齐 JWT 回退、恢复补偿、single-flight 与旧定时器代际保护合同。' },
+      { type: 'improvement', description: '归档 Socket 生产观察报告并收口已替代分支，不重复迁移旧实现。' },
+    ],
+  },
+  {
     version: '2.20.1', date: '2026-08-26', title: 'Creator Collector 无 UI E2E 验收',
     impactScope: ['Creator Agent', '抖音采集'],
     changes: [

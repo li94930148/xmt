@@ -15,6 +15,15 @@ from xmt_collector.platforms.douyin.adapter import DouyinAdapter, LoginRequired
 from xmt_collector.runtime.protocol import ProtocolError, event, parse_request
 
 
+# The frozen Windows Worker talks JSON Lines to Electron over pipes.  The
+# process locale may be a legacy code page, while protocol messages contain
+# Chinese text; make the wire encoding deterministic before emitting events.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+
 class Worker:
     def __init__(self) -> None:
         quiet_logger = logging.getLogger("xmt.collector.scrapling")

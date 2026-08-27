@@ -26,6 +26,13 @@ test('Collector runtime resolver 覆盖开发、打包和缺失 Python', () => {
     fs.writeFileSync(path.join(collector, 'xmt_collector', 'runtime', 'worker.py'), ''); fs.writeFileSync(path.join(collector, 'requirements.lock'), '');
     assert.equal(resolveCollectorRuntime(root, 'darwin').code, 'READY');
     assert.equal(resolveCollectorRuntime(root, 'win32').code, 'READY');
+    const packaged = path.join(root, 'resources', 'collector-runtime');
+    fs.mkdirSync(packaged, { recursive: true });
+    fs.mkdirSync(path.join(packaged, 'xmt-collector-worker'), { recursive: true });
+    fs.writeFileSync(path.join(packaged, 'xmt-collector-worker', 'xmt-collector-worker.exe'), '');
+    assert.equal(resolveCollectorRuntime(path.join(root, 'resources'), 'win32', true).mode, 'packaged-worker');
+    assert.equal(resolveCollectorRuntime(path.join(root, 'resources'), 'win32', true).code, 'READY');
+    assert.equal(resolveCollectorRuntime(path.join(root, 'missing-resources'), 'win32', true).code, 'PACKAGED_RUNTIME_NOT_FOUND');
     fs.rmSync(path.join(collector, '.venv', 'bin', 'python'));
     assert.equal(resolveCollectorRuntime(root, 'darwin').code, 'PYTHON_NOT_FOUND');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }

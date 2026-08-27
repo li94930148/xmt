@@ -279,6 +279,7 @@ async function performSync(sample = false): Promise<SyncResult> {
         path.join(paths().root, "profiles"),
       ),
       token: await readToken(),
+      packaged: app.isPackaged,
       mode: sample ? "metrics_refresh" : "full_snapshot",
       checkpoint: (name, data) => void log(`${name} ${JSON.stringify(data)}`),
     });

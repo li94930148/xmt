@@ -106,3 +106,19 @@ jobs:
         with:
           name: xmt-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  creator-agent-package-contract:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - run: npm --prefix agent ci
+      - run: npm --prefix agent run electron:build
+      - run: npm --prefix agent run test:package-runtime

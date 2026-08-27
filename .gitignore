@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 agent/release*/
+agent/.collector-runtime-build/
 agent/data/
 agent/profiles/
 agent/browser-cache/

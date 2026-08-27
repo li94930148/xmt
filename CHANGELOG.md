@@ -8,6 +8,7 @@
 - 增加 Creator Collector 无 UI CLI E2E 入口、官方导出观测与连续双导出验收。
 - 修复 Collector 未观测账号资料覆盖已有资料；账号元数据现按 observed-only 语义更新。
 - 修复 full_snapshot 固定滚动导致历史作品可能漏采，改为带安全上限的耗尽式滚动验收。
+- 修复 Creator Agent 发布包缺失 Scrapling Collector runtime；发布版现携带冻结 Worker 并增加 Windows artifact contract。
 
 ## 2.19.11 - 2026-08-20
 

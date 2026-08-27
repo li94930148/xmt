@@ -37,7 +37,14 @@ class Worker:
             self.emit("unknown", "error", {"code": str(error), "message": "Worker 请求不是有效 JSON 协议。"})
             return
         if request.method == "health":
-            self.emit(request.id, "completed", {"ready": True, "python": sys.version.split()[0], "scrapling": scrapling.__version__, "protocol_version": PROTOCOL_VERSION})
+            self.emit(request.id, "completed", {
+                "ready": True,
+                "collector_import": True,
+                "scrapling_import": True,
+                "python": sys.version.split()[0],
+                "scrapling": scrapling.__version__,
+                "protocol_version": PROTOCOL_VERSION,
+            })
         elif request.method == "cancel":
             target = self.running.get(str(request.params.get("jobId", request.id)))
             if target:

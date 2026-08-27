@@ -17,6 +17,7 @@ export async function runCreatorCollectorTask(options: {
   profilePath: string;
   token: string;
   mode: CollectionMode;
+  packaged?: boolean;
   checkpoint?: CollectorCheckpoint;
 }): Promise<SyncResult> {
   const {
@@ -26,6 +27,7 @@ export async function runCreatorCollectorTask(options: {
     profilePath,
     token,
     mode,
+    packaged = false,
     checkpoint = () => undefined,
   } = options;
   const taskId = crypto.randomUUID();
@@ -40,6 +42,7 @@ export async function runCreatorCollectorTask(options: {
   const bridge = new ScraplingWorkerBridge(
     repositoryRoot,
     (message) => void note("collector:diagnostic", { message }),
+    packaged,
   );
   const unsubscribe = bridge.onEvent((event) => {
     if (event.event === "progress") void note("collector:progress", event.data);

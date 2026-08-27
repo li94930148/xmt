@@ -3,6 +3,7 @@ import path from "node:path";
 import type { CollectionMode, CreatorSnapshot, CreatorWork } from "../types.js";
 import { ScraplingWorkerBridge } from "./workerBridge.js";
 import type { ExportReceipt } from "./exportAssertion.js";
+import type { CollectorBrowserLaunch } from "./browserLaunch.js";
 
 export class ScraplingCreatorCollector {
   constructor(
@@ -10,6 +11,7 @@ export class ScraplingCreatorCollector {
     private readonly profilePath: string,
     private readonly outputRoot: string,
     private readonly accountId: string,
+    private readonly browser: CollectorBrowserLaunch,
   ) {}
   async collect(
     options: { collectionMode?: CollectionMode; taskId?: string } = {},
@@ -22,6 +24,7 @@ export class ScraplingCreatorCollector {
         taskId: options.taskId,
         scope: options.collectionMode || "full_snapshot",
         profilePath: this.profilePath,
+        browser: this.browser,
         outputPath: path.join(
           this.outputRoot,
           "collector",

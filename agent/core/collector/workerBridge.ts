@@ -6,6 +6,15 @@ import path from 'node:path';
 
 export type WorkerEvent = { id: string; event: 'started'|'progress'|'login_required'|'capture'|'export'|'warning'|'error'|'completed'|'cancelled'; data: Record<string, unknown> };
 type Pending = { resolve: (value: WorkerEvent) => void; reject: (reason: Error) => void; timer: NodeJS.Timeout };
+export class CollectorLoginRequiredError extends Error {
+  readonly code = "COLLECTOR_LOGIN_REQUIRED" as const;
+  constructor(message = "抖音 Creator Center 需要重新认证。") { super(message); this.name = "CollectorLoginRequiredError"; }
+}
+export function workerTerminalError(message: WorkerEvent): Error | null {
+  if (message.event === "error") return new Error(String(message.data.message || "Scrapling Worker 执行失败"));
+  if (message.event === "login_required") return new CollectorLoginRequiredError(String(message.data.message || "抖音 Creator Center 需要重新认证。"));
+  return null;
+}
 export type CollectorRuntimeCode = 'READY'|'RUNTIME_ROOT_NOT_FOUND'|'PYTHON_NOT_FOUND'|'WORKER_NOT_FOUND'|'PACKAGED_RUNTIME_NOT_FOUND';
 export type CollectorRuntime = { code: CollectorRuntimeCode; mode: 'source-python'|'packaged-worker'; collector: string; python?: string; worker?: string; executable?: string; requirements?: string; available: boolean };
 export function resolveCollectorRuntime(root: string, platform = process.platform, packaged = false): CollectorRuntime {
@@ -65,6 +74,7 @@ export class ScraplingWorkerBridge {
     if (!['completed', 'error', 'login_required', 'cancelled'].includes(message.event)) return;
     const pending = this.pending.get(message.id); if (!pending) return;
     clearTimeout(pending.timer); this.pending.delete(message.id);
-    if (message.event === 'error') pending.reject(new Error(String(message.data.message || 'Scrapling Worker 执行失败'))); else pending.resolve(message);
+    const error = workerTerminalError(message);
+    if (error) pending.reject(error); else pending.resolve(message);
   }
 }

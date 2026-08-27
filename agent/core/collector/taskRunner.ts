@@ -5,6 +5,7 @@ import { upload } from "../uploader/client.js";
 import type { AgentConfig, CollectionMode, SyncResult } from "../types.js";
 import { ScraplingCreatorCollector } from "./scrapling.js";
 import { ScraplingWorkerBridge } from "./workerBridge.js";
+import { collectorBrowserEvidence, collectorBrowserLaunch } from "./browserLaunch.js";
 
 export type CollectorCheckpoint = (
   name: string,
@@ -57,13 +58,15 @@ export async function runCreatorCollectorTask(options: {
       startedAt,
     );
     const knownContentIds = database.knownContentIds();
-    await note("collector:start", { mode, profile: profilePath });
+    const browser = collectorBrowserLaunch(config.browserConfig);
+    await note("collector:start", { mode, browser: collectorBrowserEvidence(browser) });
     await note("snapshot:start");
     const snapshot = await new ScraplingCreatorCollector(
       bridge,
       profilePath,
       dataRoot,
       config.accountId,
+      browser,
     ).collect({ collectionMode: mode, taskId });
     await note("snapshot:complete", {
       works: snapshot.works.length,

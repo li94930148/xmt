@@ -17,7 +17,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import {
   discoverBrowsers,
-  fallbackBrowsers,
+  creatorFallbackBrowsers,
   rankBrowsers,
 } from "../core/browser/discovery.js";
 import { BrowserRegistry } from "../core/browser/registry.js";
@@ -30,6 +30,8 @@ import {
   managedProfile,
 } from "../core/browser/profile.js";
 import { runCreatorCollectorTask } from "../core/collector/taskRunner.js";
+import { CollectorLoginRequiredError } from "../core/collector/workerBridge.js";
+import { applyCollectorLoginRequired, heartbeatLoginStatus } from "./collectorAuthState.js";
 import { bind, heartbeat } from "../core/uploader/client.js";
 import { intervalMs, nextDailyDelay } from "../core/scheduler/scheduler.js";
 import type { AgentConfig, SyncResult } from "../core/types.js";
@@ -129,16 +131,19 @@ async function readyBrowserSession(config: AgentConfig) {
     ),
     registry = new BrowserRegistry(paths().root, found);
   const candidates = config.browserConfig.autoFallback
-    ? fallbackBrowsers(
+    ? creatorFallbackBrowsers(
         found,
         config.browserConfig.id,
         config.browserConfig.lastSuccessfulId,
       )
     : found.filter((item) => item.id === config.browserConfig.id).slice(0, 1);
+  const creatorCandidates = candidates.filter((item) => item.capabilities.supportsCreatorCenter);
+  if (!creatorCandidates.length)
+    throw new Error("COLLECTOR_BROWSER_UNSUPPORTED: Scrapling Creator Collector 仅支持 Chromium-compatible 浏览器，请选择 Chrome、Edge、Brave、Chromium、Arc 或自定义 Chromium 浏览器。");
   if (!candidates.length)
     throw new Error("当前浏览器不可用，且未发现可回退的浏览器");
   const failures: string[] = [];
-  for (const item of candidates) {
+  for (const item of creatorCandidates) {
     const selection: BrowserSelection = {
       ...config.browserConfig,
       id: item.id,
@@ -289,7 +294,14 @@ async function performSync(sample = false): Promise<SyncResult> {
     );
     return result;
   } catch (error) {
-    lastError = error instanceof Error ? error.message : String(error);
+    if (error instanceof CollectorLoginRequiredError) {
+      const auth = applyCollectorLoginRequired();
+      douyinLoggedIn = auth.douyinLoggedIn;
+      browserConnected = auth.browserConnected;
+      browserLoginStatus = auth.browserLoginStatus;
+      lastError = auth.lastError;
+      void sendHeartbeat();
+    } else lastError = error instanceof Error ? error.message : String(error);
     await log(`同步任务失败：${lastError}`);
     throw error;
   } finally {
@@ -326,12 +338,7 @@ async function sendHeartbeat() {
     await heartbeat(config, await readToken(), {
       deviceName: os.hostname(),
       os: `${os.platform()} ${os.arch()}`,
-      browserLoginStatus:
-        browserLoginStatus === "logged_in"
-          ? "valid"
-          : browserLoginStatus === "login_required"
-            ? "invalid"
-            : "unknown",
+      browserLoginStatus: heartbeatLoginStatus(browserLoginStatus),
     });
   } catch (error) {
     await log(

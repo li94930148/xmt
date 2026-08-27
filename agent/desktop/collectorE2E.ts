@@ -9,6 +9,7 @@ import {
 } from "../core/browser/profile.js";
 import { runCreatorCollectorTask } from "../core/collector/taskRunner.js";
 import { assertExportReceipts } from "../core/collector/exportAssertion.js";
+import { collectorBrowserEvidence, collectorBrowserLaunch } from "../core/collector/browserLaunch.js";
 import type { AgentConfig } from "../core/types.js";
 
 const argument = (name: string) => {
@@ -44,6 +45,7 @@ async function main() {
     };
     checkpoint("round:start", { status: "started" });
     checkpoint("profile:resolved", { profile: profilePath, status: "pass" });
+    checkpoint("browser:launch", { status: "pass", browser: collectorBrowserEvidence(collectorBrowserLaunch(config.browserConfig)) });
     const session = new BrowserRegistry(
       dataRoot,
       discoverBrowsers({ customPath: config.browserConfig.executablePath }),

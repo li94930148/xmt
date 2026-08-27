@@ -69,9 +69,12 @@ async function main() {
   };
   try {
     await request('health', 'health', {}, (response) => response.event === 'completed' && response.data?.ready === true && response.data?.collector_import === true && response.data?.scrapling_import === true);
-    await request('collect-smoke', 'collect', { platform: 'unsupported' }, (response) => response.event === 'error' && response.data?.code === 'not_implemented');
+    await request('collect-smoke', 'collect', {
+      platform: 'unsupported',
+      browser: { type: 'chromium', engine: 'chromium', runtime: 'playwright', executablePath: 'C:\\Program Files\\XMT\\playwright-chromium.exe', headless: false },
+    }, (response) => response.event === 'error' && response.data?.code === 'not_implemented');
     await request('shutdown', 'shutdown', {}, (response) => response.event === 'completed' && response.data?.shutdown === true);
-    console.log('packaged runtime contract passed: included, relocated, no system Python or repo dependency, JSONL health, Scrapling import, collect smoke, shutdown');
+    console.log('packaged runtime contract passed: included, relocated, no system Python or repo dependency, JSONL health, Scrapling import, Chromium browser descriptor, collect smoke, shutdown');
   } finally {
     child.kill();
   }

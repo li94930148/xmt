@@ -23,6 +23,7 @@
     "browser:select": "npm run build && node dist-desktop/core/browser/cli.js select",
     "doctor": "npm run build && node scripts/doctor.cjs",
     "test:collector-bridge": "npm run build && node --test dist-desktop/core/collector/workerBridge.test.js",
+    "test:collector-browser-auth": "npm run build && node --test dist-desktop/core/collector/workerBridge.test.js dist-desktop/desktop/collectorAuthState.test.js",
     "login": "electron .",
     "start": "electron .",
     "sync": "electron .",

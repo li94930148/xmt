@@ -12,6 +12,8 @@
 - 收紧 full_snapshot：耗尽前恢复并验证无约束全量视图，无法确认时 fail closed。
 - 恢复 Creator 作品指标容器与别名兼容；未观测指标不再被制造为零值。
 - `--exports` 现为每轮两份官方导出的 fail-closed E2E Gate。
+- Collector 现严格复用 Agent 所选 Chromium-compatible 浏览器运行时/可执行路径，不再强制 Google Chrome。
+- Worker `login_required` 现作为类型化认证失败向 Desktop 传播，UI 与 heartbeat 会立即反映登录失效。
 
 ## 2.19.11 - 2026-08-20
 

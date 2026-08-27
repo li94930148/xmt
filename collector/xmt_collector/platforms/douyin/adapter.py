@@ -15,6 +15,7 @@ from xmt_collector.manifest.writer import ManifestWriter
 from xmt_collector.platforms.douyin.normalizer import find_work_candidates, normalize_account_metadata, normalize_work
 from xmt_collector.platforms.douyin.pagination import ScrollProgress, advance_scroll
 from xmt_collector.platforms.douyin.view_scope import content_view_scope
+from xmt_collector.platforms.douyin.browser_launch import BrowserLaunch
 from xmt_collector.security.sanitizer import sanitize
 
 CREATOR_ORIGIN = "https://creator.douyin.com"
@@ -57,24 +58,24 @@ class LoginRequired(RuntimeError):
 class DouyinAdapter:
     """The only platform adapter. It uses normal Scrapling Dynamic sessions."""
 
-    def __init__(self, profile: Path, run_root: Path, emit: Callable[[str, dict[str, Any]], Awaitable[None]]) -> None:
-        self.profile, self.run_root, self.emit = profile, run_root, emit
+    def __init__(self, profile: Path, run_root: Path, emit: Callable[[str, dict[str, Any]], Awaitable[None]], browser: BrowserLaunch) -> None:
+        self.profile, self.run_root, self.emit, self.browser = profile, run_root, emit, browser
         self.cancelled = False
 
     async def collect(self, account_id: str, scope: str, task_id: str) -> dict[str, Any]:
         self.profile.mkdir(parents=True, exist_ok=True)
         run = ManifestWriter(self.run_root)
         captured: list[dict[str, Any]] = []
-        capability = {"platform": "douyin", "pages": []}
+        capability = {"platform": "douyin", "browser": self.browser.evidence(), "pages": []}
         completeness: dict[str, Any] = {"mode": "not_applicable", "exhausted": scope != "full_snapshot", "iterations": 0, "uniqueWorks": 0, "stopReason": "not_full_snapshot"}
         async with AsyncDynamicSession(
             max_pages=1,
-            headless=False,
-            real_chrome=True,
+            headless=self.browser.headless,
+            **self.browser.session_kwargs(),
             google_search=False,
             network_idle=False,
             timeout=45_000,
-            user_data_dir=str(self.profile),
+            **({} if self.browser.runtime == "external-cdp" else {"user_data_dir": str(self.profile)}),
             capture_xhr=r"https://creator\.douyin\.com/.*",
             additional_args={"accept_downloads": True},
         ) as session:
@@ -253,7 +254,7 @@ class DouyinAdapter:
         account = normalize_account_metadata(captured)
         audit = acceptance_evidence(captured, works)
         run.write_json("audit/acceptance-evidence.json", audit)
-        manifest = {"platform": "douyin", "account": account_id, "taskId": task_id, "scope": scope, "captured_at": datetime.now(timezone.utc).isoformat(), "xhrResponses": len(captured), "exports": all_exports, "collectionCompleteness": completeness}
+        manifest = {"platform": "douyin", "account": account_id, "taskId": task_id, "scope": scope, "captured_at": datetime.now(timezone.utc).isoformat(), "xhrResponses": len(captured), "exports": all_exports, "collectionCompleteness": completeness, "browser": self.browser.evidence()}
         run.write_json("manifest.json", manifest)
         return {"manifest": manifest, "capability": capability, "captures": captured, "works": works, "account": account, "collectionCompleteness": completeness}
 

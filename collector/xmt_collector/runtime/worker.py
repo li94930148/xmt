@@ -12,6 +12,7 @@ from scrapling.core.utils import set_logger
 
 from xmt_collector import COLLECTOR_VERSION, PROTOCOL_VERSION, SCHEMA_VERSION
 from xmt_collector.platforms.douyin.adapter import DouyinAdapter, LoginRequired
+from xmt_collector.platforms.douyin.browser_launch import BrowserLaunchError, parse_browser_launch
 from xmt_collector.runtime.protocol import ProtocolError, event, parse_request
 
 
@@ -80,6 +81,11 @@ class Worker:
             self.emit(request.id, "error", {"code": "unknown_method", "message": "不支持的 Worker 方法。"})
 
     async def collect(self, request_id: str, params: dict[str, Any], method: str) -> None:
+        try:
+            browser = parse_browser_launch(params.get("browser"))
+        except BrowserLaunchError as error:
+            self.emit(request_id, "error", {"code": error.code, "message": str(error)[:500]})
+            return
         if params.get("platform", "douyin") != "douyin":
             self.emit(request_id, "error", {"code": "not_implemented", "message": "当前仅支持 douyin。"})
             return
@@ -94,16 +100,16 @@ class Worker:
             return
         async def send(name: str, data: dict[str, Any]) -> None:
             self.emit(request_id, name, data)
-        adapter = DouyinAdapter(profile, output / "runs" / request_id, send)
+        adapter = DouyinAdapter(profile, output / "runs" / request_id, send, browser)
         self.running[request_id] = adapter
-        self.emit(request_id, "started", {"platform": "douyin", "collector": "scrapling", "mode": method})
+        self.emit(request_id, "started", {"platform": "douyin", "collector": "scrapling", "mode": method, "browser": browser.evidence()})
         try:
             task_id = str(params.get("taskId") or request_id)
             result = await adapter.collect(account_id, str(params.get("scope", "audit")), task_id)
             self.emit(request_id, "capture", {"xhrResponses": result["manifest"]["xhrResponses"]})
             self.emit(request_id, "completed", {"pages": len(result["capability"]["pages"]), "tabs": sum(len(page["tabs"]) for page in result["capability"]["pages"]), "xhrResponses": result["manifest"]["xhrResponses"], "exports": result["manifest"]["exports"], "manifest": result["manifest"], "capability": result["capability"], "works": result["works"], "account": result["account"], "collectionCompleteness": result["collectionCompleteness"]})
         except LoginRequired:
-            self.emit(request_id, "login_required", {"code": "WAITING_FOR_USER_LOGIN", "message": "请在 Creator Agent 专用 Chrome 中正常扫码或完成验证码后重试。"})
+            self.emit(request_id, "login_required", {"code": "WAITING_FOR_USER_LOGIN", "message": "请在 Creator Agent 专用浏览器中正常扫码或完成验证码后重试。"})
         except asyncio.CancelledError:
             self.emit(request_id, "cancelled", {"accepted": True})
         except Exception as error:

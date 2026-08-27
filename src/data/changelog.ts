@@ -11,6 +11,31 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.20.2', date: '2026-08-27', title: '主线收口与移动认证续期修复',
+    impactScope: ['Android', '认证', '版本治理'],
+    changes: [
+      { type: 'fix', description: 'Android 真实登录显式绑定服务端 Token 生命周期，并在 refresh 后重新安排下一周期。' },
+      { type: 'security', description: '补齐 JWT 回退、恢复补偿、single-flight 与旧定时器代际保护合同。' },
+      { type: 'improvement', description: '归档 Socket 生产观察报告并收口已替代分支，不重复迁移旧实现。' },
+    ],
+  },
+  {
+    version: '2.20.1', date: '2026-08-26', title: 'Creator Collector 无 UI E2E 验收',
+    impactScope: ['Creator Agent', '抖音采集'],
+    changes: [
+      { type: 'fix', description: '修复 works SQLite 非标量字段持久化。' },
+      { type: 'feature', description: '新增无 UI CLI E2E 入口与官方双导出连续验收。' },
+    ],
+  },
+  {
+    version: '2.20.0', date: '2026-08-18', title: 'Creator Collector Scrapling First',
+    impactScope: ['Creator Agent', '抖音采集', '本地安全'],
+    changes: [
+      { type: 'feature', description: '新增 Scrapling Python Worker 与抖音能力清单采集。' },
+      { type: 'security', description: '本地 Worker 仅输出脱敏 JSON 协议事件，不记录会话凭据。' },
+    ],
+  },
+  {
     version: '2.19.11', date: '2026-08-20', title: 'Creator Agent 上传协议安全收口',
     impactScope: ['Creator Agent', '上传安全', 'Android'],
     changes: [

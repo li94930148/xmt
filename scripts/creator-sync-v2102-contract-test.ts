@@ -109,7 +109,19 @@ assert(douyinIds.filter(row => String(row.aweme_id).startsWith('739')).every(row
 assert(!douyinIds.some(row => ['music-1', 'manifest'].includes(String(row.aweme_id))));
 assert(!douyinIds.some(row => String(row.aweme_id) === 'raw-recursive-work'), 'v2.10.2 must not recurse raw_records');
 
-console.log('v2.10.2 server contract tests passed: V1 signed envelope; 12/12 normalized; snapshot idempotent x10; numeric IDs and non-work objects rejected; dual-table IDs consistent.');
+await execute(`UPDATE douyin_accounts SET nickname=?,avatar=?,fans_count=?,following_count=?,works_count=?,total_likes=? WHERE douyin_uid=?`, ['旧昵称', 'https://example.invalid/old.jpg', 100, 50, 40, 1000, 'contract-account']);
+await sync({ ...currentPayload, snapshot_id: 'snapshot-account-unavailable', account: { platform_uid: 'contract-account', nickname: '', avatar: '', metadata_observed: { nickname: false, avatar: false, fans_count: false, following_count: false, works_count: false, total_likes: false } } });
+const preserved = await queryOne<{ nickname: string; avatar: string; fans_count: number; following_count: number; works_count: number; total_likes: number }>('SELECT nickname,avatar,fans_count,following_count,works_count,total_likes FROM douyin_accounts WHERE douyin_uid=?', ['contract-account']);
+assert.deepEqual(preserved, { nickname: '旧昵称', avatar: 'https://example.invalid/old.jpg', fans_count: 100, following_count: 50, works_count: 40, total_likes: 1000 }, 'unavailable metadata must preserve existing values');
+await sync({ ...currentPayload, snapshot_id: 'snapshot-account-observed-zero', account: { platform_uid: 'contract-account', nickname: '新昵称', avatar: 'https://example.invalid/new.jpg', fans_count: 0, metadata_observed: { nickname: true, avatar: true, fans_count: true, following_count: false, works_count: false, total_likes: false } } });
+const updated = await queryOne<{ nickname: string; avatar: string; fans_count: number; following_count: number; works_count: number; total_likes: number }>('SELECT nickname,avatar,fans_count,following_count,works_count,total_likes FROM douyin_accounts WHERE douyin_uid=?', ['contract-account']);
+assert.deepEqual(updated, { nickname: '新昵称', avatar: 'https://example.invalid/new.jpg', fans_count: 0, following_count: 50, works_count: 40, total_likes: 1000 }, 'observed metadata, including zero, must update without clearing unavailable values');
+await execute(`UPDATE douyin_accounts SET creator_account_id=0 WHERE douyin_uid=?`, ['contract-account']);
+await sync({ ...currentPayload, snapshot_id: 'snapshot-repair-creator-link' });
+const repairedLink = await queryOne<{ creator_account_id: number }>('SELECT creator_account_id FROM douyin_accounts WHERE douyin_uid=?', ['contract-account']);
+assert.equal(Number(repairedLink?.creator_account_id), 1, 'internal creator_account_id must always be repaired independently from metadata availability');
+
+console.log('v2.10.2 server contract tests passed: V1 signed envelope; 12/12 normalized; snapshot idempotent x10; numeric IDs and non-work objects rejected; dual-table IDs consistent; unavailable account metadata preserved.');
 
 db.close();
 try { rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch {}

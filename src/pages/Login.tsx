@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, getPublicSystemSettings, login } from '../api';
 import { mobileLogin } from '../api/auth';
+import { notifyNativeTokenIssued } from '@/auth/native/native-auth-runtime';
 import { getNativeEndpointConfigurationError, isAndroid } from '@/platform/runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
 import { LoginError } from '../api/auth';
@@ -455,6 +456,7 @@ export default function Login() {
         await nativeRefreshCredentials.set((result as typeof result & { refreshToken: string }).refreshToken);
         nativeUserProfile.set(result.user);
         authStore.loginV1(result.user, result.accessToken);
+        notifyNativeTokenIssued({ expiresInSeconds: (result as typeof result & { expiresIn: number }).expiresIn }, 'login');
       } else if (result.authMode === 'v1-web') {
         completeWebLogin(result, authStore.loginV1);
       } else {

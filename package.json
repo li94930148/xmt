@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.19.11",
+  "version": "2.20.2",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -66,6 +66,7 @@
     "test:android-runtime": "tsx tests/mobile/android-runtime-contract.test.ts",
     "test:mobile-auth-runtime": "tsx tests/mobile/native-auth-runtime.test.ts",
     "test:native-auth-refresh-scheduler": "tsx tests/auth/native-auth-refresh-scheduler.test.ts",
+    "test:native-auth-runtime-integration": "tsx tests/auth/native-auth-runtime-integration.test.ts",
     "test:mobile-device-registry": "tsx tests/notifications/mobile-device-registry.test.ts",
     "test:daily-report-permissions": "tsx tests/daily/daily-report-permissions.test.ts",
     "test:yjs-auth-recovery": "tsx tests/collaboration/yjs-auth-recovery.test.ts",
@@ -163,6 +164,7 @@
     "test:android-build-endpoints": "tsx tests/mobile/android-build-endpoints.test.ts",
     "test:apk-endpoint-artifact": "node tests/mobile/apk-endpoint-artifact-contract.test.mjs",
     "test:editor-format-painter": "tsx --test tests/editor/format-painter.test.ts",
+    "agent:collector-e2e": "npm --prefix agent run collector:e2e --",
     "test:user-role-assignment-security": "tsx tests/auth/user-role-assignment-security.test.ts",
     "test:html-sanitization": "tsx tests/security/html-sanitization.test.ts",
     "test:yjs-invalid-update": "tsx tests/collaboration/yjs-invalid-update.test.ts",

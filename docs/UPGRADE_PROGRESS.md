@@ -1802,3 +1802,9 @@
 
 1. B 类事件与旧 polling SID 的延迟请求相符，但生产频率仍需在 legacy 下继续观测。
 2. 当前不进入 C3.12-A；禁止开启 Auth 灰度。
+# v2.20.0 Creator Collector
+
+- 已完成：Scrapling First Worker、独立 Profile、JSON Lines Bridge、脱敏 Manifest 与旧采集源码清理。
+- 数据库变化：无。
+- 验证：Python 单测、Agent check/build、Bridge health/shutdown 通过。
+- 风险：真实账号登录、内容管理指标、数据中心指标与官方导出仍需用户在专用 Chrome 内扫码后完成 POC；禁止部署生产。

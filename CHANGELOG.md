@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.20.2 - 2026-08-27
+
+### 修复
+
+- 恢复此前未进入主线的 Android Native Auth 真实续期调度：V1 登录保留服务端 `expiresIn`，移动登录完成后显式绑定 Token 生命周期。
+- refresh 成功后按新生命周期重新调度；JWT `exp` 仅作回退，并补齐前后台、网络恢复、可见性与延迟定时器补偿。
+- 增加调度代际保护、single-flight 与真实登录到连续两轮 refresh 的集成合同，防止重复刷新和旧定时器回流。
+- 归档 v2.17.2 Socket 业务时段只读观察报告；日报布局代码已由 v2.19.3 合入，不重复迁移旧实现。
+
+### 版本与兼容性
+
+- XMT 与 Android 统一升级至 v2.20.2 / 22002；Creator Agent 保持 v2.12.1-agent。
+- 无数据库迁移，不改变 RBAC、Session concurrency、生产端点、Creator 上传协议或 Scrapling Collector 合同。
+
+## 2.20.1 - 2026-08-26
+
+### 修复与验收
+
+- 修复 works SQLite 非标量字段持久化。
+- 增加 Creator Collector 无 UI CLI E2E 入口、官方导出观测与连续双导出验收。
+- 修复 Collector 未观测账号资料覆盖已有资料；账号元数据现按 observed-only 语义更新。
+- 修复 full_snapshot 固定滚动导致历史作品可能漏采，改为带安全上限的耗尽式滚动验收。
+- 修复 Creator Agent 发布包缺失 Scrapling Collector runtime；发布版现携带冻结 Worker 并增加 Windows artifact contract。
+- 收紧 full_snapshot：耗尽前恢复并验证无约束全量视图，无法确认时 fail closed。
+- 恢复 Creator 作品指标容器与别名兼容；未观测指标不再被制造为零值。
+- `--exports` 现为每轮两份官方导出的 fail-closed E2E Gate。
+- Collector 现严格复用 Agent 所选 Chromium-compatible 浏览器运行时/可执行路径，不再强制 Google Chrome。
+- Worker `login_required` 现作为类型化认证失败向 Desktop 传播，UI 与 heartbeat 会立即反映登录失效。
+
 ## 2.19.11 - 2026-08-20
 
 ### Security
@@ -10,7 +39,6 @@
 ### Tests
 
 - 新增 Creator Agent 上传防重放安全合同并纳入核心安全 CI。
-
 ## 2.19.10 - 2026-08-20
 
 ### Security
@@ -436,3 +464,12 @@
 - 远程光标用户名改为编辑区行侧动态标签，不再覆盖正文。
 - 标签仅在远程光标活跃时短暂显示，支持多人光标、滚动与窗口尺寸变化，并保持 pointer-events 隔离。
 - 保持既有 Yjs 同步、断线重连、版本历史与撤销链路不变。
+## 2.20.0 - 2026-08-18
+
+### 新增
+
+- Creator Collector 切换为 Scrapling First 本地 Worker，增加脱敏 XHR 与能力清单。
+
+### 技术升级
+
+- Creator Agent 升级为 2.12.0-agent；移除旧 Node Playwright Collector 和已提交构建产物。

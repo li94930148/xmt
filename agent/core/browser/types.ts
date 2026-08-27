@@ -5,6 +5,8 @@ export type BrowserEngine = 'chromium'|'firefox'|'webkit';
 export type BrowserRuntime = 'system'|'playwright'|'external-cdp';
 export type BrowserSessionMode = 'persistent'|'temporary'|'connect-cdp';
 export type BrowserCompatibility = 'compatible'|'partially_compatible'|'incompatible'|'not_tested';
+export type LoginState = 'logged_in'|'login_required'|'unknown';
+export type LoginStateResult = { status:LoginState; evidence:string[]; finalHost?:string; finalPath?:string; source:'browser' };
 export type BrowserCapabilities = {
   supportsPersistentContext:boolean; supportsCdp:boolean; supportsNetworkResponseInspection:boolean;
   supportsRequestInterception:boolean; supportsDownloads:boolean; supportsMultiPage:boolean;
@@ -25,6 +27,6 @@ export interface BrowserSession {
   start():Promise<void>; stop():Promise<void>; restart():Promise<void>; isConnected():boolean;
   getContext():BrowserContext; getActivePage():Promise<Page>; openPage(url:string):Promise<Page>;
   listPages():Page[]; ensurePage(url:string):Promise<Page>; getCapabilities():BrowserCapabilities;
-  getBrowserInfo():BrowserInfo; checkLoginState():Promise<boolean>;
+  getBrowserInfo():BrowserInfo; checkLoginState():Promise<LoginStateResult>;
   withPage<T>(run:(page:Page)=>Promise<T>):Promise<T>;
 }

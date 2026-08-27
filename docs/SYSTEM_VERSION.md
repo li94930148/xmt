@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.19.11
+v2.20.2
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.19.11
 
 ## 本版本摘要
 
-本版本关闭 Creator Agent legacy protocol downgrade 与旧 `/report` 上传入口，保留既有 V1 防重放合同；Android 生产端点合同保持不变。
+本版本在 v2.20.1 Scrapling First Collector 基线上补回 Android Native Auth 真实登录续期调度，并归档历史 Socket 生产观察报告；无数据库迁移，Creator Agent 保持 v2.12.1-agent。

@@ -12,6 +12,8 @@ export type AuthLoginResult = {
   session?: AuthSessionSummary;
   requestId?: string;
   loginAttemptId?: string;
+  /** V1 only. Server-issued token lifetime in seconds; legacy login has none. */
+  expiresIn?: number;
 };
 
 export type AuthLoginTraceContext = Pick<AuthLoginResult, 'requestId' | 'loginAttemptId'>;
@@ -36,6 +38,14 @@ function requireNumber(value: unknown, field: string): number {
     throw new LoginResponseAdapterError(`登录响应缺少有效${field}`);
   }
   return Number(value);
+}
+
+function requireExpiresIn(value: unknown): number {
+  const seconds = requireNumber(value, 'Token 有效期');
+  // Access tokens are deliberately short-lived. This remains broad enough for
+  // non-production integration fixtures while rejecting malformed responses.
+  if (seconds > 7 * 24 * 60 * 60) throw new LoginResponseAdapterError('登录响应 Token 有效期超出合理范围');
+  return seconds;
 }
 
 function requireString(value: unknown, field: string): string {
@@ -127,6 +137,7 @@ export function adaptLoginResponse(payload: unknown, traceContext: AuthLoginTrac
     authMode: 'v1-web',
     forceChangePassword: user.force_change_password === true,
     session: toSession(data.session),
+    expiresIn: requireExpiresIn(data.expiresIn),
     requestId,
     loginAttemptId: traceContext.loginAttemptId,
   };

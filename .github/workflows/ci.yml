@@ -57,6 +57,7 @@ jobs:
       - run: npm run test:android-runtime
       - run: npm run test:mobile-auth-runtime
       - run: npm run test:native-auth-refresh-scheduler
+      - run: npm run test:native-auth-runtime-integration
       - run: npm run test:mobile-production-gate
       - run: npm run test:yjs-auth-recovery
       - run: npm run test:collaboration-access
@@ -106,3 +107,39 @@ jobs:
         with:
           name: xmt-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  creator-agent-package-contract:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - run: npm --prefix agent ci
+      - run: npm --prefix agent run electron:build
+      - run: npm --prefix agent run test:package-runtime
+
+  collector-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - run: npm --prefix agent ci
+      - run: python -m venv collector/.venv
+      - run: collector/.venv/bin/python -m pip install -r collector/requirements.lock
+      - run: npm --prefix agent run test:collector-bridge
+      - run: npm --prefix agent run test:collector-browser-auth
+      - run: npm --prefix agent run test:collector-cli-export-assertion
+      - run: collector/.venv/bin/python -m pytest collector/tests -q

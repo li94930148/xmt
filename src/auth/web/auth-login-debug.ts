@@ -22,6 +22,7 @@ export function emitAuthLoginDebugTrace(
   metadata: Readonly<Record<string, boolean | number | string | null>> = {},
 ): void {
   const observedByFixture = typeof window !== 'undefined' && window.__xmtAuthGrayBrowserObserver === true;
-  if (!import.meta.env.DEV && import.meta.env.MODE !== 'test' && !observedByFixture) return;
+  const env = import.meta.env ?? {};
+  if (!env.DEV && env.MODE !== 'test' && !observedByFixture) return;
   console.debug(`[xmt-auth] ${event}`, metadata);
 }

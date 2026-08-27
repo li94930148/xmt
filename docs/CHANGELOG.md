@@ -1,10 +1,24 @@
 # XMT 系统更新日志
 
+## v2.20.2 - 2026-08-27
+
+- 补回 Android Native Auth 真实登录后的显式生命周期绑定、连续 refresh 重排和恢复补偿，并纳入核心安全 CI。
+- XMT / Android 版本统一为 2.20.2 / 22002；Creator Agent 保持 2.12.1-agent，无数据库迁移。
+- 归档 v2.17.2 Socket 业务时段只读观察报告，不重复迁移已进入主线的日报布局代码。
+
+## v2.20.1 - 2026-08-26
+
+- 修复 works SQLite 非标量字段持久化，新增无 UI CLI E2E 入口与官方双导出验收。
+
+## v2.20.0 - 2026-08-18
+
+- Creator Collector 切换为 Scrapling First Python Worker，使用独立 Profile 和脱敏能力清单。
+- Creator Agent 升级至 v2.12.0-agent，移除旧 Node Collector 与已提交构建产物。
+
 ## v2.19.11 - 2026-08-20
 
 - Creator Agent `/data-sync` 固定要求 V1 信封，HMAC 覆盖 timestamp、nonce 与业务字段；有效签名后才原子预留 `(agent_id, nonce)`。
 - 已退役旧 `/api/creator-agent/report` 上传入口，返回 410；无数据库迁移、无 Creator 业务数据删除。
-
 ## v2.19.10 - 2026-08-20
 
 - v2.19.9 安全补充：Legacy 401 Recovery 改用精确 URL Origin，拒绝伪同源、错误端口与 HTTP 降级，防止新 Bearer Token 泄漏。
@@ -953,3 +967,31 @@
 ### 测试情况
 
 - Auth 行为冻结测试、Topic 测试、API Contract 测试、类型检查、Auth 范围 lint、版本一致性检查和生产构建均已执行；详细结果见 `UPGRADE_PROGRESS.md`。
+## v2.20.0 - 2026-08-18
+
+### 新增
+
+- 新增 Scrapling First Python Collector、JSON Lines Worker Bridge、能力 Manifest 与敏感字段脱敏。
+
+### 优化
+
+- Creator Agent 采集链路改为独立 Python Worker 与真实 Chrome 专用 Profile。
+
+### 修复
+
+- 无。
+
+### 技术升级
+
+- Creator Agent 升级至 v2.12.0-agent，锁定 Scrapling 0.4.14。
+
+### 数据库变化
+
+- 无。
+
+### 测试情况
+
+- Python 单测、Agent check/build、Worker Bridge 合同测试通过；正式账号登录及导出待人工扫码验证。
+## v2.20.1 - 2026-08-26
+
+- 修复 works SQLite 非标量字段持久化；新增无 UI CLI E2E 入口与官方双导出验收。

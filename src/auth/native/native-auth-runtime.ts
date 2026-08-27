@@ -1,4 +1,4 @@
-import { mobileRefresh, MobileRefreshError } from '@/api/auth';
+import { mobileRefresh, MobileRefreshError, type MobileRefreshResult } from '@/api/auth';
 import { useAuthStore } from '@/store';
 import { nativeRefreshCredentials, nativeUserProfile } from './secure-credentials';
 
@@ -7,7 +7,21 @@ export type NativeAuthTrace = {
   status: string;
   loginCompleted: boolean;
   hasAccessToken: boolean;
+  schedulerArmed: boolean;
+  expirySource: 'server_expires_in' | 'jwt_exp_fallback' | 'unknown';
+  expiryParseStatus: 'not_needed' | 'parsed' | 'failed';
+  expiresAt: number | null;
+  refreshDueAt: number | null;
+  remainingMs: number | null;
+  lastScheduledAt: number | null;
+  lastTriggerSource: 'login' | 'refresh' | 'timer' | 'resume' | 'network' | 'store_fallback' | null;
+  lastRefreshAttemptAt: number | null;
+  lastRefreshResult: 'success' | 'transient_failure' | 'terminal_failure' | null;
+  successfulRefreshCount: number;
+  transientRetryCount: number;
 };
+
+export type NativeTokenLifetime = { expiresInSeconds: number; issuedAtMs?: number };
 
 export type NativeAuthRuntime = {
   getAccessToken: () => string | null;
@@ -17,6 +31,7 @@ export type NativeAuthRuntime = {
   start: () => void;
   stop: () => void;
   onAccessTokenChanged: () => void;
+  onTokenIssued: (lifetime: NativeTokenLifetime, source?: 'login' | 'refresh') => void;
   onResume: () => Promise<string | null>;
   onNetworkOnline: () => Promise<string | null>;
 };
@@ -30,7 +45,7 @@ export type NativeAuthRuntimeDependencies = {
   clearUser: () => void;
   login: (user: NonNullable<ReturnType<typeof nativeUserProfile.get>>, token: string) => void;
   logout: () => void;
-  refreshRequest: typeof mobileRefresh;
+  refreshRequest: (refreshToken: string) => Promise<MobileRefreshResult>;
   now?: () => number;
   setTimer?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>;
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
@@ -41,8 +56,9 @@ export type NativeAuthRuntimeDependencies = {
 
 declare global {
   interface Window {
-    __xmtAuthRuntime?: Omit<NativeAuthRuntime, 'start' | 'stop' | 'onAccessTokenChanged' | 'onResume' | 'onNetworkOnline'>
-      & Partial<Pick<NativeAuthRuntime, 'start' | 'stop' | 'onAccessTokenChanged' | 'onResume' | 'onNetworkOnline'>>;
+    __xmtAuthRuntime?: Pick<NativeAuthRuntime, 'getAccessToken' | 'refresh' | 'getExpiresAt'>
+      & { getTraceSnapshot: () => unknown }
+      & Partial<Pick<NativeAuthRuntime, 'start' | 'stop' | 'onAccessTokenChanged' | 'onTokenIssued' | 'onResume' | 'onNetworkOnline'>>;
   }
 }
 
@@ -51,7 +67,9 @@ export function readAccessTokenExpiry(token: string | null) {
   try {
     const payload = token.split('.')[1];
     if (!payload) return null;
-    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: unknown };
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = `${base64}${'='.repeat((4 - base64.length % 4) % 4)}`;
+    const decoded = JSON.parse(atob(padded)) as { exp?: unknown };
     return typeof decoded.exp === 'number' ? decoded.exp * 1000 : null;
   } catch {
     return null;
@@ -64,6 +82,15 @@ export function createNativeAuthRuntime(dependencies: NativeAuthRuntimeDependenc
   let refreshInFlight: Promise<string | null> | null = null;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let transientRetries = 0;
+  let scheduleGeneration = 0;
+  let expiresAtMs: number | null = null;
+  let expirySource: NativeAuthTrace['expirySource'] = 'unknown';
+  let expiryParseStatus: NativeAuthTrace['expiryParseStatus'] = 'not_needed';
+  let lastScheduledAt: number | null = null;
+  let lastTriggerSource: NativeAuthTrace['lastTriggerSource'] = null;
+  let lastRefreshAttemptAt: number | null = null;
+  let lastRefreshResult: NativeAuthTrace['lastRefreshResult'] = null;
+  let successfulRefreshCount = 0;
   const now = dependencies.now ?? Date.now;
   const setTimer = dependencies.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
   const clearTimer = dependencies.clearTimer ?? ((timer) => clearTimeout(timer));
@@ -74,18 +101,44 @@ export function createNativeAuthRuntime(dependencies: NativeAuthRuntimeDependenc
   const clearRefreshTimer = () => {
     if (refreshTimer) clearTimer(refreshTimer);
     refreshTimer = null;
+    scheduleGeneration += 1;
   };
   const schedule = (delay: number) => {
     clearRefreshTimer();
-    refreshTimer = setTimer(() => { refreshTimer = null; void ensureFreshToken(); }, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, delay)));
+    const generation = scheduleGeneration;
+    lastScheduledAt = now();
+    refreshTimer = setTimer(() => {
+      if (generation !== scheduleGeneration) return;
+      refreshTimer = null;
+      lastTriggerSource = 'timer';
+      void ensureFreshToken();
+    }, Math.min(MAX_TIMER_DELAY_MS, Math.max(0, delay)));
   };
-  const scheduleForCurrentToken = () => {
+  const clearLifetime = () => {
     clearRefreshTimer();
-    const expiry = readAccessTokenExpiry(dependencies.getAccessToken());
-    if (!expiry) return;
-    const delay = expiry - now() - refreshLeadMs;
+    expiresAtMs = null;
+    expirySource = 'unknown';
+    expiryParseStatus = 'not_needed';
+  };
+  const scheduleForExpiry = () => {
+    clearRefreshTimer();
+    if (!expiresAtMs) return;
+    const delay = expiresAtMs - now() - refreshLeadMs;
     if (delay <= 0) { void ensureFreshToken(); return; }
     schedule(delay);
+  };
+  const scheduleFromJwtFallback = () => {
+    const expiry = readAccessTokenExpiry(dependencies.getAccessToken());
+    if (!expiry) {
+      expirySource = 'unknown';
+      expiryParseStatus = 'failed';
+      clearRefreshTimer();
+      return;
+    }
+    expiresAtMs = expiry;
+    expirySource = 'jwt_exp_fallback';
+    expiryParseStatus = 'parsed';
+    scheduleForExpiry();
   };
   const isTerminal = (error: unknown) => error instanceof MobileRefreshError && error.terminal;
 
@@ -96,20 +149,25 @@ export function createNativeAuthRuntime(dependencies: NativeAuthRuntimeDependenc
       const user = dependencies.getUser();
       if (!refreshToken || !user) return null;
       try {
+        lastRefreshAttemptAt = now();
         const next = await dependencies.refreshRequest(refreshToken);
         await dependencies.setRefreshToken(next.refreshToken);
         dependencies.login(user, next.accessToken);
         transientRetries = 0;
-        scheduleForCurrentToken();
+        successfulRefreshCount += 1;
+        lastRefreshResult = 'success';
+        onTokenIssued({ expiresInSeconds: next.expiresIn }, 'refresh');
         return next.accessToken;
       } catch (error) {
         if (isTerminal(error)) {
-          clearRefreshTimer();
+          lastRefreshResult = 'terminal_failure';
+          clearLifetime();
           await dependencies.clearRefreshToken().catch(() => undefined);
           dependencies.clearUser();
           dependencies.logout();
         } else if (transientRetries < maxTransientRetries) {
           transientRetries += 1;
+          lastRefreshResult = 'transient_failure';
           schedule(retryBaseMs * 2 ** (transientRetries - 1));
         }
         return null;
@@ -121,16 +179,34 @@ export function createNativeAuthRuntime(dependencies: NativeAuthRuntimeDependenc
   };
 
   const ensureFreshToken = () => {
-    const expiry = readAccessTokenExpiry(dependencies.getAccessToken());
-    if (!expiry || expiry - now() <= refreshLeadMs) return refresh();
-    scheduleForCurrentToken();
+    if (!dependencies.getAccessToken()) {
+      clearLifetime();
+      return Promise.resolve(null);
+    }
+    if (!expiresAtMs) scheduleFromJwtFallback();
+    if (!expiresAtMs || expiresAtMs - now() <= refreshLeadMs) return refresh();
+    scheduleForExpiry();
     return Promise.resolve(dependencies.getAccessToken());
+  };
+  const onTokenIssued = (lifetime: NativeTokenLifetime, source: 'login' | 'refresh' = 'login') => {
+    const seconds = lifetime.expiresInSeconds;
+    if (!Number.isSafeInteger(seconds) || seconds <= 0 || seconds > 7 * 24 * 60 * 60) {
+      expirySource = 'unknown';
+      expiryParseStatus = 'failed';
+      clearRefreshTimer();
+      return;
+    }
+    expiresAtMs = (lifetime.issuedAtMs ?? now()) + seconds * 1000;
+    expirySource = 'server_expires_in';
+    expiryParseStatus = 'not_needed';
+    lastTriggerSource = source;
+    scheduleForExpiry();
   };
 
   return {
     getAccessToken: dependencies.getAccessToken,
     refresh,
-    getExpiresAt: () => readAccessTokenExpiry(dependencies.getAccessToken()),
+    getExpiresAt: () => expiresAtMs,
     getTraceSnapshot: () => {
       const accessToken = dependencies.getAccessToken();
       return {
@@ -138,13 +214,30 @@ export function createNativeAuthRuntime(dependencies: NativeAuthRuntimeDependenc
         status: accessToken ? 'authenticated' : 'anonymous',
         loginCompleted: Boolean(accessToken),
         hasAccessToken: Boolean(accessToken),
+        schedulerArmed: refreshTimer !== null,
+        expirySource,
+        expiryParseStatus,
+        expiresAt: expiresAtMs,
+        refreshDueAt: expiresAtMs === null ? null : expiresAtMs - refreshLeadMs,
+        remainingMs: expiresAtMs === null ? null : expiresAtMs - now(),
+        lastScheduledAt,
+        lastTriggerSource,
+        lastRefreshAttemptAt,
+        lastRefreshResult,
+        successfulRefreshCount,
+        transientRetryCount: transientRetries,
       };
     },
-    start: scheduleForCurrentToken,
-    stop: clearRefreshTimer,
-    onAccessTokenChanged: () => { transientRetries = 0; scheduleForCurrentToken(); },
-    onResume: ensureFreshToken,
-    onNetworkOnline: ensureFreshToken,
+    start: () => { if (dependencies.getAccessToken()) scheduleFromJwtFallback(); },
+    stop: clearLifetime,
+    onAccessTokenChanged: () => {
+      transientRetries = 0;
+      lastTriggerSource = 'store_fallback';
+      if (!dependencies.getAccessToken()) clearLifetime(); else scheduleFromJwtFallback();
+    },
+    onTokenIssued,
+    onResume: () => { lastTriggerSource = 'resume'; return ensureFreshToken(); },
+    onNetworkOnline: () => { lastTriggerSource = 'network'; return ensureFreshToken(); },
   };
 }
 
@@ -169,6 +262,12 @@ export function refreshNativeSession() {
   return installedRuntime.refresh();
 }
 
+/** Explicitly binds a successful Android login to its server-issued lifetime. */
+export function notifyNativeTokenIssued(lifetime: NativeTokenLifetime, source: 'login' | 'refresh' = 'login') {
+  if (!installedRuntime) installedRuntime = createNativeAuthRuntime(runtimeDependencies());
+  installedRuntime.onTokenIssued(lifetime, source);
+}
+
 export function installNativeAuthRuntime() {
   if (!installedRuntime) installedRuntime = createNativeAuthRuntime(runtimeDependencies());
   window.__xmtAuthRuntime = installedRuntime;
@@ -179,6 +278,10 @@ export function installNativeAuthRuntime() {
   };
   window.addEventListener('xmt-app-resume', onResume);
   window.addEventListener('xmt-network-status', onNetwork);
+  const onBrowserOnline = () => { void installedRuntime?.onNetworkOnline(); };
+  const onVisibility = () => { if (document.visibilityState === 'visible') void installedRuntime?.onResume(); };
+  window.addEventListener('online', onBrowserOnline);
+  document.addEventListener('visibilitychange', onVisibility);
   const unsubscribe = useAuthStore.subscribe((state, previous) => {
     if (state.token !== previous.token) installedRuntime?.onAccessTokenChanged();
     if (!state.isLoggedIn) installedRuntime?.stop();
@@ -186,6 +289,8 @@ export function installNativeAuthRuntime() {
   return () => {
     window.removeEventListener('xmt-app-resume', onResume);
     window.removeEventListener('xmt-network-status', onNetwork);
+    window.removeEventListener('online', onBrowserOnline);
+    document.removeEventListener('visibilitychange', onVisibility);
     unsubscribe();
     installedRuntime?.stop();
     if (window.__xmtAuthRuntime === installedRuntime) delete window.__xmtAuthRuntime;

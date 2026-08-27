@@ -51,6 +51,8 @@ export class CreatorDatabase {
     try { this.db.exec('BEGIN IMMEDIATE'); run(); this.db.exec('COMMIT'); status[module]='success'; }
     catch(error) { try { this.db.exec('ROLLBACK'); } catch {} status[module]='failed'; status.errors[module]=error instanceof Error?error.message:String(error); }
   }
+  private text(value: unknown) { if (value === null || value === undefined) return ''; return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : JSON.stringify(value); }
+  private json(value: unknown) { return JSON.stringify(value ?? null); }
   save(snapshot:CreatorSnapshot):ModuleSaveStatus {
     const status:ModuleSaveStatus={account:'failed',works:'failed',dashboard:'failed',fans:'failed',raw:'failed',errors:{}};
     const knownContentIds=this.knownContentIds();
@@ -61,8 +63,8 @@ export class CreatorDatabase {
       const stat=this.db.prepare('INSERT OR IGNORE INTO creator_work_statistics(item_id,snapshot_time,statistics_json,raw_json,snapshot_id) VALUES(?,?,?,?,?)');
       for(const item of snapshot.works){
         const itemId=String(item.item_id);
-        work.run(itemId,item.title,item.published_at||'',item.cover||'',item.status||'',JSON.stringify(item.raw||item),snapshot.collected_at);
-        stat.run(itemId,snapshot.collected_at,JSON.stringify(item.metrics),JSON.stringify(snapshot.work_details.find((detail)=>String(detail.item_id)===itemId)||null),snapshot.snapshot_id);
+        work.run(itemId,this.text(item.title),this.text(item.published_at),this.text(item.cover),this.text(item.status),this.json(item.raw ?? item),this.text(snapshot.collected_at));
+        stat.run(itemId,this.text(snapshot.collected_at),this.json(item.metrics),this.json(snapshot.work_details.find((detail)=>String(detail.item_id)===itemId)),this.text(snapshot.snapshot_id));
       }
     });
     this.attempt(status,'dashboard',()=>this.db.prepare('INSERT OR IGNORE INTO creator_dashboard_statistics(snapshot_time,range_key,statistics_json,snapshot_id) VALUES(?,?,?,?)').run(snapshot.collected_at,'all',JSON.stringify({dashboard:snapshot.dashboard,content_analysis:snapshot.content_analysis}),snapshot.snapshot_id));

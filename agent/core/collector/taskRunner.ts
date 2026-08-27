@@ -64,7 +64,7 @@ export async function runCreatorCollectorTask(options: {
       profilePath,
       dataRoot,
       config.accountId,
-    ).collect({ collectionMode: mode });
+    ).collect({ collectionMode: mode, taskId });
     await note("snapshot:complete", {
       works: snapshot.works.length,
       xhr: snapshot.collection_stats.raw_response_count,
@@ -96,8 +96,10 @@ export async function runCreatorCollectorTask(options: {
     });
     await note("collector:complete");
     return {
+      taskId,
       collectedAt: new Date().toISOString(),
       snapshot,
+      exportReceipts: snapshot.export_receipts || [],
       local,
       upload: result,
     };

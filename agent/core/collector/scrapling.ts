@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import type { CollectionMode, CreatorSnapshot, CreatorWork } from "../types.js";
 import { ScraplingWorkerBridge } from "./workerBridge.js";
+import type { ExportReceipt } from "./exportAssertion.js";
 
 export class ScraplingCreatorCollector {
   constructor(
@@ -11,13 +12,14 @@ export class ScraplingCreatorCollector {
     private readonly accountId: string,
   ) {}
   async collect(
-    options: { collectionMode?: CollectionMode } = {},
+    options: { collectionMode?: CollectionMode; taskId?: string } = {},
   ): Promise<CreatorSnapshot> {
     const result = await this.bridge.request(
       "collect",
       {
         platform: "douyin",
         accountId: this.accountId,
+        taskId: options.taskId,
         scope: options.collectionMode || "full_snapshot",
         profilePath: this.profilePath,
         outputPath: path.join(
@@ -35,6 +37,7 @@ export class ScraplingCreatorCollector {
       pages?: number;
       account?: Record<string, unknown>;
       collectionCompleteness?: Record<string, unknown>;
+      exports?: ExportReceipt[];
     };
     if (!data.xhrResponses)
       throw new Error("未捕获到抖音 XHR，已停止同步以避免用空结果覆盖数据。");
@@ -51,7 +54,7 @@ export class ScraplingCreatorCollector {
     const workerAccount = data.account || {};
     const observed = (workerAccount.metadata_observed || {}) as Record<string, boolean>;
     const metadata = (key: string) => observed[key] === true ? workerAccount[key] : undefined;
-    if ((options.collectionMode || "full_snapshot") === "full_snapshot" && data.collectionCompleteness?.exhausted !== true) {
+    if ((options.collectionMode || "full_snapshot") === "full_snapshot" && (data.collectionCompleteness?.exhausted !== true || (data.collectionCompleteness?.viewScope as Record<string, unknown> | undefined)?.verified !== true)) {
       throw new Error("FULL_SNAPSHOT_INCOMPLETE: 未获得作品列表耗尽证据。");
     }
     return {
@@ -96,6 +99,7 @@ export class ScraplingCreatorCollector {
         trafficSources: [],
         contentPerformance: {},
       },
+      export_receipts: Array.isArray(data.exports) ? data.exports : [],
     };
   }
 }

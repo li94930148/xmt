@@ -1,5 +1,6 @@
 export type SyncInterval = 'manual' | '12h' | 'daily';
 import type { BrowserSelection, BrowserCompatibility } from './browser/types.js';
+import type { ExportReceipt } from './collector/exportAssertion.js';
 export type AgentConfig = {
   serverUrl: string; agentId: number; deviceId: string; platform: 'douyin'; accountId: string; accountName: string;
   browserConfig: BrowserSelection & { browserVersion?:string; lastSuccessfulId?:string; compatibilityStatus?:BrowserCompatibility; compatibilityReason?:string; lastTestedAt?:string };
@@ -47,6 +48,7 @@ export type CreatorSnapshot = {
   raw: { api_map: Array<{ page: string; url: string; method: string; responseKeys: string[] }>; captures: NetworkCapture[] };
   /** Compatibility for the existing desktop UI. */
   videos: CreatorWork[]; operations: { last7Days: unknown; last30Days: unknown; trafficSources: unknown; contentPerformance: unknown };
+  export_receipts?: ExportReceipt[];
 };
 
-export type SyncResult = { collectedAt: string; snapshot: CreatorSnapshot; local?: unknown; upload: { success: boolean; snapshot_id?: number; source?: string; modules?: unknown } };
+export type SyncResult = { taskId: string; collectedAt: string; snapshot: CreatorSnapshot; exportReceipts: ExportReceipt[]; local?: unknown; upload: { success: boolean; snapshot_id?: number; source?: string; modules?: unknown } };

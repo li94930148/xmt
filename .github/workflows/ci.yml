@@ -122,3 +122,21 @@ jobs:
       - run: npm --prefix agent ci
       - run: npm --prefix agent run electron:build
       - run: npm --prefix agent run test:package-runtime
+
+  collector-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - run: npm --prefix agent ci
+      - run: npm --prefix agent run test:collector-bridge
+      - run: npm --prefix agent run test:collector-cli-export-assertion
+      - run: python -m pip install -r collector/requirements.lock
+      - run: python -m pytest collector/tests -q

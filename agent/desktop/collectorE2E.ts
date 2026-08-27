@@ -8,6 +8,7 @@ import {
   managedProfile,
 } from "../core/browser/profile.js";
 import { runCreatorCollectorTask } from "../core/collector/taskRunner.js";
+import { assertExportReceipts } from "../core/collector/exportAssertion.js";
 import type { AgentConfig } from "../core/types.js";
 
 const argument = (name: string) => {
@@ -72,6 +73,9 @@ async function main() {
       mode: "full_snapshot",
       checkpoint,
     });
+    const exports = assertExportReceipts(result.exportReceipts, requireExports, result.taskId);
+    checkpoint("export:assertion", exports);
+    if (exports.status === "fail") throw new Error(exports.code);
     checkpoint("round:complete", {
       status: "pass",
       works: result.snapshot.works.length,

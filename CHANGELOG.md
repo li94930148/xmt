@@ -9,6 +9,9 @@
 - 修复 Collector 未观测账号资料覆盖已有资料；账号元数据现按 observed-only 语义更新。
 - 修复 full_snapshot 固定滚动导致历史作品可能漏采，改为带安全上限的耗尽式滚动验收。
 - 修复 Creator Agent 发布包缺失 Scrapling Collector runtime；发布版现携带冻结 Worker 并增加 Windows artifact contract。
+- 收紧 full_snapshot：耗尽前恢复并验证无约束全量视图，无法确认时 fail closed。
+- 恢复 Creator 作品指标容器与别名兼容；未观测指标不再被制造为零值。
+- `--exports` 现为每轮两份官方导出的 fail-closed E2E Gate。
 
 ## 2.19.11 - 2026-08-20
 

@@ -18,7 +18,7 @@ def _first_present(*values: Any) -> Any:
 
 
 def normalize_work(raw: dict[str, Any]) -> dict[str, Any]:
-    statistics = raw.get("statistics") if isinstance(raw.get("statistics"), dict) else raw
+    metrics = _normalize_metrics(raw)
     return {
         "item_id": str(_first_present(raw.get("item_id"), raw.get("aweme_id"), raw.get("id")) or ""),
         "title": str(_first_present(raw.get("title"), raw.get("desc"), raw.get("caption"), raw.get("item_title")) or ""),
@@ -28,8 +28,42 @@ def normalize_work(raw: dict[str, Any]) -> dict[str, Any]:
         # Cover payloads commonly contain expiring signed URLs. They are neither
         # needed by the upload contract nor safe to emit over the worker protocol.
         "cover_uri": _cover_uri(raw.get("cover") or raw.get("cover_url")),
-        "metrics": {key: _number(statistics.get(key)) for key in ("play_count", "digg_count", "comment_count", "share_count", "collect_count", "danmaku_count", "cover_click_rate", "avg_view_proportion", "new_fans") if key in statistics},
+        "metrics": metrics,
     }
+
+
+_METRIC_ALIASES = {
+    "play_count": ("play_count", "playCount", "view_count", "vv"),
+    "like_count": ("like_count", "likeCount", "digg_count"),
+    "comment_count": ("comment_count", "commentCount"),
+    "share_count": ("share_count", "shareCount"),
+    "collect_count": ("collect_count", "collectCount", "favorite_count"),
+    "avg_play_duration": ("avg_play_duration", "avgPlayDuration", "avg_watch_time", "avg_view_second"),
+    "completion_rate": ("completion_rate", "completionRate", "finish_rate"),
+    "click_rate": ("click_rate", "clickRate", "ctr", "cover_click_rate"),
+    "two_second_bounce_rate": ("two_second_bounce_rate", "twoSecondBounceRate", "bounce_rate_2s"),
+    "interaction_rate": ("interaction_rate", "interactionRate"),
+    "new_fans": ("new_fans", "newFans", "subscribe_count"),
+    "lost_fans": ("lost_fans", "unsubscribe_count"),
+    "profile_views": ("profile_views", "profileViewCount", "homepage_visit_count"),
+    "fan_view_proportion": ("fan_view_proportion",),
+    "avg_view_proportion": ("avg_view_proportion",),
+}
+
+
+def _normalize_metrics(raw: dict[str, Any]) -> dict[str, int | float]:
+    # The legacy Collector merged sources in this order; later containers win.
+    source: dict[str, Any] = dict(raw)
+    for name in ("statistics", "stats", "metrics"):
+        if isinstance(raw.get(name), dict):
+            source.update(raw[name])
+    result: dict[str, int | float] = {}
+    for canonical, aliases in _METRIC_ALIASES.items():
+        value = _first_present(*(source.get(alias) for alias in aliases))
+        numeric = _number(value)
+        if numeric is not None:
+            result[canonical] = numeric
+    return result
 
 
 def _cover_uri(value: Any) -> str | None:

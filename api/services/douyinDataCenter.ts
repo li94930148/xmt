@@ -9,11 +9,32 @@ type Period = '7d' | '30d' | '90d';
 type WorksCursor = { publish_time: string; id: number };
 type AnalyzedDouyinWork = ReturnType<typeof analyzeDouyinWorks>['works'][number];
 export type DouyinWorksPage = { items: AnalyzedDouyinWork[]; next_cursor: string | null; has_more: boolean; page_size: number };
+export type OfficialDashboardMode = 'existing_only' | 'shadow_compare' | 'official_preferred';
+export type OfficialReconciliationStatus = 'comparable' | 'matched' | 'different' | 'existing_only' | 'official_only' | 'not_comparable';
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const parse = (value: unknown): JsonRecord => { try { return typeof value === 'string' ? JSON.parse(value) as JsonRecord : value && typeof value === 'object' ? value as JsonRecord : {}; } catch { return {}; } };
 const shanghaiDate = (value: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
 const days = (period: Period) => ({ '7d': 7, '30d': 30, '90d': 90 })[period];
+
+export function officialDashboardMode(value = process.env.CREATOR_OFFICIAL_DASHBOARD_MODE): OfficialDashboardMode {
+  return value === 'shadow_compare' || value === 'official_preferred' ? value : 'existing_only';
+}
+export function reconcileOfficialMetric(existingValue: number | null, officialValue: number | null): OfficialReconciliationStatus {
+  if (existingValue === null && officialValue === null) return 'not_comparable';
+  if (existingValue === null) return 'official_only';
+  if (officialValue === null) return 'existing_only';
+  return existingValue === officialValue ? 'matched' : 'different';
+}
+export function officialReconciliationSummary(existingValue: number | null, officialValue: number | null) {
+  const status = reconcileOfficialMetric(existingValue, officialValue);
+  return { comparable: status === 'matched' || status === 'different', status };
+}
+async function officialViewsForDashboard(creatorAccountId: number) {
+  const row = await queryOne<{ total: number | null; rows: number }>(`SELECT SUM(value_number) total,COUNT(*) rows
+    FROM creator_official_metrics WHERE account_id=? AND metric_code='views' AND source_item_key IS NOT NULL`, [creatorAccountId]);
+  return row && Number(row.rows) > 0 && Number.isFinite(Number(row.total)) ? Number(row.total) : null;
+}
 
 const encodeCursor = (cursor: WorksCursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
 function decodeCursor(value?: string): WorksCursor | null {
@@ -217,15 +238,23 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   const rankedWorks = [...analyzed.works].sort((left, right) => Number(right.performance.is_viral) - Number(left.performance.is_viral) || right.performance.score - left.performance.score || number(right.play_count) - number(left.play_count));
   const fansAvailable = number(latest.fans_count_available ?? account.fans_count_available) === 1;
   const missingFields = fansAvailable ? [] : ['fans_count', 'fan_growth'];
+  const mode = officialDashboardMode();
+  const officialViews = mode === 'existing_only' ? null : await officialViewsForDashboard(creatorAccountId);
+  const reconciliation = officialReconciliationSummary(totals.plays, officialViews);
+  // Shadow mode deliberately leaves the public dashboard shape and values on
+  // the established path. The log contains only a safe aggregate summary.
+  if (mode === 'shadow_compare') console.info('[creator-official-shadow]', JSON.stringify({ account_id: creatorAccountId, metric: 'play_count', ...reconciliation }));
+  const useOfficialViews = mode === 'official_preferred' && officialViews !== null;
+  const displayPlays = useOfficialViews ? officialViews : totals.plays;
   return {
     account,
     metrics: {
       fans_count: fansAvailable ? number(latest.fans_count ?? account.fans_count) : null,
       works_count: works.length,
-      play_count: totals.plays,
+      play_count: displayPlays,
       interaction_count: totals.interactions,
-      interaction_rate: totals.plays > 0 ? totals.interactions / totals.plays : 0,
-      share_rate: totals.plays > 0 ? totals.shares / totals.plays : 0,
+      interaction_rate: displayPlays > 0 ? totals.interactions / displayPlays : 0,
+      share_rate: displayPlays > 0 ? totals.shares / displayPlays : 0,
       viral_works_count: analyzed.works.filter(work => work.performance.is_viral).length,
     },
     health: calculateDouyinAccountHealth(account, analyzed.works, snapshots),
@@ -236,7 +265,7 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     snapshot_count: snapshots.length,
     snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
     data_status: missingFields.length ? 'partial' : 'ready',
-    data_source: 'douyin_creator_center_collection',
+    data_source: useOfficialViews ? 'douyin_official_export' : 'douyin_creator_center_collection',
     last_success_at: account.last_sync_time ?? null,
     missing_fields: missingFields,
     warnings: fansAvailable ? [] : ['当前采集响应没有提供粉丝总数；该字段不会按 0 展示或参与增长评分。'],
@@ -245,6 +274,7 @@ export async function getDouyinDashboard(creatorAccountId: number) {
       works: 'douyin_works',
       growth: 'douyin_daily_snapshots',
       scoring: 'douyin_works',
+      play_count: useOfficialViews ? 'creator_official_metrics.views' : 'douyin_works',
     },
     formulas: DOUYIN_OPERATIONS_FORMULAS,
   };

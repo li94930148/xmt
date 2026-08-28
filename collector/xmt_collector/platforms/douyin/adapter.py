@@ -260,7 +260,7 @@ class DouyinAdapter:
             # Parse the copied export only.  The original browser download stays local
             # and no raw workbook cell data is ever emitted over the bridge.
             try:
-                official_data.append(parse_official_export(self.run_root / "exports" / str(receipt["storedFilename"]), receipt))
+                official_data.append(parse_official_export(self.run_root / "exports" / str(receipt["storedFilename"]), {**receipt, "accountId": account_id}))
             except Exception as error:
                 official_data.append({"file": receipt, "confidence": "unknown", "quality": {"source_rows": 0, "accepted_rows": 0, "duplicate_rows": 0, "rejected_rows": 0, "warnings": [f"PARSE_FAILED:{type(error).__name__}"]}, "datasets": {}})
         manifest = {"platform": "douyin", "account": account_id, "taskId": task_id, "scope": scope, "captured_at": datetime.now(timezone.utc).isoformat(), "xhrResponses": len(captured), "exports": all_exports, "officialData": official_data, "collectionCompleteness": completeness, "browser": self.browser.evidence()}

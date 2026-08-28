@@ -118,17 +118,21 @@ export async function upload(
     taskId?: string;
   } = {},
 ) {
+  const payload = snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId, options.taskId) : toUnifiedCreatorPayload(snapshot, options);
+  return uploadCanonicalPayload(config, agentToken, payload, snapshot.agent_version, snapshot.collected_at || new Date().toISOString());
+}
+export async function uploadCanonicalPayload(config: AgentConfig, agentToken: string, payload: Record<string, unknown>, agentVersion: string, collectedAt: string) {
   const body: Record<string, unknown> = {
     protocol_version: 1,
-    agent_version: snapshot.agent_version,
+    agent_version: agentVersion,
     agent_id: config.agentId,
     device_id: config.deviceId,
     platform: config.platform,
     account_id: config.accountId,
     timestamp: new Date().toISOString(),
     nonce: crypto.randomUUID(),
-    collected_at: snapshot.collected_at || new Date().toISOString(),
-    data: encrypt(snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId, options.taskId) : toUnifiedCreatorPayload(snapshot, options), agentToken),
+    collected_at: collectedAt,
+    data: encrypt(payload, agentToken),
   };
   body.signature = sign(body, agentToken);
   const serialized = JSON.stringify(body);

@@ -64,21 +64,21 @@ def parse_official_export(file: Path, source: dict[str, Any]) -> dict[str, Any]:
     rows = _rows(file); header_index = next((i for i, row in enumerate(rows[:20]) if len(set(row) & set(CONTENT_HEADERS)) >= 3 or len(set(row) & set(INCOME_HEADERS)) >= 2), None)
     if header_index is None: return {"file": source, "confidence": "unknown", "quality": {"source_rows": len(rows), "accepted_rows": 0, "duplicate_rows": 0, "rejected_rows": 0, "warnings": ["HEADER_UNRECOGNIZED"]}, "datasets": {}}
     headers = rows[header_index]; mapping = {name: index for index, name in enumerate(headers) if name in CONTENT_HEADERS or name in INCOME_HEADERS}
-    content = len(set(headers) & set(CONTENT_HEADERS)) >= 3; accepted: list[dict[str, Any]] = []; rejected = 0; seen: set[str] = set()
+    content = len(set(headers) & set(CONTENT_HEADERS)) >= 3; accepted: list[dict[str, Any]] = []; rejected = 0; seen: set[str] = set(); warnings: list[str] = []
     for row in rows[header_index + 1:]:
         read = lambda name: row[mapping[name]].strip() if name in mapping and mapping[name] < len(row) else ""
         if not any(row): continue
         if content:
             title, published = read("作品名称"), _date(read("发布时间"))
             if not title or not published: rejected += 1; continue
-            item_key = hashlib.sha256(f"{title}\n{published}".encode()).hexdigest()
-            if item_key in seen: continue
+            item_key = hashlib.sha256(f"douyin\n{source.get('accountId', '')}\n{title.strip()}\n{published}".encode()).hexdigest()
+            if item_key in seen: rejected += 1; warnings.append("FALLBACK_IDENTITY_COLLISION"); continue
             seen.add(item_key); metrics = {standard: _number(read(label)) for label, standard in CONTENT_HEADERS.items() if standard not in {"title", "published_at", "content_format", "review_status"} and _number(read(label)) is not None}
-            accepted.append({"source_item_key": item_key, "title": title, "published_at": published, "content_format": read("体裁"), "review_status": read("审核状态"), "metrics": metrics})
+            accepted.append({"fallback_source_key": item_key, "identity_source": "fallback_title_published_at", "identity_confidence": "low", "title": title, "published_at": published, "content_format": read("体裁"), "review_status": read("审核状态"), "metrics": metrics})
         else:
             date, amount = _date(read("日期")), _number(read("收获音浪"))
             if not date or amount is None: rejected += 1; continue
             key = f"{date}:sound_wave_amount"
             if key in seen: continue
             seen.add(key); accepted.append({"metric_date": date[:10], "metric_code": "sound_wave_amount", "value": str(amount), "unit": "sound_wave"})
-    return {"file": source, "confidence": "confirmed" if content or "收获音浪" in mapping else "probable", "quality": {"source_rows": max(0, len(rows) - header_index - 1), "accepted_rows": len(accepted), "duplicate_rows": 0, "rejected_rows": rejected, "warnings": []}, "datasets": {"content_metrics": accepted} if content else {"income_metrics": accepted}}
+    return {"file": source, "confidence": "confirmed" if content or "收获音浪" in mapping else "probable", "quality": {"source_rows": max(0, len(rows) - header_index - 1), "accepted_rows": len(accepted), "duplicate_rows": 0, "rejected_rows": rejected, "warnings": warnings}, "datasets": {"content_metrics": accepted} if content else {"income_metrics": accepted}}

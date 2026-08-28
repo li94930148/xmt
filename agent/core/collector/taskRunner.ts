@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { CreatorDatabase } from "../database/creatorDatabase.js";
 import { upload } from "../uploader/client.js";
+import { toOfficialExportPayload } from '../uploader/officialPayload.js';
 import type { AgentConfig, CollectionMode, SyncResult } from "../types.js";
 import { ScraplingCreatorCollector } from "./scrapling.js";
 import { ScraplingWorkerBridge } from "./workerBridge.js";
@@ -19,6 +20,7 @@ export async function runCreatorCollectorTask(options: {
   token: string;
   mode: CollectionMode;
   packaged?: boolean;
+  flushOfficialQueue?: () => Promise<void>;
   checkpoint?: CollectorCheckpoint;
 }): Promise<SyncResult> {
   const {
@@ -30,6 +32,7 @@ export async function runCreatorCollectorTask(options: {
     mode,
     packaged = false,
     checkpoint = () => undefined,
+    flushOfficialQueue,
   } = options;
   const taskId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
@@ -57,6 +60,7 @@ export async function runCreatorCollectorTask(options: {
       config.accountId,
       startedAt,
     );
+    database.recoverUploading();
     const knownContentIds = database.knownContentIds();
     const browser = collectorBrowserLaunch(config.browserConfig);
     await note("collector:start", { mode, browser: collectorBrowserEvidence(browser) });
@@ -81,10 +85,22 @@ export async function runCreatorCollectorTask(options: {
       status: local.works,
     });
     await note("upload:start");
-    const result = await upload(config, token, snapshot, {
+    const officialPayload = snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId, taskId) : null;
+    const queueJob = officialPayload ? database.enqueueUpload({ batch_id: officialPayload.batch_id, platform: config.platform, platform_account_id: config.accountId, source_file_sha256: String(officialPayload.source_files[0]?.sha256 || ''), parser_version: officialPayload.parser_version, payload_json: JSON.stringify(officialPayload), payload_sha256: crypto.createHash('sha256').update(JSON.stringify(officialPayload)).digest('hex') }) : null;
+    let result;
+    if (queueJob && officialPayload) {
+      // The desktop-owned scheduler is the only official-export sender.  It
+      // rebuilds the encrypted transport envelope for every attempt from this
+      // persisted canonical payload.
+      if (!flushOfficialQueue) throw new Error('官方导出已入队，等待 Electron 队列调度器发送');
+      await flushOfficialQueue();
+      const completed = database.uploadJob(queueJob.job_id); if (completed?.status !== 'succeeded') throw new Error(completed?.last_error_message_sanitized || '官方导出已入队，等待重试');
+      result = { success: true, status: 'success' as const, success_count: 1, failed_count: 0, modules: {}, errors: {} } as Awaited<ReturnType<typeof upload>>;
+    } else try { result = await upload(config, token, snapshot, {
       knownContentIds,
       taskId,
-    });
+    }); if (queueJob) database.finishUpload(queueJob.job_id, result); }
+    catch (error) { if (queueJob) database.failUpload(queueJob.job_id, 'retryable_failed', 'NETWORK_OR_UPLOAD_FAILED', error instanceof Error ? error.message : String(error), new Date(Date.now() + 30_000).toISOString()); throw error; }
     database.finishSyncTask(
       taskId,
       local.works === "success" ? result.status : "partial_success",

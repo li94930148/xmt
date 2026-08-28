@@ -62,7 +62,7 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       if (previous) updated++; else inserted++;
     };
     const defaultSha=text(sourceFiles[0]?.sha256);
-    for (const item of contentMetrics) { const date=text(item.published_at).slice(0,10); const key=text(item.source_item_key); const metrics=item.metrics&&typeof item.metrics==='object'?item.metrics as JsonRecord:{}; for(const [code,value] of Object.entries(metrics)) await store(key,date,code,value,code.includes('rate')?'ratio':'count',defaultSha); }
+    for (const item of contentMetrics) { const date=text(item.published_at).slice(0,10); const key=text(item.platform_item_id||item.aweme_id||item.url_item_id||item.fallback_source_key); const metrics=item.metrics&&typeof item.metrics==='object'?item.metrics as JsonRecord:{}; for(const [code,value] of Object.entries(metrics)) await store(key,date,code,value,code.includes('rate')?'ratio':'count',defaultSha); }
     for (const item of incomeMetrics) await store(null,text(item.metric_date),text(item.metric_code),item.value,text(item.unit),defaultSha);
     const result={result:{inserted,updated,unchanged,rejected},warnings:[] as string[]}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[JSON.stringify(result),batch.id]);
     return {success:true,batch_id:batchId,duplicate_batch:false,...result};

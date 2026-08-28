@@ -1,5 +1,16 @@
 # XMT 系统更新日志
 
+## v2.20.4 - 2026-08-28
+
+### 修复
+
+- Creator Agent 队列 payload 使用稳定 JSON TEXT，拒绝未定义值、对象数组和非有限数直接绑定 SQLite。
+- 旧本地数据库启动时幂等创建 upload_queue，并在同步前完成数据库就绪校验。
+
+### 测试情况
+
+- SQLite 类型边界、旧库迁移、真实 Electron IPC、队列与 loopback HTTP 回归纳入本地门禁。
+
 ## v2.20.3 - 2026-08-28
 
 ### 新增

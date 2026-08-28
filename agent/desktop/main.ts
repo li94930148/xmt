@@ -39,6 +39,9 @@ import type { DesktopState, SetupInput } from "./types.js";
 import { CreatorDatabase } from "../core/database/creatorDatabase.js";
 import { UploadQueueScheduler } from "../core/uploader/queueScheduler.js";
 import type { RebindInput } from "./types.js";
+const AGENT_VERSION = '2.13.0-agent';
+const SYSTEM_VERSION = '2.20.4';
+const BUILD_ID = process.env.XMT_AGENT_BUILD_ID || `source-${SYSTEM_VERSION}-${AGENT_VERSION}`;
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
 const resourceDirectory = process.resourcesPath;
@@ -71,8 +74,12 @@ let browserConnected = false;
 let douyinLoggedIn = false;
 let browserLoginStatus: "logged_in" | "login_required" | "unknown" = "unknown";
 let activeSession: BrowserSession | null = null;
+let databaseReady = false;
+let databaseSchemaVersion = 0;
+let databaseInitializationError: string | undefined;
 const paths = () => {
-  const root = portableMode ? portableDataRoot : app.getPath("userData");
+  const testRoot = process.env.NODE_ENV === 'test' ? process.env.XMT_AGENT_TEST_DATA_ROOT : undefined;
+  const root = testRoot || (portableMode ? portableDataRoot : app.getPath("userData"));
   return {
     root,
     config: path.join(root, "config.json"),
@@ -83,6 +90,12 @@ const paths = () => {
     log: path.join(root, "logs", "sync.log"),
   };
 };
+function apiTarget(value?: string): 'loopback'|'production'|'invalid' { if (!value) return 'invalid'; if (loopbackUrl(value)) return 'loopback'; try { new URL(value); return 'production'; } catch { return 'invalid'; } }
+function initializeDatabase() {
+  try { const database = new CreatorDatabase(paths().database); database.close(); databaseReady = true; databaseSchemaVersion = 1; databaseInitializationError = undefined; }
+  catch (error) { databaseReady = false; databaseInitializationError = error instanceof Error ? error.message : String(error); }
+}
+function assertDatabaseReady() { if (!databaseReady) throw new Error(databaseInitializationError ? 'LOCAL_DATABASE_NOT_READY' : 'LOCAL_DATABASE_INITIALIZING'); }
 async function log(message: string) {
   const p = paths();
   await fs.mkdir(p.logs, { recursive: true });
@@ -249,6 +262,7 @@ async function state(): Promise<DesktopState> {
     portableMode,
     browserConnected,
     douyinLoggedIn,
+    runtimeIdentity: { systemVersion: SYSTEM_VERSION, agentVersion: AGENT_VERSION, buildId: BUILD_ID, mainPid: process.pid, packaged: app.isPackaged, databaseReady, databaseSchemaVersion, uploadQueue: databaseReady, workerRuntime: app.isPackaged ? 'packaged' : 'development', apiTarget: apiTarget(config?.serverUrl) },
     browsers: discoverBrowsers().map((item) => ({
       id: item.id,
       displayName: item.displayName,
@@ -275,18 +289,20 @@ function mayRunQueueScheduler(config: AgentConfig) {
   return app.isPackaged || loopbackUrl(config.serverUrl);
 }
 async function startUploadQueueScheduler() {
+  assertDatabaseReady();
   if (uploadQueueScheduler) return;
   const config = await readConfig();
   if (!config || !fsSync.existsSync(paths().token) || !mayRunQueueScheduler(config)) return;
   const token = await readToken();
   uploadQueueDatabase = new CreatorDatabase(paths().database);
   uploadQueueScheduler = new UploadQueueScheduler(uploadQueueDatabase, async (job) => {
-    const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
+    const payload = uploadQueueDatabase?.parseUploadPayload(job);
+    if (!payload) throw new Error('LOCAL_UPLOAD_QUEUE_READ_FAILED');
     return uploadCanonicalPayload(
       config,
       token,
       payload,
-      String(payload.agent_version || '2.12.1-agent'),
+      String(payload.agent_version || AGENT_VERSION),
       String(payload.generated_at || new Date().toISOString()),
     );
   });
@@ -299,6 +315,7 @@ function stopUploadQueueScheduler() {
   uploadQueueDatabase = null;
 }
 async function performSync(sample = false): Promise<SyncResult> {
+  assertDatabaseReady();
   if (syncing) throw new Error("同步正在进行中");
   const config = await readConfig();
   if (!config) throw new Error("请先连接 XMT 并绑定账号");
@@ -342,9 +359,9 @@ async function performSync(sample = false): Promise<SyncResult> {
       browserLoginStatus = auth.browserLoginStatus;
       lastError = auth.lastError;
       void sendHeartbeat();
-    } else lastError = error instanceof Error ? error.message : String(error);
-    await log(`同步任务失败：${lastError}`);
-    throw error;
+    } else lastError = '本地同步队列写入失败，数据尚未上传。请查看 Agent 诊断信息后重试。';
+    await log(`同步任务失败：${error instanceof Error && error.message.startsWith('UPLOAD_QUEUE_') ? error.message : 'LOCAL_UPLOAD_QUEUE_WRITE_FAILED'}`);
+    throw new Error('LOCAL_UPLOAD_QUEUE_WRITE_FAILED');
   } finally {
     syncing = false;
     await emit();
@@ -476,7 +493,7 @@ ipcMain.handle("agent:setup", async (_event, input: SetupInput) => {
     device_id: deviceId,
     device_name: os.hostname(),
     os: `${os.platform()} ${os.arch()}`,
-    agent_version: "2.12.1-agent",
+    agent_version: AGENT_VERSION,
     protocol_version: 1,
     browser_type: browser.type,
     browser_version: "",
@@ -515,7 +532,7 @@ ipcMain.handle("agent:rebind", async (_event, input: RebindInput) => {
     device_id: config.deviceId,
     device_name: os.hostname(),
     os: `${os.platform()} ${os.arch()}`,
-    agent_version: "2.12.1-agent",
+    agent_version: AGENT_VERSION,
     protocol_version: 1,
     browser_type: config.browserConfig.type,
     browser_version: config.browserConfig.browserVersion || "",
@@ -706,9 +723,10 @@ ipcMain.handle("agent:open-logs", async () => {
 });
 app.whenReady().then(async () => {
   globalThis.fetch = net.fetch as typeof fetch;
+  initializeDatabase();
   createWindow();
   createTray();
-  startHeartbeat();
+  if (databaseReady) { startHeartbeat(); await startUploadQueueScheduler(); }
   await schedule();
   app.on("activate", () => mainWindow?.show());
 });

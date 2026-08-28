@@ -65,7 +65,7 @@ export class ScraplingCreatorCollector {
     return {
       schema_version: 1,
       protocol_version: 1,
-      agent_version: "2.12.1-agent",
+      agent_version: "2.13.0-agent",
       platform: "douyin",
       source: "local_creator_center",
       contract_version: "2.10.2",

@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.4', date: '2026-08-28', title: 'Creator Agent 本地队列 SQLite 修复', impactScope: ['Creator Agent', '本地数据安全'], changes: [{ type: 'fix', description: '队列 payload 固定为 canonical JSON TEXT，校验 SQLite 参数类型与回读哈希。' }, { type: 'improvement', description: '旧数据库首次启动会先完成幂等队列迁移，并提供无敏感运行时身份诊断。' }] },
   {
     version: '2.20.3', date: '2026-08-28', title: 'Creator 官方导出本地安全同步',
     impactScope: ['Creator Agent', '抖音数据', '数据安全'],

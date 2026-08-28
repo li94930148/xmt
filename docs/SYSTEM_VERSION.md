@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.20.3
+v2.20.4
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.20.3
 
 ## 本版本摘要
 
-本版本在 v2.20.1 Scrapling First Collector 基线上补回 Android Native Auth 真实登录续期调度，并归档历史 Socket 生产观察报告；无数据库迁移，Creator Agent 保持 v2.12.1-agent。
+本版本修复 Creator Agent 本地 SQLite 队列参数边界与旧数据库首次迁移；Creator Agent 升级到 v2.13.0-agent。macOS 正式包尚未开始。

@@ -94,7 +94,7 @@ export async function heartbeat(
         account_id: config.accountId,
         device_name: state.deviceName,
         os: state.os,
-        agent_version: "2.12.1-agent",
+        agent_version: "2.13.0-agent",
         protocol_version: 1,
         browser_login_status: state.browserLoginStatus,
         browser_type: browser.type,

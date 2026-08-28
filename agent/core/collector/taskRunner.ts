@@ -3,6 +3,7 @@ import path from "node:path";
 import { CreatorDatabase } from "../database/creatorDatabase.js";
 import { upload } from "../uploader/client.js";
 import { toOfficialExportPayload } from '../uploader/officialPayload.js';
+import { canonicalJson, canonicalJsonHash } from '../database/sqliteValues.js';
 import type { AgentConfig, CollectionMode, SyncResult } from "../types.js";
 import { ScraplingCreatorCollector } from "./scrapling.js";
 import { ScraplingWorkerBridge } from "./workerBridge.js";
@@ -86,7 +87,8 @@ export async function runCreatorCollectorTask(options: {
     });
     await note("upload:start");
     const officialPayload = snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId, taskId) : null;
-    const queueJob = officialPayload ? database.enqueueUpload({ batch_id: officialPayload.batch_id, platform: config.platform, platform_account_id: config.accountId, source_file_sha256: String(officialPayload.source_files[0]?.sha256 || ''), parser_version: officialPayload.parser_version, payload_json: JSON.stringify(officialPayload), payload_sha256: crypto.createHash('sha256').update(JSON.stringify(officialPayload)).digest('hex') }) : null;
+    const canonicalPayloadJson = officialPayload ? canonicalJson('canonical_payload_json', officialPayload) : null;
+    const queueJob = officialPayload && canonicalPayloadJson ? database.enqueueUpload({ batch_id: officialPayload.batch_id, platform: config.platform, platform_account_id: config.accountId, source_file_sha256: String(officialPayload.source_files[0]?.sha256 || ''), parser_version: officialPayload.parser_version, payload_json: canonicalPayloadJson, payload_sha256: canonicalJsonHash(canonicalPayloadJson) }) : null;
     let result;
     if (queueJob && officialPayload) {
       // The desktop-owned scheduler is the only official-export sender.  It

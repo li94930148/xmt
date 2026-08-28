@@ -41,6 +41,8 @@ export class ScraplingCreatorCollector {
       account?: Record<string, unknown>;
       collectionCompleteness?: Record<string, unknown>;
       exports?: ExportReceipt[];
+      officialData?: Array<Record<string, unknown>>;
+      manifest?: { officialData?: Array<Record<string, unknown>> };
     };
     if (!data.xhrResponses)
       throw new Error("未捕获到抖音 XHR，已停止同步以避免用空结果覆盖数据。");
@@ -103,6 +105,7 @@ export class ScraplingCreatorCollector {
         contentPerformance: {},
       },
       export_receipts: Array.isArray(data.exports) ? data.exports : [],
+      official_data: Array.isArray(data.officialData) ? data.officialData : Array.isArray(data.manifest?.officialData) ? data.manifest.officialData : [],
     };
   }
 }

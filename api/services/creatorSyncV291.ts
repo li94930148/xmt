@@ -35,9 +35,44 @@ async function openEnvelope(body: JsonRecord, authorization?: string) {
   catch { throw Object.assign(new Error('上传数据解密失败'), { statusCode: 400 }); }
 }
 
+async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snapshotTime: string) {
+  const batchId = text(payload.batch_id);
+  const parserVersion = text(payload.parser_version);
+  const platformAccountId = text(payload.platform_account_id);
+  if (!isUuid(batchId) || !parserVersion || payload.platform !== agent.platform || platformAccountId !== agent.account_id) throw Object.assign(new Error('官方导出数据包字段或账号绑定无效'), { statusCode: 422 });
+  const sourceFiles = array(payload.source_files, 50);
+  const datasets = payload.datasets && typeof payload.datasets === 'object' ? payload.datasets as JsonRecord : {};
+  const contentMetrics = array(datasets.content_metrics, 5000), incomeMetrics = array(datasets.income_metrics, 5000);
+  if (sourceFiles.some(file => !/^[a-f0-9]{64}$/i.test(text(file.sha256)) || Number(file.size_bytes) < 0)) throw Object.assign(new Error('官方导出文件审计摘要无效'), { statusCode: 422 });
+  return runInTransaction(async tx => {
+    await tx.execute(`INSERT INTO creator_platform_accounts(user_id,platform,platform_uid,status) VALUES(?,?,?,'active') ON CONFLICT(user_id,platform,platform_uid) DO NOTHING`, [agent.user_id, agent.platform, agent.account_id]);
+    const account = await tx.queryOne<{id:number}>('SELECT id FROM creator_platform_accounts WHERE user_id=? AND platform=? AND platform_uid=?', [agent.user_id, agent.platform, agent.account_id]);
+    if (!account) throw new Error('官方导出账号写入失败');
+    const existing = await tx.queryOne<{result_json:string}>('SELECT result_json FROM creator_ingest_batches WHERE agent_id=? AND batch_id=?', [agent.id, batchId]);
+    if (existing) return { success: true, batch_id: batchId, duplicate_batch: true, ...(JSON.parse(existing.result_json) as JsonRecord) };
+    await tx.execute(`INSERT INTO creator_ingest_batches(agent_id,batch_id,account_id,parser_version) VALUES(?,?,?,?)`, [agent.id,batchId,account.id,parserVersion]);
+    const batch = await tx.queryOne<{id:number}>('SELECT id FROM creator_ingest_batches WHERE agent_id=? AND batch_id=?', [agent.id,batchId]); if (!batch) throw new Error('批次创建失败');
+    for (const file of sourceFiles) await tx.execute('INSERT INTO creator_ingest_files(batch_id,sha256,file_type,file_name,size_bytes) VALUES(?,?,?,?,?)', [batch.id,text(file.sha256),text(file.file_type),text(file.file_name),Number(file.size_bytes)]);
+    let inserted=0, updated=0, unchanged=0, rejected=0;
+    const store = async (sourceItemKey: string | null, metricDate: string, metricCode: string, value: unknown, unit: string, sha: string) => {
+      if (!metricDate || !metricCode || value === null || value === undefined || !sha) { rejected++; return; }
+      const valueText=text(value), previous=await tx.queryOne<{value_text:string}>('SELECT value_text FROM creator_official_metrics WHERE account_id=? AND source_item_key IS ? AND metric_date=? AND metric_code=?',[account.id,sourceItemKey,metricDate,metricCode]);
+      if (previous?.value_text === valueText) { unchanged++; return; }
+      const numeric=Number(value); await tx.execute(`INSERT INTO creator_official_metrics(account_id,source_item_key,metric_date,metric_code,value_text,value_number,unit,source_type,source_file_sha256,parser_version,collected_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,source_item_key,metric_date,metric_code) DO UPDATE SET value_text=excluded.value_text,value_number=excluded.value_number,unit=excluded.unit,source_type=excluded.source_type,source_file_sha256=excluded.source_file_sha256,parser_version=excluded.parser_version,collected_at=excluded.collected_at,updated_at=CURRENT_TIMESTAMP`,[account.id,sourceItemKey,metricDate,metricCode,valueText,Number.isFinite(numeric)?numeric:null,unit,'official_export',sha,parserVersion,snapshotTime]);
+      if (previous) updated++; else inserted++;
+    };
+    const defaultSha=text(sourceFiles[0]?.sha256);
+    for (const item of contentMetrics) { const date=text(item.published_at).slice(0,10); const key=text(item.source_item_key); const metrics=item.metrics&&typeof item.metrics==='object'?item.metrics as JsonRecord:{}; for(const [code,value] of Object.entries(metrics)) await store(key,date,code,value,code.includes('rate')?'ratio':'count',defaultSha); }
+    for (const item of incomeMetrics) await store(null,text(item.metric_date),text(item.metric_code),item.value,text(item.unit),defaultSha);
+    const result={result:{inserted,updated,unchanged,rejected},warnings:[] as string[]}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[JSON.stringify(result),batch.id]);
+    return {success:true,batch_id:batchId,duplicate_batch:false,...result};
+  });
+}
+
 export async function acceptCreatorDataSync(body: JsonRecord, authorization?: string) {
   if (Buffer.byteLength(JSON.stringify(body)) > 12 * 1024 * 1024) throw Object.assign(new Error('同步数据包超过 12MB 限制'), { statusCode: 413 });
   const { agent, payload } = await openEnvelope(body, authorization);
+  if (payload.schema_version === 2) return acceptOfficialExportV2(agent, payload, text(body.collected_at, new Date().toISOString()));
   if (payload.schema_version !== undefined && payload.schema_version !== 1) throw Object.assign(new Error('Creator Agent 数据协议版本不兼容'), { statusCode: 422 });
   if (payload.platform !== agent.platform) throw Object.assign(new Error('同步数据平台与 Agent 绑定不匹配'), { statusCode: 403 });
   const account = payload.account && typeof payload.account === 'object' ? payload.account as JsonRecord : {};

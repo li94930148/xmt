@@ -1808,3 +1808,10 @@
 - 数据库变化：无。
 - 验证：Python 单测、Agent check/build、Bridge health/shutdown 通过。
 - 风险：真实账号登录、内容管理指标、数据中心指标与官方导出仍需用户在专用 Chrome 内扫码后完成 POC；禁止部署生产。
+# v2.20.3 Creator 官方导出本地安全同步
+
+- 完成内容：本地 XLSX 表头识别、字段归一、质量摘要和仅标准数据的加密上传；服务端新增批次、文件与业务指标幂等事务。
+- 修改文件：Collector 导出解析器、Agent 上传构造、Creator sync 服务、数据库初始化、契约测试与数据契约文档。
+- 数据库变化：新增 `creator_ingest_batches`、`creator_ingest_files`、`creator_official_metrics`，仅追加且不删除历史数据。
+- 测试：Agent/root typecheck、Agent build、v1 安全与同步契约、v2 官方导出契约、真实样本本地解析均通过。
+- 风险：仅确认两类实际下载文件，官方页面入口完整覆盖和异步任务流仍待用户提供脱敏截图或 URL；当前不部署生产。

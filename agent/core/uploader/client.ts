@@ -3,6 +3,7 @@ import { encrypt, sign } from "../crypto/envelope.js";
 import type { AgentConfig, CreatorSnapshot } from "../types.js";
 import type { PageCapability } from "../collector/capabilities.js";
 import { toUnifiedCreatorPayload } from "./unifiedPayload.js";
+import { toOfficialExportPayload } from "./officialPayload.js";
 async function responseJson(response: Response) {
   const value = (await response.json().catch(() => ({}))) as Record<
     string,
@@ -127,7 +128,7 @@ export async function upload(
     timestamp: new Date().toISOString(),
     nonce: crypto.randomUUID(),
     collected_at: snapshot.collected_at || new Date().toISOString(),
-    data: encrypt(toUnifiedCreatorPayload(snapshot, options), agentToken),
+    data: encrypt(snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId, options.taskId) : toUnifiedCreatorPayload(snapshot, options), agentToken),
   };
   body.signature = sign(body, agentToken);
   const serialized = JSON.stringify(body);

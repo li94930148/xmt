@@ -13,6 +13,7 @@ fs.writeFileSync(envFile, [
   'XMT_MOBILE_AUTH_ALLOWLIST_USER_IDS=42',
   'ALLOWED_ORIGINS=https://lanyaomedia.com,http://localhost,https://localhost',
   'XMT_AUTH_REFRESH_PEPPER=not-printed',
+  'XMT_CREATOR_OFFICIAL_DASHBOARD_MODE=existing_only',
 ].join('\n'), { mode: 0o600 });
 
 const env: NodeJS.ProcessEnv = { NODE_ENV: 'production', XMT_RUNTIME_ENV_FILE: envFile, XMT_MOBILE_AUTH_ENABLED: 'false' };
@@ -20,6 +21,7 @@ const loaded = loadRuntimeEnvironment(env);
 assert.equal(loaded.source, 'runtime_env_file');
 assert.equal(env.XMT_MOBILE_AUTH_ENABLED, 'true');
 assert.equal(env.XMT_MOBILE_AUTH_ALLOWLIST_USER_IDS, '42');
+assert.equal(env.XMT_CREATOR_OFFICIAL_DASHBOARD_MODE, 'existing_only');
 assert.equal(inspectRuntimeEnvironment(env).source, 'runtime_env_file');
 
 const insecure = path.join(dir, 'insecure.env');

@@ -33,7 +33,7 @@ Agent SQLite 的 `upload_queue` 保存 canonical payload、其哈希、批次、
 
 文件级键：账号 + 文件 SHA-256 + 解析器版本；批次由稳定 UUID 表示。服务端按 Agent + batch_id 返回原结果。指标业务键为账号 + 来源作品键（收益为空）+ 日期 + metric_code；相同规范值计入 `unchanged`，变化才更新。
 
-仪表盘读取模式由 `CREATOR_OFFICIAL_DASHBOARD_MODE` 白名单控制：默认 `existing_only`，保持既有公开响应；`shadow_compare` 仍返回旧口径，只记录不含标题、昵称或原始指标值的对账状态（`matched`、`different`、`existing_only`、`official_only`、`not_comparable`）；`official_preferred` 仅在已确认 `views` 指标存在时选择 `creator_official_metrics` 作为播放量单一来源，不叠加旧值，缺失时确定性回退旧来源。
+仪表盘读取模式由 `XMT_CREATOR_OFFICIAL_DASHBOARD_MODE` 白名单控制：默认 `existing_only`，保持既有公开响应；`shadow_compare` 仍返回旧口径，只记录不含标题、昵称或原始指标值的对账状态（`matched`、`different`、`existing_only`、`official_only`、`not_comparable`）；`official_preferred` 仅在已确认 `views` 指标存在时选择 `creator_official_metrics` 作为播放量单一来源，不叠加旧值，缺失时确定性回退旧来源。
 
 ## 安全与回滚
 

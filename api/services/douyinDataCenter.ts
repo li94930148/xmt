@@ -17,7 +17,7 @@ const parse = (value: unknown): JsonRecord => { try { return typeof value === 's
 const shanghaiDate = (value: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
 const days = (period: Period) => ({ '7d': 7, '30d': 30, '90d': 90 })[period];
 
-export function officialDashboardMode(value = process.env.CREATOR_OFFICIAL_DASHBOARD_MODE): OfficialDashboardMode {
+export function officialDashboardMode(value = process.env.XMT_CREATOR_OFFICIAL_DASHBOARD_MODE): OfficialDashboardMode {
   return value === 'shadow_compare' || value === 'official_preferred' ? value : 'existing_only';
 }
 export function reconcileOfficialMetric(existingValue: number | null, officialValue: number | null): OfficialReconciliationStatus {

@@ -7,6 +7,7 @@ import type { DatabaseMigration } from './types';
 import { dailyWorkspaceV2Migration } from './006_daily_workspace_v2';
 import { dailyLightweightRefactorMigration } from './007_daily_lightweight_refactor';
 import { mobileDeviceRegistryMigration } from './008_mobile_device_registry';
+import { creatorOfficialExportV2203Migration } from './009_creator_official_export_v2203';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -17,4 +18,5 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   dailyWorkspaceV2Migration,
   dailyLightweightRefactorMigration,
   mobileDeviceRegistryMigration,
+  creatorOfficialExportV2203Migration,
 ];

@@ -38,3 +38,5 @@ Agent SQLite 的 `upload_queue` 保存 canonical payload、其哈希、批次、
 ## 安全与回滚
 
 继续使用 `/api/creator-agent/data-sync`、protocol v1 信封、AES-256-GCM、HMAC-SHA256、timestamp、nonce、五分钟窗口、原子 nonce 保留和 Agent/账号绑定。`schema_version: 2` 仅路由业务载荷；v1 Agent 与现有 OAuth、Webhook、OpenAPI 不变。回滚为停止发送 v2；新审计表不影响既有读取路径。
+
+服务端迁移为 `009_creator_official_export_v2203`，只新增批次、文件与官方指标审计表及查询索引；可重复执行，不删除、重命名或覆写任何既有表和业务数据。服务端仅接受白名单指标、有效日期、受限数量及有效来源身份；未知指标、非法来源键、文件摘要或日期会在事务写入前以 `422` 拒绝。

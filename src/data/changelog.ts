@@ -11,6 +11,14 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '2.20.3', date: '2026-08-28', title: 'Creator 官方导出本地安全同步',
+    impactScope: ['Creator Agent', '抖音数据', '数据安全'],
+    changes: [
+      { type: 'feature', description: '本地解析官方导出文件并上传标准化指标与质量摘要。' },
+      { type: 'security', description: '原始 Excel 和浏览器登录资料不上传；批次、文件和业务指标均有幂等保护。' },
+    ],
+  },
+  {
     version: '2.20.2', date: '2026-08-27', title: '主线收口与移动认证续期修复',
     impactScope: ['Android', '认证', '版本治理'],
     changes: [

@@ -1,10 +1,13 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { CreatorSnapshot } from '../types.js';
 
 export type ModuleSaveStatus = { account: 'success'|'failed'; works: 'success'|'failed'; dashboard: 'success'|'failed'; fans: 'success'|'failed'; raw: 'success'|'failed'; errors: Record<string,string> };
 export type SyncTaskStatus = 'running'|'success'|'partial_success'|'failed';
+export type UploadQueueStatus = 'pending'|'uploading'|'succeeded'|'retryable_failed'|'permanent_failed';
+export type UploadQueueJob = { job_id:string; batch_id:string; platform:string; platform_account_id:string; source_file_sha256:string; parser_version:string; payload_json:string; payload_sha256:string; status:UploadQueueStatus; attempt_count:number; next_retry_at:string|null; last_error_code:string|null; last_error_message_sanitized:string|null; receipt_json:string|null; created_at:string; updated_at:string; succeeded_at:string|null };
 
 export class CreatorDatabase {
   private readonly db: DatabaseSync;
@@ -29,6 +32,7 @@ export class CreatorDatabase {
       CREATE TABLE IF NOT EXISTS creator_fans_statistics(id INTEGER PRIMARY KEY,snapshot_time TEXT,statistics_json TEXT,snapshot_id TEXT);
       CREATE TABLE IF NOT EXISTS creator_fans_snapshots(id INTEGER PRIMARY KEY,account_id TEXT,snapshot_time TEXT,fans_count INTEGER DEFAULT 0,raw_json TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,snapshot_id TEXT);
       CREATE TABLE IF NOT EXISTS creator_raw_snapshots(id INTEGER PRIMARY KEY,snapshot_time TEXT,source TEXT,raw_json TEXT,snapshot_id TEXT);
+      CREATE TABLE IF NOT EXISTS upload_queue(job_id TEXT PRIMARY KEY,batch_id TEXT NOT NULL,platform TEXT NOT NULL,platform_account_id TEXT NOT NULL,source_file_sha256 TEXT NOT NULL,parser_version TEXT NOT NULL,payload_json TEXT NOT NULL,payload_sha256 TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('pending','uploading','succeeded','retryable_failed','permanent_failed')),attempt_count INTEGER NOT NULL DEFAULT 0,next_retry_at TEXT,last_error_code TEXT,last_error_message_sanitized TEXT,receipt_json TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,succeeded_at TEXT,UNIQUE(platform,platform_account_id,source_file_sha256,parser_version));
       CREATE TABLE IF NOT EXISTS sync_tasks(task_id TEXT PRIMARY KEY,start_time TEXT NOT NULL,end_time TEXT,platform TEXT NOT NULL,account TEXT NOT NULL,status TEXT NOT NULL,success_count INTEGER DEFAULT 0,failed_count INTEGER DEFAULT 0,error_message TEXT);`);
     this.ensureColumns('creator_accounts', [['snapshot_id','TEXT']]);
     this.ensureColumns('creator_work_statistics', [['snapshot_id','TEXT']]);
@@ -43,6 +47,7 @@ export class CreatorDatabase {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_fans_statistics_snapshot ON creator_fans_statistics(snapshot_id) WHERE snapshot_id IS NOT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_fans_snapshot_account ON creator_fans_snapshots(snapshot_id,account_id) WHERE snapshot_id IS NOT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_raw_snapshot_source ON creator_raw_snapshots(snapshot_id,source) WHERE snapshot_id IS NOT NULL;`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_upload_queue_due ON upload_queue(status,next_retry_at,created_at);`);
   }
   knownContentIds(){return new Set((this.db.prepare('SELECT item_id FROM creator_works').all() as Array<{item_id:string}>).map((row) => String(row.item_id)));}
   startSyncTask(taskId:string,platform:string,account:string,startTime:string){this.db.prepare('INSERT INTO sync_tasks(task_id,start_time,platform,account,status) VALUES(?,?,?,?,?)').run(taskId,startTime,platform,account,'running');}
@@ -79,5 +84,16 @@ export class CreatorDatabase {
     const tables=['creator_accounts','creator_works','creator_work_statistics','creator_dashboard_statistics','creator_fans_statistics','creator_fans_snapshots','creator_raw_snapshots'];
     return Object.fromEntries(tables.map((table)=>[table,Number((this.db.prepare(`SELECT COUNT(*) count FROM ${table}`).get() as {count:number}).count)]));
   }
+  enqueueUpload(input: Omit<UploadQueueJob,'job_id'|'status'|'attempt_count'|'next_retry_at'|'last_error_code'|'last_error_message_sanitized'|'receipt_json'|'created_at'|'updated_at'|'succeeded_at'>) {
+    const now=new Date().toISOString(), jobId=crypto.randomUUID();
+    const existing=this.db.prepare('SELECT job_id FROM upload_queue WHERE platform=? AND platform_account_id=? AND source_file_sha256=? AND parser_version=?').get(input.platform,input.platform_account_id,input.source_file_sha256,input.parser_version) as {job_id:string}|undefined;
+    if(existing)return {job_id:existing.job_id,created:false};
+    this.db.prepare('INSERT INTO upload_queue(job_id,batch_id,platform,platform_account_id,source_file_sha256,parser_version,payload_json,payload_sha256,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(jobId,input.batch_id,input.platform,input.platform_account_id,input.source_file_sha256,input.parser_version,input.payload_json,input.payload_sha256,'pending',now,now); return {job_id:jobId,created:true};
+  }
+  recoverUploading(leaseMs=5*60_000, now=Date.now()){return this.db.prepare("UPDATE upload_queue SET status='retryable_failed',next_retry_at=?,updated_at=?,last_error_code='INTERRUPTED',last_error_message_sanitized='Agent upload lease expired' WHERE status='uploading' AND updated_at<=?").run(new Date(now).toISOString(),new Date(now).toISOString(),new Date(now-leaseMs).toISOString()).changes;}
+  claimNextUpload(now=new Date().toISOString(), maxAttempts=8):UploadQueueJob|undefined { this.db.exec('BEGIN IMMEDIATE'); try { const row=this.db.prepare("SELECT * FROM upload_queue WHERE status IN ('pending','retryable_failed') AND attempt_count<? AND (next_retry_at IS NULL OR next_retry_at<=?) ORDER BY created_at LIMIT 1").get(maxAttempts,now) as UploadQueueJob|undefined; if(row){const changed=this.db.prepare("UPDATE upload_queue SET status='uploading',attempt_count=attempt_count+1,updated_at=? WHERE job_id=? AND status IN ('pending','retryable_failed')").run(now,row.job_id).changes;if(!changed){this.db.exec('COMMIT');return undefined;}} this.db.exec('COMMIT'); return row; } catch(error){this.db.exec('ROLLBACK');throw error;} }
+  finishUpload(jobId:string,receipt:unknown){const now=new Date().toISOString();this.db.prepare("UPDATE upload_queue SET status='succeeded',receipt_json=?,succeeded_at=?,updated_at=?,last_error_code=NULL,last_error_message_sanitized=NULL WHERE job_id=?").run(this.json(receipt),now,now,jobId);}
+  failUpload(jobId:string,status:Extract<UploadQueueStatus,'retryable_failed'|'permanent_failed'>,code:string,message:string,nextRetryAt?:string){this.db.prepare('UPDATE upload_queue SET status=?,next_retry_at=?,last_error_code=?,last_error_message_sanitized=?,updated_at=? WHERE job_id=?').run(status,nextRetryAt||null,code,message.replace(/[\r\n]/g,' ').slice(0,240),new Date().toISOString(),jobId);}
+  uploadJob(jobId:string){return this.db.prepare('SELECT * FROM upload_queue WHERE job_id=?').get(jobId) as UploadQueueJob|undefined;}
   close(){this.db.close();}
 }

@@ -16,6 +16,7 @@ from xmt_collector.platforms.douyin.normalizer import find_work_candidates, norm
 from xmt_collector.platforms.douyin.pagination import ScrollProgress, advance_scroll
 from xmt_collector.platforms.douyin.view_scope import content_view_scope
 from xmt_collector.platforms.douyin.browser_launch import BrowserLaunch
+from xmt_collector.platforms.douyin.export_parser import parse_official_export
 from xmt_collector.security.sanitizer import sanitize
 
 CREATOR_ORIGIN = "https://creator.douyin.com"
@@ -254,9 +255,17 @@ class DouyinAdapter:
         account = normalize_account_metadata(captured)
         audit = acceptance_evidence(captured, works)
         run.write_json("audit/acceptance-evidence.json", audit)
-        manifest = {"platform": "douyin", "account": account_id, "taskId": task_id, "scope": scope, "captured_at": datetime.now(timezone.utc).isoformat(), "xhrResponses": len(captured), "exports": all_exports, "collectionCompleteness": completeness, "browser": self.browser.evidence()}
+        official_data: list[dict[str, Any]] = []
+        for receipt in all_exports:
+            # Parse the copied export only.  The original browser download stays local
+            # and no raw workbook cell data is ever emitted over the bridge.
+            try:
+                official_data.append(parse_official_export(self.run_root / "exports" / str(receipt["storedFilename"]), {**receipt, "accountId": account_id}))
+            except Exception as error:
+                official_data.append({"file": receipt, "confidence": "unknown", "quality": {"source_rows": 0, "accepted_rows": 0, "duplicate_rows": 0, "rejected_rows": 0, "warnings": [f"PARSE_FAILED:{type(error).__name__}"]}, "datasets": {}})
+        manifest = {"platform": "douyin", "account": account_id, "taskId": task_id, "scope": scope, "captured_at": datetime.now(timezone.utc).isoformat(), "xhrResponses": len(captured), "exports": all_exports, "officialData": official_data, "collectionCompleteness": completeness, "browser": self.browser.evidence()}
         run.write_json("manifest.json", manifest)
-        return {"manifest": manifest, "capability": capability, "captures": captured, "works": works, "account": account, "collectionCompleteness": completeness}
+        return {"manifest": manifest, "capability": capability, "captures": captured, "works": works, "account": account, "officialData": official_data, "collectionCompleteness": completeness}
 
     def cancel(self) -> None:
         self.cancelled = True

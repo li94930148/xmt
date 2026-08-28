@@ -32,11 +32,12 @@ import {
 import { runCreatorCollectorTask } from "../core/collector/taskRunner.js";
 import { CollectorLoginRequiredError } from "../core/collector/workerBridge.js";
 import { applyCollectorLoginRequired, heartbeatLoginStatus } from "./collectorAuthState.js";
-import { bind, heartbeat } from "../core/uploader/client.js";
+import { bind, heartbeat, uploadCanonicalPayload } from "../core/uploader/client.js";
 import { intervalMs, nextDailyDelay } from "../core/scheduler/scheduler.js";
 import type { AgentConfig, SyncResult } from "../core/types.js";
 import type { DesktopState, SetupInput } from "./types.js";
 import { CreatorDatabase } from "../core/database/creatorDatabase.js";
+import { UploadQueueScheduler } from "../core/uploader/queueScheduler.js";
 import type { RebindInput } from "./types.js";
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
@@ -62,6 +63,8 @@ let tray: Tray | null = null;
 let syncing = false;
 let timer: NodeJS.Timeout | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
+let uploadQueueDatabase: CreatorDatabase | null = null;
+let uploadQueueScheduler: UploadQueueScheduler | null = null;
 let lastSyncAt: string | undefined;
 let lastError: string | undefined;
 let browserConnected = false;
@@ -262,6 +265,39 @@ async function emit() {
   mainWindow?.webContents.send("agent:state", value);
   return value;
 }
+function loopbackUrl(value: string) {
+  try { return ['localhost', '127.0.0.1', '::1'].includes(new URL(value).hostname); }
+  catch { return false; }
+}
+function mayRunQueueScheduler(config: AgentConfig) {
+  // An unpackaged development run must never drain a user's persisted
+  // production endpoint. Tests may exercise the real sender against loopback.
+  return app.isPackaged || loopbackUrl(config.serverUrl);
+}
+async function startUploadQueueScheduler() {
+  if (uploadQueueScheduler) return;
+  const config = await readConfig();
+  if (!config || !fsSync.existsSync(paths().token) || !mayRunQueueScheduler(config)) return;
+  const token = await readToken();
+  uploadQueueDatabase = new CreatorDatabase(paths().database);
+  uploadQueueScheduler = new UploadQueueScheduler(uploadQueueDatabase, async (job) => {
+    const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
+    return uploadCanonicalPayload(
+      config,
+      token,
+      payload,
+      String(payload.agent_version || '2.12.1-agent'),
+      String(payload.generated_at || new Date().toISOString()),
+    );
+  });
+  uploadQueueScheduler.start();
+}
+function stopUploadQueueScheduler() {
+  uploadQueueScheduler?.stop();
+  uploadQueueScheduler = null;
+  uploadQueueDatabase?.close();
+  uploadQueueDatabase = null;
+}
 async function performSync(sample = false): Promise<SyncResult> {
   if (syncing) throw new Error("同步正在进行中");
   const config = await readConfig();
@@ -286,6 +322,11 @@ async function performSync(sample = false): Promise<SyncResult> {
       token: await readToken(),
       packaged: app.isPackaged,
       mode: sample ? "metrics_refresh" : "full_snapshot",
+      flushOfficialQueue: async () => {
+        await startUploadQueueScheduler();
+        if (!uploadQueueScheduler) throw new Error("官方导出队列在当前开发运行中不会发送到非本机服务器");
+        await uploadQueueScheduler.flush();
+      },
       checkpoint: (name, data) => void log(`${name} ${JSON.stringify(data)}`),
     });
     lastSyncAt = result.collectedAt;
@@ -457,6 +498,7 @@ ipcMain.handle("agent:setup", async (_event, input: SetupInput) => {
   await writeConfig(config);
   await saveToken(bound.agent_token);
   await log("XMT 一次性绑定码已使用，设备绑定成功");
+  await startUploadQueueScheduler();
   return emit();
 });
 ipcMain.handle("agent:rebind", async (_event, input: RebindInput) => {
@@ -468,6 +510,7 @@ ipcMain.handle("agent:rebind", async (_event, input: RebindInput) => {
     throw new Error("服务器地址必须使用 HTTPS");
   const config = await readConfig();
   if (!config) throw new Error("请先完成连接");
+  stopUploadQueueScheduler();
   const bound = await bind(serverUrl, input.bindingCode, {
     device_id: config.deviceId,
     device_name: os.hostname(),
@@ -490,6 +533,7 @@ ipcMain.handle("agent:rebind", async (_event, input: RebindInput) => {
   await saveToken(bound.agent_token);
   await log("XMT 服务器已通过一次性绑定码安全更换");
   startHeartbeat();
+  await startUploadQueueScheduler();
   return emit();
 });
 ipcMain.handle("agent:login-open", async () => {
@@ -673,4 +717,5 @@ app.on("before-quit", () => {
   (app as typeof app & { isQuitting?: boolean }).isQuitting = true;
   if (timer) clearTimeout(timer);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
+  stopUploadQueueScheduler();
 });

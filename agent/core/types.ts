@@ -49,6 +49,7 @@ export type CreatorSnapshot = {
   /** Compatibility for the existing desktop UI. */
   videos: CreatorWork[]; operations: { last7Days: unknown; last30Days: unknown; trafficSources: unknown; contentPerformance: unknown };
   export_receipts?: ExportReceipt[];
+  official_data?: Array<Record<string, unknown>>;
 };
 
 export type SyncResult = { taskId: string; collectedAt: string; snapshot: CreatorSnapshot; exportReceipts: ExportReceipt[]; local?: unknown; upload: { success: boolean; snapshot_id?: number; source?: string; modules?: unknown } };

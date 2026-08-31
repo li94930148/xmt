@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcrypt';
 import { queryAll, queryOne, runInTransaction } from '../database/utils.js';
+import { resolveCoverUrl } from '../utils/coverResolver.js';
 
 type AgentRow = { id: number; user_id: number; platform: string; account_id: string; token_hash: string };
 type JsonRecord = Record<string, unknown>;
@@ -24,6 +25,7 @@ const number = (value: unknown, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 const array = (value: unknown, max: number): JsonRecord[] => Array.isArray(value) ? value.filter((item): item is JsonRecord => Boolean(item) && typeof item === 'object').slice(0, max) : [];
+const coverUrl = (item: JsonRecord) => resolveCoverUrl({ douyinCoverUrl: item.cover_url ?? item.cover, creatorRawJson: item.raw_json ?? item });
 
 async function authenticateAndDecrypt(body: JsonRecord, authorization?: string) {
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -78,8 +80,8 @@ export async function acceptCreatorDataSync(body: JsonRecord, authorization?: st
       const platformItemId = text(item.platform_item_id || item.item_id);
       if (!platformItemId) continue;
       await tx.execute(`INSERT INTO creator_content_items(account_id,platform,platform_item_id,title,cover_url,publish_time,duration,status,raw_json)
-        VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,platform,platform_item_id) DO UPDATE SET title=excluded.title,cover_url=excluded.cover_url,publish_time=excluded.publish_time,duration=excluded.duration,status=excluded.status,raw_json=excluded.raw_json`, [
-        accountRow.id, agent.platform, platformItemId, text(item.title), text(item.cover_url || item.cover), text(item.publish_time || item.published_at) || null, number(item.duration, 0), text(item.status), json(item.raw_json ?? item),
+        VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,platform,platform_item_id) DO UPDATE SET title=excluded.title,cover_url=CASE WHEN trim(excluded.cover_url)<>'' THEN excluded.cover_url ELSE creator_content_items.cover_url END,publish_time=excluded.publish_time,duration=excluded.duration,status=excluded.status,raw_json=excluded.raw_json`, [
+        accountRow.id, agent.platform, platformItemId, text(item.title), coverUrl(item), text(item.publish_time || item.published_at) || null, number(item.duration, 0), text(item.status), json(item.raw_json ?? item),
       ]);
       const row = await tx.queryOne<{ id: number }>('SELECT id FROM creator_content_items WHERE account_id=? AND platform=? AND platform_item_id=?', [accountRow.id, agent.platform, platformItemId]);
       if (row) contentIds.set(platformItemId, row.id);
@@ -142,7 +144,10 @@ export async function getUnifiedCreatorCenterData(userId: number, platformUid?: 
   const trends = await queryAll<{ content_id: number; metric_name: string; metric_value: number; record_time: string }>('SELECT content_id,metric_name,metric_value,record_time FROM creator_content_trends WHERE content_id IN (SELECT id FROM creator_content_items WHERE account_id=?) ORDER BY record_time', [account.id]);
   return {
     account: { ...account, account_id: account.platform_uid, snapshot_time: text(accountMetric?.snapshot_time || account.updated_at), source: 'local_creator_center', metrics: accountMetric ? { ...accountMetric, growth: parse(accountMetric.growth_json, {}), raw: parse(accountMetric.raw_json, {}) } : null },
-    works: items.map((item) => ({ ...item, item_id: item.platform_item_id, cover: item.cover_url, published_at: item.publish_time, raw: parse(item.raw_json, {}), metric_raw: parse(text(item.metric_raw_json), {}) })),
+    works: items.map((item) => {
+      const cover = resolveCoverUrl({ creatorCoverUrl: item.cover_url, creatorRawJson: item.raw_json });
+      return { ...item, item_id: item.platform_item_id, cover_url: cover, cover, published_at: item.publish_time, raw: parse(item.raw_json, {}), metric_raw: parse(text(item.metric_raw_json), {}) };
+    }),
     dashboard: accountMetric ? { ...accountMetric, growth: parse(accountMetric.growth_json, {}), trends } : null,
     fans: fans ? { ...fans, gender: parse(fans.gender_json, {}), age: parse(fans.age_json, {}), city: parse(fans.city_json, {}), province: parse(fans.province_json, {}), interest: parse(fans.interest_json, {}), active_time: parse(fans.active_time_json, {}), raw: parse(fans.raw_json, {}) } : null,
     history: history.map((row) => ({ ...row, source: 'local_creator_center', growth: parse(row.growth_json, {}) })),

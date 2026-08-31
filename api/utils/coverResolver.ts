@@ -14,11 +14,11 @@ function imageUrl(value: unknown): string {
   const source = record(value);
   if (!Object.keys(source).length) return '';
   const urls = Array.isArray(source.url_list) ? source.url_list : Array.isArray(source.urlList) ? source.urlList : [];
-  return text(urls[0]) || text(source.url) || text(source.uri);
+  return imageUrl(urls) || imageUrl(source.url) || imageUrl(source.uri);
 }
 
 export function resolveCoverUrl(input: { douyinCoverUrl?: unknown; creatorCoverUrl?: unknown; creatorRawJson?: unknown }): string {
-  const direct = text(input.douyinCoverUrl) || text(input.creatorCoverUrl);
+  const direct = imageUrl(input.douyinCoverUrl) || imageUrl(input.creatorCoverUrl);
   if (direct) return direct;
   const raw = parseRawJson(input.creatorRawJson);
   const video = record(raw.video);

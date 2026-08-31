@@ -70,6 +70,7 @@ jobs:
       - run: npm run test:migration-readiness
       - run: npm run test:version-governance
       - run: npm run test:creator-sync-v2102
+      - run: npm run test:creator-cover-url-integrity
       - run: npm run test:creator-agent-replay-security
       - run: npm run test:auth-web-cookie
       - run: npm run test:auth-web-runtime

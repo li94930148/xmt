@@ -14,7 +14,14 @@ extraResources:
     to: collector-runtime
     filter:
       - "**/*"
+  - from: .package-metadata/build-info.json
+    to: build-info.json
 win:
   target:
     - target: dir
       arch: [x64]
+mac:
+  target:
+    - target: dir
+      arch: [arm64]
+  category: public.app-category.productivity

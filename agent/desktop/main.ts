@@ -37,11 +37,23 @@ import { intervalMs, nextDailyDelay } from "../core/scheduler/scheduler.js";
 import type { AgentConfig, SyncResult } from "../core/types.js";
 import type { DesktopState, SetupInput } from "./types.js";
 import { CreatorDatabase } from "../core/database/creatorDatabase.js";
+import { canonicalJson, canonicalJsonHash } from "../core/database/sqliteValues.js";
 import { UploadQueueScheduler } from "../core/uploader/queueScheduler.js";
 import type { RebindInput } from "./types.js";
+const AGENT_VERSION = '2.13.0-agent';
+const SYSTEM_VERSION = '2.20.4';
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
 const resourceDirectory = process.resourcesPath;
+function loadBuildId() {
+  if (!app.isPackaged) return process.env.XMT_AGENT_BUILD_ID || `source-${SYSTEM_VERSION}-${AGENT_VERSION}`;
+  try {
+    const value = JSON.parse(fsSync.readFileSync(path.join(resourceDirectory, "build-info.json"), "utf8")) as { buildId?: unknown };
+    if (typeof value.buildId === "string" && /^macos-arm64-v\d+\.\d+\.\d+-v\d+\.\d+\.\d+-agent-[0-9a-f]{7,40}$/.test(value.buildId)) return value.buildId;
+  } catch { /* A missing build marker is surfaced through the fallback identity. */ }
+  return `packaged-${SYSTEM_VERSION}-${AGENT_VERSION}`;
+}
+const BUILD_ID = loadBuildId();
 const portableFlagCandidates = [
   path.join(executableDirectory, "portable.flag"),
   path.join(resourceDirectory, "portable.flag"),
@@ -71,8 +83,13 @@ let browserConnected = false;
 let douyinLoggedIn = false;
 let browserLoginStatus: "logged_in" | "login_required" | "unknown" = "unknown";
 let activeSession: BrowserSession | null = null;
+let databaseReady = false;
+let databaseSchemaVersion = 0;
+let databaseInitializationError: string | undefined;
+let packageContractToken: string | undefined;
 const paths = () => {
-  const root = portableMode ? portableDataRoot : app.getPath("userData");
+  const testRoot = process.env.NODE_ENV === 'test' ? process.env.XMT_AGENT_TEST_DATA_ROOT : undefined;
+  const root = testRoot || (portableMode ? portableDataRoot : app.getPath("userData"));
   return {
     root,
     config: path.join(root, "config.json"),
@@ -83,6 +100,36 @@ const paths = () => {
     log: path.join(root, "logs", "sync.log"),
   };
 };
+function apiTarget(value?: string): 'loopback'|'production'|'invalid' { if (!value) return 'invalid'; if (loopbackUrl(value)) return 'loopback'; try { new URL(value); return 'production'; } catch { return 'invalid'; } }
+function initializeDatabase() {
+  try { const database = new CreatorDatabase(paths().database); database.close(); databaseReady = true; databaseSchemaVersion = 1; databaseInitializationError = undefined; }
+  catch (error) { databaseReady = false; databaseInitializationError = error instanceof Error ? error.message : String(error); }
+}
+function assertDatabaseReady() { if (!databaseReady) throw new Error(databaseInitializationError ? 'LOCAL_DATABASE_NOT_READY' : 'LOCAL_DATABASE_INITIALIZING'); }
+async function initializePackageContractBootstrap() {
+  const serialized = process.env.XMT_AGENT_PACKAGE_CONTRACT_BOOTSTRAP;
+  if (!serialized) return;
+  if (process.env.NODE_ENV !== "test" || !process.env.XMT_AGENT_TEST_DATA_ROOT) throw new Error("PACKAGE_CONTRACT_BOOTSTRAP_REQUIRES_ISOLATED_TEST_ROOT");
+  const bootstrap = JSON.parse(serialized) as { serverUrl?: unknown; token?: unknown };
+  if (typeof bootstrap.serverUrl !== "string" || !loopbackUrl(bootstrap.serverUrl) || typeof bootstrap.token !== "string" || !bootstrap.token) throw new Error("PACKAGE_CONTRACT_BOOTSTRAP_REQUIRES_LOOPBACK");
+  const config: AgentConfig = {
+    serverUrl: bootstrap.serverUrl,
+    agentId: 1,
+    deviceId: "package-contract-device",
+    platform: "douyin",
+    accountId: "package-contract-account",
+    accountName: "package-contract-account",
+    browserConfig: { id: "package-contract", type: "chromium", engine: "chromium", runtime: "playwright", executablePath: "/nonexistent", sessionMode: "persistent", profileName: "default", headless: false, launchArgs: [], autoFallback: false },
+    syncConfig: { enabled: false, interval: "manual", dailyHour: 2 },
+  };
+  await writeConfig(config);
+  packageContractToken = bootstrap.token;
+  await fs.writeFile(paths().token, Buffer.alloc(0), { mode: 0o600 });
+  const payloadJson = canonicalJson("package_contract_payload", { schema_version: 2, agent_version: AGENT_VERSION, generated_at: new Date().toISOString(), datasets: {}, quality: { warnings: [] } });
+  const database = new CreatorDatabase(paths().database);
+  database.enqueueUpload({ batch_id: crypto.randomUUID(), platform: "douyin", platform_account_id: config.accountId, source_file_sha256: "a".repeat(64), parser_version: "package-contract", payload_json: payloadJson, payload_sha256: canonicalJsonHash(payloadJson) });
+  database.close();
+}
 async function log(message: string) {
   const p = paths();
   await fs.mkdir(p.logs, { recursive: true });
@@ -204,6 +251,7 @@ async function saveToken(token: string) {
   await fs.writeFile(paths().token, protectToken(token), { mode: 0o600 });
 }
 async function readToken() {
+  if (packageContractToken) return packageContractToken;
   try {
     return safeStorage.decryptString(await fs.readFile(paths().token));
   } catch {
@@ -249,6 +297,7 @@ async function state(): Promise<DesktopState> {
     portableMode,
     browserConnected,
     douyinLoggedIn,
+    runtimeIdentity: { systemVersion: SYSTEM_VERSION, agentVersion: AGENT_VERSION, buildId: BUILD_ID, mainPid: process.pid, packaged: app.isPackaged, databaseReady, databaseSchemaVersion, uploadQueue: databaseReady, workerRuntime: app.isPackaged ? 'packaged' : 'development', apiTarget: apiTarget(config?.serverUrl) },
     browsers: discoverBrowsers().map((item) => ({
       id: item.id,
       displayName: item.displayName,
@@ -275,18 +324,20 @@ function mayRunQueueScheduler(config: AgentConfig) {
   return app.isPackaged || loopbackUrl(config.serverUrl);
 }
 async function startUploadQueueScheduler() {
+  assertDatabaseReady();
   if (uploadQueueScheduler) return;
   const config = await readConfig();
   if (!config || !fsSync.existsSync(paths().token) || !mayRunQueueScheduler(config)) return;
   const token = await readToken();
   uploadQueueDatabase = new CreatorDatabase(paths().database);
   uploadQueueScheduler = new UploadQueueScheduler(uploadQueueDatabase, async (job) => {
-    const payload = JSON.parse(job.payload_json) as Record<string, unknown>;
+    const payload = uploadQueueDatabase?.parseUploadPayload(job);
+    if (!payload) throw new Error('LOCAL_UPLOAD_QUEUE_READ_FAILED');
     return uploadCanonicalPayload(
       config,
       token,
       payload,
-      String(payload.agent_version || '2.12.1-agent'),
+      String(payload.agent_version || AGENT_VERSION),
       String(payload.generated_at || new Date().toISOString()),
     );
   });
@@ -299,6 +350,7 @@ function stopUploadQueueScheduler() {
   uploadQueueDatabase = null;
 }
 async function performSync(sample = false): Promise<SyncResult> {
+  assertDatabaseReady();
   if (syncing) throw new Error("同步正在进行中");
   const config = await readConfig();
   if (!config) throw new Error("请先连接 XMT 并绑定账号");
@@ -342,9 +394,9 @@ async function performSync(sample = false): Promise<SyncResult> {
       browserLoginStatus = auth.browserLoginStatus;
       lastError = auth.lastError;
       void sendHeartbeat();
-    } else lastError = error instanceof Error ? error.message : String(error);
-    await log(`同步任务失败：${lastError}`);
-    throw error;
+    } else lastError = '本地同步队列写入失败，数据尚未上传。请查看 Agent 诊断信息后重试。';
+    await log(`同步任务失败：${error instanceof Error && error.message.startsWith('UPLOAD_QUEUE_') ? error.message : 'LOCAL_UPLOAD_QUEUE_WRITE_FAILED'}`);
+    throw new Error('LOCAL_UPLOAD_QUEUE_WRITE_FAILED');
   } finally {
     syncing = false;
     await emit();
@@ -476,7 +528,7 @@ ipcMain.handle("agent:setup", async (_event, input: SetupInput) => {
     device_id: deviceId,
     device_name: os.hostname(),
     os: `${os.platform()} ${os.arch()}`,
-    agent_version: "2.12.1-agent",
+    agent_version: AGENT_VERSION,
     protocol_version: 1,
     browser_type: browser.type,
     browser_version: "",
@@ -515,7 +567,7 @@ ipcMain.handle("agent:rebind", async (_event, input: RebindInput) => {
     device_id: config.deviceId,
     device_name: os.hostname(),
     os: `${os.platform()} ${os.arch()}`,
-    agent_version: "2.12.1-agent",
+    agent_version: AGENT_VERSION,
     protocol_version: 1,
     browser_type: config.browserConfig.type,
     browser_version: config.browserConfig.browserVersion || "",
@@ -574,8 +626,10 @@ ipcMain.handle("agent:login-complete", async () => {
   await log(`${activeSession.getBrowserInfo().displayName} 登录状态正常`);
   return emit();
 });
-ipcMain.handle("agent:sync", () => performSync());
-ipcMain.handle("agent:sync-sample", () => performSync(true));
+function registerDatabaseReadyIpc() {
+  ipcMain.handle("agent:sync", () => performSync());
+  ipcMain.handle("agent:sync-sample", () => performSync(true));
+}
 ipcMain.handle(
   "agent:settings",
   async (
@@ -706,11 +760,26 @@ ipcMain.handle("agent:open-logs", async () => {
 });
 app.whenReady().then(async () => {
   globalThis.fetch = net.fetch as typeof fetch;
+  initializeDatabase();
+  await initializePackageContractBootstrap();
   createWindow();
   createTray();
-  startHeartbeat();
+  if (databaseReady) { registerDatabaseReadyIpc(); startHeartbeat(); await startUploadQueueScheduler(); }
   await schedule();
+  const runtimeProbe = process.env.XMT_AGENT_RUNTIME_PROBE_FILE;
+  if (runtimeProbe) {
+    await fs.mkdir(path.dirname(runtimeProbe), { recursive: true });
+    await fs.writeFile(runtimeProbe, JSON.stringify({ runtimeIdentity: (await state()).runtimeIdentity, resourcesPath: process.resourcesPath, rendererUrl: process.env.ELECTRON_RENDERER_URL || null }, null, 2), "utf8");
+  }
   app.on("activate", () => mainWindow?.show());
+}).catch(async (error) => {
+  const runtimeProbe = process.env.XMT_AGENT_RUNTIME_PROBE_FILE;
+  const message = error instanceof Error ? error.message : String(error);
+  console.error("XMT Agent startup failed:", message);
+  if (runtimeProbe) {
+    await fs.mkdir(path.dirname(runtimeProbe), { recursive: true });
+    await fs.writeFile(runtimeProbe, JSON.stringify({ startupError: message }, null, 2), "utf8");
+  }
 });
 app.on("window-all-closed", () => {});
 app.on("before-quit", () => {

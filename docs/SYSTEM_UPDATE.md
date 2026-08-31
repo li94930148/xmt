@@ -2,7 +2,13 @@
 
 ## 当前版本
 
-v2.20.3
+v2.20.4
+
+## v2.20.4 Creator Agent SQLite 队列修复
+
+- Agent v2.13.0-agent 在启用同步前完成本地队列表迁移与检查。
+- canonical payload 仅以 JSON TEXT 保存，读取时校验 SHA-256；错误提示不暴露底层 SQL 或参数。
+- 本轮未开始 macOS 正式打包、发布或生产同步。
 
 ## v2.20.3 本地官方导出安全同步
 

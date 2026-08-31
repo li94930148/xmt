@@ -124,6 +124,28 @@ jobs:
       - run: npm --prefix agent run electron:build
       - run: npm --prefix agent run test:package-runtime
 
+  creator-agent-macos-arm64-package-contract:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - run: npm --prefix agent ci
+      - run: python -m venv collector/.venv
+      - run: npm --prefix agent run electron:build:mac
+      - run: npm --prefix agent run test:package-runtime:mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xmt-creator-agent-v2.13.0-macos-arm64
+          path: agent/release/XMT-Creator-Agent-v2.13.0-macos-arm64.zip
+          if-no-files-found: error
+
   collector-contract:
     runs-on: ubuntu-latest
     steps:

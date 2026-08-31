@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.20.4 - 2026-08-28
+
+### 修复
+
+- Creator Agent 本地队列使用 canonical JSON TEXT 与严格 SQLite 参数边界，读取时校验 payload SHA-256。
+- 旧数据库启动先完成 upload_queue 幂等迁移和就绪检查；同步错误不再向界面暴露 SQL 或驱动参数。
+
+### 版本与兼容性
+
+- XMT 升级至 v2.20.4，Creator Agent 升级至 v2.13.0-agent；未开始 macOS 正式打包、发布或生产同步。
+
 ## 2.20.3 - 2026-08-28
 
 ### 新增

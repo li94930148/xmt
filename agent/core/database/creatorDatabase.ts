@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { CreatorSnapshot } from '../types.js';
+import { canonicalJson, canonicalJsonHash, optionalText, requiredInteger, requiredText, verifiedCanonicalObject } from './sqliteValues.js';
 
 export type ModuleSaveStatus = { account: 'success'|'failed'; works: 'success'|'failed'; dashboard: 'success'|'failed'; fans: 'success'|'failed'; raw: 'success'|'failed'; errors: Record<string,string> };
 export type SyncTaskStatus = 'running'|'success'|'partial_success'|'failed';
@@ -56,28 +57,28 @@ export class CreatorDatabase {
     try { this.db.exec('BEGIN IMMEDIATE'); run(); this.db.exec('COMMIT'); status[module]='success'; }
     catch(error) { try { this.db.exec('ROLLBACK'); } catch {} status[module]='failed'; status.errors[module]=error instanceof Error?error.message:String(error); }
   }
-  private text(value: unknown) { if (value === null || value === undefined) return ''; return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : JSON.stringify(value); }
-  private json(value: unknown) { return JSON.stringify(value ?? null); }
+  private text(field: string, value: unknown) { return optionalText(field, value) || ''; }
+  private json(field: string, value: unknown) { return canonicalJson(field, value ?? null); }
   save(snapshot:CreatorSnapshot):ModuleSaveStatus {
     const status:ModuleSaveStatus={account:'failed',works:'failed',dashboard:'failed',fans:'failed',raw:'failed',errors:{}};
     const knownContentIds=this.knownContentIds();
     snapshot.collection_stats.new_count=snapshot.works.filter((item)=>!knownContentIds.has(String(item.item_id))).length;
-    this.attempt(status,'account',()=>this.db.prepare('INSERT OR IGNORE INTO creator_accounts(platform,account_uid,nickname,avatar,fans_count,raw_json,collected_at,snapshot_id) VALUES(?,?,?,?,?,?,?,?)').run(snapshot.platform,String(snapshot.account.uid),snapshot.account.nickname,snapshot.account.avatar,snapshot.account.fans_count,JSON.stringify(snapshot.account),snapshot.collected_at,snapshot.snapshot_id));
+    this.attempt(status,'account',()=>this.db.prepare('INSERT OR IGNORE INTO creator_accounts(platform,account_uid,nickname,avatar,fans_count,raw_json,collected_at,snapshot_id) VALUES(?,?,?,?,?,?,?,?)').run(requiredText('platform',snapshot.platform),requiredText('account_uid',String(snapshot.account.uid)),this.text('nickname',snapshot.account.nickname),this.text('avatar',snapshot.account.avatar),requiredInteger('fans_count',Number(snapshot.account.fans_count || 0)),this.json('account_json',snapshot.account),this.text('collected_at',snapshot.collected_at),this.text('snapshot_id',snapshot.snapshot_id)));
     this.attempt(status,'works',()=>{
       const work=this.db.prepare('INSERT INTO creator_works(item_id,title,published_at,cover,status,raw_json,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET title=excluded.title,published_at=excluded.published_at,cover=excluded.cover,status=excluded.status,raw_json=excluded.raw_json,updated_at=excluded.updated_at');
       const stat=this.db.prepare('INSERT OR IGNORE INTO creator_work_statistics(item_id,snapshot_time,statistics_json,raw_json,snapshot_id) VALUES(?,?,?,?,?)');
       for(const item of snapshot.works){
         const itemId=String(item.item_id);
-        work.run(itemId,this.text(item.title),this.text(item.published_at),this.text(item.cover),this.text(item.status),this.json(item.raw ?? item),this.text(snapshot.collected_at));
-        stat.run(itemId,this.text(snapshot.collected_at),this.json(item.metrics),this.json(snapshot.work_details.find((detail)=>String(detail.item_id)===itemId)),this.text(snapshot.snapshot_id));
+        work.run(itemId,this.text('work_title',item.title),this.text('published_at',item.published_at),this.text('cover',item.cover),this.text('work_status',item.status),this.json('work_raw_json',item.raw ?? item),this.text('collected_at',snapshot.collected_at));
+        stat.run(itemId,this.text('snapshot_time',snapshot.collected_at),this.json('work_metrics_json',item.metrics),this.json('work_detail_json',snapshot.work_details.find((detail)=>String(detail.item_id)===itemId)),this.text('snapshot_id',snapshot.snapshot_id));
       }
     });
-    this.attempt(status,'dashboard',()=>this.db.prepare('INSERT OR IGNORE INTO creator_dashboard_statistics(snapshot_time,range_key,statistics_json,snapshot_id) VALUES(?,?,?,?)').run(snapshot.collected_at,'all',JSON.stringify({dashboard:snapshot.dashboard,content_analysis:snapshot.content_analysis}),snapshot.snapshot_id));
+    this.attempt(status,'dashboard',()=>this.db.prepare('INSERT OR IGNORE INTO creator_dashboard_statistics(snapshot_time,range_key,statistics_json,snapshot_id) VALUES(?,?,?,?)').run(this.text('snapshot_time',snapshot.collected_at),'all',this.json('dashboard_statistics_json',{dashboard:snapshot.dashboard,content_analysis:snapshot.content_analysis}),this.text('snapshot_id',snapshot.snapshot_id)));
     this.attempt(status,'fans',()=>{
-      this.db.prepare('INSERT OR IGNORE INTO creator_fans_snapshots(account_id,snapshot_time,fans_count,raw_json,created_at,snapshot_id) VALUES(?,?,?,?,?,?)').run(String(snapshot.account.uid),snapshot.collected_at,snapshot.account.fans_count,JSON.stringify(snapshot.fans),snapshot.collected_at,snapshot.snapshot_id);
-      this.db.prepare('INSERT OR IGNORE INTO creator_fans_statistics(snapshot_time,statistics_json,snapshot_id) VALUES(?,?,?)').run(snapshot.collected_at,JSON.stringify(snapshot.fans),snapshot.snapshot_id);
+      this.db.prepare('INSERT OR IGNORE INTO creator_fans_snapshots(account_id,snapshot_time,fans_count,raw_json,created_at,snapshot_id) VALUES(?,?,?,?,?,?)').run(requiredText('account_id',String(snapshot.account.uid)),this.text('snapshot_time',snapshot.collected_at),requiredInteger('fans_count',Number(snapshot.account.fans_count || 0)),this.json('fans_raw_json',snapshot.fans),this.text('created_at',snapshot.collected_at),this.text('snapshot_id',snapshot.snapshot_id));
+      this.db.prepare('INSERT OR IGNORE INTO creator_fans_statistics(snapshot_time,statistics_json,snapshot_id) VALUES(?,?,?)').run(this.text('snapshot_time',snapshot.collected_at),this.json('fans_statistics_json',snapshot.fans),this.text('snapshot_id',snapshot.snapshot_id));
     });
-    this.attempt(status,'raw',()=>this.db.prepare('INSERT OR IGNORE INTO creator_raw_snapshots(snapshot_time,source,raw_json,snapshot_id) VALUES(?,?,?,?)').run(snapshot.collected_at,snapshot.source,JSON.stringify(snapshot.raw),snapshot.snapshot_id));
+    this.attempt(status,'raw',()=>this.db.prepare('INSERT OR IGNORE INTO creator_raw_snapshots(snapshot_time,source,raw_json,snapshot_id) VALUES(?,?,?,?)').run(this.text('snapshot_time',snapshot.collected_at),this.text('snapshot_source',snapshot.source),this.json('snapshot_raw_json',snapshot.raw),this.text('snapshot_id',snapshot.snapshot_id)));
     return status;
   }
   snapshotCounts(){
@@ -86,14 +87,17 @@ export class CreatorDatabase {
   }
   enqueueUpload(input: Omit<UploadQueueJob,'job_id'|'status'|'attempt_count'|'next_retry_at'|'last_error_code'|'last_error_message_sanitized'|'receipt_json'|'created_at'|'updated_at'|'succeeded_at'>) {
     const now=new Date().toISOString(), jobId=crypto.randomUUID();
-    const existing=this.db.prepare('SELECT job_id FROM upload_queue WHERE platform=? AND platform_account_id=? AND source_file_sha256=? AND parser_version=?').get(input.platform,input.platform_account_id,input.source_file_sha256,input.parser_version) as {job_id:string}|undefined;
+    const platform=requiredText('platform',input.platform), platformAccountId=requiredText('platform_account_id',input.platform_account_id), sourceSha=requiredText('source_file_sha256',input.source_file_sha256), parserVersion=requiredText('parser_version',input.parser_version), batchId=requiredText('batch_id',input.batch_id), payloadJson=requiredText('canonical_payload_json',input.payload_json), payloadSha=requiredText('canonical_payload_sha256',input.payload_sha256);
+    verifiedCanonicalObject('canonical_payload_json',payloadJson,payloadSha);
+    const existing=this.db.prepare('SELECT job_id FROM upload_queue WHERE platform=? AND platform_account_id=? AND source_file_sha256=? AND parser_version=?').get(platform,platformAccountId,sourceSha,parserVersion) as {job_id:string}|undefined;
     if(existing)return {job_id:existing.job_id,created:false};
-    this.db.prepare('INSERT INTO upload_queue(job_id,batch_id,platform,platform_account_id,source_file_sha256,parser_version,payload_json,payload_sha256,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(jobId,input.batch_id,input.platform,input.platform_account_id,input.source_file_sha256,input.parser_version,input.payload_json,input.payload_sha256,'pending',now,now); return {job_id:jobId,created:true};
+    this.db.prepare('INSERT INTO upload_queue(job_id,batch_id,platform,platform_account_id,source_file_sha256,parser_version,payload_json,payload_sha256,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(jobId,batchId,platform,platformAccountId,sourceSha,parserVersion,payloadJson,payloadSha,'pending',now,now); return {job_id:jobId,created:true};
   }
   recoverUploading(leaseMs=5*60_000, now=Date.now()){return this.db.prepare("UPDATE upload_queue SET status='retryable_failed',next_retry_at=?,updated_at=?,last_error_code='INTERRUPTED',last_error_message_sanitized='Agent upload lease expired' WHERE status='uploading' AND updated_at<=?").run(new Date(now).toISOString(),new Date(now).toISOString(),new Date(now-leaseMs).toISOString()).changes;}
   claimNextUpload(now=new Date().toISOString(), maxAttempts=8):UploadQueueJob|undefined { this.db.exec('BEGIN IMMEDIATE'); try { const row=this.db.prepare("SELECT * FROM upload_queue WHERE status IN ('pending','retryable_failed') AND attempt_count<? AND (next_retry_at IS NULL OR next_retry_at<=?) ORDER BY created_at LIMIT 1").get(maxAttempts,now) as UploadQueueJob|undefined; if(row){const changed=this.db.prepare("UPDATE upload_queue SET status='uploading',attempt_count=attempt_count+1,updated_at=? WHERE job_id=? AND status IN ('pending','retryable_failed')").run(now,row.job_id).changes;if(!changed){this.db.exec('COMMIT');return undefined;}} this.db.exec('COMMIT'); return row; } catch(error){this.db.exec('ROLLBACK');throw error;} }
-  finishUpload(jobId:string,receipt:unknown){const now=new Date().toISOString();this.db.prepare("UPDATE upload_queue SET status='succeeded',receipt_json=?,succeeded_at=?,updated_at=?,last_error_code=NULL,last_error_message_sanitized=NULL WHERE job_id=?").run(this.json(receipt),now,now,jobId);}
+  finishUpload(jobId:string,receipt:unknown){const now=new Date().toISOString();this.db.prepare("UPDATE upload_queue SET status='succeeded',receipt_json=?,succeeded_at=?,updated_at=?,last_error_code=NULL,last_error_message_sanitized=NULL WHERE job_id=?").run(this.json('receipt_json',receipt),now,now,jobId);}
   failUpload(jobId:string,status:Extract<UploadQueueStatus,'retryable_failed'|'permanent_failed'>,code:string,message:string,nextRetryAt?:string){this.db.prepare('UPDATE upload_queue SET status=?,next_retry_at=?,last_error_code=?,last_error_message_sanitized=?,updated_at=? WHERE job_id=?').run(status,nextRetryAt||null,code,message.replace(/[\r\n]/g,' ').slice(0,240),new Date().toISOString(),jobId);}
   uploadJob(jobId:string){return this.db.prepare('SELECT * FROM upload_queue WHERE job_id=?').get(jobId) as UploadQueueJob|undefined;}
+  parseUploadPayload(job: UploadQueueJob) { return verifiedCanonicalObject('canonical_payload_json', job.payload_json, job.payload_sha256); }
   close(){this.db.close();}
 }

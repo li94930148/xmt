@@ -16,7 +16,7 @@ fs.rmSync(outputRoot, { recursive: true, force: true });
 fs.mkdirSync(outputRoot, { recursive: true });
 run(['-m', 'pip', 'install', '--disable-pip-version-check', '-r', 'requirements.lock', '-r', 'requirements-build.lock']);
 const runtime = path.join(outputRoot, 'collector-runtime');
-run(['-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--name', 'xmt-collector-worker', '--distpath', runtime, '--workpath', path.join(outputRoot, 'work'), '--specpath', path.join(outputRoot, 'spec'), '--paths', collectorRoot, '--collect-all', 'scrapling', '--collect-all', 'patchright', '--collect-all', 'browserforge', '--collect-all', 'apify_fingerprint_datapoints', path.join(collectorRoot, 'xmt_collector', 'runtime', 'worker.py')]);
+run(['-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--name', 'xmt-collector-worker', '--distpath', runtime, '--workpath', path.join(outputRoot, 'work'), '--specpath', path.join(outputRoot, 'spec'), '--paths', collectorRoot, '--collect-all', 'scrapling', '--collect-all', 'patchright', '--collect-all', 'playwright', '--collect-all', 'browserforge', '--collect-all', 'apify_fingerprint_datapoints', path.join(collectorRoot, 'xmt_collector', 'runtime', 'worker.py')]);
 const executable = path.join(runtime, 'xmt-collector-worker', process.platform === 'win32' ? 'xmt-collector-worker.exe' : 'xmt-collector-worker');
 if (!fs.existsSync(executable)) throw new Error(`Collector runtime build missing executable: ${executable}`);
 console.log(`collector runtime: ${runtime}`);

@@ -60,8 +60,11 @@ async function main() {
     const executable = path.join(extracted, 'Contents', 'MacOS', 'XMT-Creator-Agent');
     const resources = path.join(extracted, 'Contents', 'Resources');
     const worker = path.join(resources, 'collector-runtime', 'xmt-collector-worker', 'xmt-collector-worker');
+    const playwrightDriver = path.join(resources, 'collector-runtime', 'xmt-collector-worker', '_internal', 'playwright', 'driver', 'node');
     assert(fs.existsSync(executable), 'PACKAGED_APP_EXECUTABLE_NOT_INCLUDED');
     assert(fs.existsSync(worker), 'PACKAGED_RUNTIME_NOT_INCLUDED');
+    assert(fs.existsSync(playwrightDriver), 'PACKAGED_PLAYWRIGHT_DRIVER_NOT_INCLUDED');
+    run(playwrightDriver, ['--version']);
     const files = run('/usr/bin/find', [extracted, '-type', 'f']).split('\n').filter(Boolean);
     const prohibited = files.filter((file) => forbidden.test(path.relative(extracted, file)));
     assert(!prohibited.length, `PACKAGED_RUNTIME_CONTAINS_USER_DATA: ${prohibited.join(', ')}`);

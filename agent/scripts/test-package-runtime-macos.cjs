@@ -87,7 +87,20 @@ async function main() {
     try {
       try { await waitForFile(probe); } catch (error) { throw new Error(`${error.message}: ${appDiagnostics.slice(-2000)}`); }
       const deadline = Date.now() + 20_000;
-      while (Date.now() < deadline && loopback.counts().syncRequests !== 1) await sleep(100);
+      let succeeded = 0;
+      while (Date.now() < deadline) {
+        const counts = loopback.counts();
+        const db = path.join(testData, 'creator.db');
+        if (fs.existsSync(db)) {
+          const { DatabaseSync } = require('node:sqlite');
+          const queueDb = new DatabaseSync(db);
+          succeeded = queueDb.prepare("SELECT count(*) AS count FROM upload_queue WHERE status='succeeded'").get().count;
+          queueDb.close();
+        }
+        if (counts.syncRequests === 1 && succeeded === 1) break;
+        await sleep(100);
+      }
+      assert(loopback.counts().syncRequests === 1 && succeeded === 1, `PACKAGED_LOOPBACK_QUEUE_NOT_SUCCEEDED: ${JSON.stringify({ ...loopback.counts(), succeeded })}`);
     } finally {
       await stopChild(appProcess);
     }

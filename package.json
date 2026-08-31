@@ -137,6 +137,7 @@
     "test:creator-access-platform": "tsx scripts/creator-access-platform-test.ts",
     "test:creator-sync-v2102": "tsx scripts/creator-sync-v2102-contract-test.ts",
     "test:creator-cover-url-integrity": "tsx tests/creator-cover-url-integrity.test.ts",
+    "test:canonical-works": "tsx tests/canonical-works.test.ts",
     "test:creator-agent-replay-security": "tsx tests/security/creator-agent-replay-security.test.ts",
     "test:official-export-v2": "tsx scripts/official-export-v2-contract-test.ts",
     "test:official-export-real-http": "tsx scripts/official-export-real-http-test.ts",

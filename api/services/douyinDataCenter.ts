@@ -2,6 +2,7 @@ import { queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { douyinDataNormalizer, type NormalizedDouyinContract, type NormalizedDouyinWork } from './douyinDataNormalizer.js';
 import { analyzeDouyinWorks, calculateDouyinAccountHealth, DOUYIN_OPERATIONS_FORMULAS, type DouyinMetricsWork } from './douyinOperationsAnalytics.js';
 import { resolveCoverUrl } from '../utils/coverResolver.js';
+import { canonicalizeDouyinWorks } from './canonicalWorks.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentIdentity = { id: number; user_id: number; platform: string; account_id: string };
@@ -285,7 +286,8 @@ export async function getDouyinWorks(creatorAccountId: number, sort = 'latest', 
   const limit = Math.min(100, Math.max(1, Math.floor(requestedLimit) || 20));
   if (!account) return { items: [], next_cursor: null, has_more: false, page_size: limit };
   const works = await queryAll<DouyinMetricsWork>(`SELECT w.*,a.content_category,a.content_json FROM douyin_works w LEFT JOIN douyin_analysis_records a ON a.id=(SELECT id FROM douyin_analysis_records WHERE work_id=w.id ORDER BY snapshot_time DESC,id DESC LIMIT 1) WHERE w.account_id=?`, [account.id]);
-  const analyzed = analyzeDouyinWorks(works).works.map(work => ({ ...work, viral_tag: work.performance.is_viral ? '爆款' : '' }));
+  const canonical = canonicalizeDouyinWorks(works);
+  const analyzed = analyzeDouyinWorks(canonical).works.map(work => ({ ...work, viral_tag: work.performance.is_viral ? '爆款' : '' }));
   const stableNewestFirst = (left: typeof analyzed[number], right: typeof analyzed[number]) =>
     new Date(String(right.publish_time || 0)).getTime() - new Date(String(left.publish_time || 0)).getTime()
     || number(right.id) - number(left.id);

@@ -2,7 +2,12 @@
 
 ## 当前版本
 
-v2.20.5
+v2.20.6
+
+## v2.20.6 Agent 认证事实与窗口交互解耦
+
+- Main 将 `profile_authenticated`、`login_window_state`、浏览器、绑定、Token 和数据库就绪状态汇总为只读 `canSync` 能力快照。
+- 已认证受管 Profile 显示“重新登录”且可同步；临时窗口关闭只重置窗口状态，不会抹除认证事实。
 
 ## v2.20.5 Creator Agent 登录状态一致性
 

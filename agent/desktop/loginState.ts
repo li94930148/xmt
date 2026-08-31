@@ -1,13 +1,30 @@
-import type { LoginState } from "../core/browser/types.js";
+export type ProfileAuthentication = "unknown" | "unauthenticated" | "authenticated" | "expired" | "error";
+export type LoginWindowState = "closed" | "opening" | "awaiting_confirmation" | "closing" | "error";
 
-export type LoginFlowState = "idle" | "opening" | "awaiting_confirmation" | "authenticated" | "closed" | "error";
+export type AgentCapabilities = {
+  profileAuthenticated: boolean;
+  loginWindowState: LoginWindowState;
+  browserReady: boolean;
+  bindingReady: boolean;
+  tokenReady: boolean;
+  databaseReady: boolean;
+  syncInProgress: boolean;
+  canSync: boolean;
+  loginAction: "open" | "confirm" | "relogin" | "unavailable";
+};
 
-export function loginStateAfterBrowserCheck(status: LoginState, windowOpen: boolean): LoginFlowState {
-  if (!windowOpen) return "closed";
-  return status === "logged_in" ? "authenticated" : "awaiting_confirmation";
+export function profileAuthenticationFromBrowser(status: "logged_in" | "login_required" | "unknown"): ProfileAuthentication {
+  return status === "logged_in" ? "authenticated" : status === "login_required" ? "unauthenticated" : "unknown";
 }
 
-export function mayConfirmLogin(state: LoginFlowState, windowOpen: boolean) {
+export function capabilities(input: Omit<AgentCapabilities, "canSync" | "loginAction" | "profileAuthenticated"> & { profileAuthentication: ProfileAuthentication }): AgentCapabilities {
+  const profileAuthenticated = input.profileAuthentication === "authenticated";
+  const canSync = profileAuthenticated && input.browserReady && input.bindingReady && input.tokenReady && input.databaseReady && !input.syncInProgress;
+  const loginAction = !input.browserReady ? "unavailable" : input.loginWindowState === "awaiting_confirmation" ? "confirm" : profileAuthenticated ? "relogin" : "open";
+  return { ...input, profileAuthenticated, canSync, loginAction };
+}
+
+export function mayConfirmLogin(state: LoginWindowState, windowOpen: boolean) {
   return state === "awaiting_confirmation" && windowOpen;
 }
 

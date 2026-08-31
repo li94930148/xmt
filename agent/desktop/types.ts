@@ -1,6 +1,8 @@
 import type { AgentConfig,SyncResult } from '../core/types.js';
 export type RuntimeIdentity={systemVersion:string;agentVersion:string;buildId:string;mainPid:number;packaged:boolean;databaseReady:boolean;databaseSchemaVersion:number;uploadQueue:boolean;workerRuntime:'packaged'|'development';apiTarget:'loopback'|'production'|'invalid'};
-export type DesktopState={connected:boolean;configured:boolean;syncing:boolean;lastSyncAt?:string;lastError?:string;config?:AgentConfig;logs:string[];autoLaunch:boolean;portableMode:boolean;browserConnected:boolean;douyinLoggedIn:boolean;runtimeIdentity:RuntimeIdentity;browsers:Array<{id:string;displayName:string;type:string;engine:string;runtime:string;version?:string;compatibilityStatus:string}>};
+export type LoginFlowState='idle'|'opening'|'awaiting_confirmation'|'authenticated'|'closed'|'error';
+export type DesktopBrowser={id:string;displayName:string;type:string;engine:string;runtime:string;version?:string;compatibilityStatus:string};
+export type DesktopState={connected:boolean;configured:boolean;syncing:boolean;lastSyncAt?:string;lastError?:string;config?:AgentConfig;logs:string[];autoLaunch:boolean;portableMode:boolean;browserConnected:boolean;douyinLoggedIn:boolean;loginState:LoginFlowState;browserAvailable:boolean;currentBrowser?:DesktopBrowser;runtimeIdentity:RuntimeIdentity;browsers:DesktopBrowser[]};
 export type SetupInput={serverUrl:string;bindingCode:string};
 export type RebindInput={serverUrl:string;bindingCode:string};
 export type SettingsInput={serverUrl:string;enabled:boolean;interval:'manual'|'12h'|'daily';dailyHour:number;autoLaunch:boolean;browserId:string;executablePath?:string};

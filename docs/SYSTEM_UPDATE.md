@@ -2,7 +2,13 @@
 
 ## 当前版本
 
-v2.20.4
+v2.20.5
+
+## v2.20.5 Creator Agent 登录状态一致性
+
+- 登录流程由 Electron Main 维护 `idle`、`opening`、`awaiting_confirmation`、`authenticated`、`closed`、`error` 状态；Renderer 仅消费 Main 状态。
+- 已认证受管 Profile 显示“登录正常 / 重新登录”；无存活登录窗口不会显示“我已完成登录”。
+- 未解析浏览器时登录和同步禁用；正式包内 Playwright driver 与用户选择的系统 Chromium 均由 Main 的实际解析结果展示。
 
 ## v2.20.4 Creator Agent SQLite 队列修复
 

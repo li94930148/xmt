@@ -1,5 +1,17 @@
 # XMT 系统更新日志
 
+## v2.20.5 - 2026-08-31
+
+### 修复
+
+- Creator Agent 的登录窗口、确认按钮和 Profile 登录结果统一由 Electron Main 状态机提供；Renderer 刷新不会沿用旧窗口状态。
+- 无存活登录窗口时 `agent:login-complete` 返回稳定代码 `LOGIN_WINDOW_NOT_OPEN`；界面只显示脱敏中文提示。
+- 浏览器显示使用实际解析的 session / driver，未解析到受支持浏览器时登录和同步均禁用。
+
+### 测试情况
+
+- 覆盖登录窗口关闭、Main 重启、Renderer 刷新、已登录 Profile、无可用浏览器、SQLite 队列与包内 arm64 driver 回归。
+
 ## v2.20.4 - 2026-08-28
 
 ### 修复

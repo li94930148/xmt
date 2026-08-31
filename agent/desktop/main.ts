@@ -22,6 +22,7 @@ import {
 } from "../core/browser/discovery.js";
 import { BrowserRegistry } from "../core/browser/registry.js";
 import type {
+  BrowserInfo,
   BrowserSelection,
   BrowserSession,
 } from "../core/browser/types.js";
@@ -32,6 +33,7 @@ import {
 import { runCreatorCollectorTask } from "../core/collector/taskRunner.js";
 import { CollectorLoginRequiredError } from "../core/collector/workerBridge.js";
 import { applyCollectorLoginRequired, heartbeatLoginStatus } from "./collectorAuthState.js";
+import { loginStateAfterBrowserCheck, mayConfirmLogin, type LoginFlowState } from "./loginState.js";
 import { bind, heartbeat, uploadCanonicalPayload } from "../core/uploader/client.js";
 import { intervalMs, nextDailyDelay } from "../core/scheduler/scheduler.js";
 import type { AgentConfig, SyncResult } from "../core/types.js";
@@ -40,8 +42,8 @@ import { CreatorDatabase } from "../core/database/creatorDatabase.js";
 import { canonicalJson, canonicalJsonHash } from "../core/database/sqliteValues.js";
 import { UploadQueueScheduler } from "../core/uploader/queueScheduler.js";
 import type { RebindInput } from "./types.js";
-const AGENT_VERSION = '2.13.0-agent';
-const SYSTEM_VERSION = '2.20.4';
+const AGENT_VERSION = '2.13.1-agent';
+const SYSTEM_VERSION = '2.20.5';
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
 const resourceDirectory = process.resourcesPath;
@@ -83,6 +85,7 @@ let browserConnected = false;
 let douyinLoggedIn = false;
 let browserLoginStatus: "logged_in" | "login_required" | "unknown" = "unknown";
 let activeSession: BrowserSession | null = null;
+let loginState: LoginFlowState = "idle";
 let databaseReady = false;
 let databaseSchemaVersion = 0;
 let databaseInitializationError: string | undefined;
@@ -242,6 +245,28 @@ async function markBrowserCompatible(
   config.browserConfig.lastTestedAt = new Date().toISOString();
   await writeConfig(config);
 }
+async function refreshBrowserAuthentication(config: AgentConfig, startSession: boolean) {
+  let session = activeSession;
+  if (!hasLiveLoginWindow()) {
+    if (!startSession) {
+      closeLoginFlow();
+      return false;
+    }
+    loginState = "opening";
+    session = await readyBrowserSession(config);
+  }
+  if (!session || !session.isConnected()) {
+    closeLoginFlow();
+    return false;
+  }
+  browserConnected = true;
+  const login = await session.checkLoginState();
+  browserLoginStatus = login.status;
+  loginState = loginStateAfterBrowserCheck(login.status, hasLiveLoginWindow());
+  douyinLoggedIn = loginState === "authenticated";
+  if (douyinLoggedIn) await markBrowserCompatible(config, session);
+  return douyinLoggedIn;
+}
 function protectToken(token: string) {
   if (!safeStorage.isEncryptionAvailable())
     throw new Error("系统安全存储当前不可用，无法安全保存 Agent 凭据");
@@ -283,8 +308,32 @@ async function recentLogs() {
     return [];
   }
 }
+function desktopBrowser(info: BrowserInfo) {
+  return { id: info.id, displayName: info.displayName, type: info.browserType, engine: info.engine, runtime: info.runtime, version: info.version, compatibilityStatus: info.compatibilityStatus };
+}
+function hasLiveLoginWindow() {
+  if (!activeSession?.isConnected()) return false;
+  try { return activeSession.listPages().some((page) => !page.isClosed()); }
+  catch { return false; }
+}
+function closeLoginFlow() {
+  activeSession = null;
+  browserConnected = false;
+  douyinLoggedIn = false;
+  browserLoginStatus = "unknown";
+  loginState = "closed";
+}
+function reconcileLoginFlow() {
+  if (loginState === "awaiting_confirmation" && !hasLiveLoginWindow()) closeLoginFlow();
+}
 async function state(): Promise<DesktopState> {
   const config = await readConfig();
+  reconcileLoginFlow();
+  const found = discoverBrowsers(config?.browserConfig.type === "custom" ? { customPath: config.browserConfig.executablePath } : undefined);
+  const browsers = found.map(desktopBrowser);
+  const currentBrowser = activeSession?.isConnected()
+    ? desktopBrowser(activeSession.getBrowserInfo())
+    : browsers.find((item) => item.id === config?.browserConfig.id || item.id === config?.browserConfig.lastSuccessfulId);
   return {
     connected: Boolean(config && fsSync.existsSync(paths().token)),
     configured: Boolean(config),
@@ -297,16 +346,11 @@ async function state(): Promise<DesktopState> {
     portableMode,
     browserConnected,
     douyinLoggedIn,
+    loginState,
+    browserAvailable: Boolean(currentBrowser),
+    currentBrowser,
     runtimeIdentity: { systemVersion: SYSTEM_VERSION, agentVersion: AGENT_VERSION, buildId: BUILD_ID, mainPid: process.pid, packaged: app.isPackaged, databaseReady, databaseSchemaVersion, uploadQueue: databaseReady, workerRuntime: app.isPackaged ? 'packaged' : 'development', apiTarget: apiTarget(config?.serverUrl) },
-    browsers: discoverBrowsers().map((item) => ({
-      id: item.id,
-      displayName: item.displayName,
-      type: item.browserType,
-      engine: item.engine,
-      runtime: item.runtime,
-      version: item.version,
-      compatibilityStatus: item.compatibilityStatus,
-    })),
+    browsers,
   };
 }
 async function emit() {
@@ -354,6 +398,7 @@ async function performSync(sample = false): Promise<SyncResult> {
   if (syncing) throw new Error("同步正在进行中");
   const config = await readConfig();
   if (!config) throw new Error("请先连接 XMT 并绑定账号");
+  if (!(await refreshBrowserAuthentication(config, true))) throw new Error("LOGIN_REQUIRED");
   syncing = true;
   lastError = undefined;
   await emit();
@@ -392,9 +437,11 @@ async function performSync(sample = false): Promise<SyncResult> {
       douyinLoggedIn = auth.douyinLoggedIn;
       browserConnected = auth.browserConnected;
       browserLoginStatus = auth.browserLoginStatus;
+      loginState = "closed";
       lastError = auth.lastError;
       void sendHeartbeat();
-    } else lastError = '本地同步队列写入失败，数据尚未上传。请查看 Agent 诊断信息后重试。';
+    } else if (error instanceof Error && error.message === "LOGIN_REQUIRED") lastError = "抖音登录状态需要由 Creator Agent 主进程重新确认。";
+    else lastError = '本地同步队列写入失败，数据尚未上传。请查看 Agent 诊断信息后重试。';
     await log(`同步任务失败：${error instanceof Error && error.message.startsWith('UPLOAD_QUEUE_') ? error.message : 'LOCAL_UPLOAD_QUEUE_WRITE_FAILED'}`);
     throw new Error('LOCAL_UPLOAD_QUEUE_WRITE_FAILED');
   } finally {
@@ -592,34 +639,32 @@ ipcMain.handle("agent:login-open", async () => {
   const config = await readConfig();
   if (!config) throw new Error("请先完成连接");
   try {
+    loginState = "opening";
+    await emit();
     const session = await readyBrowserSession(config);
     const page = await session.getActivePage();
     await page.bringToFront();
-    browserConnected = true;
-    const login = await session.checkLoginState();
-    browserLoginStatus = login.status;
-    douyinLoggedIn = login.status === "logged_in";
-    if (douyinLoggedIn) await markBrowserCompatible(config, session);
+    await refreshBrowserAuthentication(config, true);
     await log(
-      `已启动 ${session.getBrowserInfo().displayName} 独立会话，login_status=${login.status}`,
+      `已启动 ${session.getBrowserInfo().displayName} 独立会话，login_state=${loginState}`,
     );
-    await emit();
+    return emit();
   } catch (error) {
-    activeSession = null;
-    browserConnected = false;
+    closeLoginFlow();
+    loginState = "error";
+    await emit();
     throw error;
   }
 });
 ipcMain.handle("agent:login-complete", async () => {
-  if (!activeSession) throw new Error("请先打开登录窗口");
+  reconcileLoginFlow();
+  if (!mayConfirmLogin(loginState, hasLiveLoginWindow())) throw new Error("LOGIN_WINDOW_NOT_OPEN");
+  if (!activeSession) throw new Error("LOGIN_WINDOW_NOT_OPEN");
   const login = await activeSession.checkLoginState();
   browserLoginStatus = login.status;
-  if (login.status === "login_required")
-    throw new Error("当前抖音创作者中心仍处于登录页面，请完成登录后重试。");
-  if (login.status === "unknown")
-    throw new Error(
-      "暂时无法确认抖音创作者中心登录状态，请保持页面打开并稍后重试。",
-    );
+  if (login.status === "login_required") throw new Error("LOGIN_NOT_CONFIRMED");
+  if (login.status === "unknown") throw new Error("LOGIN_STATUS_UNKNOWN");
+  loginState = "authenticated";
   douyinLoggedIn = true;
   const config = await readConfig();
   if (config) await markBrowserCompatible(config, activeSession);
@@ -706,17 +751,11 @@ ipcMain.handle("agent:browser-restart", async () => {
   const config = await readConfig();
   if (!config) throw new Error("请先完成连接");
   await activeSession?.stop();
-  activeSession = null;
-  browserConnected = false;
-  douyinLoggedIn = false;
+  closeLoginFlow();
   const session = await readyBrowserSession(config);
-  browserConnected = session.isConnected();
-  const login = await session.checkLoginState();
-  browserLoginStatus = login.status;
-  douyinLoggedIn = login.status === "logged_in";
-  if (douyinLoggedIn) await markBrowserCompatible(config, session);
+  await refreshBrowserAuthentication(config, true);
   await log(
-    `${session.getBrowserInfo().displayName} 会话测试完成，login_status=${login.status}`,
+    `${session.getBrowserInfo().displayName} 会话测试完成，login_state=${loginState}`,
   );
   return emit();
 });
@@ -745,9 +784,7 @@ ipcMain.handle("agent:browser-profile-clear", async () => {
     profileRoot,
   );
   await activeSession?.stop();
-  activeSession = null;
-  browserConnected = false;
-  douyinLoggedIn = false;
+  closeLoginFlow();
   await fs.rm(target, { recursive: true, force: true });
   await log(
     `已清理当前账号的独立浏览器资料：${config.browserConfig.type}/${config.accountId}`,

@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.20.4
+v2.20.5
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.20.4
 
 ## 本版本摘要
 
-本版本修复 Creator Agent 本地 SQLite 队列参数边界与旧数据库首次迁移；Creator Agent 升级到 v2.13.0-agent。macOS 正式包尚未开始。
+本版本修复 Creator Agent 登录窗口与浏览器状态不一致；Creator Agent 升级到 v2.13.1-agent。登录确认由 Main 状态机授权，保留本地队列迁移与 macOS arm64 打包运行时边界。

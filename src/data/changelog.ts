@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.5', date: '2026-08-31', title: 'Creator Agent 登录状态一致性', impactScope: ['Creator Agent', 'macOS 正式包'], changes: [{ type: 'fix', description: '登录窗口、确认按钮和浏览器显示统一由 Electron Main 状态机裁定，关闭或重启后不保留 Renderer 临时状态。' }, { type: 'improvement', description: '无可用浏览器时禁用登录与同步，并对 IPC 错误进行脱敏显示。' }] },
   { version: '2.20.4', date: '2026-08-28', title: 'Creator Agent 本地队列 SQLite 修复', impactScope: ['Creator Agent', '本地数据安全'], changes: [{ type: 'fix', description: '队列 payload 固定为 canonical JSON TEXT，校验 SQLite 参数类型与回读哈希。' }, { type: 'improvement', description: '旧数据库首次启动会先完成幂等队列迁移，并提供无敏感运行时身份诊断。' }] },
   {
     version: '2.20.3', date: '2026-08-28', title: 'Creator 官方导出本地安全同步',

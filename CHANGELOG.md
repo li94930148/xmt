@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.20.5 - 2026-08-31
+
+### 修复
+
+- Creator Agent 登录窗口、登录确认与受管 Profile 登录结果统一由 Electron Main 状态机裁定，关闭窗口或主进程重启后不会保留 Renderer 临时确认状态。
+- 只有 Main 持有存活的 `awaiting_confirmation` 会话时才允许确认登录；无窗口确认稳定返回 `LOGIN_WINDOW_NOT_OPEN`，界面不再展示 Electron IPC 前缀或底层错误。
+- 当前浏览器改为展示 Main 实际解析的浏览器 / driver；未解析到受支持浏览器时禁用登录和同步并给出引导。
+
+### 版本与兼容性
+
+- XMT 升级至 v2.20.5，Creator Agent 升级至 v2.13.1-agent；保留 SQLite 队列迁移、database-ready barrier、v1/v2 上传契约和 macOS arm64 Playwright driver 修复。
+
 ## 2.20.4 - 2026-08-28
 
 ### 修复

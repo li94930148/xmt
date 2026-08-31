@@ -12,6 +12,7 @@ dist
 dist-ssr
 agent/release*/
 agent/.collector-runtime-build/
+agent/.package-metadata/
 agent/data/
 agent/profiles/
 agent/browser-cache/

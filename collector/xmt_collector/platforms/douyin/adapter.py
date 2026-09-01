@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import io
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -18,6 +19,7 @@ from xmt_collector.platforms.douyin.view_scope import content_view_scope
 from xmt_collector.platforms.douyin.browser_launch import BrowserLaunch
 from xmt_collector.platforms.douyin.export_parser import parse_official_export
 from xmt_collector.security.sanitizer import sanitize
+from xmt_collector.platforms.douyin.cover_metadata import summarize_covers
 
 CREATOR_ORIGIN = "https://creator.douyin.com"
 PAGES = {
@@ -266,6 +268,62 @@ class DouyinAdapter:
         manifest = {"platform": "douyin", "account": account_id, "taskId": task_id, "scope": scope, "captured_at": datetime.now(timezone.utc).isoformat(), "xhrResponses": len(captured), "exports": all_exports, "officialData": official_data, "collectionCompleteness": completeness, "browser": self.browser.evidence()}
         run.write_json("manifest.json", manifest)
         return {"manifest": manifest, "capability": capability, "captures": captured, "works": works, "account": account, "officialData": official_data, "collectionCompleteness": completeness}
+
+    async def inspect_cover_metadata_only(self, account_scope_hash: str) -> dict[str, Any]:
+        """Visit only Content Management and return no work IDs, URLs, XHR, or files."""
+        if not self.profile.is_dir():
+            raise RuntimeError("COVER_METADATA_PROFILE_NOT_READY")
+        captured: list[dict[str, Any]] = []
+        started_at = time.monotonic()
+        max_duration_seconds = 120
+        max_works = 1_000
+        async with AsyncDynamicSession(
+            max_pages=1, headless=self.browser.headless, **self.browser.session_kwargs(), google_search=False,
+            network_idle=False, timeout=45_000, **({} if self.browser.runtime == "external-cdp" else {"user_data_dir": str(self.profile)}),
+            capture_xhr=r"https://creator\\.douyin\\.com/.*", additional_args={"accept_downloads": False},
+        ) as session:
+            login_required = False
+            async def inspect(page: Any) -> None:
+                nonlocal login_required
+                text = await page.locator("body").inner_text(timeout=10_000)
+                if "扫码登录" in text or ("登录" in text and "内容管理" not in text): login_required = True; return
+                # Content pagination is bounded by stable scroll, never visits data/export pages.
+                progress = ScrollProgress()
+                seen_positions: set[tuple[int, int]] = set()
+                while progress.iterations < 60:
+                    self._assert_not_cancelled()
+                    if time.monotonic() - started_at >= max_duration_seconds:
+                        break
+                    before = await page.evaluate("() => ({top:window.scrollY,height:document.documentElement.scrollHeight,viewport:window.innerHeight})")
+                    position = (int(before["top"]), int(before["height"]))
+                    if position in seen_positions:
+                        break
+                    seen_positions.add(position)
+                    await page.mouse.wheel(0, max(900, int(before["viewport"] * .8)))
+                    await page.wait_for_timeout(700)
+                    after = await page.evaluate("() => ({top:window.scrollY,height:document.documentElement.scrollHeight,viewport:window.innerHeight})")
+                    progress, exhausted = advance_scroll(progress, at_bottom=after["top"] + after["viewport"] >= after["height"] - 2, progressed=after["height"] > before["height"] or after["top"] > before["top"])
+                    if exhausted: break
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                response = await session.fetch(f"{CREATOR_ORIGIN}{PAGES['内容管理']}", page_action=inspect)
+            if login_required: raise LoginRequired("WAITING_FOR_USER_LOGIN")
+            for xhr in response.captured_xhr:
+                try: decoded: Any = json.loads(getattr(xhr, "body", b"").decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError): continue
+                captured.append(decoded)
+        works_by_id: dict[str, dict[str, Any]] = {}
+        for payload in captured:
+            for item in find_work_candidates(payload):
+                work_id = str(item.get("aweme_id") or item.get("item_id") or item.get("id") or "")
+                if work_id and work_id not in works_by_id:
+                    if len(works_by_id) >= max_works:
+                        break
+                    works_by_id[work_id] = item
+            if len(works_by_id) >= max_works:
+                break
+        result = await summarize_covers(account_scope_hash, list(works_by_id.values()))
+        result.update({"account_scope_hash": account_scope_hash, "collected_at": datetime.now(timezone.utc).isoformat()})
+        return result
 
     def cancel(self) -> None:
         self.cancelled = True

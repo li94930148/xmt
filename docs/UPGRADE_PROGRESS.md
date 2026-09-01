@@ -1,5 +1,10 @@
 # XMT 升级阶段记录
 
+## v2.20.8 Creator 封面 metadata-only（2026-09-01）
+
+- 新增独立 Electron IPC、Bridge 与 Worker 白名单任务，只读检查内容管理页的封面候选并返回脱敏汇总。
+- 数据库变化：无；任务不触发普通同步、上传、队列、batch、快照或官方 Excel 下载。
+
 ## v2.19.11 Creator Agent 上传协议安全收口（2026-08-20）
 
 - `/data-sync` 原有 V1 timestamp、nonce、HMAC 与 AES-GCM 防重放合同保持有效；本次关闭可选 legacy protocol fallback。

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import json
 import logging
 import sys
@@ -70,6 +71,15 @@ class Worker:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             self.emit(request.id, "completed", {"shutdown": True})
+        elif request.method == "cover_metadata_only":
+            if request.id in self.tasks:
+                self.emit(request.id, "error", {"code": "already_running", "message": "同一采集任务正在运行。"})
+                return
+            # This route is intentionally not an alias for collect/start.  New
+            # worker methods must be added explicitly, otherwise they fail closed.
+            task = asyncio.create_task(self.cover_metadata_only(request.id, request.params))
+            self.tasks[request.id] = task
+            task.add_done_callback(lambda _: self.tasks.pop(request.id, None))
         elif request.method in {"login", "collect", "start"}:
             if request.id in self.tasks:
                 self.emit(request.id, "error", {"code": "already_running", "message": "同一采集任务正在运行。"})
@@ -114,6 +124,30 @@ class Worker:
             self.emit(request_id, "cancelled", {"accepted": True})
         except Exception as error:
             self.emit(request_id, "error", {"code": "collector_failed", "message": str(error)[:500]})
+        finally:
+            self.running.pop(request_id, None)
+
+    async def cover_metadata_only(self, request_id: str, params: dict[str, Any]) -> None:
+        """Dedicated task: it never invokes collect(), manifests, exports, or upload code."""
+        try:
+            browser = parse_browser_launch(params.get("browser"))
+            if params.get("platform") != "douyin": raise RuntimeError("not_implemented")
+            account_scope_hash = str(params.get("accountScopeHash") or "")
+            profile = Path(str(params.get("profilePath") or ""))
+            if not re.fullmatch(r"[a-f0-9]{64}", account_scope_hash) or not profile.is_absolute(): raise RuntimeError("invalid_path")
+            adapter = DouyinAdapter(profile, Path("/nonexistent-cover-metadata"), lambda _name, _data: asyncio.sleep(0), browser)
+            self.running[request_id] = adapter
+            self.emit(request_id, "started", {"mode": "cover_metadata_only"})
+            self.emit(request_id, "completed", await adapter.inspect_cover_metadata_only(account_scope_hash))
+        except LoginRequired:
+            self.emit(request_id, "login_required", {"code":"WAITING_FOR_USER_LOGIN", "message":"需要正常登录后才能检查封面来源。"})
+        except asyncio.CancelledError:
+            # Session context teardown closes the page.  Do not invoke any shared
+            # collection cleanup path because those may own snapshots or queues.
+            self.emit(request_id, "cancelled", {"accepted": True})
+        except Exception:
+            # Third-party browser errors can contain URLs; never forward them.
+            self.emit(request_id, "error", {"code":"cover_metadata_failed", "message":"封面元数据检查未完成。"})
         finally:
             self.running.pop(request_id, None)
 

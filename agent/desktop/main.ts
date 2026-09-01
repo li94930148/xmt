@@ -31,7 +31,9 @@ import {
   managedProfile,
 } from "../core/browser/profile.js";
 import { runCreatorCollectorTask } from "../core/collector/taskRunner.js";
-import { CollectorLoginRequiredError } from "../core/collector/workerBridge.js";
+import { CollectorLoginRequiredError, ScraplingWorkerBridge } from "../core/collector/workerBridge.js";
+import { inspectCoverMetadata } from '../core/collector/coverMetadata.js';
+import { collectorBrowserLaunch } from '../core/collector/browserLaunch.js';
 import { applyCollectorLoginRequired, heartbeatLoginStatus } from "./collectorAuthState.js";
 import { capabilities, mayConfirmLogin, profileAuthenticationFromBrowser, type LoginWindowState, type ProfileAuthentication } from "./loginState.js";
 import { bind, heartbeat, uploadCanonicalPayload } from "../core/uploader/client.js";
@@ -42,8 +44,8 @@ import { CreatorDatabase } from "../core/database/creatorDatabase.js";
 import { canonicalJson, canonicalJsonHash } from "../core/database/sqliteValues.js";
 import { UploadQueueScheduler } from "../core/uploader/queueScheduler.js";
 import type { RebindInput } from "./types.js";
-const AGENT_VERSION = '2.13.2-agent';
-const SYSTEM_VERSION = '2.20.6';
+const AGENT_VERSION = '2.13.3-agent';
+const SYSTEM_VERSION = '2.20.8';
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
 const resourceDirectory = process.resourcesPath;
@@ -75,6 +77,7 @@ console.log(
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let syncing = false;
+let coverMetadataInspecting = false;
 let timer: NodeJS.Timeout | null = null;
 let heartbeatTimer: NodeJS.Timeout | null = null;
 let uploadQueueDatabase: CreatorDatabase | null = null;
@@ -448,6 +451,20 @@ async function performSync(sample = false): Promise<SyncResult> {
     await emit();
   }
 }
+/** Separate from performSync: no token read, database write, queue, scheduler or uploader. */
+async function performCoverMetadataInspection() {
+  assertDatabaseReady();
+  if (syncing || coverMetadataInspecting || uploadQueueScheduler?.isFlushing()) throw new Error('COVER_METADATA_SAFETY_GATE_BLOCKED');
+  const config = await readConfig();
+  if (!config || config.platform !== 'douyin' || !config.accountId) throw new Error('COVER_METADATA_BINDING_NOT_READY');
+  if (!await refreshProfileAuthentication(config, true) || profileAuthentication !== 'authenticated') throw new Error('COVER_METADATA_PROFILE_NOT_AUTHENTICATED');
+  coverMetadataInspecting = true;
+  try {
+    const browser = collectorBrowserLaunch(config.browserConfig);
+    await activeSession?.stop(); activeSession = null; browserConnected = false;
+    return await inspectCoverMetadata({ config, browser, profilePath: assertManagedProfile(managedProfile(paths().root, config.browserConfig, config.accountId), path.join(paths().root, 'profiles')), bridge: new ScraplingWorkerBridge(app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../..'), () => undefined, app.isPackaged) });
+  } finally { coverMetadataInspecting = false; await emit(); }
+}
 async function schedule() {
   if (timer) clearTimeout(timer);
   timer = null;
@@ -673,6 +690,7 @@ ipcMain.handle("agent:login-complete", async () => {
 function registerDatabaseReadyIpc() {
   ipcMain.handle("agent:sync", () => performSync());
   ipcMain.handle("agent:sync-sample", () => performSync(true));
+  ipcMain.handle('cover-metadata:inspect', () => performCoverMetadataInspection());
 }
 ipcMain.handle(
   "agent:settings",

@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.8', date: '2026-09-01', title: 'Creator 本地封面来源检查', impactScope: ['Creator Agent', '封面诊断'], changes: [{ type: 'feature', description: '新增独立本地封面候选检查，结果仅返回脱敏汇总。' }, { type: 'security', description: '检查路径不调用同步、上传、队列或官方导出下载。' }] },
   { version: '2.20.7', date: '2026-08-31', title: 'Creator 作品封面 URL 完整性', impactScope: ['Creator 作品库', '同步兼容'], changes: [{ type: 'fix', description: '拒绝相对路径和无效封面 URL，避免浏览器加载失败。' }, { type: 'fix', description: '读取旧数据时从既有 raw 字段恢复可解析封面，并保留已有有效封面。' }] },
   { version: '2.20.6', date: '2026-08-31', title: 'Creator Agent 认证与窗口状态解耦', impactScope: ['Creator Agent', 'macOS 正式包'], changes: [{ type: 'fix', description: '认证事实与临时登录窗口状态分离，Main 权威计算 canSync 和登录动作。' }, { type: 'security', description: 'Renderer 不能伪造同步能力；Main 在同步前再次校验认证、浏览器、绑定、Token 与数据库状态。' }] },
   { version: '2.20.5', date: '2026-08-31', title: 'Creator Agent 登录状态一致性', impactScope: ['Creator Agent', 'macOS 正式包'], changes: [{ type: 'fix', description: '登录窗口、确认按钮和浏览器显示统一由 Electron Main 状态机裁定，关闭或重启后不保留 Renderer 临时状态。' }, { type: 'improvement', description: '无可用浏览器时禁用登录与同步，并对 IPC 错误进行脱敏显示。' }] },

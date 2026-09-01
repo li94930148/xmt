@@ -2,6 +2,7 @@ import { queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { douyinDataNormalizer, type NormalizedDouyinContract, type NormalizedDouyinWork } from './douyinDataNormalizer.js';
 import { analyzeDouyinWorks, calculateDouyinAccountHealth, DOUYIN_OPERATIONS_FORMULAS, type DouyinMetricsWork } from './douyinOperationsAnalytics.js';
 import { resolveCoverUrl } from '../utils/coverResolver.js';
+import { canonicalizeDouyinWorks } from './canonicalWorks.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentIdentity = { id: number; user_id: number; platform: string; account_id: string };
@@ -45,27 +46,36 @@ function decodeCursor(value?: string): WorksCursor | null {
   } catch { return null; }
 }
 
-async function resolveWorkCovers<T extends DouyinMetricsWork>(account: Record<string, unknown>, works: T[]): Promise<Array<T & { cover_url: string }>> {
+async function resolveWorkCovers<T extends DouyinMetricsWork & { cover_candidates?: string[] }>(account: Record<string, unknown>, works: T[]): Promise<Array<T & { cover_url: string; cover_candidates: string[] }>> {
   if (!works.length) return [];
   const contentIds = works.map(work => number(work.content_id)).filter(id => id > 0);
   const itemIds = works.map(work => String(work.aweme_id || '')).filter(Boolean);
   const clauses: string[] = [];
   const params: unknown[] = [];
-  if (contentIds.length) {
-    clauses.push(`id IN (${contentIds.map(() => '?').join(',')})`);
-    params.push(...contentIds);
-  }
   const creatorAccountId = number(account.creator_account_id);
-  if (creatorAccountId && itemIds.length) {
-    clauses.push(`(account_id=? AND platform='douyin' AND platform_item_id IN (${itemIds.map(() => '?').join(',')}))`);
-    params.push(creatorAccountId, ...itemIds);
+  if (creatorAccountId) {
+    if (contentIds.length) {
+      clauses.push(`id IN (${contentIds.map(() => '?').join(',')})`);
+      params.push(...contentIds);
+    }
+    if (itemIds.length) {
+      clauses.push(`(platform='douyin' AND platform_item_id IN (${itemIds.map(() => '?').join(',')}))`);
+      params.push(...itemIds);
+    }
   }
-  const candidates = clauses.length ? await queryAll<Record<string, unknown>>(`SELECT id,platform_item_id,cover_url,raw_json FROM creator_content_items WHERE ${clauses.join(' OR ')}`, params) : [];
+  const candidates = creatorAccountId && clauses.length
+    ? await queryAll<Record<string, unknown>>(`SELECT id,platform_item_id,cover_url,raw_json FROM creator_content_items WHERE account_id=? AND (${clauses.join(' OR ')})`, [creatorAccountId, ...params])
+    : [];
   const byId = new Map(candidates.map(item => [number(item.id), item]));
   const byPlatformId = new Map(candidates.map(item => [String(item.platform_item_id || ''), item]));
   return works.map(work => {
     const creator = byId.get(number(work.content_id)) || byPlatformId.get(String(work.aweme_id || ''));
-    return { ...work, cover_url: resolveCoverUrl({ douyinCoverUrl: work.cover_url, creatorCoverUrl: creator?.cover_url, creatorRawJson: creator?.raw_json }) };
+    const candidates = [...new Set([
+      ...(work.cover_candidates || []),
+      resolveCoverUrl({ douyinCoverUrl: work.cover_url }),
+      resolveCoverUrl({ creatorCoverUrl: creator?.cover_url, creatorRawJson: creator?.raw_json }),
+    ].filter(Boolean))].slice(0, 4);
+    return { ...work, cover_url: candidates[0] || '', cover_candidates: candidates };
   });
 }
 
@@ -285,7 +295,8 @@ export async function getDouyinWorks(creatorAccountId: number, sort = 'latest', 
   const limit = Math.min(100, Math.max(1, Math.floor(requestedLimit) || 20));
   if (!account) return { items: [], next_cursor: null, has_more: false, page_size: limit };
   const works = await queryAll<DouyinMetricsWork>(`SELECT w.*,a.content_category,a.content_json FROM douyin_works w LEFT JOIN douyin_analysis_records a ON a.id=(SELECT id FROM douyin_analysis_records WHERE work_id=w.id ORDER BY snapshot_time DESC,id DESC LIMIT 1) WHERE w.account_id=?`, [account.id]);
-  const analyzed = analyzeDouyinWorks(works).works.map(work => ({ ...work, viral_tag: work.performance.is_viral ? '爆款' : '' }));
+  const canonical = canonicalizeDouyinWorks(works);
+  const analyzed = analyzeDouyinWorks(canonical).works.map(work => ({ ...work, viral_tag: work.performance.is_viral ? '爆款' : '' }));
   const stableNewestFirst = (left: typeof analyzed[number], right: typeof analyzed[number]) =>
     new Date(String(right.publish_time || 0)).getTime() - new Date(String(left.publish_time || 0)).getTime()
     || number(right.id) - number(left.id);

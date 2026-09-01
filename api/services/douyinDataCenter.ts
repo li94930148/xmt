@@ -46,27 +46,36 @@ function decodeCursor(value?: string): WorksCursor | null {
   } catch { return null; }
 }
 
-async function resolveWorkCovers<T extends DouyinMetricsWork>(account: Record<string, unknown>, works: T[]): Promise<Array<T & { cover_url: string }>> {
+async function resolveWorkCovers<T extends DouyinMetricsWork & { cover_candidates?: string[] }>(account: Record<string, unknown>, works: T[]): Promise<Array<T & { cover_url: string; cover_candidates: string[] }>> {
   if (!works.length) return [];
   const contentIds = works.map(work => number(work.content_id)).filter(id => id > 0);
   const itemIds = works.map(work => String(work.aweme_id || '')).filter(Boolean);
   const clauses: string[] = [];
   const params: unknown[] = [];
-  if (contentIds.length) {
-    clauses.push(`id IN (${contentIds.map(() => '?').join(',')})`);
-    params.push(...contentIds);
-  }
   const creatorAccountId = number(account.creator_account_id);
-  if (creatorAccountId && itemIds.length) {
-    clauses.push(`(account_id=? AND platform='douyin' AND platform_item_id IN (${itemIds.map(() => '?').join(',')}))`);
-    params.push(creatorAccountId, ...itemIds);
+  if (creatorAccountId) {
+    if (contentIds.length) {
+      clauses.push(`id IN (${contentIds.map(() => '?').join(',')})`);
+      params.push(...contentIds);
+    }
+    if (itemIds.length) {
+      clauses.push(`(platform='douyin' AND platform_item_id IN (${itemIds.map(() => '?').join(',')}))`);
+      params.push(...itemIds);
+    }
   }
-  const candidates = clauses.length ? await queryAll<Record<string, unknown>>(`SELECT id,platform_item_id,cover_url,raw_json FROM creator_content_items WHERE ${clauses.join(' OR ')}`, params) : [];
+  const candidates = creatorAccountId && clauses.length
+    ? await queryAll<Record<string, unknown>>(`SELECT id,platform_item_id,cover_url,raw_json FROM creator_content_items WHERE account_id=? AND (${clauses.join(' OR ')})`, [creatorAccountId, ...params])
+    : [];
   const byId = new Map(candidates.map(item => [number(item.id), item]));
   const byPlatformId = new Map(candidates.map(item => [String(item.platform_item_id || ''), item]));
   return works.map(work => {
     const creator = byId.get(number(work.content_id)) || byPlatformId.get(String(work.aweme_id || ''));
-    return { ...work, cover_url: resolveCoverUrl({ douyinCoverUrl: work.cover_url, creatorCoverUrl: creator?.cover_url, creatorRawJson: creator?.raw_json }) };
+    const candidates = [...new Set([
+      ...(work.cover_candidates || []),
+      resolveCoverUrl({ douyinCoverUrl: work.cover_url }),
+      resolveCoverUrl({ creatorCoverUrl: creator?.cover_url, creatorRawJson: creator?.raw_json }),
+    ].filter(Boolean))].slice(0, 4);
+    return { ...work, cover_url: candidates[0] || '', cover_candidates: candidates };
   });
 }
 

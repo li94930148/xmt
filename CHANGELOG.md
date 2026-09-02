@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.20.12 - 2026-09-02
+
+- 新增封面候选 HEAD、有限 Range GET 与固定 Creator Referer 的脱敏 403 分类，未转发认证信息或持久化图片。
+- Creator Agent 升级至 v2.13.7-agent；未使用正式 Profile 或真实候选复验。
+
 ## 2.20.11 - 2026-09-02
 
 - 修复 Creator 内容页 XHR 正则的双重转义错误；精确 Creator HTTPS 来源捕获为空时不再伪装为成功的作品 0。

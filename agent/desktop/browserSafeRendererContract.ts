@@ -1,20 +1,4 @@
-import crypto from 'node:crypto';
-import type { AgentConfig } from '../core/types.js';
 import type { DesktopState, RendererAccountIdentity, RendererSettings } from './types.js';
-
-const auditTag = (accountId:string, deviceId:string) => {
-  return crypto.createHmac('sha256', deviceId).update(`renderer-account-audit:v1:${accountId}`).digest('hex').slice(0, 10).toUpperCase();
-};
-
-export function rendererAccountIdentity(config:AgentConfig|undefined, authenticated:boolean):RendererAccountIdentity {
-  if (!config?.accountId || !config.deviceId) return {is_bound:false,platform_label:'抖音',account_audit_tag:'',scope_status:'unconfirmed'};
-  return {is_bound:true,platform_label:'抖音',account_audit_tag:auditTag(config.accountId,config.deviceId),scope_status:authenticated?'confirmed':'unconfirmed'};
-}
-
-export function rendererSettings(config:AgentConfig|undefined):RendererSettings|undefined {
-  if (!config) return undefined;
-  return {serverUrl:config.serverUrl,syncConfig:{enabled:config.syncConfig.enabled,interval:config.syncConfig.interval,dailyHour:config.syncConfig.dailyHour},browserConfig:{id:config.browserConfig.id,executablePath:config.browserConfig.executablePath}};
-}
 
 const object = (value:unknown):Record<string,unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string,unknown> : {};
 const text = (value:unknown, fallback='') => typeof value === 'string' ? value : fallback;
@@ -23,7 +7,7 @@ const number = (value:unknown) => Number.isSafeInteger(value) ? Number(value) : 
 const oneOf = <T extends string>(value:unknown, allowed:readonly T[], fallback:T) => allowed.includes(value as T) ? value as T : fallback;
 const browser = (value:unknown) => { const item=object(value); return {id:text(item.id),displayName:text(item.displayName),type:text(item.type),engine:text(item.engine),runtime:text(item.runtime),...(typeof item.version==='string'?{version:item.version}:{}),compatibilityStatus:text(item.compatibilityStatus)}; };
 
-/** Drops unknown fields at the IPC boundary so Renderer state can never retain raw binding identity. */
+/** Pure runtime whitelist for data already redacted by Electron Main. */
 export function sanitizeRendererState(value:unknown):DesktopState {
   const input=object(value), account=object(input.account), settings=object(input.settings), syncConfig=object(settings.syncConfig), browserConfig=object(settings.browserConfig), capability=object(input.capabilities), identity=object(input.runtimeIdentity);
   const normalizedAccount:RendererAccountIdentity={is_bound:bool(account.is_bound),platform_label:'抖音',account_audit_tag:/^[A-F0-9]{8,12}$/.test(text(account.account_audit_tag))?text(account.account_audit_tag):'',scope_status:oneOf(account.scope_status,['confirmed','unconfirmed','mismatch'] as const,'unconfirmed')};

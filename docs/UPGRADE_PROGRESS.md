@@ -1825,3 +1825,9 @@
 - 数据库变化：新增 `creator_ingest_batches`、`creator_ingest_files`、`creator_official_metrics`，仅追加且不删除历史数据。
 - 测试：Agent/root typecheck、Agent build、v1 安全与同步契约、v2 官方导出契约、真实样本本地解析均通过。
 - 风险：仅确认两类实际下载文件，官方页面入口完整覆盖和异步任务流仍待用户提供脱敏截图或 URL；当前不部署生产。
+## v2.20.10 Creator Agent Preload 浏览器安全契约（2026-09-02）
+
+- 修复 sandboxed Preload 经状态契约间接导入 `node:crypto` 导致正式 Renderer 空白。
+- 设备键控 HMAC 与真实绑定配置保留在 Main-only 模块；Preload/Renderer 仅消费已脱敏的纯浏览器白名单状态。
+- 新增最终打包 arm64 制品的 sandbox/contextIsolation/nodeIntegration 冒烟门禁；仅使用临时 userData 与 loopback fixture。
+- 无数据库迁移、无生产数据写入；正式安装和真实 Profile 验收需单独授权。

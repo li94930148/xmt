@@ -7,7 +7,7 @@ const path = require('node:path');
 const agentRoot = path.resolve(__dirname, '..');
 const version = JSON.parse(fs.readFileSync(path.join(agentRoot, 'package.json'), 'utf8')).version;
 const releaseVersion = version.replace(/-agent$/, '');
-const archive = path.join(agentRoot, 'release', `XMT-Creator-Agent-v${releaseVersion}-macos-arm64.zip`);
+const archive = path.join(process.env.XMT_AGENT_RELEASE_DIRECTORY ? path.resolve(process.env.XMT_AGENT_RELEASE_DIRECTORY) : path.join(agentRoot, 'release'), `XMT-Creator-Agent-v${releaseVersion}-macos-arm64.zip`);
 const appName = 'XMT Creator Agent.app';
 const forbidden = /(^|[\\/])(config\.json|creator\.db|[^\\/]*\.(?:sqlite|xlsx)|cookies?|agent-token\.bin|sync\.log)(?:$|[\\/])/i;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

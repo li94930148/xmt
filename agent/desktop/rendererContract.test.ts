@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { rendererAccountIdentity, sanitizeRendererState } from './rendererContract.js';
+import { rendererAccountIdentity } from './mainOnlyAccountIdentity.js';
+import { sanitizeRendererState } from './browserSafeRendererContract.js';
 import type { AgentConfig } from '../core/types.js';
 
 const raw:AgentConfig={accountId:'fixture-account-id-7391',accountName:'Fixture Creator Nickname',deviceId:'fixture-device-id-1001',agentId:17,serverUrl:'https://fixture.invalid',platform:'douyin',browserConfig:{id:'browser-fixture',type:'custom',engine:'chromium',runtime:'system',sessionMode:'persistent',profileName:'fixture',headless:false,launchArgs:[],autoFallback:false},syncConfig:{enabled:false,interval:'manual',dailyHour:2}};
@@ -23,8 +24,9 @@ test('preload state contract drops raw binding fields, unknown fields, logs and 
 });
 
 test('metadata-only bridge takes no renderer account parameter and renderer sources avoid client storage or raw error rendering',()=>{
-  const root=process.cwd(), preload=readFileSync(path.join(root,'desktop/preload.ts'),'utf8');
-  assert.match(preload,/inspectCoverMetadata:\(\)=>ipcRenderer\.invoke\('cover-metadata:inspect'\)/);
+  const root=process.cwd(), preload=readFileSync(path.join(root,'desktop/preload.ts'),'utf8'), preloadApi=readFileSync(path.join(root,'desktop/preloadApi.ts'),'utf8');
+  assert.match(preload,/createDesktopApi\(ipcRenderer\)/);
+  assert.match(preloadApi,/inspectCoverMetadata:\(\)=>ipcRenderer\.invoke\('cover-metadata:inspect'\)/);
   for(const file of ['renderer/App.tsx','renderer/Dashboard.tsx','renderer/Settings.tsx','renderer/Login.tsx']){
     const source=readFileSync(path.join(root,'desktop',file),'utf8');
     assert.doesNotMatch(source,/localStorage|sessionStorage|console\.|cause\.message|accountName|accountId/);

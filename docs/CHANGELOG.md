@@ -1,5 +1,16 @@
 # XMT 系统更新日志
 
+## v2.20.10 - 2026-09-02
+
+### 修复
+
+- 将 Creator Agent 的 Main-only HMAC 身份投影与 Preload/Renderer 的纯浏览器安全状态契约拆分，避免 sandboxed Preload 导入 Node 内置模块。
+- Preload API 缺失时 Renderer 显示固定脱敏错误页；最终 macOS arm64 打包制品验证 contextBridge 与非空界面。
+
+### 技术升级
+
+- Agent 升级至 `v2.13.5-agent`；不新增迁移，不改变普通同步或 metadata-only 的 Main 权威门禁。
+
 ## v2.20.9 - 2026-09-01
 
 ### 安全修复

@@ -3,6 +3,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import Dashboard from './Dashboard';
+import App from './App';
 import type { DesktopState } from '../types';
 
 const secretId='fixture-account-id-7391', secretName='Fixture Creator Nickname';
@@ -19,4 +20,10 @@ test('unconfirmed or mismatched scope fails closed for metadata-only UI',()=>{
     const html=renderToStaticMarkup(<Dashboard state={{...state,account:{...state.account,scope_status}}} onLogin={async()=>undefined} onLoginComplete={async()=>undefined} onSync={async()=>({} as never)} onInspectCoverMetadata={async()=>({} as never)}/>);
     assert.match(html,/aria-label="检查最新封面来源，仅本地执行" disabled=""/);
   }
+});
+
+test('missing preload bridge renders a fixed, redacted failure page instead of a blank renderer',()=>{
+  const html=renderToStaticMarkup(<App/>);
+  assert.equal(html,'<div class="fatal">安全接口加载失败，请退出并重新安装 Creator Agent。</div>');
+  assert.equal(html.includes(secretId),false);
 });

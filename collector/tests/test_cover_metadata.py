@@ -1,6 +1,8 @@
 from xmt_collector.platforms.douyin import cover_metadata
 from xmt_collector.platforms.douyin.cover_metadata import cover_candidates, ttl_seconds
+from xmt_collector.platforms.douyin.adapter import creator_xhr_url
 from pathlib import Path
+import re
 
 def test_cover_candidates_only_returns_unique_http_urls():
     value={"cover":{"url_list":["https://image.example/a","https://image.example/a","javascript:bad"]}}
@@ -37,3 +39,22 @@ def test_worker_route_is_explicit_and_unknown_modes_fail_closed():
     assert 'elif request.method in {"login", "collect", "start"}' in source
     assert '"unknown_method"' in source
     assert "self.collect(request.id, request.params, request.method)" not in source.split('elif request.method == "cover_metadata_only"', 1)[1].split('elif request.method in {"login", "collect", "start"}', 1)[0]
+
+def test_creator_xhr_pattern_regression_and_exact_origin_filter():
+    old = re.compile(r"https://creator\\.douyin\\.com/.*")
+    fixed = re.compile(r"^https://creator\.douyin\.com(?:/|$)")
+    assert old.fullmatch("https://creator.douyin.com/path") is None
+    for value in ["https://creator.douyin.com/path", "https://creator.douyin.com/path?x=fixture"]:
+        assert fixed.match(value)
+        assert creator_xhr_url(value)
+    for value in ["http://creator.douyin.com/path", "https://creator.douyin.com.evil.example/path", "https://user:pass@creator.douyin.com/path", "https://sub.creator.douyin.com/path", r"https://creator\.douyin\.com/path"]:
+        assert fixed.match(value) is None or not creator_xhr_url(value)
+        assert not creator_xhr_url(value)
+
+def test_metadata_only_source_failure_is_a_fixed_code_not_empty_success():
+    worker = Path(__file__).parents[1] / "xmt_collector" / "runtime" / "worker.py"
+    source = worker.read_text(encoding="utf-8")
+    adapter = Path(__file__).parents[1] / "xmt_collector" / "platforms" / "douyin" / "adapter.py"
+    assert 'CoverMetadataFailure("COVER_METADATA_SOURCE_NOT_FOUND")' in adapter.read_text(encoding="utf-8")
+    assert 'failed(error.code, "source_not_found")' in source
+    assert '"execution_status": "failed"' in source

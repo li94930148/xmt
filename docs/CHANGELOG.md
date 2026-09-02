@@ -1,5 +1,12 @@
 # XMT 系统更新日志
 
+## v2.20.11 - 2026-09-02
+
+### 修复
+
+- 修复 Creator 内容页 XHR 双重转义导致 metadata-only 未捕获来源却显示作品 0 的问题。
+- Main、Bridge、Preload 与 Renderer 仅投影固定错误码和阶段聚合；Agent 为 `v2.13.6-agent`，无迁移和生产数据变更。
+
 ## v2.20.10 - 2026-09-02
 
 ### 修复

@@ -1,5 +1,10 @@
 # XMT 升级阶段记录
 
+## v2.20.9 Creator Agent Renderer 账号标识脱敏（2026-09-01）
+
+- 完整绑定配置不再跨 Main/Renderer 边界；Renderer 仅接收短审计标识、绑定状态和范围状态。
+- 数据库变化：无；普通同步与 metadata-only 仍由 Main 内部解析绑定账号。
+
 ## v2.20.8 Creator 封面 metadata-only（2026-09-01）
 
 - 新增独立 Electron IPC、Bridge 与 Worker 白名单任务，只读检查内容管理页的封面候选并返回脱敏汇总。

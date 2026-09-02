@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.20.9 - 2026-09-01
+
+- 修复 Creator Agent Renderer 直接透传绑定配置导致账号标识暴露的问题；界面现在仅显示 Main 生成的短审计标识与账号范围状态。
+- Preload 对状态 IPC 进行运行时白名单投影，未知字段、日志和原始错误上下文不会进入 Renderer。
+- Creator Agent 升级至 v2.13.4-agent；不新增数据库迁移，不改变同步、上传或 metadata-only 的零副作用边界。
+
 ## 2.20.8 - 2026-09-01
 
 - 新增本地封面 metadata-only 检查；Creator Agent v2.13.3-agent 与业务同步、队列和上传隔离，无数据库迁移。

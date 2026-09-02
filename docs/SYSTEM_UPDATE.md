@@ -2,7 +2,12 @@
 
 ## 当前版本
 
-v2.20.9
+v2.20.10
+
+## v2.20.10 Creator Agent Preload 浏览器安全契约
+
+- Main-only 身份投影保留设备键控 HMAC；Preload 与 Renderer 不再运行时导入 `node:crypto` 或绑定配置。
+- sandboxed Preload 未建立 contextBridge 时，Renderer 显示固定脱敏错误页而不再空白。
 
 ## v2.20.9 Creator Agent Renderer 账号标识脱敏
 

@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.10', date: '2026-09-02', title: 'Creator Agent Preload 沙箱兼容', impactScope: ['Creator Agent', '安全'], changes: [{ type: 'fix', description: '将 Main-only HMAC 身份投影与浏览器安全 Preload 契约拆分，修复正式包 Renderer 空白。' }, { type: 'security', description: 'Bridge 缺失时显示固定脱敏错误页，Preload 构建产物禁止包含 Node crypto。' }] },
   { version: '2.20.9', date: '2026-09-01', title: 'Creator Agent 账号标识脱敏', impactScope: ['Creator Agent', '安全'], changes: [{ type: 'security', description: 'Renderer 仅接收短审计标识和范围状态，完整绑定配置不再跨 IPC。' }] },
   { version: '2.20.8', date: '2026-09-01', title: 'Creator 本地封面来源检查', impactScope: ['Creator Agent', '封面诊断'], changes: [{ type: 'feature', description: '新增独立本地封面候选检查，结果仅返回脱敏汇总。' }, { type: 'security', description: '检查路径不调用同步、上传、队列或官方导出下载。' }] },
   { version: '2.20.7', date: '2026-08-31', title: 'Creator 作品封面 URL 完整性', impactScope: ['Creator 作品库', '同步兼容'], changes: [{ type: 'fix', description: '拒绝相对路径和无效封面 URL，避免浏览器加载失败。' }, { type: 'fix', description: '读取旧数据时从既有 raw 字段恢复可解析封面，并保留已有有效封面。' }] },

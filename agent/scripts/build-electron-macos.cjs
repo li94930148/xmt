@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const repositoryRoot = path.resolve(root, '..');
-const release = path.join(root, 'release');
+const release = process.env.XMT_AGENT_RELEASE_DIRECTORY ? path.resolve(process.env.XMT_AGENT_RELEASE_DIRECTORY) : path.join(root, 'release');
 const appName = 'XMT Creator Agent.app';
 const app = path.join(release, appName);
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;

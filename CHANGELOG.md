@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.20.10 - 2026-09-02
+
+- 修复 Creator Agent sandboxed Preload 运行时误导入 `node:crypto` 导致 contextBridge 未建立、Renderer 空白的问题。
+- 账号短审计标识 HMAC 保留在 Electron Main；Preload 和 Renderer 只使用纯浏览器安全的白名单契约，并增加最终打包制品依赖门禁与 sandbox 冒烟测试。
+- Creator Agent 升级至 v2.13.5-agent；无数据库迁移，不执行同步、上传或 metadata-only。
+
 ## 2.20.9 - 2026-09-01
 
 - 修复 Creator Agent Renderer 直接透传绑定配置导致账号标识暴露的问题；界面现在仅显示 Main 生成的短审计标识与账号范围状态。

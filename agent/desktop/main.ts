@@ -43,9 +43,10 @@ import { CreatorDatabase } from "../core/database/creatorDatabase.js";
 import { canonicalJson, canonicalJsonHash } from "../core/database/sqliteValues.js";
 import { UploadQueueScheduler } from "../core/uploader/queueScheduler.js";
 import type { RebindInput } from "./types.js";
-import { rendererAccountIdentity, rendererSettings, sanitizeRendererState } from './rendererContract.js';
-const AGENT_VERSION = '2.13.4-agent';
-const SYSTEM_VERSION = '2.20.9';
+import { rendererAccountIdentity, rendererSettings } from './mainOnlyAccountIdentity.js';
+import { sanitizeRendererState } from './browserSafeRendererContract.js';
+const AGENT_VERSION = '2.13.5-agent';
+const SYSTEM_VERSION = '2.20.10';
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
 const resourceDirectory = process.resourcesPath;
@@ -93,6 +94,7 @@ let databaseReady = false;
 let databaseSchemaVersion = 0;
 let databaseInitializationError: string | undefined;
 let packageContractToken: string | undefined;
+const isIsolatedPreloadSmoke = () => process.env.NODE_ENV === 'test' && process.env.XMT_AGENT_PRELOAD_SMOKE === '1' && Boolean(process.env.XMT_AGENT_TEST_DATA_ROOT);
 const paths = () => {
   const testRoot = process.env.NODE_ENV === 'test' ? process.env.XMT_AGENT_TEST_DATA_ROOT : undefined;
   const root = testRoot || (portableMode ? portableDataRoot : app.getPath("userData"));
@@ -135,6 +137,31 @@ async function initializePackageContractBootstrap() {
   const database = new CreatorDatabase(paths().database);
   database.enqueueUpload({ batch_id: crypto.randomUUID(), platform: "douyin", platform_account_id: config.accountId, source_file_sha256: "a".repeat(64), parser_version: "package-contract", payload_json: payloadJson, payload_sha256: canonicalJsonHash(payloadJson) });
   database.close();
+}
+async function initializePreloadSmokeBootstrap() {
+  if (!isIsolatedPreloadSmoke()) return;
+  const serialized = process.env.XMT_AGENT_PRELOAD_SMOKE_BOOTSTRAP;
+  if (!serialized) throw new Error('PRELOAD_SMOKE_BOOTSTRAP_REQUIRED');
+  const bootstrap = JSON.parse(serialized) as { serverUrl?: unknown };
+  if (typeof bootstrap.serverUrl !== 'string' || !loopbackUrl(bootstrap.serverUrl)) throw new Error('PRELOAD_SMOKE_REQUIRES_LOOPBACK');
+  await writeConfig({
+    serverUrl: bootstrap.serverUrl,
+    agentId: 1,
+    deviceId: 'preload-smoke-device',
+    platform: 'douyin',
+    accountId: 'preload-smoke-account',
+    accountName: 'preload-smoke-account',
+    browserConfig: { id: 'preload-smoke', type: 'chromium', engine: 'chromium', runtime: 'playwright', executablePath: '/nonexistent', sessionMode: 'persistent', profileName: 'default', headless: false, launchArgs: [], autoFallback: false },
+    syncConfig: { enabled: false, interval: 'manual', dailyHour: 2 },
+  });
+}
+async function writeRuntimeProbe(extra:Record<string,unknown>={}) {
+  const runtimeProbe = process.env.XMT_AGENT_RUNTIME_PROBE_FILE;
+  if (!runtimeProbe) return;
+  await fs.mkdir(path.dirname(runtimeProbe), { recursive: true });
+  let previous:Record<string,unknown>={};
+  try { previous=JSON.parse(await fs.readFile(runtimeProbe,'utf8')) as Record<string,unknown>; } catch { /* Initial probe write. */ }
+  await fs.writeFile(runtimeProbe, JSON.stringify({...previous,runtimeIdentity:(await state()).runtimeIdentity,resourcesPath:process.resourcesPath,rendererUrl:process.env.ELECTRON_RENDERER_URL||null,...extra},null,2),'utf8');
 }
 async function log(message: string) {
   const p = paths();
@@ -511,10 +538,11 @@ function createWindow() {
     },
   });
   mainWindow.webContents.once("did-finish-load", async () => {
-    const preloadReady = await mainWindow?.webContents.executeJavaScript(
-      `typeof window.xmtAgent === 'object'`,
-    );
-    console.log("renderer loaded, preload API:", preloadReady);
+    try {
+      const renderer = await mainWindow?.webContents.executeJavaScript(`(() => { const text=document.body?.innerText||''; return {preloadApi:typeof window.xmtAgent==='object',surface:text.includes('安全接口加载失败')?'safe-error':text.trim()?'content':'blank'}; })()`);
+      console.log("renderer loaded, preload API:", renderer?.preloadApi === true);
+      await writeRuntimeProbe({renderer});
+    } catch { await writeRuntimeProbe({renderer:{preloadApi:false,surface:'blank'}}); }
   });
   mainWindow.webContents.on("did-fail-load", (_event, code, description, url) =>
     console.error("renderer load failed:", { code, description, url }),
@@ -806,15 +834,12 @@ app.whenReady().then(async () => {
   globalThis.fetch = net.fetch as typeof fetch;
   initializeDatabase();
   await initializePackageContractBootstrap();
+  await initializePreloadSmokeBootstrap();
   createWindow();
   createTray();
-  if (databaseReady) { registerDatabaseReadyIpc(); startHeartbeat(); await startUploadQueueScheduler(); }
-  await schedule();
-  const runtimeProbe = process.env.XMT_AGENT_RUNTIME_PROBE_FILE;
-  if (runtimeProbe) {
-    await fs.mkdir(path.dirname(runtimeProbe), { recursive: true });
-    await fs.writeFile(runtimeProbe, JSON.stringify({ runtimeIdentity: (await state()).runtimeIdentity, resourcesPath: process.resourcesPath, rendererUrl: process.env.ELECTRON_RENDERER_URL || null }, null, 2), "utf8");
-  }
+  if (databaseReady) { registerDatabaseReadyIpc(); if (!isIsolatedPreloadSmoke()) { startHeartbeat(); await startUploadQueueScheduler(); } }
+  if (!isIsolatedPreloadSmoke()) await schedule();
+  await writeRuntimeProbe();
   app.on("activate", () => mainWindow?.show());
 }).catch(async (error) => {
   const runtimeProbe = process.env.XMT_AGENT_RUNTIME_PROBE_FILE;

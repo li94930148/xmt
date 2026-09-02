@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.20.9
+v2.20.10
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.20.9
 
 ## 本版本摘要
 
-本版本修复 Creator Agent Renderer 账号标识脱敏；Agent 升级为 v2.13.4-agent。Renderer 仅接收短审计标识与范围状态，检查不会上传、入队、下载 Excel 或修改生产数据。
+本版本修复 Creator Agent sandboxed Preload 的浏览器安全契约；Agent 升级为 v2.13.5-agent。HMAC 仅在 Main，Renderer 继续只接收短审计标识与范围状态。

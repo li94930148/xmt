@@ -1,6 +1,4 @@
-import type { DesktopApi,DesktopState,SetupInput } from './types.js';
 import {contextBridge,ipcRenderer} from 'electron';
-import {sanitizeRendererState} from './rendererContract.js';
-const safeState=(value:unknown)=>sanitizeRendererState(value);
-const api:DesktopApi={getState:async()=>safeState(await ipcRenderer.invoke('agent:get-state')),setup:async(input:SetupInput)=>safeState(await ipcRenderer.invoke('agent:setup',input)),rebind:async input=>safeState(await ipcRenderer.invoke('agent:rebind',input)),openDouyinLogin:()=>ipcRenderer.invoke('agent:login-open'),completeDouyinLogin:async()=>safeState(await ipcRenderer.invoke('agent:login-complete')),syncSample:()=>ipcRenderer.invoke('agent:sync-sample'),syncNow:()=>ipcRenderer.invoke('agent:sync'),inspectCoverMetadata:()=>ipcRenderer.invoke('cover-metadata:inspect'),saveSettings:async input=>safeState(await ipcRenderer.invoke('agent:settings',input)),chooseBrowser:()=>ipcRenderer.invoke('agent:choose-browser'),restartBrowser:async()=>safeState(await ipcRenderer.invoke('agent:browser-restart')),clearBrowserProfile:async()=>{const result=await ipcRenderer.invoke('agent:browser-profile-clear');return {cleared:result?.cleared===true,state:safeState(result?.state)};},onState(listener){const handler=(_event:unknown,state:unknown)=>listener(safeState(state));ipcRenderer.on('agent:state',handler);return()=>ipcRenderer.removeListener('agent:state',handler);}};
-contextBridge.exposeInMainWorld('xmtAgent',api);
+import {createDesktopApi} from './preloadApi.js';
+
+contextBridge.exposeInMainWorld('xmtAgent',createDesktopApi(ipcRenderer));

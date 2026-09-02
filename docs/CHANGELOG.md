@@ -1,5 +1,20 @@
 # XMT 系统更新日志
 
+## v2.20.9 - 2026-09-01
+
+### 安全修复
+
+- Creator Agent Renderer 不再接收完整绑定配置、账号 ID、设备绑定 ID 或完整昵称；仅显示 Main 生成的短审计标识与范围状态。
+- `agent:get-state` 与 `agent:state` 经 preload 运行时白名单投影；未知字段、历史日志和原始异常上下文不会进入 Renderer、DOM 或可访问性树。
+
+### 技术升级
+
+- Agent 升级至 `v2.13.4-agent`。普通同步和 metadata-only 继续由 Main 内部解析当前绑定账号。
+
+### 数据库变化
+
+- 无。
+
 ## v2.20.8 - 2026-09-01
 
 ### 新增

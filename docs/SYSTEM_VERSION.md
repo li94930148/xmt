@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v2.20.8
+v2.20.9
 
 ## 版本规则
 
@@ -12,4 +12,4 @@ v2.20.8
 
 ## 本版本摘要
 
-本版本新增 Creator Agent 本地封面来源检查；Agent 升级为 v2.13.3-agent。检查不会上传、入队、下载 Excel 或修改生产数据。
+本版本修复 Creator Agent Renderer 账号标识脱敏；Agent 升级为 v2.13.4-agent。Renderer 仅接收短审计标识与范围状态，检查不会上传、入队、下载 Excel 或修改生产数据。

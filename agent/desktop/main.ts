@@ -7,7 +7,6 @@ import {
   nativeImage,
   net,
   safeStorage,
-  shell,
   Tray,
 } from "electron";
 import fs from "node:fs/promises";
@@ -44,8 +43,9 @@ import { CreatorDatabase } from "../core/database/creatorDatabase.js";
 import { canonicalJson, canonicalJsonHash } from "../core/database/sqliteValues.js";
 import { UploadQueueScheduler } from "../core/uploader/queueScheduler.js";
 import type { RebindInput } from "./types.js";
-const AGENT_VERSION = '2.13.3-agent';
-const SYSTEM_VERSION = '2.20.8';
+import { rendererAccountIdentity, rendererSettings, sanitizeRendererState } from './rendererContract.js';
+const AGENT_VERSION = '2.13.4-agent';
+const SYSTEM_VERSION = '2.20.9';
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
 const resourceDirectory = process.resourcesPath;
@@ -139,10 +139,9 @@ async function initializePackageContractBootstrap() {
 async function log(message: string) {
   const p = paths();
   await fs.mkdir(p.logs, { recursive: true });
-  const safe = message.replace(
-    /cookie|password|authorization|token/gi,
-    "[redacted]",
-  );
+  const config = await readConfig();
+  const sensitive = [config?.accountId, config?.accountName, config?.agentId && String(config.agentId), config?.deviceId].filter((value):value is string => Boolean(value));
+  const safe = sensitive.reduce((line, value) => line.split(value).join('[redacted]'), message).replace(/cookie|password|authorization|token/gi,"[redacted]");
   await fs.appendFile(p.log, `[${new Date().toISOString()}] ${safe}\n`, "utf8");
 }
 function defaultBrowserConfig() {
@@ -298,17 +297,6 @@ function fingerprint() {
     )
     .digest("hex");
 }
-async function recentLogs() {
-  try {
-    return (await fs.readFile(paths().log, "utf8"))
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .slice(-100)
-      .reverse();
-  } catch {
-    return [];
-  }
-}
 function desktopBrowser(info: BrowserInfo) {
   return { id: info.id, displayName: info.displayName, type: info.browserType, engine: info.engine, runtime: info.runtime, version: info.version, compatibilityStatus: info.compatibilityStatus };
 }
@@ -332,14 +320,14 @@ async function state(): Promise<DesktopState> {
   const currentBrowser = activeSession?.isConnected()
     ? desktopBrowser(activeSession.getBrowserInfo())
     : browsers.find((item) => item.id === config?.browserConfig.id || item.id === config?.browserConfig.lastSuccessfulId);
-  return {
+  const value = {
     connected: Boolean(config && fsSync.existsSync(paths().token)),
     configured: Boolean(config),
     syncing,
     lastSyncAt,
-    lastError,
-    config: config || undefined,
-    logs: await recentLogs(),
+    account: rendererAccountIdentity(config || undefined, profileAuthentication === 'authenticated'),
+    settings: rendererSettings(config || undefined),
+    logs: [],
     autoLaunch: portableMode ? false : app.getLoginItemSettings().openAtLogin,
     portableMode,
     browserConnected,
@@ -351,7 +339,8 @@ async function state(): Promise<DesktopState> {
     currentBrowser,
     runtimeIdentity: { systemVersion: SYSTEM_VERSION, agentVersion: AGENT_VERSION, buildId: BUILD_ID, mainPid: process.pid, packaged: app.isPackaged, databaseReady, databaseSchemaVersion, uploadQueue: databaseReady, workerRuntime: app.isPackaged ? 'packaged' : 'development', apiTarget: apiTarget(config?.serverUrl) },
     browsers,
-  };
+  } satisfies DesktopState;
+  return sanitizeRendererState(value);
 }
 async function emit() {
   const value = await state();
@@ -812,10 +801,6 @@ ipcMain.handle("agent:browser-profile-clear", async () => {
     `已清理当前账号的独立浏览器资料：${config.browserConfig.type}/${config.accountId}`,
   );
   return { cleared: true, state: await emit() };
-});
-ipcMain.handle("agent:open-logs", async () => {
-  await fs.mkdir(paths().logs, { recursive: true });
-  await shell.openPath(paths().logs);
 });
 app.whenReady().then(async () => {
   globalThis.fetch = net.fetch as typeof fetch;

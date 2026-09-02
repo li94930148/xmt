@@ -1,0 +1,33 @@
+import crypto from 'node:crypto';
+import type { AgentConfig } from '../core/types.js';
+import type { DesktopState, RendererAccountIdentity, RendererSettings } from './types.js';
+
+const auditTag = (accountId:string, deviceId:string) => {
+  return crypto.createHmac('sha256', deviceId).update(`renderer-account-audit:v1:${accountId}`).digest('hex').slice(0, 10).toUpperCase();
+};
+
+export function rendererAccountIdentity(config:AgentConfig|undefined, authenticated:boolean):RendererAccountIdentity {
+  if (!config?.accountId || !config.deviceId) return {is_bound:false,platform_label:'抖音',account_audit_tag:'',scope_status:'unconfirmed'};
+  return {is_bound:true,platform_label:'抖音',account_audit_tag:auditTag(config.accountId,config.deviceId),scope_status:authenticated?'confirmed':'unconfirmed'};
+}
+
+export function rendererSettings(config:AgentConfig|undefined):RendererSettings|undefined {
+  if (!config) return undefined;
+  return {serverUrl:config.serverUrl,syncConfig:{enabled:config.syncConfig.enabled,interval:config.syncConfig.interval,dailyHour:config.syncConfig.dailyHour},browserConfig:{id:config.browserConfig.id,executablePath:config.browserConfig.executablePath}};
+}
+
+const object = (value:unknown):Record<string,unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string,unknown> : {};
+const text = (value:unknown, fallback='') => typeof value === 'string' ? value : fallback;
+const bool = (value:unknown) => value === true;
+const number = (value:unknown) => Number.isSafeInteger(value) ? Number(value) : 0;
+const oneOf = <T extends string>(value:unknown, allowed:readonly T[], fallback:T) => allowed.includes(value as T) ? value as T : fallback;
+const browser = (value:unknown) => { const item=object(value); return {id:text(item.id),displayName:text(item.displayName),type:text(item.type),engine:text(item.engine),runtime:text(item.runtime),...(typeof item.version==='string'?{version:item.version}:{}),compatibilityStatus:text(item.compatibilityStatus)}; };
+
+/** Drops unknown fields at the IPC boundary so Renderer state can never retain raw binding identity. */
+export function sanitizeRendererState(value:unknown):DesktopState {
+  const input=object(value), account=object(input.account), settings=object(input.settings), syncConfig=object(settings.syncConfig), browserConfig=object(settings.browserConfig), capability=object(input.capabilities), identity=object(input.runtimeIdentity);
+  const normalizedAccount:RendererAccountIdentity={is_bound:bool(account.is_bound),platform_label:'抖音',account_audit_tag:/^[A-F0-9]{8,12}$/.test(text(account.account_audit_tag))?text(account.account_audit_tag):'',scope_status:oneOf(account.scope_status,['confirmed','unconfirmed','mismatch'] as const,'unconfirmed')};
+  const normalizedSettings:RendererSettings|undefined=bool(input.configured)?{serverUrl:text(settings.serverUrl),syncConfig:{enabled:bool(syncConfig.enabled),interval:oneOf(syncConfig.interval,['manual','12h','daily'] as const,'manual'),dailyHour:Math.max(0,Math.min(23,number(syncConfig.dailyHour)))},browserConfig:{id:text(browserConfig.id),...(typeof browserConfig.executablePath==='string'?{executablePath:browserConfig.executablePath}:{})}}:undefined;
+  const current=object(input.currentBrowser), browsers=Array.isArray(input.browsers)?input.browsers.map(browser):[];
+  return {connected:bool(input.connected),configured:bool(input.configured),syncing:bool(input.syncing),...(typeof input.lastSyncAt==='string'?{lastSyncAt:input.lastSyncAt}:{}),account:normalizedAccount,...(normalizedSettings?{settings:normalizedSettings}:{}),logs:[],autoLaunch:bool(input.autoLaunch),portableMode:bool(input.portableMode),browserConnected:bool(input.browserConnected),douyinLoggedIn:bool(input.douyinLoggedIn),profileAuthentication:oneOf(input.profileAuthentication,['unknown','unauthenticated','authenticated','expired','error'] as const,'unknown'),loginWindowState:oneOf(input.loginWindowState,['closed','opening','awaiting_confirmation','closing','error'] as const,'closed'),capabilities:{profileAuthenticated:bool(capability.profileAuthenticated),loginWindowState:oneOf(capability.loginWindowState,['closed','opening','awaiting_confirmation','closing','error'] as const,'closed'),browserReady:bool(capability.browserReady),bindingReady:bool(capability.bindingReady),tokenReady:bool(capability.tokenReady),databaseReady:bool(capability.databaseReady),syncInProgress:bool(capability.syncInProgress),canSync:bool(capability.canSync),loginAction:oneOf(capability.loginAction,['open','confirm','relogin','unavailable'] as const,'unavailable')},browserAvailable:bool(input.browserAvailable),...(Object.keys(current).length?{currentBrowser:browser(current)}:{}),runtimeIdentity:{systemVersion:text(identity.systemVersion),agentVersion:text(identity.agentVersion),buildId:text(identity.buildId),mainPid:number(identity.mainPid),packaged:bool(identity.packaged),databaseReady:bool(identity.databaseReady),databaseSchemaVersion:number(identity.databaseSchemaVersion),uploadQueue:bool(identity.uploadQueue),workerRuntime:oneOf(identity.workerRuntime,['packaged','development'] as const,'development'),apiTarget:oneOf(identity.apiTarget,['loopback','production','invalid'] as const,'invalid')},browsers};
+}

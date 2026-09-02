@@ -144,8 +144,8 @@ jobs:
       - run: npm --prefix agent run test:package-runtime:mac
       - uses: actions/upload-artifact@v4
         with:
-          name: xmt-creator-agent-v2.13.3-macos-arm64
-          path: agent/release/XMT-Creator-Agent-v2.13.3-macos-arm64.zip
+          name: xmt-creator-agent-v2.13.4-macos-arm64
+          path: agent/release/XMT-Creator-Agent-v2.13.4-macos-arm64.zip
           if-no-files-found: error
 
   collector-contract:
@@ -163,6 +163,7 @@ jobs:
       - run: npm --prefix agent ci
       - run: python -m venv collector/.venv
       - run: collector/.venv/bin/python -m pip install -r collector/requirements.lock
+      - run: npm --prefix agent run test:renderer-security
       - run: npm --prefix agent run test:collector-bridge
       - run: npm --prefix agent run test:collector-browser-auth
       - run: npm --prefix agent run test:collector-cli-export-assertion

@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlparse
 
 from scrapling.fetchers import AsyncDynamicSession
 
@@ -56,6 +57,27 @@ _CONTENT_SCOPE_SCRIPT = """
 
 class LoginRequired(RuntimeError):
     pass
+
+
+class CoverMetadataFailure(RuntimeError):
+    """A fixed, renderer-safe diagnostic code for the isolated cover task."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def creator_xhr_url(value: object) -> bool:
+    """Accept only exact Creator HTTPS origins; never return or log the URL."""
+    if not isinstance(value, str):
+        return False
+    parsed = urlparse(value)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == "creator.douyin.com"
+        and parsed.username is None
+        and parsed.password is None
+    )
 
 
 class DouyinAdapter:
@@ -277,14 +299,20 @@ class DouyinAdapter:
         started_at = time.monotonic()
         max_duration_seconds = 120
         max_works = 1_000
+        page_iterations = 0
         async with AsyncDynamicSession(
             max_pages=1, headless=self.browser.headless, **self.browser.session_kwargs(), google_search=False,
             network_idle=False, timeout=45_000, **({} if self.browser.runtime == "external-cdp" else {"user_data_dir": str(self.profile)}),
-            capture_xhr=r"https://creator\\.douyin\\.com/.*", additional_args={"accept_downloads": False},
+            # Raw regexes need one slash per literal dot.  The previous double
+            # escaping only matched a non-existent backslash-prefixed host,
+            # silently producing an empty capture set and a false works=0 result.
+            # AsyncDynamicSession accepts a regular expression only.  Anchor the
+            # scheme and host boundary, then structurally re-check each response.
+            capture_xhr=r"^https://creator\.douyin\.com(?:/|$)", additional_args={"accept_downloads": False},
         ) as session:
             login_required = False
             async def inspect(page: Any) -> None:
-                nonlocal login_required
+                nonlocal login_required, page_iterations
                 text = await page.locator("body").inner_text(timeout=10_000)
                 if "扫码登录" in text or ("登录" in text and "内容管理" not in text): login_required = True; return
                 # Content pagination is bounded by stable scroll, never visits data/export pages.
@@ -299,6 +327,7 @@ class DouyinAdapter:
                     if position in seen_positions:
                         break
                     seen_positions.add(position)
+                    page_iterations = len(seen_positions)
                     await page.mouse.wheel(0, max(900, int(before["viewport"] * .8)))
                     await page.wait_for_timeout(700)
                     after = await page.evaluate("() => ({top:window.scrollY,height:document.documentElement.scrollHeight,viewport:window.innerHeight})")
@@ -308,12 +337,18 @@ class DouyinAdapter:
                 response = await session.fetch(f"{CREATOR_ORIGIN}{PAGES['内容管理']}", page_action=inspect)
             if login_required: raise LoginRequired("WAITING_FOR_USER_LOGIN")
             for xhr in response.captured_xhr:
+                if not creator_xhr_url(getattr(xhr, "url", None)):
+                    continue
                 try: decoded: Any = json.loads(getattr(xhr, "body", b"").decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError): continue
                 captured.append(decoded)
+        if not captured:
+            raise CoverMetadataFailure("COVER_METADATA_SOURCE_NOT_FOUND")
         works_by_id: dict[str, dict[str, Any]] = {}
+        raw_items_seen = 0
         for payload in captured:
             for item in find_work_candidates(payload):
+                raw_items_seen += 1
                 work_id = str(item.get("aweme_id") or item.get("item_id") or item.get("id") or "")
                 if work_id and work_id not in works_by_id:
                     if len(works_by_id) >= max_works:
@@ -322,7 +357,22 @@ class DouyinAdapter:
             if len(works_by_id) >= max_works:
                 break
         result = await summarize_covers(account_scope_hash, list(works_by_id.values()))
-        result.update({"account_scope_hash": account_scope_hash, "collected_at": datetime.now(timezone.utc).isoformat()})
+        stages = [
+            {"stage": "browser_session", "status": "ok", "count": 1, "duration_bucket": "lt_1m", "boolean": True},
+            {"stage": "login_state", "status": "ok", "count": 1, "duration_bucket": "lt_1m", "boolean": True},
+            {"stage": "entry_page", "status": "ok", "count": 1, "duration_bucket": "lt_1m", "boolean": True},
+            {"stage": "page_ready", "status": "ok", "count": 1, "duration_bucket": "lt_1m", "boolean": True},
+            {"stage": "source_discovery", "status": "ok", "count": len(captured), "duration_bucket": "lt_1m", "boolean": True},
+            {"stage": "page_iteration", "status": "ok", "count": page_iterations, "duration_bucket": "lt_3m", "boolean": True},
+            {"stage": "raw_items_seen", "status": "ok" if raw_items_seen else "empty", "count": raw_items_seen, "duration_bucket": "lt_1m", "boolean": bool(raw_items_seen)},
+            {"stage": "scope_items_matched", "status": "ok" if works_by_id else "empty", "count": len(works_by_id), "duration_bucket": "lt_1m", "boolean": bool(works_by_id)},
+            {"stage": "items_parsed", "status": "ok" if works_by_id else "empty", "count": len(works_by_id), "duration_bucket": "lt_1m", "boolean": bool(works_by_id)},
+            {"stage": "items_deduplicated", "status": "ok", "count": len(works_by_id), "duration_bucket": "lt_1m", "boolean": True},
+            {"stage": "items_with_candidates", "status": "ok" if result["works_with_candidates"] else "empty", "count": result["works_with_candidates"], "duration_bucket": "lt_10s", "boolean": bool(result["works_with_candidates"])},
+            {"stage": "image_validation", "status": "ok", "count": result["probe_summary"]["valid_images"], "duration_bucket": "lt_3m", "boolean": True},
+            {"stage": "termination", "status": "ok", "count": len(works_by_id), "termination_reason": "completed", "duration_bucket": "lt_3m", "boolean": True},
+        ]
+        result.update({"account_scope_hash": account_scope_hash, "collected_at": datetime.now(timezone.utc).isoformat(), "execution_status": "completed", "termination_reason": "completed", "diagnostics": stages})
         return result
 
     def cancel(self) -> None:

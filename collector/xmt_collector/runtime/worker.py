@@ -12,7 +12,7 @@ import scrapling
 from scrapling.core.utils import set_logger
 
 from xmt_collector import COLLECTOR_VERSION, PROTOCOL_VERSION, SCHEMA_VERSION
-from xmt_collector.platforms.douyin.adapter import DouyinAdapter, LoginRequired
+from xmt_collector.platforms.douyin.adapter import CoverMetadataFailure, DouyinAdapter, LoginRequired
 from xmt_collector.platforms.douyin.browser_launch import BrowserLaunchError, parse_browser_launch
 from xmt_collector.runtime.protocol import ProtocolError, event, parse_request
 
@@ -129,10 +129,18 @@ class Worker:
 
     async def cover_metadata_only(self, request_id: str, params: dict[str, Any]) -> None:
         """Dedicated task: it never invokes collect(), manifests, exports, or upload code."""
+        account_scope_hash = str(params.get("accountScopeHash") or "")
+        def failed(code: str, termination: str) -> dict[str, Any]:
+            # This is intentionally a completed protocol envelope with an explicit
+            # failed status.  It lets Main project a fixed diagnostic without ever
+            # forwarding a browser exception, URL, page body, or identifier.
+            return {"account_scope_hash": account_scope_hash, "collected_at": "", "execution_status": "failed", "termination_reason": termination,
+                    "diagnostics": [{"stage": "termination", "status": "failed", "count": 0, "code": code, "termination_reason": termination, "duration_bucket": "unknown", "boolean": False}],
+                    "works_seen": 0, "works_with_candidates": 0, "works_without_candidates": 0, "candidates_seen": 0,
+                    "probe_summary": {"valid_images": 0, "forbidden": 0, "not_found": 0, "non_image": 0, "timeout": 0, "invalid_url": 0, "signed": 0, "expiring": 0, "expired_at_collection": 0}}
         try:
             browser = parse_browser_launch(params.get("browser"))
             if params.get("platform") != "douyin": raise RuntimeError("not_implemented")
-            account_scope_hash = str(params.get("accountScopeHash") or "")
             profile = Path(str(params.get("profilePath") or ""))
             if not re.fullmatch(r"[a-f0-9]{64}", account_scope_hash) or not profile.is_absolute(): raise RuntimeError("invalid_path")
             adapter = DouyinAdapter(profile, Path("/nonexistent-cover-metadata"), lambda _name, _data: asyncio.sleep(0), browser)
@@ -140,14 +148,16 @@ class Worker:
             self.emit(request_id, "started", {"mode": "cover_metadata_only"})
             self.emit(request_id, "completed", await adapter.inspect_cover_metadata_only(account_scope_hash))
         except LoginRequired:
-            self.emit(request_id, "login_required", {"code":"WAITING_FOR_USER_LOGIN", "message":"需要正常登录后才能检查封面来源。"})
+            self.emit(request_id, "completed", failed("LOGIN_REQUIRED", "login_required"))
+        except CoverMetadataFailure as error:
+            self.emit(request_id, "completed", failed(error.code, "source_not_found"))
         except asyncio.CancelledError:
             # Session context teardown closes the page.  Do not invoke any shared
             # collection cleanup path because those may own snapshots or queues.
             self.emit(request_id, "cancelled", {"accepted": True})
         except Exception:
             # Third-party browser errors can contain URLs; never forward them.
-            self.emit(request_id, "error", {"code":"cover_metadata_failed", "message":"封面元数据检查未完成。"})
+            self.emit(request_id, "completed", failed("PAGE_PARSE_FAILED", "worker_failed"))
         finally:
             self.running.pop(request_id, None)
 

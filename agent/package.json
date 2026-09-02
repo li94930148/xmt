@@ -3,7 +3,7 @@
   "productName": "XMT Creator Agent",
   "description": "XMT 本地抖音创作者数据采集与加密同步桌面客户端",
   "author": "XMT",
-  "version": "2.13.5-agent",
+  "version": "2.13.6-agent",
   "private": true,
   "type": "commonjs",
   "main": "dist-desktop/desktop/main.js",

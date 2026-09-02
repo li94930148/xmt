@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.20.11 - 2026-09-02
+
+- 修复 Creator 内容页 XHR 正则的双重转义错误；精确 Creator HTTPS 来源捕获为空时不再伪装为成功的作品 0。
+- metadata-only 返回严格白名单的分阶段脱敏诊断，普通同步、上传、队列、数据库写入与生产接口行为不变。
+- Creator Agent 升级至 v2.13.6-agent；未安装正式包且未执行第二次真实 metadata-only。
+
 ## 2.20.10 - 2026-09-02
 
 - 修复 Creator Agent sandboxed Preload 运行时误导入 `node:crypto` 导致 contextBridge 未建立、Renderer 空白的问题。

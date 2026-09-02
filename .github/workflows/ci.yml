@@ -144,8 +144,11 @@ jobs:
       - run: npm --prefix agent run test:package-runtime:mac
       - uses: actions/upload-artifact@v4
         with:
-          name: xmt-creator-agent-v2.13.5-macos-arm64
-          path: agent/release/XMT-Creator-Agent-v2.13.5-macos-arm64.zip
+          # The build script derives the archive version from agent/package.json.
+          # CI must not pin a previous release or turn a validated package into a
+          # failed run solely during artifact publication.
+          name: xmt-creator-agent-macos-arm64
+          path: agent/release/XMT-Creator-Agent-v*-macos-arm64.zip
           if-no-files-found: error
 
   collector-contract:

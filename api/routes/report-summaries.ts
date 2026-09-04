@@ -124,4 +124,21 @@ router.get('/archive', async (req, res) => {
   }
 });
 
+router.get('/archive/:kind/:id', async (req, res) => {
+  if (!isAdmin(req.user!)) return res.status(403).json({ success: false, message: '仅管理员可查看总结详情' });
+  const kind = req.params.kind;
+  const id = Number(req.params.id);
+  if ((kind !== 'monthly' && kind !== 'yearly') || !Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: '总结详情参数不合法' });
+  }
+  try {
+    const table = kind === 'monthly' ? 'monthly_summaries' : 'yearly_summaries';
+    const row = await queryOne<SummaryRow>(`SELECT s.*, u.name AS user_name, u.username FROM ${table} s LEFT JOIN users u ON u.id = s.user_id WHERE s.id = ?`, [id]);
+    if (!row) return res.status(404).json({ success: false, message: '总结记录不存在' });
+    return res.json({ success: true, data: mapSummaryRow(kind, row) });
+  } catch (error) {
+    return handle(error, res);
+  }
+});
+
 export default router;

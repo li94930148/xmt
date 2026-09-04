@@ -83,8 +83,8 @@ export type DailyReportArchiveResponse = {
   reports: DailyReport[];
 };
 
-export type MonthlyRecord = { id?: number; year: number; month: number; work_summary_md: string; key_projects_md: string; issues_plan_md: string; display_content_md: string; user_name?: string; username?: string };
-export type YearlyRecord = { id?: number; year: number; annual_summary_md: string; achievements_md: string; shortcomings_md: string; next_year_plan_md: string; display_content_md: string; user_name?: string; username?: string };
+export type MonthlyRecord = { id?: number; year: number; month: number; work_summary_md: string; key_projects_md: string; issues_plan_md: string; display_content_md: string; user_name?: string; username?: string; created_at?: string | null; updated_at?: string | null };
+export type YearlyRecord = { id?: number; year: number; annual_summary_md: string; achievements_md: string; shortcomings_md: string; next_year_plan_md: string; display_content_md: string; user_name?: string; username?: string; created_at?: string | null; updated_at?: string | null };
 export type SummaryArchive = { year: number; monthly: MonthlyRecord[]; yearly: YearlyRecord[] };
 export type ReportTemplate = { id: number; name: string; description?: string; sections: Array<{ key: string; title: string }>; isDefault?: boolean; sortOrder?: number; userId?: number | null };
 
@@ -183,3 +183,4 @@ export const saveMonthlyRecord = (year: number, month: number, payload: Partial<
 export const getYearlyRecord = (year: number) => summaryRequest<YearlyRecord>(`/yearly${buildQuery({ year })}`);
 export const saveYearlyRecord = (year: number, payload: Partial<YearlyRecord>) => summaryRequest<YearlyRecord>(`/yearly${buildQuery({ year })}`, { method: 'PUT', body: JSON.stringify(payload) });
 export const getSummaryArchive = (year: number, userId?: number) => summaryRequest<SummaryArchive>(`/archive${buildQuery({ year, userId })}`);
+export const getSummaryArchiveDetail = (kind: 'monthly' | 'yearly', id: number) => summaryRequest<MonthlyRecord | YearlyRecord>(`/archive/${kind}/${id}`);

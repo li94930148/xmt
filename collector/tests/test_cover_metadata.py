@@ -32,6 +32,24 @@ def test_private_and_rebinding_dns_are_not_public(monkeypatch):
 def test_ttl_is_aggregate_only_and_parses_epoch():
     assert ttl_seconds("https://image.example/a?expires=946684910", now=946684900)==10
 
+def test_probe_matrix_distinguishes_head_and_referer_without_credentials(monkeypatch):
+    calls=[]
+    def request(_url, method, referer=False):
+        calls.append((method,referer))
+        if method=="HEAD": return "FORBIDDEN",403
+        return ("VALID",200) if referer else ("FORBIDDEN",403)
+    monkeypatch.setattr(cover_metadata,"_request",request)
+    result=cover_metadata.probe_candidate("https://public.example/cover?signature=fixture")
+    assert result["classification"]=="REFERER_BOUND"
+    assert calls==[("HEAD",False),("GET",False),("GET",True)]
+
+def test_probe_matrix_never_uses_origin_cookie_or_authorization():
+    plain=cover_metadata._headers(False,True); referred=cover_metadata._headers(True,True)
+    assert plain["Accept"]==cover_metadata.IMAGE_ACCEPT
+    assert plain["User-Agent"]==cover_metadata.SAFE_USER_AGENT
+    assert "Cookie" not in plain and "Authorization" not in plain and "Origin" not in plain
+    assert referred["Referer"]==cover_metadata.CREATOR_REFERER
+
 def test_worker_route_is_explicit_and_unknown_modes_fail_closed():
     worker = Path(__file__).parents[1] / "xmt_collector" / "runtime" / "worker.py"
     source = worker.read_text(encoding="utf-8")

@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.14', date: '2026-09-04', title: '总结归档详情完善', impactScope: ['日报系统', '月报', '年报'], changes: [{ type: 'fix', description: '月报、年报归档新增完整详情入口和分区内容展示。' }, { type: 'improvement', description: '详情支持长文本滚动、Esc 关闭，并保持现有权限边界。' }] },
   { version: '2.20.13', date: '2026-09-04', title: '总结归档正文显示修复', impactScope: ['日报系统', '月报', '年报'], changes: [{ type: 'fix', description: '修复月报、年报提交正文未被服务端读取，归档记录存在却显示为空的问题。' }, { type: 'improvement', description: '归档统一输出明确正文模型，并兼容仍在旧字段中的历史报告。' }] },
   { version: '2.20.12', date: '2026-09-02', title: 'Creator 封面候选 403 诊断', impactScope: ['Creator Agent', '安全'], changes: [{ type: 'fix', description: '增加有限的 HEAD、Range GET 与固定 Creator Referer 对照，分类远端拒绝。' }, { type: 'security', description: '不转发认证信息、不保存候选或图片，并继续执行重定向与网络目标校验。' }] },
   { version: '2.20.11', date: '2026-09-02', title: 'Creator 封面来源空作品诊断', impactScope: ['Creator Agent', '安全'], changes: [{ type: 'fix', description: '修复 Creator XHR 双重转义导致的来源未捕获，并拒绝相似域名。' }, { type: 'security', description: '空来源使用分阶段脱敏失败诊断，不再伪装为成功作品 0。' }] },

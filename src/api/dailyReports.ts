@@ -83,8 +83,8 @@ export type DailyReportArchiveResponse = {
   reports: DailyReport[];
 };
 
-export type MonthlyRecord = { id?: number; year: number; month: number; work_summary_md: string; key_projects_md: string; issues_plan_md: string; user_name?: string; username?: string };
-export type YearlyRecord = { id?: number; year: number; annual_summary_md: string; achievements_md: string; shortcomings_md: string; next_year_plan_md: string; user_name?: string; username?: string };
+export type MonthlyRecord = { id?: number; year: number; month: number; work_summary_md: string; key_projects_md: string; issues_plan_md: string; display_content_md: string; user_name?: string; username?: string };
+export type YearlyRecord = { id?: number; year: number; annual_summary_md: string; achievements_md: string; shortcomings_md: string; next_year_plan_md: string; display_content_md: string; user_name?: string; username?: string };
 export type SummaryArchive = { year: number; monthly: MonthlyRecord[]; yearly: YearlyRecord[] };
 export type ReportTemplate = { id: number; name: string; description?: string; sections: Array<{ key: string; title: string }>; isDefault?: boolean; sortOrder?: number; userId?: number | null };
 

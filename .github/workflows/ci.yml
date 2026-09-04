@@ -54,6 +54,7 @@ jobs:
       - run: npm run test:android-endpoint-contract
       - run: npm run test:mobile-health-response-contract
       - run: npm run test:daily-report-permissions
+      - run: npm run test:report-summaries
       - run: npm run test:android-runtime
       - run: npm run test:mobile-auth-runtime
       - run: npm run test:native-auth-refresh-scheduler

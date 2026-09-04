@@ -13,8 +13,8 @@ export default function DailyReportSummaryForm({ kind }: Props) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [monthly, setMonthly] = useState<MonthlyRecord>({ year, month, work_summary_md: '', key_projects_md: '', issues_plan_md: '' });
-  const [yearly, setYearly] = useState<YearlyRecord>({ year, annual_summary_md: '', achievements_md: '', shortcomings_md: '', next_year_plan_md: '' });
+  const [monthly, setMonthly] = useState<MonthlyRecord>({ year, month, work_summary_md: '', key_projects_md: '', issues_plan_md: '', display_content_md: '' });
+  const [yearly, setYearly] = useState<YearlyRecord>({ year, annual_summary_md: '', achievements_md: '', shortcomings_md: '', next_year_plan_md: '', display_content_md: '' });
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 

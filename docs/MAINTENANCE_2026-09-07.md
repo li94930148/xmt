@@ -10,7 +10,8 @@
 - 全 refs Git bundle 已创建并通过 `git bundle verify`，另存当前未提交 patch、旧工作区 patch、分支 SHA 清单和工作区清单。
 - 本机备份位于 `/Users/youfeifei/Projects/xmt-maintenance-backup-20260907`，仅当前用户可访问，未上传 GitHub。
 - 六个旧工作区均无未提交文件、没有检测到打开的文件，且 HEAD 已合入 main；完整移动至 `/Users/youfeifei/.Trash/xmt-merged-worktrees-20260907`，随后 prune 注册信息并删除对应已合并本地分支。现在仅保留主工作区。
-- 旧工作区约 16GB 保留在废纸篓，可恢复；此操作不等于释放 16GB 物理磁盘空间。主工作区业务数据库、环境变量及 Creator Agent 登录资料保持原位。
+- 旧工作区移动时约 16GB。随后按白名单移除其中 35 个可重建目录（node_modules、Python 虚拟环境和构建缓存），删除前占用合计 9.23GiB；源码、历史安装包与 Git bundle 继续保留，可重建依赖。没有清空整个废纸篓。主工作区业务数据库、环境变量及 Creator Agent 登录资料保持原位。
+- 另清理 17 个已合入 main 的历史本地分支；5 个不属于 main 祖先的旧本地分支保留，避免把未核验历史改动丢弃或混入远端整合。
 
 ## 修复与复核
 
@@ -23,6 +24,7 @@
 | 重复动画依赖 | 四个调用文件统一到已有 motion/react；移除 framer-motion 直接依赖，其作为 motion 的内部依赖继续存在 |
 | 仅供类型使用的 Vercel 构建依赖 | 转发入口改用 Node IncomingMessage/ServerResponse，移除 @vercel/node；运行处理仍直接交给 Express |
 | lint 报告被生成文件污染 | 排除打包副本和 Python 虚拟环境；真实源码保持原规则，剩余 343 error / 57 warning |
+| Git 忽略业务数据时误忽略源码 | 将 data/ 收窄为 /data/，src/data 不再误匹配；根数据库及 agent/data 仍被忽略 |
 | 错误响应泄露、分页状态、通知偏好事务 | 已在 PR #41 实现；当前核对真实中间件、fetchData(page) 与 runInTransaction，安全及接口回归通过 |
 | Creator 同名死代码、导出表格展开过大、成就 N+1 | 已在 PR #41 移除死代码、展开前限制表格范围、按指标缓存查询；当前代码复核确认 |
 | 请求体限制文案 | 两个上限是不同层次：HTTP 16MB、Creator 同步包 12MB；已集中定义，未改变协议上限；不应误称二者必须同值 |

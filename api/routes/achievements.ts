@@ -57,9 +57,20 @@ router.get('/progress', authenticate, async (req, res) => {
     const achievements = await queryAll(`SELECT * FROM achievements ORDER BY id ASC`);
     const progress: Record<number, { current: number; target: number; percentage: number }> = {};
 
-    for (const a of achievements) {
+    // 同一 condition_type 只查询一次（login_streak 额外按时间窗区分），
+    // 避免成就列表增长后退化成逐条 COUNT 的 N+1 查询。
+    const metricCache = new Map<string, number>();
+    const computeMetric = async (achievement: Record<string, unknown>): Promise<number> => {
+      const conditionType = String(achievement.condition_type ?? '');
+      const conditionValue = achievement.condition_value;
+      const cacheKey = conditionType === 'login_streak'
+        ? `login_streak:${String(conditionValue)}`
+        : conditionType;
+      const cached = metricCache.get(cacheKey);
+      if (cached !== undefined) return cached;
+
       let current = 0;
-      switch (a.condition_type) {
+      switch (conditionType) {
         case 'topic_count': {
           const r: any = await queryOne(`SELECT COUNT(*) as count FROM topics WHERE creator_id = ?`, [userId]);
           current = r?.count || 0;
@@ -88,7 +99,7 @@ router.get('/progress', authenticate, async (req, res) => {
         case 'login_streak': {
           const r: any = await queryOne(
             `SELECT COUNT(DISTINCT DATE(created_at)) as days FROM activity_log WHERE user_id = ? AND created_at >= datetime('now', '-' || ? || ' days')`,
-            [userId, a.condition_value]
+            [userId, conditionValue]
           );
           current = r?.days || 0;
           break;
@@ -115,6 +126,13 @@ router.get('/progress', authenticate, async (req, res) => {
           break;
         }
       }
+
+      metricCache.set(cacheKey, current);
+      return current;
+    };
+
+    for (const a of achievements) {
+      const current = await computeMetric(a);
 
       const target = Number(a.condition_value) || 1;
       progress[Number(a.id)] = {

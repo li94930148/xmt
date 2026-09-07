@@ -67,6 +67,22 @@ export function sendServerError(res: Response, message = '服务器内部错误'
   return sendError(res, message, 500);
 }
 
+/**
+ * Removes implementation details from legacy route failures before they leave
+ * the process. Older routes still return `{ message, error }`; libsql errors
+ * make `sql` and `params` enumerable, so serializing those objects leaks data.
+ */
+export function sanitizeServerErrorPayload(payload: unknown, requestId?: string): unknown {
+  if (!payload || typeof payload !== 'object' || !Object.prototype.hasOwnProperty.call(payload, 'error')) {
+    return payload;
+  }
+
+  const { error, ...safePayload } = payload as Record<string, unknown>;
+  const errorName = error instanceof Error ? error.name : typeof error;
+  console.error('[API] internal request error', { requestId, errorName });
+  return { ...safePayload, success: false, code: 'INTERNAL_ERROR' };
+}
+
 export type V1ResponseMeta = Partial<Pagination> & Record<string, unknown>;
 
 export function sendV1Success<T>(

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
-import { queryAll, execute } from '../database/utils';
+import { queryAll, execute, runInTransaction } from '../database/utils';
 
 const router = Router();
 
@@ -68,16 +68,27 @@ router.put('/preferences', authenticate, async (req, res) => {
       return res.status(400).json({ message: '请提供偏好设置列表' });
     }
 
-    // 清除旧偏好
-    await execute(`DELETE FROM notification_preferences WHERE user_id = ?`, [userId]);
-
-    // 插入新偏好
+    // 先整体校验再落库：否则遇到非法输入时旧偏好已被清空，回滚前会短暂处于"已删未建"状态
     for (const pref of preferences) {
-      await execute(
-        `INSERT INTO notification_preferences (user_id, channel, event_type, enabled, config) VALUES (?, ?, ?, ?, ?)`,
-        [userId, pref.channel, pref.event_type, pref.enabled ? 1 : 0, pref.config || null]
-      );
+      if (typeof pref?.channel !== 'string' || !pref.channel.trim()) {
+        return res.status(400).json({ message: '通知渠道不合法' });
+      }
+      if (typeof pref?.event_type !== 'string' || !pref.event_type.trim()) {
+        return res.status(400).json({ message: '通知事件类型不合法' });
+      }
     }
+
+    // 清空旧偏好与写入新偏好必须原子完成。此前是 DELETE 后逐条 INSERT 且无事务，
+    // 任意一条 INSERT 失败都会让用户永久丢失自己的通知偏好配置。
+    await runInTransaction(async (tx) => {
+      await tx.execute(`DELETE FROM notification_preferences WHERE user_id = ?`, [userId]);
+      for (const pref of preferences) {
+        await tx.execute(
+          `INSERT INTO notification_preferences (user_id, channel, event_type, enabled, config) VALUES (?, ?, ?, ?, ?)`,
+          [userId, pref.channel, pref.event_type, pref.enabled ? 1 : 0, pref.config || null]
+        );
+      }
+    });
 
     res.json({ message: '通知偏好更新成功' });
   } catch (error) {

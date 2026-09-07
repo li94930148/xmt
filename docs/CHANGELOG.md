@@ -1,10 +1,36 @@
 # XMT 系统更新日志
 
+## v2.20.15 - 2026-09-07
+
+### 安全
+
+- 升级 `@tiptap/*` 全家桶到 ^3.31.0，修复 `mergeAttributes()` 在 `__proto__` 上把自有键变为可继承可执行 DOM 属性的中危漏洞。
+- `package.json#overrides` 把 `qs` 锁定到 6.16.0，修复 express / body-parser 链路上的 `qs` 数组上限绕过与 `isBuffer` DoS 中危漏洞。
+- 新增 HTTP 级错误脱敏拦截器回归测试 `tests/security/error-response-http-contract.test.ts`，直接起真实 app、注入探针路由触发 5xx，断言响应不含 SQL 与绑定参数；任何后续改动若误删 `api/app.ts:267` 拦截器本体会立即失败。
+
+### 修复 / 改进
+
+- 新增 `api/utils/limits.ts` 统一请求体与同步包体积常量：`HTTP_JSON_BODY_LIMIT` / `CREATOR_SYNC_MAX_PAYLOAD_BYTES`。`api/app.ts` 全局 413 文案与 `creatorSyncV291.ts` 同步包 413 文案均改为引用该模块，消除魔法数字与"12MB / 16MB"两种提示并存的不一致。
+- 抖音官方导出 xlsx 解析改用 `sheet['!ref']` 在展开前判断行 / 列数（20000 行 / 200 列），命中限制直接抛错，避免把整张表展开为内存数组后才校验。
+- 移除 `api/services/creatorDataCenter.ts` 中未被引用的 `acceptCreatorDataSync` 死代码副本（长期与 `creatorSyncV291.ts` 同名函数并存），以及随之失效的辅助函数 / 导入。
+- 成就进度接口按 `condition_type`（`login_streak` 额外按时间窗）聚合缓存查询，消除成就列表增长后的 N+1 计数。
+- 新增 `deploy/linux/HTTPS_REQUIRED.md`，明确 `upgrade-insecure-requests` CSP 指令下 XMT 必须部署在 HTTPS 站点之后；`docs/上线前检查清单.md` 同步补充对应章节。
+
+### 数据库变化
+
+- 无迁移、无破坏性 schema 变更。
+
+### 版本与兼容性
+
+- XMT 升级至 v2.20.15；不影响 RBAC、Session、Creator Agent 上传协议、Scrapling Collector 合同或任何对外 API。
+- `package-lock.json` 同步更新后，请运行 `npm ci` 刷新本地 `node_modules`。
+- Creator Agent 桌面端版本保持 v2.13.0-agent 不变。
+
 ## v2.20.14 - 2026-09-04
 
 ### 修复
 
-- 月报、年报归档列表新增明确“查看详情”入口，点击条目也可打开详情。
+- 月报、年报归档列表新增明确"查看详情"入口，点击条目也可打开详情。
 - 月报详情分别展示工作总结、重点项目、问题与计划；年报详情分别展示年度总结、主要成果、经验不足、下一年度计划。
 - 详情读取保持管理员权限边界，并对非法参数、无权限和记录不存在分别返回正确状态。
 
@@ -22,7 +48,7 @@
 
 - 修复月报、年报表单以 snake_case 发送正文而服务端仅读取 camelCase，导致提交后归档正文为空的问题。
 - 归档接口统一输出 `display_content_md`，优先使用月报/年报规范正文，并兼容旧 `content_md` 历史数据。
-- 空值、纯空白与空 HTML 节点才显示“未填写内容”；日报归档路径与权限规则保持不变。
+- 空值、纯空白与空 HTML 节点才显示"未填写内容"；日报归档路径与权限规则保持不变。
 
 ### 数据库变化
 
@@ -71,15 +97,35 @@
 
 - Agent 升级至 `v2.13.4-agent`。普通同步和 metadata-only 继续由 Main 内部解析当前绑定账号。
 
+### 安全
+
+- 升级 `@tiptap/*` 全家桶到 ^3.31.0，修复 `mergeAttributes()` 在 `__proto__` 上把自有键变为可继承可执行 DOM 属性的中危漏洞。
+- `package.json#overrides` 把 `qs` 锁定到 6.16.0，修复 express / body-parser 链路上的 `qs` 数组上限绕过与 `isBuffer` DoS 中危漏洞。
+- 新增 HTTP 级错误脱敏拦截器回归测试 `tests/security/error-response-sanitization-http.test.ts`，直接起真实 app、注入探针路由触发 5xx，断言响应不含 SQL 与绑定参数；任何后续改动若误删 `api/app.ts:267` 拦截器本体会立即失败。
+
+### 修复 / 改进
+
+- 新增 `api/utils/limits.ts` 统一请求体与同步包体积常量：`HTTP_JSON_BODY_LIMIT` / `CREATOR_SYNC_MAX_PAYLOAD_BYTES`。`api/app.ts` 全局 413 文案与 `creatorSyncV291.ts` 同步包 413 文案均改为引用该模块，消除魔法数字与"12MB / 16MB"两种提示并存的不一致。
+- 抖音官方导出 xlsx 解析改用 `sheet['!ref']` 在展开前判断行 / 列数（20000 行 / 200 列），命中限制直接抛错，避免把整张表展开为内存数组后才校验。
+- 移除 `api/services/creatorDataCenter.ts` 中未被引用的 `acceptCreatorDataSync` 死代码副本（长期与 `creatorSyncV291.ts` 同名函数并存），以及随之失效的辅助函数 / 导入。
+- 成就进度接口按 `condition_type`（`login_streak` 额外按时间窗）聚合缓存查询，消除成就列表增长后的 N+1 计数。
+- 新增 `deploy/linux/HTTPS_REQUIRED.md`，明确 `upgrade-insecure-requests` CSP 指令下 XMT 必须部署在 HTTPS 站点之后；`docs/上线前检查清单.md` 同步补充对应章节。
+
 ### 数据库变化
 
-- 无。
+- 无迁移、无破坏性 schema 变更。
+
+### 版本与兼容性
+
+- XMT 升级至 v2.20.15；不影响 RBAC、Session、Creator Agent 上传协议、Scrapling Collector 合同或任何对外 API。
+- `package-lock.json` 同步更新后，请运行 `npm ci` 刷新本地 `node_modules`。
+- Creator Agent 桌面端版本保持 v2.13.0-agent 不变。
 
 ## v2.20.8 - 2026-09-01
 
 ### 新增
 
-- Creator Agent 增加“检查最新封面来源（仅本地）”能力，只返回脱敏统计摘要。
+- Creator Agent 增加"检查最新封面来源（仅本地）"能力，只返回脱敏统计摘要。
 
 ### 优化
 
@@ -118,6 +164,28 @@
 ### 测试情况
 
 - 覆盖登录窗口关闭、Main 重启、Renderer 刷新、已登录 Profile、无可用浏览器、SQLite 队列与包内 arm64 driver 回归。
+
+## v2.20.5 - 2026-08-28
+
+### 修复
+
+- API 的 500 响应不再序列化底层异常对象，避免泄露 SQL、绑定参数和驱动内部字段。
+- 拍摄计划与发布管理列表改为上限为 100 的分页查询，前端可翻页访问后续数据。
+- 修正请求体超过 16MB 时仍提示 12MB 的不一致文案。
+
+### 技术升级
+
+- `react-router-dom` 升至 7.18.2；锁定 Socket.IO、`ws`、`ip-address` 等传递依赖的修复版本。
+- 官方 Excel 解析改用 SheetJS 官方 CDN 的 0.20.3，并限制文件大小、行数和列数。
+- 增加 Helmet 响应头与 Socket.IO 单包 1MB、20 秒心跳超时限制。
+
+### 数据库变化
+
+- 无。
+
+### 测试情况
+
+- 新增错误响应脱敏和 Workflow 分页合同；完整校验见本次验证记录。
 
 ## v2.20.4 - 2026-08-28
 

@@ -759,6 +759,11 @@ const MagicBento: React.FC<BentoProps> = ({
                 ref={el => {
                   if (!el) return;
 
+                  // 内联 ref 回调每次重渲染都会重新执行。若不先摘掉上一轮的监听器，
+                  // 同一个节点上会逐次叠加 handler，表现为越用越卡、动效重复触发。
+                  const bound = el as HTMLElement & { __bentoCleanup?: () => void };
+                  bound.__bentoCleanup?.();
+
                   const handleMouseMove = (e: MouseEvent) => {
                     if (shouldDisableAnimations) return;
 
@@ -859,6 +864,13 @@ const MagicBento: React.FC<BentoProps> = ({
                         onComplete: () => ripple.remove()
                       }
                     );
+                  };
+
+                  // 清理函数挂在节点自身：随节点一起回收，不额外持有引用
+                  bound.__bentoCleanup = () => {
+                    el.removeEventListener('mousemove', handleMouseMove);
+                    el.removeEventListener('mouseleave', handleMouseLeave);
+                    el.removeEventListener('click', handleClick);
                   };
 
                   el.addEventListener('mousemove', handleMouseMove);

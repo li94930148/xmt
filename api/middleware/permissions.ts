@@ -5,6 +5,7 @@ import { sendV1Error } from '../utils/response';
 // 权限缓存（内存 Map，TTL 5 分钟）
 const permissionCache = new Map<string, { permissions: string[]; expires: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+const CACHE_MAX_ENTRIES = 1_000;
 
 /**
  * 获取用户的权限列表（带缓存）
@@ -26,6 +27,10 @@ async function getUserPermissions(userId: number): Promise<string[]> {
 
   const permList = permissions.map(p => String(p.code));
 
+  if (permissionCache.size >= CACHE_MAX_ENTRIES) {
+    const oldestKey = permissionCache.keys().next().value;
+    if (oldestKey) permissionCache.delete(oldestKey);
+  }
   permissionCache.set(cacheKey, {
     permissions: permList,
     expires: Date.now() + CACHE_TTL
@@ -74,13 +79,12 @@ export function requirePermission(...permissionCodes: string[]) {
           return sendV1Error(req, res, {
             code: 'PERMISSION_DENIED',
             message: '权限不足',
-            details: { required: permissionCodes, current: userPermissions },
+            details: { required: permissionCodes },
           }, 403);
         }
         return res.status(403).json({
           message: '权限不足',
-          required: permissionCodes,
-          current: userPermissions
+          required: permissionCodes
         });
       }
 
@@ -122,13 +126,12 @@ export function requireAllPermissions(...permissionCodes: string[]) {
           return sendV1Error(req, res, {
             code: 'PERMISSION_DENIED',
             message: '权限不足',
-            details: { required: permissionCodes, current: userPermissions },
+            details: { required: permissionCodes },
           }, 403);
         }
         return res.status(403).json({
           message: '权限不足',
-          required: permissionCodes,
-          current: userPermissions
+          required: permissionCodes
         });
       }
 

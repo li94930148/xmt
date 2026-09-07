@@ -6,6 +6,10 @@ import type { NormalizedVideoSnapshot } from '@shared/types/social-review';
 
 type ExportRow = Record<string, unknown>;
 
+const MAX_EXPORT_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_EXPORT_ROWS = 20_000;
+const MAX_EXPORT_COLUMNS = 200;
+
 export type DouyinExportParseResult = {
   fileType: 'csv' | 'xlsx' | 'xls';
   parsedRowCount: number;
@@ -69,9 +73,15 @@ function findValue(row: ExportRow, aliases: string[]) {
 }
 
 function readRows(filePath: string, bytes: Buffer): { rows: ExportRow[]; headers: string[] } {
+  if (bytes.byteLength > MAX_EXPORT_FILE_BYTES) throw new Error('导出文件超过 10MB 限制。');
   const workbook = XLSX.read(bytes, { type: 'buffer', raw: false });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) return { rows: [], headers: [] };
+  // 用 sheet['!ref'] 预先判断行/列数，命中限制时直接抛出，
+  // 避免调用 sheet_to_json 时把整张表展开为内存数组才检查。
+  const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+  if (range.e.r - range.s.r > MAX_EXPORT_ROWS) throw new Error('导出文件超过 20000 行限制。');
+  if (range.e.c - range.s.c + 1 > MAX_EXPORT_COLUMNS) throw new Error('导出文件超过 200 列限制。');
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' });
   const headers = (matrix[0] || []).map((value) => String(value ?? '').trim());
   return { headers, rows: matrix.slice(1).map((cells) => Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? '']))) };

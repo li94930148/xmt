@@ -73,3 +73,9 @@ emergency-backup/
 
 # PM2 local production config
 ecosystem.config.cjs
+
+# Local audit probes (one-off scripts) and work artifacts
+.audit-*.mjs
+.audit-*.mts
+.workbuddy/
+outputs/

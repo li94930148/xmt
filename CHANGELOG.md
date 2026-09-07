@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.20.15 - 2026-09-07
+
+### Security
+
+- 升级 `@tiptap/*` 全家桶至 ^3.31.0，修复 `mergeAttributes()` 在 `__proto__` 上将自有键转换为可继承可执行 DOM 属性的中危漏洞。
+- 在 `package.json#overrides` 中将 `qs` 锁定到 6.16.0，修复 express/body-parser 链路上的 `qs` 数组上限绕过与 `isBuffer` DoS 中危漏洞。
+- 新增 HTTP 级错误脱敏拦截器回归测试（`tests/security/error-response-http-contract.test.ts`），守护 `api/app.ts:267` 单点依赖。
+
+### Fixes / Improvements
+
+- 请求体上限改为常量统一来源：`api/utils/limits.ts` 提供 `HTTP_JSON_BODY_LIMIT` / `CREATOR_SYNC_MAX_PAYLOAD_BYTES`，`api/app.ts` 全局 413 文案与 `creatorSyncV291.ts` 同步包 413 文案均改为引用，消除魔法数字与不一致文案。
+- 抖音官方导出 xlsx 解析改用 `sheet['!ref']` 在展开前判断行/列数，命中限制直接抛错，避免把整张表展开为内存数组再校验。
+- 删除 `api/services/creatorDataCenter.ts` 中未被引用的 `acceptCreatorDataSync` 死代码副本，以及随之失效的辅助函数与导入。
+- 成就进度接口按 `condition_type`（`login_streak` 额外按时间窗）聚合缓存查询，消除成就列表增长后的 N+1 计数。
+- 新增 `deploy/linux/HTTPS_REQUIRED.md`，明确 `upgrade-insecure-requests` CSP 指令下 XMT 必须部署在 HTTPS 站点之后；并在 `docs/上线前检查清单.md` 中补充对应章节。
+
+### 版本与兼容性
+
+- XMT 升级至 v2.20.15；不涉及数据库迁移或破坏性 API 变更。
+- 升级 `package-lock.json` 后需运行 `npm ci` 同步 `node_modules`。
+- 未改动 RBAC、Session、Creator Agent 上传协议、Scrapling Collector 合同。
+
 ## 2.20.14 - 2026-09-04
 
 - 为月报、年报总结归档增加完整详情入口：列表保留摘要，详情分区展示全部主要内容、提交人、所属期间和时间信息。
@@ -56,7 +78,7 @@
 ### 修复
 
 - Creator Agent 将受管 Profile 的认证事实与临时登录窗口交互彻底分离；Main 统一计算 `canSync` 与登录动作，已认证 Profile 不再依赖登录窗口存活。
-- Renderer 首次加载、恢复和重新聚焦时重新读取 Main 能力快照；认证有效时显示“重新登录”并按 Main 能力启用同步。
+- Renderer 首次加载、恢复和重新聚焦时重新读取 Main 能力快照；认证有效时显示"重新登录"并按 Main 能力启用同步。
 
 ### 版本与兼容性
 
@@ -70,9 +92,16 @@
 - 只有 Main 持有存活的 `awaiting_confirmation` 会话时才允许确认登录；无窗口确认稳定返回 `LOGIN_WINDOW_NOT_OPEN`，界面不再展示 Electron IPC 前缀或底层错误。
 - 当前浏览器改为展示 Main 实际解析的浏览器 / driver；未解析到受支持浏览器时禁用登录和同步并给出引导。
 
-### 版本与兼容性
+## 2.20.5 - 2026-08-28
 
-- XMT 升级至 v2.20.5，Creator Agent 升级至 v2.13.1-agent；保留 SQLite 队列迁移、database-ready barrier、v1/v2 上传契约和 macOS arm64 Playwright driver 修复。
+### Security
+
+- API 500 响应不再包含底层 SQL 或绑定参数；增加安全响应头、Socket 单包上限和权限缓存上限。
+- 将有已知告警的前端路由、Socket、网络解析和 Excel 解析依赖升级到修复版本。
+
+### Fixes
+
+- 拍摄计划与发布管理列表提供受限分页和前端翻页；修正 16MB 请求体限制文案。
 
 ## 2.20.4 - 2026-08-28
 

@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.16', date: '2026-09-07', title: '历史修复整合与依赖精简', impactScope: ['稳定性', '安全维护'], changes: [{ type: 'fix', description: '修复自动回归测试入口并隔离测试数据库。' }, { type: 'security', description: '更新受影响工具依赖，增加持续安全检查。' }, { type: 'improvement', description: '减少重复依赖，收敛源码检查范围。' }] },
   { version: '2.20.15', date: '2026-09-07', title: '依赖安全与工程化收口', impactScope: ['依赖安全', 'API 防护', '工程化'], changes: [
     { type: 'security', description: '升级 @tiptap/* 全家桶到 ^3.31.0，修复 mergeAttributes() 在 __proto__ 上的 DOM 属性污染中危漏洞。' },
     { type: 'security', description: '在 overrides 中锁定 qs 6.16.0，修复 express/body-parser 链路上数组上限绕过与 isBuffer DoS 中危漏洞。' },

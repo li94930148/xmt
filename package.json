@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-"version": "2.20.15",
+  "version": "2.20.16",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -10,6 +10,7 @@
     "version:check": "node scripts/version-check.mjs",
     "lint": "eslint .",
     "check": "tsc --noEmit",
+    "test:entrypoints": "node scripts/check-test-entrypoints.mjs",
     "test:time": "tsx scripts/time-contract-test.ts",
     "test:rate-limit": "tsx scripts/rate-limit-contract-test.ts",
     "test:topics": "tsx tests/topics/topics.test.ts",
@@ -180,7 +181,7 @@
     "test:auth-401-recovery": "tsx tests/auth/auth-401-recovery.test.ts",
     "test:role-management-security": "tsx tests/auth/role-management-security.test.ts",
     "test:error-response-sanitization": "tsx tests/security/error-response-sanitization.test.ts",
-    "test:error-response-sanitization-http": "tsx tests/security/error-response-sanitization-http.test.ts"
+    "test:error-response-sanitization-http": "tsx tests/security/error-response-http-contract.test.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",
@@ -225,7 +226,6 @@
     "dotenv": "^17.2.1",
     "express": "^4.21.2",
     "express-rate-limit": "^8.5.2",
-    "framer-motion": "^12.42.0",
     "gsap": "^3.13.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
@@ -261,7 +261,6 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/swagger-ui-express": "^4.1.8",
-    "@vercel/node": "^5.3.6",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
     "babel-plugin-react-dev-locator": "^1.0.0",
@@ -299,6 +298,9 @@
   },
   "homepage": "https://github.com/li94930148/xmt#readme",
   "overrides": {
+    "xcode": {
+      "uuid": "11.1.1"
+    },
     "ws": "8.21.3",
     "ip-address": "10.5.0",
     "socket.io-parser": "4.2.7",

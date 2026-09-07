@@ -65,8 +65,9 @@ try {
   const syncA = await join(ownerA, outsiderId, 'admin') as { roomId?: string; update?: number[] };
   assert.equal(syncA.roomId, roomId);
   assert.ok(Array.isArray(syncA.update));
-  await join(ownerB);
-  const users = await waitFor(ownerA, 'collaboration:users') as { roomId?: string; users?: Array<{ id: number; role?: string }> };
+  // 先订阅再触发 JOIN；users 广播可能早于另一个 socket 的 sync 到达。
+  const usersChanged = waitFor(ownerA, 'collaboration:users');
+  const [, users] = await Promise.all([join(ownerB), usersChanged]) as [unknown, { roomId?: string; users?: Array<{ id: number; role?: string }> }];
   assert.equal(users.roomId, roomId);
   assert.ok(users.users?.every((user) => user.id === ownerId && user.role === 'member'));
 

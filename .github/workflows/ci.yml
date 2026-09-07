@@ -16,6 +16,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:entrypoints
+      - run: npm audit --audit-level=high
       - run: npm run version:check
       - run: npm run check
       - run: npm run build

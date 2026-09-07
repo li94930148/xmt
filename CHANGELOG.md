@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.20.16 - 2026-09-07
+
+### 新增
+
+- CI 增加测试入口存在性检查与全量依赖 high/critical 安全门禁。
+
+### 优化
+
+- 动画统一从 motion/react 导入，移除重复直接依赖；Vercel 转发入口使用 Node HTTP 类型，移除仅用于类型的构建工具依赖。
+- ESLint 排除打包副本与 Python 虚拟环境，保留真实源码规则。
+
+### 修复
+
+- 修复 HTTP 脱敏测试脚本路径错误造成 PR #41 CI 失败；测试使用独立临时数据库并在 finally 关闭连接与服务。
+
+### 技术升级
+
+- 定向更新 Vite 6 补丁、tsx、PostCSS 与受影响开发工具链；xcode 单独覆盖 uuid 11.1.1，保留 CommonJS v4 调用兼容性。
+
+### 数据库变化
+
+- 无 schema、权限或业务数据变更。
+
+### 测试情况
+
+- HTTP 脱敏与 xcode UUID 实际调用通过；全量 npm audit 为 0。完整回归结果见 docs/MAINTENANCE_2026-09-07.md。
+
 ## 2.20.15 - 2026-09-07
 
 ### Security

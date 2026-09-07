@@ -1,4 +1,4 @@
-import type { TargetAndTransition, Variants } from 'framer-motion';
+import type { TargetAndTransition, Variants } from 'motion/react';
 
 export const pageVariants: Variants = {
   initial: { opacity: 0, y: 8 },

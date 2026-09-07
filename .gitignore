@@ -61,7 +61,7 @@ certs/
 *.pfx
 
 # Database files and local production data
-data/
+/data/
 *.db
 *.sqlite
 data/*.db-wal

@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.17', date: '2026-09-08', title: '登录与主题显示修复', impactScope: ['登录', '用户管理', '页面显示'], changes: [{ type: 'fix', description: '新建账号未填写姓名时，登录响应使用用户名作为显示名，不再误报服务暂时不可用。' }, { type: 'fix', description: '恢复生产页面的主题背景、卡片颜色和边框显示。' }] },
   { version: '2.20.16', date: '2026-09-07', title: '历史修复整合与依赖精简', impactScope: ['稳定性', '安全维护'], changes: [{ type: 'fix', description: '修复自动回归测试入口并隔离测试数据库。' }, { type: 'security', description: '更新受影响工具依赖，增加持续安全检查。' }, { type: 'improvement', description: '减少重复依赖，收敛源码检查范围。' }] },
   { version: '2.20.15', date: '2026-09-07', title: '依赖安全与工程化收口', impactScope: ['依赖安全', 'API 防护', '工程化'], changes: [
     { type: 'security', description: '升级 @tiptap/* 全家桶到 ^3.31.0，修复 mergeAttributes() 在 __proto__ 上的 DOM 属性污染中危漏洞。' },

@@ -25,6 +25,19 @@ assert.equal(legacy.accessToken, 'legacy-seven-day-jwt');
 assert.equal(legacy.session, undefined);
 assert.equal(legacy.user.force_change_password, false);
 
+const legacyWithoutDisplayName = adaptLoginResponse({
+  user: {
+    id: 9,
+    username: 'legacy-name-fallback',
+    email: '',
+    role: 'member',
+    name: '',
+    force_change_password: false,
+  },
+  token: 'legacy-name-fallback-token',
+});
+assert.equal(legacyWithoutDisplayName.user.name, 'legacy-name-fallback');
+
 const v1 = adaptLoginResponse({
   success: true,
   data: {
@@ -57,6 +70,34 @@ assert.equal(v1.accessToken, 'v1-memory-access-token');
 assert.equal(v1.session?.id, 'session-8');
 assert.equal(v1.requestId, 'request-v1-8');
 assert.equal(v1.user.force_change_password, true);
+
+const v1WithoutDisplayName = adaptLoginResponse({
+  success: true,
+  data: {
+    user: {
+      id: 10,
+      username: 'v1-name-fallback',
+      email: '',
+      role: 'member',
+      name: '   ',
+      forceChangePassword: false,
+    },
+    accessToken: 'v1-name-fallback-token',
+    expiresIn: 900,
+    session: {
+      id: 'session-10',
+      clientType: 'web',
+      deviceName: null,
+      appVersion: null,
+      createdAt: '2026-09-08T00:00:00.000Z',
+      lastSeenAt: '2026-09-08T00:00:00.000Z',
+      idleExpiresAt: '2026-09-09T00:00:00.000Z',
+      absoluteExpiresAt: '2026-09-15T00:00:00.000Z',
+      current: true,
+    },
+  },
+});
+assert.equal(v1WithoutDisplayName.user.name, 'v1-name-fallback');
 assert.deepEqual(toAuthV1User(v1.user), {
   id: 8,
   username: 'v1-member',

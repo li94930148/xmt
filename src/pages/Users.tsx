@@ -26,12 +26,12 @@ interface UserFormData {
 }
 
 const roleColors: Record<string, string> = {
-  admin: 'bg-red-500/20 text-red-400 border-red-500/30',
-  director: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  editor: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  copywriter: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-  post_production: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  camera: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+  admin: 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30',
+  director: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
+  editor: 'bg-studio-violet/15 text-studio-violet-contrast border-studio-violet/30',
+  copywriter: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
+  post_production: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
+  camera: 'bg-studio-cyan/15 text-studio-cyan-contrast border-studio-cyan/30',
   member: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
 };
 
@@ -85,7 +85,7 @@ export default function Users() {
     [roles],
   );
 
-  const getRoleBadgeClass = (roleCode: string) => roleColors[roleCode] || 'bg-slate-500/20 text-slate-300 border-slate-500/30';
+  const getRoleBadgeClass = (roleCode: string) => roleColors[roleCode] || 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary';
   const getRoleLabel = (roleCode: string) => roleNameMap[roleCode] || getRoleDisplayName(roleCode);
 
   const ensureAssignableRoles = async () => {
@@ -378,13 +378,13 @@ export default function Users() {
                           {canUpdateUser ? (
                             <button
                               onClick={() => void handleToggleEnable(user)}
-                              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs transition-colors ${user.enabled ? 'border border-green-500/30 bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'border border-red-500/30 bg-red-500/20 text-red-400 hover:bg-red-500/30'}`}
+                              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs transition-colors ${user.enabled ? 'border border-studio-success/30 bg-studio-success/15 text-studio-success-contrast hover:bg-studio-success/25' : 'border border-studio-coral/30 bg-studio-coral/15 text-studio-coral-contrast hover:bg-studio-coral/25'}`}
                             >
                               {user.enabled ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
                               {user.enabled ? '启用' : '禁用'}
                             </button>
                           ) : (
-                            <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs ${user.enabled ? 'border border-green-500/30 bg-green-500/20 text-green-400' : 'border border-red-500/30 bg-red-500/20 text-red-400'}`}>
+                            <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs ${user.enabled ? 'border border-studio-success/30 bg-studio-success/15 text-studio-success-contrast' : 'border border-studio-coral/30 bg-studio-coral/15 text-studio-coral-contrast'}`}>
                               {user.enabled ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
                               {user.enabled ? '启用' : '禁用'}
                             </span>

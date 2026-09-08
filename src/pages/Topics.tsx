@@ -598,11 +598,11 @@ export default function Topics() {
             <CheckCircle className="h-4 w-4" />
             通过
           </ActionButton>
-          <ActionButton onClick={() => handleBatchAudit('rejected')} className="px-3 py-2 border-studio-coral/35 text-[#FFC2CC] hover:bg-studio-coral/10">
+          <ActionButton onClick={() => handleBatchAudit('rejected')} className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10">
             <XCircle className="h-4 w-4" />
             驳回
           </ActionButton>
-          <ActionButton onClick={handleBatchDelete} className="px-3 py-2 border-studio-coral/35 text-[#FFC2CC] hover:bg-studio-coral/10">
+          <ActionButton onClick={handleBatchDelete} className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10">
             <Trash2 className="h-4 w-4" />
             删除
           </ActionButton>

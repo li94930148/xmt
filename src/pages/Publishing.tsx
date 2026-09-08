@@ -407,7 +407,7 @@ export default function Publishing() {
                       <button
                         type="button"
                         onClick={() => setDeleteTarget(publishing)}
-                        className="rounded-button border border-studio-coral/30 bg-studio-coral/10 p-2 text-[#FFC2CC] transition hover:bg-studio-coral/15"
+                        className="rounded-button border border-studio-coral/30 bg-studio-coral/10 p-2 text-studio-coral-contrast transition hover:bg-studio-coral/15"
                         title="删除"
                       >
                         <Trash2 className="h-4 w-4" />

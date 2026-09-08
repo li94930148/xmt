@@ -317,13 +317,13 @@ export default function CalendarPage() {
                               key={eventIndex}
                               className={`truncate rounded-md border px-2 py-1 text-[11px] font-medium ${
                                 eventTypeTone[eventItem.event_type || 'other'] === 'coral'
-                                  ? 'border-studio-coral/30 bg-studio-coral/10 text-[#FFC2CC]'
+                                  ? 'border-studio-coral/30 bg-studio-coral/10 text-studio-coral-contrast'
                                   : eventTypeTone[eventItem.event_type || 'other'] === 'success'
-                                    ? 'border-studio-success/30 bg-studio-success/10 text-[#B8F7E3]'
+                                    ? 'border-studio-success/30 bg-studio-success/10 text-studio-success-contrast'
                                     : eventTypeTone[eventItem.event_type || 'other'] === 'amber'
-                                      ? 'border-studio-amber/30 bg-studio-amber/10 text-[#FDE7B2]'
+                                      ? 'border-studio-amber/30 bg-studio-amber/10 text-studio-amber-contrast'
                                       : eventTypeTone[eventItem.event_type || 'other'] === 'cyan'
-                                        ? 'border-studio-cyan/30 bg-studio-cyan/10 text-[#A5F3FC]'
+                                        ? 'border-studio-cyan/30 bg-studio-cyan/10 text-studio-cyan-contrast'
                                         : 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary'
                               }`}
                             >

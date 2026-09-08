@@ -5,13 +5,13 @@
 
 // === 选题状态颜色 ===
 export const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string; border: string }> = {
-  pending:    { bg: 'bg-yellow-500/10',  text: 'text-yellow-400',  dot: 'bg-yellow-500',  border: 'border-yellow-500/30' },
-  approved:   { bg: 'bg-green-500/10',   text: 'text-green-400',   dot: 'bg-green-500',   border: 'border-green-500/30' },
-  rejected:   { bg: 'bg-red-500/10',     text: 'text-red-400',     dot: 'bg-red-500',     border: 'border-red-500/30' },
-  production: { bg: 'bg-blue-500/10',    text: 'text-blue-400',    dot: 'bg-blue-500',    border: 'border-blue-500/30' },
-  shooting:   { bg: 'bg-purple-500/10',  text: 'text-purple-400',  dot: 'bg-purple-500',  border: 'border-purple-500/30' },
-  publishing: { bg: 'bg-indigo-500/10',  text: 'text-indigo-400',  dot: 'bg-indigo-500',  border: 'border-indigo-500/30' },
-  completed:  { bg: 'bg-gray-500/10',    text: 'text-gray-400',    dot: 'bg-gray-500',    border: 'border-gray-500/30' },
+  pending:    { bg: 'bg-studio-amber/10',   text: 'text-studio-amber-contrast',   dot: 'bg-studio-amber',   border: 'border-studio-amber/30' },
+  approved:   { bg: 'bg-studio-success/10', text: 'text-studio-success-contrast', dot: 'bg-studio-success', border: 'border-studio-success/30' },
+  rejected:   { bg: 'bg-studio-coral/10',   text: 'text-studio-coral-contrast',   dot: 'bg-studio-coral',   border: 'border-studio-coral/30' },
+  production: { bg: 'bg-studio-primary/10', text: 'text-studio-primary-contrast', dot: 'bg-studio-primary', border: 'border-studio-primary/30' },
+  shooting:   { bg: 'bg-studio-violet/10',  text: 'text-studio-violet-contrast',  dot: 'bg-studio-violet',  border: 'border-studio-violet/30' },
+  publishing: { bg: 'bg-studio-cyan/10',    text: 'text-studio-cyan-contrast',    dot: 'bg-studio-cyan',    border: 'border-studio-cyan/30' },
+  completed:  { bg: 'bg-studio-surface-soft', text: 'text-studio-text-secondary', dot: 'bg-studio-text-muted', border: 'border-studio-border-soft' },
 };
 
 // === 选题状态中文 ===
@@ -47,10 +47,10 @@ export const PLATFORMS = [
 
 // === 通知类型样式 ===
 export const NOTIFICATION_STYLES: Record<string, { bg: string; border: string; text: string; icon: string }> = {
-  success: { bg: 'bg-green-500/10',  border: 'border-green-500/30',  text: 'text-green-400',  icon: '✓' },
-  error:   { bg: 'bg-red-500/10',    border: 'border-red-500/30',    text: 'text-red-400',    icon: '✕' },
-  warning: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400', icon: '!' },
-  info:    { bg: 'bg-blue-500/10',   border: 'border-blue-500/30',   text: 'text-blue-400',   icon: 'i' },
+  success: { bg: 'bg-studio-success/10', border: 'border-studio-success/30', text: 'text-studio-success-contrast', icon: '✓' },
+  error:   { bg: 'bg-studio-coral/10',   border: 'border-studio-coral/30',   text: 'text-studio-coral-contrast',   icon: '✕' },
+  warning: { bg: 'bg-studio-amber/10',   border: 'border-studio-amber/30',   text: 'text-studio-amber-contrast',   icon: '!' },
+  info:    { bg: 'bg-studio-primary/10', border: 'border-studio-primary/30', text: 'text-studio-primary-contrast', icon: 'i' },
 };
 
 // === 成就相关 ===
@@ -63,10 +63,10 @@ export const ACHIEVEMENT_CATEGORIES = [
 ];
 
 export const ACHIEVEMENT_RARITIES = [
-  { value: 'common',    label: '普通', color: 'text-gray-400',   bg: 'bg-gray-500/10',   border: 'border-gray-500/30' },
-  { value: 'rare',      label: '稀有', color: 'text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/30' },
-  { value: 'epic',      label: '史诗', color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/30' },
-  { value: 'legendary', label: '传说', color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30' },
+  { value: 'common',    label: '普通', color: 'text-studio-text-secondary', bg: 'bg-studio-surface-soft', border: 'border-studio-border-soft' },
+  { value: 'rare',      label: '稀有', color: 'text-studio-primary-contrast', bg: 'bg-studio-primary/10', border: 'border-studio-primary/30' },
+  { value: 'epic',      label: '史诗', color: 'text-studio-violet-contrast',  bg: 'bg-studio-violet/10',  border: 'border-studio-violet/30' },
+  { value: 'legendary', label: '传说', color: 'text-studio-amber-contrast',   bg: 'bg-studio-amber/10',   border: 'border-studio-amber/30' },
 ];
 
 // === 成就等级阈值 ===

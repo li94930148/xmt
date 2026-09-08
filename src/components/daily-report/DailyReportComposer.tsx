@@ -42,7 +42,7 @@ export default function DailyReportComposer({ status = 'draft', items, submittin
           </ActionButton>
         </div>
       </div>
-      {status === 'rejected' ? <p className="border-b border-studio-coral/25 bg-studio-coral/10 px-5 py-3 text-sm text-[#FFC2CC]">日报已退回，请修改后重新提交。</p> : null}
+      {status === 'rejected' ? <p className="border-b border-studio-coral/25 bg-studio-coral/10 px-5 py-3 text-sm text-studio-coral-contrast">日报已退回，请修改后重新提交。</p> : null}
       <div className="grid gap-5 p-5">
         {fields.map((field) => {
           const item = getItem(field.key);

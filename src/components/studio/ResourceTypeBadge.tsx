@@ -12,23 +12,23 @@ function getResourceTone(type?: string): ResourceTone {
   const value = (type || '').trim().toLowerCase();
 
   if (value.includes('image') || value.includes('图片') || value.includes('photo')) {
-    return { label: '图片', icon: FileImage, className: 'border-studio-cyan/35 bg-studio-cyan/12 text-[#A5F3FC]' };
+    return { label: '图片', icon: FileImage, className: 'border-studio-cyan/35 bg-studio-cyan/12 text-studio-cyan-contrast' };
   }
 
   if (value.includes('video') || value.includes('视频')) {
-    return { label: '视频', icon: FileVideo, className: 'border-studio-violet/35 bg-studio-violet/12 text-[#DDD6FE]' };
+    return { label: '视频', icon: FileVideo, className: 'border-studio-violet/35 bg-studio-violet/12 text-studio-violet-contrast' };
   }
 
   if (value.includes('audio') || value.includes('音频')) {
-    return { label: '音频', icon: FileAudio, className: 'border-studio-amber/35 bg-studio-amber/12 text-[#FDE7B2]' };
+    return { label: '音频', icon: FileAudio, className: 'border-studio-amber/35 bg-studio-amber/12 text-studio-amber-contrast' };
   }
 
   if (value.includes('link') || value.includes('链接') || value.includes('url')) {
-    return { label: '链接', icon: Link2, className: 'border-studio-success/35 bg-studio-success/12 text-[#B8F7E3]' };
+    return { label: '链接', icon: Link2, className: 'border-studio-success/35 bg-studio-success/12 text-studio-success-contrast' };
   }
 
   if (value.includes('doc') || value.includes('文档') || value.includes('script')) {
-    return { label: '文档', icon: FileText, className: 'border-studio-primary/35 bg-studio-primary/12 text-[#BFD0FF]' };
+    return { label: '文档', icon: FileText, className: 'border-studio-primary/35 bg-studio-primary/12 text-studio-primary-contrast' };
   }
 
   return { label: type || '其他', icon: Package, className: 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary' };

@@ -173,10 +173,10 @@ export default function PublishingDetail() {
         </button>
         <div className="flex items-center gap-3">
           <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs border ${
-            data.status === 'published' ? 'bg-green-500/20 text-green-400 border-green-500/30' :
-            data.status === 'failed' ? 'bg-red-500/20 text-red-400 border-red-500/30' :
-            data.status === 'scheduled' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' :
-            'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+            data.status === 'published' ? 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30' :
+            data.status === 'failed' ? 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30' :
+            data.status === 'scheduled' ? 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30' :
+            'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30'
           }`}>
             {PUBLISHING_STATUS_TEXT[data.status] || data.status}
           </span>

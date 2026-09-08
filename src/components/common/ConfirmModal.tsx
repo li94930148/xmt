@@ -21,12 +21,12 @@ interface ConfirmModalProps {
 const variantConfig: Record<ConfirmVariant, { icon: typeof Trash2; iconClass: string; buttonClass: string }> = {
   danger: {
     icon: Trash2,
-    iconClass: 'bg-red-500/15 text-red-400',
+    iconClass: 'bg-studio-coral/15 text-studio-coral-contrast',
     buttonClass: 'bg-red-600 hover:bg-red-700 text-white',
   },
   warning: {
     icon: AlertTriangle,
-    iconClass: 'bg-amber-500/15 text-amber-400',
+    iconClass: 'bg-studio-amber/15 text-studio-amber-contrast',
     buttonClass: 'bg-amber-500 hover:bg-amber-400 text-black',
   },
   default: {

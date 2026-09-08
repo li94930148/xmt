@@ -309,13 +309,13 @@ export default function TopicDetail() {
   }, [navigate, requestTopicLeave]);
 
   const statusColors: Record<string, string> = {
-    pending: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    approved: 'bg-green-500/20 text-green-400 border-green-500/30',
-    rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
-    production: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    shooting: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-    publishing: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
-    completed: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+    pending: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
+    approved: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
+    rejected: 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30',
+    production: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
+    shooting: 'bg-studio-violet/15 text-studio-violet-contrast border-studio-violet/30',
+    publishing: 'bg-studio-cyan/15 text-studio-cyan-contrast border-studio-cyan/30',
+    completed: 'bg-studio-surface-soft text-studio-text-secondary border-studio-border-soft',
   };
 
   const statusText: Record<string, string> = {
@@ -391,7 +391,7 @@ export default function TopicDetail() {
   }
 
   if (!topic) {
-    return <p className="text-gray-400 text-center py-8">选题不存在</p>;
+    return <p className="py-8 text-center text-studio-text-secondary">选题不存在</p>;
   }
 
   const isEditing = editTitle || editDetails || editDescription || editOutline;
@@ -413,7 +413,7 @@ export default function TopicDetail() {
       <div className="flex items-center gap-4">
         <button
           onClick={handleReturnToTopics}
-          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+          className="flex items-center gap-2 text-studio-text-secondary transition-colors hover:text-studio-text-primary"
         >
           <ChevronLeft className="w-5 h-5" />
           返回列表
@@ -443,7 +443,7 @@ export default function TopicDetail() {
                 </h1>
               )}
               {isOverdue && (
-                <span className="px-2 py-1 bg-red-500/20 text-red-400 text-xs rounded-full border border-red-500/30 flex items-center gap-1">
+                <span className="flex items-center gap-1 rounded-full border border-studio-coral/30 bg-studio-coral/15 px-2 py-1 text-xs text-studio-coral-contrast">
                   <AlertTriangle className="w-3 h-3" />
                   已逾期
                 </span>
@@ -507,7 +507,7 @@ export default function TopicDetail() {
               />
             ) : (
               <p
-                className={`font-medium cursor-pointer transition-colors ${isOverdue ? 'text-red-400 hover:text-red-300' : `${styles.textPrimary} hover:text-blue-400`}`}
+                className={`font-medium cursor-pointer transition-colors ${isOverdue ? 'text-studio-coral-contrast hover:opacity-80' : `${styles.textPrimary} hover:text-studio-primary-contrast`}`}
                 onClick={() => {
                   if (canEditTopic) setEditDetails(true);
                 }}
@@ -628,7 +628,7 @@ export default function TopicDetail() {
             <button
               onClick={handleSave}
               disabled={isAggregateSaving}
-              className={`px-4 py-2 bg-blue-600 hover:bg-blue-700 ${styles.textPrimary} rounded-lg transition-colors flex items-center gap-2`}
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
             >
               <Save className="w-4 h-4" />
               保存
@@ -656,14 +656,14 @@ export default function TopicDetail() {
                 <div key={step.status} className="flex items-center">
                   <div className={`flex flex-col items-center ${isCurrent ? 'scale-110' : ''}`}>
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      isCurrent ? 'bg-blue-600 text-white' : isCompleted ? 'bg-green-500/20 text-green-400' : `${styles.bgTertiary} text-gray-500`
+                      isCurrent ? 'bg-blue-600 text-white' : isCompleted ? 'bg-studio-success/15 text-studio-success-contrast' : `${styles.bgTertiary} text-studio-text-muted`
                     }`}>
                       <Icon className="w-5 h-5" />
                     </div>
                     <span className={`text-xs mt-2 ${
-                      isCurrent ? 'text-blue-400 font-medium' :
-                      isCompleted ? 'text-green-400' :
-                      'text-gray-500'
+                      isCurrent ? 'text-studio-primary-contrast font-medium' :
+                      isCompleted ? 'text-studio-success-contrast' :
+                      'text-studio-text-muted'
                     }`}>
                       {step.label}
                     </span>
@@ -683,7 +683,7 @@ export default function TopicDetail() {
             {topic.status === 'pending' && canAudit && (
               <button
                 onClick={() => setShowAuditModal(true)}
-                className={`px-4 py-2 bg-blue-600 hover:bg-blue-700 ${styles.textPrimary} rounded-lg transition-colors flex items-center gap-2`}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
               >
                 <CheckCircle className="w-4 h-4" />
                 审核选题
@@ -708,7 +708,7 @@ export default function TopicDetail() {
             {canEditTopic && topic.status !== 'completed' && topic.status !== 'rejected' && (
               <button
                 onClick={() => handleUpdateStatus(nextStatuses[topic.status])}
-                className={`px-4 py-2 bg-gradient-to-r from-blue-600 to-cyan-600 ${styles.textPrimary} font-semibold rounded-lg hover:opacity-90 transition-opacity flex items-center gap-2`}
+                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90"
               >
                 <ArrowRight className="w-4 h-4" />
                 推进到下一阶段
@@ -744,14 +744,14 @@ export default function TopicDetail() {
             
             <div className="space-y-4">
               <div>
-                <label className={`block text-gray-300 text-sm font-medium mb-2`}>审核结果</label>
+                <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>审核结果</label>
                 <div className="flex gap-4">
                   <button
                     onClick={() => setAuditData({ ...auditData, status: 'approved' })}
                     className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
                       auditData.status === 'approved' 
                         ? 'bg-green-600 text-white' 
-                        : `${styles.bgTertiary} text-gray-300 ${styles.hoverBg}`
+                        : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
                     }`}
                   >
                     <CheckCircle className="w-5 h-5" />
@@ -762,7 +762,7 @@ export default function TopicDetail() {
                     className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
                       auditData.status === 'rejected' 
                         ? 'bg-red-600 text-white' 
-                        : `${styles.bgTertiary} text-gray-300 ${styles.hoverBg}`
+                        : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
                     }`}
                   >
                     <XCircle className="w-5 h-5" />
@@ -773,7 +773,7 @@ export default function TopicDetail() {
               
               {auditData.status === 'approved' && (
                 <div>
-                  <label className="block text-gray-300 text-sm font-medium mb-2">指派负责人</label>
+                  <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>指派负责人</label>
                   <select
                     value={auditData.assignee_id}
                     onChange={(e) => setAuditData({ ...auditData, assignee_id: parseInt(e.target.value) })}
@@ -788,7 +788,7 @@ export default function TopicDetail() {
               )}
               
               <div>
-                <label className="block text-gray-300 text-sm font-medium mb-2">审核意见</label>
+                <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>审核意见</label>
                 <textarea
                   value={auditData.comment}
                   onChange={(e) => setAuditData({ ...auditData, comment: e.target.value })}

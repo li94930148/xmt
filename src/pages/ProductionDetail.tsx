@@ -613,7 +613,7 @@ export default function ProductionDetail() {
             {canDelete ? (
               <ActionButton
                 onClick={() => setShowDeleteModal(true)}
-                className="px-3 py-2 border-studio-coral/35 text-[#FFC2CC] hover:bg-studio-coral/10"
+                className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10"
                 title="删除创作记录"
               >
                 <Trash2 className="h-4 w-4" />

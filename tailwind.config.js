@@ -30,6 +30,12 @@ export default {
           coral: 'var(--xmt-coral)',
           amber: 'var(--xmt-amber)',
           success: 'var(--xmt-success)',
+          'primary-contrast': 'var(--xmt-primary-contrast)',
+          'cyan-contrast': 'var(--xmt-cyan-contrast)',
+          'violet-contrast': 'var(--xmt-violet-contrast)',
+          'coral-contrast': 'var(--xmt-coral-contrast)',
+          'amber-contrast': 'var(--xmt-amber-contrast)',
+          'success-contrast': 'var(--xmt-success-contrast)',
         },
         // 品牌色（固定值，不随主题变化）
         brand: {

@@ -217,7 +217,7 @@ export default function Resources() {
               <button
                 type="button"
                 onClick={() => setShowDeleteModal(true)}
-                className="inline-flex min-h-10 items-center gap-2 rounded-button border border-studio-coral/30 bg-studio-coral/10 px-4 py-2.5 text-sm font-semibold text-[#FFC2CC] transition hover:bg-studio-coral/15"
+                className="inline-flex min-h-10 items-center gap-2 rounded-button border border-studio-coral/30 bg-studio-coral/10 px-4 py-2.5 text-sm font-semibold text-studio-coral-contrast transition hover:bg-studio-coral/15"
               >
                 <Trash2 className="h-4 w-4" />
                 删除

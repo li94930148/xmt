@@ -3,12 +3,12 @@ import { twMerge } from 'tailwind-merge';
 export type StatusTone = 'primary' | 'cyan' | 'violet' | 'coral' | 'amber' | 'success' | 'muted';
 
 const toneClass: Record<StatusTone, string> = {
-  primary: 'border-studio-primary/35 bg-studio-primary/12 text-[#BFD0FF]',
-  cyan: 'border-studio-cyan/35 bg-studio-cyan/12 text-[#A5F3FC]',
-  violet: 'border-studio-violet/35 bg-studio-violet/12 text-[#DDD6FE]',
-  coral: 'border-studio-coral/35 bg-studio-coral/12 text-[#FFC2CC]',
-  amber: 'border-studio-amber/35 bg-studio-amber/12 text-[#FDE7B2]',
-  success: 'border-studio-success/35 bg-studio-success/12 text-[#B8F7E3]',
+  primary: 'border-studio-primary/35 bg-studio-primary/12 text-studio-primary-contrast',
+  cyan: 'border-studio-cyan/35 bg-studio-cyan/12 text-studio-cyan-contrast',
+  violet: 'border-studio-violet/35 bg-studio-violet/12 text-studio-violet-contrast',
+  coral: 'border-studio-coral/35 bg-studio-coral/12 text-studio-coral-contrast',
+  amber: 'border-studio-amber/35 bg-studio-amber/12 text-studio-amber-contrast',
+  success: 'border-studio-success/35 bg-studio-success/12 text-studio-success-contrast',
   muted: 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary',
 };
 

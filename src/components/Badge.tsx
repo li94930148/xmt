@@ -49,7 +49,7 @@ interface PointBadgeProps {
  */
 export function PointBadge({ points, className = '' }: PointBadgeProps) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 ${className}`}>
+    <span className={`inline-flex items-center rounded-full border border-studio-amber/30 bg-studio-amber/10 px-2 py-0.5 text-[10px] font-medium text-studio-amber-contrast ${className}`}>
       {points} 积分
     </span>
   );

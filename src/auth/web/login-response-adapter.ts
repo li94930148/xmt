@@ -53,15 +53,20 @@ function requireString(value: unknown, field: string): string {
   return value;
 }
 
+function displayNameOrUsername(value: unknown, username: string): string {
+  return isString(value) ? value : username;
+}
+
 function toLegacyUser(value: unknown): User {
   if (!isRecord(value)) throw new LoginResponseAdapterError('登录响应缺少用户信息');
+  const username = requireString(value.username, '用户名');
   return {
     id: requireNumber(value.id, '用户 ID'),
-    username: requireString(value.username, '用户名'),
+    username,
     password: typeof value.password === 'string' ? value.password : '',
     email: typeof value.email === 'string' ? value.email : '',
     role: requireString(value.role, '用户角色'),
-    name: requireString(value.name, '用户名称'),
+    name: displayNameOrUsername(value.name, username),
     enabled: value.enabled !== false,
     force_change_password: value.force_change_password === true,
     created_at: typeof value.created_at === 'string' ? value.created_at : '',
@@ -71,13 +76,14 @@ function toLegacyUser(value: unknown): User {
 
 function toV1User(value: unknown): User {
   if (!isRecord(value)) throw new LoginResponseAdapterError('v1 登录响应缺少用户信息');
+  const username = requireString(value.username, '用户名');
   return {
     id: requireNumber(value.id, '用户 ID'),
-    username: requireString(value.username, '用户名'),
+    username,
     password: '',
     email: typeof value.email === 'string' ? value.email : '',
     role: requireString(value.role, '用户角色'),
-    name: requireString(value.name, '用户名称'),
+    name: displayNameOrUsername(value.name, username),
     enabled: true,
     force_change_password: value.forceChangePassword === true,
     created_at: '',

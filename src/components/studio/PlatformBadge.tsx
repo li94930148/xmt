@@ -19,7 +19,7 @@ function getPlatformTone(platform?: string): PlatformTone {
     return {
       label: platform || '抖音',
       icon: Music2,
-      className: 'border-studio-cyan/35 bg-studio-cyan/12 text-[#A5F3FC]',
+      className: 'border-studio-cyan/35 bg-studio-cyan/12 text-studio-cyan-contrast',
     };
   }
 
@@ -27,7 +27,7 @@ function getPlatformTone(platform?: string): PlatformTone {
     return {
       label: platform || '小红书',
       icon: BookOpen,
-      className: 'border-studio-coral/35 bg-studio-coral/12 text-[#FFC2CC]',
+      className: 'border-studio-coral/35 bg-studio-coral/12 text-studio-coral-contrast',
     };
   }
 
@@ -35,7 +35,7 @@ function getPlatformTone(platform?: string): PlatformTone {
     return {
       label: platform || '视频号',
       icon: Radio,
-      className: 'border-studio-success/35 bg-studio-success/12 text-[#B8F7E3]',
+      className: 'border-studio-success/35 bg-studio-success/12 text-studio-success-contrast',
     };
   }
 
@@ -43,7 +43,7 @@ function getPlatformTone(platform?: string): PlatformTone {
     return {
       label: platform || '快手',
       icon: Clapperboard,
-      className: 'border-studio-amber/35 bg-studio-amber/12 text-[#FDE7B2]',
+      className: 'border-studio-amber/35 bg-studio-amber/12 text-studio-amber-contrast',
     };
   }
 
@@ -51,7 +51,7 @@ function getPlatformTone(platform?: string): PlatformTone {
     return {
       label: platform || 'B站',
       icon: PlaySquare,
-      className: 'border-studio-violet/35 bg-studio-violet/12 text-[#DDD6FE]',
+      className: 'border-studio-violet/35 bg-studio-violet/12 text-studio-violet-contrast',
     };
   }
 

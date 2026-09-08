@@ -160,12 +160,12 @@ export default function Production() {
   };
 
   const topicStatusColors: Record<string, string> = {
-    pending: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    approved: 'bg-green-500/20 text-green-400 border-green-500/30',
-    rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
-    production: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    shooting: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-    publishing: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+    pending: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
+    approved: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
+    rejected: 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30',
+    production: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
+    shooting: 'bg-studio-violet/15 text-studio-violet-contrast border-studio-violet/30',
+    publishing: 'bg-studio-cyan/15 text-studio-cyan-contrast border-studio-cyan/30',
     completed: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
   };
 
@@ -180,10 +180,10 @@ export default function Production() {
   };
 
   const productionStatusColors: Record<string, string> = {
-    draft: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    review: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    approved: 'bg-green-500/20 text-green-400 border-green-500/30',
-    rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
+    draft: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
+    review: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
+    approved: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
+    rejected: 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30',
   };
 
   const productionStatusText: Record<string, string> = {

@@ -39,7 +39,7 @@ export default function DailyReportReviewDialog({ report, loading, onClose, onRe
         />
         <div className="mt-5 flex flex-wrap justify-end gap-2">
           <ActionButton onClick={onClose}>取消</ActionButton>
-          <ActionButton onClick={() => onReview('reject', comment)} disabled={loading} className="border-studio-coral/35 text-[#FFC2CC] hover:bg-studio-coral/10">
+          <ActionButton onClick={() => onReview('reject', comment)} disabled={loading} className="border-studio-coral/35 text-studio-coral-contrast hover:bg-studio-coral/10">
             退回修改
           </ActionButton>
           <ActionButton onClick={() => onReview('approve', comment)} disabled={loading} variant="primary">

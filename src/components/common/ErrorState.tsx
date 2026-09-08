@@ -20,19 +20,19 @@ const variantMap: Record<
 > = {
   error: {
     icon: AlertTriangle,
-    iconClass: 'bg-red-500/15 text-red-400',
+    iconClass: 'bg-studio-coral/15 text-studio-coral-contrast',
     defaultTitle: '加载失败',
     defaultDescription: '当前内容暂时无法显示，请稍后重试。',
   },
   warning: {
     icon: ShieldAlert,
-    iconClass: 'bg-amber-500/15 text-amber-400',
+    iconClass: 'bg-studio-amber/15 text-studio-amber-contrast',
     defaultTitle: '暂时不可用',
     defaultDescription: '当前操作没有成功完成，请检查条件后重试。',
   },
   notFound: {
     icon: FileQuestion,
-    iconClass: 'bg-slate-500/15 text-slate-300',
+    iconClass: 'bg-studio-surface-soft text-studio-text-secondary',
     defaultTitle: '未找到内容',
     defaultDescription: '你要查看的数据不存在，或已经被移除。',
   },

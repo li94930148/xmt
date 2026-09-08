@@ -21,11 +21,11 @@ export default function AccessDeniedState({
       <div className={`w-full max-w-2xl overflow-hidden rounded-[28px] ${styles.card}`}>
         <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-red-500/10 px-8 py-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-400">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-studio-amber/15 text-studio-amber-contrast">
               <LockKeyhole className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-amber-400">403</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-studio-amber-contrast">403</p>
               <h1 className={`mt-1 text-2xl font-semibold ${styles.textPrimary}`}>{title}</h1>
             </div>
           </div>

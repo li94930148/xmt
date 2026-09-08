@@ -357,7 +357,7 @@ export default function Shooting() {
                         topicTitle: shooting.topic_title || '该制作计划',
                       })
                     }
-                    className="inline-flex min-h-10 items-center justify-center rounded-button border border-studio-coral/30 bg-studio-coral/10 px-3 py-2 text-sm font-semibold text-[#FFC2CC] transition hover:bg-studio-coral/15"
+                    className="inline-flex min-h-10 items-center justify-center rounded-button border border-studio-coral/30 bg-studio-coral/10 px-3 py-2 text-sm font-semibold text-studio-coral-contrast transition hover:bg-studio-coral/15"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>

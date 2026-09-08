@@ -149,7 +149,7 @@ export default function Messages() {
                 <CheckCircle2 className="h-4 w-4" />
                 全部已读
               </ActionButton>
-              <ActionButton onClick={() => setShowClearConfirm(true)} className="border-studio-coral/35 text-[#FFC2CC] hover:bg-studio-coral/10">
+              <ActionButton onClick={() => setShowClearConfirm(true)} className="border-studio-coral/35 text-studio-coral-contrast hover:bg-studio-coral/10">
                 <Trash2 className="h-4 w-4" />
                 清空
               </ActionButton>

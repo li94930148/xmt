@@ -7,16 +7,16 @@ type Props = {
 };
 
 const retroClasses: Record<RetrospectiveStatus, string> = {
-  draft: 'border-amber-400/30 bg-amber-400/10 text-amber-300',
-  published: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
-  archived: 'border-slate-400/30 bg-slate-400/10 text-slate-300',
+  draft: 'border-studio-amber/30 bg-studio-amber/10 text-studio-amber-contrast',
+  published: 'border-studio-success/30 bg-studio-success/10 text-studio-success-contrast',
+  archived: 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary',
 };
 
 const actionClasses: Record<RetroActionStatus, string> = {
-  todo: 'border-slate-400/30 bg-slate-400/10 text-slate-300',
-  doing: 'border-sky-400/30 bg-sky-400/10 text-sky-300',
-  done: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
-  cancelled: 'border-zinc-400/30 bg-zinc-400/10 text-zinc-300',
+  todo: 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary',
+  doing: 'border-studio-cyan/30 bg-studio-cyan/10 text-studio-cyan-contrast',
+  done: 'border-studio-success/30 bg-studio-success/10 text-studio-success-contrast',
+  cancelled: 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary',
 };
 
 export default function RetroStatusPill({ status, kind = 'retro' }: Props) {
@@ -28,7 +28,7 @@ export default function RetroStatusPill({ status, kind = 'retro' }: Props) {
     : retroStatusLabels[status as RetrospectiveStatus];
 
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${classes || 'border-slate-400/30 bg-slate-400/10 text-slate-300'}`}>
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${classes || 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary'}`}>
       {label || '未知状态'}
     </span>
   );

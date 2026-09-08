@@ -154,9 +154,9 @@ export default function ShootingDetail() {
   };
 
   const statusColors: Record<string, string> = {
-    planned: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    in_progress: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    completed: 'bg-green-500/20 text-green-400 border-green-500/30',
+    planned: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
+    in_progress: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
+    completed: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
     cancelled: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
   };
 

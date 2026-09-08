@@ -16,6 +16,12 @@ html.dark {
   --xmt-coral: #FF5F7A;
   --xmt-amber: #F8B84E;
   --xmt-success: #20D69B;
+  --xmt-primary-contrast: #BFD0FF;
+  --xmt-cyan-contrast: #A5F3FC;
+  --xmt-violet-contrast: #DDD6FE;
+  --xmt-coral-contrast: #FFC2CC;
+  --xmt-amber-contrast: #FDE7B2;
+  --xmt-success-contrast: #B8F7E3;
   --xmt-danger: #FF5F7A;
   --xmt-warning: #F8B84E;
   --xmt-glow-primary: 0 0 32px rgba(79, 124, 255, 0.28);
@@ -63,6 +69,12 @@ html.light {
   --xmt-text-primary: #111827;
   --xmt-text-secondary: #475569;
   --xmt-text-muted: #64748B;
+  --xmt-primary-contrast: #1D4ED8;
+  --xmt-cyan-contrast: #0E7490;
+  --xmt-violet-contrast: #6D28D9;
+  --xmt-coral-contrast: #BE123C;
+  --xmt-amber-contrast: #92400E;
+  --xmt-success-contrast: #047857;
 
   --color-bg-primary: var(--xmt-app-bg);
   --color-bg-secondary: var(--xmt-surface);

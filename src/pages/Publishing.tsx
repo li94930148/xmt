@@ -88,6 +88,10 @@ export default function Publishing() {
   const [formData, setFormData] = useState(initialFormData);
   const [deleteTarget, setDeleteTarget] = useState<PublishingType | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  // 页大小以服务端返回为准，避免前端写死与后端默认值脱节
+  const [pageSize, setPageSize] = useState(50);
 
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
@@ -96,11 +100,18 @@ export default function Publishing() {
     void fetchData();
   }, []);
 
-  const fetchData = async () => {
+  const fetchData = async (requestedPage = page) => {
     setLoading(true);
     try {
-      const result = await getPublishing();
-      setPublishings(result);
+      let result = await getPublishing({ page: requestedPage });
+      // 删除末页最后一条后当前页会越界变空，回退到上一页避免出现空白列表
+      if (result.data.length === 0 && result.page > 1) {
+        result = await getPublishing({ page: result.page - 1 });
+      }
+      setPublishings(result.data);
+      setPage(result.page);
+      setTotal(result.total);
+      setPageSize(result.limit || pageSize);
 
       const topicList = await getTopics();
       setTopics(topicList.data.filter((topic) => topic.status === 'publishing' || topic.status === 'shooting'));
@@ -131,6 +142,7 @@ export default function Publishing() {
     }
 
     try {
+      const isEditing = Boolean(editingPublishing);
       if (editingPublishing) {
         await updatePublishing(editingPublishing.id, {
           platform: formData.platform,
@@ -170,8 +182,8 @@ export default function Publishing() {
       setShowCreateModal(false);
       resetForm();
 
-      const result = await getPublishing();
-      setPublishings(result);
+      // 新建记录排在最前，回到第 1 页才能看到；编辑则停留在当前页
+      await fetchData(isEditing ? page : 1);
     } catch (error) {
       addNotification({
         title: '操作失败',
@@ -189,8 +201,7 @@ export default function Publishing() {
         message: '发布记录已删除',
         type: 'success',
       });
-      const result = await getPublishing();
-      setPublishings(result);
+      await fetchData(page);
     } catch (error) {
       addNotification({
         title: '删除失败',
@@ -409,6 +420,16 @@ export default function Publishing() {
           </table>
         </ResponsiveTableShell>
       )}
+
+      {total > pageSize ? (
+        <div className="flex items-center justify-between gap-3 text-sm text-studio-text-secondary">
+          <span>共 {total} 条，第 {page} / {Math.ceil(total / pageSize)} 页</span>
+          <div className="flex gap-2">
+            <ActionButton type="button" variant="ghost" disabled={page <= 1} onClick={() => void fetchData(page - 1)}>上一页</ActionButton>
+            <ActionButton type="button" variant="ghost" disabled={page >= Math.ceil(total / pageSize)} onClick={() => void fetchData(page + 1)}>下一页</ActionButton>
+          </div>
+        </div>
+      ) : null}
 
       <FormModal
         open={showCreateModal}

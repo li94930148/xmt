@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { twMerge } from 'tailwind-merge';
-import { motion, useReducedMotion, type HTMLMotionProps } from 'framer-motion';
+import { motion, useReducedMotion, type HTMLMotionProps } from 'motion/react';
 
 type XMTCardProps = HTMLMotionProps<'div'> & { children: ReactNode; glow?: boolean };
 

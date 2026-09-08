@@ -5,7 +5,8 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist'] },
+  // 构建副本与 Python 环境内的第三方声明不是项目源码。
+  { ignores: ['**/node_modules/**', '**/dist/**', 'agent/dist-*/**', 'agent/release*/**', 'agent/.collector-runtime-build/**', 'collector/.venv*/**', 'android/.gradle/**', 'android/**/build/**'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],

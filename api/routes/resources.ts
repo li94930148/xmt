@@ -23,13 +23,10 @@ router.get('/', authenticate, async (req, res) => {
       params.push(req.user?.id);
     }
     
+    const countResult = await queryOne(`SELECT COUNT(*) as total FROM (${query}) as temp`, params);
     query += ` ORDER BY r.created_at DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit as string), (parseInt(page as string) - 1) * parseInt(limit as string));
-    
     const resources = await queryAll(query, params);
-    
-    const countQuery = query.replace(/ORDER BY.*$/, '');
-    const countResult = await queryOne(`SELECT COUNT(*) as total FROM (${countQuery}) as temp`, params.slice(0, -2));
     
     res.json({
       data: resources,

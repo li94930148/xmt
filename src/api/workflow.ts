@@ -125,8 +125,10 @@ export async function deleteComment(id: number): Promise<{ message: string }> {
   return response.json();
 }
 
+export type PaginatedWorkflowResult<T> = { data: T[]; total: number; page: number; limit: number };
+
 // Shooting
-export async function getShooting(params?: { topic_id?: number }): Promise<Shooting[]> {
+export async function getShooting(params?: { topic_id?: number; page?: number; limit?: number }): Promise<PaginatedWorkflowResult<Shooting>> {
   const query = new URLSearchParams(params as Record<string, string>);
   const response = await fetch(`${BASE_URL}/workflow/shooting?${query}`, {
     headers: getAuthHeader()
@@ -164,7 +166,7 @@ export async function createShooting(data: { topic_id: number; plan_date?: strin
 }
 
 // Publishing
-export async function getPublishing(params?: { topic_id?: number }): Promise<Publishing[]> {
+export async function getPublishing(params?: { topic_id?: number; page?: number; limit?: number }): Promise<PaginatedWorkflowResult<Publishing>> {
   const query = new URLSearchParams(params as Record<string, string>);
   const response = await fetch(`${BASE_URL}/workflow/publishing?${query}`, {
     headers: getAuthHeader()

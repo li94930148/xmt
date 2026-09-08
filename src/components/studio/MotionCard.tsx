@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import type { HTMLMotionProps } from 'framer-motion';
-import { motion, useReducedMotion } from 'framer-motion';
+import type { HTMLMotionProps } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 import { twMerge } from 'tailwind-merge';
 import { cardHover } from './motion';
 

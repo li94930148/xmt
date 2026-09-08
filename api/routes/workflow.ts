@@ -23,6 +23,19 @@ type VersionRow = {
   created_at?: string | null;
 };
 
+const LIST_PAGE_SIZE_DEFAULT = 50;
+const LIST_PAGE_SIZE_MAX = 100;
+
+export function parseListPagination(query: Record<string, unknown>) {
+  const pageCandidate = Number.parseInt(String(query.page ?? 1), 10);
+  const limitCandidate = Number.parseInt(String(query.limit ?? LIST_PAGE_SIZE_DEFAULT), 10);
+  const page = Number.isFinite(pageCandidate) && pageCandidate > 0 ? pageCandidate : 1;
+  const limit = Number.isFinite(limitCandidate) && limitCandidate > 0
+    ? Math.min(limitCandidate, LIST_PAGE_SIZE_MAX)
+    : LIST_PAGE_SIZE_DEFAULT;
+  return { page, limit, offset: (page - 1) * limit };
+}
+
 function parseVersionParts(version: string | undefined): VersionParts | null {
   const normalized = String(version || 'v1.0');
   const match = normalized.match(/^v?(\d+)\.(\d+)$/);
@@ -553,8 +566,11 @@ router.get('/shooting', authenticate, async (req, res) => {
       query += ` AND (t.creator_id = ? OR t.assignee_id = ? OR s.operator_id = ?)`;
       params.push(userId, userId, userId);
     }
-    query += ` ORDER BY s.created_at DESC`;
-    res.json(await queryAll(query, params));
+    const { page, limit, offset } = parseListPagination(req.query);
+    const total = await queryOne<{ total: number }>(`SELECT COUNT(*) AS total FROM (${query}) AS shooting_list`, params);
+    query += ` ORDER BY s.created_at DESC LIMIT ? OFFSET ?`;
+    const data = await queryAll(query, [...params, limit, offset]);
+    res.json({ data, total: total?.total || 0, page, limit });
   } catch (error) {
     res.status(500).json({ message: '获取拍摄列表失败', error });
   }
@@ -696,8 +712,11 @@ router.get('/publishing', authenticate, async (req, res) => {
       query += ` AND (t.creator_id = ? OR t.assignee_id = ? OR p.operator_id = ?)`;
       params.push(userId, userId, userId);
     }
-    query += ` ORDER BY p.created_at DESC`;
-    res.json(await queryAll(query, params));
+    const { page, limit, offset } = parseListPagination(req.query);
+    const total = await queryOne<{ total: number }>(`SELECT COUNT(*) AS total FROM (${query}) AS publishing_list`, params);
+    query += ` ORDER BY p.created_at DESC LIMIT ? OFFSET ?`;
+    const data = await queryAll(query, [...params, limit, offset]);
+    res.json({ data, total: total?.total || 0, page, limit });
   } catch (error) {
     res.status(500).json({ message: '获取发布列表失败', error });
   }

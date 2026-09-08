@@ -8,6 +8,7 @@ import express, {
   type NextFunction,
 } from 'express'
 import cors from 'cors'
+import helmet from 'helmet'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import http from 'http'
@@ -22,6 +23,7 @@ import { verifyAccessTokenV1 } from './modules/auth/token.service.js'
 import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/socket.js'
 import { apiLimiter } from './middleware/rateLimit.js'
 import { parseTrustProxy } from './utils/trustProxy.js'
+import { HTTP_JSON_BODY_LIMIT, HTTP_JSON_BODY_LIMIT_MB } from './utils/limits.js'
 import { isAllowedRequestOrigin, parseConfiguredOrigins } from './security/origin-policy.js'
 import { requireDirectLoopback } from './security/internal-access.js'
 import { resolveServerBinding } from './config/server-bind.js'
@@ -37,7 +39,7 @@ import { createAuthMetricsHttpRouter, readAuthMetricsHttpConfig } from './module
 import { openApiRouter } from './openapi.js'
 import { requestId } from './middleware/request-id.js'
 import { authRolloutRuntimeReadiness } from './config/auth-rollout-runtime.js'
-import { sendV1Error } from './utils/response.js'
+import { sanitizeServerErrorPayload, sendV1Error } from './utils/response.js'
 import usersRoutes from './routes/users.js'
 import messagesRoutes from './routes/messages.js'
 import analyticsRoutes from './routes/analytics.js'
@@ -130,6 +132,10 @@ export { server }
 const allowedOrigins = parseConfiguredOrigins(process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGINS)
 
 export const io = new Server(server, {
+  // Cap a single Socket.IO payload well below the HTTP JSON ceiling. This
+  // limits parser allocation before application-level validation runs.
+  maxHttpBufferSize: 1_000_000,
+  pingTimeout: 20_000,
   cors: {
     origin: (origin, callback) => {
       if (isAllowedRequestOrigin(origin, allowedOrigins)) return callback(null, true)
@@ -241,9 +247,34 @@ const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
 }
 
 app.use(requestId)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      baseUri: ["'self'"],
+      fontSrc: ["'self'", 'data:'],
+      formAction: ["'self'"],
+      frameAncestors: ["'self'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      objectSrc: ["'none'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      connectSrc: ["'self'", 'https:', 'wss:'],
+      upgradeInsecureRequests: [],
+    },
+  },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+}))
+app.use('/api', (_req, res, next) => {
+  const originalJson = res.json.bind(res)
+  res.json = ((payload: unknown) => originalJson(
+    res.statusCode >= 500 ? sanitizeServerErrorPayload(payload, _req.requestId) : payload,
+  )) as typeof res.json
+  next()
+})
 app.use('/api', cors(corsOptions))
-app.use(express.json({ limit: '16mb', verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
-app.use(express.urlencoded({ extended: true, limit: '16mb' }))
+app.use(express.json({ limit: HTTP_JSON_BODY_LIMIT, verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = buffer } }))
+app.use(express.urlencoded({ extended: true, limit: HTTP_JSON_BODY_LIMIT }))
 app.use('/internal', requireDirectLoopback)
 app.get('/internal/auth-rollout/runtime', (req, res) => {
   res.setHeader('Cache-Control', 'no-store')
@@ -381,7 +412,7 @@ app.use((error: Error & { status?: number; statusCode?: number; type?: string },
   res.status(payloadTooLarge ? 413 : 500).json({
     success: false,
     error: payloadTooLarge ? 'Payload too large' : 'Server internal error',
-    message: payloadTooLarge ? '同步数据包超过 12MB 限制' : undefined,
+    message: payloadTooLarge ? `请求体超过 ${HTTP_JSON_BODY_LIMIT_MB}MB 限制` : undefined,
   })
 })
 

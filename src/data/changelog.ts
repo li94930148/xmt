@@ -10,6 +10,15 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.16', date: '2026-09-07', title: '历史修复整合与依赖精简', impactScope: ['稳定性', '安全维护'], changes: [{ type: 'fix', description: '修复自动回归测试入口并隔离测试数据库。' }, { type: 'security', description: '更新受影响工具依赖，增加持续安全检查。' }, { type: 'improvement', description: '减少重复依赖，收敛源码检查范围。' }] },
+  { version: '2.20.15', date: '2026-09-07', title: '依赖安全与工程化收口', impactScope: ['依赖安全', 'API 防护', '工程化'], changes: [
+    { type: 'security', description: '升级 @tiptap/* 全家桶到 ^3.31.0，修复 mergeAttributes() 在 __proto__ 上的 DOM 属性污染中危漏洞。' },
+    { type: 'security', description: '在 overrides 中锁定 qs 6.16.0，修复 express/body-parser 链路上数组上限绕过与 isBuffer DoS 中危漏洞。' },
+    { type: 'security', description: '新增 HTTP 级错误脱敏拦截器回归测试，守护 api/app.ts:267 单点保护机制。' },
+    { type: 'improvement', description: '请求体与同步包体积统一到 api/utils/limits.ts，消除 12MB/16MB 不一致文案与魔法数字。' },
+    { type: 'improvement', description: '抖音官方导出 xlsx 改用 sheet[\'!ref\'] 前置行/列防护；移除 creatorDataCenter.acceptCreatorDataSync 死代码；成就进度接口按 condition_type 聚合消除 N+1。' },
+    { type: 'improvement', description: '新增 deploy/linux/HTTPS_REQUIRED.md，明确 upgrade-insecure-requests 要求 HTTPS 部署。' },
+  ] },
   { version: '2.20.14', date: '2026-09-04', title: '总结归档详情完善', impactScope: ['日报系统', '月报', '年报'], changes: [{ type: 'fix', description: '月报、年报归档新增完整详情入口和分区内容展示。' }, { type: 'improvement', description: '详情支持长文本滚动、Esc 关闭，并保持现有权限边界。' }] },
   { version: '2.20.13', date: '2026-09-04', title: '总结归档正文显示修复', impactScope: ['日报系统', '月报', '年报'], changes: [{ type: 'fix', description: '修复月报、年报提交正文未被服务端读取，归档记录存在却显示为空的问题。' }, { type: 'improvement', description: '归档统一输出明确正文模型，并兼容仍在旧字段中的历史报告。' }] },
   { version: '2.20.12', date: '2026-09-02', title: 'Creator 封面候选 403 诊断', impactScope: ['Creator Agent', '安全'], changes: [{ type: 'fix', description: '增加有限的 HEAD、Range GET 与固定 Creator Referer 对照，分类远端拒绝。' }, { type: 'security', description: '不转发认证信息、不保存候选或图片，并继续执行重定向与网络目标校验。' }] },
@@ -20,6 +29,7 @@ export const changelog: ChangelogEntry[] = [
   { version: '2.20.7', date: '2026-08-31', title: 'Creator 作品封面 URL 完整性', impactScope: ['Creator 作品库', '同步兼容'], changes: [{ type: 'fix', description: '拒绝相对路径和无效封面 URL，避免浏览器加载失败。' }, { type: 'fix', description: '读取旧数据时从既有 raw 字段恢复可解析封面，并保留已有有效封面。' }] },
   { version: '2.20.6', date: '2026-08-31', title: 'Creator Agent 认证与窗口状态解耦', impactScope: ['Creator Agent', 'macOS 正式包'], changes: [{ type: 'fix', description: '认证事实与临时登录窗口状态分离，Main 权威计算 canSync 和登录动作。' }, { type: 'security', description: 'Renderer 不能伪造同步能力；Main 在同步前再次校验认证、浏览器、绑定、Token 与数据库状态。' }] },
   { version: '2.20.5', date: '2026-08-31', title: 'Creator Agent 登录状态一致性', impactScope: ['Creator Agent', 'macOS 正式包'], changes: [{ type: 'fix', description: '登录窗口、确认按钮和浏览器显示统一由 Electron Main 状态机裁定，关闭或重启后不保留 Renderer 临时状态。' }, { type: 'improvement', description: '无可用浏览器时禁用登录与同步，并对 IPC 错误进行脱敏显示。' }] },
+  { version: '2.20.5', date: '2026-08-28', title: '审计安全修复与依赖治理', impactScope: ['API', '实时协作', '工作流', '依赖安全'], changes: [{ type: 'security', description: '服务端 500 响应统一移除内部错误对象，避免泄露 SQL 与参数；增加安全响应头和 Socket 单包限制。' }, { type: 'fix', description: '拍摄和发布列表改为受限分页，并提供前端翻页。' }, { type: 'improvement', description: '升级存在审计告警的依赖，官方导出解析使用修复版 SheetJS 并限制文件、行数和列数。' }] },
   { version: '2.20.4', date: '2026-08-28', title: 'Creator Agent 本地队列 SQLite 修复', impactScope: ['Creator Agent', '本地数据安全'], changes: [{ type: 'fix', description: '队列 payload 固定为 canonical JSON TEXT，校验 SQLite 参数类型与回读哈希。' }, { type: 'improvement', description: '旧数据库首次启动会先完成幂等队列迁移，并提供无敏感运行时身份诊断。' }] },
   {
     version: '2.20.3', date: '2026-08-28', title: 'Creator 官方导出本地安全同步',

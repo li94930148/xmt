@@ -1,5 +1,27 @@
 # XMT 升级阶段记录
 
+## v2.20.16 历史修复整合与依赖精简（2026-09-07）
+
+- 范围：PR #41 CI 修复、依赖安全、重复工具精简、远端分支及本地工作区归档。
+- 修改文件与验证详情：`MAINTENANCE_2026-09-07.md`。
+- 数据库：无结构或权限变更，HTTP 回归使用临时数据库。
+- 风险：真实源码仍有 lint 债务；未把所有静态问题或长期功能规划视为已修复 bug。
+- 下一阶段：按模块处理剩余源码 lint 与需真实账号的业务验收；本轮未进行生产代码部署。
+
+## v2.20.15 依赖安全与工程化收口（2026-09-07）
+
+- 修复 `@tiptap/*` `mergeAttributes()` 在 `__proto__` 上的 DOM 属性污染中危漏洞：所有 `@tiptap/*` 包从 `^3.25.0` 提升到 `^3.31.0`（安装后为 3.31.3）。
+- 修复 `qs` 在 express / body-parser 链路的数组上限绕过与 `isBuffer` DoS 中危漏洞：`package.json#overrides` 把 `qs` 锁定到 6.16.0。
+- 新增 HTTP 级错误脱敏拦截器回归测试 `tests/security/error-response-http-contract.test.ts`，直接起真实 app、注入探针路由触发 5xx 并断言响应不含 SQL / 参数；任何后续改动若误删 `api/app.ts:267` 拦截器本体，本测试会立即失败。
+- 新增 `api/utils/limits.ts` 统一请求体与同步包体积上限：`HTTP_JSON_BODY_LIMIT`、`HTTP_JSON_BODY_LIMIT_BYTES`、`HTTP_JSON_BODY_LIMIT_MB`、`CREATOR_SYNC_MAX_PAYLOAD_BYTES`、`CREATOR_SYNC_MAX_PAYLOAD_MB`。`api/app.ts:414` 全局 413 文案与 `creatorSyncV291.ts:87` 同步包 413 文案均改为引用，消除魔法数字与"12MB / 16MB"不一致。
+- 抖音官方导出 xlsx 解析改用 `sheet['!ref']` 在展开前判断行 / 列数，命中限制直接抛错，避免把整张表展开为内存数组才校验。
+- 删除 `api/services/creatorDataCenter.ts` 中未被引用的 `acceptCreatorDataSync` 死代码副本（以及随之失效的 `array` / `number` / `json` / `runInTransaction`），与 `creatorSyncV291.ts` 长期同名并存的隐患收敛。
+- 成就进度接口 `api/routes/achievements.ts` 按 `condition_type`（`login_streak` 额外按时间窗）聚合缓存查询，消除成就数量增加后的 N+1。
+- 新增 `deploy/linux/HTTPS_REQUIRED.md` 明确 `upgrade-insecure-requests` CSP 指令下 XMT 必须部署在 HTTPS 站点之后；`docs/上线前检查清单.md` 同步补充对应章节。
+- 数据库变化：无迁移、无破坏性 schema 变更；不改变 RBAC、Session、Creator Agent 上传协议、Scrapling Collector 合同。
+- 验证：`npm run check` 零错误；`npm audit --omit=dev` = 0 vulnerabilities；`npm run version:check` 通过；HTTP 级错误脱敏测试、`tests/topics`、`tests/api-contract` 全部通过。
+- 生产状态：未部署；`package-lock.json` 同步更新后需 `npm ci` 刷新本地 `node_modules`。
+
 ## v2.20.14 总结归档详情完善（2026-09-04）
 
 - 完成内容：月报、年报归档增加完整详情弹窗；列表展示摘要、更新时间与明确查看入口，详情按业务字段分区并支持长文本滚动。
@@ -24,6 +46,14 @@
 
 - 新增独立 Electron IPC、Bridge 与 Worker 白名单任务，只读检查内容管理页的封面候选并返回脱敏汇总。
 - 数据库变化：无；任务不触发普通同步、上传、队列、batch、快照或官方 Excel 下载。
+
+## v2.20.5 审计安全修复（2026-08-28）
+
+- 收口 API 500 响应中的可枚举错误对象，新增统一响应脱敏层；现有路由契约保留业务提示并补 `INTERNAL_ERROR` 代码。
+- 拍摄和发布列表增加有界 `LIMIT/OFFSET`、总数和页面翻页；资源列表计数不再依赖 SQL 正则截断。
+- 生产依赖审计归零：升级 React Router、SheetJS 官方分发包及 Socket/网络解析传递依赖；加入 Helmet 和 Socket 单包限制。
+- 数据库变化：无迁移、无数据操作。生产状态：未部署。
+- 验证：错误响应/分页合同、Internal loopback、Socket 生命周期、角色权限安全、版本检查、类型检查、生产依赖审计与生产构建均通过；全量 lint 未纳入门禁，仍有既有历史规则错误。
 
 ## v2.19.11 Creator Agent 上传协议安全收口（2026-08-20）
 

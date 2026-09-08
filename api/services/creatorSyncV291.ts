@@ -6,6 +6,7 @@ import { creatorInsightService } from './creatorInsights.js';
 import { persistDouyinContractV2102, persistNormalizedDouyinSync } from './douyinDataCenter.js';
 import { requireCreatorAgentV1 } from './creatorAgentProtocol.js';
 import { resolveCoverUrl } from '../utils/coverResolver.js';
+import { CREATOR_SYNC_MAX_PAYLOAD_BYTES, CREATOR_SYNC_MAX_PAYLOAD_MB } from '../utils/limits.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentRow = { id: number; user_id: number; platform: string; account_id: string; token_hash: string };
@@ -86,7 +87,7 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
 }
 
 export async function acceptCreatorDataSync(body: JsonRecord, authorization?: string) {
-  if (Buffer.byteLength(JSON.stringify(body)) > 12 * 1024 * 1024) throw Object.assign(new Error('同步数据包超过 12MB 限制'), { statusCode: 413 });
+  if (Buffer.byteLength(JSON.stringify(body)) > CREATOR_SYNC_MAX_PAYLOAD_BYTES) throw Object.assign(new Error(`Creator Agent 同步数据包超过 ${CREATOR_SYNC_MAX_PAYLOAD_MB}MB 限制`), { statusCode: 413 });
   const { agent, payload } = await openEnvelope(body, authorization);
   if (payload.schema_version === 2) return acceptOfficialExportV2(agent, payload, text(body.collected_at, new Date().toISOString()));
   if (payload.schema_version !== undefined && payload.schema_version !== 1) throw Object.assign(new Error('Creator Agent 数据协议版本不兼容'), { statusCode: 422 });

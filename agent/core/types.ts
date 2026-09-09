@@ -23,6 +23,7 @@ export type CreatorWork = DouyinWorkInput & {
   cover?: string;
   status?: string;
   raw?: unknown;
+  cover_asset?: { mime_type: string; sha256: string; size_bytes: number; data_base64: string };
   [key: string]: unknown;
 };
 export type CreatorWorkDetail = { item_id: string; overview: MetricMap; traffic: unknown; audience: unknown; comments: unknown; raw: unknown };

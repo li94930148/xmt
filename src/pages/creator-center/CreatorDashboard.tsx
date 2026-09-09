@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Activity, CalendarRange, Gauge, Heart, Play, Share2, Users, Video } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { createCreatorAgentBindingCode, getCreatorAgentStatus, getDouyinDashboard, getDouyinSyncLogs, type CreatorAgentStatus, type DouyinDashboardData } from '@/api/creatorCenter';
-import ImageFallback from '@/components/common/ImageFallback';
+import CreatorCoverImage from '@/components/common/CreatorCoverImage';
 import CreatorProfileCard from '@/components/xmt-ui/CreatorProfileCard';
 import { EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, Panel, asRecord, formatDate, formatNumber, num } from './shared';
 import { ReactBitsPageScene } from '@/features/reactbits-appearance/slots/ReactBitsPageScene';
@@ -89,7 +89,7 @@ export default function CreatorDashboard() {
         <div className="space-y-2">
           {data.top_works.map((work, index) => <button type="button" key={work.id} onClick={() => navigate(`/analytics/creator-center/work/${work.id}`)} className="flex w-full items-center gap-4 rounded-xl bg-studio-surface p-3 text-left transition hover:ring-1 hover:ring-studio-cyan/40">
             <span className="w-6 text-center text-sm font-semibold text-studio-text-muted">{index + 1}</span>
-            <ImageFallback src={work.cover_url} alt={work.title} className="h-14 w-20 rounded-lg object-cover" />
+            <CreatorCoverImage work={work} className="h-14 w-20 rounded-lg object-cover" />
             <div className="min-w-0 flex-1"><p className="truncate font-medium">{work.title}</p><p className="mt-1 text-xs text-studio-text-muted">{work.performance.is_viral ? '爆款 · ' : ''}评分 {work.performance.score} · 播放 {formatNumber(work.play_count)}</p></div>
             <div className="text-right"><b>{(work.performance.interaction_rate * 100).toFixed(2)}%</b><p className="text-xs text-studio-text-muted">互动率</p></div>
           </button>)}

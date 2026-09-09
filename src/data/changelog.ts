@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.19', date: '2026-09-09', title: 'Creator 托管封面与重复作品合并', impactScope: ['Creator Agent', '作品库', '数据驾驶舱'], changes: [{ type: 'fix', description: '认证浏览器已加载的封面可安全同步并在生产端稳定显示。' }, { type: 'fix', description: '同标题、同发布时间但采集编号不同的同一作品合并展示。' }] },
   { version: '2.20.18', date: '2026-09-08', title: '亮色主题对比度修复', impactScope: ['选题管理', '状态标签', '共享界面'], changes: [{ type: 'fix', description: '选题统计卡片和关联资料在亮色模式下恢复清晰背景与文字。' }, { type: 'improvement', description: '共享状态、平台、资源和提示控件统一使用深浅主题自适应高对比色。' }] },
   { version: '2.20.17', date: '2026-09-08', title: '登录与主题显示修复', impactScope: ['登录', '用户管理', '页面显示'], changes: [{ type: 'fix', description: '新建账号未填写姓名时，登录响应使用用户名作为显示名，不再误报服务暂时不可用。' }, { type: 'fix', description: '恢复生产页面的主题背景、卡片颜色和边框显示。' }] },
   { version: '2.20.16', date: '2026-09-07', title: '历史修复整合与依赖精简', impactScope: ['稳定性', '安全维护'], changes: [{ type: 'fix', description: '修复自动回归测试入口并隔离测试数据库。' }, { type: 'security', description: '更新受影响工具依赖，增加持续安全检查。' }, { type: 'improvement', description: '减少重复依赖，收敛源码检查范围。' }] },

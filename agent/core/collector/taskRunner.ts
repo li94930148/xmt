@@ -89,7 +89,10 @@ export async function runCreatorCollectorTask(options: {
     const officialPayload = snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId, taskId) : null;
     const canonicalPayloadJson = officialPayload ? canonicalJson('canonical_payload_json', officialPayload) : null;
     const queueJob = officialPayload && canonicalPayloadJson ? database.enqueueUpload({ batch_id: officialPayload.batch_id, platform: config.platform, platform_account_id: config.accountId, source_file_sha256: String(officialPayload.source_files[0]?.sha256 || ''), parser_version: officialPayload.parser_version, payload_json: canonicalPayloadJson, payload_sha256: canonicalJsonHash(canonicalPayloadJson) }) : null;
-    let result;
+    const result = await upload(config, token, { ...snapshot, official_data: [] }, {
+      knownContentIds,
+      taskId,
+    });
     if (queueJob && officialPayload) {
       // The desktop-owned scheduler is the only official-export sender.  It
       // rebuilds the encrypted transport envelope for every attempt from this
@@ -97,12 +100,7 @@ export async function runCreatorCollectorTask(options: {
       if (!flushOfficialQueue) throw new Error('官方导出已入队，等待 Electron 队列调度器发送');
       await flushOfficialQueue();
       const completed = database.uploadJob(queueJob.job_id); if (completed?.status !== 'succeeded') throw new Error(completed?.last_error_message_sanitized || '官方导出已入队，等待重试');
-      result = { success: true, status: 'success' as const, success_count: 1, failed_count: 0, modules: {}, errors: {} } as Awaited<ReturnType<typeof upload>>;
-    } else try { result = await upload(config, token, snapshot, {
-      knownContentIds,
-      taskId,
-    }); if (queueJob) database.finishUpload(queueJob.job_id, result); }
-    catch (error) { if (queueJob) database.failUpload(queueJob.job_id, 'retryable_failed', 'NETWORK_OR_UPLOAD_FAILED', error instanceof Error ? error.message : String(error), new Date(Date.now() + 30_000).toISOString()); throw error; }
+    }
     database.finishSyncTask(
       taskId,
       local.works === "success" ? result.status : "partial_success",

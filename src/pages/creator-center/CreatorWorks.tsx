@@ -3,16 +3,11 @@ import { ArrowUpDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getDouyinWorks, type DouyinWork } from '@/api/creatorCenter';
 import { EmptyState, ErrorState, LoadingState, PageHeader, Panel, formatDate, formatNumber } from './shared';
+import CreatorCoverImage from '@/components/common/CreatorCoverImage';
 
 const sortOptions=[['score','表现评分'],['latest','最新发布'],['plays','最高播放'],['interactions','最高互动率'],['likes','最高点赞']] as const;
-const imageCandidates=(work:DouyinWork)=>[...new Set([work.cover_url,...(work.cover_candidates||[])].filter((value):value is string=>typeof value==='string'&&/^https?:\/\//i.test(value.trim())))].slice(0,4);
 function WorkThumbnail({work}:{work:DouyinWork}){
-  const candidates=imageCandidates(work);
-  const [candidateIndex,setCandidateIndex]=useState(0);
-  useEffect(()=>setCandidateIndex(0),[work.id,candidates.join('|')]);
-  const source=candidates[candidateIndex];
-  if(!source)return <span role="img" aria-label={`${work.title||'作品'}暂无封面`} className="grid h-14 w-20 shrink-0 place-items-center rounded-lg bg-studio-surface text-xs text-studio-text-muted">暂无封面</span>;
-  return <img src={source} alt={work.title} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={()=>setCandidateIndex(current=>current+1<candidates.length?current+1:current)} className="h-14 w-20 shrink-0 rounded-lg object-cover"/>;
+  return <CreatorCoverImage work={work} className="h-14 w-20 shrink-0 rounded-lg object-cover"/>;
 }
 export default function CreatorWorks({reviewMode=false}:{reviewMode?:boolean}){
   const navigate=useNavigate();
@@ -23,7 +18,7 @@ export default function CreatorWorks({reviewMode=false}:{reviewMode?:boolean}){
   const[loading,setLoading]=useState(true);
   const[loadingMore,setLoadingMore]=useState(false);
   const[error,setError]=useState('');
-  const load=useCallback(async(cursor?:string)=>{const append=Boolean(cursor);if(append)setLoadingMore(true);else setLoading(true);setError('');try{const page=await getDouyinWorks(sort,20,cursor);setWorks(current=>append?[...current,...page.items]:page.items);setNextCursor(page.next_cursor);setHasMore(page.has_more);}catch(cause){setError(cause instanceof Error?cause.message:'抖音作品库加载失败');}finally{if(append)setLoadingMore(false);else setLoading(false);}},[sort]);
+  const load=useCallback(async(cursor?:string)=>{const append=Boolean(cursor);if(append)setLoadingMore(true);else setLoading(true);setError('');try{const page=await getDouyinWorks(sort,20,cursor);setWorks(current=>append?[...new Map([...current,...page.items].map(work=>[work.id,work])).values()]:page.items);setNextCursor(page.next_cursor);setHasMore(page.has_more);}catch(cause){setError(cause instanceof Error?cause.message:'抖音作品库加载失败');}finally{if(append)setLoadingMore(false);else setLoading(false);}},[sort]);
   useEffect(()=>{setWorks([]);setNextCursor(null);void load();},[load]);
   if(loading&&!works.length)return <LoadingState/>;
   if(error&&!works.length)return <ErrorState message={error}/>;

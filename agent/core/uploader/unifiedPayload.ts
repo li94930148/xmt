@@ -79,6 +79,7 @@ export function toUnifiedCreatorPayload(snapshot: CreatorSnapshot, options: { kn
       cover_url: work.cover_url || work.cover || '',
       metrics: work.metrics,
     },
+    cover_asset: work.cover_asset,
   }));
   const metrics = snapshot.works.map((work) => {
     const detail = details.get(String(work.item_id)) || {};

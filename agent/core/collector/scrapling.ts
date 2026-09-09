@@ -51,6 +51,7 @@ export class ScraplingCreatorCollector {
       item_id: String(work.item_id || ""),
       title: String(work.title || ""),
       cover_url: String(work.cover_uri || ""),
+      cover_asset: work.cover_asset && typeof work.cover_asset === 'object' ? work.cover_asset as CreatorWork['cover_asset'] : undefined,
       publish_time: String(work.published_at || ""),
       video_url: "",
       metrics: (work.metrics || {}) as CreatorWork["metrics"],
@@ -65,7 +66,7 @@ export class ScraplingCreatorCollector {
     return {
       schema_version: 1,
       protocol_version: 1,
-      agent_version: "2.13.0-agent",
+      agent_version: "2.13.8-agent",
       platform: "douyin",
       source: "local_creator_center",
       contract_version: "2.10.2",

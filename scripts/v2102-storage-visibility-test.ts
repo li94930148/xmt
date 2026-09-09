@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import crypto from 'node:crypto';
 
 const tempRoot = mkdtempSync(path.join(tmpdir(), 'xmt-storage-visibility-'));
 process.env.XMT_DB_PATH = path.join(tempRoot, 'visibility.db');
@@ -46,6 +47,8 @@ for (let index = 1; index <= 45; index += 1) {
   await execute(`INSERT INTO douyin_works(content_id,account_id,aweme_id,title,cover_url,publish_time,play_count,like_count,comment_count,share_count,collect_count,duration,completion_rate,interaction_rate)
     VALUES(?,301,?,?,?,?,?,?,?,?,?,10,.5,.1)`, [content.id, awemeId, `真实作品 ${index}`, directCover, publishTime, 1000 + index, 100 + index, 10 + index, 5 + index, 2 + index]);
 }
+const managedCover = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+await execute(`INSERT INTO creator_cover_assets(account_id,platform_item_id,mime_type,sha256,size_bytes,bytes) VALUES(301,'7500000000000000001','image/png',?,?,?)`, [crypto.createHash('sha256').update(managedCover).digest('hex'), managedCover.byteLength, managedCover]);
 
 const app = express();
 app.use(express.json());
@@ -69,13 +72,14 @@ try {
   });
 
   const adminPageResponse = await request('/api/creator-agent/douyin/works?sort=latest&limit=20', tokens.admin);
-  const adminPage = await adminPageResponse.json() as { items: Array<{ id: number; cover_url: string }>; next_cursor: string | null; has_more: boolean; page_size: number };
+  const adminPage = await adminPageResponse.json() as { items: Array<{ id: number; cover_url: string; managed_cover_available: boolean }>; next_cursor: string | null; has_more: boolean; page_size: number };
   assert.equal(adminPageResponse.status, 200);
   assert.equal(adminPage.items.length, 20);
   assert.equal(adminPage.page_size, 20);
   assert.equal(adminPage.has_more, true);
   assert(adminPage.next_cursor);
   assert.equal(adminPage.items[0].cover_url, 'https://cdn.example.test/douyin-cover.jpg');
+  assert.equal(adminPage.items[0].managed_cover_available, true);
   assert.equal(adminPage.items[1].cover_url, 'https://cdn.example.test/creator-cover.jpg');
   assert.equal(adminPage.items[2].cover_url, 'https://cdn.example.test/raw-cover.jpg');
   assert.equal(adminPage.items[3].cover_url, '', 'empty cover stays empty so ImageFallback can render the placeholder');
@@ -85,6 +89,10 @@ try {
   assert.equal(memberPageResponse.status, 200, 'member should view the admin-synced public account');
   assert.deepEqual(memberPage.items.map(item => item.id), adminPage.items.map(item => item.id));
   assert.equal(await queryOne('SELECT 1 FROM creator_account_access WHERE account_id=301 AND user_id=102'), null, 'view must not depend on creator_account_access');
+  const managedCoverResponse = await request(`/api/creator-agent/douyin/works/${adminPage.items[0].id}/cover`, tokens.member);
+  assert.equal(managedCoverResponse.status, 200);
+  assert.equal(managedCoverResponse.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await managedCoverResponse.arrayBuffer()), managedCover);
 
   const secondResponse = await request(`/api/creator-agent/douyin/works?sort=latest&limit=20&cursor=${encodeURIComponent(String(memberPage.next_cursor))}`, tokens.member);
   const secondPage = await secondResponse.json() as typeof adminPage;

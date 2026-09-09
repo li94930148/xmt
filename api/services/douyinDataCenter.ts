@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { douyinDataNormalizer, type NormalizedDouyinContract, type NormalizedDouyinWork } from './douyinDataNormalizer.js';
 import { analyzeDouyinWorks, calculateDouyinAccountHealth, DOUYIN_OPERATIONS_FORMULAS, type DouyinMetricsWork } from './douyinOperationsAnalytics.js';
@@ -17,6 +18,21 @@ const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value
 const parse = (value: unknown): JsonRecord => { try { return typeof value === 'string' ? JSON.parse(value) as JsonRecord : value && typeof value === 'object' ? value as JsonRecord : {}; } catch { return {}; } };
 const shanghaiDate = (value: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
 const days = (period: Period) => ({ '7d': 7, '30d': 30, '90d': 90 })[period];
+const COVER_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
+const MAX_COVER_BYTES = 128 * 1024;
+export function validatedCoverAsset(asset: NormalizedDouyinWork['cover_asset']) {
+  if (!asset) return null;
+  if (!COVER_MIME.has(asset.mime_type) || !/^[a-f0-9]{64}$/i.test(asset.sha256) || asset.size_bytes < 1 || asset.size_bytes > MAX_COVER_BYTES) return null;
+  const bytes = Buffer.from(asset.data_base64, 'base64');
+  const magic = bytes.subarray(0, 16);
+  const validMagic = magic.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))
+    || magic.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    || magic.subarray(0, 6).toString('ascii') === 'GIF87a' || magic.subarray(0, 6).toString('ascii') === 'GIF89a'
+    || (magic.subarray(0, 4).toString('ascii') === 'RIFF' && magic.subarray(8, 12).toString('ascii') === 'WEBP')
+    || magic.subarray(4, 8).toString('ascii') === 'ftyp';
+  const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+  return validMagic && bytes.byteLength === asset.size_bytes && sha256 === asset.sha256.toLowerCase() ? { ...asset, bytes } : null;
+}
 
 export function officialDashboardMode(value = process.env.XMT_CREATOR_OFFICIAL_DASHBOARD_MODE): OfficialDashboardMode {
   return value === 'shadow_compare' || value === 'official_preferred' ? value : 'existing_only';
@@ -46,36 +62,39 @@ function decodeCursor(value?: string): WorksCursor | null {
   } catch { return null; }
 }
 
-async function resolveWorkCovers<T extends DouyinMetricsWork & { cover_candidates?: string[] }>(account: Record<string, unknown>, works: T[]): Promise<Array<T & { cover_url: string; cover_candidates: string[] }>> {
+async function resolveWorkCovers<T extends DouyinMetricsWork & { cover_candidates?: string[]; canonical_platform_item_ids?: string[] }>(account: Record<string, unknown>, works: T[]): Promise<Array<T & { cover_url: string; cover_candidates: string[] }>> {
   if (!works.length) return [];
   const contentIds = works.map(work => number(work.content_id)).filter(id => id > 0);
-  const itemIds = works.map(work => String(work.aweme_id || '')).filter(Boolean);
+  const itemIds = [...new Set(works.flatMap(work => work.canonical_platform_item_ids || [String(work.aweme_id || '')]).filter(Boolean))];
   const clauses: string[] = [];
   const params: unknown[] = [];
   const creatorAccountId = number(account.creator_account_id);
   if (creatorAccountId) {
     if (contentIds.length) {
-      clauses.push(`id IN (${contentIds.map(() => '?').join(',')})`);
+      clauses.push(`i.id IN (${contentIds.map(() => '?').join(',')})`);
       params.push(...contentIds);
     }
     if (itemIds.length) {
-      clauses.push(`(platform='douyin' AND platform_item_id IN (${itemIds.map(() => '?').join(',')}))`);
+      clauses.push(`(i.platform='douyin' AND i.platform_item_id IN (${itemIds.map(() => '?').join(',')}))`);
       params.push(...itemIds);
     }
   }
   const candidates = creatorAccountId && clauses.length
-    ? await queryAll<Record<string, unknown>>(`SELECT id,platform_item_id,cover_url,raw_json FROM creator_content_items WHERE account_id=? AND (${clauses.join(' OR ')})`, [creatorAccountId, ...params])
+    ? await queryAll<Record<string, unknown>>(`SELECT i.id,i.platform_item_id,i.cover_url,i.raw_json,CASE WHEN a.id IS NULL THEN 0 ELSE 1 END managed_cover_available
+        FROM creator_content_items i LEFT JOIN creator_cover_assets a ON a.account_id=i.account_id AND a.platform_item_id=i.platform_item_id
+        WHERE i.account_id=? AND (${clauses.join(' OR ')})`, [creatorAccountId, ...params])
     : [];
   const byId = new Map(candidates.map(item => [number(item.id), item]));
   const byPlatformId = new Map(candidates.map(item => [String(item.platform_item_id || ''), item]));
   return works.map(work => {
-    const creator = byId.get(number(work.content_id)) || byPlatformId.get(String(work.aweme_id || ''));
+    const creatorItems = (work.canonical_platform_item_ids || [String(work.aweme_id || '')]).map(id => byPlatformId.get(id)).filter(Boolean) as Record<string, unknown>[];
+    const creator = creatorItems.find(item => number(item.managed_cover_available) === 1) || byId.get(number(work.content_id)) || creatorItems[0];
     const candidates = [...new Set([
       ...(work.cover_candidates || []),
       resolveCoverUrl({ douyinCoverUrl: work.cover_url }),
       resolveCoverUrl({ creatorCoverUrl: creator?.cover_url, creatorRawJson: creator?.raw_json }),
     ].filter(Boolean))].slice(0, 4);
-    return { ...work, cover_url: candidates[0] || '', cover_candidates: candidates };
+    return { ...work, cover_url: candidates[0] || '', cover_candidates: candidates, managed_cover_available: number(creator?.managed_cover_available) === 1 };
   });
 }
 
@@ -186,6 +205,10 @@ async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: 
         [creatorAccount.id, 'douyin', work.aweme_id, work.title, work.cover_url, work.publish_time, work.duration, 'published', JSON.stringify(work.raw)]);
       const content = await tx.queryOne<{ id: number }>('SELECT id FROM creator_content_items WHERE account_id=? AND platform=? AND platform_item_id=?', [creatorAccount.id, 'douyin', work.aweme_id]);
       if (!content) throw new Error(`Creator 作品写入失败: ${work.aweme_id}`);
+      const coverAsset = validatedCoverAsset(work.cover_asset);
+      if (coverAsset) await tx.execute(`INSERT INTO creator_cover_assets(account_id,platform_item_id,mime_type,sha256,size_bytes,bytes,updated_at)
+        VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(account_id,platform_item_id) DO UPDATE SET mime_type=excluded.mime_type,sha256=excluded.sha256,size_bytes=excluded.size_bytes,bytes=excluded.bytes,updated_at=CURRENT_TIMESTAMP`,
+        [creatorAccount.id, work.aweme_id, coverAsset.mime_type, coverAsset.sha256, coverAsset.size_bytes, coverAsset.bytes]);
       await tx.execute(`INSERT INTO creator_content_metrics(content_id,snapshot_time,play_count,like_count,comment_count,share_count,favorite_count,play_duration,completion_rate,cover_click_rate,raw_json)
         VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(content_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,favorite_count=excluded.favorite_count,completion_rate=excluded.completion_rate,raw_json=excluded.raw_json`,
         [content.id, snapshotTime, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, 0, work.completion_rate, 0, JSON.stringify(work.raw)]);
@@ -237,7 +260,8 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     queryAll<DouyinMetricsWork>('SELECT * FROM douyin_works WHERE account_id=?', [account.id]),
     queryAll<Record<string, unknown>>('SELECT * FROM douyin_daily_snapshots WHERE account_id=? ORDER BY snapshot_date ASC', [account.id]),
   ]);
-  const analyzed = analyzeDouyinWorks(works);
+  const canonical = canonicalizeDouyinWorks(works);
+  const analyzed = analyzeDouyinWorks(canonical);
   const totals = analyzed.works.reduce((result, work) => ({
     plays: result.plays + number(work.play_count),
     interactions: result.interactions + work.performance.interaction_count,
@@ -260,7 +284,7 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     account,
     metrics: {
       fans_count: fansAvailable ? number(latest.fans_count ?? account.fans_count) : null,
-      works_count: works.length,
+      works_count: canonical.length,
       play_count: displayPlays,
       interaction_count: totals.interactions,
       interaction_rate: displayPlays > 0 ? totals.interactions / displayPlays : 0,
@@ -332,7 +356,7 @@ export async function getDouyinWorkDetail(creatorAccountId: number, workId: numb
     queryAll<Record<string, unknown>>('SELECT * FROM douyin_work_snapshots WHERE work_id=? ORDER BY snapshot_time ASC', [workId]),
     queryOne<Record<string, unknown>>('SELECT * FROM douyin_analysis_records WHERE work_id=? ORDER BY snapshot_time DESC,id DESC LIMIT 1', [workId]),
   ]);
-  const analyzed = analyzeDouyinWorks(works);
+  const analyzed = analyzeDouyinWorks(canonicalizeDouyinWorks(works));
   const work = analyzed.works.find(item => number(item.id) === workId);
   if (!work) return null;
   const [coveredWork] = await resolveWorkCovers(account, [work]);
@@ -371,6 +395,14 @@ export async function getDouyinWorkReview(creatorAccountId: number, workId: numb
       evidence_only: true,
     },
   };
+}
+
+export async function getDouyinManagedCover(creatorAccountId: number, workId: number) {
+  return queryOne<{ bytes: Uint8Array; mime_type: string; sha256: string }>(`SELECT a.bytes,a.mime_type,a.sha256
+    FROM douyin_works target JOIN douyin_accounts d ON d.id=target.account_id
+    JOIN douyin_works sibling ON sibling.account_id=target.account_id AND (sibling.id=target.id OR (lower(trim(sibling.title))=lower(trim(target.title)) AND sibling.publish_time=target.publish_time))
+    JOIN creator_cover_assets a ON a.account_id=d.creator_account_id AND a.platform_item_id=sibling.aweme_id
+    WHERE d.creator_account_id=? AND target.id=? ORDER BY a.updated_at DESC LIMIT 1`, [creatorAccountId, workId]);
 }
 
 export async function getDouyinTrends(creatorAccountId: number, period: Period) {

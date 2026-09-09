@@ -26,6 +26,7 @@ export type NormalizedDouyinWork = {
   completion_rate: number;
   interaction_rate: number;
   raw: JsonRecord;
+  cover_asset?: { mime_type: string; sha256: string; size_bytes: number; data_base64: string };
 };
 
 export type NormalizedDouyinPayload = {
@@ -193,6 +194,14 @@ function validateContractWork(value: unknown): { work?: NormalizedDouyinWork; re
   const completionRate = completionRaw > 1 ? completionRaw / 100 : completionRaw;
   const interactions = likeCount + commentCount + shareCount + collectCount;
   const durationRaw = number(source.duration);
+  const coverAssetSource = record(source.cover_asset);
+  const dataBase64 = typeof coverAssetSource.data_base64 === 'string' ? coverAssetSource.data_base64 : '';
+  const coverAsset = dataBase64 ? {
+    mime_type: text(coverAssetSource.mime_type),
+    sha256: text(coverAssetSource.sha256),
+    size_bytes: nonNegativeInteger(coverAssetSource.size_bytes),
+    data_base64: dataBase64,
+  } : undefined;
   return {
     work: {
       aweme_id: awemeId,
@@ -215,6 +224,7 @@ function validateContractWork(value: unknown): { work?: NormalizedDouyinWork; re
         video_url: typeof source.video_url === 'string' ? source.video_url : '',
         metrics,
       },
+      cover_asset: coverAsset,
     },
   };
 }

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import hashlib
 import io
 import json
 import time
@@ -20,9 +22,12 @@ from xmt_collector.platforms.douyin.view_scope import content_view_scope
 from xmt_collector.platforms.douyin.browser_launch import BrowserLaunch
 from xmt_collector.platforms.douyin.export_parser import parse_official_export
 from xmt_collector.security.sanitizer import sanitize
-from xmt_collector.platforms.douyin.cover_metadata import summarize_covers
+from xmt_collector.platforms.douyin.cover_metadata import cover_candidates, summarize_covers
 
 CREATOR_ORIGIN = "https://creator.douyin.com"
+MAX_COVER_ASSET_BYTES = 128 * 1024
+MAX_COVER_ASSET_TOTAL_BYTES = 4 * 1024 * 1024
+MAX_COVER_ASSETS = 100
 PAGES = {
     "首页": "/creator-micro/home",
     "内容管理": "/creator-micro/content/manage",
@@ -53,6 +58,26 @@ _CONTENT_SCOPE_SCRIPT = """
     }).filter(Boolean);
 }
 """
+
+
+def _cover_identity(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return ""
+    port = f":{parsed.port}" if parsed.port else ""
+    return hashlib.sha256(f"{parsed.scheme}://{parsed.hostname.lower()}{port}{parsed.path}".encode()).hexdigest()
+
+
+def _validated_image_mime(content_type: str, body: bytes) -> str:
+    mime = content_type.split(";", 1)[0].strip().lower()
+    allowed = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"}
+    magic = (
+        body.startswith(b"\xff\xd8\xff") or body.startswith(b"\x89PNG\r\n\x1a\n")
+        or body.startswith((b"GIF87a", b"GIF89a"))
+        or (body.startswith(b"RIFF") and body[8:12] == b"WEBP")
+        or body[4:8] == b"ftyp"
+    )
+    return mime if mime in allowed and magic else ""
 
 
 class LoginRequired(RuntimeError):
@@ -91,6 +116,8 @@ class DouyinAdapter:
         self.profile.mkdir(parents=True, exist_ok=True)
         run = ManifestWriter(self.run_root)
         captured: list[dict[str, Any]] = []
+        cover_assets_by_identity: dict[str, dict[str, Any]] = {}
+        cover_asset_bytes_total = 0
         capability = {"platform": "douyin", "browser": self.browser.evidence(), "pages": []}
         completeness: dict[str, Any] = {"mode": "not_applicable", "exhausted": scope != "full_snapshot", "iterations": 0, "uniqueWorks": 0, "stopReason": "not_full_snapshot"}
         async with AsyncDynamicSession(
@@ -114,13 +141,46 @@ class DouyinAdapter:
                 login_required = False
                 scope_error: str | None = None
                 async def inspect(page: Any) -> None:
-                    nonlocal login_required, completeness, scope_error
+                    nonlocal login_required, completeness, scope_error, cover_asset_bytes_total
                     observed_xhr = 0
+                    image_tasks: set[asyncio.Task[None]] = set()
+
+                    async def capture_image_response(response: Any) -> None:
+                        nonlocal cover_asset_bytes_total
+                        if len(cover_assets_by_identity) >= MAX_COVER_ASSETS or cover_asset_bytes_total >= MAX_COVER_ASSET_TOTAL_BYTES:
+                            return
+                        try:
+                            headers = response.headers
+                            content_type = str(headers.get("content-type", ""))
+                            content_length = int(headers.get("content-length", "0") or 0)
+                            if response.status != 200 or not content_type.lower().startswith("image/") or content_length < 1 or content_length > MAX_COVER_ASSET_BYTES:
+                                return
+                            identity = _cover_identity(str(response.url))
+                            if not identity or identity in cover_assets_by_identity:
+                                return
+                            body = await response.body()
+                            if not body or len(body) > MAX_COVER_ASSET_BYTES or cover_asset_bytes_total + len(body) > MAX_COVER_ASSET_TOTAL_BYTES:
+                                return
+                            mime = _validated_image_mime(content_type, body)
+                            if not mime:
+                                return
+                            cover_assets_by_identity[identity] = {
+                                "mime_type": mime,
+                                "sha256": hashlib.sha256(body).hexdigest(),
+                                "size_bytes": len(body),
+                                "data_base64": base64.b64encode(body).decode("ascii"),
+                            }
+                            cover_asset_bytes_total += len(body)
+                        except Exception:
+                            return
 
                     def observe_response(response: Any) -> None:
                         nonlocal observed_xhr
                         if str(getattr(response, "url", "")).startswith(CREATOR_ORIGIN):
                             observed_xhr += 1
+                        task = asyncio.create_task(capture_image_response(response))
+                        image_tasks.add(task)
+                        task.add_done_callback(image_tasks.discard)
 
                     page.on("response", observe_response)
 
@@ -230,6 +290,8 @@ class DouyinAdapter:
                                 await page.wait_for_timeout(1_000)
                                 modal_text = await page.locator('[role="dialog"]').all_inner_texts()
                                 interactions.append({"action": "export_clicked", "target": label, "modalObserved": bool(modal_text), "checkpoint": "export-click"})
+                    if image_tasks:
+                        await asyncio.gather(*tuple(image_tasks), return_exceptions=True)
 
                 # Scrapling's optional fetcher diagnostics may include complete URLs.
                 # Keep third-party library output away from our JSON Lines protocol and logs.
@@ -273,7 +335,17 @@ class DouyinAdapter:
         (self.run_root / "xhr" / "schema-report.md").write_text(schema_markdown, encoding="utf-8")
         all_exports = [item for page in capability["pages"] for item in page["exports"]]
         candidates = [candidate for capture in captured for candidate in find_work_candidates(capture.get("response"))]
-        works_by_id = {work["item_id"]: work for work in (normalize_work(candidate) for candidate in candidates) if work["item_id"]}
+        works_by_id: dict[str, dict[str, Any]] = {}
+        for candidate in candidates:
+            work = normalize_work(candidate)
+            if not work["item_id"]:
+                continue
+            for url in cover_candidates(candidate):
+                asset = cover_assets_by_identity.get(_cover_identity(url))
+                if asset:
+                    work["cover_asset"] = asset
+                    break
+            works_by_id[work["item_id"]] = work
         works = list(works_by_id.values())
         completeness["uniqueWorks"] = len(works)
         account = normalize_account_metadata(captured)

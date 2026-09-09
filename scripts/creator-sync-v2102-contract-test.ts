@@ -57,6 +57,7 @@ const legacy = await sync({
 });
 assert.equal(legacy.success, true, 'v2.10.1 payload should remain compatible');
 
+const managedCover = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const works = Array.from({ length: 12 }, (_, index) => ({
   aweme_id: `73900000000000000${String(index).padStart(2, '0')}`,
   title: `标准作品 ${index + 1}`,
@@ -64,6 +65,7 @@ const works = Array.from({ length: 12 }, (_, index) => ({
   publish_time: `2026-07-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
   video_url: '',
   metrics: { play_count: 1000 + index, like_count: 100 + index, comment_count: 10, share_count: 5, collect_count: 2, completion_rate: 50 },
+  ...(index === 0 ? { cover_asset: { mime_type: 'image/png', sha256: crypto.createHash('sha256').update(managedCover).digest('hex'), size_bytes: managedCover.byteLength, data_base64: managedCover.toString('base64') } } : {}),
 }));
 const currentPayload = {
   contract_version: '2.10.2',
@@ -86,6 +88,9 @@ const currentCount = await queryOne<{ count: number }>('SELECT COUNT(*) count FR
 assert.equal(Number(currentCount?.count), 12, '12 works must remain 12 after ten identical snapshots');
 const snapshotLogCount = await queryOne<{ count: number }>('SELECT COUNT(*) count FROM douyin_sync_logs WHERE account_id=? AND snapshot_id=?', [douyinAccount.id, 'snapshot-12-works']);
 assert.equal(Number(snapshotLogCount?.count), 1, 'snapshot_id must be idempotent');
+const storedCover = await queryOne<{ size_bytes: number; bytes: Uint8Array }>(`SELECT size_bytes,bytes FROM creator_cover_assets WHERE platform_item_id=?`, [works[0].aweme_id]);
+assert.equal(Number(storedCover?.size_bytes), managedCover.byteLength);
+assert.deepEqual(Buffer.from(storedCover?.bytes || []), managedCover, 'validated cover bytes must persist idempotently');
 
 await sync({ ...currentPayload, snapshot_id: 'snapshot-invalid-number', contents: [{ ...works[0], aweme_id: 739000000000000001 }] });
 const invalidLog = await queryOne<{ summary_json: string }>('SELECT summary_json FROM douyin_sync_logs WHERE account_id=? AND snapshot_id=?', [douyinAccount.id, 'snapshot-invalid-number']);
@@ -121,7 +126,7 @@ await sync({ ...currentPayload, snapshot_id: 'snapshot-repair-creator-link' });
 const repairedLink = await queryOne<{ creator_account_id: number }>('SELECT creator_account_id FROM douyin_accounts WHERE douyin_uid=?', ['contract-account']);
 assert.equal(Number(repairedLink?.creator_account_id), 1, 'internal creator_account_id must always be repaired independently from metadata availability');
 
-console.log('v2.10.2 server contract tests passed: V1 signed envelope; 12/12 normalized; snapshot idempotent x10; numeric IDs and non-work objects rejected; dual-table IDs consistent; unavailable account metadata preserved.');
+console.log('v2.10.2 server contract tests passed: V1 signed envelope; 12/12 normalized; managed cover persisted; snapshot idempotent x10; numeric IDs and non-work objects rejected; dual-table IDs consistent; unavailable account metadata preserved.');
 
 db.close();
 try { rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch {}

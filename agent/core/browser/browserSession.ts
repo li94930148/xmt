@@ -6,13 +6,18 @@ import { assertManagedProfile } from './profile.js';
 import type { BrowserInfo, BrowserSelection, BrowserSession } from './types.js';
 
 const CREATOR = 'https://creator.douyin.com/creator-micro/home';
+const PROFILE_RELEASE_GRACE_MS = 750;
+
+export function managedBrowserLaunchArgs(args: string[] = []) {
+  return args.includes('--disable-background-mode') ? [...args] : [...args, '--disable-background-mode'];
+}
 
 export class ManagedBrowserSession implements BrowserSession {
   private context: BrowserContext | null = null;
   constructor(private info: BrowserInfo, private selection: BrowserSelection, private profile: string, private dataRoot: string) {}
   private api() { return this.info.engine === 'firefox' ? firefox : this.info.engine === 'webkit' ? webkit : chromium; }
-  async start() { if (this.context) return; const userDataDir = assertManagedProfile(this.profile, this.dataRoot); this.context = await this.api().launchPersistentContext(path.resolve(userDataDir), { headless: this.selection.headless, executablePath: this.info.runtime === 'system' ? this.info.executablePath : undefined, args: this.selection.launchArgs || [], acceptDownloads: true }); await this.ensurePage(CREATOR); }
-  async stop() { await this.context?.close(); this.context = null; }
+  async start() { if (this.context) return; const userDataDir = assertManagedProfile(this.profile, this.dataRoot); this.context = await this.api().launchPersistentContext(path.resolve(userDataDir), { headless: this.selection.headless, executablePath: this.info.runtime === 'system' ? this.info.executablePath : undefined, args: managedBrowserLaunchArgs(this.selection.launchArgs), acceptDownloads: true }); await this.ensurePage(CREATOR); }
+  async stop() { const context = this.context; this.context = null; if (!context) return; await context.close(); await new Promise(resolve => setTimeout(resolve, PROFILE_RELEASE_GRACE_MS)); }
   async restart() { await this.stop(); await this.start(); }
   isConnected() { return Boolean(this.context?.browser()?.isConnected()); }
   getContext() { if (!this.context) throw new Error('浏览器会话尚未启动'); return this.context; }

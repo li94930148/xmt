@@ -3,11 +3,12 @@ import type { DesktopState } from '../types';
 import type { SyncResult } from '../../core/types';
 import type { CoverMetadataSummary } from '../../core/collector/coverMetadata';
 import { loginActionError } from '../loginState';
+import { coverInspectionActionError } from '../coverInspectionState';
 
 export default function Dashboard({state,onLogin,onLoginComplete,onSync,onInspectCoverMetadata}:{state:DesktopState;onLogin:()=>Promise<unknown>;onLoginComplete:()=>Promise<unknown>;onSync:(sample?:boolean)=>Promise<SyncResult>;onInspectCoverMetadata:()=>Promise<CoverMetadataSummary>}) {
   const [result,setResult]=useState<SyncResult>(); const [cover,setCover]=useState<CoverMetadataSummary>(); const [actionError,setActionError]=useState(''); const [inspecting,setInspecting]=useState(false);
   const run=async(action:()=>Promise<unknown>,login=false)=>{setActionError('');try{return await action();}catch(cause){setActionError(login?loginActionError(cause):'操作未完成，请检查 Agent 诊断后重试。');}};
-  const inspect=async()=>{setInspecting(true);setActionError('');try{const next=await onInspectCoverMetadata();setCover(next);if(next.execution_status==='failed')setActionError(next.termination_reason==='source_not_found'?'未发现可用的内容页数据来源；未执行同步或上传。':next.termination_reason==='login_required'?'抖音登录状态需要重新确认；未执行同步或上传。':'封面来源检查未完成；未执行同步或上传。');}catch{setActionError('封面来源检查未完成，请根据安全门禁或诊断后重试。');}finally{setInspecting(false);}};
+  const inspect=async()=>{setInspecting(true);setActionError('');try{const next=await onInspectCoverMetadata();setCover(next);if(next.execution_status==='failed')setActionError(next.termination_reason==='source_not_found'?'未发现可用的内容页数据来源；未执行同步或上传。':next.termination_reason==='login_required'?'抖音登录状态需要重新确认；未执行同步或上传。':'封面来源检查未完成；未执行同步或上传。');}catch(cause){setActionError(coverInspectionActionError(cause));}finally{setInspecting(false);}};
   const identity=state.runtimeIdentity,capability=state.capabilities,loginLabel=capability.loginAction==='relogin'?'重新登录':capability.loginAction==='confirm'?'我已完成登录':'打开登录窗口';
   const account=state.account, canInspect=account.scope_status==='confirmed'&&!inspecting&&!state.syncing;
   const coverStatus=cover&&cover.execution_status==='completed'?'作品 '+cover.works_seen+' · 有候选 '+cover.works_with_candidates+' · 有效图片 '+cover.probe_summary.valid_images+' · 远端拒绝 '+cover.source_classification.REMOTE_FORBIDDEN+' · 防盗链 '+cover.source_classification.REFERER_BOUND:'检查未完成';

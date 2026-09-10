@@ -35,6 +35,7 @@ import { inspectCoverMetadata } from '../core/collector/coverMetadata.js';
 import { collectorBrowserLaunch } from '../core/collector/browserLaunch.js';
 import { applyCollectorLoginRequired, heartbeatLoginStatus } from "./collectorAuthState.js";
 import { capabilities, mayConfirmLogin, profileAuthenticationFromBrowser, type LoginWindowState, type ProfileAuthentication } from "./loginState.js";
+import { coverInspectionFailureCode } from './coverInspectionState.js';
 import { bind, heartbeat, uploadCanonicalPayload } from "../core/uploader/client.js";
 import { intervalMs, nextDailyDelay } from "../core/scheduler/scheduler.js";
 import type { AgentConfig, SyncResult } from "../core/types.js";
@@ -473,12 +474,19 @@ async function performCoverMetadataInspection() {
   if (syncing || coverMetadataInspecting || uploadQueueScheduler?.isFlushing()) throw new Error('COVER_METADATA_SAFETY_GATE_BLOCKED');
   const config = await readConfig();
   if (!config || config.platform !== 'douyin' || !config.accountId) throw new Error('COVER_METADATA_BINDING_NOT_READY');
-  if (!await refreshProfileAuthentication(config, true) || profileAuthentication !== 'authenticated') throw new Error('COVER_METADATA_PROFILE_NOT_AUTHENTICATED');
   coverMetadataInspecting = true;
   try {
     const browser = collectorBrowserLaunch(config.browserConfig);
     await activeSession?.stop(); activeSession = null; browserConnected = false;
-    return await inspectCoverMetadata({ config, browser, profilePath: assertManagedProfile(managedProfile(paths().root, config.browserConfig, config.accountId), path.join(paths().root, 'profiles')), bridge: new ScraplingWorkerBridge(app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../..'), () => undefined, app.isPackaged) });
+    const result = await inspectCoverMetadata({ config, browser, profilePath: assertManagedProfile(managedProfile(paths().root, config.browserConfig, config.accountId), path.join(paths().root, 'profiles')), bridge: new ScraplingWorkerBridge(app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../..'), () => undefined, app.isPackaged) });
+    if (result.termination_reason === 'login_required') profileAuthentication = 'unauthenticated';
+    else if (result.execution_status === 'completed') profileAuthentication = 'authenticated';
+    await log(`封面来源检查完成：status=${result.execution_status} reason=${result.termination_reason}`);
+    return result;
+  } catch (error) {
+    const code = coverInspectionFailureCode(error);
+    await log(`封面来源检查失败：${code}`);
+    throw new Error(code);
   } finally { coverMetadataInspecting = false; await emit(); }
 }
 async function schedule() {

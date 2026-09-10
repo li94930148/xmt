@@ -129,7 +129,6 @@ export default function ProductionDetail() {
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [editMode, setEditMode] = useState(true);
   const [editData, setEditData] = useState({
     content: '',
     status: 'draft',
@@ -148,7 +147,6 @@ export default function ProductionDetail() {
       ),
   );
   const canDelete = canEditProduction && hasPermission('production:delete');
-  const canManageProductionResources = canEditProduction && hasPermission('production:update') && hasPermission('resource:view');
   const activeDocId = production ? getCollaborationRoomId('production', production.id) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
   const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
@@ -170,7 +168,6 @@ export default function ProductionDetail() {
       if (payload.productionId !== production.id || payload.fromVersion !== production.version) return;
       if (payload.createdBy.id === authUser.id) return;
       setSuperseded(payload);
-      setEditMode(false);
     };
     socket.on(COLLABORATION_EVENTS.VERSION_SUPERSEDED, handleSuperseded);
     return () => { socket.off(COLLABORATION_EVENTS.VERSION_SUPERSEDED, handleSuperseded); };
@@ -209,7 +206,7 @@ export default function ProductionDetail() {
     }
   }, [appStore, navigate, requestLeave]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!id) return;
 
     setLoading(true);
@@ -244,11 +241,11 @@ export default function ProductionDetail() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [appStore, id]);
 
   useEffect(() => {
     void fetchData();
-  }, [id]);
+  }, [fetchData]);
 
   const versionEntries = useMemo<VersionEntry[]>(() => {
     if (!production) {
@@ -366,7 +363,6 @@ export default function ProductionDetail() {
       content: production.content || editData.content || '',
       status: production.status,
     });
-    setEditMode(true);
   };
 
   const productionEditorAdapter = useMemo(() => {
@@ -412,7 +408,6 @@ export default function ProductionDetail() {
         type: 'success',
       });
 
-      setEditMode(true);
       await fetchData();
     } catch (error) {
       appStore.addNotification({
@@ -441,7 +436,6 @@ export default function ProductionDetail() {
         type: 'success',
       });
 
-      setEditMode(true);
       await fetchData();
     } catch (error) {
       appStore.addNotification({
@@ -524,6 +518,12 @@ export default function ProductionDetail() {
   const statusLabel = STATUS_TEXT[production.status] || production.status;
   const syncLabel = editorStateLabel(syncStatus);
   const editorLocked = Boolean(superseded);
+  const canManageProductionResources = canEditProduction
+    && production?.status !== 'approved'
+    && selectedVersionId === 'current'
+    && !editorLocked
+    && hasPermission('production:update')
+    && hasPermission('resource:view');
 
   return (
     <PageShell>

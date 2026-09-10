@@ -8,6 +8,7 @@ import { dailyWorkspaceV2Migration } from './006_daily_workspace_v2';
 import { dailyLightweightRefactorMigration } from './007_daily_lightweight_refactor';
 import { mobileDeviceRegistryMigration } from './008_mobile_device_registry';
 import { creatorOfficialExportV2203Migration } from './009_creator_official_export_v2203';
+import { productionMaterialsWorkspaceMigration } from './010_production_materials_workspace';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -19,4 +20,5 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   dailyLightweightRefactorMigration,
   mobileDeviceRegistryMigration,
   creatorOfficialExportV2203Migration,
+  productionMaterialsWorkspaceMigration,
 ];

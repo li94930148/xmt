@@ -33,6 +33,7 @@ jobs:
       - run: npm ci
       - run: npm run test:topics
       - run: npm run test:api-contract
+      - run: npm run test:production-materials
       - run: npm run test:auth
       - run: npm run test:rbac-invariant
       - run: npm run test:auth-session-service

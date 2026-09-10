@@ -1,5 +1,5 @@
 import { useAuthStore } from '../store';
-import type { Production, Shooting, Publishing, Comment } from '../types';
+import type { Production, ProductionHistory, Shooting, Publishing, Comment } from '../types';
 
 const BASE_URL = '/api';
 
@@ -63,7 +63,7 @@ export async function deleteProduction(id: number): Promise<{ message: string }>
   return response.json();
 }
 
-export async function getProductionHistory(productionId: number): Promise<any[]> {
+export async function getProductionHistory(productionId: number): Promise<ProductionHistory[]> {
   const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/history`, {
     headers: getAuthHeader()
   });
@@ -73,28 +73,57 @@ export async function getProductionHistory(productionId: number): Promise<any[]>
 
 export interface ProductionResource {
   id: number;
+  production_id: number;
+  source_resource_id: number | null;
+  material_type: 'library' | 'manual';
   title: string;
-  summary: string | null;
-  library_type: 'project' | 'content_archive' | 'knowledge' | 'media';
-  category: { id: number; name: string; path?: string } | null;
+  content_html: string;
+  content_format: string;
+  source_name: string;
+  source_url: string | null;
+  sort_order: number;
+  revision: number;
+  created_by: number | null;
+  updated_by: number | null;
+  creator_name: string | null;
+  updater_name: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export async function getProductionResources(productionId: number): Promise<ProductionResource[]> {
-  const response = await fetch(`${BASE_URL}/productions/${productionId}/resources`, { headers: getAuthHeader() });
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/materials`, { headers: getAuthHeader() });
   if (!response.ok) throw new Error(await getErrorMessage(response, '获取参考资料失败'));
   return (await response.json()).data;
 }
 
-export async function addProductionResource(productionId: number, resourceId: number): Promise<void> {
+export async function addProductionResources(productionId: number, resourceIds: number[]): Promise<{ data: ProductionResource[]; skipped_resource_ids: number[] }> {
   const response = await fetch(`${BASE_URL}/productions/${productionId}/resources`, {
-    method: 'POST', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify({ resource_id: resourceId }),
+    method: 'POST', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify({ resource_ids: resourceIds }),
   });
   if (!response.ok) throw new Error(await getErrorMessage(response, '添加参考资料失败'));
+  return response.json();
 }
 
-export async function removeProductionResource(productionId: number, resourceId: number): Promise<void> {
-  const response = await fetch(`${BASE_URL}/productions/${productionId}/resources/${resourceId}`, { method: 'DELETE', headers: getAuthHeader() });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '解除参考资料失败'));
+export async function createManualProductionMaterial(productionId: number, input: { title?: string; content_html: string }): Promise<ProductionResource> {
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/materials/manual`, {
+    method: 'POST', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '新建创作资料失败'));
+  return (await response.json()).data;
+}
+
+export async function updateProductionMaterial(productionId: number, materialId: number, input: { title: string; content_html: string; revision: number }): Promise<ProductionResource> {
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/materials/${materialId}`, {
+    method: 'PUT', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '保存创作资料失败'));
+  return (await response.json()).data;
+}
+
+export async function removeProductionMaterial(productionId: number, materialId: number): Promise<void> {
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/materials/${materialId}`, { method: 'DELETE', headers: getAuthHeader() });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '移除创作资料失败'));
 }
 
 // Comments
@@ -137,6 +166,8 @@ export async function getShooting(params?: { topic_id?: number; page?: number; l
   return response.json();
 }
 
+// Existing detail pages refine this legacy envelope locally.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function getShootingById(id: number): Promise<any> {
   const response = await fetch(`${BASE_URL}/workflow/shooting/${id}`, {
     headers: getAuthHeader()
@@ -175,6 +206,8 @@ export async function getPublishing(params?: { topic_id?: number; page?: number;
   return response.json();
 }
 
+// Existing detail pages refine this legacy envelope locally.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function getPublishingById(id: number): Promise<any> {
   const response = await fetch(`${BASE_URL}/workflow/publishing/${id}`, {
     headers: getAuthHeader()

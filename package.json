@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.20.21",
+  "version": "2.20.22",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -39,6 +39,7 @@
     "test:auth-socket-bridge": "tsx tests/auth/socket-auth-bridge.test.ts",
     "test:socket-production-gate": "tsx tests/auth/socket-production-gate.test.ts",
     "test:production-version-sync": "tsx tests/workflow-production-version-sync.test.ts",
+    "test:production-materials": "tsx tests/production/production-materials.test.ts && tsx tests/production/material-workspace-ui.test.ts",
     "auth:production-preflight": "tsx scripts/auth-production-preflight.ts",
     "ops:auth-readiness": "tsx scripts/ops-auth-readiness.ts",
     "ops:backup-restore-drill": "tsx scripts/backup-restore-drill.ts",
@@ -239,6 +240,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.18.2",
+    "sanitize-html": "^2.17.7",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "swagger-ui-express": "^5.0.1",
@@ -263,6 +265,7 @@
     "@types/node": "^22.15.30",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/sanitize-html": "^2.16.1",
     "@types/swagger-ui-express": "^4.1.8",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",

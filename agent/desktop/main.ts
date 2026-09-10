@@ -90,6 +90,7 @@ let browserConnected = false;
 let profileAuthentication: ProfileAuthentication = "unknown";
 let browserLoginStatus: "logged_in" | "login_required" | "unknown" = "unknown";
 let activeSession: BrowserSession | null = null;
+let activeSessionStart: Promise<BrowserSession> | null = null;
 let loginWindowState: LoginWindowState = "closed";
 let databaseReady = false;
 let databaseSchemaVersion = 0;
@@ -207,6 +208,12 @@ async function writeConfig(config: AgentConfig) {
 }
 async function readyBrowserSession(config: AgentConfig) {
   if (activeSession?.isConnected()) return activeSession;
+  if (activeSessionStart) return activeSessionStart;
+  activeSessionStart = startBrowserSession(config);
+  try { return await activeSessionStart; }
+  finally { activeSessionStart = null; }
+}
+async function startBrowserSession(config: AgentConfig) {
   const found = discoverBrowsers(
       config.browserConfig.type === "custom"
         ? { customPath: config.browserConfig.executablePath }

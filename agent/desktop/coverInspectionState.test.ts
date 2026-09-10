@@ -26,3 +26,10 @@ test('cover inspection delegates authentication to its single worker browser lau
   assert.doesNotMatch(implementation, /refreshProfileAuthentication/);
   assert.match(implementation, /inspectCoverMetadata/);
 });
+
+test('desktop browser startup is single-flight across concurrent state reads', () => {
+  const source = readFileSync(path.join(process.cwd(), 'desktop/main.ts'), 'utf8');
+  assert.match(source, /if \(activeSessionStart\) return activeSessionStart/);
+  assert.match(source, /activeSessionStart = startBrowserSession\(config\)/);
+  assert.match(source, /finally \{ activeSessionStart = null; \}/);
+});

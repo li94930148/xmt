@@ -5,7 +5,7 @@
 - 从前后端共享 `User` 模型和登录响应适配器中移除 `password` 字段，客户端用户状态不再接收或保留密码值。
 - 删除仅被专项测试调用的 `resolveAuthMode()` 死函数，保留灰度运行时仍使用的认证模式类型。
 - 完成代码精简清单的引用核验；Social Review、JWT 兼容入口、数据库兼容表、认证灰度和迁移脚本因仍有真实依赖而保留。
-- Creator Agent 升级至 v2.13.9-agent：修复 macOS 封面来源检查重复启动同一专用 Chrome Profile、触发 `SingletonLock` 冲突的问题，并提供固定、脱敏且可操作的本地诊断。
+- Creator Agent 升级至 v2.13.10-agent：修复 macOS 封面来源检查重复启动及启动状态并发读取同一专用 Chrome Profile、触发 `SingletonLock` 冲突的问题，并提供固定、脱敏且可操作的本地诊断。
 
 ## v2.20.20 - 2026-09-09
 

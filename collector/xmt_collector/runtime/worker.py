@@ -26,6 +26,33 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 
+def cover_metadata_failure_summary(account_scope_hash: str, code: str, termination: str) -> dict[str, Any]:
+    """Return the same aggregate-only shape as a successful cover inspection."""
+    probe_outcomes = ("head_ok", "forbidden", "valid", "invalid_content", "unsafe_redirect", "unsafe_network_target", "not_found", "timeout", "unknown", "skipped")
+    return {
+        "account_scope_hash": account_scope_hash,
+        "collected_at": "",
+        "execution_status": "failed",
+        "termination_reason": termination,
+        "diagnostics": [{"stage": "termination", "status": "failed", "count": 0, "code": code, "termination_reason": termination, "duration_bucket": "unknown", "boolean": False}],
+        "works_seen": 0,
+        "works_with_candidates": 0,
+        "works_without_candidates": 0,
+        "candidates_seen": 0,
+        "probe_summary": {"valid_images": 0, "forbidden": 0, "not_found": 0, "non_image": 0, "timeout": 0, "invalid_url": 0, "signed": 0, "expiring": 0, "expired_at_collection": 0},
+        "source_classification": {key: 0 for key in ("DIRECT_PUBLIC", "HEAD_UNSUPPORTED_GET_VALID", "REFERER_BOUND", "SESSION_BOUND", "SIGNED_VALID", "SIGNED_EXPIRING", "SIGNED_EXPIRED", "REMOTE_FORBIDDEN", "INVALID_CONTENT", "UNSAFE_REDIRECT", "UNSAFE_NETWORK_TARGET", "UNKNOWN")},
+        "diagnostic_summary": {
+            "host_hash_groups": 0,
+            "query_candidates": 0,
+            "signature_candidates": 0,
+            "expiry_candidates": 0,
+            "head_results": {f"head_{key}": 0 for key in probe_outcomes},
+            "range_results": {f"get_{key}": 0 for key in probe_outcomes},
+            "referer_results": {f"referer_{key}": 0 for key in probe_outcomes},
+        },
+    }
+
+
 class Worker:
     def __init__(self) -> None:
         quiet_logger = logging.getLogger("xmt.collector.scrapling")
@@ -130,14 +157,6 @@ class Worker:
     async def cover_metadata_only(self, request_id: str, params: dict[str, Any]) -> None:
         """Dedicated task: it never invokes collect(), manifests, exports, or upload code."""
         account_scope_hash = str(params.get("accountScopeHash") or "")
-        def failed(code: str, termination: str) -> dict[str, Any]:
-            # This is intentionally a completed protocol envelope with an explicit
-            # failed status.  It lets Main project a fixed diagnostic without ever
-            # forwarding a browser exception, URL, page body, or identifier.
-            return {"account_scope_hash": account_scope_hash, "collected_at": "", "execution_status": "failed", "termination_reason": termination,
-                    "diagnostics": [{"stage": "termination", "status": "failed", "count": 0, "code": code, "termination_reason": termination, "duration_bucket": "unknown", "boolean": False}],
-                    "works_seen": 0, "works_with_candidates": 0, "works_without_candidates": 0, "candidates_seen": 0,
-                    "probe_summary": {"valid_images": 0, "forbidden": 0, "not_found": 0, "non_image": 0, "timeout": 0, "invalid_url": 0, "signed": 0, "expiring": 0, "expired_at_collection": 0}}
         try:
             browser = parse_browser_launch(params.get("browser"))
             if params.get("platform") != "douyin": raise RuntimeError("not_implemented")
@@ -148,16 +167,16 @@ class Worker:
             self.emit(request_id, "started", {"mode": "cover_metadata_only"})
             self.emit(request_id, "completed", await adapter.inspect_cover_metadata_only(account_scope_hash))
         except LoginRequired:
-            self.emit(request_id, "completed", failed("LOGIN_REQUIRED", "login_required"))
+            self.emit(request_id, "completed", cover_metadata_failure_summary(account_scope_hash, "LOGIN_REQUIRED", "login_required"))
         except CoverMetadataFailure as error:
-            self.emit(request_id, "completed", failed(error.code, "source_not_found"))
+            self.emit(request_id, "completed", cover_metadata_failure_summary(account_scope_hash, error.code, "source_not_found"))
         except asyncio.CancelledError:
             # Session context teardown closes the page.  Do not invoke any shared
             # collection cleanup path because those may own snapshots or queues.
             self.emit(request_id, "cancelled", {"accepted": True})
         except Exception:
             # Third-party browser errors can contain URLs; never forward them.
-            self.emit(request_id, "completed", failed("PAGE_PARSE_FAILED", "worker_failed"))
+            self.emit(request_id, "completed", cover_metadata_failure_summary(account_scope_hash, "PAGE_PARSE_FAILED", "worker_failed"))
         finally:
             self.running.pop(request_id, None)
 

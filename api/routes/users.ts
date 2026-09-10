@@ -10,6 +10,22 @@ import { disconnectUserSockets } from '../utils/socket.js';
 
 const router = express.Router();
 
+const MAX_LIST_LIMIT = 200;
+
+export function parseUsersPagination(
+  pageValue: unknown,
+  limitValue: unknown,
+  defaultLimit: number,
+) {
+  const parsedPage = Number(pageValue);
+  const parsedLimit = Number(limitValue);
+  const page = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  const limit = Number.isInteger(parsedLimit) && parsedLimit > 0
+    ? Math.min(parsedLimit, MAX_LIST_LIMIT)
+    : defaultLimit;
+  return { page, limit, offset: (page - 1) * limit };
+}
+
 async function getRoleByCode(roleCode: string) {
   return queryOne<{ id: number; code: string; name: string }>(`SELECT id, code, name FROM roles WHERE code = ?`, [roleCode]);
 }
@@ -26,19 +42,19 @@ router.get('/assignable-roles', authenticate, requirePermission('user:create', '
 
 router.get('/', authenticate, requirePermission('user:view'), async (req, res) => {
   try {
-    const { page = 1, limit = 1000 } = req.query;
+    const pagination = parseUsersPagination(req.query.page, req.query.limit, MAX_LIST_LIMIT);
     
     const users = await queryAll(`SELECT id, username, name, email, role, enabled, created_at, updated_at 
                          FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-      [parseInt(limit as string), (parseInt(page as string) - 1) * parseInt(limit as string)]);
+      [pagination.limit, pagination.offset]);
     
     const countResult = await queryOne(`SELECT COUNT(*) as total FROM users`);
     
     res.json({
       data: users,
       total: countResult?.total || 0,
-      page: parseInt(page as string),
-      limit: parseInt(limit as string)
+      page: pagination.page,
+      limit: pagination.limit
     });
   } catch (error) {
     res.status(500).json({ message: '获取用户列表失败', error });
@@ -48,20 +64,20 @@ router.get('/', authenticate, requirePermission('user:view'), async (req, res) =
 // 注意：这些固定路由必须放在?/:id 之前，否则?Express 会把 logs/activity-logs 当成 id
 router.get('/logs', authenticate, requirePermission('user:logs'), async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    const pagination = parseUsersPagination(req.query.page, req.query.limit, 20);
     
     const logs = await queryAll(`SELECT al.*, u.name as user_name FROM activity_log al 
                         LEFT JOIN users u ON al.user_id = u.id 
                         ORDER BY al.created_at DESC LIMIT ? OFFSET ?`,
-      [parseInt(limit as string), (parseInt(page as string) - 1) * parseInt(limit as string)]);
+      [pagination.limit, pagination.offset]);
     
     const countResult = await queryOne(`SELECT COUNT(*) as total FROM activity_log`);
     
     res.json({
       data: logs,
       total: countResult?.total || 0,
-      page: parseInt(page as string),
-      limit: parseInt(limit as string)
+      page: pagination.page,
+      limit: pagination.limit
     });
   } catch (error) {
     res.status(500).json({ message: '获取操作日志失败', error });
@@ -70,10 +86,8 @@ router.get('/logs', authenticate, requirePermission('user:logs'), async (req, re
 
 router.get('/activity-logs', authenticate, requirePermission('user:logs'), async (req, res) => {
   try {
-    const { page = 1, limit = 20, user_id } = req.query;
-    const limitNum = parseInt(limit as string);
-    const pageNum = parseInt(page as string);
-    const offset = (pageNum - 1) * limitNum;
+    const { user_id } = req.query;
+    const pagination = parseUsersPagination(req.query.page, req.query.limit, 20);
 
     let whereClause = '';
     const params: unknown[] = [];
@@ -88,7 +102,7 @@ router.get('/activity-logs', authenticate, requirePermission('user:logs'), async
        LEFT JOIN users u ON al.user_id = u.id 
        ${whereClause}
        ORDER BY al.created_at DESC LIMIT ? OFFSET ?`,
-      [...params, limitNum, offset]
+      [...params, pagination.limit, pagination.offset]
     );
 
     const countResult = await queryOne(
@@ -98,7 +112,9 @@ router.get('/activity-logs', authenticate, requirePermission('user:logs'), async
 
     res.json({
       data: logs,
-      total: countResult?.total || 0
+      total: countResult?.total || 0,
+      page: pagination.page,
+      limit: pagination.limit
     });
   } catch (error) {
     res.status(500).json({ message: '获取活动日志失败', error });
@@ -255,6 +271,7 @@ router.delete('/:id', authenticate, requirePermission('user:delete'), async (req
     await execute(`DELETE FROM user_roles WHERE user_id = ?`, [id]);
     
     await execute(`DELETE FROM users WHERE id = ?`, [id]);
+    clearPermissionCache(Number(id));
     
     await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
       req.user?.id, 'delete', 'user', `删除用户: ${user.username}`

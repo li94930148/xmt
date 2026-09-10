@@ -512,7 +512,7 @@ router.put('/production/:id', authenticate, async (req, res) => {
       }
       const topic = await queryOne(`SELECT title FROM topics WHERE id = ?`, [topic_id]);
       if (topic) {
-        await execute(`INSERT INTO messages (user_id, title, content, type, created_at) VALUES (?, ?, ?, ?, ?)`, [req.user?.id, '创作审核通过', `选题?{topic.title}」创作已通过审核，进入成片制作环节`, 'success', beijingNow()]);
+        await execute(`INSERT INTO messages (user_id, title, content, type, created_at) VALUES (?, ?, ?, ?, ?)`, [req.user?.id, '创作审核通过', `选题「${topic.title}」创作已通过审核，进入成片制作环节`, 'success', beijingNow()]);
       }
     }
     broadcastToRoom('production', 'production:updated', { id: Number(req.params.id) });
@@ -635,7 +635,7 @@ router.put('/shooting/:id', authenticate, requirePermission('workflow:shooting')
       }
       const topic = await queryOne(`SELECT title FROM topics WHERE id = ?`, [targetTopicId]);
       if (topic) {
-        await execute(`INSERT INTO messages (user_id, title, content, type, created_at) VALUES (?, ?, ?, ?, ?)`, [req.user?.id, '成片制作完成', `选题?{topic.title}」成片制作已完成，进入发布管理环节`, 'success', beijingNow()]);
+        await execute(`INSERT INTO messages (user_id, title, content, type, created_at) VALUES (?, ?, ?, ?, ?)`, [req.user?.id, '成片制作完成', `选题「${topic.title}」成片制作已完成，进入发布管理环节`, 'success', beijingNow()]);
       }
     }
     broadcastToRoom('shooting', 'shooting:updated', { id: Number(req.params.id) });
@@ -742,7 +742,7 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
       const existingTopic = await queryOne(`SELECT * FROM topics WHERE id = ?`, [topic_id]);
       if (existingTopic && existingTopic.status !== 'completed') {
         await execute(`UPDATE topics SET status = 'completed' WHERE id = ?`, [topic_id]);
-        await execute(`INSERT INTO messages (user_id, title, content, type, created_at) VALUES (?, ?, ?, ?, ?)`, [req.user?.id, '发布完成', `选题?{existingTopic.title}」已发布完成`, 'success', beijingNow()]);
+        await execute(`INSERT INTO messages (user_id, title, content, type, created_at) VALUES (?, ?, ?, ?, ?)`, [req.user?.id, '发布完成', `选题「${existingTopic.title}」已发布完成`, 'success', beijingNow()]);
       }
       await syncPublishedArchive(Number(topic_id), req.user?.id);
     }
@@ -807,7 +807,7 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
         await execute(`UPDATE topics SET status = 'completed' WHERE id = ?`, [topicId]);
         await execute(
           `INSERT INTO messages (user_id, title, content, type, created_at) VALUES (?, ?, ?, ?, ?)`,
-          [req.user?.id, '发布完成', `选题?{existingTopic.title}」已发布完成`, 'success', beijingNow()],
+          [req.user?.id, '发布完成', `选题「${existingTopic.title}」已发布完成`, 'success', beijingNow()],
         );
       }
       await syncPublishedArchive(topicId, req.user?.id);

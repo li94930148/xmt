@@ -22,7 +22,6 @@ export type AuditAction = 'approved' | 'rejected';
 export interface User {
   id: number;
   username: string;
-  password: string;
   email: string;
   role: UserRole;
   name: string;

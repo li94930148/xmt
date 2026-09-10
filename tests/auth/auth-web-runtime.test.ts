@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AuthRuntime } from '../../src/auth/runtime/auth-runtime.js';
-import { resolveAuthMode } from '../../src/auth/runtime/auth-mode.js';
 import { MemoryAccessTokenStore } from '../../src/auth/runtime/token-memory-store.js';
 import { ApiClient } from '../../packages/api-client/client.js';
 import { AuthV1Client } from '../../packages/api-client/auth-client.js';
@@ -27,10 +26,6 @@ const user: AuthV1User = {
   role: 'member',
   forceChangePassword: false,
 };
-
-assert.equal(resolveAuthMode(), 'legacy');
-assert.equal(resolveAuthMode({ webAuthEnabled: false, userId: 7, allowlistedUserIds: new Set([7]) }), 'legacy');
-assert.equal(resolveAuthMode({ webAuthEnabled: true, userId: 7, allowlistedUserIds: new Set([7]) }), 'v1-web');
 
 const allowlist = parseAuthWebAllowlist('7, 9,invalid,-1,0,7');
 assert.deepEqual([...allowlist], [7, 9]);

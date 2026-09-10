@@ -24,6 +24,7 @@ assert.equal(legacy.authMode, 'legacy');
 assert.equal(legacy.accessToken, 'legacy-seven-day-jwt');
 assert.equal(legacy.session, undefined);
 assert.equal(legacy.user.force_change_password, false);
+assert.equal(Object.prototype.hasOwnProperty.call(legacy.user, 'password'), false);
 
 const legacyWithoutDisplayName = adaptLoginResponse({
   user: {
@@ -70,6 +71,7 @@ assert.equal(v1.accessToken, 'v1-memory-access-token');
 assert.equal(v1.session?.id, 'session-8');
 assert.equal(v1.requestId, 'request-v1-8');
 assert.equal(v1.user.force_change_password, true);
+assert.equal(Object.prototype.hasOwnProperty.call(v1.user, 'password'), false);
 
 const v1WithoutDisplayName = adaptLoginResponse({
   success: true,

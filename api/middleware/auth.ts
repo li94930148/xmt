@@ -80,7 +80,6 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     const user: User = {
       id: Number(resultRecord.id),
       username: String(resultRecord.username),
-      password: '',
       email: String(resultRecord.email ?? ''),
       role: String(resultRecord.role) as User['role'],
       name: String(resultRecord.name ?? ''),

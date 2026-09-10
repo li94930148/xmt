@@ -2,9 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import { queryAll } from '../database/utils';
 import { sendV1Error } from '../utils/response';
 
-// 权限缓存（内存 Map，TTL 5 分钟）
+// 权限缓存（内存 Map，TTL 60 秒；权限写路径仍需主动失效）
 const permissionCache = new Map<string, { permissions: string[]; expires: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+export const PERMISSION_CACHE_TTL_MS = 60 * 1000;
 const CACHE_MAX_ENTRIES = 1_000;
 
 /**
@@ -33,7 +33,7 @@ async function getUserPermissions(userId: number): Promise<string[]> {
   }
   permissionCache.set(cacheKey, {
     permissions: permList,
-    expires: Date.now() + CACHE_TTL
+    expires: Date.now() + PERMISSION_CACHE_TTL_MS
   });
 
   return permList;

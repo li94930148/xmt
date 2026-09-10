@@ -1,6 +1,7 @@
 from xmt_collector.platforms.douyin import cover_metadata
 from xmt_collector.platforms.douyin.cover_metadata import cover_candidates, ttl_seconds
 from xmt_collector.platforms.douyin.adapter import creator_xhr_url
+from xmt_collector.runtime.worker import cover_metadata_failure_summary
 from pathlib import Path
 import re
 
@@ -74,5 +75,13 @@ def test_metadata_only_source_failure_is_a_fixed_code_not_empty_success():
     source = worker.read_text(encoding="utf-8")
     adapter = Path(__file__).parents[1] / "xmt_collector" / "platforms" / "douyin" / "adapter.py"
     assert 'CoverMetadataFailure("COVER_METADATA_SOURCE_NOT_FOUND")' in adapter.read_text(encoding="utf-8")
-    assert 'failed(error.code, "source_not_found")' in source
+    assert 'cover_metadata_failure_summary(account_scope_hash, error.code, "source_not_found")' in source
     assert '"execution_status": "failed"' in source
+
+def test_metadata_only_failure_preserves_the_aggregate_only_bridge_contract():
+    value = cover_metadata_failure_summary("a" * 64, "COVER_METADATA_SOURCE_NOT_FOUND", "source_not_found")
+    assert set(value) == {"account_scope_hash", "collected_at", "execution_status", "termination_reason", "diagnostics", "works_seen", "works_with_candidates", "works_without_candidates", "candidates_seen", "probe_summary", "source_classification", "diagnostic_summary"}
+    assert value["execution_status"] == "failed"
+    assert value["diagnostic_summary"]["head_results"]["head_skipped"] == 0
+    assert value["source_classification"]["UNKNOWN"] == 0
+    assert all("url" not in str(item).lower() for item in value["diagnostics"])

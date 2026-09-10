@@ -14,7 +14,7 @@
 ### 修复
 
 - 从共享用户模型、请求认证用户和 Legacy/v1 登录响应适配结果中移除 `password` 字段。即使服务端历史响应意外携带该字段，客户端用户状态也不会接收或持久化。
-- Creator Agent 升级至 v2.13.10-agent：macOS 封面来源检查改为单 Worker 浏览器会话，浏览器启动采用 single-flight 串行化，专用 Chrome 禁止后台驻留并等待 Profile 锁释放；Renderer 只显示固定错误分类，不显示浏览器原始异常。
+- Creator Agent 升级至 v2.13.11-agent：macOS 封面来源检查改为单 Worker 浏览器会话，浏览器启动采用 single-flight 串行化，专用 Chrome 禁止后台驻留并等待 Profile 锁释放；Worker 的失败摘要补齐来源分类与诊断聚合字段，使 `source_not_found`、`login_required` 等安全结果可通过 Main 契约校验并准确显示。
 
 ### 技术升级
 

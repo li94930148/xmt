@@ -1,5 +1,23 @@
 # XMT 升级阶段记录
 
+## v2.20.21 共享用户模型精简与清理核验（2026-09-10）
+
+- 范围：共享 `User` DTO、认证中间件用户投影、Legacy/v1 登录响应适配、Auth Web Runtime 死函数及代码精简清单核验。
+- 修改：移除共享用户对象的 `password` 字段和三处空值/历史响应映射；删除无生产调用的 `resolveAuthMode()` 及对应过时测试，保留 `AuthMode` 类型。
+- 数据库：无 schema 迁移，不读取、导出或修改用户密码哈希及业务数据。
+- 测试：Login Response Adapter、Auth Web Runtime、Legacy Auth 冻结测试和类型检查通过；发布闭环继续执行测试入口、版本检查、依赖审计、生产构建及 diff 检查。
+- 风险：Social Review 仍有前端页面、API 客户端、Socket 会话和脚本依赖；JWT 转发入口有 20 个调用方；兼容表与迁移脚本有文档或数据链路依赖，因此均未删除。认证灰度和 Topics 双轨仍处保留期。
+- 下一阶段：产品确认 Social Review 是正式退役还是恢复挂载后，再设计完整垂直切片清理或恢复方案；Auth v1 全量完成后单独收口灰度和 legacy JWT。
+
+## v2.20.20 代码审查安全整改（2026-09-09）
+
+- 范围：Social Review 休眠路由、统一错误响应、用户/日志分页、权限缓存与工作流通知文案。
+- 修改：Social Review 增加 `analytics:view` 基础门禁并保留管理员二次门禁；Social Review 和总结归档未知异常返回固定 `INTERNAL_ERROR`；用户/日志分页限制为最多 200 条；权限缓存 TTL 改为 60 秒；修复 4 处选题标题插值。
+- 数据库：无 schema 迁移，不修改业务数据、角色、权限分配或 Auth token 合同。
+- 验证：新增授权、脱敏、分页与通知文案合同；既有错误响应、总结归档、日报权限、类型检查均通过；版本检查、依赖审计和生产构建在发布闭环执行。
+- 风险：Social Review 旧路由当前未挂载，修复属于重新启用前的纵深防御；legacy JWT verifier 下线依赖 Auth v1 灰度完成，本次不改变认证协议；`req.user!` 经核验仍由认证中间件保护，未做无收益的全局类型重构。
+- 下一阶段：若重新启用 Social Review 路由，需在正式挂载点补真实角色 HTTP 验收；Auth v1 完成迁移后按专项方案退役 legacy JWT。
+
 ## v2.20.19 Creator 托管封面与作品身份收口（2026-09-09）
 
 - 范围：Creator Agent 浏览器采集、加密作品同步、服务端封面资产、作品库/驾驶舱/详情展示及 canonical 身份。

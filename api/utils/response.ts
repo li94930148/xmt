@@ -8,6 +8,7 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   message?: string;
   error?: string;
+  code?: ApiErrorCode;
   pagination?: {
     page: number;
     limit: number;
@@ -65,6 +66,18 @@ export function sendNotFound(res: Response, message = '资源不存在') {
 // 服务器错误响应（不泄露内部错误信息）
 export function sendServerError(res: Response, message = '服务器内部错误') {
   return sendError(res, message, 500);
+}
+
+// 新路由应使用固定安全文案和错误码；内部异常仅记录类型，避免日志二次泄露绑定参数。
+export function sendSafeServerError(
+  res: Response,
+  message = '服务器内部错误',
+  context = 'API',
+  error?: unknown,
+) {
+  const errorName = error instanceof Error ? error.name : typeof error;
+  console.error(`[${context}] internal request error`, { errorName });
+  return res.status(500).json({ success: false, code: 'INTERNAL_ERROR', message });
 }
 
 /**

@@ -63,7 +63,6 @@ function toLegacyUser(value: unknown): User {
   return {
     id: requireNumber(value.id, '用户 ID'),
     username,
-    password: typeof value.password === 'string' ? value.password : '',
     email: typeof value.email === 'string' ? value.email : '',
     role: requireString(value.role, '用户角色'),
     name: displayNameOrUsername(value.name, username),
@@ -80,7 +79,6 @@ function toV1User(value: unknown): User {
   return {
     id: requireNumber(value.id, '用户 ID'),
     username,
-    password: '',
     email: typeof value.email === 'string' ? value.email : '',
     role: requireString(value.role, '用户角色'),
     name: displayNameOrUsername(value.name, username),

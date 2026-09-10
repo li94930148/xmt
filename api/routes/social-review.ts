@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
+import { sendSafeServerError } from '../utils/response.js';
 import { execute, executeInsert, queryAll, queryOne } from '../database/utils.js';
 import { credentialHealthCheck, getCredentialSummaryByAccountId } from '../services/social-review/credentials.js';
 import { collectDouyinPerformanceMetrics } from '../services/social-review/douyinPerformanceService.js';
@@ -33,7 +34,9 @@ import { syncDouyinAccountMetrics } from '../services/social-review/douyinAccoun
 
 const router = express.Router();
 
-router.use(authenticate);
+// Keep the dormant legacy router safe if it is mounted again: every endpoint
+// exposes account or collection analytics and therefore requires view access.
+router.use(authenticate, requirePermission('analytics:view'));
 
 function sendData(res: Response, data: unknown) {
   res.json({ success: true, data });
@@ -41,9 +44,13 @@ function sendData(res: Response, data: unknown) {
 
 function handleError(error: unknown, res: Response) {
   const message = error instanceof Error ? error.message : '服务暂时不可用，请稍后重试。';
-  const status = /不存在/.test(message) ? 404 : /仅允许|权限|未启用/.test(message) ? 400 : 500;
-  const normalizedStatus = /未启用|仅管理员|请选择|仅支持|账号/.test(message) ? 400 : status;
-  res.status(normalizedStatus).json({ success: false, message });
+  const isNotFound = /不存在[。.]?$/.test(message);
+  const isSafeClientError = /^(本阶段仅允许|当前账号暂不支持|未发现已登录|账号未|计划账号未|采集计划未启用|服务器浏览器需要管理员|采集凭据|登录凭据|导出文件|请选择|仅支持|作品列表接口请求失败|性能接口请求失败|账号数据解析失败)/.test(message);
+  if (isNotFound || isSafeClientError) {
+    return res.status(isNotFound ? 404 : 400).json({ success: false, message });
+  }
+
+  return sendSafeServerError(res, '服务暂时不可用，请稍后重试。', 'social-review', error);
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {

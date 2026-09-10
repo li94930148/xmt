@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.20.19",
+  "version": "2.20.21",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -183,7 +183,8 @@
     "test:auth-401-recovery": "tsx tests/auth/auth-401-recovery.test.ts",
     "test:role-management-security": "tsx tests/auth/role-management-security.test.ts",
     "test:error-response-sanitization": "tsx tests/security/error-response-sanitization.test.ts",
-    "test:error-response-sanitization-http": "tsx tests/security/error-response-http-contract.test.ts"
+    "test:error-response-sanitization-http": "tsx tests/security/error-response-http-contract.test.ts",
+    "test:code-review-remediation": "tsx tests/security/code-review-remediation.test.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",

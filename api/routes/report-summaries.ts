@@ -1,6 +1,7 @@
 import express, { type Request, type Response } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { execute, queryAll, queryOne } from '../database/utils.js';
+import { sendSafeServerError } from '../utils/response.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -16,7 +17,11 @@ function isAdmin(user: NonNullable<Request['user']>) {
 }
 
 function handle(error: unknown, res: Response) {
-  res.status(400).json({ success: false, message: error instanceof Error ? error.message : '总结请求失败' });
+  const message = error instanceof Error ? error.message : '';
+  if (/^(参数 (year|month) 不合法|month 不合法)$/.test(message)) {
+    return res.status(400).json({ success: false, message });
+  }
+  return sendSafeServerError(res, '总结请求失败，请稍后重试。', 'report-summaries', error);
 }
 
 type SummaryKind = 'monthly' | 'yearly';

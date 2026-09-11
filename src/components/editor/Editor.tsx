@@ -22,6 +22,7 @@ import EditorContextMenu from './ContextMenu';
 import TableOfContents from './TableOfContents';
 import { createEditorExtensions } from './extensions/editorExtensions';
 import type { FormatPainterMode } from './formatPainter';
+import { resolveEditorInsertionSelection } from './editorInsertion';
 
 interface EditorProps {
   value: string;
@@ -37,6 +38,12 @@ interface EditorProps {
   immersive?: boolean;
   pageScroll?: boolean;
   stateDocId?: string;
+  onCommandHandleChange?: (handle: EditorCommandHandle | null) => void;
+  toolbarVariant?: 'full' | 'basic';
+}
+
+export interface EditorCommandHandle {
+  insertHtmlAtSelectionOrEnd(html: string): boolean;
 }
 
 export default function Editor({
@@ -48,6 +55,8 @@ export default function Editor({
   collaboration,
   immersive = false,
   stateDocId,
+  onCommandHandleChange,
+  toolbarVariant = 'full',
 }: EditorProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const lastValueRef = useRef(value);
@@ -78,6 +87,7 @@ export default function Editor({
   const [wordCount, setWordCount] = useState(0);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [formatPainterMode, setFormatPainterMode] = useState<FormatPainterMode>('idle');
+  const lastFocusedSelectionRef = useRef<{ from: number; to: number } | null>(null);
   const baseExtensions = useMemo(() => createEditorExtensions(placeholder), [placeholder]);
 
   // 立即保存（仅 Ctrl+S 触发）
@@ -145,6 +155,15 @@ export default function Editor({
         }, 1200);
       }
     },
+    onFocus: ({ editor }) => {
+      const { from, to } = editor.state.selection;
+      lastFocusedSelectionRef.current = { from, to };
+    },
+    onSelectionUpdate: ({ editor }) => {
+      if (!editor.isFocused) return;
+      const { from, to } = editor.state.selection;
+      lastFocusedSelectionRef.current = { from, to };
+    },
     editorProps: {
       attributes: {
         class: `editor-content prose max-w-none ${immersive ? 'px-4 sm:px-8 lg:px-16 py-8 lg:py-12' : 'px-10 py-8'} min-h-[300px] outline-none ${isDark ? 'prose-invert' : ''}`,
@@ -196,6 +215,20 @@ export default function Editor({
       },
     },
   }, [readOnly, collaboration?.provider, baseExtensions]);
+
+  useEffect(() => {
+    if (!editor || !onCommandHandleChange) return;
+    const handle: EditorCommandHandle = {
+      insertHtmlAtSelectionOrEnd(html) {
+        if (!html || readOnly) return false;
+        const docEnd = editor.state.doc.content.size;
+        const target = resolveEditorInsertionSelection(lastFocusedSelectionRef.current, docEnd);
+        return editor.chain().focus().setTextSelection(target).insertContent(html).run();
+      },
+    };
+    onCommandHandleChange(handle);
+    return () => onCommandHandleChange(null);
+  }, [editor, onCommandHandleChange, readOnly]);
 
   const handleCopyAll = useCallback(async () => {
     if (!editor) return;
@@ -279,7 +312,7 @@ export default function Editor({
     }
 
     setWordCount(editor.getText().replace(/\s+/g, '').length);
-  }, [editor, value, collaboration?.provider]);
+  }, [editor, value, collaboration?.provider, placeholder]);
 
   useEffect(() => {
     if (!editor) return;
@@ -427,6 +460,7 @@ export default function Editor({
           {editor && !readOnly && (
             <Toolbar
               editor={editor}
+              variant={toolbarVariant}
               onAddComment={handleAddComment}
               onToggleToc={() => setShowToc(!showToc)}
               showToc={showToc}

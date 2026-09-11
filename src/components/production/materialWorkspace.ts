@@ -10,18 +10,11 @@ export function clampMaterialWorkspaceHeight(value: number, viewportHeight: numb
   return Math.min(maximum, Math.max(MIN_MATERIAL_WORKSPACE_HEIGHT, Math.round(value)));
 }
 
-export class LatestOnlySaveQueue<TInput, TResult> {
-  private generation = 0;
-  private disposed = false;
+// One empty paragraph represents two text newlines without an oversized visual gap.
+const INSERTION_GAP_HTML = '<p><br></p>';
 
-  dispose() {
-    this.disposed = true;
-    this.generation += 1;
-  }
-
-  async run(input: TInput, save: (input: TInput) => Promise<TResult>) {
-    const generation = ++this.generation;
-    const result = await save(input);
-    return { result, current: !this.disposed && generation === this.generation };
-  }
+export function buildMaterialInsertionHtml(contents: readonly string[]) {
+  const nonEmpty = contents.map((content) => content.trim()).filter(Boolean);
+  if (nonEmpty.length === 0) return '';
+  return `${INSERTION_GAP_HTML}${nonEmpty.join(INSERTION_GAP_HTML)}${INSERTION_GAP_HTML}`;
 }

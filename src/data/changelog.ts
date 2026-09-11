@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.22', date: '2026-09-10', title: '创作资料工作区', impactScope: ['创作管理', '资料库', '富文本编辑'], changes: [{ type: 'feature', description: '创作详情直接展示资料正文，支持从资料库批量生成独立快照及手动粘贴资料。' }, { type: 'improvement', description: '资料支持安全编辑、自动保存、独立删除，以及按用户记忆的工作区高度。' }] },
   { version: '2.20.21', date: '2026-09-10', title: '共享用户模型安全精简', impactScope: ['登录', '用户状态', '认证运行时'], changes: [{ type: 'security', description: '登录响应进入客户端用户状态前会丢弃密码字段，前后端共享用户模型不再声明密码。' }, { type: 'improvement', description: '删除无生产调用的认证模式辅助函数，并保留仍在灰度期使用的兼容能力。' }] },
   { version: '2.20.20', date: '2026-09-09', title: '代码审查安全整改', impactScope: ['API 权限', '错误响应', '用户与日志列表', '工作流通知'], changes: [{ type: 'security', description: 'Social Review 休眠路由统一增加数据分析查看权限，未知内部异常只返回固定安全响应。' }, { type: 'fix', description: '限制用户与日志列表查询规模，缩短权限缓存窗口并修复选题通知标题。' }] },
   { version: '2.20.19', date: '2026-09-09', title: 'Creator 托管封面与重复作品合并', impactScope: ['Creator Agent', '作品库', '数据驾驶舱'], changes: [{ type: 'fix', description: '认证浏览器已加载的封面可安全同步并在生产端稳定显示。' }, { type: 'fix', description: '同标题、同发布时间但采集编号不同的同一作品合并展示。' }] },

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import Editor from './editor/Editor';
+import Editor, { type EditorCommandHandle } from './editor/Editor';
 import RichTextEditor from './RichTextEditor';
 import { useAuthStore } from '../store';
 import { useSocket } from '../hooks/useSocket';
@@ -20,6 +20,7 @@ import { RuntimeHandleBridge } from '../editor/runtime/RuntimeHandleBridge';
 import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
 
 export type ContentEditorMode = 'rich' | 'legacy' | 'readonly';
+export type { EditorCommandHandle };
 
 export interface ContentEditorProps {
   value: string;
@@ -37,6 +38,8 @@ export interface ContentEditorProps {
   persistenceStatus?: EditorState;
   adapter?: ContentEditorAdapter;
   onRuntimeHandleChange?: (handle: ContentEditorRuntimeHandle | null) => void;
+  onEditorCommandHandleChange?: (handle: EditorCommandHandle | null) => void;
+  toolbarVariant?: 'full' | 'basic';
 }
 
 const noop = () => {};
@@ -57,6 +60,8 @@ export default function ContentEditor({
   persistenceStatus = 'synced',
   adapter,
   onRuntimeHandleChange,
+  onEditorCommandHandleChange,
+  toolbarVariant = 'full',
 }: ContentEditorProps) {
   const resolvedReadOnly = readOnly || mode === 'readonly';
   const wrapperStyle = minHeight === undefined ? undefined : { minHeight };
@@ -268,6 +273,8 @@ export default function ContentEditor({
             immersive={runtime.capabilities.immersive}
             pageScroll={runtime.capabilities.pageScroll}
             stateDocId={collaborationKey}
+            onCommandHandleChange={onEditorCommandHandleChange}
+            toolbarVariant={toolbarVariant}
           />
         )}
       </ContentEditorRuntime>

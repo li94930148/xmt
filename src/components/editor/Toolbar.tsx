@@ -20,12 +20,13 @@ import {
   ChevronDown, Maximize, Minimize,
   PanelRight, PanelRightClose,
   Download, FileText, FileCode, FileJson,
-  MoreHorizontal, IndentIncrease, Paintbrush,
+  MoreHorizontal, IndentIncrease, Paintbrush, List, ListOrdered,
 } from 'lucide-react';
 import { captureFormatSnapshot, createFormatPainterTransaction, type FormatPainterMode, type FormatSnapshot } from './formatPainter';
 
 interface ToolbarProps {
   editor: Editor | null;
+  variant?: 'full' | 'basic';
   onAddComment?: () => void;
   onToggleToc?: () => void;
   showToc?: boolean;
@@ -66,6 +67,7 @@ const HEADING_OPTIONS = [
 
 export default function Toolbar({
   editor,
+  variant = 'full',
   onAddComment,
   onToggleToc,
   showToc,
@@ -381,6 +383,44 @@ export default function Toolbar({
   const dropdownClass = `absolute top-full left-0 mt-1 z-50 rounded-lg shadow-xl border py-1 ${
     isDark ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'
   }`;
+
+  if (variant === 'basic') {
+    return (
+      <div
+        className={`editor-toolbar flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-2 ${
+          isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+        }`}
+        aria-label="基础富文本工具栏"
+      >
+        <button type="button" onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} className={btnClass()} title="撤销 (Ctrl+Z)" aria-label="撤销">
+          <Undo className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} className={btnClass()} title="重做 (Ctrl+Y)" aria-label="重做">
+          <Redo className="h-4 w-4" />
+        </button>
+        {divider}
+        <button type="button" onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} title="加粗 (Ctrl+B)" aria-label="加粗">
+          <Bold className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} title="斜体 (Ctrl+I)" aria-label="斜体">
+          <Italic className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} title="下划线 (Ctrl+U)" aria-label="下划线">
+          <Underline className="h-4 w-4" />
+        </button>
+        {divider}
+        <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} className={btnClass(editor.isActive('bulletList'))} title="项目符号列表" aria-label="项目符号列表">
+          <List className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive('orderedList'))} title="编号列表" aria-label="编号列表">
+          <ListOrdered className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={setLink} className={btnClass(editor.isActive('link'))} title="链接" aria-label="链接">
+          <LinkIcon className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
 
   // 核心工具按钮（始终显示）
   const coreButtons = (

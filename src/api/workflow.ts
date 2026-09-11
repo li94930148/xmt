@@ -71,59 +71,40 @@ export async function getProductionHistory(productionId: number): Promise<Produc
   return response.json();
 }
 
-export interface ProductionResource {
-  id: number;
+export interface ProductionMaterialDraft {
   production_id: number;
-  source_resource_id: number | null;
-  material_type: 'library' | 'manual';
-  title: string;
   content_html: string;
-  content_format: string;
-  source_name: string;
-  source_url: string | null;
-  sort_order: number;
   revision: number;
   created_by: number | null;
   updated_by: number | null;
-  creator_name: string | null;
-  updater_name: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
-export async function getProductionResources(productionId: number): Promise<ProductionResource[]> {
-  const response = await fetch(`${BASE_URL}/productions/${productionId}/materials`, { headers: getAuthHeader() });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '获取参考资料失败'));
+export async function getProductionMaterialDraft(productionId: number): Promise<ProductionMaterialDraft> {
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/material-draft`, { headers: getAuthHeader() });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '获取创作资料草稿失败'));
   return (await response.json()).data;
 }
 
-export async function addProductionResources(productionId: number, resourceIds: number[]): Promise<{ data: ProductionResource[]; skipped_resource_ids: number[] }> {
-  const response = await fetch(`${BASE_URL}/productions/${productionId}/resources`, {
-    method: 'POST', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify({ resource_ids: resourceIds }),
-  });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '添加参考资料失败'));
-  return response.json();
-}
-
-export async function createManualProductionMaterial(productionId: number, input: { title?: string; content_html: string }): Promise<ProductionResource> {
-  const response = await fetch(`${BASE_URL}/productions/${productionId}/materials/manual`, {
-    method: 'POST', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify(input),
-  });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '新建创作资料失败'));
-  return (await response.json()).data;
-}
-
-export async function updateProductionMaterial(productionId: number, materialId: number, input: { title: string; content_html: string; revision: number }): Promise<ProductionResource> {
-  const response = await fetch(`${BASE_URL}/productions/${productionId}/materials/${materialId}`, {
+export async function updateProductionMaterialDraft(productionId: number, input: { content_html: string; revision: number }): Promise<ProductionMaterialDraft> {
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/material-draft`, {
     method: 'PUT', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '保存创作资料失败'));
+  if (!response.ok) throw new Error(await getErrorMessage(response, '保存创作资料草稿失败'));
   return (await response.json()).data;
 }
 
-export async function removeProductionMaterial(productionId: number, materialId: number): Promise<void> {
-  const response = await fetch(`${BASE_URL}/productions/${productionId}/materials/${materialId}`, { method: 'DELETE', headers: getAuthHeader() });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '移除创作资料失败'));
+export async function getProductionResourceInsertions(productionId: number, resourceIds: number[]): Promise<{
+  data: Array<{ resource_id: number; content_html: string }>;
+  empty_resource_ids: number[];
+  message?: string;
+}> {
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/material-draft/resources`, {
+    method: 'POST', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify({ resource_ids: resourceIds }),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '读取资料正文失败'));
+  return response.json();
 }
 
 // Comments

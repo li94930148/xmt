@@ -1,5 +1,6 @@
 import { runInTransaction } from '../../../database/utils.js';
 import type { AuthWebLoginRepository, CreateAuthWebLoginInput } from './auth-web-login.repository.js';
+import { activityLogTimestamp } from '../../../services/activity-log.js';
 
 export class SqliteAuthWebLoginRepository implements AuthWebLoginRepository {
   createLogin(input: CreateAuthWebLoginInput): Promise<void> {
@@ -46,8 +47,8 @@ export class SqliteAuthWebLoginRepository implements AuthWebLoginRepository {
         ],
       );
       await tx.execute(
-        'INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)',
-        [input.user.id, 'login', 'auth', `用户 ${input.user.name} 登录系统`],
+        'INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)',
+        [input.user.id, 'login', 'auth', `用户 ${input.user.name} 登录系统`, activityLogTimestamp()],
       );
     });
   }

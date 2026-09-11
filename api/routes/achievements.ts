@@ -98,7 +98,7 @@ router.get('/progress', authenticate, async (req, res) => {
         }
         case 'login_streak': {
           const r: any = await queryOne(
-            `SELECT COUNT(DISTINCT DATE(created_at)) as days FROM activity_log WHERE user_id = ? AND created_at >= datetime('now', '-' || ? || ' days')`,
+            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= date('now', '+8 hours', '-' || ? || ' days')`,
             [userId, conditionValue]
           );
           current = r?.days || 0;
@@ -347,7 +347,7 @@ router.post('/check', authenticate, async (req, res) => {
         }
         case 'login_streak': {
           const result: any = await queryOne(
-            `SELECT COUNT(DISTINCT DATE(created_at)) as days FROM activity_log WHERE user_id = ? AND created_at >= datetime('now', '-' || ? || ' days')`,
+            `SELECT COUNT(*) as days FROM user_login_days WHERE user_id = ? AND login_date >= date('now', '+8 hours', '-' || ? || ' days')`,
             [userId, conditionValue]
           );
           earned = (result?.days || 0) >= conditionValue;

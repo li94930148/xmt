@@ -6,6 +6,7 @@ import {
 import type { Announcement } from '../types';
 import { formatBeijingDate, getCurrentBeijingDateTimeString } from '../lib/utils';
 import { GlassPanel } from './studio';
+import { parseStoredBjt } from '@shared/time';
 
 // Mock API — replace with real endpoints
 async function getAnnouncements(): Promise<Announcement[]> {
@@ -123,7 +124,7 @@ export default function AnnouncementBoard() {
   // Sort: pinned first, then by date
   const sortedItems = [...items].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    return (parseStoredBjt(b.created_at)?.getTime() ?? 0) - (parseStoredBjt(a.created_at)?.getTime() ?? 0);
   });
 
   return (

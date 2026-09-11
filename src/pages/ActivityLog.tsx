@@ -4,6 +4,7 @@ import { useAppStore } from '../store';
 import { getActivityLogs, getUsers } from '../api';
 import type { ActivityLog as ActivityLogType, User } from '../types';
 import { Clock, User as UserIcon, Filter, ChevronLeft, ChevronRight, Loader2, FileText, Settings, Trash2, Edit, Plus, LogIn, Send } from 'lucide-react';
+import { formatBeijingTime } from '../lib/utils';
 
 const actionIcons: Record<string, typeof FileText> = {
   create: Plus,
@@ -89,7 +90,7 @@ export default function ActivityLog() {
     if (minutes < 60) return `${minutes}分钟前`;
     if (hours < 24) return `${hours}小时前`;
     if (days < 7) return `${days}天前`;
-    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' });
+    return formatBeijingTime(dateStr, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   const getActionIcon = (action: string) => {

@@ -74,7 +74,7 @@ router.get('/stats', authenticate, async (req, res) => {
     const weekResult = await queryOne(`
       SELECT COUNT(*) as count FROM pomodoro_sessions 
       WHERE user_id = ? AND completed = 1 
-      AND ended_at >= datetime('now', 'weekday 0', '-7 days')
+      AND ended_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
     `, [userId]);
 
     const totalResult = await queryOne(`
@@ -105,7 +105,7 @@ router.get('/ranking', authenticate, async (req, res) => {
       FROM users u
       LEFT JOIN pomodoro_sessions ps ON ps.user_id = u.id 
         AND ps.completed = 1 
-        AND ps.ended_at >= datetime('now', 'weekday 0', '-7 days')
+        AND ps.ended_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
       WHERE u.enabled = 1
       GROUP BY u.id
       HAVING count > 0

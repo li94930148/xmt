@@ -1,13 +1,12 @@
 import BaseModal from '../common/BaseModal';
 import type { MonthlyRecord, YearlyRecord } from '../../api/dailyReports';
+import { formatBeijingTime } from '../../lib/utils';
 
 type SummaryKind = 'monthly' | 'yearly';
 type SummaryRecord = MonthlyRecord | YearlyRecord;
 
 function displayDate(value?: string | null) {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
+  return value ? formatBeijingTime(value) : '—';
 }
 
 function valueOrEmpty(value?: string | null) {

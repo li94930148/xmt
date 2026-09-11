@@ -10,6 +10,7 @@ import { mobileDeviceRegistryMigration } from './008_mobile_device_registry';
 import { creatorOfficialExportV2203Migration } from './009_creator_official_export_v2203';
 import { productionMaterialsWorkspaceMigration } from './010_production_materials_workspace';
 import { productionMaterialDraftMigration } from './011_production_material_draft';
+import { activityLogTimeRetentionMigration } from './012_activity_log_time_retention';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -23,4 +24,5 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   creatorOfficialExportV2203Migration,
   productionMaterialsWorkspaceMigration,
   productionMaterialDraftMigration,
+  activityLogTimeRetentionMigration,
 ];

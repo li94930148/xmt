@@ -5,10 +5,11 @@ import EmptyState from '../components/EmptyState';
 import { ErrorState, LoadingState, PageHeader, PageToolbar } from '../components/common';
 import { checkCredentialHealth, generateSocialReport, getSocialAccount, getSocialContentInsights, getSocialDashboard, getSocialDailySummary, getSocialDataQuality, getSocialAccountVideos, getSocialLatestReport, getSocialMetricStatus, getSocialOperationSuggestions, syncSocialExport, type AccountDashboard, type ContentInsights, type CredentialHealth, type DailySummary, type DataQuality, type FeaturePattern, type MetricStatus, type OperationSuggestion, type SocialReviewReport, type SocialVideoReview } from '../api/socialReview';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { formatBeijingTime } from '../lib/utils';
 
 function count(value: number | null | undefined) { return value == null ? '暂无数据' : Number(value).toLocaleString('zh-CN'); }
 function percent(value: number | null | undefined) { return value == null ? '暂无数据' : `${(Number(value) * 100).toFixed(1)}%`; }
-function dateText(value: string | null) { if (!value) return '暂无记录'; const date = new Date(value.replace(' ', 'T')); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false }); }
+function dateText(value: string | null) { return value ? formatBeijingTime(value) : '暂无记录'; }
 function platformText(platform: string) { return ({ douyin: '抖音', kuaishou: '快手', xiaohongshu: '小红书', shipinhao: '视频号', tiktok: 'TikTok', bilibili: '哔哩哔哩', weibo: '微博', other: '其他' } as Record<string, string>)[platform] || platform; }
 
 export default function SocialReviewAccountDetail() {

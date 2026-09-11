@@ -6,23 +6,28 @@ type DbArg = string | number | boolean | null;
 /**
  * Transitional SQL compatibility boundary.
  *
- * Existing routes still contain the former SQLite expression while they are
- * migrated in small, reviewable batches. Before execution it is converted to
- * a bound Beijing timestamp, so SQLite never calculates the application time
- * and every write receives an explicit value.
+ * Existing routes still contain former SQLite clock expressions while they
+ * are migrated in small, reviewable batches. Before runtime DML execution they
+ * are converted to a bound Beijing timestamp, so SQLite never calculates the
+ * application time and every write receives an explicit value.
  */
 function bindLegacyBjtNow(sql: string, params: unknown[]): { sql: string; params: unknown[] } {
-  const expression = "datetime('now', '+8 hours')";
+  if (!/^\s*(?:INSERT|UPDATE|DELETE|SELECT|WITH)\b/i.test(sql)) return { sql, params };
+
+  const expression = /datetime\(\s*'now'\s*,\s*'\+8 hours'\s*\)|CURRENT_TIMESTAMP/gi;
   let cursor = 0;
   let rewritten = sql;
   const values = [...params];
+  const timestamp = beijingNow();
 
   while (true) {
-    const index = rewritten.indexOf(expression, cursor);
-    if (index < 0) break;
+    expression.lastIndex = cursor;
+    const match = expression.exec(rewritten);
+    if (!match) break;
+    const index = match.index;
     const placeholdersBefore = (rewritten.slice(0, index).match(/\?/g) ?? []).length;
-    values.splice(placeholdersBefore, 0, beijingNow());
-    rewritten = `${rewritten.slice(0, index)}?${rewritten.slice(index + expression.length)}`;
+    values.splice(placeholdersBefore, 0, timestamp);
+    rewritten = `${rewritten.slice(0, index)}?${rewritten.slice(index + match[0].length)}`;
     cursor = index + 1;
   }
   return { sql: rewritten, params: values };

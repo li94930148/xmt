@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Activity, ArrowLeft, Clock3, Eye, Heart, MessageCircle, MousePointer2, Play, RefreshCw, Sparkles, Users } from 'lucide-react';
 import { getCreatorCenterData, type CreatorCenterData, type CreatorTrend } from '@/api/creatorCenter';
+import { formatBeijingTime } from '@/lib/utils';
 
 type JsonRecord = Record<string, unknown>;
 const asRecord = (value: unknown): JsonRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
 const num = (value: unknown) => { const n = Number(value); return Number.isFinite(n) ? n : 0; };
 const formatNumber = (value: unknown) => new Intl.NumberFormat('zh-CN', { notation: num(value) >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(num(value));
-const formatDate = (value: unknown) => value ? new Date(String(value)).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+const formatDate = (value: unknown) => value ? formatBeijingTime(String(value), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
 
 export default function DouyinCreatorDataCenter() {
   const { contentId } = useParams();

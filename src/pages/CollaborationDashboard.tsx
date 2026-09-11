@@ -15,10 +15,11 @@ import { useContentOSContext } from '../content/orchestrator/useContentOSContext
 import type { UnifiedTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
 import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import ContentDocumentPicker from '../components/ContentDocumentPicker';
+import { formatBeijingTime } from '../lib/utils';
 
 function formatTime(timestamp?: number | null) {
   if (!timestamp) return '-';
-  return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
+  return formatBeijingTime(timestamp);
 }
 
 function eventColor(type: UnifiedTimelineEvent['type']) {

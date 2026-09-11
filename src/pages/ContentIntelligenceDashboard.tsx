@@ -5,6 +5,7 @@ import { displayDocId } from '../utils/docIdDisplay';
 import { useContentOSContext } from '../content/orchestrator/useContentOSContext';
 import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import ContentDocumentPicker from '../components/ContentDocumentPicker';
+import { formatBeijingTime } from '../lib/utils';
 
 function phaseLabel(phase: string) {
   const labels: Record<string, string> = {
@@ -111,7 +112,7 @@ export default function ContentIntelligenceDashboard() {
                   <div className="flex items-center justify-between gap-3">
                     <span className={`text-sm font-medium ${styles.textPrimary}`}>{phaseLabel(phase.phase)}</span>
                     <span className={`text-xs ${styles.textMuted}`}>
-                      {new Date(phase.start).toLocaleString('zh-CN', { hour12: false })}
+                      {formatBeijingTime(phase.start)}
                     </span>
                   </div>
                 </div>

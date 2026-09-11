@@ -1,4 +1,5 @@
 import { execute, queryAll, queryOne, runInTransaction } from '../../database/utils';
+import { activityLogTimestamp } from '../../services/activity-log';
 import type {
   CreateTopicRecord,
   InitialProductionRecord,
@@ -84,8 +85,8 @@ function transactionAdapter(tx: DatabaseTransaction): TopicTransaction {
       [input.topicId, input.action, input.comment, input.operatorId],
     ).then(() => undefined),
     addActivity: (input: TopicActivityWrite) => tx.execute(
-      'INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)',
-      [input.userId, input.action, input.target, input.detail],
+      'INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)',
+      [input.userId, input.action, input.target, input.detail, activityLogTimestamp()],
     ).then(() => undefined),
     productionExists: (topicId) => tx.queryOne('SELECT id FROM production WHERE topic_id = ?', [topicId]).then(Boolean),
     createInitialProduction: (input: InitialProductionRecord) => tx.execute(

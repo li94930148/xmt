@@ -7,6 +7,7 @@ import { SqliteSessionRepository } from '../modules/auth/session/session.sqlite-
 import { SessionService } from '../modules/auth/session/session.service.js';
 import { assertAssignableRole, getAssignableRoles } from '../services/role-assignment.service.js';
 import { disconnectUserSockets } from '../utils/socket.js';
+import { activityLogCutoffTimestamp, activityLogTimestamp, serializeActivityLog } from '../services/activity-log.js';
 
 const router = express.Router();
 
@@ -65,16 +66,18 @@ router.get('/', authenticate, requirePermission('user:view'), async (req, res) =
 router.get('/logs', authenticate, requirePermission('user:logs'), async (req, res) => {
   try {
     const pagination = parseUsersPagination(req.query.page, req.query.limit, 20);
+    const cutoff = activityLogCutoffTimestamp();
     
-    const logs = await queryAll(`SELECT al.*, u.name as user_name FROM activity_log al 
+    const logs = await queryAll<{ created_at: unknown }>(`SELECT al.*, u.name as user_name FROM activity_log al
                         LEFT JOIN users u ON al.user_id = u.id 
+                        WHERE al.created_at >= ?
                         ORDER BY al.created_at DESC LIMIT ? OFFSET ?`,
-      [pagination.limit, pagination.offset]);
+      [cutoff, pagination.limit, pagination.offset]);
     
-    const countResult = await queryOne(`SELECT COUNT(*) as total FROM activity_log`);
+    const countResult = await queryOne(`SELECT COUNT(*) as total FROM activity_log WHERE created_at >= ?`, [cutoff]);
     
     res.json({
-      data: logs,
+      data: logs.map(serializeActivityLog),
       total: countResult?.total || 0,
       page: pagination.page,
       limit: pagination.limit
@@ -88,16 +91,17 @@ router.get('/activity-logs', authenticate, requirePermission('user:logs'), async
   try {
     const { user_id } = req.query;
     const pagination = parseUsersPagination(req.query.page, req.query.limit, 20);
+    const cutoff = activityLogCutoffTimestamp();
 
-    let whereClause = '';
-    const params: unknown[] = [];
+    let whereClause = 'WHERE al.created_at >= ?';
+    const params: unknown[] = [cutoff];
 
     if (user_id) {
-      whereClause = 'WHERE al.user_id = ?';
+      whereClause += ' AND al.user_id = ?';
       params.push(parseInt(user_id as string));
     }
 
-    const logs = await queryAll(
+    const logs = await queryAll<{ created_at: unknown }>(
       `SELECT al.*, u.name as user_name FROM activity_log al 
        LEFT JOIN users u ON al.user_id = u.id 
        ${whereClause}
@@ -111,7 +115,7 @@ router.get('/activity-logs', authenticate, requirePermission('user:logs'), async
     );
 
     res.json({
-      data: logs,
+      data: logs.map(serializeActivityLog),
       total: countResult?.total || 0,
       page: pagination.page,
       limit: pagination.limit
@@ -172,8 +176,8 @@ router.post('/', authenticate, requirePermission('user:create'), async (req, res
       return createdUserId;
     });
     
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
-      req.user?.id, 'create', 'user', `创建用户: ${username}`
+    await execute(`INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`, [
+      req.user?.id, 'create', 'user', `创建用户: ${username}`, activityLogTimestamp()
     ]);
     
     res.json({ message: '用户创建成功', userId });
@@ -245,8 +249,8 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
     }
     if (identityChanged) disconnectUserSockets(Number(id));
     
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
-      req.user?.id, 'update', 'user', `更新用户: ${user.username}`
+    await execute(`INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`, [
+      req.user?.id, 'update', 'user', `更新用户: ${user.username}`, activityLogTimestamp()
     ]);
     
     res.json({ message: '用户更新成功' });
@@ -273,8 +277,8 @@ router.delete('/:id', authenticate, requirePermission('user:delete'), async (req
     await execute(`DELETE FROM users WHERE id = ?`, [id]);
     clearPermissionCache(Number(id));
     
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)`, [
-      req.user?.id, 'delete', 'user', `删除用户: ${user.username}`
+    await execute(`INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`, [
+      req.user?.id, 'delete', 'user', `删除用户: ${user.username}`, activityLogTimestamp()
     ]);
     
     res.json({ message: '用户删除成功' });

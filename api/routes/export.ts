@@ -110,7 +110,7 @@ router.get('/analytics', authenticate, requirePermission('export:data'), async (
         DATE(created_at) as date,
         COUNT(*) as topics_created
       FROM topics
-      WHERE created_at >= datetime('now', '-30 days')
+      WHERE created_at >= datetime('now', '+8 hours', '-30 days')
       GROUP BY DATE(created_at)
       ORDER BY date ASC
     `);
@@ -142,7 +142,7 @@ router.get('/weekly-report', authenticate, requirePermission('export:data'), asy
       FROM topics t
       LEFT JOIN users u ON t.creator_id = u.id
       WHERE t.status = 'completed'
-        AND t.updated_at >= datetime('now', 'weekday 0', '-7 days')
+        AND t.updated_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
       ORDER BY t.updated_at DESC
     `);
 
@@ -151,7 +151,7 @@ router.get('/weekly-report', authenticate, requirePermission('export:data'), asy
       FROM publishing p
       LEFT JOIN topics t ON p.topic_id = t.id
       WHERE p.status = 'published'
-        AND p.publish_time >= datetime('now', 'weekday 0', '-7 days')
+        AND p.publish_time >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
       ORDER BY p.publish_time DESC
     `);
 
@@ -159,7 +159,7 @@ router.get('/weekly-report', authenticate, requirePermission('export:data'), asy
       SELECT t.*, u.name as creator_name
       FROM topics t
       LEFT JOIN users u ON t.creator_id = u.id
-      WHERE t.created_at >= datetime('now', 'weekday 0', '-7 days')
+      WHERE t.created_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
       ORDER BY t.created_at DESC
     `);
 
@@ -170,7 +170,7 @@ router.get('/weekly-report', authenticate, requirePermission('export:data'), asy
         COALESCE(SUM(shares), 0) as total_shares,
         COALESCE(SUM(comments), 0) as total_comments
       FROM analytics
-      WHERE data_date >= date('now', 'weekday 0', '-7 days')
+      WHERE data_date >= date('now', '+8 hours', 'weekday 0', '-7 days')
     `);
 
     const pomodoroStats = await queryOne(`
@@ -179,14 +179,14 @@ router.get('/weekly-report', authenticate, requirePermission('export:data'), asy
         COALESCE(SUM(duration), 0) as total_minutes
       FROM pomodoro_sessions
       WHERE completed = 1
-        AND ended_at >= datetime('now', 'weekday 0', '-7 days')
+        AND ended_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
     `);
 
     const newInspirations = await queryAll(`
       SELECT i.*, u.name as creator_name
       FROM inspirations i
       LEFT JOIN users u ON i.creator_id = u.id
-      WHERE i.created_at >= datetime('now', 'weekday 0', '-7 days')
+      WHERE i.created_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
       ORDER BY i.votes DESC
       LIMIT 5
     `);

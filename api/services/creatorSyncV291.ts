@@ -36,7 +36,7 @@ async function openEnvelope(body: JsonRecord, authorization?: string) {
   if (supplied.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(supplied))) throw Object.assign(new Error('上传签名验证失败'), { statusCode: 401 });
   try { await execute('INSERT INTO creator_agent_nonces(agent_id,nonce,request_time) VALUES(?,?,?)', [agent.id, nonce, new Date(timestamp).toISOString()]); }
   catch { throw Object.assign(new Error('检测到重复的 Agent 请求'), { statusCode: 409 }); }
-  await execute("DELETE FROM creator_agent_nonces WHERE created_at < datetime('now','-1 day')");
+  await execute("DELETE FROM creator_agent_nonces WHERE created_at < datetime('now','+8 hours','-1 day')");
   try { const envelope = body.data as {iv:string;tag:string;ciphertext:string}; const decipher = crypto.createDecipheriv('aes-256-gcm', key(token), Buffer.from(envelope.iv,'base64')); decipher.setAuthTag(Buffer.from(envelope.tag,'base64')); return { agent, payload: JSON.parse(decipher.update(envelope.ciphertext,'base64','utf8') + decipher.final('utf8')) as JsonRecord }; }
   catch { throw Object.assign(new Error('上传数据解密失败'), { statusCode: 400 }); }
 }

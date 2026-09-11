@@ -6,6 +6,7 @@ import { useContentOSContext } from '../content/orchestrator/useContentOSContext
 import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import ContentDocumentPicker from '../components/ContentDocumentPicker';
 import { editorStateLabel } from '../editor/state/editorStateManager';
+import { formatBeijingTime } from '../lib/utils';
 
 function stateLabel(state?: string) {
   const labels: Record<string, string> = {
@@ -48,7 +49,7 @@ function timelineSourceLabel(source?: string) {
 }
 
 function formatTime(timestamp: number) {
-  return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
+  return formatBeijingTime(timestamp);
 }
 
 export default function ContentOSDashboard() {

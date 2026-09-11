@@ -1,6 +1,7 @@
 import { execute, queryOne } from '../../database/utils.js';
 import type { AuthRepository } from './auth.repository.js';
 import type { AuthUserRecord } from './auth.types.js';
+import { activityLogTimestamp } from '../../services/activity-log.js';
 
 export class SqliteAuthRepository implements AuthRepository {
   async findUserByUsername(username: unknown): Promise<AuthUserRecord | null> {
@@ -61,11 +62,12 @@ export class SqliteAuthRepository implements AuthRepository {
   }
 
   async writeActivityLog(userId: number, action: string, target: string, detail: string): Promise<void> {
-    await execute('INSERT INTO activity_log (user_id, action, target, detail) VALUES (?, ?, ?, ?)', [
+    await execute('INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)', [
       userId,
       action,
       target,
       detail,
+      activityLogTimestamp(),
     ]);
   }
 

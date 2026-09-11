@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.24', date: '2026-09-11', title: '北京时间与活动日志保留', impactScope: ['系统时间', '活动日志', '日期展示'], changes: [{ type: 'fix', description: '活动日志统一按北京时间写入和显示，历史 UTC 记录在升级时校正。' }, { type: 'improvement', description: '活动日志仅保留最近 7 天，其他页面日期展示统一使用北京时间。' }] },
   { version: '2.20.23', date: '2026-09-11', title: '统一创作资料草稿', impactScope: ['创作管理', '资料库', '富文本编辑'], changes: [{ type: 'improvement', description: '创作资料简化为一份连续草稿，可直接输入、复制粘贴和自动保存。' }, { type: 'improvement', description: '添加资料直接打开资料库选择器，并把所选正文按光标位置插入草稿。' }] },
   { version: '2.20.22', date: '2026-09-10', title: '创作资料工作区', impactScope: ['创作管理', '资料库', '富文本编辑'], changes: [{ type: 'feature', description: '创作详情直接展示资料正文，支持从资料库批量生成独立快照及手动粘贴资料。' }, { type: 'improvement', description: '资料支持安全编辑、自动保存、独立删除，以及按用户记忆的工作区高度。' }] },
   { version: '2.20.21', date: '2026-09-10', title: '共享用户模型安全精简', impactScope: ['登录', '用户状态', '认证运行时'], changes: [{ type: 'security', description: '登录响应进入客户端用户状态前会丢弃密码字段，前后端共享用户模型不再声明密码。' }, { type: 'improvement', description: '删除无生产调用的认证模式辅助函数，并保留仍在灰度期使用的兼容能力。' }] },

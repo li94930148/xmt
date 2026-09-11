@@ -33,6 +33,7 @@ import PageShell from '../components/studio/PageShell';
 import PlatformBadge from '../components/studio/PlatformBadge';
 import ResponsiveTableShell from '../components/studio/ResponsiveTableShell';
 import SearchBar from '../components/studio/SearchBar';
+import { formatBjtDatabase } from '@shared/time';
 import StatusPill, { type StatusTone } from '../components/studio/StatusPill';
 import StudioEmptyState from '../components/studio/EmptyState';
 import { formatBeijingDate } from '../lib/utils';
@@ -232,7 +233,7 @@ export default function Publishing() {
       platform: publishing.platform || '',
       url: publishing.url || '',
       status: publishing.status,
-      publish_time: publishing.publish_time ? new Date(publishing.publish_time).toISOString().slice(0, 16) : '',
+      publish_time: publishing.publish_time ? formatBjtDatabase(publishing.publish_time).replace(' ', 'T').slice(0, 16) : '',
       views: publishing.views?.toString() || '',
       likes: publishing.likes?.toString() || '',
       shares: publishing.shares?.toString() || '',

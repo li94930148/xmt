@@ -5,9 +5,10 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useContentOSContext } from '../content/orchestrator/useContentOSContext';
 import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import ContentDocumentPicker from '../components/ContentDocumentPicker';
+import { formatBeijingTime } from '../lib/utils';
 
 function formatTime(timestamp: number) {
-  return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
+  return formatBeijingTime(timestamp);
 }
 
 function typeLabel(type: UnifiedTimelineEvent['type']) {

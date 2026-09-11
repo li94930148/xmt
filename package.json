@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.20.23",
+  "version": "2.20.24",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -12,6 +12,7 @@
     "check": "tsc --noEmit",
     "test:entrypoints": "node scripts/check-test-entrypoints.mjs",
     "test:time": "tsx scripts/time-contract-test.ts",
+    "test:activity-log": "tsx tests/activity/activity-log-time-retention.test.ts",
     "test:rate-limit": "tsx scripts/rate-limit-contract-test.ts",
     "test:topics": "tsx tests/topics/topics.test.ts",
     "test:socket": "tsx tests/socket-lifecycle-observability.test.ts",

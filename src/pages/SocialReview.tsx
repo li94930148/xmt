@@ -7,11 +7,11 @@ import { ErrorState, LoadingState, PageHeader, PageToolbar } from '../components
 import { deleteSocialAccount, getSocialAccountStatuses, getSocialAccountsOverview, getSocialDailySummary, getSocialHotVideos, getSocialIngestionJobs, getSocialLatestReport, getSocialLatestSnapshot, getSocialDataQuality, getSocialDashboard, getSocialMetricStatus, startLoginRecovery, type IngestionJob, type MetricStatus, type SocialAccountOverview, type SocialAccountStatus, type VideoPerformanceItem } from '../api/socialReview';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useAuthStore } from '../store';
+import { formatBeijingTime } from '../lib/utils';
 
 function formatDate(value: string | null) {
   if (!value) return '暂无记录';
-  const date = new Date(value.replace(' ', 'T'));
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
+  return formatBeijingTime(value);
 }
 
 function formatCount(value: number | null | undefined) {

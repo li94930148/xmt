@@ -5,10 +5,11 @@ import EmptyState from '../components/EmptyState';
 import { ErrorState, LoadingState, PageHeader, PageToolbar } from '../components/common';
 import { getSimilarSocialVideos, getSocialAccount, getSocialVideo, getSocialVideoFeatures, getSocialVideoInsights, getSocialVideoLifecycle, type SocialVideoReview, type VideoMetricPoint } from '../api/socialReview';
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import { formatBeijingTime } from '../lib/utils';
 
 function count(value: number | null | undefined) { return value == null ? '暂无数据' : Number(value).toLocaleString('zh-CN'); }
 function percent(value: number | null | undefined) { return value == null ? '暂无数据' : `${(Number(value) * 100).toFixed(1)}%`; }
-function dateText(value: string | null) { if (!value) return '暂无记录'; const date = new Date(value.replace(' ', 'T')); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false }); }
+function dateText(value: string | null) { return value ? formatBeijingTime(value) : '暂无记录'; }
 
 export default function SocialReviewVideoDetail() {
   const styles = useThemeStyles();

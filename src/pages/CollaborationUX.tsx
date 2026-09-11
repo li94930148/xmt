@@ -7,10 +7,11 @@ import type { UnifiedTimelineEvent } from '../editor/timeline/unifiedContentTime
 import { editorStateLabel } from '../editor/state/editorStateManager';
 import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import ContentDocumentPicker from '../components/ContentDocumentPicker';
+import { formatBeijingTime } from '../lib/utils';
 
 function formatTime(timestamp?: number | null) {
   if (!timestamp) return '-';
-  return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
+  return formatBeijingTime(timestamp);
 }
 
 function eventText(event: UnifiedTimelineEvent) {

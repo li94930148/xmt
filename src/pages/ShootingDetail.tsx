@@ -15,6 +15,7 @@ import { setCurrentContentDocument } from '../content/orchestrator/currentConten
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
+import { parseStoredBjt } from '@shared/time';
 
 interface ShootingDetailData extends ShootingType {
   production: {
@@ -185,7 +186,7 @@ export default function ShootingDetail() {
     return getTimelineView(getCollaborationRoomId('shooting', shooting.id), {
       versionEvents: shooting.production ? [{
         id: `production-version-${shooting.production.id}`,
-        timestamp: new Date(shooting.updated_at || shooting.created_at).getTime(),
+        timestamp: parseStoredBjt(shooting.updated_at || shooting.created_at)?.getTime() ?? Date.now(),
         version: shooting.production.version,
         status: shooting.production.status,
         operatorName: shooting.production.operator_name,
@@ -200,7 +201,7 @@ export default function ShootingDetail() {
     recordTimelineEvent({
       id: `shooting:${shooting.id}:production-version:${shooting.production.id}`,
       docId: getCollaborationRoomId('shooting', shooting.id),
-      timestamp: new Date(shooting.updated_at || shooting.created_at).getTime(),
+      timestamp: parseStoredBjt(shooting.updated_at || shooting.created_at)?.getTime() ?? Date.now(),
       type: 'version',
       source: 'version',
       userId: shooting.production.operator_name,

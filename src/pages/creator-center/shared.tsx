@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Activity, Heart, MousePointer2, Play, RefreshCw, Sparkles, Users, type LucideIcon } from 'lucide-react';
 import { getCreatorCenterData, type CreatorCenterData } from '@/api/creatorCenter';
 import XMTCard from '@/design-system/components/XMTCard';
+import { formatBeijingTime } from '@/lib/utils';
 
 export type JsonRecord=Record<string,unknown>;
 export const asRecord=(value:unknown):JsonRecord=>value&&typeof value==='object'&&!Array.isArray(value)?value as JsonRecord:{};
 export const num=(value:unknown)=>{const result=Number(value);return Number.isFinite(result)?result:0;};
 export const formatNumber=(value:unknown)=>new Intl.NumberFormat('zh-CN',{notation:num(value)>=10000?'compact':'standard',maximumFractionDigits:1}).format(num(value));
 export const formatPercent=(value:unknown)=>`${num(value).toFixed(2)}%`;
-export const formatDate=(value:unknown,full=false)=>value?new Date(String(value)).toLocaleString('zh-CN',full?{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}:{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+export const formatDate=(value:unknown,full=false)=>value?formatBeijingTime(String(value),full?{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}:{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
 export const levelMeta={viral:{label:'爆款',className:'bg-rose-500/12 text-rose-500'},excellent:{label:'优秀',className:'bg-emerald-500/12 text-emerald-500'},normal:{label:'普通',className:'bg-blue-500/12 text-blue-500'},low:{label:'低效',className:'bg-slate-500/12 text-studio-text-muted'}} as const;
 
 export function useCreatorData(){const[data,setData]=useState<CreatorCenterData|null>(null);const[loading,setLoading]=useState(true);const[error,setError]=useState('');const load=useCallback(async()=>{setLoading(true);setError('');try{setData(await getCreatorCenterData());}catch(cause){setError(cause instanceof Error?cause.message:'数据加载失败');}finally{setLoading(false);}},[]);useEffect(()=>{void load();},[load]);return{data,loading,error,load};}

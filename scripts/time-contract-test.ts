@@ -42,6 +42,10 @@ await execute("INSERT INTO timestamps (label, created_at) VALUES (?, datetime('n
 const row = await queryOne<{ created_at: string }>('SELECT created_at FROM timestamps WHERE label = ?', ['test']);
 assert.match(row?.created_at ?? '', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
 assert.match(formatBjtApi(row?.created_at ?? ''), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/);
+await execute('INSERT INTO timestamps (label, created_at) VALUES (?, CURRENT_TIMESTAMP)', ['legacy-current']);
+const legacyCurrent = await queryOne<{ created_at: string }>('SELECT created_at FROM timestamps WHERE label = ?', ['legacy-current']);
+assert.match(legacyCurrent?.created_at ?? '', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+assert.ok(Math.abs((parseStoredBjt(legacyCurrent?.created_at)?.getTime() ?? 0) - Date.now()) < 5000);
 await db.close();
 await new Promise((resolve) => setTimeout(resolve, 50));
 fs.rmSync(path.dirname(tempDb), { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });

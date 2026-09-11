@@ -44,6 +44,7 @@ import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/React
 import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
 import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCardSlot';
 import { ReactBitsRevealSlot } from '../features/reactbits-appearance/ReactBitsRevealSlot';
+import { parseStoredBjt } from '@shared/time';
 
 type SortField = 'title' | 'created_at' | 'deadline' | 'status' | 'submitted_at';
 type SortDir = 'asc' | 'desc';
@@ -159,7 +160,7 @@ export default function Topics() {
           cmp = (a.title || '').localeCompare(b.title || '');
           break;
         case 'created_at':
-          cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          cmp = (parseStoredBjt(a.created_at)?.getTime() ?? 0) - (parseStoredBjt(b.created_at)?.getTime() ?? 0);
           break;
         case 'deadline':
           cmp = new Date(a.deadline || '9999').getTime() - new Date(b.deadline || '9999').getTime();

@@ -7,33 +7,33 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 function formatTimeFromSource(
-  dateStr: string | undefined | null,
+  dateStr: Date | number | string | undefined | null,
   sourceTimezone: 'utc' | 'beijing',
   options?: Intl.DateTimeFormatOptions
 ): string {
   if (!dateStr) return '-';
 
-  const normalized = sourceTimezone === 'utc' && !dateStr.endsWith('Z') && !dateStr.includes('+')
+  const normalized = sourceTimezone === 'utc' && typeof dateStr === 'string' && !dateStr.endsWith('Z') && !dateStr.includes('+')
     ? `${dateStr.replace(' ', 'T')}Z`
     : dateStr;
   return formatBjtDisplay(normalized, options);
 }
 
 export function formatBeijingTime(
-  dateStr: string | undefined | null,
+  dateStr: Date | number | string | undefined | null,
   options?: Intl.DateTimeFormatOptions
 ): string {
   return formatTimeFromSource(dateStr, 'beijing', options);
 }
 
 export function formatUtcToBeijingTime(
-  dateStr: string | undefined | null,
+  dateStr: Date | number | string | undefined | null,
   options?: Intl.DateTimeFormatOptions
 ): string {
   return formatTimeFromSource(dateStr, 'utc', options);
 }
 
-export function formatBeijingDate(dateStr: string | undefined | null): string {
+export function formatBeijingDate(dateStr: Date | number | string | undefined | null): string {
   return formatBeijingTime(dateStr, {
     year: 'numeric',
     month: '2-digit',

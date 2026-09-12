@@ -10,6 +10,10 @@ export function clampMaterialWorkspaceHeight(value: number, viewportHeight: numb
   return Math.min(maximum, Math.max(MIN_MATERIAL_WORKSPACE_HEIGHT, Math.round(value)));
 }
 
+export function canPersistMaterialDraft(canManage: boolean) {
+  return canManage;
+}
+
 // One empty paragraph represents two text newlines without an oversized visual gap.
 const INSERTION_GAP_HTML = '<p><br></p>';
 

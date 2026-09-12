@@ -10,17 +10,15 @@ import {
   Compass,
   Download,
   FileClock,
-  FileText,
   Flame,
   Lightbulb,
-  PenLine,
-  Send,
   Timer,
   TrendingUp,
   Users,
 } from 'lucide-react';
-import { getInspirations, getMonthlyStats, getTeamStats, getTopics, voteInspiration } from '../api';
-import type { Inspiration, MonthlyStats, TeamStats, Topic, TopicStatus } from '../types';
+import { getInspirations, getMonthlyStats, getProduction, getPublishing, getTeamStats, getTopics, voteInspiration } from '../api';
+import { getDouyinDashboard } from '../api/creatorCenter';
+import type { Inspiration, MonthlyStats, Production, Publishing, TeamStats, Topic, TopicStatus } from '../types';
 import { useAuthStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
 import AnnouncementBoard from '../components/AnnouncementBoard';
@@ -37,6 +35,7 @@ import {
 import { formatBeijingDate } from '../lib/utils';
 import { ProgressBar, XMTCard } from '../design-system';
 import DashboardBento from '../components/xmt-ui/DashboardBento';
+import { buildHomeDashboardMetrics } from '../components/xmt-ui/homeDashboardMetrics';
 
 const statusText: Record<TopicStatus, string> = {
   pending: '待审核',
@@ -58,11 +57,38 @@ const statusTone: Record<TopicStatus, 'primary' | 'cyan' | 'violet' | 'coral' | 
   completed: 'success',
 };
 
+const DASHBOARD_PAGE_SIZE = 100;
+
+async function getDashboardTopics() {
+  const first = await getTopics({ limit: DASHBOARD_PAGE_SIZE });
+  const pageCount = Math.ceil(first.total / first.limit);
+  if (pageCount <= 1) return first.data;
+  const remaining = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) => getTopics({ page: index + 2, limit: first.limit })),
+  );
+  return [...first.data, ...remaining.flatMap((page) => page.data)];
+}
+
+async function getDashboardPublishing() {
+  const first = await getPublishing({ limit: DASHBOARD_PAGE_SIZE });
+  const pageCount = Math.ceil(first.total / first.limit);
+  if (pageCount <= 1) return first.data;
+  const remaining = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) => getPublishing({ page: index + 2, limit: first.limit })),
+  );
+  return [...first.data, ...remaining.flatMap((page) => page.data)];
+}
+
 export default function Home() {
   const [teamStats, setTeamStats] = useState<TeamStats | null>(null);
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStats | null>(null);
   const [pendingTopics, setPendingTopics] = useState<Topic[]>([]);
+  const [pendingTopicTotal, setPendingTopicTotal] = useState(0);
+  const [dashboardTopics, setDashboardTopics] = useState<Topic[]>([]);
   const [recentTopics, setRecentTopics] = useState<Topic[]>([]);
+  const [productions, setProductions] = useState<Production[]>([]);
+  const [publishing, setPublishing] = useState<Publishing[]>([]);
+  const [douyinViews, setDouyinViews] = useState<number | null>(null);
   const [todayTopicCount, setTodayTopicCount] = useState(0);
   const [hotInspirations, setHotInspirations] = useState<Inspiration[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +96,7 @@ export default function Home() {
   const user = useAuthStore((state) => state.user);
   const { permissions, loading: permissionsLoading } = usePermission();
   const canViewAnalytics = user?.role === 'admin' || permissions.includes('*') || permissions.includes('analytics:view');
+  const canViewCreatorData = user?.role === 'admin' || permissions.includes('*') || permissions.includes('creator:data:view');
 
   useEffect(() => {
     if (user && permissionsLoading) {
@@ -78,22 +105,32 @@ export default function Home() {
 
     const fetchData = async () => {
       try {
-        const [team, monthly, pending, recent, inspirations] = await Promise.allSettled([
+        const [team, monthly, pending, recent, productionList, publishingList, douyin, inspirations] = await Promise.allSettled([
           canViewAnalytics ? getTeamStats() : Promise.resolve(null),
           canViewAnalytics ? getMonthlyStats() : Promise.resolve(null),
-          getTopics({ status: 'pending' }),
-          getTopics(),
+          getTopics({ status: 'pending', limit: 100 }),
+          getDashboardTopics(),
+          getProduction(),
+          getDashboardPublishing(),
+          canViewCreatorData ? getDouyinDashboard() : Promise.resolve(null),
           getInspirations({ limit: 6 }),
         ]);
 
         if (team.status === 'fulfilled' && team.value) setTeamStats(team.value);
         if (monthly.status === 'fulfilled' && monthly.value) setMonthlyStats(monthly.value);
-        if (pending.status === 'fulfilled') setPendingTopics(pending.value.data.slice(0, 5));
+        if (pending.status === 'fulfilled') {
+          setPendingTopicTotal(pending.value.total);
+          setPendingTopics(pending.value.data.slice(0, 5));
+        }
         if (recent.status === 'fulfilled') {
           const today = formatBeijingDate(new Date().toISOString());
-          setTodayTopicCount(recent.value.data.filter((topic) => formatBeijingDate(topic.created_at) === today).length);
-          setRecentTopics(recent.value.data.slice(0, 6));
+          setTodayTopicCount(recent.value.filter((topic) => formatBeijingDate(topic.created_at) === today).length);
+          setDashboardTopics(recent.value);
+          setRecentTopics(recent.value.slice(0, 6));
         }
+        if (productionList.status === 'fulfilled') setProductions(productionList.value);
+        if (publishingList.status === 'fulfilled') setPublishing(publishingList.value);
+        if (douyin.status === 'fulfilled' && douyin.value) setDouyinViews(douyin.value.metrics.play_count);
         if (inspirations.status === 'fulfilled') {
           setHotInspirations([...inspirations.value.data].sort((a, b) => (b.votes || 0) - (a.votes || 0)).slice(0, 6));
         }
@@ -105,19 +142,12 @@ export default function Home() {
     };
 
     void fetchData();
-  }, [canViewAnalytics, permissionsLoading, user]);
+  }, [canViewAnalytics, canViewCreatorData, permissionsLoading, user]);
 
-  const rhythm = useMemo(() => {
-    const inProduction = recentTopics.filter((topic) => topic.status === 'production').length;
-    const toPublish = recentTopics.filter((topic) => topic.status === 'publishing').length;
-
-    return [
-      { label: '待审核选题', value: pendingTopics.length, icon: Clock3, tone: 'amber' as const, path: '/topics?status=pending' },
-      { label: '进行中稿件', value: inProduction, icon: PenLine, tone: 'cyan' as const, path: '/production' },
-      { label: '今日待发布', value: toPublish, icon: Send, tone: 'primary' as const, path: '/publishing' },
-      { label: '待提交日报', value: 1, icon: FileClock, tone: 'coral' as const, path: '/daily-report' },
-    ];
-  }, [pendingTopics.length, recentTopics]);
+  const dashboardMetrics = useMemo(
+    () => buildHomeDashboardMetrics(dashboardTopics, productions, publishing),
+    [dashboardTopics, productions, publishing],
+  );
 
   const toolActions = [
     { id: 'daily', label: '今日日报', desc: '填写今日进展', icon: FileClock, path: '/daily-report', tone: 'coral' },
@@ -156,24 +186,24 @@ export default function Home() {
   return (
     <PageShell>
       <DashboardBento
-        pendingTopics={pendingTopics.length}
-        inProduction={rhythm.find((item) => item.label === '进行中稿件')?.value || 0}
-        toPublish={rhythm.find((item) => item.label === '今日待发布')?.value || 0}
+        pendingTopics={pendingTopicTotal}
+        inProduction={dashboardMetrics.inProduction}
+        toPublish={dashboardMetrics.toPublish}
         todayTopics={todayTopicCount}
-        completionRate={Number(teamStats?.completion_rate || 0)}
-        totalViews={monthlyStats?.total_views || 0}
+        completionRate={dashboardMetrics.productionIndex}
+        totalViews={douyinViews ?? monthlyStats?.total_views ?? 0}
         hotInspirations={hotInspirations.length}
         onNavigate={handleDashboardNavigate}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="本月完成" value={teamStats?.completed_count || 0} unit="选题" icon={CheckCircle2} tone="success" trend={{ label: '内容交付', up: true }} />
+        <MetricCard title="已完成内容" value={dashboardMetrics.completedContent} unit="项" icon={CheckCircle2} tone="success" trend={{ label: '创作与发布', up: true }} />
         <MetricCard title="逾期任务" value={teamStats?.overdue_count || 0} unit="项" icon={Clock3} tone="coral" trend={{ label: '需关注', up: false }} />
         <XMTCard className="p-5">
-          <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold text-studio-text-muted">完成率</p><p className="mt-3 text-3xl font-bold text-studio-text-primary xmt-data-number">{teamStats?.completion_rate || 0}%</p></div><div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-gradient-to-br from-studio-cyan to-studio-primary shadow-lg shadow-studio-cyan/20"><TrendingUp className="h-5 w-5 text-white" /></div></div>
-          <div className="mt-4"><ProgressBar value={Number(teamStats?.completion_rate || 0)} tone="success" label="本月团队节奏" /></div>
+          <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold text-studio-text-muted">生产指数</p><p className="mt-3 text-3xl font-bold text-studio-text-primary xmt-data-number">{dashboardMetrics.productionIndex}%</p></div><div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-gradient-to-br from-studio-cyan to-studio-primary shadow-lg shadow-studio-cyan/20"><TrendingUp className="h-5 w-5 text-white" /></div></div>
+          <div className="mt-4"><ProgressBar value={dashboardMetrics.productionIndex} tone="success" label="当前内容链路进度" /></div>
         </XMTCard>
-        <MetricCard title="播放量" value={(monthlyStats?.total_views || 0).toLocaleString()} unit="累计" icon={BarChart3} tone="violet" trend={{ label: '数据复盘', up: true }} />
+        <MetricCard title="播放量" value={(douyinViews ?? monthlyStats?.total_views ?? 0).toLocaleString()} unit="累计" icon={BarChart3} tone="violet" trend={{ label: douyinViews == null ? '数据复盘' : '抖音运营中心', up: true }} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]">

@@ -12,6 +12,7 @@ import { EmptyState, GlassPanel, SearchBar } from '@/components/studio';
 import { useAppStore, useAuthStore } from '@/store';
 import {
   buildMaterialInsertionHtml,
+  canPersistMaterialDraft,
   clampMaterialWorkspaceHeight,
   DEFAULT_MATERIAL_WORKSPACE_HEIGHT,
   materialWorkspaceStorageKey,
@@ -82,6 +83,11 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
   }, [productionId]);
 
   const saveLatest = useCallback(async () => {
+    if (!canPersistMaterialDraft(canManage)) {
+      hasUnsavedRef.current = false;
+      saveQueuedRef.current = false;
+      return;
+    }
     if (savingRef.current) {
       saveQueuedRef.current = true;
       return;
@@ -115,9 +121,10 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
     } finally {
       savingRef.current = false;
     }
-  }, [addNotification, productionId]);
+  }, [addNotification, canManage, productionId]);
 
   const scheduleSave = useCallback((nextContent: string) => {
+    if (!canPersistMaterialDraft(canManage)) return;
     contentRef.current = nextContent;
     generationRef.current += 1;
     hasUnsavedRef.current = true;
@@ -125,10 +132,18 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
     setSaveState('dirty');
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void saveLatest(), 800);
-  }, [saveLatest]);
+  }, [canManage, saveLatest]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { saveLatestRef.current = saveLatest; }, [saveLatest]);
+  useEffect(() => {
+    if (canManage) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    hasUnsavedRef.current = false;
+    saveQueuedRef.current = false;
+    setSaveState((current) => current === 'failed' || current === 'dirty' || current === 'saving' ? 'saved' : current);
+  }, [canManage]);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -225,7 +240,7 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold text-studio-text-primary">创作资料</h2>
           <span className={`text-xs ${saveState === 'failed' ? 'text-studio-coral-contrast' : 'text-studio-text-muted'}`}>{saveLabel}</span>
-          {saveState === 'failed' ? <button type="button" onClick={() => void saveLatest()} className="text-xs text-studio-cyan">重试</button> : null}
+          {canManage && saveState === 'failed' ? <button type="button" onClick={() => void saveLatest()} className="text-xs text-studio-cyan">重试</button> : null}
         </div>
         {canManage ? <button type="button" onClick={() => setPickerOpen(true)} className="inline-flex items-center gap-2 rounded-button bg-studio-primary px-3 py-2 text-sm text-white"><Link2 className="h-4 w-4" />添加资料</button> : null}
       </div>

@@ -10,8 +10,10 @@ export {
   getProduction, createProduction, getProductionById, updateProduction, deleteProduction, getProductionHistory,
   getComments, addComment, deleteComment,
   getShooting, getShootingById, updateShooting, createShooting,
-  getPublishing, getPublishingById, createPublishing, updatePublishing, deletePublishing
+  getPublishing, getPublishingById, createPublishing, updatePublishing, deletePublishing,
+  reconcilePublishingDouyin, getPublishingDouyinCandidates, updatePublishingDouyinLink
 } from './workflow';
+export type { PublishingDouyinCandidate } from './workflow';
 
 // 新增 API 模块
 export {

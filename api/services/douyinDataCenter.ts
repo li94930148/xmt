@@ -4,6 +4,7 @@ import { douyinDataNormalizer, type NormalizedDouyinContract, type NormalizedDou
 import { analyzeDouyinWorks, calculateDouyinAccountHealth, DOUYIN_OPERATIONS_FORMULAS, type DouyinMetricsWork } from './douyinOperationsAnalytics.js';
 import { resolveCoverUrl } from '../utils/coverResolver.js';
 import { canonicalizeDouyinWorks } from './canonicalWorks.js';
+import { reconcilePublishingDouyinLinks } from './publishingDouyinLink.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentIdentity = { id: number; user_id: number; platform: string; account_id: string };
@@ -120,7 +121,7 @@ export async function persistNormalizedDouyinSync(agent: AgentIdentity, payload:
   const normalized = douyinDataNormalizer.normalize(payload, agent.account_id);
   const plays = normalized.works.map(work => work.play_count).sort((a, b) => a - b);
   const medianPlay = plays.length ? plays[Math.floor(plays.length / 2)] : 0;
-  return runInTransaction(async tx => {
+  const result = await runInTransaction(async tx => {
     await tx.execute(`INSERT INTO creator_platform_accounts(user_id,platform,platform_uid,nickname,avatar,account_name,status,updated_at)
       VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
       ON CONFLICT(user_id,platform,platform_uid) DO UPDATE SET nickname=CASE WHEN trim(excluded.nickname)<>'' THEN excluded.nickname ELSE creator_platform_accounts.nickname END,avatar=CASE WHEN trim(excluded.avatar)<>'' THEN excluded.avatar ELSE creator_platform_accounts.avatar END,account_name=CASE WHEN trim(excluded.account_name)<>'' THEN excluded.account_name ELSE creator_platform_accounts.account_name END,status='active',updated_at=CURRENT_TIMESTAMP`,
@@ -160,6 +161,15 @@ export async function persistNormalizedDouyinSync(agent: AgentIdentity, payload:
       VALUES(?,?,?,?,?,?,?,?,?,?)`, [account.id, 'agent_incremental', normalized.works.length ? 'success' : 'failed', `标准化作品 ${normalized.works.length} 条`, snapshotTime, normalized.api_count, normalized.works.length, normalized.rejected_count, normalized.works.length ? null : '未从真实接口响应中识别到合法 aweme_list 作品', taskId]);
     return { account_id: account.id, creator_account_id: creatorAccount.id, works: normalized.works.length, api_count: normalized.api_count, rejected_count: normalized.rejected_count };
   });
+  try {
+    await reconcilePublishingDouyinLinks({ accountId: result.account_id });
+  } catch (error) {
+    console.error('[publishing-douyin-link] reconcile failed after normalized sync', {
+      accountId: result.account_id,
+      message: error instanceof Error ? error.message : 'unknown error',
+    });
+  }
+  return result;
 }
 
 export async function getDouyinPollutionCandidates() {
@@ -177,7 +187,7 @@ export async function persistDouyinContractV2102(agent: AgentIdentity, payload: 
 async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: NormalizedDouyinContract, snapshotTime: string, taskId: string) {
   const plays = normalized.works.map(work => work.play_count).sort((a, b) => a - b);
   const medianPlay = plays.length ? plays[Math.floor(plays.length / 2)] : 0;
-  return runInTransaction(async tx => {
+  const result = await runInTransaction(async tx => {
     await tx.execute(`INSERT INTO creator_platform_accounts(user_id,platform,platform_uid,nickname,avatar,account_name,status,updated_at)
       VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
       ON CONFLICT(user_id,platform,platform_uid) DO UPDATE SET nickname=CASE WHEN trim(excluded.nickname)<>'' THEN excluded.nickname ELSE creator_platform_accounts.nickname END,avatar=CASE WHEN trim(excluded.avatar)<>'' THEN excluded.avatar ELSE creator_platform_accounts.avatar END,account_name=CASE WHEN trim(excluded.account_name)<>'' THEN excluded.account_name ELSE creator_platform_accounts.account_name END,status='active',updated_at=CURRENT_TIMESTAMP`,
@@ -236,6 +246,15 @@ async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: 
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [account.id, 'agent_incremental', status, `标准化作品 ${normalized.works.length} 条`, snapshotTime, normalized.summary.raw_response_count, normalized.summary.normalized_success_count, normalized.summary.rejected_count, status === 'failed' ? '未收到合法 DouyinWorkInput' : null, taskId, normalized.contract_version, normalized.collection_mode, normalized.snapshot_id, JSON.stringify(normalized.summary)]);
     return { account_id: account.id, creator_account_id: creatorAccount.id, works: normalized.works.length, duplicate: false, snapshot_id: normalized.snapshot_id, summary: normalized.summary };
   });
+  try {
+    await reconcilePublishingDouyinLinks({ accountId: result.account_id });
+  } catch (error) {
+    console.error('[publishing-douyin-link] reconcile failed after contract sync', {
+      accountId: result.account_id,
+      message: error instanceof Error ? error.message : 'unknown error',
+    });
+  }
+  return result;
 }
 
 async function accountForScope(creatorAccountId: number) {

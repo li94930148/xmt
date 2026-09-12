@@ -245,3 +245,55 @@ export async function deletePublishing(id: number): Promise<{ message: string }>
   if (!response.ok) throw new Error('删除发布记录失败');
   return response.json();
 }
+
+export type PublishingDouyinCandidate = {
+  id: number;
+  account_id: number;
+  title: string;
+  publish_time?: string | null;
+  play_count?: number;
+  like_count?: number;
+  comment_count?: number;
+  share_count?: number;
+  linked_publishing_id?: number | null;
+  match_method: 'exact' | 'containment' | 'fuzzy';
+  match_score: number;
+};
+
+export async function reconcilePublishingDouyin(): Promise<{
+  message: string;
+  linked: number;
+  reviewed: number;
+  ambiguous: number;
+  unmatched: number;
+}> {
+  const response = await fetch(`${BASE_URL}/workflow/publishing/douyin/reconcile`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.message || '刷新抖音作品关联失败');
+  return response.json();
+}
+
+export async function getPublishingDouyinCandidates(id: number, query?: string): Promise<{
+  publishing: { id: number; title: string };
+  candidates: PublishingDouyinCandidate[];
+}> {
+  const search = new URLSearchParams();
+  if (query?.trim()) search.set('query', query.trim());
+  const response = await fetch(`${BASE_URL}/workflow/publishing/${id}/douyin-candidates?${search}`, {
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.message || '获取抖音作品候选失败');
+  return response.json();
+}
+
+export async function updatePublishingDouyinLink(id: number, douyinWorkId: number | null): Promise<{ message: string }> {
+  const response = await fetch(`${BASE_URL}/workflow/publishing/${id}/douyin-link`, {
+    method: 'PUT',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ douyin_work_id: douyinWorkId }),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.message || '更新抖音作品关联失败');
+  return response.json();
+}

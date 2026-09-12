@@ -7,7 +7,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const activityLogTimeRetentionMigration: DatabaseMigration = {
   version: '012',
   name: 'activity_log_time_retention',
-  checksum: '012-activity-log-time-retention-v3',
+  checksum: '012-activity-log-time-retention-v2',
   async up(executor) {
     // Every existing activity_log writer relied on SQLite CURRENT_TIMESTAMP, so
     // these offset-free historical values are known UTC values rather than

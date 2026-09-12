@@ -15,6 +15,8 @@ for (const migration of databaseMigrations) await client.execute({ sql: 'INSERT 
 await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?', args: ['001'] });
 const run = () => spawnSync('npx', ['tsx', 'scripts/migration-readiness.ts'], { cwd: process.cwd(), env: { ...process.env, XMT_DB_PATH: database }, encoding: 'utf8' });
 assert.equal(run().status, 0, 'safe expand migration may proceed');
+await client.execute({ sql: `UPDATE database_migrations SET status = 'failed' WHERE version = ?`, args: ['001'] });
+assert.equal(run().status, 0, 'matching failed safe expand migration may retry');
 await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?', args: ['006'] });
 const review = run(); assert.notEqual(review.status, 0); assert.match(review.stdout, /REVIEW_REQUIRED/);
 await client.execute({ sql: 'INSERT INTO database_migrations (version, name, checksum, status) VALUES (?, ?, ?, ?)', args: ['006', databaseMigrations.find((migration) => migration.version === '006')!.name, 'invalid', 'applied'] });

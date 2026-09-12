@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.21.0', date: '2026-09-12', title: '发布管理接入抖音作品数据', impactScope: ['发布管理', '抖音运营中心', 'Creator 数据同步'], changes: [{ type: 'feature', description: '发布稿件可自动或人工关联抖音作品，并支持候选搜索与解除关联。' }, { type: 'improvement', description: '关联后的发布时间、状态和互动指标实时以抖音运营中心为准，原稿件数据继续保留。' }] },
   { version: '2.20.25', date: '2026-09-12', title: '创作只读与首页数据联动', impactScope: ['创作管理', '首页驾驶舱', '抖音运营中心'], changes: [{ type: 'fix', description: '已审核稿件的创作资料严格只读，不再因自动保存连续提示失败。' }, { type: 'improvement', description: '首页聚合内容生产链路和抖音播放数据，并按最深业务阶段计算内容生产指数。' }] },
   { version: '2.20.24', date: '2026-09-11', title: '北京时间与活动日志保留', impactScope: ['系统时间', '活动日志', '日期展示'], changes: [{ type: 'fix', description: '活动日志统一按北京时间写入和显示，历史 UTC 记录在升级时校正。' }, { type: 'improvement', description: '活动日志仅保留最近 7 天，其他页面日期展示统一使用北京时间。' }] },
   { version: '2.20.23', date: '2026-09-11', title: '统一创作资料草稿', impactScope: ['创作管理', '资料库', '富文本编辑'], changes: [{ type: 'improvement', description: '创作资料简化为一份连续草稿，可直接输入、复制粘贴和自动保存。' }, { type: 'improvement', description: '添加资料直接打开资料库选择器，并把所选正文按光标位置插入草稿。' }] },

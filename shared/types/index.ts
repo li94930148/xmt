@@ -175,6 +175,14 @@ export interface Publishing {
   likes?: number;
   shares?: number;
   comments?: number;
+  publishing_platform?: string;
+  publishing_status?: string;
+  publishing_publish_time?: string;
+  douyin_work_id?: number | null;
+  douyin_title?: string | null;
+  douyin_match_method?: 'exact' | 'containment' | 'fuzzy' | 'manual' | null;
+  douyin_match_score?: number | null;
+  data_source?: 'publishing' | 'douyin';
   created_at: string;
   updated_at: string;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -13,18 +13,24 @@ import {
   MessageCircle,
   Play,
   Plus,
+  RefreshCw,
   Share2,
   Trash2,
+  Unlink,
   UserRound,
 } from 'lucide-react';
 import {
   createPublishing,
   deletePublishing,
+  getPublishingDouyinCandidates,
   getPublishing,
   getTopics,
+  reconcilePublishingDouyin,
   updatePublishing,
+  updatePublishingDouyinLink,
 } from '../api';
-import { ConfirmModal, FormModal, LoadingState } from '../components/common';
+import type { PublishingDouyinCandidate } from '../api';
+import { BaseModal, ConfirmModal, FormModal, LoadingState } from '../components/common';
 import ActionButton from '../components/studio/ActionButton';
 import GlassPanel from '../components/studio/GlassPanel';
 import MetricCard from '../components/studio/MetricCard';
@@ -39,6 +45,7 @@ import StudioEmptyState from '../components/studio/EmptyState';
 import { formatBeijingDate } from '../lib/utils';
 import { useAppStore } from '../store';
 import { Publishing as PublishingType, Topic } from '../types';
+import { usePermission } from '../hooks/usePermission';
 
 const initialFormData = {
   topic_id: '',
@@ -93,18 +100,26 @@ export default function Publishing() {
   const [total, setTotal] = useState(0);
   // 页大小以服务端返回为准，避免前端写死与后端默认值脱节
   const [pageSize, setPageSize] = useState(50);
+  const [linkTarget, setLinkTarget] = useState<PublishingType | null>(null);
+  const [linkQuery, setLinkQuery] = useState('');
+  const [linkCandidates, setLinkCandidates] = useState<PublishingDouyinCandidate[]>([]);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [syncingDouyin, setSyncingDouyin] = useState(false);
 
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
+  const { hasAllPermissions, loading: permissionsLoading } = usePermission();
+  const canManageDouyinLinks = !permissionsLoading
+    && hasAllPermissions(['workflow:publishing', 'creator:data:view']);
 
-  useEffect(() => {
-    void fetchData();
-  }, []);
-
-  const fetchData = async (requestedPage = page) => {
+  const fetchData = useCallback(async (requestedPage = 1) => {
     setLoading(true);
     try {
-      let result = await getPublishing({ page: requestedPage });
+      const [initialResult, topicList] = await Promise.all([
+        getPublishing({ page: requestedPage }),
+        getTopics(),
+      ]);
+      let result = initialResult;
       // 删除末页最后一条后当前页会越界变空，回退到上一页避免出现空白列表
       if (result.data.length === 0 && result.page > 1) {
         result = await getPublishing({ page: result.page - 1 });
@@ -112,9 +127,7 @@ export default function Publishing() {
       setPublishings(result.data);
       setPage(result.page);
       setTotal(result.total);
-      setPageSize(result.limit || pageSize);
-
-      const topicList = await getTopics();
+      setPageSize(result.limit || 50);
       setTopics(topicList.data.filter((topic) => topic.status === 'publishing' || topic.status === 'shooting'));
     } catch (error) {
       addNotification({
@@ -125,7 +138,11 @@ export default function Publishing() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addNotification]);
+
+  useEffect(() => {
+    void fetchData(1);
+  }, [fetchData]);
 
   const resetForm = () => {
     setFormData(initialFormData);
@@ -145,15 +162,16 @@ export default function Publishing() {
     try {
       const isEditing = Boolean(editingPublishing);
       if (editingPublishing) {
+        const usesDouyinData = editingPublishing.data_source === 'douyin';
         await updatePublishing(editingPublishing.id, {
-          platform: formData.platform,
+          platform: usesDouyinData ? undefined : formData.platform,
           url: formData.url,
-          status: formData.status,
-          publish_time: formData.publish_time,
-          views: Number.parseInt(formData.views, 10) || 0,
-          likes: Number.parseInt(formData.likes, 10) || 0,
-          shares: Number.parseInt(formData.shares, 10) || 0,
-          comments: Number.parseInt(formData.comments, 10) || 0,
+          status: usesDouyinData ? undefined : formData.status,
+          publish_time: usesDouyinData ? undefined : formData.publish_time,
+          views: usesDouyinData ? undefined : Number.parseInt(formData.views, 10) || 0,
+          likes: usesDouyinData ? undefined : Number.parseInt(formData.likes, 10) || 0,
+          shares: usesDouyinData ? undefined : Number.parseInt(formData.shares, 10) || 0,
+          comments: usesDouyinData ? undefined : Number.parseInt(formData.comments, 10) || 0,
         });
         addNotification({
           title: '更新成功',
@@ -226,14 +244,70 @@ export default function Publishing() {
     }
   };
 
+  const loadLinkCandidates = async (target: PublishingType, query = '') => {
+    setLinkLoading(true);
+    try {
+      const result = await getPublishingDouyinCandidates(target.id, query);
+      setLinkCandidates(result.candidates);
+    } catch (error) {
+      addNotification({ title: '获取候选失败', message: (error as Error).message, type: 'error' });
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
+  const openDouyinLink = (publishing: PublishingType) => {
+    setLinkTarget(publishing);
+    setLinkQuery('');
+    setLinkCandidates([]);
+    void loadLinkCandidates(publishing);
+  };
+
+  const handleReconcileDouyin = async () => {
+    setSyncingDouyin(true);
+    try {
+      const result = await reconcilePublishingDouyin();
+      addNotification({
+        title: '抖音数据关联已刷新',
+        message: result.linked > 0
+          ? `新增 ${result.linked} 条高置信关联；歧义或未匹配稿件可人工选择。`
+          : '没有发现新的唯一高置信关联，现有绑定保持不变。',
+        type: 'success',
+      });
+      await fetchData(page);
+    } catch (error) {
+      addNotification({ title: '刷新关联失败', message: (error as Error).message, type: 'error' });
+    } finally {
+      setSyncingDouyin(false);
+    }
+  };
+
+  const handleDouyinLink = async (workId: number | null) => {
+    if (!linkTarget) return;
+    setLinkLoading(true);
+    try {
+      const result = await updatePublishingDouyinLink(linkTarget.id, workId);
+      addNotification({ title: workId === null ? '关联已解除' : '关联成功', message: result.message, type: 'success' });
+      setLinkTarget(null);
+      setLinkCandidates([]);
+      await fetchData(page);
+    } catch (error) {
+      addNotification({ title: '更新关联失败', message: (error as Error).message, type: 'error' });
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
   const handleEdit = (publishing: PublishingType) => {
     setEditingPublishing(publishing);
     setFormData({
       topic_id: publishing.topic_id.toString(),
-      platform: publishing.platform || '',
+      platform: publishing.publishing_platform ?? publishing.platform ?? '',
       url: publishing.url || '',
-      status: publishing.status,
-      publish_time: publishing.publish_time ? formatBjtDatabase(publishing.publish_time).replace(' ', 'T').slice(0, 16) : '',
+      status: publishing.publishing_status ?? publishing.status,
+      publish_time: (publishing.publishing_publish_time ?? publishing.publish_time)
+        ? formatBjtDatabase(publishing.publishing_publish_time ?? publishing.publish_time).replace(' ', 'T').slice(0, 16)
+        : '',
       views: publishing.views?.toString() || '',
       likes: publishing.likes?.toString() || '',
       shares: publishing.shares?.toString() || '',
@@ -251,6 +325,7 @@ export default function Publishing() {
       ),
     [publishings, searchTerm],
   );
+  const editingUsesDouyinData = editingPublishing?.data_source === 'douyin';
 
   const todayKey = new Date().toISOString().slice(0, 10);
   const metrics = useMemo(
@@ -267,19 +342,27 @@ export default function Publishing() {
     <PageShell>
       <PageHeader
         title="发布管理"
-        description="查看多平台发布节奏、发布时间、负责人和异常状态。"
+        description="查看多平台发布节奏；已关联作品的发布时间和互动数据以抖音运营中心为准。"
         actions={
-          <ActionButton
-            type="button"
-            variant="primary"
-            onClick={() => {
-              resetForm();
-              setShowCreateModal(true);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            添加发布记录
-          </ActionButton>
+          <div className="flex flex-wrap items-center gap-2">
+            {canManageDouyinLinks ? (
+              <ActionButton type="button" onClick={() => void handleReconcileDouyin()} disabled={syncingDouyin}>
+                <RefreshCw className={`h-4 w-4 ${syncingDouyin ? 'animate-spin' : ''}`} />
+                {syncingDouyin ? '正在关联' : '刷新抖音关联'}
+              </ActionButton>
+            ) : null}
+            <ActionButton
+              type="button"
+              variant="primary"
+              onClick={() => {
+                resetForm();
+                setShowCreateModal(true);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              添加发布记录
+            </ActionButton>
+          </div>
         }
       />
 
@@ -342,6 +425,11 @@ export default function Publishing() {
                         <span className="line-clamp-2 font-semibold text-studio-text-primary group-hover:text-studio-cyan">
                           {publishing.topic_title || '未命名发布内容'}
                         </span>
+                        {publishing.data_source === 'douyin' ? (
+                          <span className="mt-1 block line-clamp-1 text-xs text-studio-cyan" title={publishing.douyin_title || undefined}>
+                            抖音实时数据{publishing.douyin_title && publishing.douyin_title !== publishing.topic_title ? ` · ${publishing.douyin_title}` : ''}
+                          </span>
+                        ) : null}
                         <span className="mt-1 flex items-center gap-1 text-xs text-studio-text-muted">
                           <UserRound className="h-3.5 w-3.5" />
                           {publishing.operator_name || '未分配'}
@@ -386,6 +474,16 @@ export default function Publishing() {
                   <td className="px-5 py-4 text-sm font-medium text-studio-text-secondary">{getNextAction(publishing.status)}</td>
                   <td className="px-5 py-4">
                     <div className="flex items-center justify-end gap-2 opacity-100 transition-opacity md:opacity-70 md:group-hover:opacity-100">
+                      {canManageDouyinLinks ? (
+                        <button
+                          type="button"
+                          onClick={() => openDouyinLink(publishing)}
+                          className={`rounded-button border p-2 transition ${publishing.douyin_work_id ? 'border-studio-cyan/40 bg-studio-cyan/10 text-studio-cyan' : 'border-studio-border-soft bg-white/[0.05] text-studio-text-secondary hover:border-studio-border-active hover:text-studio-text-primary'}`}
+                          title={publishing.douyin_work_id ? '调整抖音作品关联' : '关联抖音作品'}
+                        >
+                          <Link2 className="h-4 w-4" />
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => handleEdit(publishing)}
@@ -445,6 +543,11 @@ export default function Publishing() {
         size="xl"
       >
         <div className="space-y-4">
+          {editingUsesDouyinData ? (
+            <div className="rounded-button border border-studio-cyan/30 bg-studio-cyan/10 px-4 py-3 text-sm text-studio-cyan-contrast">
+              该稿件已关联抖音作品。平台、发布时间、状态和互动数据由抖音运营中心实时提供；发布链接仍可维护。
+            </div>
+          ) : null}
           <div>
             <label className="mb-2 block text-sm font-medium text-studio-text-secondary">关联选题 *</label>
             <select
@@ -471,6 +574,7 @@ export default function Publishing() {
                 onChange={(event) => setFormData({ ...formData, platform: event.target.value })}
                 className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
                 placeholder="如：抖音、小红书、视频号"
+                disabled={editingUsesDouyinData}
               />
             </div>
             <div>
@@ -493,7 +597,7 @@ export default function Publishing() {
                 value={formData.publish_time}
                 onChange={(event) => setFormData({ ...formData, publish_time: event.target.value })}
                 className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={formData.status !== 'pending'}
+                disabled={editingUsesDouyinData || formData.status !== 'pending'}
               />
             </div>
             <div>
@@ -502,6 +606,7 @@ export default function Publishing() {
                 value={formData.status}
                 onChange={(event) => setFormData({ ...formData, status: event.target.value })}
                 className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
+                disabled={editingUsesDouyinData}
               >
                 <option value="pending">待发布</option>
                 <option value="published">已发布</option>
@@ -537,6 +642,7 @@ export default function Publishing() {
                       onChange={(event) => setFormData({ ...formData, [field.key]: event.target.value })}
                       className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
                       placeholder="0"
+                      disabled={editingUsesDouyinData}
                     />
                   </div>
                 );
@@ -545,6 +651,85 @@ export default function Publishing() {
           </div>
         </div>
       </FormModal>
+
+      <BaseModal
+        open={Boolean(linkTarget)}
+        onClose={() => setLinkTarget(null)}
+        size="lg"
+        title="关联抖音作品"
+        description={linkTarget ? `发布稿件：${linkTarget.topic_title || '未命名发布内容'}` : undefined}
+        footer={
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              {linkTarget?.douyin_work_id ? (
+                <ActionButton type="button" onClick={() => void handleDouyinLink(null)} disabled={linkLoading}>
+                  <Unlink className="h-4 w-4" />
+                  解除当前关联
+                </ActionButton>
+              ) : null}
+            </div>
+            <ActionButton type="button" onClick={() => setLinkTarget(null)}>关闭</ActionButton>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <SearchBar
+              value={linkQuery}
+              onChange={(event) => setLinkQuery(event.target.value)}
+              placeholder="输入抖音作品标题关键词"
+              className="flex-1"
+            />
+            <ActionButton
+              type="button"
+              disabled={linkLoading || !linkTarget}
+              onClick={() => linkTarget && void loadLinkCandidates(linkTarget, linkQuery)}
+            >
+              搜索候选
+            </ActionButton>
+          </div>
+          <p className="text-xs leading-5 text-studio-text-muted">
+            系统只自动绑定唯一的高置信结果；同名、近似或已被其他稿件占用的作品需要人工确认。
+          </p>
+          {linkLoading ? (
+            <LoadingState type="section" text="正在读取抖音作品..." />
+          ) : linkCandidates.length === 0 ? (
+            <div className="rounded-button border border-studio-border-soft px-4 py-8 text-center text-sm text-studio-text-muted">
+              暂无候选作品
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {linkCandidates.map((candidate) => {
+                const linkedHere = candidate.linked_publishing_id === linkTarget?.id;
+                const linkedElsewhere = Boolean(candidate.linked_publishing_id && !linkedHere);
+                return (
+                  <div key={candidate.id} className="rounded-button border border-studio-border-soft bg-white/[0.03] p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="line-clamp-2 font-medium text-studio-text-primary">{candidate.title}</p>
+                        <p className="mt-1 text-xs text-studio-text-muted">
+                          {formatBeijingDate(candidate.publish_time)} · 播放 {(candidate.play_count || 0).toLocaleString()} · 点赞 {(candidate.like_count || 0).toLocaleString()}
+                        </p>
+                        <p className="mt-1 text-xs text-studio-cyan">
+                          标题匹配 {Math.round(candidate.match_score * 100)}% · {candidate.match_method === 'exact' ? '标题一致' : candidate.match_method === 'containment' ? '标题包含' : '近似标题'}
+                        </p>
+                      </div>
+                      <ActionButton
+                        type="button"
+                        variant={linkedHere ? 'primary' : 'secondary'}
+                        disabled={linkLoading || linkedHere || linkedElsewhere}
+                        onClick={() => void handleDouyinLink(candidate.id)}
+                      >
+                        {linkedHere ? '当前关联' : linkedElsewhere ? '已关联其他稿件' : '关联此作品'}
+                      </ActionButton>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </BaseModal>
 
       <ConfirmModal
         open={Boolean(deleteTarget)}

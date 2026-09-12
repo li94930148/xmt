@@ -1,12 +1,17 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿import express from 'express';
 import { beijingNow, beijingToday, queryOne, queryAll, execute, executeInsert } from '../database/utils';
 import { authenticate } from '../middleware/auth';
-import { requirePermission } from '../middleware/permissions';
+import { requireAllPermissions, requirePermission } from '../middleware/permissions';
 import { canEditProduction, canViewAllContent, canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, resolveCommentTopicScope } from '../utils/access';
 import { syncPublishedArchive } from '../services/publishedArchive';
 import { buildWorkflowRuntimeContext } from '@shared/workflow/workflow_runtime';
 import { broadcastToRoom, getSocketIO } from '../utils/socket';
 import { getCollaborationRoomId, COLLABORATION_EVENTS, type VersionSupersededPayload } from '../../src/collaboration/core/events.js';
+import {
+  getPublishingDouyinCandidates,
+  reconcilePublishingDouyinLinks,
+  setPublishingDouyinLink,
+} from '../services/publishingDouyinLink.js';
 
 const router = express.Router();
 
@@ -674,9 +679,94 @@ router.post('/shooting', authenticate, requirePermission('workflow:shooting'), a
   }
 });
 
+const publishingWithDouyinSelect = `
+  p.id,p.topic_id,p.url,p.script_content,p.operator_id,p.created_at,p.updated_at,
+  p.platform AS publishing_platform,p.status AS publishing_status,p.publish_time AS publishing_publish_time,
+  CASE WHEN dw.id IS NOT NULL THEN '抖音' ELSE p.platform END AS platform,
+  CASE WHEN dw.id IS NOT NULL THEN 'published' ELSE p.status END AS status,
+  COALESCE(dw.publish_time,p.publish_time) AS publish_time,
+  u.name AS operator_name,t.title AS topic_title,
+  COALESCE(dw.play_count,a.views,0) AS views,
+  COALESCE(dw.like_count,a.likes,0) AS likes,
+  COALESCE(dw.share_count,a.shares,0) AS shares,
+  COALESCE(dw.comment_count,a.comments,0) AS comments,
+  dw.id AS douyin_work_id,dw.title AS douyin_title,
+  link.match_method AS douyin_match_method,link.match_score AS douyin_match_score,
+  CASE WHEN dw.id IS NOT NULL THEN 'douyin' ELSE 'publishing' END AS data_source
+`;
+
+const publishingWithDouyinJoins = `
+  LEFT JOIN users u ON p.operator_id=u.id
+  LEFT JOIN topics t ON p.topic_id=t.id
+  LEFT JOIN analytics a ON t.id=a.topic_id
+  LEFT JOIN publishing_douyin_links link ON link.publishing_id=p.id
+  LEFT JOIN douyin_works dw ON dw.id=link.douyin_work_id
+`;
+
+router.post(
+  '/publishing/douyin/reconcile',
+  authenticate,
+  requireAllPermissions('workflow:publishing', 'creator:data:view'),
+  async (req, res) => {
+    try {
+      const result = await reconcilePublishingDouyinLinks({ createdBy: req.user?.id });
+      res.json({ message: '抖音作品关联已刷新', ...result });
+    } catch {
+      res.status(500).json({ message: '刷新抖音作品关联失败' });
+    }
+  },
+);
+
+router.get(
+  '/publishing/:id/douyin-candidates',
+  authenticate,
+  requirePermission('creator:data:view'),
+  async (req, res) => {
+    try {
+      const publishingId = Number(req.params.id);
+      if (!Number.isSafeInteger(publishingId) || publishingId <= 0) {
+        return res.status(400).json({ message: '发布记录 ID 无效' });
+      }
+      const topic = await getTopicScopeByPublishingId(publishingId);
+      if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该发布记录' });
+      const query = String(req.query.query || '').trim();
+      if (query.length > 200) return res.status(400).json({ message: '搜索关键词不能超过 200 个字符' });
+      const result = await getPublishingDouyinCandidates(publishingId, query);
+      if (!result) return res.status(404).json({ message: '发布记录不存在' });
+      res.json(result);
+    } catch {
+      res.status(500).json({ message: '获取抖音作品候选失败' });
+    }
+  },
+);
+
+router.put(
+  '/publishing/:id/douyin-link',
+  authenticate,
+  requireAllPermissions('workflow:publishing', 'creator:data:view'),
+  async (req, res) => {
+    try {
+      const publishingId = Number(req.params.id);
+      const workId = req.body?.douyin_work_id == null ? null : Number(req.body.douyin_work_id);
+      if (!Number.isSafeInteger(publishingId) || publishingId <= 0 || (workId !== null && (!Number.isSafeInteger(workId) || workId <= 0))) {
+        return res.status(400).json({ message: '关联参数无效' });
+      }
+      const topic = await getTopicScopeByPublishingId(publishingId);
+      if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限修改该发布记录' });
+      const result = await setPublishingDouyinLink(publishingId, workId, req.user?.id);
+      if (!result) return res.status(404).json({ message: '发布记录或抖音作品不存在' });
+      if ('conflictPublishingId' in result) return res.status(409).json({ message: '该抖音作品已关联其他发布稿件' });
+      broadcastToRoom('publishing', 'publishing:updated', { id: publishingId });
+      res.json({ message: workId === null ? '已解除抖音作品关联' : '已关联抖音作品', ...result });
+    } catch {
+      res.status(500).json({ message: '更新抖音作品关联失败' });
+    }
+  },
+);
+
 router.get('/publishing/:id', authenticate, async (req, res) => {
   try {
-    const publishing = await queryOne(`SELECT p.*, u.name as operator_name, t.title as topic_title, t.description as topic_description, t.platform as topic_platform, t.deadline as topic_deadline, t.status as topic_status FROM publishing p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id WHERE p.id = ?`, [req.params.id]);
+    const publishing = await queryOne(`SELECT ${publishingWithDouyinSelect},t.description AS topic_description,t.platform AS topic_platform,t.deadline AS topic_deadline,t.status AS topic_status FROM publishing p ${publishingWithDouyinJoins} WHERE p.id=?`, [req.params.id]);
     if (!publishing) return res.status(404).json({ message: '发布记录不存在' });
     const topic = await getTopicScopeByPublishingId(req.params.id);
     if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该发布记录' });
@@ -704,7 +794,7 @@ router.get('/publishing/:id', authenticate, async (req, res) => {
 router.get('/publishing', authenticate, async (req, res) => {
   try {
     const { topic_id } = req.query;
-    let query = `SELECT p.*, u.name as operator_name, t.title as topic_title, COALESCE(a.views, 0) as views, COALESCE(a.likes, 0) as likes, COALESCE(a.shares, 0) as shares, COALESCE(a.comments, 0) as comments FROM publishing p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id LEFT JOIN analytics a ON t.id = a.topic_id WHERE 1=1`;
+    let query = `SELECT ${publishingWithDouyinSelect} FROM publishing p ${publishingWithDouyinJoins} WHERE 1=1`;
     const params: any[] = [];
     if (topic_id) { query += ` AND p.topic_id = ?`; params.push(topic_id); }
     if (!canViewAllContent(req.user)) {

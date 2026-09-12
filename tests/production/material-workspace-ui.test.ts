@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   buildMaterialInsertionHtml,
+  canPersistMaterialDraft,
   clampMaterialWorkspaceHeight,
   DEFAULT_MATERIAL_WORKSPACE_HEIGHT,
   materialWorkspaceStorageKey,
@@ -18,4 +19,6 @@ assert.equal(insertion, '<p><br></p><p>资料一</p><p><br></p><p>资料二</p><
 assert.deepEqual(resolveEditorInsertionSelection({ from: 3, to: 3 }, 10), { from: 3, to: 3 });
 assert.deepEqual(resolveEditorInsertionSelection(null, 10), { from: 10, to: 10 });
 assert.deepEqual(resolveEditorInsertionSelection({ from: 11, to: 11 }, 10), { from: 10, to: 10 });
+assert.equal(canPersistMaterialDraft(false), false, 'read-only materials never persist editor changes');
+assert.equal(canPersistMaterialDraft(true), true, 'editable materials retain autosave');
 console.log('material workspace UI logic tests passed');

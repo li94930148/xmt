@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.20.25', date: '2026-09-12', title: '创作只读与首页数据联动', impactScope: ['创作管理', '首页驾驶舱', '抖音运营中心'], changes: [{ type: 'fix', description: '已审核稿件的创作资料严格只读，不再因自动保存连续提示失败。' }, { type: 'improvement', description: '首页聚合内容生产链路和抖音播放数据，并按最深业务阶段计算内容生产指数。' }] },
   { version: '2.20.24', date: '2026-09-11', title: '北京时间与活动日志保留', impactScope: ['系统时间', '活动日志', '日期展示'], changes: [{ type: 'fix', description: '活动日志统一按北京时间写入和显示，历史 UTC 记录在升级时校正。' }, { type: 'improvement', description: '活动日志仅保留最近 7 天，其他页面日期展示统一使用北京时间。' }] },
   { version: '2.20.23', date: '2026-09-11', title: '统一创作资料草稿', impactScope: ['创作管理', '资料库', '富文本编辑'], changes: [{ type: 'improvement', description: '创作资料简化为一份连续草稿，可直接输入、复制粘贴和自动保存。' }, { type: 'improvement', description: '添加资料直接打开资料库选择器，并把所选正文按光标位置插入草稿。' }] },
   { version: '2.20.22', date: '2026-09-10', title: '创作资料工作区', impactScope: ['创作管理', '资料库', '富文本编辑'], changes: [{ type: 'feature', description: '创作详情直接展示资料正文，支持从资料库批量生成独立快照及手动粘贴资料。' }, { type: 'improvement', description: '资料支持安全编辑、自动保存、独立删除，以及按用户记忆的工作区高度。' }] },

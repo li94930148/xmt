@@ -7,7 +7,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const activityLogTimeRetentionMigration: DatabaseMigration = {
   version: '012',
   name: 'activity_log_time_retention',
-  checksum: '012-activity-log-time-retention-v2',
+  checksum: '012-activity-log-time-retention-v3',
   async up(executor) {
     // Every existing activity_log writer relied on SQLite CURRENT_TIMESTAMP, so
     // these offset-free historical values are known UTC values rather than
@@ -28,9 +28,10 @@ export const activityLogTimeRetentionMigration: DatabaseMigration = {
     `);
     await executor.execute(`
       INSERT OR IGNORE INTO user_login_days (user_id, login_date)
-      SELECT user_id, date(created_at)
-      FROM activity_log
-      WHERE action = 'login' AND user_id IS NOT NULL AND created_at IS NOT NULL
+      SELECT al.user_id, date(al.created_at)
+      FROM activity_log al
+      INNER JOIN users u ON u.id = al.user_id
+      WHERE al.action = 'login' AND al.user_id IS NOT NULL AND al.created_at IS NOT NULL
     `);
 
     const cutoff = formatBjtDatabase(new Date(nowBjt().getTime() - ACTIVITY_LOG_RETENTION_DAYS * DAY_MS));

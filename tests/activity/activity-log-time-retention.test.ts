@@ -35,11 +35,15 @@ try {
     sql: `INSERT INTO activity_log(user_id, action, created_at) VALUES (1, 'login', ?), (1, 'expired', ?)`,
     args: [sqliteUtc(recentInstant), sqliteUtc(expiredInstant)],
   });
+  await db.execute({
+    sql: `INSERT INTO activity_log(user_id, action, created_at) VALUES (2, 'login', ?)`,
+    args: [sqliteUtc(recentInstant)],
+  });
 
   await activityLogTimeRetentionMigration.up(db);
 
   const migrated = await db.execute(`SELECT action, created_at FROM activity_log ORDER BY id`);
-  assert.equal(migrated.rows.length, 1, 'migration removes activity logs older than seven days');
+  assert.equal(migrated.rows.length, 2, 'migration removes activity logs older than seven days');
   assert.equal(migrated.rows[0].action, 'login');
   assert.equal(migrated.rows[0].created_at, formatBjtDatabase(recentInstant));
   const loginDays = await db.execute(`SELECT user_id, login_date FROM user_login_days`);
@@ -52,7 +56,7 @@ try {
     args: [latest, tooOld],
   });
   const retained = await db.execute(`SELECT action FROM activity_log ORDER BY id`);
-  assert.deepEqual(retained.rows.map((row) => row.action), ['login', 'latest']);
+  assert.deepEqual(retained.rows.map((row) => row.action), ['login', 'login', 'latest']);
 
   await db.execute({
     sql: `INSERT INTO activity_log(user_id, action, created_at) VALUES (1, 'login', ?)`,

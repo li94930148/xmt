@@ -1,5 +1,5 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿import express from 'express';
-import { beijingNow, beijingToday, queryOne, queryAll, execute, executeInsert } from '../database/utils';
+import { beijingNow, beijingToday, queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requireAllPermissions, requirePermission } from '../middleware/permissions';
 import { canEditProduction, canViewAllContent, canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, resolveCommentTopicScope } from '../utils/access';
@@ -30,6 +30,22 @@ type VersionRow = {
 
 const LIST_PAGE_SIZE_DEFAULT = 50;
 const LIST_PAGE_SIZE_MAX = 100;
+const PUBLISHING_STATUSES = new Set(['pending', 'published', 'failed', 'scheduled']);
+const PUBLISHING_METRIC_FIELDS = ['views', 'likes', 'shares', 'comments'] as const;
+const DOUYIN_AUTHORITATIVE_FIELDS = ['platform', 'status', 'publish_time', ...PUBLISHING_METRIC_FIELDS] as const;
+
+function parsePublishingMetric(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function publishingDateKey(value: unknown): string | null {
+  if (value == null || value === '') return beijingToday();
+  const match = String(value).trim().match(/^(\d{4}-\d{2}-\d{2})(?:[ T].*)?$/);
+  if (!match) return null;
+  const parsed = new Date(`${match[1]}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== match[1] ? null : match[1];
+}
 
 export function parseListPagination(query: Record<string, unknown>) {
   const pageCandidate = Number.parseInt(String(query.page ?? 1), 10);
@@ -698,7 +714,13 @@ const publishingWithDouyinSelect = `
 const publishingWithDouyinJoins = `
   LEFT JOIN users u ON p.operator_id=u.id
   LEFT JOIN topics t ON p.topic_id=t.id
-  LEFT JOIN analytics a ON t.id=a.topic_id
+  LEFT JOIN analytics a ON a.id=(
+    SELECT latest_a.id
+    FROM analytics latest_a
+    WHERE latest_a.topic_id=p.topic_id
+    ORDER BY COALESCE(latest_a.data_date,'') DESC,latest_a.id DESC
+    LIMIT 1
+  )
   LEFT JOIN publishing_douyin_links link ON link.publishing_id=p.id
   LEFT JOIN douyin_works dw ON dw.id=link.douyin_work_id
 `;
@@ -803,10 +825,31 @@ router.get('/publishing', authenticate, async (req, res) => {
       params.push(userId, userId, userId);
     }
     const { page, limit, offset } = parseListPagination(req.query);
-    const total = await queryOne<{ total: number }>(`SELECT COUNT(*) AS total FROM (${query}) AS publishing_list`, params);
+    const [total, summary] = await Promise.all([
+      queryOne<{ total: number }>(`SELECT COUNT(*) AS total FROM (${query}) AS publishing_list`, params),
+      queryOne<{ today: number; pending: number; published: number; failed: number }>(`
+        SELECT
+          SUM(CASE WHEN substr(publish_time,1,10)=? AND status<>'published' THEN 1 ELSE 0 END) AS today,
+          SUM(CASE WHEN status IN ('pending','scheduled') THEN 1 ELSE 0 END) AS pending,
+          SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) AS published,
+          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed
+        FROM (${query}) AS publishing_summary
+      `, [beijingToday(), ...params]),
+    ]);
     query += ` ORDER BY p.created_at DESC LIMIT ? OFFSET ?`;
     const data = await queryAll(query, [...params, limit, offset]);
-    res.json({ data, total: total?.total || 0, page, limit });
+    res.json({
+      data,
+      total: Number(total?.total || 0),
+      page,
+      limit,
+      summary: {
+        today: Number(summary?.today || 0),
+        pending: Number(summary?.pending || 0),
+        published: Number(summary?.published || 0),
+        failed: Number(summary?.failed || 0),
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: '获取发布列表失败', error });
   }
@@ -816,25 +859,61 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
   try {
     const { topic_id, platform, url, status = 'pending', publish_time, views = 0, likes = 0, shares = 0, comments = 0 } = req.body;
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
+    if (!PUBLISHING_STATUSES.has(String(status))) return res.status(400).json({ message: '发布状态无效' });
+    const analyticsDate = publishingDateKey(publish_time);
+    if (!analyticsDate) return res.status(400).json({ message: '发布时间格式无效' });
+    const rawMetrics = { views, likes, shares, comments };
+    const normalizedMetrics = Object.fromEntries(
+      PUBLISHING_METRIC_FIELDS.map((field) => [field, parsePublishingMetric(rawMetrics[field])]),
+    ) as Record<(typeof PUBLISHING_METRIC_FIELDS)[number], number | null>;
+    if (Object.values(normalizedMetrics).some((value) => value === null)) {
+      return res.status(400).json({ message: '播放、点赞、分享和评论必须是非负整数' });
+    }
     const topic = await getTopicScopeById(topic_id);
     if (!topic) return res.status(404).json({ message: '选题不存在' });
     if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限操作该选题的发布记录' });
-    const publishingId = await executeInsert(`INSERT INTO publishing (topic_id, platform, url, status, publish_time, operator_id) VALUES (?, ?, ?, ?, ?, ?)`, [topic_id, platform, url, status, publish_time, req.user?.id]);
-    
-    const existingAnalytics = await queryOne(`SELECT id FROM analytics WHERE topic_id = ?`, [topic_id]);
-    if (existingAnalytics) {
-      await execute(`UPDATE analytics SET views = views + ?, likes = likes + ?, shares = shares + ?, comments = comments + ?, data_date = COALESCE(data_date, ?) WHERE topic_id = ?`, [views, likes, shares, comments, publish_time || beijingToday(), topic_id]);
-    } else {
-      await execute(`INSERT INTO analytics (topic_id, views, likes, shares, comments, data_date) VALUES (?, ?, ?, ?, ?, ?)`, [topic_id, views, likes, shares, comments, publish_time || beijingToday()]);
-    }
-    
-    if (status === 'published') {
-      const existingTopic = await queryOne(`SELECT * FROM topics WHERE id = ?`, [topic_id]);
-      if (existingTopic && existingTopic.status !== 'completed') {
-        await execute(`UPDATE topics SET status = 'completed' WHERE id = ?`, [topic_id]);
-        await execute(`INSERT INTO messages (user_id, title, content, type, created_at) VALUES (?, ?, ?, ?, ?)`, [req.user?.id, '发布完成', `选题「${existingTopic.title}」已发布完成`, 'success', beijingNow()]);
+    const publishingId = await runInTransaction(async (tx) => {
+      const id = await tx.executeInsert(
+        `INSERT INTO publishing(topic_id,platform,url,status,publish_time,operator_id) VALUES(?,?,?,?,?,?)`,
+        [topic_id, platform, url, status, publish_time, req.user?.id],
+      );
+      const existingAnalytics = await tx.queryOne<{ id: number }>(
+        `SELECT id FROM analytics WHERE topic_id=? AND data_date=? ORDER BY id DESC LIMIT 1`,
+        [topic_id, analyticsDate],
+      );
+      const metricValues = PUBLISHING_METRIC_FIELDS.map((field) => normalizedMetrics[field] as number);
+      if (existingAnalytics) {
+        await tx.execute(
+          `UPDATE analytics SET views=views+?,likes=likes+?,shares=shares+?,comments=comments+? WHERE id=?`,
+          [...metricValues, existingAnalytics.id],
+        );
+      } else {
+        await tx.execute(
+          `INSERT INTO analytics(topic_id,views,likes,shares,comments,data_date) VALUES(?,?,?,?,?,?)`,
+          [topic_id, ...metricValues, analyticsDate],
+        );
       }
-      await syncPublishedArchive(Number(topic_id), req.user?.id);
+      if (status === 'published' && topic.status !== 'completed') {
+        const existingTopic = await tx.queryOne<{ title: string }>('SELECT title FROM topics WHERE id=?', [topic_id]);
+        if (existingTopic) {
+          await tx.execute(`UPDATE topics SET status='completed' WHERE id=?`, [topic_id]);
+          await tx.execute(
+            `INSERT INTO messages(user_id,title,content,type,created_at) VALUES(?,?,?,?,?)`,
+            [req.user?.id, '发布完成', `选题「${existingTopic.title}」已发布完成`, 'success', beijingNow()],
+          );
+        }
+      }
+      return id;
+    });
+    if (status === 'published') {
+      try {
+        await syncPublishedArchive(Number(topic_id), req.user?.id);
+      } catch (error) {
+        console.error('[publishing] archive sync failed after create', {
+          topicId: Number(topic_id),
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
+      }
     }
     broadcastToRoom('publishing', 'publishing:created', { id: publishingId, topic_id: req.body.topic_id });
     res.json({ message: '发布记录添加成功', publishingId });
@@ -846,16 +925,40 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
 router.put('/publishing/:id', authenticate, requirePermission('workflow:publishing'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { platform, url, status, publish_time, script_content, views, likes, shares, comments } = req.body;
+    const { platform, url, status, publish_time, script_content } = req.body;
     const existingPublishing = await queryOne<Record<string, unknown>>(`SELECT * FROM publishing WHERE id = ?`, [id]);
     if (!existingPublishing) {
       return res.status(404).json({ message: '发布记录不存在' });
     }
     const currentTopic = await getTopicScopeByPublishingId(id);
     if (!canEditProduction(req.user, currentTopic)) return res.status(403).json({ message: '无权限修改该发布记录' });
+    const linkedWork = await queryOne<{ douyin_work_id: number }>(
+      `SELECT douyin_work_id FROM publishing_douyin_links WHERE publishing_id=?`,
+      [id],
+    );
+    if (linkedWork && DOUYIN_AUTHORITATIVE_FIELDS.some((field) => req.body[field] !== undefined)) {
+      return res.status(409).json({ message: '已关联抖音作品，请先解除关联后再修改平台、状态、时间或互动数据' });
+    }
+    if (status !== undefined && !PUBLISHING_STATUSES.has(String(status))) {
+      return res.status(400).json({ message: '发布状态无效' });
+    }
+    const suppliedMetrics = Object.fromEntries(
+      PUBLISHING_METRIC_FIELDS.filter((field) => req.body[field] !== undefined)
+        .map((field) => [field, parsePublishingMetric(req.body[field])]),
+    ) as Partial<Record<(typeof PUBLISHING_METRIC_FIELDS)[number], number | null>>;
+    if (Object.values(suppliedMetrics).some((value) => value === null)) {
+      return res.status(400).json({ message: '播放、点赞、分享和评论必须是非负整数' });
+    }
+    const hasMetricUpdates = Object.keys(suppliedMetrics).length > 0;
+    const analyticsDate = publish_time !== undefined || hasMetricUpdates
+      ? publishingDateKey(publish_time ?? existingPublishing.publish_time)
+      : null;
+    if ((publish_time !== undefined || hasMetricUpdates) && !analyticsDate) {
+      return res.status(400).json({ message: '发布时间格式无效' });
+    }
 
     const updateFields: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
 
     if (platform !== undefined) { updateFields.push('platform = ?'); params.push(platform); }
     if (url !== undefined) { updateFields.push('url = ?'); params.push(url); }
@@ -863,44 +966,57 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
     if (publish_time !== undefined) { updateFields.push('publish_time = ?'); params.push(publish_time); }
     if (script_content !== undefined) { updateFields.push('script_content = ?'); params.push(script_content); }
 
-    if (updateFields.length === 0) return res.status(400).json({ message: '没有需要更新的字段' });
-
-    params.push(id);
-    await execute(`UPDATE publishing SET ${updateFields.join(', ')}, updated_at = datetime('now', '+8 hours') WHERE id = ?`, params);
-
     const topicId = Number(existingPublishing.topic_id);
+    const metricFields = Object.keys(suppliedMetrics) as Array<(typeof PUBLISHING_METRIC_FIELDS)[number]>;
+    if (updateFields.length === 0 && metricFields.length === 0) return res.status(400).json({ message: '没有需要更新的字段' });
 
-    if (views !== undefined || likes !== undefined || shares !== undefined || comments !== undefined || publish_time !== undefined) {
-      const existingAnalytics = await queryOne<Record<string, unknown>>(`SELECT id FROM analytics WHERE topic_id = ?`, [topicId]);
-      const resolvedDate = publish_time || beijingToday();
-      const nextViews = Number(views || 0);
-      const nextLikes = Number(likes || 0);
-      const nextShares = Number(shares || 0);
-      const nextComments = Number(comments || 0);
-
-      if (existingAnalytics) {
-        await execute(
-          `UPDATE analytics SET views = ?, likes = ?, shares = ?, comments = ?, data_date = ? WHERE topic_id = ?`,
-          [nextViews, nextLikes, nextShares, nextComments, resolvedDate, topicId],
-        );
-      } else {
-        await execute(
-          `INSERT INTO analytics (topic_id, views, likes, shares, comments, data_date) VALUES (?, ?, ?, ?, ?, ?)`,
-          [topicId, nextViews, nextLikes, nextShares, nextComments, resolvedDate],
+    await runInTransaction(async (tx) => {
+      if (updateFields.length > 0) {
+        await tx.execute(
+          `UPDATE publishing SET ${updateFields.join(', ')},updated_at=datetime('now','+8 hours') WHERE id=?`,
+          [...params, id],
         );
       }
-    }
-
+      if (metricFields.length > 0) {
+        const existingAnalytics = await tx.queryOne<Record<string, unknown>>(
+          `SELECT id,views,likes,shares,comments FROM analytics WHERE topic_id=? AND data_date=? ORDER BY id DESC LIMIT 1`,
+          [topicId, analyticsDate!],
+        );
+        const nextMetrics = PUBLISHING_METRIC_FIELDS.map((field) => (
+          suppliedMetrics[field] ?? Number(existingAnalytics?.[field] || 0)
+        ));
+        if (existingAnalytics) {
+          await tx.execute(
+            `UPDATE analytics SET views=?,likes=?,shares=?,comments=? WHERE id=?`,
+            [...nextMetrics, existingAnalytics.id],
+          );
+        } else {
+          await tx.execute(
+            `INSERT INTO analytics(topic_id,views,likes,shares,comments,data_date) VALUES(?,?,?,?,?,?)`,
+            [topicId, ...nextMetrics, analyticsDate!],
+          );
+        }
+      }
+      if (status === 'published' && currentTopic?.status !== 'completed') {
+        const existingTopic = await tx.queryOne<{ title: string }>('SELECT title FROM topics WHERE id=?', [topicId]);
+        if (existingTopic) {
+          await tx.execute(`UPDATE topics SET status='completed' WHERE id=?`, [topicId]);
+          await tx.execute(
+            `INSERT INTO messages(user_id,title,content,type,created_at) VALUES(?,?,?,?,?)`,
+            [req.user?.id, '发布完成', `选题「${existingTopic.title}」已发布完成`, 'success', beijingNow()],
+          );
+        }
+      }
+    });
     if (status === 'published') {
-      const existingTopic = await queryOne<Record<string, unknown>>(`SELECT * FROM topics WHERE id = ?`, [topicId]);
-      if (existingTopic && existingTopic.status !== 'completed') {
-        await execute(`UPDATE topics SET status = 'completed' WHERE id = ?`, [topicId]);
-        await execute(
-          `INSERT INTO messages (user_id, title, content, type, created_at) VALUES (?, ?, ?, ?, ?)`,
-          [req.user?.id, '发布完成', `选题「${existingTopic.title}」已发布完成`, 'success', beijingNow()],
-        );
+      try {
+        await syncPublishedArchive(topicId, req.user?.id);
+      } catch (error) {
+        console.error('[publishing] archive sync failed after update', {
+          topicId,
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
       }
-      await syncPublishedArchive(topicId, req.user?.id);
     }
 
     broadcastToRoom('publishing', 'publishing:updated', { id: Number(req.params.id) });

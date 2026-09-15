@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import { dateKeyBjt } from '../../shared/time/index.js';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-publishing-douyin-link-'));
 process.env.XMT_DB_PATH = path.join(directory, 'publishing-douyin.db');
@@ -41,10 +42,11 @@ const topicId = await executeInsert(
   ['东平湖', 'test', 'other', adminId, adminId],
 );
 const publishingId = await executeInsert(
-  `INSERT INTO publishing(topic_id,platform,status,publish_time,operator_id) VALUES(?,'其他平台','pending',NULL,?)`,
+  `INSERT INTO publishing(topic_id,platform,status,publish_time,operator_id) VALUES(?,'其他平台','pending','2026-01-01',?)`,
   [topicId, adminId],
 );
 await execute(`INSERT INTO analytics(topic_id,views,likes,shares,comments,data_date) VALUES(?,3,2,1,4,'2026-01-01')`, [topicId]);
+await execute(`INSERT INTO analytics(topic_id,views,likes,shares,comments,data_date) VALUES(?,999,999,999,999,'2025-12-31')`, [topicId]);
 const accountId = await executeInsert(
   `INSERT INTO douyin_accounts(name,profile_url,douyin_uid,user_id,last_sync_time) VALUES('测试账号','https://example.invalid/douyin','test-publishing-link',?,?)`,
   [adminId, '2026-09-12 10:00:00'],
@@ -76,7 +78,10 @@ const restrictedHeaders = { Authorization: `Bearer ${signToken({ userId: restric
 try {
   const listResponse = await fetch(`${base}/publishing`, { headers });
   assert.equal(listResponse.status, 200);
-  const linked = (await listResponse.json()).data[0];
+  const listPayload = await listResponse.json();
+  assert.equal(listPayload.total, 1, 'multiple analytics snapshots must not duplicate publishing rows');
+  assert.deepEqual(listPayload.summary, { today: 0, pending: 0, published: 1, failed: 0 });
+  const linked = listPayload.data[0];
   assert.equal(linked.data_source, 'douyin');
   assert.equal(linked.platform, '抖音');
   assert.equal(linked.status, 'published');
@@ -86,6 +91,12 @@ try {
   await execute('UPDATE douyin_works SET play_count=1500,like_count=99 WHERE id=?', [workId]);
   const refreshed = (await (await fetch(`${base}/publishing`, { headers })).json()).data[0];
   assert.deepEqual([refreshed.views, refreshed.likes], [1500, 99], 'publishing reads current Douyin metrics');
+
+  const protectedUpdateResponse = await fetch(`${base}/publishing/${publishingId}`, {
+    method: 'PUT', headers, body: JSON.stringify({ platform: '被隐藏修改的平台' }),
+  });
+  assert.equal(protectedUpdateResponse.status, 409, 'linked Douyin fields must also be protected by the API');
+  assert.equal((await queryOne<{ platform: string }>('SELECT platform FROM publishing WHERE id=?', [publishingId]))?.platform, '其他平台');
 
   const candidatesResponse = await fetch(`${base}/publishing/${publishingId}/douyin-candidates`, { headers });
   assert.equal(candidatesResponse.status, 200);
@@ -105,11 +116,39 @@ try {
   assert.equal(fallback.status, 'pending');
   assert.deepEqual([fallback.views, fallback.likes, fallback.comments, fallback.shares], [3, 2, 4, 1]);
 
+  const partialMetricResponse = await fetch(`${base}/publishing/${publishingId}`, {
+    method: 'PUT', headers, body: JSON.stringify({ views: 7 }),
+  });
+  assert.equal(partialMetricResponse.status, 200);
+  assert.deepEqual(
+    await queryOne('SELECT views,likes,shares,comments FROM analytics WHERE topic_id=? AND data_date=? ORDER BY id DESC LIMIT 1', [topicId, '2026-01-01']),
+    { views: 7, likes: 2, shares: 1, comments: 4 },
+    'partial metric updates must preserve unspecified metrics',
+  );
+  assert.equal(
+    (await queryOne<{ views: number }>('SELECT views FROM analytics WHERE topic_id=? AND data_date=?', [topicId, '2025-12-31']))?.views,
+    999,
+    'updating the current publishing snapshot must not overwrite older analytics history',
+  );
+
   const manualResponse = await fetch(`${base}/publishing/${publishingId}/douyin-link`, {
     method: 'PUT', headers, body: JSON.stringify({ douyin_work_id: workId }),
   });
   assert.equal(manualResponse.status, 200);
   assert.equal((await queryOne<{ match_method: string }>('SELECT match_method FROM publishing_douyin_links WHERE publishing_id=?', [publishingId]))?.match_method, 'manual');
+
+  await execute(
+    `INSERT INTO publishing(topic_id,platform,status,publish_time,operator_id) VALUES(?,'视频号','scheduled',?,?)`,
+    [topicId, dateKeyBjt(), adminId],
+  );
+  const pagedPayload = await (await fetch(`${base}/publishing?limit=1`, { headers })).json();
+  assert.equal(pagedPayload.data.length, 1);
+  assert.equal(pagedPayload.total, 2);
+  assert.deepEqual(
+    pagedPayload.summary,
+    { today: 1, pending: 1, published: 1, failed: 0 },
+    'summary must cover the full visible dataset rather than only the current page',
+  );
 
   assert.equal((await queryOne<{ quick_check: string }>('PRAGMA quick_check'))?.quick_check, 'ok');
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) count FROM pragma_foreign_key_check'))?.count, 0);

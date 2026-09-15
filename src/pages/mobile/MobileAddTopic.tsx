@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { createTopic } from '@/api';
 import { useNetworkState } from '@/platform/network';
 import { clearSafeDraft, readSafeDraftValue, writeSafeDraft } from '@/platform/safe-draft';
+import { celebrateMilestone } from '@/utils/confetti';
 
 type TopicForm = {
   title: string;
@@ -50,6 +51,7 @@ export default function MobileAddTopic() {
       ].filter(Boolean).join('\n\n');
       await createTopic({ title: form.title.trim(), description: details, outline: form.outline.trim() || undefined, platform: form.platform.trim(), deadline: form.deadline, assignee_id: null });
       clearSafeDraft(draftKey);
+      celebrateMilestone();
       navigate('/topics', { replace: true });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '提交选题失败，已保留本地草稿');

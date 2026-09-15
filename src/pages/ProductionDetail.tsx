@@ -33,6 +33,7 @@ import { editorStateLabel, useEditorEventState } from '../editor/state/editorSta
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
 import ProductionResourcesPanel from '../components/production/ProductionResourcesPanel';
+import { celebrateMilestone } from '../utils/confetti';
 import { useSocket } from '../hooks/useSocket';
 import { COLLABORATION_EVENTS, type VersionSupersededPayload } from '../collaboration/core/events';
 
@@ -463,6 +464,8 @@ export default function ProductionDetail() {
         message: '创作状态已同步',
         type: 'success',
       });
+
+      if (status === 'approved') celebrateMilestone();
 
       await fetchData();
     } catch (error) {

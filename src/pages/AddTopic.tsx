@@ -8,6 +8,7 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingDate } from '../lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
+import { celebrateMilestone } from '../utils/confetti';
 
 export default function AddTopic() {
   const navigate = useNavigate();
@@ -66,6 +67,7 @@ export default function AddTopic() {
       });
 
       appStore.addNotification({ title: '提报成功', message: '选题已成功提交审核', type: 'success' });
+      celebrateMilestone();
       navigate('/topics');
     } catch (error) {
       appStore.addNotification({ title: '提报失败', message: (error as Error).message, type: 'error' });

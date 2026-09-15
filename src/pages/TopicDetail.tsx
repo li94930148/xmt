@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore, useAppStore } from '../store';
 import { getTopic, auditTopic, updateTopicStatus, updateTopic } from '../api';
+import { celebrateMilestone } from '../utils/confetti';
 import { getUsers } from '../api';
 import { Topic, User } from '../types';
 import { ChevronLeft, Clock, User as UserIcon, Calendar, FileText, CheckCircle, XCircle, ArrowRight, Save, AlertTriangle, Camera, Scissors, Send, List, FileText as FileIcon } from 'lucide-react';
@@ -209,6 +210,7 @@ export default function TopicDetail() {
     try {
       await updateTopicStatus(parseInt(id!), status);
       appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
+      if (status === 'shooting' || status === 'completed') celebrateMilestone();
       const topicData = await getTopic(parseInt(id!));
       setTopic(topicData);
     } catch (error) {

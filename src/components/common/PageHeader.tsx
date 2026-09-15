@@ -21,7 +21,6 @@ interface PageHeaderProps {
 
 export default function PageHeader({
   title,
-  description,
   backButton,
   actions,
   extra,
@@ -73,7 +72,6 @@ export default function PageHeader({
             ) : null}
             <div className="min-w-0">
               <h1 className={styles.pageTitle}>{title}</h1>
-              {description ? <p className={`${styles.subtitle} mt-1`}>{description}</p> : null}
             </div>
           </div>
           {extra ? <div className="mt-3">{extra}</div> : null}

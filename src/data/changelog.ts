@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.21.3', date: '2026-09-15', title: '放了些小惊喜', impactScope: ['日常使用'], changes: [{ type: 'improvement', description: '放了些小惊喜，优化了日常使用体验。' }] },
   { version: '2.21.2', date: '2026-09-15', title: '放了些小惊喜', impactScope: ['日常使用'], changes: [{ type: 'improvement', description: '放了些小惊喜。' }] },
   { version: '2.21.1', date: '2026-09-15', title: '发布与分析数据一致性修复', impactScope: ['发布管理', '数据分析', '权限与统计'], changes: [{ type: 'fix', description: '多日分析快照不再造成发布重复或跨日期覆盖，部分指标更新会保留其他字段。' }, { type: 'improvement', description: '发布页统计改为全量北京时间口径，抖音关联权威字段增加服务端保护。' }] },
   { version: '2.21.0', date: '2026-09-12', title: '发布管理接入抖音作品数据', impactScope: ['发布管理', '抖音运营中心', 'Creator 数据同步'], changes: [{ type: 'feature', description: '发布稿件可自动或人工关联抖音作品，并支持候选搜索与解除关联。' }, { type: 'improvement', description: '关联后的发布时间、状态和互动指标实时以抖音运营中心为准，原稿件数据继续保留。' }] },

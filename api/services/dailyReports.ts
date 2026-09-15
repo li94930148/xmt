@@ -212,7 +212,6 @@ async function listDailyReportManagers() {
   );
 }
 
-/*
 async function notifyDailyReportSubmitted(author: User, reportDate: string) {
   try {
     const managers = await listDailyReportManagers();
@@ -239,39 +238,6 @@ function notifyDailyReportReviewed(ownerId: number, reportDate: string, action: 
     ownerId,
     approved ? '日报审核通过' : '日报已退回',
     `${reportDate} 的日报${approved ? '已审核通过' : '已退回修改'}${comment ? `：${comment}` : ''}`,
-    approved ? 'success' : 'warning',
-    '/daily-report'
-  );
-}
-
-*/
-
-async function notifyDailyReportSubmitted(author: User, reportDate: string) {
-  try {
-    const managers = await listDailyReportManagers();
-    for (const manager of managers) {
-      if (Number(manager.id) === author.id) {
-        continue;
-      }
-      createMessage(
-        Number(manager.id),
-        'Daily report pending review',
-        `${author.name || author.username} submitted a daily report for ${reportDate}.`,
-        'info',
-        '/daily-report'
-      );
-    }
-  } catch (error) {
-    console.warn('[DailyReports] notify submit failed:', error);
-  }
-}
-
-function notifyDailyReportReviewed(ownerId: number, reportDate: string, action: 'approve' | 'reject', comment: string) {
-  const approved = action === 'approve';
-  createMessage(
-    ownerId,
-    approved ? 'Daily report approved' : 'Daily report rejected',
-    `${reportDate} daily report ${approved ? 'was approved' : 'was rejected'}${comment ? `: ${comment}` : ''}`,
     approved ? 'success' : 'warning',
     '/daily-report'
   );

@@ -3,8 +3,8 @@
  * 官方 Registry：https://reactbits.dev/r/BorderGlow-TS-TW.json
  * 接入日期：2026-08-08
  * 原始依赖：无
- * 修改原因：XMT 官方组件来源标记与目录适配。
- * 修改内容：仅添加本注释；未修改官方视觉行为。
+ * 修改原因：组件作为按钮外壳时不能覆盖业务按钮的主题表面。
+ * 修改内容：增加透明按钮表面模式，保留卡片模式原有视觉行为。
  */
 
 import { useRef, useCallback, useState, useEffect, type ReactNode } from 'react';
@@ -22,6 +22,7 @@ interface BorderGlowProps {
   animated?: boolean;
   colors?: string[];
   fillOpacity?: number;
+  buttonSurface?: boolean;
 }
 
 function parseHSL(hslStr: string): { h: number; s: number; l: number } {
@@ -92,6 +93,7 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
   animated = false,
   colors = ['#c084fc', '#f472b6', '#38bdf8'],
   fillOpacity = 0.5,
+  buttonSurface = false,
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
@@ -176,12 +178,12 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
       onPointerMove={handlePointerMove}
       onPointerEnter={() => setIsHovered(true)}
       onPointerLeave={() => setIsHovered(false)}
-      className={`relative grid isolate border border-white/15 ${className}`}
+      className={`relative grid isolate ${buttonSurface ? 'border-0' : 'border border-white/15'} ${className}`}
       style={{
-        background: backgroundColor,
+        background: buttonSurface ? 'transparent' : backgroundColor,
         borderRadius: `${borderRadius}px`,
         transform: 'translate3d(0, 0, 0.01px)',
-        boxShadow: 'rgba(0,0,0,0.1) 0 1px 2px, rgba(0,0,0,0.1) 0 2px 4px, rgba(0,0,0,0.1) 0 4px 8px, rgba(0,0,0,0.1) 0 8px 16px, rgba(0,0,0,0.1) 0 16px 32px, rgba(0,0,0,0.1) 0 32px 64px',
+        boxShadow: buttonSurface ? 'none' : 'rgba(0,0,0,0.1) 0 1px 2px, rgba(0,0,0,0.1) 0 2px 4px, rgba(0,0,0,0.1) 0 4px 8px, rgba(0,0,0,0.1) 0 8px 16px, rgba(0,0,0,0.1) 0 16px 32px, rgba(0,0,0,0.1) 0 32px 64px',
       }}
     >
       {/* mesh gradient border */}
@@ -254,7 +256,7 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
         />
       </span>
 
-      <div className="flex flex-col relative overflow-auto z-[1]">
+      <div className={`relative z-[1] flex flex-col ${buttonSurface ? 'overflow-visible' : 'overflow-auto'}`}>
         {children}
       </div>
     </div>

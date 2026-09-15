@@ -276,7 +276,6 @@ export default function Shooting() {
     <PageShell>
       <PageHeader
         title="成片制作"
-        description="跟进拍摄计划、素材交付和制作状态，优先处理临近截止的内容。"
         actions={
           <ActionButton type="button" variant="primary" onClick={() => setShowCreateModal(true)}>
             <Plus className="h-4 w-4" />

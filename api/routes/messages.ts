@@ -1,6 +1,7 @@
 import express from 'express';
 import { queryOne, queryAll, execute } from '../database/utils';
 import { authenticate } from '../middleware/auth';
+import { localizeMessage } from '../utils/messageLocalization';
 
 const router = express.Router();
 
@@ -31,7 +32,7 @@ router.get('/', authenticate, async (req, res) => {
     query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit as string), (parseInt(page as string) - 1) * parseInt(limit as string));
     
-    const messages = await queryAll(query, params);
+    const messages = (await queryAll(query, params)).map(localizeMessage);
     
     res.json({
       data: messages,

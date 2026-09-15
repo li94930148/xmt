@@ -16,6 +16,7 @@ import { editorStateLabel, useEditorEventState } from '../editor/state/editorSta
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
 import { parseStoredBjt } from '@shared/time';
+import { celebrateMilestone } from '../utils/confetti';
 
 interface ShootingDetailData extends ShootingType {
   production: {
@@ -146,6 +147,7 @@ export default function ShootingDetail() {
 
       if (newStatus === 'completed') {
         appStore.addNotification({ title: '制作完成', message: '成片制作已完成，自动流转到发布管理', type: 'success' });
+        celebrateMilestone();
       } else {
         appStore.addNotification({ title: '状态更新', message: '状态已更新', type: 'success' });
       }

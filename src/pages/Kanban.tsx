@@ -6,6 +6,7 @@ import { Topic, User } from '../types';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { STATUS_COLORS, STATUS_TEXT } from '../constants';
 import { formatBeijingDate } from '../lib/utils';
+import { celebrateMilestone } from '../utils/confetti';
 import {
   Clock, CheckCircle, XCircle, FileText, Camera, Send,
   ChevronLeft, ChevronRight, Filter, User as UserIcon, ExternalLink
@@ -74,6 +75,7 @@ export default function Kanban() {
       await updateTopicStatus(topicId, newStatus);
       setTopics(prev => prev.map(t => t.id === topicId ? { ...t, status: newStatus as Topic['status'] } : t));
       appStore.addNotification({ title: '状态已更新', message: '选题状态已切换', type: 'success' });
+      if (newStatus === 'shooting' || newStatus === 'completed') celebrateMilestone();
     } catch (error) {
       appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
     }

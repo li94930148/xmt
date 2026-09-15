@@ -16,6 +16,7 @@ import TaskFlowCard from '../components/studio/TaskFlowCard';
 import { formatBeijingDate } from '../lib/utils';
 import { useAppStore, useAuthStore } from '../store';
 import { Shooting as ShootingType, Topic } from '../types';
+import { celebrateMilestone } from '../utils/confetti';
 
 type ConfirmAction =
   | { type: 'delete'; shootingId: number; topicTitle: string }
@@ -211,6 +212,7 @@ export default function Shooting() {
         message: '成片制作已完成，已流转到发布管理环节',
         type: 'success',
       });
+      celebrateMilestone();
 
       await fetchData(page);
     } catch (error) {

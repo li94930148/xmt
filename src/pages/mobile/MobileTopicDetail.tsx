@@ -6,6 +6,7 @@ import type { Topic, TopicStatus } from '@/types';
 import { getTopicResources, type TopicResource } from '@/api/topics';
 import { clearSafeDraft, readSafeDraftValue, writeSafeDraft } from '@/platform/safe-draft';
 import { useNetworkState } from '@/platform/network';
+import { celebrateMilestone } from '@/utils/confetti';
 
 const nextStatus: Partial<Record<TopicStatus, TopicStatus>> = {
   rejected: 'pending', approved: 'production', production: 'shooting', shooting: 'publishing', publishing: 'completed',
@@ -97,6 +98,7 @@ export default function MobileTopicDetail() {
       await updateTopicStatus(topic.id, next);
       setTopic((current) => current ? { ...current, status: next } : current);
       setNotice(`已推进至${statusName[next]}`);
+      if (next === 'shooting' || next === 'completed') celebrateMilestone();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '状态推进失败');
     } finally { setSaving(false); }

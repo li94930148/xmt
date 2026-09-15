@@ -132,20 +132,22 @@ export async function reconcilePublishingDouyinLinks(options: { accountId?: numb
     return ordered[0].match.match_score - ordered[1].match.match_score >= AUTO_MATCH_MARGIN ? [ordered[0]] : [];
   });
 
-  if (accepted.length > 0) {
-    await runInTransaction(async (tx) => {
+  const linked = accepted.length > 0
+    ? await runInTransaction(async (tx) => {
+      let inserted = 0;
       for (const { publishing, match } of accepted) {
-        await tx.execute(`
+        inserted += await tx.execute(`
           INSERT OR IGNORE INTO publishing_douyin_links(
             publishing_id,douyin_work_id,match_method,match_score,created_by,created_at,updated_at
           ) VALUES(?,?,?,?,?,datetime('now','+8 hours'),datetime('now','+8 hours'))
         `, [publishing.id, match.id, match.match_method, match.match_score, options.createdBy ?? null]);
       }
-    });
-  }
+      return inserted;
+    })
+    : 0;
 
   return {
-    linked: accepted.length,
+    linked,
     reviewed: publishingRows.length,
     ambiguous: proposals.length - accepted.length,
     unmatched: publishingRows.length - proposals.length,

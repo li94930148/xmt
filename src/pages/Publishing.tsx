@@ -30,6 +30,7 @@ import {
   updatePublishingDouyinLink,
 } from '../api';
 import type { PublishingDouyinCandidate } from '../api';
+import type { PublishingSummary } from '../api/workflow';
 import { BaseModal, ConfirmModal, FormModal, LoadingState } from '../components/common';
 import ActionButton from '../components/studio/ActionButton';
 import GlassPanel from '../components/studio/GlassPanel';
@@ -100,6 +101,7 @@ export default function Publishing() {
   const [total, setTotal] = useState(0);
   // 页大小以服务端返回为准，避免前端写死与后端默认值脱节
   const [pageSize, setPageSize] = useState(50);
+  const [summary, setSummary] = useState<PublishingSummary>({ today: 0, pending: 0, published: 0, failed: 0 });
   const [linkTarget, setLinkTarget] = useState<PublishingType | null>(null);
   const [linkQuery, setLinkQuery] = useState('');
   const [linkCandidates, setLinkCandidates] = useState<PublishingDouyinCandidate[]>([]);
@@ -128,6 +130,7 @@ export default function Publishing() {
       setPage(result.page);
       setTotal(result.total);
       setPageSize(result.limit || 50);
+      setSummary(result.summary);
       setTopics(topicList.data.filter((topic) => topic.status === 'publishing' || topic.status === 'shooting'));
     } catch (error) {
       addNotification({
@@ -327,17 +330,6 @@ export default function Publishing() {
   );
   const editingUsesDouyinData = editingPublishing?.data_source === 'douyin';
 
-  const todayKey = new Date().toISOString().slice(0, 10);
-  const metrics = useMemo(
-    () => ({
-      today: publishings.filter((item) => item.publish_time?.slice(0, 10) === todayKey && item.status !== 'published').length,
-      pending: publishings.filter((item) => item.status === 'pending' || item.status === 'scheduled').length,
-      published: publishings.filter((item) => item.status === 'published').length,
-      failed: publishings.filter((item) => item.status === 'failed').length,
-    }),
-    [publishings, todayKey],
-  );
-
   return (
     <PageShell>
       <PageHeader
@@ -367,10 +359,10 @@ export default function Publishing() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="今日待发布" value={metrics.today} icon={Calendar} tone="cyan" />
-        <MetricCard title="待确认" value={metrics.pending} icon={FileText} tone="amber" />
-        <MetricCard title="已发布" value={metrics.published} icon={CheckCircle} tone="success" />
-        <MetricCard title="发布异常" value={metrics.failed} icon={AlertTriangle} tone="coral" />
+        <MetricCard title="今日待发布" value={summary.today} icon={Calendar} tone="cyan" />
+        <MetricCard title="待确认" value={summary.pending} icon={FileText} tone="amber" />
+        <MetricCard title="已发布" value={summary.published} icon={CheckCircle} tone="success" />
+        <MetricCard title="发布异常" value={summary.failed} icon={AlertTriangle} tone="coral" />
       </div>
 
       <GlassPanel className="p-4">

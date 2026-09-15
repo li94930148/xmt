@@ -1,10 +1,22 @@
 import express from 'express';
-import { beijingToday, queryOne, queryAll, execute } from '../database/utils';
+import { beijingToday, queryOne, queryAll, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { canAccessTopic, getTopicScopeById } from '../utils/access';
 
 const router = express.Router();
+const ANALYTICS_METRIC_FIELDS = ['views', 'likes', 'shares', 'comments'] as const;
+
+function parseAnalyticsMetric(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function isValidDateKey(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
 
 function getBeijingMonthYear() {
   const [year, month] = beijingToday().split('-');
@@ -139,28 +151,40 @@ router.post('/', authenticate, requirePermission('analytics:create'), async (req
   try {
     const { topic_id, views, likes, shares, comments, data_date } = req.body;
 
-    if (!topic_id) {
+    const topicId = Number(topic_id);
+    if (!Number.isSafeInteger(topicId) || topicId <= 0) {
       return res.status(400).json({ message: '选题ID不能为空' });
     }
-
-    const exists = await queryOne(
-      `SELECT COUNT(*) as count FROM analytics WHERE topic_id = ? AND data_date = ?`,
-      [topic_id, data_date]
-    );
-
-    if (Number(exists?.count) > 0) {
-      await execute(
-        `UPDATE analytics SET views = ?, likes = ?, shares = ?, comments = ?
-         WHERE topic_id = ? AND data_date = ?`,
-        [views, likes, shares, comments, topic_id, data_date]
-      );
-    } else {
-      await execute(
-        `INSERT INTO analytics (topic_id, views, likes, shares, comments, data_date)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [topic_id, views, likes, shares, comments, data_date]
-      );
+    if (!isValidDateKey(data_date)) return res.status(400).json({ message: '数据日期格式无效' });
+    const rawMetrics = { views, likes, shares, comments };
+    const metrics = Object.fromEntries(
+      ANALYTICS_METRIC_FIELDS.map((field) => [field, parseAnalyticsMetric(rawMetrics[field] ?? 0)]),
+    ) as Record<(typeof ANALYTICS_METRIC_FIELDS)[number], number | null>;
+    if (Object.values(metrics).some((value) => value === null)) {
+      return res.status(400).json({ message: '播放、点赞、分享和评论必须是非负整数' });
     }
+    const topic = await getTopicScopeById(topicId);
+    if (!topic) return res.status(404).json({ message: '选题不存在' });
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限录入该选题数据' });
+
+    await runInTransaction(async (tx) => {
+      const existing = await tx.queryOne<{ id: number }>(
+        `SELECT id FROM analytics WHERE topic_id=? AND data_date=? ORDER BY id DESC LIMIT 1`,
+        [topicId, data_date],
+      );
+      const metricValues = ANALYTICS_METRIC_FIELDS.map((field) => metrics[field] as number);
+      if (existing) {
+        await tx.execute(
+          `UPDATE analytics SET views=?,likes=?,shares=?,comments=? WHERE id=?`,
+          [...metricValues, existing.id],
+        );
+      } else {
+        await tx.execute(
+          `INSERT INTO analytics(topic_id,views,likes,shares,comments,data_date) VALUES(?,?,?,?,?,?)`,
+          [topicId, ...metricValues, data_date],
+        );
+      }
+    });
 
     res.json({ message: '数据录入成功' });
   } catch (error) {

@@ -8,34 +8,39 @@ type ConfettiParticle = {
   rotationSpeed: number;
   width: number;
   height: number;
+  delayMs: number;
+  shape: 'rect' | 'circle';
 };
 
 const CONFETTI_COLORS = ['#22d3ee', '#60a5fa', '#a78bfa', '#f472b6', '#fbbf24', '#34d399'];
-const ANIMATION_DURATION_MS = 1_600;
+const ANIMATION_DURATION_MS = 2_800;
 
 function createParticles(width: number, height: number): ConfettiParticle[] {
-  return Array.from({ length: 96 }, (_, index) => {
-    const fromLeft = index % 2 === 0;
-    const spread = (Math.random() - 0.5) * 4.2;
+  return Array.from({ length: 216 }, (_, index) => {
+    const burst = index % 3;
+    const fromLeft = burst === 0;
+    const fromCenter = burst === 2;
+    const direction = fromCenter ? (Math.random() - 0.5) * 13 : (fromLeft ? 6.5 : -6.5) + (Math.random() - 0.5) * 5.5;
 
     return {
       color: CONFETTI_COLORS[index % CONFETTI_COLORS.length],
-      x: fromLeft ? width * 0.12 : width * 0.88,
-      y: height * 0.78,
-      velocityX: (fromLeft ? 4.5 : -4.5) + spread,
-      velocityY: -8 - Math.random() * 5,
+      x: fromCenter ? width * (0.42 + Math.random() * 0.16) : (fromLeft ? width * 0.08 : width * 0.92),
+      y: fromCenter ? height * 0.6 : height * 0.88,
+      velocityX: direction,
+      velocityY: fromCenter ? -7 - Math.random() * 8 : -11 - Math.random() * 8,
       rotation: Math.random() * Math.PI,
-      rotationSpeed: (Math.random() - 0.5) * 0.35,
-      width: 5 + Math.random() * 5,
-      height: 8 + Math.random() * 7,
+      rotationSpeed: (Math.random() - 0.5) * 0.5,
+      width: 6 + Math.random() * 7,
+      height: 9 + Math.random() * 10,
+      delayMs: fromCenter ? 300 + Math.random() * 180 : Math.random() * 120,
+      shape: index % 5 === 0 ? 'circle' : 'rect',
     };
   });
 }
 
-/** A small, dependency-free celebration for successful workflow milestones. */
+/** A prominent, dependency-free celebration for successful workflow milestones. */
 export function celebrateMilestone(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
@@ -86,18 +91,27 @@ export function celebrateMilestone(): void {
     context.clearRect(0, 0, viewportWidth, viewportHeight);
 
     for (const particle of particles) {
+      const particleElapsed = now - startedAt - particle.delayMs;
+      if (particleElapsed < 0) continue;
+      const particleProgress = Math.min(particleElapsed / (ANIMATION_DURATION_MS - particle.delayMs), 1);
       particle.velocityX *= 0.985;
-      particle.velocityY += 0.22;
+      particle.velocityY += 0.2;
       particle.x += particle.velocityX;
       particle.y += particle.velocityY;
       particle.rotation += particle.rotationSpeed;
 
       context.save();
-      context.globalAlpha = progress > 0.72 ? (1 - progress) / 0.28 : 1;
+      context.globalAlpha = particleProgress > 0.76 ? (1 - particleProgress) / 0.24 : 1;
       context.translate(particle.x, particle.y);
       context.rotate(particle.rotation);
       context.fillStyle = particle.color;
-      context.fillRect(-particle.width / 2, -particle.height / 2, particle.width, particle.height);
+      if (particle.shape === 'circle') {
+        context.beginPath();
+        context.arc(0, 0, particle.width / 2, 0, Math.PI * 2);
+        context.fill();
+      } else {
+        context.fillRect(-particle.width / 2, -particle.height / 2, particle.width, particle.height);
+      }
       context.restore();
     }
 

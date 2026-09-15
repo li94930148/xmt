@@ -3,8 +3,8 @@
  * 官方 Registry：https://reactbits.dev/r/StarBorder-TS-TW.json
  * 接入日期：2026-08-08
  * 原始依赖：无
- * 修改原因：XMT 官方组件来源标记与目录适配。
- * 修改内容：仅添加本注释；未修改官方视觉行为。
+ * 修改原因：XMT 按钮需要跨浏览器继承统一的主题、尺寸和交互样式。
+ * 修改内容：保留星光边框动画，移除固定黑色内层与额外内边距。
  */
 
 import React from 'react';
@@ -28,33 +28,34 @@ const StarBorder = <T extends React.ElementType = 'button'>({
   ...rest
 }: StarBorderProps<T>) => {
   const Component = as || 'button';
+  const componentProps = rest as React.ComponentPropsWithoutRef<T> & { style?: React.CSSProperties };
 
   return (
     <Component
-      className={`relative inline-block overflow-hidden rounded-[20px] ${className}`}
-      {...(rest as any)}
-      style={{
-        padding: `${thickness}px 0`,
-        ...(rest as any).style
-      }}
+      className={`relative overflow-hidden ${className}`}
+      {...componentProps}
+      style={{ ...componentProps.style }}
     >
       <div
-        className="absolute w-[300%] h-[50%] opacity-70 bottom-[-11px] right-[-250%] rounded-full animate-star-movement-bottom z-0"
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-[-11px] right-[-250%] z-0 h-[50%] w-[300%] animate-star-movement-bottom rounded-full opacity-70"
         style={{
           background: `radial-gradient(circle, ${color}, transparent 10%)`,
           animationDuration: speed
         }}
       ></div>
       <div
-        className="absolute w-[300%] h-[50%] opacity-70 top-[-10px] left-[-250%] rounded-full animate-star-movement-top z-0"
+        aria-hidden="true"
+        className="pointer-events-none absolute left-[-250%] top-[-10px] z-0 h-[50%] w-[300%] animate-star-movement-top rounded-full opacity-70"
         style={{
           background: `radial-gradient(circle, ${color}, transparent 10%)`,
           animationDuration: speed
         }}
       ></div>
-      <div className="relative z-1 bg-gradient-to-b from-black to-gray-900 border border-gray-800 text-white text-center text-[16px] py-[16px] px-[26px] rounded-[20px]">
+      <span className="pointer-events-none absolute inset-0 rounded-[inherit]" aria-hidden="true" style={{ border: `${thickness}px solid ${color}`, opacity: 0.45 }} />
+      <span className="relative z-[1] inline-flex items-center justify-center gap-2">
         {children}
-      </div>
+      </span>
     </Component>
   );
 };

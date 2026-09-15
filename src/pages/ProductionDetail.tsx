@@ -704,7 +704,7 @@ export default function ProductionDetail() {
           <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4">
             <div>
               <p className="text-xs font-semibold text-studio-text-muted">版本历史</p>
-              <h2 className="mt-1 text-sm font-semibold text-studio-text-primary">版本与审核说明</h2>
+              <h2 className="mt-1 text-sm font-semibold text-studio-text-primary">版本记录</h2>
             </div>
             <button type="button" onClick={() => setShowSidebar(false)} className="rounded-lg p-2 text-studio-text-muted transition hover:bg-white/[0.06] hover:text-studio-text-primary">
               <PanelRightClose className="h-4 w-4" />
@@ -760,19 +760,11 @@ export default function ProductionDetail() {
               ) : null}
             </div>
 
-            <div className="space-y-3 border-t border-studio-border-soft pt-5">
-              <div>
-                <p className="text-xs font-semibold uppercase text-studio-text-muted">关联选题</p>
-                <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan transition hover:text-white">
-                  {topic?.title || production.topic_title || '-'}
-                </button>
-              </div>
-              <div>
-                <p className="text-xs font-semibold uppercase text-studio-text-muted">审核说明</p>
-                <p className="mt-2 text-sm leading-6 text-studio-text-secondary">
-                  当前只调整外层工作台视觉，审核、保存、版本和协同同步仍沿用原有流程。
-                </p>
-              </div>
+            <div className="border-t border-studio-border-soft pt-5">
+              <p className="text-xs font-semibold uppercase text-studio-text-muted">关联选题</p>
+              <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan transition hover:text-white">
+                {topic?.title || production.topic_title || '-'}
+              </button>
             </div>
           </div>
         </GlassPanel>

@@ -28,7 +28,6 @@ import {
   Video,
   Database,
   ListFilter,
-  UserRoundSearch,
   Inbox,
   ShieldCheck,
 } from 'lucide-react';
@@ -103,7 +102,6 @@ export const navigationSections: NavigationSection[] = [
       { id: 'creator-dashboard', label: '运营概览', icon: Database, path: '/analytics/creator-center', permissions: ['creator:data:view'] },
       { id: 'creator-works', label: '作品管理', icon: ListFilter, path: '/analytics/creator-center/works', permissions: ['creator:data:view'] },
       { id: 'creator-trends', label: '数据趋势', icon: BarChart3, path: '/analytics/creator-center/trends', permissions: ['creator:data:view'] },
-      { id: 'creator-fans', label: '粉丝画像', icon: UserRoundSearch, path: '/analytics/creator-center/fans', permissions: ['creator:data:view'] },
       { id: 'creator-reports', label: '复盘报告', icon: FileBarChart, path: '/analytics/creator-center/reports', permissions: ['creator:report:view'] },
     ],
   },

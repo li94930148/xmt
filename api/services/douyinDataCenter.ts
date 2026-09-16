@@ -9,6 +9,7 @@ import { reconcilePublishingDouyinLinks } from './publishingDouyinLink.js';
 type JsonRecord = Record<string, unknown>;
 type AgentIdentity = { id: number; user_id: number; platform: string; account_id: string };
 type Period = '7d' | '30d' | '90d';
+type ReportPeriod = 'daily' | 'weekly' | 'monthly';
 type WorksCursor = { publish_time: string; id: number };
 type AnalyzedDouyinWork = ReturnType<typeof analyzeDouyinWorks>['works'][number];
 export type DouyinWorksPage = { items: AnalyzedDouyinWork[]; next_cursor: string | null; has_more: boolean; page_size: number };
@@ -288,8 +289,18 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   }), { plays: 0, interactions: 0, shares: 0 });
   const latest = snapshots.at(-1) || {};
   const previous = (periodDays: number) => snapshots.filter(row => new Date(String(row.snapshot_date)).getTime() <= new Date(String(latest.snapshot_date)).getTime() - periodDays * 86400000).at(-1) || null;
+  const validFanSnapshots = snapshots.filter(row => number(row.fans_count_available) === 1);
+  const latestFanSnapshot = validFanSnapshots.at(-1) || null;
+  const previousFan = (periodDays: number) => validFanSnapshots.filter(row => new Date(String(row.snapshot_date)).getTime() <= new Date(String(latest.snapshot_date)).getTime() - periodDays * 86400000).at(-1) || null;
+  const growthFor = (periodDays: number) => {
+    const result = growth(latest, previous(periodDays));
+    if (!result) return null;
+    const fanStart = previousFan(periodDays);
+    return { ...result, fans: latestFanSnapshot && fanStart && String(latestFanSnapshot.snapshot_date) !== String(fanStart.snapshot_date) ? number(latestFanSnapshot.fans_count) - number(fanStart.fans_count) : null };
+  };
   const rankedWorks = [...analyzed.works].sort((left, right) => Number(right.performance.is_viral) - Number(left.performance.is_viral) || right.performance.score - left.performance.score || number(right.play_count) - number(left.play_count));
-  const fansAvailable = number(latest.fans_count_available ?? account.fans_count_available) === 1;
+  const accountFansAvailable = number(account.fans_count_available) === 1;
+  const fansAvailable = accountFansAvailable || Boolean(latestFanSnapshot);
   const missingFields = fansAvailable ? [] : ['fans_count', 'fan_growth'];
   const mode = officialDashboardMode();
   const officialViews = mode === 'existing_only' ? null : await officialViewsForDashboard(creatorAccountId);
@@ -302,7 +313,7 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   return {
     account,
     metrics: {
-      fans_count: fansAvailable ? number(latest.fans_count ?? account.fans_count) : null,
+      fans_count: fansAvailable ? number(accountFansAvailable ? account.fans_count : latestFanSnapshot?.fans_count) : null,
       works_count: canonical.length,
       play_count: displayPlays,
       interaction_count: totals.interactions,
@@ -312,8 +323,8 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     },
     health: calculateDouyinAccountHealth(account, analyzed.works, snapshots),
     baselines: analyzed.baselines,
-    growth_7d: growth(latest, previous(7)),
-    growth_30d: growth(latest, previous(30)),
+    growth_7d: growthFor(7),
+    growth_30d: growthFor(30),
     top_works: await resolveWorkCovers(account, rankedWorks.slice(0, 5)),
     snapshot_count: snapshots.length,
     snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
@@ -447,4 +458,82 @@ export async function getDouyinTrends(creatorAccountId: number, period: Period) 
 export async function getDouyinSyncLogs(creatorAccountId: number) {
   const account = await accountForScope(creatorAccountId);
   return account ? queryAll<Record<string, unknown>>('SELECT * FROM douyin_sync_logs WHERE account_id=? ORDER BY sync_time DESC,id DESC LIMIT 100', [account.id]) : [];
+}
+
+export async function getDouyinReportData(creatorAccountId: number, type: ReportPeriod) {
+  const account = await accountForScope(creatorAccountId);
+  if (!account) return null;
+  const [works, snapshots] = await Promise.all([
+    queryAll<DouyinMetricsWork>('SELECT * FROM douyin_works WHERE account_id=?', [account.id]),
+    queryAll<Record<string, unknown>>('SELECT * FROM douyin_daily_snapshots WHERE account_id=? ORDER BY snapshot_date ASC', [account.id]),
+  ]);
+  const analyzed = analyzeDouyinWorks(canonicalizeDouyinWorks(works));
+  const latest = snapshots.at(-1) || null;
+  const validFanSnapshots = snapshots.filter(row => number(row.fans_count_available) === 1);
+  const latestFanSnapshot = validFanSnapshots.at(-1) || null;
+  const periodDays = type === 'daily' ? 1 : type === 'weekly' ? 7 : 30;
+  const anchor = latest?.snapshot_date ? new Date(String(latest.snapshot_date)).getTime() : Date.now();
+  const boundary = anchor - periodDays * 86400000;
+  const start = snapshots.filter((row) => new Date(String(row.snapshot_date)).getTime() <= boundary).at(-1) || snapshots[0] || null;
+  const periodWorks = analyzed.works.filter((work) => new Date(String(work.publish_time || 0)).getTime() >= boundary);
+  const current = analyzed.works.reduce((result, work) => ({
+    plays: result.plays + number(work.play_count),
+    likes: result.likes + number(work.like_count),
+    comments: result.comments + number(work.comment_count),
+    shares: result.shares + number(work.share_count),
+    collects: result.collects + number(work.collect_count),
+  }), { plays: 0, likes: 0, comments: 0, shares: 0, collects: 0 });
+  const accountFansAvailable = number(account.fans_count_available) === 1;
+  const fansAvailable = accountFansAvailable || Boolean(latestFanSnapshot);
+  const hasGrowthBaseline = Boolean(latest && start && String(latest.snapshot_date) !== String(start.snapshot_date));
+  const growthValue = (key: string) => hasGrowthBaseline && latest && start ? number(latest[key]) - number(start[key]) : null;
+  const fanStart = validFanSnapshots.filter(row => new Date(String(row.snapshot_date)).getTime() <= boundary).at(-1) || validFanSnapshots[0] || null;
+  const fanGrowth = latestFanSnapshot && fanStart && String(latestFanSnapshot.snapshot_date) !== String(fanStart.snapshot_date)
+    ? number(latestFanSnapshot.fans_count) - number(fanStart.fans_count)
+    : null;
+  const excellent = periodWorks.filter((work) => work.performance.level === 'viral' || work.performance.level === 'excellent').sort((left, right) => right.performance.score - left.performance.score || number(right.play_count) - number(left.play_count)).slice(0, 5);
+  const low = periodWorks.filter((work) => work.performance.level === 'low').sort((left, right) => left.performance.score - right.performance.score || number(left.play_count) - number(right.play_count)).slice(0, 5);
+  return {
+    period_days: periodDays,
+    account_performance: {
+      health: calculateDouyinAccountHealth(account, analyzed.works, snapshots),
+      current: {
+        fans_count: fansAvailable ? number(accountFansAvailable ? account.fans_count : latestFanSnapshot?.fans_count) : null,
+        works_count: analyzed.works.length,
+        play_count: current.plays,
+        interaction_count: current.likes + current.comments + current.shares + current.collects,
+        like_count: current.likes,
+        comment_count: current.comments,
+        share_count: current.shares,
+        collect_count: current.collects,
+      },
+    },
+    work_performance: {
+      published: periodWorks.length,
+      total: analyzed.works.length,
+      level_distribution: analyzed.works.reduce<Record<string, number>>((result, work) => {
+        result[work.performance.level] = (result[work.performance.level] || 0) + 1;
+        return result;
+      }, { viral: 0, excellent: 0, normal: 0, low: 0 }),
+    },
+    growth: {
+      plays: growthValue('play_count'),
+      fans: fanGrowth,
+      interactions: hasGrowthBaseline && latest && start
+        ? number(latest.like_count) + number(latest.comment_count) + number(latest.share_count)
+          - number(start.like_count) - number(start.comment_count) - number(start.share_count)
+        : null,
+    },
+    excellent_works: excellent.map((work) => ({ id: work.id, title: String((work as JsonRecord).title || ''), score: work.performance.score, level: work.performance.level, play_count: number(work.play_count) })),
+    low_efficiency_works: low.map((work) => ({ id: work.id, title: String((work as JsonRecord).title || ''), score: work.performance.score, level: work.performance.level, play_count: number(work.play_count) })),
+    data_coverage: {
+      source: 'douyin_operations_unified',
+      snapshot_count: snapshots.length,
+      period_start: start?.snapshot_date ?? null,
+      period_end: latest?.snapshot_date ?? null,
+      fans_available: fansAvailable,
+      missing_fields: fansAvailable ? [] : ['fans_count', 'fan_growth'],
+      metric_definition: '累计播放为去重后每个入库作品当前播放量之和；周期增长为账号日快照期末减期初。',
+    },
+  };
 }

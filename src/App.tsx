@@ -100,7 +100,6 @@ const CreatorDashboard = lazyWithRetry(() => import('@/pages/creator-center/Crea
 const CreatorWorks = lazyWithRetry(() => import('@/pages/creator-center/CreatorWorks'), 'CreatorWorks');
 const CreatorWorkDetail = lazyWithRetry(() => import('@/pages/creator-center/CreatorWorkDetail'), 'CreatorWorkDetail');
 const CreatorTrends = lazyWithRetry(() => import('@/pages/creator-center/CreatorTrends'), 'CreatorTrends');
-const CreatorFans = lazyWithRetry(() => import('@/pages/creator-center/CreatorFans'), 'CreatorFans');
 const CreatorReports = lazyWithRetry(() => import('@/pages/creator-center/CreatorReports'), 'CreatorReports');
 const PermissionManagement = lazyWithRetry(() => import('@/pages/PermissionManagement'), 'PermissionManagement');
 const AnonymousFeedbackAdmin = lazyWithRetry(() => import('@/pages/AnonymousFeedbackAdmin'), 'AnonymousFeedbackAdmin');
@@ -233,7 +232,6 @@ export default function App() {
                   <Route path="/analytics/creator-center/content/:id" element={<CreatorWorkDetail />} />
                   <Route path="/analytics/creator-center/work/:id" element={<CreatorWorkDetail />} />
                   <Route path="/analytics/creator-center/trends" element={<CreatorTrends />} />
-                  <Route path="/analytics/creator-center/fans" element={<CreatorFans />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['creator:report:view']} />}>
                   <Route path="/analytics/creator-center/reports" element={<CreatorReports />} />

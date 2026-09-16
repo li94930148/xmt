@@ -39,10 +39,12 @@ export default function AuthRolloutStatus() {
     if (!data) return null;
     const external = data.exporters.status.filter((item) => item.kind !== 'memory');
     const externalReady = external.some((item) => item.enabled && item.healthy && Boolean(item.lastExportAt));
+    const externalReason = external.map((item) => item.reason).find(Boolean);
+    const socketReady = data.socketBridge.socketBridgeEnabled && data.socketBridge.socketBridgeApproval;
     const checks: Check[] = [
       { label: '保持安全基线', ready: data.runtime.effectiveRolloutMode === 'legacy' || data.rollout.mode === 'allowlist', description: data.runtime.effectiveRolloutMode === 'legacy' ? '正式用户仍走原登录链路，可以随时安全准备下一阶段。' : '当前只允许明确名单，不会自动扩大到其他用户。' },
-      { label: '外部监控与告警', ready: externalReady, description: externalReady ? '已有健康的持久指标出口并完成过数据导出。' : '目前只有进程内指标或尚无成功导出，服务重启后会丢失观察数据。' },
-      { label: 'Socket / 协作会话衔接', ready: data.socketBridge.socketBridgeEnabled && data.socketBridge.socketBridgeApproval, description: data.socketBridge.socketBridgeEnabled && data.socketBridge.socketBridgeApproval ? '协作连接已通过独立审批门禁。' : '实时协作用户仍可能持有旧 Token，暂不适合扩大登录迁移。' },
+      { label: '外部监控与告警', ready: externalReady, description: externalReady ? '已收到允许来源的指标抓取；仍需在灰度审批中附上告警接收证据。' : externalReason || '尚未收到外部监控抓取，不能把进程内指标当作持久观测证据。' },
+      { label: 'Socket / 协作会话衔接', ready: socketReady, description: socketReady ? `协作连接已通过独立审批门禁，当前准入 ${data.socketBridge.socketV1EligibleUserCount} 人。` : !data.socketBridge.socketBridgeApproval ? 'Socket Bridge 尚未取得独立审批；先确定 2–3 个普通测试账号和回滚窗口。' : 'Socket Bridge 已审批但运行开关未生效，暂不扩大登录迁移。' },
       { label: '运行风险', ready: data.risk.status === 'healthy', description: data.risk.status === 'healthy' ? '当前窗口没有触发停止条件。' : `已触发 ${data.risk.events.length} 个停止条件，应先处理异常。` },
     ];
     const ready = checks.every((item) => item.ready);
@@ -58,6 +60,7 @@ export default function AuthRolloutStatus() {
   if (!data || !decision) return <PageShell><PageHeader title="登录安全升级"/><GlassPanel className="p-6 text-studio-coral">{error || '暂时无法读取状态'}</GlassPanel></PageShell>;
 
   const hour = data.metrics.lastHour;
+  const lastExternalScrape = data.exporters.status.filter((item) => item.kind !== 'memory' && item.lastExportAt).map((item) => String(item.lastExportAt)).sort().at(-1);
   return <PageShell>
     <PageHeader title="登录安全升级" description="判断新登录机制是否具备进入下一阶段的条件" actions={<button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-button border border-studio-border-soft px-4 text-sm font-semibold"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>重新检查</button>}/>
     {error ? <div role="alert" className="rounded-button border border-studio-coral/30 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral">{error}</div> : null}
@@ -98,6 +101,7 @@ export default function AuthRolloutStatus() {
         <div><p className="text-xs text-studio-text-muted">配置来源</p><p className="mt-1 font-medium">{data.runtime.effectiveConfigSource}</p></div>
         <div><p className="text-xs text-studio-text-muted">Auth v1 / Web</p><p className="mt-1 font-medium">{data.runtime.effectiveAuthV1Enabled ? '开' : '关'} / {data.runtime.effectiveAuthWebEnabled ? '开' : '关'}</p></div>
         <div><p className="text-xs text-studio-text-muted">指标出口</p><p className="mt-1 font-medium">{data.exporters.source.join(' + ') || '无'}</p></div>
+        <div><p className="text-xs text-studio-text-muted">最近外部抓取</p><p className="mt-1 font-medium">{lastExternalScrape ? formatTime(lastExternalScrape) : '尚未验证'}</p></div>
         <div><p className="text-xs text-studio-text-muted">状态生成时间</p><p className="mt-1 font-medium">{formatTime(data.generatedAt)}</p></div>
       </div>
     </details>

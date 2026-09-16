@@ -29,10 +29,15 @@ metrics.countCsrfFailed({ userId: 25, sessionId: 'session-1', mode: 'v1-web', cl
 metrics.countLogoutSuccess({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web' });
 metrics.recordSessionRevoked({ userId: 25, sessionId: 'session-1', mode: 'v1-web', clientType: 'web', reason: 'logout' });
 
+const beforeScrape = prometheus.status();
+assert.equal(beforeScrape.lastExportAt, null, 'in-process metric events must not be reported as an external Prometheus scrape');
+assert.match(String(beforeScrape.reason), /尚未收到 Prometheus 抓取/);
+
 assert.equal(memory.list().filter((point) => point.name === 'v1_login_count').length, 1, 'memory exporter stays compatible');
 assert.equal(memory.list().filter((point) => point.name === 'security_events').length, 1);
 
 const output = prometheus.metrics();
+assert(prometheus.status().lastExportAt, 'an actual metrics endpoint read must record scrape evidence');
 assert.match(output, /xmt_auth_login_total\{instance="test-instance",mode="v1-web"\} 1/);
 assert.match(output, /xmt_auth_refresh_total\{instance="test-instance",mode="v1-web"\} 1/);
 assert.match(output, /xmt_auth_refresh_failed_total\{instance="test-instance",mode="v1-web"\} 1/);

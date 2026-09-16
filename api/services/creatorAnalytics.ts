@@ -1,4 +1,5 @@
 import { execute, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils.js';
+import { getDouyinReportData } from './douyinDataCenter.js';
 
 type JsonRecord = Record<string, unknown>;
 type Period = '7d' | '30d' | '90d';
@@ -205,36 +206,22 @@ export class CreatorAnalyticsService {
     return { period, days: daysFor(period), series: grouped };
   }
 
-  async fans(accountId: number, compareDays = 30) {
-    const availableFilter = `(age_json NOT IN ('','{}','null') OR gender_json NOT IN ('','{}','null') OR city_json NOT IN ('','{}','null') OR province_json NOT IN ('','{}','null') OR interest_json NOT IN ('','{}','null') OR active_time_json NOT IN ('','{}','null'))`;
-    const current = await queryOne<JsonRecord>(`SELECT snapshot_time,age_json,gender_json,city_json,province_json,interest_json,active_time_json FROM creator_fans_portraits WHERE account_id=? AND ${availableFilter} ORDER BY snapshot_time DESC LIMIT 1`, [accountId]);
-    const compareTime = current ? new Date(timestamp(current.snapshot_time) - compareDays * 86400000).toISOString() : '';
-    const previous = current ? await queryOne<JsonRecord>(`SELECT snapshot_time,age_json,gender_json,city_json,province_json,interest_json,active_time_json FROM creator_fans_portraits WHERE account_id=? AND snapshot_time<=? AND ${availableFilter} ORDER BY snapshot_time DESC LIMIT 1`, [accountId, compareTime]) : null;
-    const map = (row?: JsonRecord) => row ? { snapshot_time: row.snapshot_time, age: parse(row.age_json), gender: parse(row.gender_json), city: parse(row.city_json), province: parse(row.province_json), interest: parse(row.interest_json), active_time: parse(row.active_time_json) } : null;
-    return { compare_days: compareDays, current: map(current || undefined), previous: map(previous || undefined), data_status: current ? 'ready' : 'unavailable', data_source: 'douyin_creator_center_collection', missing_fields: current ? [] : ['fan_portrait'], warnings: current ? [] : ['已收到粉丝模块快照，但当前采集响应没有可用画像字段。需要获得 fans.data.bind 等相应数据权限后重新采集。'] };
-  }
-
   async generateReport(accountId: number, type: ReportType) {
-    const days = daysFor(type);
-    const [overview, works, metrics] = await Promise.all([this.overview(accountId), workRows(accountId), accountMetrics(accountId)]);
-    const latest = metrics.at(-1), start = metrics.find((row) => timestamp(row.snapshot_time) >= cutoff(days, latest?.snapshot_time)) || metrics[0];
-    const rated = overview.rated_works.map((analysis) => ({ ...analysis, work: works.find((work) => work.id === analysis.id) }));
-    const top = [...rated].sort((a, b) => b.score - a.score).slice(0, 5);
-    const low = [...rated].sort((a, b) => a.score - b.score).slice(0, 5);
-    const periodWorks = works.filter((work) => timestamp(work.publish_time) >= cutoff(days, latest?.snapshot_time));
+    const unified = await getDouyinReportData(accountId, type);
+    if (!unified) throw Object.assign(new Error('该账号尚未完成标准化抖音同步'), { statusCode: 404 });
+    const growth = unified.growth;
+    const health = unified.account_performance.health;
     const anomalies: Array<{ metric: string; message: string }> = [];
-    if (number(latest?.play_count) < number(start?.play_count)) anomalies.push({ metric: 'plays', message: '周期末播放量低于周期初快照' });
-    if (number(latest?.fans_count) < number(start?.fans_count)) anomalies.push({ metric: 'fans', message: '周期内粉丝出现净流失' });
-    if (overview.health.content_stability < 45) anomalies.push({ metric: 'stability', message: '作品播放波动较大，内容稳定性低于 45 分' });
+    if (growth.plays != null && growth.plays < 0) anomalies.push({ metric: 'plays', message: '周期末累计播放低于期初快照，请核对采集完整性' });
+    if (growth.fans != null && growth.fans < 0) anomalies.push({ metric: 'fans', message: '周期内粉丝出现净流失' });
+    if (number(health.score) < 45) anomalies.push({ metric: 'health', message: '账号综合健康度低于 45 分' });
     const content = {
-      type, period_days: days, generated_at: new Date().toISOString(),
-      account_performance: { health: overview.health, latest_snapshot: latest || null },
-      work_performance: { published: periodWorks.length, level_distribution: overview.levels },
-      growth: { plays: number(latest?.play_count)-number(start?.play_count), fans: number(latest?.fans_count)-number(start?.fans_count), interactions: number(latest?.interaction_count)-number(start?.interaction_count) },
+      report_version: 2,
+      type,
+      generated_at: new Date().toISOString(),
+      ...unified,
       anomalies,
-      excellent_works: top.map((item) => ({ id: item.id, title: item.work?.title || item.title, score: item.score, level: item.level })),
-      low_efficiency_works: low.map((item) => ({ id: item.id, title: item.work?.title || item.title, score: item.score, level: item.level })),
-      methodology: '全部结论来自 Creator Data Center 已入仓快照，未调用外部 AI。',
+      methodology: '账号、作品、趋势与报告统一读取抖音运营中心标准化数据；累计值不会重复累加历史快照。',
     };
     const id = await executeInsert('INSERT INTO creator_reports(account_id,type,content_json) VALUES(?,?,?)', [accountId, type, JSON.stringify(content)]);
     return { id, account_id: accountId, ...content };
@@ -243,6 +230,11 @@ export class CreatorAnalyticsService {
   async reports(accountId: number) {
     const rows = await queryAll<{ id: number; type: ReportType; content_json: string; created_at: string }>('SELECT id,type,content_json,created_at FROM creator_reports WHERE account_id=? ORDER BY created_at DESC,id DESC LIMIT 100', [accountId]);
     return rows.map((row) => ({ id: row.id, type: row.type, created_at: row.created_at, content: parse(row.content_json) }));
+  }
+
+  async deleteReport(accountId: number, reportId: number) {
+    const deleted = await execute('DELETE FROM creator_reports WHERE id=? AND account_id=?', [reportId, accountId]);
+    if (deleted !== 1) throw Object.assign(new Error('复盘报告不存在或不在当前账号范围内'), { statusCode: 404 });
   }
 }
 

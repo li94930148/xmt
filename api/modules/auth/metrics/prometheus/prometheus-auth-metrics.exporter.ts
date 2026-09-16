@@ -22,9 +22,13 @@ export class PrometheusAuthMetricsExporter implements AuthMetricsExporter {
   readonly kind = 'prometheus' as const;
   private samples = new Map<string, MetricSample>();
   private observations = new Map<string, number[]>();
-  private lastExportAt: string | null = null;
+  private lastMetricAt: string | null = null;
+  private lastScrapeAt: string | null = null;
 
-  constructor(private readonly instance = process.env.XMT_INSTANCE_ID?.trim() || process.env.HOSTNAME?.trim() || 'unknown') {}
+  constructor(
+    private readonly instance = process.env.XMT_INSTANCE_ID?.trim() || process.env.HOSTNAME?.trim() || 'unknown',
+    private readonly endpointEnabled = true,
+  ) {}
 
   increment(name: string, value = 1, labels: AuthMetricLabels = {}, at = new Date()): void {
     const mapped = this.map(name, labels);
@@ -32,7 +36,7 @@ export class PrometheusAuthMetricsExporter implements AuthMetricsExporter {
     const key = this.key(mapped.name, mapped.labels);
     const current = this.samples.get(key)?.value ?? 0;
     this.samples.set(key, { value: current + value, labels: mapped.labels });
-    this.lastExportAt = at.toISOString();
+    this.lastMetricAt = at.toISOString();
   }
 
   observe(name: string, value: number, labels: AuthMetricLabels = {}, at = new Date()): void {
@@ -41,17 +45,18 @@ export class PrometheusAuthMetricsExporter implements AuthMetricsExporter {
     const key = this.key(mapped.name, mapped.labels);
     this.observations.set(key, [...(this.observations.get(key) ?? []), value]);
     this.samples.set(key, { value, labels: mapped.labels });
-    this.lastExportAt = at.toISOString();
+    this.lastMetricAt = at.toISOString();
   }
 
   gauge(name: string, value: number, labels: AuthMetricLabels = {}, at = new Date()): void {
     const mapped = this.map(name, labels);
     if (!mapped) return;
     this.samples.set(this.key(mapped.name, mapped.labels), { value, labels: mapped.labels });
-    this.lastExportAt = at.toISOString();
+    this.lastMetricAt = at.toISOString();
   }
 
-  metrics(): string {
+  metrics(at = new Date()): string {
+    this.lastScrapeAt = at.toISOString();
     const lines: string[] = [];
     for (const [name, type] of TYPES) {
       lines.push(`# HELP ${name} XMT Auth ${name.replace('xmt_auth_', '').split('_').join(' ')}`);
@@ -75,7 +80,20 @@ export class PrometheusAuthMetricsExporter implements AuthMetricsExporter {
   }
 
   status(): AuthMetricsExporterStatus {
-    return { name: this.name, kind: this.kind, enabled: true, healthy: true, lastExportAt: this.lastExportAt, reason: null };
+    return {
+      name: this.name,
+      kind: this.kind,
+      enabled: this.endpointEnabled,
+      healthy: this.endpointEnabled,
+      lastExportAt: this.lastScrapeAt,
+      reason: !this.endpointEnabled
+        ? 'Prometheus 指标端点未启用'
+        : this.lastScrapeAt
+          ? null
+          : this.lastMetricAt
+            ? '已有指标事件，但尚未收到 Prometheus 抓取'
+            : '尚未收到指标事件或 Prometheus 抓取',
+    };
   }
 
   private map(name: string, labels: AuthMetricLabels) {

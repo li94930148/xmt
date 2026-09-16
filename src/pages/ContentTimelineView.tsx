@@ -1,177 +1,130 @@
-import { useMemo, useState } from 'react';
-import { Clock, GitCommit, RefreshCw } from 'lucide-react';
-import type { UnifiedTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
-import { useThemeStyles } from '../hooks/useThemeStyles';
-import { useContentOSContext } from '../content/orchestrator/useContentOSContext';
-import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import { useEffect, useMemo, useState } from 'react';
+import { Clock3, FileClock, GitBranch, RefreshCw, UserRound } from 'lucide-react';
+import { getProductionById, getProductionHistory, getShootingById } from '../api/workflow';
 import ContentDocumentPicker from '../components/ContentDocumentPicker';
+import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
+import { getTimelineView, type BuildUnifiedTimelineSources, type UnifiedTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
+import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime } from '../lib/utils';
 
-function formatTime(timestamp: number) {
-  return formatBeijingTime(timestamp);
+function eventText(event: UnifiedTimelineEvent) {
+  const version = event.payload?.version ? ` ${String(event.payload.version)}` : '';
+  if (event.type === 'version') return `生成了版本${version}`;
+  if (event.type === 'save') return '保存了内容';
+  if (event.type === 'snapshot') return '生成了内容快照';
+  if (event.type === 'conflict') return '发现并处理协作冲突';
+  return '编辑了内容';
 }
 
-function typeLabel(type: UnifiedTimelineEvent['type']) {
-  const labels: Record<UnifiedTimelineEvent['type'], string> = {
-    edit: '编辑',
-    save: '保存',
-    version: '版本',
-    snapshot: '快照',
-    conflict: '冲突',
-  };
-  return labels[type];
+function eventTone(type: UnifiedTimelineEvent['type']) {
+  if (type === 'conflict') return 'bg-red-500';
+  if (type === 'version') return 'bg-violet-500';
+  if (type === 'save') return 'bg-emerald-500';
+  return 'bg-blue-500';
 }
 
-function typeClass(type: UnifiedTimelineEvent['type']) {
-  const classes: Record<UnifiedTimelineEvent['type'], string> = {
-    edit: 'bg-blue-500/15 text-blue-400',
-    save: 'bg-emerald-500/15 text-emerald-400',
-    version: 'bg-purple-500/15 text-purple-400',
-    snapshot: 'bg-cyan-500/15 text-cyan-400',
-    conflict: 'bg-red-500/15 text-red-400',
-  };
-  return classes[type];
+function timeRange(start: number, end: number) {
+  const startText = formatBeijingTime(start, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (start === end) return startText;
+  return `${startText} – ${formatBeijingTime(end, { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-function sourceLabel(source: UnifiedTimelineEvent['source']) {
-  if (source === 'realtime') return '实时协作';
-  if (source === 'db') return '持久保存';
-  return '版本系统';
-}
+async function loadPersistedSources(docId: string): Promise<BuildUnifiedTimelineSources> {
+  const [kind, rawId] = docId.split(':');
+  const id = Number(rawId);
+  if (!Number.isSafeInteger(id) || id <= 0) return {};
 
-function payloadSummary(payload?: Record<string, unknown>) {
-  if (!payload || Object.keys(payload).length === 0) return '暂无额外节点信息';
-  if (typeof payload.version === 'string' || typeof payload.version === 'number') return `关联版本：${payload.version}`;
-  return `包含 ${Object.keys(payload).length} 项节点信息`;
+  if (kind === 'production') {
+    const [production, history] = await Promise.all([getProductionById(id), getProductionHistory(id)]);
+    return {
+      versionEvents: [
+        ...history.map((entry) => ({ id: `history-${entry.id}`, timestamp: new Date(entry.created_at).getTime(), version: entry.version, changeType: entry.change_type, operatorName: entry.operator_name })),
+        { id: `current-${production.id}`, timestamp: new Date(production.updated_at || production.created_at).getTime(), version: production.version, changeType: 'current', operatorName: production.operator_name },
+      ],
+    };
+  }
+
+  if (kind === 'shooting') {
+    const shooting = await getShootingById(id);
+    return {
+      versionEvents: [{ id: `shooting-${id}`, timestamp: new Date(shooting.updated_at || shooting.created_at).getTime(), version: shooting.production?.version, operatorName: shooting.production?.operator_name, label: '成片记录' }],
+    };
+  }
+  return {};
 }
 
 export default function ContentTimelineView() {
   const styles = useThemeStyles();
-  const initialDocument = getCurrentContentDocument();
-  const [docId, setDocId] = useState(initialDocument.label);
-  const [activeDocId, setActiveDocId] = useState(initialDocument.docId);
-  const [selected, setSelected] = useState<UnifiedTimelineEvent | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const context = useContentOSContext(activeDocId, refreshKey);
-  const selectedIndex = useMemo(
-    () => selected ? context.timeline.events.findIndex((event) => event.id === selected.id) : -1,
-    [context.timeline.events, selected],
-  );
-  const nextEvent = selectedIndex >= 0 ? context.timeline.events[selectedIndex + 1] || null : null;
-  const hasNextChange = Boolean(selected && nextEvent && selected.id !== nextEvent.id);
+  const initial = getCurrentContentDocument();
+  const [input, setInput] = useState(initial.label);
+  const [document, setDocument] = useState(initial);
+  const [sources, setSources] = useState<BuildUnifiedTimelineSources>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const pickDocument = (pickedDocId: string, pickedTitle: string) => {
-    const current = setCurrentContentDocument(pickedDocId, pickedTitle);
-    setDocId(current.title);
-    setActiveDocId(current.docId);
-    setRefreshKey((value) => value + 1);
-    setSelected(null);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    void loadPersistedSources(document.docId).then((next) => {
+      if (active) setSources(next);
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : '内容动态加载失败');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [document.docId, reloadKey]);
+
+  const timeline = useMemo(() => getTimelineView(document.docId, sources), [document.docId, sources]);
+  const sessions = useMemo(() => timeline.sessions.slice().reverse(), [timeline.sessions]);
+  const people = useMemo(() => new Set(timeline.timeline.map((event) => event.userId).filter(Boolean)).size, [timeline.timeline]);
+  const versionCount = timeline.timeline.filter((event) => event.type === 'version').length;
+  const latest = timeline.timeline[timeline.timeline.length - 1];
+
+  const chooseDocument = (docId: string, title: string) => {
+    const next = setCurrentContentDocument(docId, title);
+    setInput(next.title);
+    setDocument(next);
+  };
+
+  const applyInput = () => {
+    const resolved = resolveContentDocument(input);
+    if (!resolved) {
+      setError('请从最近内容中选择，或输入 production:编号 / shooting:编号');
+      return;
+    }
+    chooseDocument(resolved.docId, resolved.title);
+    setReloadKey((value) => value + 1);
   };
 
   return (
-    <div className="space-y-5">
-      <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>统一内容时间轴</p>
-            <h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>内容统一时间轴</h1>
-          </div>
+    <div className="mx-auto max-w-[1200px] space-y-5 pb-12">
+      <header className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div><p className={`text-xs font-medium ${styles.textMuted}`}>内容生产记录</p><h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>内容动态</h1><p className={`mt-2 text-sm ${styles.textMuted}`}>按时间查看这篇内容的编辑、保存和版本变化</p></div>
           <div className="flex w-full gap-2 lg:w-auto">
-            <ContentDocumentPicker
-              value={docId}
-              onChange={setDocId}
-              onPick={pickDocument}
-              className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`}
-            />
-            <button
-              onClick={() => {
-                const resolved = resolveContentDocument(docId);
-                if (!resolved) return;
-                const current = setCurrentContentDocument(resolved.docId, resolved.title);
-                setDocId(current.title);
-                setActiveDocId(current.docId);
-                setRefreshKey((value) => value + 1);
-                setSelected(null);
-              }}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-            >
-              <RefreshCw className="h-4 w-4" />
-              查看
-            </button>
+            <ContentDocumentPicker value={input} onChange={setInput} onPick={chooseDocument} className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm lg:w-80 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`} />
+            <button type="button" onClick={applyInput} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>查看</button>
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.3fr_0.8fr]">
-        <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
-          <div className={`flex items-center justify-between border-b ${styles.border} px-5 py-4`}>
-            <div className="flex items-center gap-2">
-              <GitCommit className="h-5 w-5 text-blue-400" />
-              <h2 className={`text-base font-semibold ${styles.textPrimary}`}>时间轴节点</h2>
-            </div>
-            <span className={`text-xs ${styles.textMuted}`}>{context.timeline.events.length} 个节点</span>
-          </div>
-          <div className="max-h-[620px] overflow-y-auto p-5">
-            {context.timeline.events.length === 0 ? (
-              <div className={`rounded-xl ${styles.bgTertiary} p-6 text-center text-sm ${styles.textMuted}`}>
-                暂无编辑、保存或版本节点
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {context.timeline.events.map((event) => (
-                  <button
-                    key={event.id}
-                    onClick={() => setSelected(event)}
-                    className={`w-full rounded-xl border p-4 text-left transition-colors ${
-                      selected?.id === event.id ? 'border-blue-500 bg-blue-500/10' : `${styles.border} ${styles.bgTertiary} ${styles.hoverBg}`
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${typeClass(event.type)}`}>
-                          {typeLabel(event.type)}
-                        </span>
-                        <span className={`text-sm ${styles.textPrimary}`}>{event.payload?.version ? `版本 ${event.payload.version}` : sourceLabel(event.source)}</span>
-                      </div>
-                      <span className={`inline-flex items-center gap-1 text-xs ${styles.textMuted}`}>
-                        <Clock className="h-3.5 w-3.5" />
-                        {formatTime(event.timestamp)}
-                      </span>
-                    </div>
-                    {event.userId && <p className={`mt-2 text-xs ${styles.textMuted}`}>操作者：{event.userId}</p>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
+      {error ? <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500">{error}</div> : null}
 
-        <aside className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
-          <div className={`border-b ${styles.border} px-5 py-4`}>
-            <h2 className={`text-base font-semibold ${styles.textPrimary}`}>节点详情</h2>
-          </div>
-          <div className="space-y-4 p-5">
-            {selected ? (
-              <>
-                <div className={`rounded-xl ${styles.bgTertiary} p-4`}>
-                  <p className={`text-sm font-medium ${styles.textPrimary}`}>{typeLabel(selected.type)}节点</p>
-                  <p className={`mt-2 text-xs ${styles.textMuted}`}>{formatTime(selected.timestamp)}</p>
-                  <p className={`mt-2 text-xs ${styles.textMuted}`}>来源：{sourceLabel(selected.source)}</p>
-                </div>
-                <div className={`rounded-xl p-4 text-sm ${styles.bgTertiary} ${styles.textSecondary}`}>
-                  {payloadSummary(selected.payload)}
-                </div>
-                <div className={`rounded-xl ${styles.bgTertiary} p-4 text-sm ${styles.textSecondary}`}>
-                  <p>只读跳转：{selectedIndex >= 0 ? '可定位到该时间点' : '暂无可定位节点'}</p>
-                  <p className="mt-2">与下一节点差异：{hasNextChange ? '存在变化' : '无变化'}</p>
-                </div>
-              </>
-            ) : (
-              <p className={`text-sm ${styles.textMuted}`}>选择一个时间轴节点查看详情。</p>
-            )}
-          </div>
-        </aside>
-      </div>
+      <section className="grid gap-4 sm:grid-cols-3">
+        <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}><div className={`flex items-center gap-2 text-xs ${styles.textMuted}`}><FileClock className="h-4 w-4"/>最近更新</div><p className={`mt-3 text-base font-semibold ${styles.textPrimary}`}>{latest ? formatBeijingTime(latest.timestamp, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '暂无记录'}</p></div>
+        <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}><div className={`flex items-center gap-2 text-xs ${styles.textMuted}`}><GitBranch className="h-4 w-4"/>版本记录</div><p className={`mt-3 text-2xl font-semibold ${styles.textPrimary}`}>{versionCount}</p></div>
+        <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}><div className={`flex items-center gap-2 text-xs ${styles.textMuted}`}><UserRound className="h-4 w-4"/>参与人员</div><p className={`mt-3 text-2xl font-semibold ${styles.textPrimary}`}>{people}</p></div>
+      </section>
+
+      <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
+        <div className={`border-b ${styles.border} px-5 py-4`}><h2 className={`font-semibold ${styles.textPrimary}`}>{document.title}</h2><p className={`mt-1 text-xs ${styles.textMuted}`}>{sessions.length} 次编辑会话 · {timeline.timeline.length} 条有效记录</p></div>
+        {loading && timeline.timeline.length === 0 ? <div className={`grid min-h-64 place-items-center ${styles.textMuted}`}><RefreshCw className="h-6 w-6 animate-spin"/></div> : sessions.length === 0 ? <div className="px-6 py-16 text-center"><Clock3 className={`mx-auto h-10 w-10 ${styles.textMuted}`}/><p className={`mt-4 text-sm font-medium ${styles.textPrimary}`}>这篇内容还没有可展示的动态</p><p className={`mt-2 text-xs ${styles.textMuted}`}>完成一次保存或生成版本后，这里会自动出现记录。</p></div> : <div className="divide-y divide-theme-border">
+          {sessions.map((session) => <article key={session.id} className="grid gap-4 px-5 py-5 md:grid-cols-[180px_1fr]"><div><p className={`text-sm font-medium ${styles.textPrimary}`}>{timeRange(session.start, session.end)}</p><p className={`mt-1 text-xs ${styles.textMuted}`}>{session.events.length} 项变化</p></div><ol className="space-y-4">{session.events.slice().reverse().map((event) => <li key={event.id} className="flex gap-3"><span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${eventTone(event.type)}`}/><div className="min-w-0"><p className={`text-sm ${styles.textPrimary}`}>{eventText(event)}</p><p className={`mt-1 text-xs ${styles.textMuted}`}>{event.userId ? `${event.userId} · ` : ''}{formatBeijingTime(event.timestamp, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</p></div></li>)}</ol></article>)}
+        </div>}
+      </section>
     </div>
   );
 }

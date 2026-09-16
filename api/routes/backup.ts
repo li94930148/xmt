@@ -8,11 +8,13 @@ import { beijingNow } from '../database/utils';
 import { getDatabasePath } from '../database/path';
 import { db } from '../database/db';
 import { BackupLockBusyError, withBackupLock } from '../database/backup-lock.js';
+import { getBackupSources, listBackupInventory, resolveInventoryBackup } from '../services/backupInventory.js';
 
 const router = Router();
 
 const DB_PATH = getDatabasePath();
 const BACKUP_DIR = path.join(path.dirname(DB_PATH), 'backups');
+const BACKUP_SOURCES = getBackupSources(DB_PATH);
 const BACKUP_NAME = /^xmt-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d+-[a-f0-9]{8})?\.db$/;
 
 // 确保备份目录存在
@@ -81,6 +83,25 @@ router.get('/list', authenticate, requirePermission('system:backup'), (req, res)
     res.json(files);
   } catch (error) {
     res.status(500).json({ message: '获取备份列表失败', error: (error as Error).message });
+  }
+});
+
+// 汇总应用、部署应急和系统定时备份。目录由服务端白名单配置，响应不暴露绝对路径。
+router.get('/inventory', authenticate, requirePermission('system:backup'), (req, res) => {
+  try {
+    res.json(listBackupInventory(BACKUP_SOURCES));
+  } catch {
+    res.status(500).json({ message: '获取备份清单失败' });
+  }
+});
+
+router.get('/download/:source/:name', authenticate, requirePermission('system:backup'), (req, res) => {
+  try {
+    const filePath = resolveInventoryBackup(BACKUP_SOURCES, req.params.source, req.params.name);
+    if (!filePath) return res.status(404).json({ message: '备份文件不存在或不在允许目录中' });
+    res.download(filePath, req.params.name);
+  } catch {
+    res.status(500).json({ message: '下载失败' });
   }
 });
 

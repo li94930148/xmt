@@ -1,197 +1,105 @@
-import { useCallback, useEffect, useState } from 'react';
-import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  Clock3,
-  LogIn,
-  RefreshCw,
-  Search,
-  ShieldCheck,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { getAuthRolloutStatus, type AuthRolloutStatusData } from '@/api/authRollout';
 import { GlassPanel, PageHeader, PageShell, StatusPill } from '@/components/studio';
 
-const MODE_LABELS = {
-  disabled: '已关闭',
-  legacy: 'Legacy',
-  internal: '内部账号',
-  allowlist: '白名单',
-  percentage: '比例灰度',
-} as const;
-
-function MetricCell({ label, value, icon: Icon }: { label: string; value: string | number; icon: typeof Activity }) {
-  return (
-    <div className="min-w-0 border-b border-studio-border-soft p-5 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0">
-      <div className="flex items-center gap-2 text-xs font-semibold text-studio-text-muted">
-        <Icon className="h-4 w-4 text-studio-cyan" />
-        {label}
-      </div>
-      <p className="mt-3 text-2xl font-bold text-studio-text-primary">{value}</p>
-    </div>
-  );
-}
+type Check = { label: string; description: string; ready: boolean };
 
 function formatTime(value: string) {
   return new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 
+function ReadinessCheck({ check }: { check: Check }) {
+  return <div className="flex items-start gap-3 rounded-button border border-studio-border-soft bg-white/[0.035] p-4">
+    {check.ready ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-studio-success" /> : <CircleDashed className="mt-0.5 h-5 w-5 shrink-0 text-studio-amber" />}
+    <div><p className="text-sm font-semibold text-studio-text-primary">{check.label}</p><p className="mt-1 text-xs leading-5 text-studio-text-secondary">{check.description}</p></div>
+  </div>;
+}
+
 export default function AuthRolloutStatus() {
   const [data, setData] = useState<AuthRolloutStatusData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [userIdInput, setUserIdInput] = useState('');
+  const [error, setError] = useState('');
 
-  const load = useCallback(async (userId?: number) => {
+  const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setError('');
     try {
-      setData(await getAuthRolloutStatus(userId));
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '认证迁移状态加载失败');
+      setData(await getAuthRolloutStatus());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '登录安全状态加载失败');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  const diagnose = () => {
-    const userId = Number(userIdInput);
-    if (Number.isSafeInteger(userId) && userId > 0) void load(userId);
-    else setError('请输入有效的正整数用户 ID');
-  };
+  const decision = useMemo(() => {
+    if (!data) return null;
+    const external = data.exporters.status.filter((item) => item.kind !== 'memory');
+    const externalReady = external.some((item) => item.enabled && item.healthy && Boolean(item.lastExportAt));
+    const checks: Check[] = [
+      { label: '保持安全基线', ready: data.runtime.effectiveRolloutMode === 'legacy' || data.rollout.mode === 'allowlist', description: data.runtime.effectiveRolloutMode === 'legacy' ? '正式用户仍走原登录链路，可以随时安全准备下一阶段。' : '当前只允许明确名单，不会自动扩大到其他用户。' },
+      { label: '外部监控与告警', ready: externalReady, description: externalReady ? '已有健康的持久指标出口并完成过数据导出。' : '目前只有进程内指标或尚无成功导出，服务重启后会丢失观察数据。' },
+      { label: 'Socket / 协作会话衔接', ready: data.socketBridge.socketBridgeEnabled && data.socketBridge.socketBridgeApproval, description: data.socketBridge.socketBridgeEnabled && data.socketBridge.socketBridgeApproval ? '协作连接已通过独立审批门禁。' : '实时协作用户仍可能持有旧 Token，暂不适合扩大登录迁移。' },
+      { label: '运行风险', ready: data.risk.status === 'healthy', description: data.risk.status === 'healthy' ? '当前窗口没有触发停止条件。' : `已触发 ${data.risk.events.length} 个停止条件，应先处理异常。` },
+    ];
+    const ready = checks.every((item) => item.ready);
+    return {
+      checks,
+      ready,
+      title: ready ? '可以准备小范围内部账号验证' : '暂不进入真实用户扩大阶段',
+      next: ready ? '下一步：按双人复核名单进行 2–3 个普通账号的固定观察窗口验证。' : '下一步：先补齐未通过项目，再运行认证灰度预检查；不要直接切换比例灰度。',
+    };
+  }, [data]);
 
-  if (loading && !data) {
-    return <PageShell><div className="flex min-h-64 items-center justify-center text-studio-text-secondary"><RefreshCw className="mr-3 h-5 w-5 animate-spin" />正在读取灰度运行状态</div></PageShell>;
-  }
+  if (loading && !data) return <PageShell><div className="flex min-h-64 items-center justify-center text-studio-text-secondary"><RefreshCw className="mr-3 h-5 w-5 animate-spin"/>正在检查登录安全状态</div></PageShell>;
+  if (!data || !decision) return <PageShell><PageHeader title="登录安全升级"/><GlassPanel className="p-6 text-studio-coral">{error || '暂时无法读取状态'}</GlassPanel></PageShell>;
 
-  if (!data) {
-    return <PageShell><PageHeader title="认证迁移状态" /><GlassPanel className="p-6 text-studio-coral">{error}</GlassPanel></PageShell>;
-  }
-
-  const recent = data.metrics.last5Minutes;
   const hour = data.metrics.lastHour;
-  return (
-    <PageShell>
-      <PageHeader
-        title="认证迁移状态"
-        description="只读查看 Auth 灰度模式、运行指标、停止风险与配置审计；本页面不能修改灰度配置。"
-        actions={<StatusPill tone={data.risk.status === 'healthy' ? 'success' : 'coral'}>{data.risk.status === 'healthy' ? '运行正常' : '需要停止评估'}</StatusPill>}
-      />
+  return <PageShell>
+    <PageHeader title="登录安全升级" description="判断新登录机制是否具备进入下一阶段的条件" actions={<button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-button border border-studio-border-soft px-4 text-sm font-semibold"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>重新检查</button>}/>
+    {error ? <div role="alert" className="rounded-button border border-studio-coral/30 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral">{error}</div> : null}
 
-      {error ? <div className="rounded-button border border-studio-coral/30 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral">{error}</div> : null}
-
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <GlassPanel className="p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold text-studio-text-muted">当前灰度模式</p>
-              <div className="mt-2 flex items-center gap-3">
-                <ShieldCheck className="h-7 w-7 text-studio-cyan" />
-                <h2 className="text-2xl font-bold text-studio-text-primary">{MODE_LABELS[data.rollout.mode]}</h2>
-              </div>
-            </div>
-            <StatusPill tone={data.rollout.enabled ? 'amber' : 'muted'}>{data.rollout.enabled ? '灰度能力可用' : '保持 Legacy'}</StatusPill>
-          </div>
-          <dl className="mt-6 grid gap-4 border-t border-studio-border-soft pt-5 sm:grid-cols-2 xl:grid-cols-4">
-            <div><dt className="text-xs text-studio-text-muted">比例</dt><dd className="mt-1 text-sm font-semibold text-studio-text-primary">{data.rollout.percentage}%</dd></div>
-            <div><dt className="text-xs text-studio-text-muted">白名单用户</dt><dd className="mt-1 text-sm font-semibold text-studio-text-primary">{data.rollout.allowlistCount}</dd></div>
-            <div><dt className="text-xs text-studio-text-muted">内部用户</dt><dd className="mt-1 text-sm font-semibold text-studio-text-primary">{data.rollout.internalCount}</dd></div>
-            <div><dt className="text-xs text-studio-text-muted">指标来源</dt><dd className="mt-1 text-sm font-semibold text-studio-text-primary">{data.exporters.source.join(' + ') || '未启用'}</dd></div>
-          </dl>
-          <p className="mt-4 text-xs text-studio-text-muted">最近事件：{data.exporters.lastEventAt ? formatTime(data.exporters.lastEventAt) : '暂无'}</p>
-        </GlassPanel>
-
-        <GlassPanel className="p-6">
-          <h2 className="text-base font-semibold text-studio-text-primary">用户准入诊断</h2>
-          <div className="mt-4 flex gap-2">
-            <input
-              value={userIdInput}
-              onChange={(event) => setUserIdInput(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter') diagnose(); }}
-              inputMode="numeric"
-              placeholder={`当前用户 ${data.diagnostic.userId}`}
-              aria-label="用户 ID"
-              className="min-w-0 flex-1 rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active"
-            />
-            <button type="button" onClick={diagnose} className="inline-flex items-center gap-2 rounded-button bg-studio-primary px-4 py-2.5 text-sm font-semibold text-white">
-              <Search className="h-4 w-4" />诊断
-            </button>
-          </div>
-          <div className="mt-4 rounded-button border border-studio-border-soft bg-white/[0.035] p-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-studio-text-primary">用户 #{data.diagnostic.userId}</span>
-              <StatusPill tone={data.diagnostic.enabled ? 'success' : 'muted'}>{data.diagnostic.enabled ? '命中 Web Auth' : '继续 Legacy'}</StatusPill>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-studio-text-secondary">{data.diagnostic.reason}</p>
-          </div>
-        </GlassPanel>
+    <GlassPanel className={`p-6 ${decision.ready ? 'border-studio-success/30' : 'border-studio-amber/30'}`}>
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-start gap-4">
+          <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-xl ${decision.ready ? 'bg-studio-success/10 text-studio-success' : 'bg-studio-amber/10 text-studio-amber'}`}><ShieldCheck className="h-6 w-6"/></div>
+          <div><p className="text-xs font-semibold text-studio-text-muted">当前结论</p><h2 className="mt-1 text-xl font-bold text-studio-text-primary">{decision.title}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-studio-text-secondary">{decision.next}</p></div>
+        </div>
+        <StatusPill tone={decision.ready ? 'success' : 'amber'}>{decision.ready ? '准备就绪' : '有前置项未完成'}</StatusPill>
       </div>
+    </GlassPanel>
 
-      <GlassPanel className="overflow-hidden">
-        <div className="border-b border-studio-border-soft px-6 py-5">
-          <h2 className="text-base font-semibold text-studio-text-primary">最近 60 分钟</h2>
-          <p className="mt-1 text-xs text-studio-text-muted">统一 Auth Event 聚合；最近 5 分钟安全事件 {recent.categories.securityEvents} 个。当前内存适配器在服务重启后重新计数。</p>
-        </div>
-        <div className="grid md:grid-cols-4">
-          <MetricCell label="登录" value={hour.categories.login} icon={LogIn} />
-          <MetricCell label="刷新成功" value={hour.categories.refresh} icon={RefreshCw} />
-          <MetricCell label="退出" value={hour.categories.logout} icon={CheckCircle2} />
-          <MetricCell label="失败事件" value={hour.categories.failure} icon={AlertTriangle} />
-        </div>
-        <div className="border-t border-studio-border-soft px-6 py-4 text-sm text-studio-text-secondary">
-          Refresh 失败率：<span className="font-semibold text-studio-text-primary">{(hour.refreshFailureRate * 100).toFixed(1)}%</span>
-        </div>
+    <section className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+      <GlassPanel className="p-6">
+        <h2 className="text-base font-semibold text-studio-text-primary">进入下一阶段前要完成什么</h2>
+        <p className="mt-1 text-xs text-studio-text-muted">每一项都通过后，才适合开始小范围真实账号验证。</p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">{decision.checks.map((check) => <ReadinessCheck key={check.label} check={check}/>)}</div>
       </GlassPanel>
+      <GlassPanel className="p-6">
+        <h2 className="text-base font-semibold text-studio-text-primary">当前运行概况</h2>
+        <dl className="mt-5 space-y-4 text-sm">
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">正式登录</dt><dd className="font-semibold text-studio-text-primary">{data.runtime.effectiveRolloutMode === 'legacy' ? '原登录机制' : '小范围新机制'}</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">灰度名单</dt><dd className="font-semibold text-studio-text-primary">{data.rollout.allowlistCount} 人</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">近 60 分钟登录</dt><dd className="font-semibold text-studio-text-primary">{hour.categories.login}</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">刷新失败率</dt><dd className="font-semibold text-studio-text-primary">{(hour.refreshFailureRate * 100).toFixed(1)}%</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">安全事件</dt><dd className="font-semibold text-studio-text-primary">{hour.categories.securityEvents}</dd></div>
+        </dl>
+      </GlassPanel>
+    </section>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <GlassPanel className="p-6">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-studio-text-primary">停止条件</h2>
-            <span className="text-xs text-studio-text-muted">窗口 {data.thresholds.windowMinutes} 分钟</span>
-          </div>
-          {data.risk.events.length === 0 ? (
-            <div className="mt-5 flex items-start gap-3 rounded-button border border-studio-success/25 bg-studio-success/8 p-4">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 text-studio-success" />
-              <div><p className="text-sm font-semibold text-studio-text-primary">未触发停止条件</p><p className="mt-1 text-xs text-studio-text-secondary">继续观察指标，不代表已获准扩大真实用户。</p></div>
-            </div>
-          ) : (
-            <div className="mt-4 space-y-3">
-              {data.risk.events.map((risk) => <div key={risk.code} className="rounded-button border border-studio-coral/30 bg-studio-coral/8 p-4"><p className="text-sm font-semibold text-studio-coral">{risk.reason}</p><p className="mt-1 text-xs text-studio-text-secondary">当前 {risk.value.toFixed(3)} / 阈值 {risk.threshold}</p></div>)}
-            </div>
-          )}
-          <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
-            <div className="rounded-button bg-white/[0.035] p-3"><dt className="text-xs text-studio-text-muted">Refresh失败率</dt><dd className="mt-1 font-semibold text-studio-text-primary">{(data.thresholds.refreshFailureRate * 100).toFixed(0)}%</dd></div>
-            <div className="rounded-button bg-white/[0.035] p-3"><dt className="text-xs text-studio-text-muted">CSRF失败</dt><dd className="mt-1 font-semibold text-studio-text-primary">{data.thresholds.csrfFailureCount}</dd></div>
-            <div className="rounded-button bg-white/[0.035] p-3"><dt className="text-xs text-studio-text-muted">Token reuse</dt><dd className="mt-1 font-semibold text-studio-text-primary">{data.thresholds.tokenReuseCount}</dd></div>
-            <div className="rounded-button bg-white/[0.035] p-3"><dt className="text-xs text-studio-text-muted">Expired</dt><dd className="mt-1 font-semibold text-studio-text-primary">{data.thresholds.expiredCount}</dd></div>
-          </dl>
-        </GlassPanel>
+    {data.risk.events.length > 0 ? <GlassPanel className="p-6"><div className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-studio-coral"/><h2 className="font-semibold text-studio-text-primary">需要先处理</h2></div><div className="mt-4 space-y-2">{data.risk.events.map((risk) => <div key={risk.code} className="flex items-start gap-3 rounded-button bg-studio-coral/8 p-4"><XCircle className="mt-0.5 h-4 w-4 shrink-0 text-studio-coral"/><p className="text-sm text-studio-text-secondary">{risk.reason}</p></div>)}</div></GlassPanel> : null}
 
-        <GlassPanel className="overflow-hidden">
-          <div className="border-b border-studio-border-soft px-6 py-5">
-            <h2 className="text-base font-semibold text-studio-text-primary">配置审计</h2>
-            <p className="mt-1 text-xs text-studio-text-muted">只展示配置载入与治理记录，不提供修改操作。</p>
-          </div>
-          <div className="divide-y divide-studio-border-soft">
-            {data.audits.map((audit) => (
-              <div key={`${audit.created_at}-${audit.action}`} className="px-6 py-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-semibold text-studio-text-primary">{audit.action}</span>
-                  <span className="text-xs text-studio-text-muted">{formatTime(audit.created_at)}</span>
-                </div>
-                <p className="mt-2 text-sm text-studio-text-secondary">{audit.reason}</p>
-                <div className="mt-2 flex items-center gap-2 text-xs text-studio-text-muted"><Clock3 className="h-3.5 w-3.5" />执行者：{audit.actor}</div>
-              </div>
-            ))}
-          </div>
-        </GlassPanel>
+    <details className="rounded-card border border-studio-border-soft bg-studio-card">
+      <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-5 text-sm font-semibold text-studio-text-primary">技术明细（运维排查时查看）<ChevronDown className="h-4 w-4"/></summary>
+      <div className="grid gap-4 border-t border-studio-border-soft p-6 text-sm sm:grid-cols-2 xl:grid-cols-4">
+        <div><p className="text-xs text-studio-text-muted">配置来源</p><p className="mt-1 font-medium">{data.runtime.effectiveConfigSource}</p></div>
+        <div><p className="text-xs text-studio-text-muted">Auth v1 / Web</p><p className="mt-1 font-medium">{data.runtime.effectiveAuthV1Enabled ? '开' : '关'} / {data.runtime.effectiveAuthWebEnabled ? '开' : '关'}</p></div>
+        <div><p className="text-xs text-studio-text-muted">指标出口</p><p className="mt-1 font-medium">{data.exporters.source.join(' + ') || '无'}</p></div>
+        <div><p className="text-xs text-studio-text-muted">状态生成时间</p><p className="mt-1 font-medium">{formatTime(data.generatedAt)}</p></div>
       </div>
-
-      <p className="text-right text-xs text-studio-text-muted">生成时间：{formatTime(data.generatedAt)}</p>
-    </PageShell>
-  );
+    </details>
+  </PageShell>;
 }

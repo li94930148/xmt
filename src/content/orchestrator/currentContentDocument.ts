@@ -83,13 +83,14 @@ export function getRecentContentDocuments(): CurrentContentDocument[] {
 }
 
 export function resolveContentDocument(input: string): CurrentContentDocument | null {
-  const normalizedDocId = normalizeDocId(input);
-  if (normalizedDocId) return createCurrentDocument(normalizedDocId);
-
   const keyword = input.trim();
   if (!keyword) return null;
 
-  return getRecentContentDocuments().find((item) => item.title === keyword || item.label === keyword) || null;
+  const recent = getRecentContentDocuments().find((item) => item.title === keyword || item.label === keyword);
+  if (recent) return recent;
+
+  const normalizedDocId = normalizeDocId(keyword);
+  return /^(production|shooting):\d+$/.test(normalizedDocId) ? createCurrentDocument(normalizedDocId) : null;
 }
 
 export function setCurrentContentDocument(docId: string, title?: string) {

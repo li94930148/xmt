@@ -28,7 +28,6 @@ import {
   Video,
   Database,
   ListFilter,
-  ScanSearch,
   UserRoundSearch,
   Inbox,
   ShieldCheck,
@@ -81,7 +80,7 @@ export const navigationSections: NavigationSection[] = [
       { id: 'production', label: '创作管理', icon: Video, path: '/production' },
       { id: 'shooting', label: '成片制作', icon: Camera, path: '/shooting', permissions: ['workflow:shooting'] },
       { id: 'publishing', label: '发布管理', icon: Send, path: '/publishing', permissions: ['workflow:publishing'] },
-      { id: 'content-timeline', label: '内容时间轴', icon: History, path: '/content-timeline', permissions: ['analytics:view'] },
+      { id: 'content-timeline', label: '内容动态', icon: History, path: '/content-timeline', permissions: ['analytics:view'] },
     ],
   },
   {
@@ -101,12 +100,11 @@ export const navigationSections: NavigationSection[] = [
     label: '抖音运营中心',
     icon: BarChart3,
     items: [
-      { id: 'creator-dashboard', label: '数据驾驶舱', icon: Database, path: '/analytics/creator-center', permissions: ['creator:data:view'] },
-      { id: 'creator-works', label: '作品库', icon: ListFilter, path: '/analytics/creator-center/works', permissions: ['creator:data:view'] },
-      { id: 'creator-reviews', label: '作品复盘', icon: ScanSearch, path: '/analytics/creator-center/reviews', permissions: ['creator:data:view'] },
-      { id: 'creator-trends', label: '趋势分析', icon: BarChart3, path: '/analytics/creator-center/trends', permissions: ['creator:data:view'] },
-      { id: 'creator-fans', label: '粉丝分析', icon: UserRoundSearch, path: '/analytics/creator-center/fans', permissions: ['creator:data:view'] },
-      { id: 'creator-reports', label: '运营报告', icon: FileBarChart, path: '/analytics/creator-center/reports', permissions: ['creator:report:view'] },
+      { id: 'creator-dashboard', label: '运营概览', icon: Database, path: '/analytics/creator-center', permissions: ['creator:data:view'] },
+      { id: 'creator-works', label: '作品管理', icon: ListFilter, path: '/analytics/creator-center/works', permissions: ['creator:data:view'] },
+      { id: 'creator-trends', label: '数据趋势', icon: BarChart3, path: '/analytics/creator-center/trends', permissions: ['creator:data:view'] },
+      { id: 'creator-fans', label: '粉丝画像', icon: UserRoundSearch, path: '/analytics/creator-center/fans', permissions: ['creator:data:view'] },
+      { id: 'creator-reports', label: '复盘报告', icon: FileBarChart, path: '/analytics/creator-center/reports', permissions: ['creator:report:view'] },
     ],
   },
   {
@@ -144,7 +142,7 @@ export const navigationSections: NavigationSection[] = [
       { id: 'backup', label: '备份管理', icon: Archive, path: '/backup', permissions: ['system:backup'] },
       { id: 'activity', label: '活动日志', icon: Activity, path: '/activity', permissions: ['user:logs'] },
       { id: 'anonymous-feedback', label: '匿名意见管理', icon: Inbox, path: '/admin/anonymous-feedback', roles: ['admin'] },
-      { id: 'auth-rollout', label: '认证迁移状态', icon: ShieldCheck, path: '/admin/auth-rollout', roles: ['admin'] },
+      { id: 'auth-rollout', label: '登录安全升级', icon: ShieldCheck, path: '/admin/auth-rollout', roles: ['admin'] },
       // TODO: 独立运维中心就绪后在此接入服务状态、定时任务、队列与系统健康能力。
     ],
   },

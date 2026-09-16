@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "2.21.3",
+  "version": "2.21.4",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -53,6 +53,7 @@
     "ops:ci-status": "tsx scripts/ci-status.ts",
     "test:ops-ci-status": "tsx tests/ops/ci-status-decision.test.ts",
     "test:backup-lock": "tsx tests/ops/backup-lock.test.ts",
+    "test:backup-inventory": "tsx tests/ops/backup-inventory.test.ts",
     "test:backup-restore-drill": "tsx tests/ops/backup-restore-drill.test.ts",
     "test:migration-readiness": "tsx tests/ops/migration-readiness.test.ts",
     "test:version-governance": "node tests/ops/version-governance.test.mjs",
@@ -179,6 +180,7 @@
     "test:android-build-endpoints": "tsx tests/mobile/android-build-endpoints.test.ts",
     "test:apk-endpoint-artifact": "node tests/mobile/apk-endpoint-artifact-contract.test.mjs",
     "test:editor-format-painter": "tsx --test tests/editor/format-painter.test.ts",
+    "test:content-document": "tsx tests/editor/current-content-document.test.ts",
     "agent:collector-e2e": "npm --prefix agent run collector:e2e --",
     "test:user-role-assignment-security": "tsx tests/auth/user-role-assignment-security.test.ts",
     "test:html-sanitization": "tsx tests/security/html-sanitization.test.ts",

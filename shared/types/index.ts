@@ -460,9 +460,15 @@ export interface DouyinVideo {
 // ==================== 备份 ====================
 
 export interface BackupFile {
+  id?: string;
   name: string;
   size: number;
   created: string;
+  source?: string;
+  sourceLabel?: string;
+  compressed?: boolean;
+  downloadable?: boolean;
+  deletable?: boolean;
 }
 
 // ==================== JWT ====================

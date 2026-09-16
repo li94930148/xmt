@@ -13,12 +13,33 @@ export type AuthMigrationCounters = {
 };
 
 export type AuthRolloutStatusData = {
+  runtime: {
+    effectiveConfigSource: 'runtime_env_file' | 'pm2_process_env' | 'development_env';
+    effectiveAuthV1Enabled: boolean;
+    effectiveAuthWebEnabled: boolean;
+    effectiveLoginRolloutEnabled: boolean;
+    effectiveRolloutMode: AuthRolloutMode;
+    effectiveSocketBridgeEnabled: boolean;
+    effectiveMobileAuthEnabled: boolean;
+    mobileAuthApproved: boolean;
+    mobileAllowlistCount: number;
+    effectiveMobileSocketEnabled: boolean;
+    allowlistCount: number;
+    processId: number;
+    loadedAt: string;
+  };
   rollout: {
     mode: AuthRolloutMode;
     enabled: boolean;
     percentage: number;
     allowlistCount: number;
     internalCount: number;
+  };
+  socketBridge: {
+    socketBridgeEnabled: boolean;
+    socketBridgeApproval: boolean;
+    socketV1EligibleUserCount: number;
+    currentMode: 'legacy' | 'allowlist';
   };
   diagnostic: {
     userId: number;

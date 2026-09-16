@@ -10,6 +10,11 @@ function getAuthHeader(): Record<string, string> {
 
 export type { BackupFile };
 
+export type BackupInventory = {
+  files: BackupFile[];
+  sources: Array<{ id: string; label: string; available: boolean; fileCount: number }>;
+};
+
 export async function createBackup(): Promise<{ message: string; name: string }> {
   const response = await fetch(`${BASE_URL}/backup/create`, {
     method: 'POST',
@@ -27,8 +32,28 @@ export async function getBackupList(): Promise<BackupFile[]> {
   return response.json();
 }
 
+export async function getBackupInventory(): Promise<BackupInventory> {
+  const response = await fetch(`${BASE_URL}/backup/inventory`, { headers: { ...getAuthHeader() } });
+  if (!response.ok) throw new Error('获取服务器备份清单失败');
+  return response.json();
+}
+
 export async function downloadBackup(name: string): Promise<void> {
   const response = await fetch(`${BASE_URL}/backup/download/${encodeURIComponent(name)}`, {
+    headers: { ...getAuthHeader() },
+  });
+  if (!response.ok) throw new Error('下载失败');
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadInventoryBackup(source: string, name: string): Promise<void> {
+  const response = await fetch(`${BASE_URL}/backup/download/${encodeURIComponent(source)}/${encodeURIComponent(name)}`, {
     headers: { ...getAuthHeader() },
   });
   if (!response.ok) throw new Error('下载失败');

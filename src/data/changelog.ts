@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.21.4', date: '2026-09-16', title: '管理与运营入口收敛', impactScope: ['内容动态', '登录安全升级', '备份管理', '抖音运营中心'], changes: [{ type: 'improvement', description: '内容记录和认证升级改为直接给出可理解、可执行的信息，抖音运营导航移除重复入口。' }, { type: 'fix', description: '备份管理可汇总应用、部署应急和服务器定时备份，并显示不可访问来源。' }] },
   { version: '2.21.3', date: '2026-09-15', title: '放了些小惊喜', impactScope: ['日常使用'], changes: [{ type: 'improvement', description: '放了些小惊喜，优化了日常使用体验。' }] },
   { version: '2.21.2', date: '2026-09-15', title: '放了些小惊喜', impactScope: ['日常使用'], changes: [{ type: 'improvement', description: '放了些小惊喜。' }] },
   { version: '2.21.1', date: '2026-09-15', title: '发布与分析数据一致性修复', impactScope: ['发布管理', '数据分析', '权限与统计'], changes: [{ type: 'fix', description: '多日分析快照不再造成发布重复或跨日期覆盖，部分指标更新会保留其他字段。' }, { type: 'improvement', description: '发布页统计改为全量北京时间口径，抖音关联权威字段增加服务端保护。' }] },

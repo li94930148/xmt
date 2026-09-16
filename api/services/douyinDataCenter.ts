@@ -15,6 +15,7 @@ type AnalyzedDouyinWork = ReturnType<typeof analyzeDouyinWorks>['works'][number]
 export type DouyinWorksPage = { items: AnalyzedDouyinWork[]; next_cursor: string | null; has_more: boolean; page_size: number };
 export type OfficialDashboardMode = 'existing_only' | 'shadow_compare' | 'official_preferred';
 export type OfficialReconciliationStatus = 'comparable' | 'matched' | 'different' | 'existing_only' | 'official_only' | 'not_comparable';
+type OfficialMetricAggregate = { works:number; plays:number; likes:number; comments:number; shares:number; collects:number; profile_visits:number; followers_gained:number; collected_at:string | null };
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const parse = (value: unknown): JsonRecord => { try { return typeof value === 'string' ? JSON.parse(value) as JsonRecord : value && typeof value === 'object' ? value as JsonRecord : {}; } catch { return {}; } };
@@ -37,7 +38,7 @@ export function validatedCoverAsset(asset: NormalizedDouyinWork['cover_asset']) 
 }
 
 export function officialDashboardMode(value = process.env.XMT_CREATOR_OFFICIAL_DASHBOARD_MODE): OfficialDashboardMode {
-  return value === 'shadow_compare' || value === 'official_preferred' ? value : 'existing_only';
+  return value === 'existing_only' || value === 'shadow_compare' ? value : 'official_preferred';
 }
 export function reconcileOfficialMetric(existingValue: number | null, officialValue: number | null): OfficialReconciliationStatus {
   if (existingValue === null && officialValue === null) return 'not_comparable';
@@ -49,10 +50,26 @@ export function officialReconciliationSummary(existingValue: number | null, offi
   const status = reconcileOfficialMetric(existingValue, officialValue);
   return { comparable: status === 'matched' || status === 'different', status };
 }
-async function officialViewsForDashboard(creatorAccountId: number) {
-  const row = await queryOne<{ total: number | null; rows: number }>(`SELECT SUM(value_number) total,COUNT(*) rows
-    FROM creator_official_metrics WHERE account_id=? AND metric_code='views' AND source_item_key IS NOT NULL`, [creatorAccountId]);
-  return row && Number(row.rows) > 0 && Number.isFinite(Number(row.total)) ? Number(row.total) : null;
+async function officialMetricsForDashboard(creatorAccountId: number): Promise<OfficialMetricAggregate | null> {
+  const latestContentFile = await queryOne<{ source_file_sha256:string }>(`SELECT source_file_sha256
+    FROM creator_official_metrics
+    WHERE account_id=? AND source_item_key IS NOT NULL AND metric_code='views'
+    ORDER BY collected_at DESC,updated_at DESC,id DESC LIMIT 1`, [creatorAccountId]);
+  if (!latestContentFile?.source_file_sha256) return null;
+  const row = await queryOne<Record<string, unknown>>(`SELECT
+    COUNT(DISTINCT CASE WHEN metric_code='views' THEN source_item_key END) works,
+    SUM(CASE WHEN metric_code='views' THEN value_number ELSE 0 END) plays,
+    SUM(CASE WHEN metric_code='likes' THEN value_number ELSE 0 END) likes,
+    SUM(CASE WHEN metric_code='comments' THEN value_number ELSE 0 END) comments,
+    SUM(CASE WHEN metric_code='shares' THEN value_number ELSE 0 END) shares,
+    SUM(CASE WHEN metric_code='favorites' THEN value_number ELSE 0 END) collects,
+    SUM(CASE WHEN metric_code='profile_visits' THEN value_number ELSE 0 END) profile_visits,
+    SUM(CASE WHEN metric_code='followers_gained' THEN value_number ELSE 0 END) followers_gained,
+    MAX(collected_at) collected_at
+    FROM creator_official_metrics
+    WHERE account_id=? AND source_item_key IS NOT NULL AND source_file_sha256=?`, [creatorAccountId, latestContentFile.source_file_sha256]);
+  if (!row || number(row.works) < 1) return null;
+  return { works:number(row.works),plays:number(row.plays),likes:number(row.likes),comments:number(row.comments),shares:number(row.shares),collects:number(row.collects),profile_visits:number(row.profile_visits),followers_gained:number(row.followers_gained),collected_at:row.collected_at ? String(row.collected_at) : null };
 }
 
 const encodeCursor = (cursor: WorksCursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
@@ -288,37 +305,45 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     shares: result.shares + number(work.share_count),
   }), { plays: 0, interactions: 0, shares: 0 });
   const latest = snapshots.at(-1) || {};
-  const previous = (periodDays: number) => snapshots.filter(row => new Date(String(row.snapshot_date)).getTime() <= new Date(String(latest.snapshot_date)).getTime() - periodDays * 86400000).at(-1) || null;
+  const baseline = (rows: Record<string, unknown>[], periodDays: number) => {
+    const boundary = new Date(String(latest.snapshot_date)).getTime() - periodDays * 86400000;
+    const candidate = rows.filter(row => new Date(String(row.snapshot_date)).getTime() <= boundary).at(-1) || null;
+    return candidate && boundary - new Date(String(candidate.snapshot_date)).getTime() <= 2 * 86400000 ? candidate : null;
+  };
+  const previous = (periodDays: number) => baseline(snapshots, periodDays);
   const validFanSnapshots = snapshots.filter(row => number(row.fans_count_available) === 1);
   const latestFanSnapshot = validFanSnapshots.at(-1) || null;
-  const previousFan = (periodDays: number) => validFanSnapshots.filter(row => new Date(String(row.snapshot_date)).getTime() <= new Date(String(latest.snapshot_date)).getTime() - periodDays * 86400000).at(-1) || null;
+  const previousFan = (periodDays: number) => baseline(validFanSnapshots, periodDays);
   const growthFor = (periodDays: number) => {
     const result = growth(latest, previous(periodDays));
     if (!result) return null;
     const fanStart = previousFan(periodDays);
-    return { ...result, fans: latestFanSnapshot && fanStart && String(latestFanSnapshot.snapshot_date) !== String(fanStart.snapshot_date) ? number(latestFanSnapshot.fans_count) - number(fanStart.fans_count) : null };
+    const latestFanIsFresh = latestFanSnapshot && Math.abs(new Date(String(latest.snapshot_date)).getTime() - new Date(String(latestFanSnapshot.snapshot_date)).getTime()) <= 2 * 86400000;
+    return { ...result, fans: latestFanIsFresh && fanStart && String(latestFanSnapshot?.snapshot_date) !== String(fanStart.snapshot_date) ? number(latestFanSnapshot?.fans_count) - number(fanStart.fans_count) : null };
   };
   const rankedWorks = [...analyzed.works].sort((left, right) => Number(right.performance.is_viral) - Number(left.performance.is_viral) || right.performance.score - left.performance.score || number(right.play_count) - number(left.play_count));
   const accountFansAvailable = number(account.fans_count_available) === 1;
   const fansAvailable = accountFansAvailable || Boolean(latestFanSnapshot);
   const missingFields = fansAvailable ? [] : ['fans_count', 'fan_growth'];
   const mode = officialDashboardMode();
-  const officialViews = mode === 'existing_only' ? null : await officialViewsForDashboard(creatorAccountId);
-  const reconciliation = officialReconciliationSummary(totals.plays, officialViews);
+  const official = mode === 'existing_only' ? null : await officialMetricsForDashboard(creatorAccountId);
+  const reconciliation = officialReconciliationSummary(totals.plays, official?.plays ?? null);
   // Shadow mode deliberately leaves the public dashboard shape and values on
   // the established path. The log contains only a safe aggregate summary.
   if (mode === 'shadow_compare') console.info('[creator-official-shadow]', JSON.stringify({ account_id: creatorAccountId, metric: 'play_count', ...reconciliation }));
-  const useOfficialViews = mode === 'official_preferred' && officialViews !== null;
-  const displayPlays = useOfficialViews ? officialViews : totals.plays;
+  const useOfficial = mode === 'official_preferred' && official !== null;
+  const displayPlays = useOfficial ? official.plays : totals.plays;
+  const displayInteractions = useOfficial ? official.likes + official.comments + official.shares + official.collects : totals.interactions;
+  const displayShares = useOfficial ? official.shares : totals.shares;
   return {
     account,
     metrics: {
       fans_count: fansAvailable ? number(accountFansAvailable ? account.fans_count : latestFanSnapshot?.fans_count) : null,
-      works_count: canonical.length,
+      works_count: useOfficial ? official.works : canonical.length,
       play_count: displayPlays,
-      interaction_count: totals.interactions,
-      interaction_rate: displayPlays > 0 ? totals.interactions / displayPlays : 0,
-      share_rate: displayPlays > 0 ? totals.shares / displayPlays : 0,
+      interaction_count: displayInteractions,
+      interaction_rate: displayPlays > 0 ? displayInteractions / displayPlays : 0,
+      share_rate: displayPlays > 0 ? displayShares / displayPlays : 0,
       viral_works_count: analyzed.works.filter(work => work.performance.is_viral).length,
     },
     health: calculateDouyinAccountHealth(account, analyzed.works, snapshots),
@@ -329,17 +354,19 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     snapshot_count: snapshots.length,
     snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
     data_status: missingFields.length ? 'partial' : 'ready',
-    data_source: useOfficialViews ? 'douyin_official_export' : 'douyin_creator_center_collection',
+    data_source: useOfficial ? 'douyin_official_export' : 'douyin_creator_center_collection',
     last_success_at: account.last_sync_time ?? null,
     missing_fields: missingFields,
     warnings: fansAvailable ? [] : ['当前采集响应没有提供粉丝总数；该字段不会按 0 展示或参与增长评分。'],
     metric_sources: {
       account: 'douyin_accounts',
-      works: 'douyin_works',
       growth: 'douyin_daily_snapshots',
       scoring: 'douyin_works',
-      play_count: useOfficialViews ? 'creator_official_metrics.views' : 'douyin_works',
+      works: useOfficial ? 'creator_official_metrics.distinct_source_item_key' : 'douyin_works',
+      play_count: useOfficial ? 'creator_official_metrics.views' : 'douyin_works',
+      interactions: useOfficial ? 'creator_official_metrics.likes_comments_shares_favorites' : 'douyin_works',
     },
+    official_snapshot_at: useOfficial ? official.collected_at : null,
     formulas: DOUYIN_OPERATIONS_FORMULAS,
   };
 }
@@ -468,27 +495,33 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
     queryAll<Record<string, unknown>>('SELECT * FROM douyin_daily_snapshots WHERE account_id=? ORDER BY snapshot_date ASC', [account.id]),
   ]);
   const analyzed = analyzeDouyinWorks(canonicalizeDouyinWorks(works));
+  const official = officialDashboardMode() === 'official_preferred' ? await officialMetricsForDashboard(creatorAccountId) : null;
+  const useOfficial = official !== null;
   const latest = snapshots.at(-1) || null;
   const validFanSnapshots = snapshots.filter(row => number(row.fans_count_available) === 1);
   const latestFanSnapshot = validFanSnapshots.at(-1) || null;
   const periodDays = type === 'daily' ? 1 : type === 'weekly' ? 7 : 30;
   const anchor = latest?.snapshot_date ? new Date(String(latest.snapshot_date)).getTime() : Date.now();
   const boundary = anchor - periodDays * 86400000;
-  const start = snapshots.filter((row) => new Date(String(row.snapshot_date)).getTime() <= boundary).at(-1) || snapshots[0] || null;
+  const startCandidate = snapshots.filter((row) => new Date(String(row.snapshot_date)).getTime() <= boundary).at(-1) || null;
+  const start = startCandidate && boundary - new Date(String(startCandidate.snapshot_date)).getTime() <= 2 * 86400000 ? startCandidate : null;
   const periodWorks = analyzed.works.filter((work) => new Date(String(work.publish_time || 0)).getTime() >= boundary);
-  const current = analyzed.works.reduce((result, work) => ({
+  const collectedCurrent = analyzed.works.reduce((result, work) => ({
     plays: result.plays + number(work.play_count),
     likes: result.likes + number(work.like_count),
     comments: result.comments + number(work.comment_count),
     shares: result.shares + number(work.share_count),
     collects: result.collects + number(work.collect_count),
   }), { plays: 0, likes: 0, comments: 0, shares: 0, collects: 0 });
+  const current = useOfficial ? { plays: official.plays, likes: official.likes, comments: official.comments, shares: official.shares, collects: official.collects } : collectedCurrent;
   const accountFansAvailable = number(account.fans_count_available) === 1;
   const fansAvailable = accountFansAvailable || Boolean(latestFanSnapshot);
   const hasGrowthBaseline = Boolean(latest && start && String(latest.snapshot_date) !== String(start.snapshot_date));
   const growthValue = (key: string) => hasGrowthBaseline && latest && start ? number(latest[key]) - number(start[key]) : null;
-  const fanStart = validFanSnapshots.filter(row => new Date(String(row.snapshot_date)).getTime() <= boundary).at(-1) || validFanSnapshots[0] || null;
-  const fanGrowth = latestFanSnapshot && fanStart && String(latestFanSnapshot.snapshot_date) !== String(fanStart.snapshot_date)
+  const fanStartCandidate = validFanSnapshots.filter(row => new Date(String(row.snapshot_date)).getTime() <= boundary).at(-1) || null;
+  const fanStart = fanStartCandidate && boundary - new Date(String(fanStartCandidate.snapshot_date)).getTime() <= 2 * 86400000 ? fanStartCandidate : null;
+  const latestFanIsFresh = latestFanSnapshot && latest && Math.abs(new Date(String(latest.snapshot_date)).getTime() - new Date(String(latestFanSnapshot.snapshot_date)).getTime()) <= 2 * 86400000;
+  const fanGrowth = latestFanIsFresh && fanStart && String(latestFanSnapshot?.snapshot_date) !== String(fanStart.snapshot_date)
     ? number(latestFanSnapshot.fans_count) - number(fanStart.fans_count)
     : null;
   const excellent = periodWorks.filter((work) => work.performance.level === 'viral' || work.performance.level === 'excellent').sort((left, right) => right.performance.score - left.performance.score || number(right.play_count) - number(left.play_count)).slice(0, 5);
@@ -499,7 +532,7 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
       health: calculateDouyinAccountHealth(account, analyzed.works, snapshots),
       current: {
         fans_count: fansAvailable ? number(accountFansAvailable ? account.fans_count : latestFanSnapshot?.fans_count) : null,
-        works_count: analyzed.works.length,
+        works_count: useOfficial ? official.works : analyzed.works.length,
         play_count: current.plays,
         interaction_count: current.likes + current.comments + current.shares + current.collects,
         like_count: current.likes,
@@ -510,7 +543,7 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
     },
     work_performance: {
       published: periodWorks.length,
-      total: analyzed.works.length,
+      total: useOfficial ? official.works : analyzed.works.length,
       level_distribution: analyzed.works.reduce<Record<string, number>>((result, work) => {
         result[work.performance.level] = (result[work.performance.level] || 0) + 1;
         return result;
@@ -527,13 +560,14 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
     excellent_works: excellent.map((work) => ({ id: work.id, title: String((work as JsonRecord).title || ''), score: work.performance.score, level: work.performance.level, play_count: number(work.play_count) })),
     low_efficiency_works: low.map((work) => ({ id: work.id, title: String((work as JsonRecord).title || ''), score: work.performance.score, level: work.performance.level, play_count: number(work.play_count) })),
     data_coverage: {
-      source: 'douyin_operations_unified',
+      source: useOfficial ? 'douyin_official_export' : 'douyin_operations_unified',
       snapshot_count: snapshots.length,
       period_start: start?.snapshot_date ?? null,
       period_end: latest?.snapshot_date ?? null,
       fans_available: fansAvailable,
       missing_fields: fansAvailable ? [] : ['fans_count', 'fan_growth'],
-      metric_definition: '累计播放为去重后每个入库作品当前播放量之和；周期增长为账号日快照期末减期初。',
+      metric_definition: useOfficial ? '作品数、播放、点赞、评论、分享和收藏以抖音创作者中心官方导出汇总为准；周期增长仅在期初期末快照日期可比时计算。' : '累计播放为去重后每个入库作品当前播放量之和；周期增长仅在期初期末快照日期可比时计算。',
+      official_snapshot_at: useOfficial ? official.collected_at : null,
     },
   };
 }

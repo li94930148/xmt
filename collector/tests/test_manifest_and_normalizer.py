@@ -3,7 +3,7 @@ import zipfile
 from pathlib import Path
 
 from xmt_collector.manifest.writer import ManifestWriter
-from xmt_collector.platforms.douyin.normalizer import normalize_work
+from xmt_collector.platforms.douyin.normalizer import normalize_account_metadata, normalize_work
 from xmt_collector.platforms.douyin.pagination import ScrollProgress, advance_scroll
 from xmt_collector.platforms.douyin.view_scope import content_view_scope
 
@@ -30,6 +30,20 @@ def test_douyin_normalizer_restores_legacy_metric_aliases_without_missing_zeroes
     assert work["metrics"] == {"play_count": 5, "like_count": 3, "comment_count": 4, "share_count": 6, "collect_count": 7}
     assert "completion_rate" not in work["metrics"]
     assert normalize_work({"aweme_id": "zero", "statistics": {"play_count": 0}})["metrics"] == {"play_count": 0}
+
+
+def test_account_metadata_accepts_current_creator_center_aliases_without_inventing_zeroes():
+    account = normalize_account_metadata([
+        {"response": {"user_profile": {"nickname": "账号", "follower_count": "2163", "following_count": 44, "aweme_count": 43, "total_favorited": 16000}}}
+    ])
+    assert account["fans_count"] == 2163
+    assert account["following_count"] == 44
+    assert account["works_count"] == 43
+    assert account["total_likes"] == 16000
+    assert account["metadata_observed"]["fans_count"] is True
+    missing = normalize_account_metadata([{"response": {"status_code": 0}}])
+    assert "fans_count" not in missing
+    assert missing["metadata_observed"]["fans_count"] is False
 
 
 def test_content_view_scope_requires_each_unbounded_group_and_selects_its_own_all():

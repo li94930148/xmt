@@ -21,6 +21,8 @@ const metricCodes = new Set(['views','likes','comments','shares','favorites','pr
 const dateKey = (value: unknown) => { const textValue = text(value); const parsed = Date.parse(textValue); return /^\d{4}-\d{2}-\d{2}(?:T|\s|$)/.test(textValue) && Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : null; };
 const fallbackKey = (value: unknown) => /^[a-f0-9]{64}$/i.test(text(value));
 const coverUrl = (item: JsonRecord) => resolveCoverUrl({ douyinCoverUrl: item.cover_url ?? item.cover, creatorRawJson: item.raw_json ?? item });
+const normalizedOfficialTitle = (value: unknown) => text(value).normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[^\p{Letter}\p{Number}]+/gu, '');
+const optionalNumber = (value: unknown) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
 
 async function openEnvelope(body: JsonRecord, authorization?: string) {
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -70,18 +72,71 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
     await tx.execute(`INSERT INTO creator_ingest_batches(agent_id,batch_id,account_id,parser_version) VALUES(?,?,?,?)`, [agent.id,batchId,account.id,parserVersion]);
     const batch = await tx.queryOne<{id:number}>('SELECT id FROM creator_ingest_batches WHERE agent_id=? AND batch_id=?', [agent.id,batchId]); if (!batch) throw new Error('批次创建失败');
     for (const file of sourceFiles) await tx.execute('INSERT INTO creator_ingest_files(batch_id,sha256,file_type,file_name,size_bytes) VALUES(?,?,?,?,?)', [batch.id,text(file.sha256),text(file.file_type),text(file.file_name),Number(file.size_bytes)]);
-    let inserted=0, updated=0, unchanged=0, rejected=0;
+    const contentCandidates = await tx.queryAll<{ id:number; title:string; publish_time:string | null; play_count:number; like_count:number; comment_count:number; share_count:number; favorite_count:number; play_duration:number; completion_rate:number; cover_click_rate:number }>(`SELECT i.id,i.title,i.publish_time,
+      COALESCE(m.play_count,0) play_count,COALESCE(m.like_count,0) like_count,COALESCE(m.comment_count,0) comment_count,
+      COALESCE(m.share_count,0) share_count,COALESCE(m.favorite_count,0) favorite_count,COALESCE(m.play_duration,0) play_duration,
+      COALESCE(m.completion_rate,0) completion_rate,COALESCE(m.cover_click_rate,0) cover_click_rate
+      FROM creator_content_items i LEFT JOIN creator_content_metrics m ON m.id=(SELECT id FROM creator_content_metrics WHERE content_id=i.id ORDER BY snapshot_time DESC,id DESC LIMIT 1)
+      WHERE i.account_id=?`, [account.id]);
+    const douyinAccount = await tx.queryOne<{ id:number; fans_count:number; fans_count_available:number }>('SELECT id,fans_count,fans_count_available FROM douyin_accounts WHERE creator_account_id=? ORDER BY last_sync_time DESC,id DESC LIMIT 1', [account.id]);
+    const workCandidates = douyinAccount ? await tx.queryAll<{ id:number; title:string; publish_time:string | null; play_count:number; like_count:number; comment_count:number; share_count:number; collect_count:number; completion_rate:number }>('SELECT id,title,publish_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate FROM douyin_works WHERE account_id=?', [douyinAccount.id]) : [];
+    let inserted=0, updated=0, unchanged=0, rejected=0, reconciledContentRows=0, reconciledWorkRows=0, unmatchedContentRows=0, ambiguousContentRows=0;
     const store = async (sourceItemKey: string | null, metricDate: string, metricCode: string, value: unknown, unit: string, sha: string) => {
       if (!metricDate || !metricCode || value === null || value === undefined || !sha) { rejected++; return; }
       const valueText=text(value), previous=await tx.queryOne<{value_text:string}>('SELECT value_text FROM creator_official_metrics WHERE account_id=? AND source_item_key IS ? AND metric_date=? AND metric_code=?',[account.id,sourceItemKey,metricDate,metricCode]);
-      if (previous?.value_text === valueText) { unchanged++; return; }
+      if (previous?.value_text === valueText) {
+        await tx.execute('UPDATE creator_official_metrics SET source_file_sha256=?,parser_version=?,collected_at=?,updated_at=CURRENT_TIMESTAMP WHERE account_id=? AND source_item_key IS ? AND metric_date=? AND metric_code=?', [sha,parserVersion,snapshotTime,account.id,sourceItemKey,metricDate,metricCode]);
+        unchanged++;
+        return;
+      }
       const numeric=Number(value); await tx.execute(`INSERT INTO creator_official_metrics(account_id,source_item_key,metric_date,metric_code,value_text,value_number,unit,source_type,source_file_sha256,parser_version,collected_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,source_item_key,metric_date,metric_code) DO UPDATE SET value_text=excluded.value_text,value_number=excluded.value_number,unit=excluded.unit,source_type=excluded.source_type,source_file_sha256=excluded.source_file_sha256,parser_version=excluded.parser_version,collected_at=excluded.collected_at,updated_at=CURRENT_TIMESTAMP`,[account.id,sourceItemKey,metricDate,metricCode,valueText,Number.isFinite(numeric)?numeric:null,unit,'official_export',sha,parserVersion,snapshotTime]);
       if (previous) updated++; else inserted++;
     };
     const defaultSha=text(sourceFiles[0]?.sha256);
-    for (const item of contentMetrics) { const date=dateKey(item.published_at)!; const key=text(item.platform_item_id||item.aweme_id||item.url_item_id||item.source_item_key||item.fallback_source_key); const metrics=item.metrics as JsonRecord; for(const [code,value] of Object.entries(metrics)) await store(key,date,code,value,code.includes('rate')?'ratio':'count',defaultSha); }
+    for (const item of contentMetrics) {
+      const date=dateKey(item.published_at)!;
+      const sourceItemKey=text(item.platform_item_id||item.aweme_id||item.url_item_id||item.source_item_key||item.fallback_source_key);
+      const metrics=item.metrics as JsonRecord;
+      for(const [code,value] of Object.entries(metrics)) await store(sourceItemKey,date,code,value,code.includes('rate')?'ratio':'count',defaultSha);
+
+      const titleKey = normalizedOfficialTitle(item.title);
+      if (!titleKey) { unmatchedContentRows++; continue; }
+      const sameWork = <T extends { title:string; publish_time:string | null }>(candidate:T) => normalizedOfficialTitle(candidate.title) === titleKey && dateKey(candidate.publish_time) === date;
+      const matchedContents = contentCandidates.filter(sameWork);
+      const matchedWorks = workCandidates.filter(sameWork);
+      if (!matchedContents.length && !matchedWorks.length) { unmatchedContentRows++; continue; }
+      if (matchedContents.length > 1 || matchedWorks.length > 1) { ambiguousContentRows++; continue; }
+      const views=optionalNumber(metrics.views), likes=optionalNumber(metrics.likes), comments=optionalNumber(metrics.comments), shares=optionalNumber(metrics.shares), favorites=optionalNumber(metrics.favorites);
+      const watchTime=optionalNumber(metrics.watch_time_seconds), completion=optionalNumber(metrics.completion_rate), coverClick=optionalNumber(metrics.cover_click_rate);
+      const metricRaw = json({ source: 'douyin_official_export', batch_id: batchId, source_item_key: sourceItemKey, metrics });
+      for (const candidate of matchedContents) {
+        await tx.execute(`INSERT INTO creator_content_metrics(content_id,snapshot_time,play_count,like_count,comment_count,share_count,favorite_count,play_duration,completion_rate,cover_click_rate,raw_json)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(content_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,favorite_count=excluded.favorite_count,play_duration=excluded.play_duration,completion_rate=excluded.completion_rate,cover_click_rate=excluded.cover_click_rate,raw_json=excluded.raw_json`,
+        [candidate.id,snapshotTime,views??candidate.play_count,likes??candidate.like_count,comments??candidate.comment_count,shares??candidate.share_count,favorites??candidate.favorite_count,watchTime??candidate.play_duration,completion??candidate.completion_rate,coverClick??candidate.cover_click_rate,metricRaw]);
+        reconciledContentRows++;
+      }
+      for (const candidate of matchedWorks) {
+        const nextPlay=views??candidate.play_count, nextLikes=likes??candidate.like_count, nextComments=comments??candidate.comment_count, nextShares=shares??candidate.share_count, nextCollects=favorites??candidate.collect_count;
+        const interactionRate=nextPlay>0?(nextLikes+nextComments+nextShares+nextCollects)/nextPlay:0;
+        await tx.execute('UPDATE douyin_works SET play_count=?,like_count=?,comment_count=?,share_count=?,collect_count=?,completion_rate=?,interaction_rate=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [nextPlay,nextLikes,nextComments,nextShares,nextCollects,completion??candidate.completion_rate,interactionRate,candidate.id]);
+        await tx.execute(`INSERT INTO douyin_work_snapshots(work_id,snapshot_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate,interaction_rate)
+          VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate`,
+        [candidate.id,snapshotTime,nextPlay,nextLikes,nextComments,nextShares,nextCollects,completion??candidate.completion_rate,interactionRate]);
+        reconciledWorkRows++;
+      }
+    }
     for (const item of incomeMetrics) await store(null,dateKey(item.metric_date)!,text(item.metric_code),item.value,text(item.unit),defaultSha);
-    const result={result:{inserted,updated,unchanged,rejected},warnings:[] as string[]}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[JSON.stringify(result),batch.id]);
+    if (douyinAccount && contentMetrics.length) {
+      const officialTotal = (code:string) => contentMetrics.reduce((sum,item) => sum + Number((item.metrics as JsonRecord | undefined)?.[code] || 0), 0);
+      await tx.execute(`INSERT INTO douyin_daily_snapshots(account_id,snapshot_date,fans_count,fans_count_available,works_count,play_count,like_count,comment_count,share_count)
+        VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,snapshot_date) DO UPDATE SET fans_count=CASE WHEN excluded.fans_count_available=1 THEN excluded.fans_count ELSE douyin_daily_snapshots.fans_count END,fans_count_available=MAX(douyin_daily_snapshots.fans_count_available,excluded.fans_count_available),works_count=excluded.works_count,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count`,
+      [douyinAccount.id,dateKey(snapshotTime),douyinAccount.fans_count,douyinAccount.fans_count_available,contentMetrics.length,officialTotal('views'),officialTotal('likes'),officialTotal('comments'),officialTotal('shares')]);
+    }
+    const warnings = [
+      ...(unmatchedContentRows ? [`${unmatchedContentRows} 条官方作品未找到标题与发布日期完全一致的本地记录，已保留官方汇总但未覆盖作品明细`] : []),
+      ...(ambiguousContentRows ? [`${ambiguousContentRows} 条官方作品存在多个标题与发布日期相同的本地候选，已保留官方汇总并等待人工确认`] : []),
+    ];
+    const result={result:{inserted,updated,unchanged,rejected,reconciled_content_rows:reconciledContentRows,reconciled_work_rows:reconciledWorkRows,unmatched_content_rows:unmatchedContentRows,ambiguous_content_rows:ambiguousContentRows},warnings}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[JSON.stringify(result),batch.id]);
     return {success:true,batch_id:batchId,duplicate_batch:false,...result};
   });
 }

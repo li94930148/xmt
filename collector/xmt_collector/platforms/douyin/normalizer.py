@@ -96,15 +96,27 @@ def find_work_candidates(value: Any) -> list[dict[str, Any]]:
 def normalize_account_metadata(captures: list[dict[str, Any]]) -> dict[str, Any]:
     """Return only fields actually observed in sanitized Creator responses."""
     fields = ("nickname", "avatar", "fans_count", "following_count", "works_count", "total_likes")
+    aliases = {
+        "nickname": ("nickname", "nick_name", "account_name", "user_name"),
+        "avatar": ("avatar", "avatar_url", "avatar_uri"),
+        # Creator Center currently exposes the live total as follower_count on
+        # the account home response.  Older responses used fans_count.
+        "fans_count": ("fans_count", "follower_count", "followers"),
+        "following_count": ("following_count", "follow_count", "following"),
+        "works_count": ("works_count", "aweme_count", "video_count"),
+        "total_likes": ("total_likes", "total_favorited", "favoriting_count"),
+    }
     result: dict[str, Any] = {"metadata_observed": {field: False for field in fields}}
 
     def visit(value: Any) -> None:
         if isinstance(value, dict):
             for field in fields:
-                candidate = value.get(field)
+                candidate = _first_present(*(value.get(alias) for alias in aliases[field]))
                 if candidate not in (None, "") and not result["metadata_observed"][field]:
                     if field == "avatar" and isinstance(candidate, dict):
                         candidate = candidate.get("url") or candidate.get("uri")
+                    if field in {"fans_count", "following_count", "works_count", "total_likes"}:
+                        candidate = _number(candidate)
                     if candidate not in (None, ""):
                         result[field] = candidate
                         result["metadata_observed"][field] = True

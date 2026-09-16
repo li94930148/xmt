@@ -53,6 +53,7 @@ export default function CreatorDashboard() {
   const account = asRecord(data.account);
   const lastLog = logs[0];
   const agent = agentStatus?.agents[0];
+  const official = data.data_source === 'douyin_official_export';
 
   return <ReactBitsPageScene page="creator"><div className="mx-auto max-w-[1500px] space-y-6 pb-12">
     <div className="sr-only"><ReactBitsHeadingSlot>抖音数据驾驶舱</ReactBitsHeadingSlot></div><PageHeader title="抖音数据驾驶舱" description="账号与内容表现概览" loading={loading} onRefresh={() => void load()} refreshLabel="刷新数据" actions={<span className={`inline-flex h-10 items-center rounded-lg px-3 text-sm ${agent?.online?'bg-emerald-500/10 text-emerald-500':'bg-amber-500/10 text-amber-600'}`}>{agent?.online?'采集端在线':'采集端离线'}</span>} />
@@ -71,10 +72,10 @@ export default function CreatorDashboard() {
       <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" disabled={bindingBusy||!account.douyin_uid} className="h-10 rounded-lg bg-studio-cyan px-4 text-sm font-medium text-slate-950 disabled:cursor-not-allowed disabled:opacity-50" onClick={()=>{setBindingBusy(true);setBindingError('');void createCreatorAgentBindingCode(String(account.douyin_uid||'')).then(value=>setBinding({code:value.binding_code,expiresAt:value.expires_at})).catch(cause=>setBindingError(cause instanceof Error?cause.message:'绑定码创建失败')).finally(()=>setBindingBusy(false));}}>{bindingBusy?'正在创建…':'创建一次性绑定码'}</button>{binding?<div className="rounded-lg bg-studio-surface px-4 py-2"><code className="font-semibold">{binding.code}</code><span className="ml-3 text-xs text-studio-text-muted">15 分钟内有效，仅可使用一次</span></div>:null}</div>
       {bindingError?<p role="alert" className="mt-3 text-sm text-red-500">{bindingError}</p>:null}
     </Panel>
-    <div className={`rounded-xl border p-4 text-sm ${data.data_status==='ready'?'border-emerald-500/30 bg-emerald-500/10':'border-amber-500/30 bg-amber-500/10'}`}><b>{data.data_status==='ready'?'数据正常':'数据不完整'}</b><span className="ml-3 text-studio-text-muted">最后同步 {formatDate(data.last_success_at,true)} · {data.metrics.works_count} 条作品</span></div>
+    <div className={`rounded-xl border p-4 text-sm ${data.data_status==='ready'?'border-emerald-500/30 bg-emerald-500/10':'border-amber-500/30 bg-amber-500/10'}`}><b>{data.data_status==='ready'?'数据正常':'数据不完整'}</b><span className="ml-3 text-studio-text-muted">{official?'抖音官方导出优先':'采集数据'} · 更新于 {formatDate(official?data.official_snapshot_at:data.last_success_at,true)} · {data.metrics.works_count} 条作品</span></div>
     <ReactBitsRevealSlot className="block"><section data-testid="creator-core-metrics" className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <MetricCard label="粉丝" value={data.metrics.fans_count == null ? '暂无数据' : data.metrics.fans_count} icon={Users} />
-      <MetricCard label="入库作品" value={data.metrics.works_count} icon={Video} accent="violet" />
+      <MetricCard label={official?'官方作品':'入库作品'} value={data.metrics.works_count} icon={Video} accent="violet" />
       <MetricCard label="累计播放" value={data.metrics.play_count} icon={Play} accent="blue" />
       <MetricCard label="互动率" value={`${(data.metrics.interaction_rate * 100).toFixed(2)}%`} icon={Heart} accent="rose" />
       <MetricCard label="分享率" value={`${(data.metrics.share_rate * 100).toFixed(2)}%`} icon={Share2} accent="blue" />

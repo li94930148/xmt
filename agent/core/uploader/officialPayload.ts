@@ -11,8 +11,9 @@ export function toOfficialExportPayload(snapshot: CreatorSnapshot, accountId: st
     for (const key of ['source_rows', 'accepted_rows', 'duplicate_rows', 'rejected_rows'] as const) total[key] += Number(value?.[key] || 0);
     total.warnings.push(...(Array.isArray(value?.warnings) ? value.warnings.map(String) : [])); return total;
   }, { source_rows: 0, accepted_rows: 0, duplicate_rows: 0, rejected_rows: 0, warnings: [] as string[] });
-  const batchSeed = JSON.stringify({ accountId, parser: 'douyin-export-v1', files: files.map(file => file.sha256).sort() });
+  const parserVersion = 'douyin-export-v2';
+  const batchSeed = JSON.stringify({ accountId, parser: parserVersion, files: files.map(file => file.sha256).sort() });
   const digest = crypto.createHash('sha256').update(batchSeed).digest('hex');
   const stableBatchId = `${digest.slice(0,8)}-${digest.slice(8,12)}-4${digest.slice(13,16)}-8${digest.slice(17,20)}-${digest.slice(20,32)}`;
-  return { schema_version: 2, batch_id: stableBatchId, agent_version: snapshot.agent_version, parser_version: 'douyin-export-v1', platform: 'douyin', platform_account_id: accountId, generated_at: snapshot.collected_at, source_files: files.map(file => ({ file_type: 'official_export', file_name: String(file.storedFilename || ''), sha256: String(file.sha256 || ''), size_bytes: Number(file.size || 0), downloaded_at: snapshot.collected_at })), datasets: { content_metrics: contentMetrics, income_metrics: incomeMetrics }, quality };
+  return { schema_version: 2, batch_id: stableBatchId, agent_version: snapshot.agent_version, parser_version: parserVersion, platform: 'douyin', platform_account_id: accountId, generated_at: snapshot.collected_at, source_files: files.map(file => ({ file_type: 'official_export', file_name: String(file.storedFilename || ''), sha256: String(file.sha256 || ''), size_bytes: Number(file.size || 0), downloaded_at: snapshot.collected_at })), datasets: { content_metrics: contentMetrics, income_metrics: incomeMetrics }, quality };
 }

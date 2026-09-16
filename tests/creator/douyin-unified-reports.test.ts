@@ -42,9 +42,10 @@ try {
   await execute(
     `INSERT INTO douyin_daily_snapshots(account_id,snapshot_date,fans_count,fans_count_available,works_count,play_count,like_count,comment_count,share_count)
      VALUES(?, '2026-09-01', 100, 1, 1, 1000, 100, 10, 5),
+           (?, '2026-09-09', 100, 1, 1, 1000, 100, 10, 5),
            (?, '2026-09-15', 130, 1, 2, 2000, 180, 20, 10),
            (?, '2026-09-16', 0, 0, 2, 2100, 190, 21, 11)`,
-    [douyinAccountId, douyinAccountId, douyinAccountId],
+    [douyinAccountId, douyinAccountId, douyinAccountId, douyinAccountId],
   );
 
   // Deliberately insert stale legacy zeros: reports must ignore this old silo.
@@ -53,21 +54,38 @@ try {
      VALUES(?, '2026-09-15T08:00:00.000Z', 0, 0, 0, '{}', '{}')`,
     [creatorAccountId],
   );
+  for (const [sourceKey, date, values] of [
+    ['official-a', '2026-09-12', { views: 650, likes: 65, comments: 7, shares: 4, favorites: 3 }],
+    ['official-b', '2026-09-14', { views: 950, likes: 95, comments: 10, shares: 5, favorites: 4 }],
+  ] as const) {
+    for (const [metric, value] of Object.entries(values)) await execute(
+      `INSERT INTO creator_official_metrics(account_id,source_item_key,metric_date,metric_code,value_text,value_number,unit,source_type,source_file_sha256,parser_version,collected_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      [creatorAccountId, sourceKey, date, metric, String(value), value, 'count', 'official_export', 'a'.repeat(64), 'douyin-export-v2', '2026-09-16T08:00:00.000Z'],
+    );
+  }
+  await execute(
+    `INSERT INTO creator_official_metrics(account_id,source_item_key,metric_date,metric_code,value_text,value_number,unit,source_type,source_file_sha256,parser_version,collected_at)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+    [creatorAccountId, 'no-longer-in-latest-export', '2026-09-01', 'views', '999999', 999999, 'count', 'official_export', 'b'.repeat(64), 'douyin-export-v1', '2026-09-15T08:00:00.000Z'],
+  );
 
   const dashboard = await getDouyinDashboard(creatorAccountId);
   assert(dashboard);
-  assert.equal(dashboard.metrics.play_count, 1500, 'dashboard and reports must share the same current cumulative play definition');
+  assert.equal(dashboard.metrics.play_count, 1600, 'dashboard must prefer the latest official Creator Center export');
+  assert.equal(dashboard.metrics.interaction_count, 193, 'official likes, comments, shares and favorites must use one source');
+  assert.equal(dashboard.data_source, 'douyin_official_export');
   assert.equal(dashboard.metrics.fans_count, 130, 'dashboard must retain the last real fans value when a later snapshot omits that field');
   assert.equal(dashboard.growth_7d?.fans, 30);
 
   const report = await creatorAnalyticsService.generateReport(creatorAccountId, 'weekly');
   assert.equal(report.report_version, 2);
-  assert.equal(report.account_performance.current.play_count, 1500, 'cumulative plays must sum current canonical works, not snapshots');
+  assert.equal(report.account_performance.current.play_count, 1600, 'reports must use the same official total as the dashboard');
   assert.equal(report.account_performance.current.fans_count, 130, 'a newer snapshot without fans must not hide the last real unified account value');
   assert.equal(report.growth.plays, 1100, 'period growth must be the latest snapshot minus the boundary snapshot');
   assert.equal(report.growth.fans, 30);
   assert.equal(report.work_performance.total, 2);
-  assert.equal(report.data_coverage.source, 'douyin_operations_unified');
+  assert.equal(report.data_coverage.source, 'douyin_official_export');
   assert(report.excellent_works.every((work) => work.level === 'viral' || work.level === 'excellent'));
   assert(report.low_efficiency_works.every((work) => work.level === 'low'));
   assert.equal(new Set([...report.excellent_works, ...report.low_efficiency_works].map((work) => work.id)).size, report.excellent_works.length + report.low_efficiency_works.length, 'excellent and low-efficiency lists must not overlap');

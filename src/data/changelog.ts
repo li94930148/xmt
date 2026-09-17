@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '2.22.2', date: '2026-09-17', title: '抖音官方作品计数校准', impactScope: ['抖音运营中心', '复盘报告'], changes: [{ type: 'fix', description: '官方导出中播放为零且未提供播放指标行的作品，现在仍会计入官方作品总数。' }] },
   { version: '2.22.1', date: '2026-09-16', title: '抖音官方数据校准', impactScope: ['抖音运营中心', '复盘报告', 'Creator Agent'], changes: [{ type: 'fix', description: '修复创作者中心实时粉丝字段漏采，粉丝总数不再停留在旧值。' }, { type: 'improvement', description: '作品数、累计播放和互动统一使用最新一次官方导出，多次导出不会叠加。' }, { type: 'improvement', description: '仅对标题与发布日期完全一致的作品校准明细；缺少可比快照时不再误算周期变化。' }] },
   { version: '2.22.0', date: '2026-09-16', title: '抖音运营数据统一与复盘完善', impactScope: ['抖音运营中心', '复盘报告', '登录安全升级'], changes: [{ type: 'improvement', description: '运营概览、累计播放、粉丝、趋势和复盘报告统一读取同一套抖音标准化数据，缺失指标会明确标注。' }, { type: 'feature', description: '复盘报告支持账号范围内安全删除；下线没有真实数据来源的粉丝画像入口。' }, { type: 'fix', description: '登录安全升级只把真实外部监控抓取视为观测证据，不再把进程内指标误判为已接入监控。' }] },
   { version: '2.21.4', date: '2026-09-16', title: '管理与运营入口收敛', impactScope: ['内容动态', '登录安全升级', '备份管理', '抖音运营中心'], changes: [{ type: 'improvement', description: '内容记录和认证升级改为直接给出可理解、可执行的信息，抖音运营导航移除重复入口。' }, { type: 'fix', description: '备份管理可汇总应用、部署应急和服务器定时备份，并显示不可访问来源。' }] },

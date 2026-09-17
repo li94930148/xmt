@@ -69,10 +69,16 @@ try {
      VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
     [creatorAccountId, 'no-longer-in-latest-export', '2026-09-01', 'views', '999999', 999999, 'count', 'official_export', 'b'.repeat(64), 'douyin-export-v1', '2026-09-15T08:00:00.000Z'],
   );
+  await execute(
+    `INSERT INTO creator_official_metrics(account_id,source_item_key,metric_date,metric_code,value_text,value_number,unit,source_type,source_file_sha256,parser_version,collected_at)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+    [creatorAccountId, 'official-zero-view-work', '2026-09-14', 'likes', '0', 0, 'count', 'official_export', 'a'.repeat(64), 'douyin-export-v2', '2026-09-16T08:00:00.000Z'],
+  );
 
   const dashboard = await getDouyinDashboard(creatorAccountId);
   assert(dashboard);
   assert.equal(dashboard.metrics.play_count, 1600, 'dashboard must prefer the latest official Creator Center export');
+  assert.equal(dashboard.metrics.works_count, 3, 'official works without a views metric row must still count as works');
   assert.equal(dashboard.metrics.interaction_count, 193, 'official likes, comments, shares and favorites must use one source');
   assert.equal(dashboard.data_source, 'douyin_official_export');
   assert.equal(dashboard.metrics.fans_count, 130, 'dashboard must retain the last real fans value when a later snapshot omits that field');
@@ -84,7 +90,7 @@ try {
   assert.equal(report.account_performance.current.fans_count, 130, 'a newer snapshot without fans must not hide the last real unified account value');
   assert.equal(report.growth.plays, 1100, 'period growth must be the latest snapshot minus the boundary snapshot');
   assert.equal(report.growth.fans, 30);
-  assert.equal(report.work_performance.total, 2);
+  assert.equal(report.work_performance.total, 3);
   assert.equal(report.data_coverage.source, 'douyin_official_export');
   assert(report.excellent_works.every((work) => work.level === 'viral' || work.level === 'excellent'));
   assert(report.low_efficiency_works.every((work) => work.level === 'low'));

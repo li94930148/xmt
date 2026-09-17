@@ -57,7 +57,7 @@ async function officialMetricsForDashboard(creatorAccountId: number): Promise<Of
     ORDER BY collected_at DESC,updated_at DESC,id DESC LIMIT 1`, [creatorAccountId]);
   if (!latestContentFile?.source_file_sha256) return null;
   const row = await queryOne<Record<string, unknown>>(`SELECT
-    COUNT(DISTINCT CASE WHEN metric_code='views' THEN source_item_key END) works,
+    COUNT(DISTINCT source_item_key) works,
     SUM(CASE WHEN metric_code='views' THEN value_number ELSE 0 END) plays,
     SUM(CASE WHEN metric_code='likes' THEN value_number ELSE 0 END) likes,
     SUM(CASE WHEN metric_code='comments' THEN value_number ELSE 0 END) comments,

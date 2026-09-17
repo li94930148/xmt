@@ -2,7 +2,31 @@ import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape
 
+from xmt_collector.platforms.douyin.adapter import work_data_export_target
 from xmt_collector.platforms.douyin.export_parser import parse_official_export
+
+
+class _ExportLocator:
+    first = object()
+    last = object()
+
+
+class _DataCenterPage:
+    def __init__(self) -> None:
+        self.requested: tuple[str, bool] | None = None
+
+    def get_by_text(self, label: str, *, exact: bool) -> _ExportLocator:
+        self.requested = (label, exact)
+        return _ExportLocator()
+
+
+def test_work_data_export_uses_first_data_center_export_control():
+    page = _DataCenterPage()
+
+    target = work_data_export_target(page)
+
+    assert page.requested == ("导出数据", True)
+    assert target is _ExportLocator.first
 
 
 def write_xlsx(path: Path, rows: list[list[object]]) -> None:

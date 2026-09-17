@@ -35,6 +35,16 @@ PAGES = {
 }
 OFFICIAL_DATA_PERIODS = (("昨天", "yesterday"), ("近7天", "7d"), ("近30天", "30d"))
 
+
+def work_data_export_target(page: Any) -> Any:
+    """Return the export control owned by the 作品数据 section.
+
+    Creator Center currently renders another 导出数据 control for fan data later
+    in the same document.  DOM order follows the page order shown to the user:
+    作品数据 first, fan data second.
+    """
+    return page.get_by_text("导出数据", exact=True).first
+
 _CONTENT_SCOPE_SCRIPT = """
 () => {
   const labels = new Set(['全部', '全部时间', '所有时间', '不限', '已发布', '审核中', '未通过', '草稿', '仅自己可见', '已删除', '视频', '图文', '直播', '近7日', '近30日', '近7天', '近30天', '近90日', '最近7天', '最近30天']);
@@ -282,7 +292,7 @@ class DouyinAdapter:
                         post_tab = page.get_by_text("投稿", exact=True).first
                         if await post_tab.is_visible():
                             await click_audited(post_tab, "click_tab", "投稿", "data-tab")
-                        export_target = page.get_by_text("导出数据", exact=True).last
+                        export_target = work_data_export_target(page)
                         if not await export_target.is_visible():
                             scope_error = "OFFICIAL_EXPORT_BUTTON_MISSING:account_daily"
                             return

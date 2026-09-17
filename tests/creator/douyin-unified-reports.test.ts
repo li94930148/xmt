@@ -74,6 +74,16 @@ try {
      VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
     [creatorAccountId, 'official-zero-view-work', '2026-09-14', 'likes', '0', 0, 'count', 'official_export', 'a'.repeat(64), 'douyin-export-v2', '2026-09-16T08:00:00.000Z'],
   );
+  for (const [date, values] of [
+    ['2026-09-15', { posts: 1, views: 100, likes: 10, comments: -2, shares: 3 }],
+    ['2026-09-16', { posts: 0, views: 200, likes: 20, comments: 4, shares: 5 }],
+  ] as const) {
+    for (const [metric, value] of Object.entries(values)) await execute(
+      `INSERT INTO creator_official_daily_metrics(account_id,metric_date,source_period,metric_code,value_text,value_number,unit,source_file_sha256,parser_version,collected_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?)`,
+      [creatorAccountId, date, '7d', metric, String(value), value, 'count', 'c'.repeat(64), 'douyin-export-v3', '2026-09-17T08:00:00.000Z'],
+    );
+  }
 
   const dashboard = await getDouyinDashboard(creatorAccountId);
   assert(dashboard);
@@ -83,19 +93,19 @@ try {
   assert.equal(dashboard.data_source, 'douyin_official_export');
   assert.equal(dashboard.metrics.fans_count, 130, 'dashboard must retain the last real fans value when a later snapshot omits that field');
   assert.equal(dashboard.growth_7d?.fans, 30);
-  assert.equal(dashboard.growth_7d?.plays, null, 'legacy collection snapshots must not be subtracted from official export totals');
-  assert.equal(dashboard.growth_7d?.interactions, null, 'mixed-source interaction growth must remain unavailable');
+  assert.equal(dashboard.growth_7d?.plays, 300, '7-day official daily flows must be summed without snapshot differencing');
+  assert.equal(dashboard.growth_7d?.interactions, 40, 'official daily interactions must preserve signed platform corrections');
 
   const report = await creatorAnalyticsService.generateReport(creatorAccountId, 'weekly');
   assert.equal(report.report_version, 2);
   assert.equal(report.account_performance.current.play_count, 1600, 'reports must use the same official total as the dashboard');
   assert.equal(report.account_performance.current.fans_count, 130, 'a newer snapshot without fans must not hide the last real unified account value');
-  assert.equal(report.growth.plays, null, 'reports must not present mixed-source snapshot deltas as official growth');
+  assert.equal(report.growth.plays, 300, 'reports must use the exact 7-day official file');
   assert.equal(report.growth.fans, 30);
-  assert.equal(report.growth.interactions, null);
+  assert.equal(report.growth.interactions, 40);
   assert.equal(report.work_performance.total, 3);
   assert.equal(report.data_coverage.source, 'douyin_official_export');
-  assert(report.data_coverage.missing_fields.includes('period_play_growth'));
+  assert(!report.data_coverage.missing_fields.includes('period_play_growth'));
   assert(report.excellent_works.every((work) => work.level === 'viral' || work.level === 'excellent'));
   assert(report.low_efficiency_works.every((work) => work.level === 'low'));
   assert.equal(new Set([...report.excellent_works, ...report.low_efficiency_works].map((work) => work.id)).size, report.excellent_works.length + report.low_efficiency_works.length, 'excellent and low-efficiency lists must not overlap');
@@ -110,7 +120,7 @@ try {
   await creatorAnalyticsService.deleteReport(creatorAccountId, Number(report.id));
   assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) count FROM creator_reports WHERE id=?', [report.id]))?.count), 0);
 
-  console.log('Unified Douyin report tests passed: official totals, mixed-source growth guard, fans, stale-silo isolation, scoped deletion.');
+  console.log('Unified Douyin report tests passed: official totals, exact-period daily flows, fans, stale-silo isolation, scoped deletion.');
 } finally {
   db.close();
   try { rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); } catch { /* best-effort temporary test cleanup */ }

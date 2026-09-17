@@ -16,6 +16,9 @@ export type DouyinWorksPage = { items: AnalyzedDouyinWork[]; next_cursor: string
 export type OfficialDashboardMode = 'existing_only' | 'shadow_compare' | 'official_preferred';
 export type OfficialReconciliationStatus = 'comparable' | 'matched' | 'different' | 'existing_only' | 'official_only' | 'not_comparable';
 type OfficialMetricAggregate = { works:number; plays:number; likes:number; comments:number; shares:number; collects:number; profile_visits:number; followers_gained:number; collected_at:string | null };
+type OfficialDailyPeriod = 'yesterday' | '7d' | '30d';
+export type OfficialDailyPoint = { metric_date:string; posts:number; views:number; likes:number; comments:number; shares:number; five_second_completion_rate:number|null; two_second_bounce_rate:number|null; cover_click_rate:number|null; watch_time_seconds:number|null };
+export type OfficialDailySummary = Omit<OfficialDailyPoint, 'metric_date'> & { days:number; period:OfficialDailyPeriod; collected_at:string|null };
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const parse = (value: unknown): JsonRecord => { try { return typeof value === 'string' ? JSON.parse(value) as JsonRecord : value && typeof value === 'object' ? value as JsonRecord : {}; } catch { return {}; } };
@@ -70,6 +73,65 @@ async function officialMetricsForDashboard(creatorAccountId: number): Promise<Of
     WHERE account_id=? AND source_item_key IS NOT NULL AND source_file_sha256=?`, [creatorAccountId, latestContentFile.source_file_sha256]);
   if (!row || number(row.works) < 1) return null;
   return { works:number(row.works),plays:number(row.plays),likes:number(row.likes),comments:number(row.comments),shares:number(row.shares),collects:number(row.collects),profile_visits:number(row.profile_visits),followers_gained:number(row.followers_gained),collected_at:row.collected_at ? String(row.collected_at) : null };
+}
+
+function weightedDailyMetric(points: OfficialDailyPoint[], key: 'five_second_completion_rate'|'two_second_bounce_rate'|'cover_click_rate'|'watch_time_seconds') {
+  let numerator = 0, denominator = 0;
+  for (const point of points) {
+    const value = point[key];
+    const weight = Math.max(0, point.views);
+    if (value === null || weight <= 0) continue;
+    numerator += value * weight;
+    denominator += weight;
+  }
+  return denominator > 0 ? numerator / denominator : null;
+}
+
+export function summarizeOfficialDaily(points: OfficialDailyPoint[], period: OfficialDailyPeriod, collectedAt: string | null): OfficialDailySummary | null {
+  if (!points.length) return null;
+  return {
+    days: points.length,
+    period,
+    collected_at: collectedAt,
+    posts: points.reduce((sum, point) => sum + point.posts, 0),
+    views: points.reduce((sum, point) => sum + point.views, 0),
+    likes: points.reduce((sum, point) => sum + point.likes, 0),
+    comments: points.reduce((sum, point) => sum + point.comments, 0),
+    shares: points.reduce((sum, point) => sum + point.shares, 0),
+    five_second_completion_rate: weightedDailyMetric(points, 'five_second_completion_rate'),
+    two_second_bounce_rate: weightedDailyMetric(points, 'two_second_bounce_rate'),
+    cover_click_rate: weightedDailyMetric(points, 'cover_click_rate'),
+    watch_time_seconds: weightedDailyMetric(points, 'watch_time_seconds'),
+  };
+}
+
+function pivotOfficialDaily(rows: Record<string, unknown>[]): OfficialDailyPoint[] {
+  const byDate = new Map<string, Record<string, number>>();
+  for (const row of rows) {
+    const date = String(row.metric_date || '');
+    if (!date) continue;
+    const metrics = byDate.get(date) || {};
+    metrics[String(row.metric_code || '')] = number(row.value_number);
+    byDate.set(date, metrics);
+  }
+  return [...byDate].sort(([left], [right]) => left.localeCompare(right)).map(([metric_date, metrics]) => ({
+    metric_date,
+    posts: number(metrics.posts), views: number(metrics.views), likes: number(metrics.likes), comments: number(metrics.comments), shares: number(metrics.shares),
+    five_second_completion_rate: metrics.five_second_completion_rate ?? null,
+    two_second_bounce_rate: metrics.two_second_bounce_rate ?? null,
+    cover_click_rate: metrics.cover_click_rate ?? null,
+    watch_time_seconds: metrics.watch_time_seconds ?? null,
+  }));
+}
+
+async function officialDailyForPeriod(creatorAccountId: number, period: OfficialDailyPeriod) {
+  const latest = await queryOne<{source_file_sha256:string;collected_at:string}>(`SELECT source_file_sha256,collected_at FROM creator_official_daily_metrics
+    WHERE account_id=? AND source_period=? ORDER BY collected_at DESC,updated_at DESC,id DESC LIMIT 1`, [creatorAccountId,period]);
+  if (!latest?.source_file_sha256) return null;
+  const rows = await queryAll<Record<string, unknown>>(`SELECT metric_date,metric_code,value_number FROM creator_official_daily_metrics
+    WHERE account_id=? AND source_period=? AND source_file_sha256=? ORDER BY metric_date ASC,id ASC`, [creatorAccountId,period,latest.source_file_sha256]);
+  const points = pivotOfficialDaily(rows);
+  return { points, summary: summarizeOfficialDaily(points, period, latest.collected_at), source_file_sha256: latest.source_file_sha256 };
 }
 
 const encodeCursor = (cursor: WorksCursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
@@ -325,7 +387,9 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   const accountFansAvailable = number(account.fans_count_available) === 1;
   const fansAvailable = accountFansAvailable || Boolean(latestFanSnapshot);
   const mode = officialDashboardMode();
-  const official = mode === 'existing_only' ? null : await officialMetricsForDashboard(creatorAccountId);
+  const [official, official7d, official30d] = mode === 'existing_only'
+    ? [null, null, null]
+    : await Promise.all([officialMetricsForDashboard(creatorAccountId), officialDailyForPeriod(creatorAccountId, '7d'), officialDailyForPeriod(creatorAccountId, '30d')]);
   const reconciliation = officialReconciliationSummary(totals.plays, official?.plays ?? null);
   // Shadow mode deliberately leaves the public dashboard shape and values on
   // the established path. The log contains only a safe aggregate summary.
@@ -334,10 +398,13 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   const displayPlays = useOfficial ? official.plays : totals.plays;
   const displayInteractions = useOfficial ? official.likes + official.comments + official.shares + official.collects : totals.interactions;
   const displayShares = useOfficial ? official.shares : totals.shares;
-  const unavailableOfficialGrowth = useOfficial ? ['period_play_growth', 'period_interaction_growth'] : [];
+  const unavailableOfficialGrowth = useOfficial ? [
+    ...(official7d?.summary ? [] : ['growth_7d']),
+    ...(official30d?.summary ? [] : ['growth_30d']),
+  ] : [];
   const missingFields = [...(fansAvailable ? [] : ['fans_count', 'fan_growth']), ...unavailableOfficialGrowth];
-  const displayGrowth = (value: ReturnType<typeof growthFor>) => useOfficial && value
-    ? { ...value, plays: null, interactions: null }
+  const displayGrowth = (value: ReturnType<typeof growthFor>, daily: OfficialDailySummary | null | undefined) => useOfficial
+    ? { fans: value?.fans ?? null, plays: daily?.views ?? null, interactions: daily ? daily.likes + daily.comments + daily.shares : null }
     : value;
   return {
     account,
@@ -352,8 +419,8 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     },
     health: calculateDouyinAccountHealth(account, analyzed.works, snapshots),
     baselines: analyzed.baselines,
-    growth_7d: displayGrowth(growthFor(7)),
-    growth_30d: displayGrowth(growthFor(30)),
+    growth_7d: displayGrowth(growthFor(7), official7d?.summary),
+    growth_30d: displayGrowth(growthFor(30), official30d?.summary),
     top_works: await resolveWorkCovers(account, rankedWorks.slice(0, 5)),
     snapshot_count: snapshots.length,
     snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
@@ -363,11 +430,11 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     missing_fields: missingFields,
     warnings: [
       ...(fansAvailable ? [] : ['当前采集响应没有提供粉丝总数；该字段不会按 0 展示或参与增长评分。']),
-      ...(useOfficial ? ['当前官方导出只提供累计指标，旧采集快照与官方口径不可直接相减；播放和互动周期增长暂不展示。'] : []),
+      ...(useOfficial ? ['播放与互动周期值来自对应的近7天、近30天官方逐日导出；计数按日求和，比例与时长按播放量加权。'] : []),
     ],
     metric_sources: {
       account: 'douyin_accounts',
-      growth: useOfficial ? 'unavailable_without_comparable_official_baseline' : 'douyin_daily_snapshots',
+      growth: useOfficial ? 'creator_official_daily_metrics.period_exact' : 'douyin_daily_snapshots',
       scoring: 'douyin_works',
       works: useOfficial ? 'creator_official_metrics.distinct_source_item_key' : 'douyin_works',
       play_count: useOfficial ? 'creator_official_metrics.views' : 'douyin_works',
@@ -472,6 +539,34 @@ export async function getDouyinManagedCover(creatorAccountId: number, workId: nu
 export async function getDouyinTrends(creatorAccountId: number, period: Period) {
   const account = await accountForScope(creatorAccountId);
   if (!account) return { period, snapshots: [] };
+  const exact = period === '7d' || period === '30d' ? await officialDailyForPeriod(creatorAccountId, period) : null;
+  const historyRows = period === '90d' ? await queryAll<Record<string, unknown>>(`SELECT metric_date,metric_code,value_number FROM creator_official_daily_metrics
+    WHERE account_id=? AND source_period='30d' ORDER BY metric_date ASC,id ASC`, [creatorAccountId]) : [];
+  const officialPoints = exact?.points || pivotOfficialDaily(historyRows).slice(-90);
+  if (officialPoints.length) {
+    const fanRows = await queryAll<Record<string, unknown>>('SELECT snapshot_date,fans_count,fans_count_available FROM douyin_daily_snapshots WHERE account_id=? ORDER BY snapshot_date ASC', [account.id]);
+    const fans = new Map(fanRows.filter(row => number(row.fans_count_available) === 1).map(row => [String(row.snapshot_date), number(row.fans_count)]));
+    return {
+      period,
+      snapshots: officialPoints.map(point => ({
+        snapshot_date: point.metric_date,
+        fans_count: fans.get(point.metric_date) ?? null,
+        works_count: point.posts,
+        play_count: point.views,
+        like_count: point.likes,
+        comment_count: point.comments,
+        share_count: point.shares,
+        interaction_count: point.likes + point.comments + point.shares,
+        tracked_interaction_rate: point.views > 0 ? (point.likes + point.comments + point.shares) / point.views : 0,
+      })),
+      source: 'creator_official_daily_metrics',
+      metric_semantics: 'daily_flow',
+      data_status: officialPoints.length < days(period) ? 'partial' : 'ready',
+      snapshot_start_date: officialPoints[0]?.metric_date ?? null,
+      missing_fields: officialPoints.some(point => !fans.has(point.metric_date)) ? ['fans_count'] : [],
+      note: '播放、互动和投稿是官方导出的逐日流量，周期卡片按日求和；粉丝仍使用存在真实值的账号快照。',
+    };
+  }
   const since = new Date(Date.now() - days(period) * 86400000).toISOString().slice(0, 10);
   const snapshots = await queryAll<Record<string, unknown>>('SELECT * FROM douyin_daily_snapshots WHERE account_id=? AND snapshot_date>=? ORDER BY snapshot_date ASC', [account.id, since]);
   return {
@@ -482,6 +577,7 @@ export async function getDouyinTrends(creatorAccountId: number, period: Period) 
       return { ...snapshot, fans_count: number(snapshot.fans_count_available) === 1 ? number(snapshot.fans_count) : null, interaction_count: interactions, tracked_interaction_rate: plays > 0 ? interactions / plays : 0 };
     }),
     source: 'douyin_daily_snapshots',
+    metric_semantics: 'cumulative_snapshot',
     data_status: snapshots.length < 2 ? 'partial' : 'ready',
     snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
     missing_fields: snapshots.some(snapshot => number(snapshot.fans_count_available) !== 1) ? ['fans_count'] : [],
@@ -502,13 +598,17 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
     queryAll<Record<string, unknown>>('SELECT * FROM douyin_daily_snapshots WHERE account_id=? ORDER BY snapshot_date ASC', [account.id]),
   ]);
   const analyzed = analyzeDouyinWorks(canonicalizeDouyinWorks(works));
-  const official = officialDashboardMode() === 'official_preferred' ? await officialMetricsForDashboard(creatorAccountId) : null;
+  const periodDays = type === 'daily' ? 1 : type === 'weekly' ? 7 : 30;
+  const officialPeriod: OfficialDailyPeriod = type === 'daily' ? 'yesterday' : type === 'weekly' ? '7d' : '30d';
+  const [official, officialDaily] = officialDashboardMode() === 'official_preferred'
+    ? await Promise.all([officialMetricsForDashboard(creatorAccountId), officialDailyForPeriod(creatorAccountId, officialPeriod)])
+    : [null, null];
   const useOfficial = official !== null;
   const latest = snapshots.at(-1) || null;
   const validFanSnapshots = snapshots.filter(row => number(row.fans_count_available) === 1);
   const latestFanSnapshot = validFanSnapshots.at(-1) || null;
-  const periodDays = type === 'daily' ? 1 : type === 'weekly' ? 7 : 30;
-  const anchor = latest?.snapshot_date ? new Date(String(latest.snapshot_date)).getTime() : Date.now();
+  const officialEndDate = officialDaily?.points.at(-1)?.metric_date;
+  const anchor = officialEndDate ? new Date(officialEndDate).getTime() : latest?.snapshot_date ? new Date(String(latest.snapshot_date)).getTime() : Date.now();
   const boundary = anchor - periodDays * 86400000;
   const startCandidate = snapshots.filter((row) => new Date(String(row.snapshot_date)).getTime() <= boundary).at(-1) || null;
   const start = startCandidate && boundary - new Date(String(startCandidate.snapshot_date)).getTime() <= 2 * 86400000 ? startCandidate : null;
@@ -557,9 +657,9 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
       }, { viral: 0, excellent: 0, normal: 0, low: 0 }),
     },
     growth: {
-      plays: useOfficial ? null : growthValue('play_count'),
+      plays: useOfficial ? officialDaily?.summary?.views ?? null : growthValue('play_count'),
       fans: fanGrowth,
-      interactions: useOfficial ? null : hasGrowthBaseline && latest && start
+      interactions: useOfficial ? officialDaily?.summary ? officialDaily.summary.likes + officialDaily.summary.comments + officialDaily.summary.shares : null : hasGrowthBaseline && latest && start
         ? number(latest.like_count) + number(latest.comment_count) + number(latest.share_count)
           - number(start.like_count) - number(start.comment_count) - number(start.share_count)
         : null,
@@ -569,11 +669,11 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
     data_coverage: {
       source: useOfficial ? 'douyin_official_export' : 'douyin_operations_unified',
       snapshot_count: snapshots.length,
-      period_start: start?.snapshot_date ?? null,
-      period_end: latest?.snapshot_date ?? null,
+      period_start: officialDaily?.points[0]?.metric_date ?? start?.snapshot_date ?? null,
+      period_end: officialEndDate ?? latest?.snapshot_date ?? null,
       fans_available: fansAvailable,
-      missing_fields: [...(fansAvailable ? [] : ['fans_count', 'fan_growth']), ...(useOfficial ? ['period_play_growth', 'period_interaction_growth'] : [])],
-      metric_definition: useOfficial ? '作品数、播放、点赞、评论、分享和收藏以抖音创作者中心官方导出汇总为准；当前只有累计官方口径，旧采集快照不可直接相减，播放和互动周期增长暂不展示。' : '累计播放为去重后每个入库作品当前播放量之和；周期增长仅在期初期末快照日期可比时计算。',
+      missing_fields: [...(fansAvailable ? [] : ['fans_count', 'fan_growth']), ...(useOfficial && !officialDaily?.summary ? ['period_play_growth', 'period_interaction_growth'] : [])],
+      metric_definition: useOfficial ? `作品累计指标以内容管理官方导出为准；${officialPeriod} 周期播放和互动来自对应官方逐日文件，计数求和，比例与时长按播放量加权。` : '累计播放为去重后每个入库作品当前播放量之和；周期增长仅在期初期末快照日期可比时计算。',
       official_snapshot_at: useOfficial ? official.collected_at : null,
     },
   };

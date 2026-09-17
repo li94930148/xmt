@@ -6,7 +6,7 @@ import os from 'node:os';
 import { ScraplingWorkerBridge, resolveCollectorRuntime, workerTerminalError } from './workerBridge.js';
 import { CollectorLoginRequiredError } from './workerBridge.js';
 import { ScraplingCreatorCollector } from './scrapling.js';
-import { collectorBrowserLaunch } from './browserLaunch.js';
+import { automatedCollectorBrowserLaunch, CollectorBackgroundUnsupportedError, collectorBrowserLaunch } from './browserLaunch.js';
 import { creatorFallbackBrowsers } from '../browser/discovery.js';
 import { capabilities } from '../browser/capabilities.js';
 import type { BrowserInfo } from '../browser/types.js';
@@ -65,4 +65,10 @@ test('Worker terminal events 保留 completed/error/login_required 语义', () =
 test('Creator 自动回退不选择 Firefox 或 WebKit', () => {
   const browser = (id: string, engine: 'chromium'|'firefox'|'webkit'): BrowserInfo => ({ id, displayName: id, browserType: engine === 'chromium' ? 'edge' : engine, engine, runtime: 'playwright', executablePath: `/tmp/${id}`, source: 'test', capabilities: capabilities(engine, 'playwright'), compatibilityStatus: 'partially_compatible', compatibilityReason: 'test' });
   assert.deepEqual(creatorFallbackBrowsers([browser('firefox', 'firefox'), browser('webkit', 'webkit'), browser('edge', 'chromium')]).map(item => item.id), ['edge']);
+});
+
+test('自动采集强制后台无头模式且拒绝可见 external-cdp 会话', () => {
+  const headless = automatedCollectorBrowserLaunch({ id: 'edge', type: 'edge', engine: 'chromium', runtime: 'system', executablePath: '/tmp/msedge', sessionMode: 'persistent', profileName: 'default', headless: false, launchArgs: [], autoFallback: false });
+  assert.equal(headless.headless, true);
+  assert.throws(() => automatedCollectorBrowserLaunch({ id: 'external', type: 'custom', engine: 'chromium', runtime: 'external-cdp', cdpEndpoint: 'http://127.0.0.1:9222', sessionMode: 'persistent', profileName: 'default', headless: false, launchArgs: [], autoFallback: false }), CollectorBackgroundUnsupportedError);
 });

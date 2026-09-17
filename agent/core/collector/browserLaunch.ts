@@ -23,6 +23,14 @@ export class CollectorBrowserUnsupportedError extends Error {
   }
 }
 
+export class CollectorBackgroundUnsupportedError extends Error {
+  readonly code = "COLLECTOR_BACKGROUND_UNSUPPORTED" as const;
+  constructor(readonly browser: Pick<CollectorBrowserLaunch, "type" | "engine" | "runtime">) {
+    super(`COLLECTOR_BACKGROUND_UNSUPPORTED: 后台静默采集不支持连接已显示的 external-cdp 浏览器（type=${browser.type}, engine=${browser.engine}, runtime=${browser.runtime}）。`);
+    this.name = "CollectorBackgroundUnsupportedError";
+  }
+}
+
 export function collectorBrowserLaunch(selection: BrowserSelection): CollectorBrowserLaunch {
   const launch: CollectorBrowserLaunch = {
     id: selection.id, type: selection.type, engine: selection.engine, runtime: selection.runtime,
@@ -35,6 +43,13 @@ export function collectorBrowserLaunch(selection: BrowserSelection): CollectorBr
   }
   if (!launch.executablePath) throw new Error("COLLECTOR_BROWSER_LAUNCH_FAILED: Chromium 浏览器缺少已解析的 executablePath。");
   return launch;
+}
+
+/** Automated sync is always headless; interactive login keeps its visible browser path. */
+export function automatedCollectorBrowserLaunch(selection: BrowserSelection): CollectorBrowserLaunch {
+  const launch = collectorBrowserLaunch(selection);
+  if (launch.runtime === "external-cdp") throw new CollectorBackgroundUnsupportedError(launch);
+  return { ...launch, headless: true };
 }
 
 export function collectorBrowserEvidence(launch: CollectorBrowserLaunch): CollectorBrowserEvidence {

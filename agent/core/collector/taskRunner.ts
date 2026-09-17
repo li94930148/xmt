@@ -7,7 +7,7 @@ import { canonicalJson, canonicalJsonHash } from '../database/sqliteValues.js';
 import type { AgentConfig, CollectionMode, SyncResult } from "../types.js";
 import { ScraplingCreatorCollector } from "./scrapling.js";
 import { ScraplingWorkerBridge } from "./workerBridge.js";
-import { collectorBrowserEvidence, collectorBrowserLaunch } from "./browserLaunch.js";
+import { automatedCollectorBrowserLaunch, collectorBrowserEvidence } from "./browserLaunch.js";
 
 export type CollectorCheckpoint = (
   name: string,
@@ -63,7 +63,7 @@ export async function runCreatorCollectorTask(options: {
     );
     database.recoverUploading();
     const knownContentIds = database.knownContentIds();
-    const browser = collectorBrowserLaunch(config.browserConfig);
+    const browser = automatedCollectorBrowserLaunch(config.browserConfig);
     await note("collector:start", { mode, browser: collectorBrowserEvidence(browser) });
     await note("snapshot:start");
     const snapshot = await new ScraplingCreatorCollector(
@@ -86,7 +86,7 @@ export async function runCreatorCollectorTask(options: {
       status: local.works,
     });
     await note("upload:start");
-    const officialPayload = snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId, taskId) : null;
+    const officialPayload = snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId) : null;
     const canonicalPayloadJson = officialPayload ? canonicalJson('canonical_payload_json', officialPayload) : null;
     const queueJob = officialPayload && canonicalPayloadJson ? database.enqueueUpload({ batch_id: officialPayload.batch_id, platform: config.platform, platform_account_id: config.accountId, source_file_sha256: String(officialPayload.source_files[0]?.sha256 || ''), parser_version: officialPayload.parser_version, payload_json: canonicalPayloadJson, payload_sha256: canonicalJsonHash(canonicalPayloadJson) }) : null;
     const result = await upload(config, token, { ...snapshot, official_data: [] }, {

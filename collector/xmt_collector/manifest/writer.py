@@ -21,8 +21,11 @@ class ManifestWriter:
         target.write_text(json.dumps(sanitize(value), ensure_ascii=False, indent=2), encoding="utf-8")
         return target
 
-    def save_export(self, source: Path, metadata: dict[str, Any]) -> dict[str, Any]:
-        target = self.run_root / "exports" / source.name
+    def save_export(self, source: Path, metadata: dict[str, Any], stored_name: str | None = None) -> dict[str, Any]:
+        safe_name = Path(stored_name or source.name).name
+        if not safe_name.lower().endswith(".xlsx"):
+            raise ValueError("EXPORT_XLSX_INVALID: unsupported filename")
+        target = self.run_root / "exports" / safe_name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
         with zipfile.ZipFile(target) as workbook:

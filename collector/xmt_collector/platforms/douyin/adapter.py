@@ -33,10 +33,11 @@ PAGES = {
     "内容管理": "/creator-micro/content/manage",
     "数据中心": "/creator-micro/data-center/operation",
 }
+OFFICIAL_DATA_PERIODS = (("昨天", "yesterday"), ("近7天", "7d"), ("近30天", "30d"))
 
 _CONTENT_SCOPE_SCRIPT = """
 () => {
-  const labels = new Set(['全部', '全部时间', '不限', '已发布', '审核中', '未通过', '草稿', '仅自己可见', '已删除', '视频', '图文', '直播', '近7日', '近30日', '近7天', '近30天', '近90日', '最近7天', '最近30天']);
+  const labels = new Set(['全部', '全部时间', '所有时间', '不限', '已发布', '审核中', '未通过', '草稿', '仅自己可见', '已删除', '视频', '图文', '直播', '近7日', '近30日', '近7天', '近30天', '近90日', '最近7天', '最近30天']);
   const active = (element) => {
     for (let node = element; node && node !== document.body; node = node.parentElement) {
       const attrs = [node.getAttribute('aria-selected'), node.getAttribute('aria-checked'), node.getAttribute('data-state')];
@@ -213,6 +214,29 @@ class DouyinAdapter:
                             await click_audited(target, "reset_to_all", "全部", "content-scope-reset")
                         raise RuntimeError("FULL_SNAPSHOT_SCOPE_UNCONFIRMED: reset did not converge")
 
+                    async def download_export(target: Any, export_id: str, dataset_type: str, period: str | None = None) -> None:
+                        enabled = await target.is_enabled()
+                        interactions.append({"action": "export_candidate", "target": "导出数据", "enabled": enabled, "datasetType": dataset_type, "period": period, "boundingBox": await target.bounding_box(), "checkpoint": "export-discovery"})
+                        if not enabled:
+                            raise RuntimeError(f"OFFICIAL_EXPORT_DISABLED:{dataset_type}:{period or 'all'}")
+                        started = datetime.now(timezone.utc)
+                        await self.emit("export", {"checkpoint": f"{export_id}:start", "page": page_name, "action": "导出数据", "datasetType": dataset_type, "period": period})
+                        async with page.expect_download(timeout=20_000) as download_info:
+                            await target.click()
+                        download = await download_info.value
+                        await self.emit("export", {"checkpoint": f"{export_id}:download-start", "page": page_name, "action": "导出数据", "datasetType": dataset_type, "period": period})
+                        temp = self.run_root / "downloads" / f"{export_id}-{download.suggested_filename}"
+                        temp.parent.mkdir(parents=True, exist_ok=True)
+                        await download.save_as(str(temp))
+                        date_stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+                        stored_name = f"作品列表导出-{date_stamp}.xlsx" if dataset_type == "content_list" else f"数据表现_短视频全量指标-{period}-{date_stamp}.xlsx"
+                        receipt = run.save_export(temp, {"page": page_name, "source": "official_download", "suggestedFilename": download.suggested_filename, "datasetType": dataset_type, "period": period}, stored_name)
+                        receipt["bytes"] = receipt["size"]
+                        receipt["taskId"] = task_id
+                        exports.append(receipt)
+                        await self.emit("export", {"checkpoint": f"{export_id}:complete", "page": page_name, "action": "导出数据", "datasetType": dataset_type, "period": period, "filename": receipt["storedFilename"], "size": receipt["size"], "sha256": receipt["sha256"], "workbookValid": receipt["workbookValid"], "sheetNames": receipt["sheetNames"], "duration_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000)})
+                        interactions.append({"action": "export_downloaded", "target": "导出数据", "datasetType": dataset_type, "period": period, "filename": receipt["storedFilename"], "sha256": receipt["sha256"], "checkpoint": "export-download"})
+
                     text = await page.locator("body").inner_text(timeout=10_000)
                     if "扫码登录" in text or "登录" in text and "内容管理" not in text:
                         login_required = True
@@ -221,16 +245,12 @@ class DouyinAdapter:
                     discovered["tabs"] = await page.locator('[role="tab"]').all_inner_texts()
                     discovered["filters"] = await page.locator('button, [role="button"], a, [role="menuitem"]').all_inner_texts()
                     if page_name == "内容管理":
-                        for label in ("全部", "已发布", "审核中", "未通过", "视频", "图文", "近7日", "近30日"):
-                            target = page.get_by_text(label, exact=True).first
-                            if await target.is_visible():
-                                await click_audited(target, "click", label, "content-filter")
+                        try:
+                            view_scope = await ensure_unbounded_content_view()
+                        except RuntimeError as error:
+                            scope_error = str(error)
+                            return
                         if scope == "full_snapshot":
-                            try:
-                                view_scope = await ensure_unbounded_content_view()
-                            except RuntimeError as error:
-                                scope_error = str(error)
-                                return
                             progress, max_iterations = ScrollProgress(), 60
                             while progress.iterations < max_iterations:
                                 self._assert_not_cancelled()
@@ -249,47 +269,34 @@ class DouyinAdapter:
                                 completeness = {"mode": "scroll", "exhausted": False, "iterations": progress.iterations, "uniqueWorks": 0, "stopReason": "safety_cap", "stableCycles": progress.stable_cycles, "viewScope": view_scope}
                                 raise RuntimeError("FULL_SNAPSHOT_INCOMPLETE: scroll safety cap reached without exhaustion evidence")
                             interactions.append({"action": "scroll_to_exhaustion", "target": "内容管理", "iterations": progress.iterations, "checkpoint": "content-scroll", "collectionCompleteness": completeness})
+                        export_target = page.get_by_text("导出数据", exact=True).first
+                        if not await export_target.is_visible():
+                            scope_error = "OFFICIAL_EXPORT_BUTTON_MISSING:content_list"
+                            return
+                        try:
+                            await download_export(export_target, "content-list", "content_list")
+                        except Exception as error:
+                            scope_error = f"OFFICIAL_EXPORT_FAILED:content_list:{type(error).__name__}"
+                            return
                     if page_name == "数据中心":
-                        for label in [text for text in discovered["tabs"] if text.strip()][:9]:
-                            target = page.get_by_text(label.strip(), exact=True).first
-                            if await target.is_visible():
-                                await click_audited(target, "click_tab", label.strip(), "data-tab")
-                        for label in ("近7天", "近30天", "近7日", "近30日"):
-                            target = page.get_by_text(label, exact=True).first
-                            if await target.is_visible():
-                                await click_audited(target, "click_date", label, "data-date")
-                    for label in ("导出数据", "导出", "下载数据", "下载报表", "生成报表"):
-                        if page_name not in {"内容管理", "数据中心"}:
-                            continue
-                        target = page.get_by_text(label, exact=False).first
-                        if await target.is_visible():
-                            enabled = await target.is_enabled()
-                            interactions.append({"action": "export_candidate", "target": label, "enabled": enabled, "boundingBox": await target.bounding_box(), "checkpoint": "export-discovery"})
-                            if not enabled or exports:
-                                continue
+                        post_tab = page.get_by_text("投稿", exact=True).first
+                        if await post_tab.is_visible():
+                            await click_audited(post_tab, "click_tab", "投稿", "data-tab")
+                        export_target = page.get_by_text("导出数据", exact=True).last
+                        if not await export_target.is_visible():
+                            scope_error = "OFFICIAL_EXPORT_BUTTON_MISSING:account_daily"
+                            return
+                        for label, period in OFFICIAL_DATA_PERIODS:
+                            period_target = page.get_by_text(label, exact=True).first
+                            if not await period_target.is_visible():
+                                scope_error = f"OFFICIAL_EXPORT_PERIOD_MISSING:{period}"
+                                return
+                            await click_audited(period_target, "select_period", label, "data-period")
                             try:
-                                export_id = "export1" if page_name == "内容管理" else "export2"
-                                started = datetime.now(timezone.utc)
-                                await self.emit("export", {"checkpoint": f"{export_id}:start", "page": page_name, "action": label})
-                                async with page.expect_download(timeout=15_000) as download_info:
-                                    await target.click()
-                                await self.emit("export", {"checkpoint": f"{export_id}:download-start", "page": page_name, "action": label})
-                                download = await download_info.value
-                                temp = self.run_root / "downloads" / download.suggested_filename
-                                temp.parent.mkdir(parents=True, exist_ok=True)
-                                await download.save_as(str(temp))
-                                receipt = run.save_export(temp, {"page": page_name, "source": "official_download", "suggestedFilename": download.suggested_filename})
-                                receipt["bytes"] = receipt["size"]
-                                receipt["taskId"] = task_id
-                                exports.append(receipt)
-                                await self.emit("export", {"checkpoint": f"{export_id}:complete", "page": page_name, "action": label, "filename": receipt["storedFilename"], "size": receipt["size"], "sha256": receipt["sha256"], "workbookValid": receipt["workbookValid"], "sheetNames": receipt["sheetNames"], "duration_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000)})
-                                interactions.append({"action": "export_downloaded", "target": label, "filename": receipt["storedFilename"], "sha256": receipt["sha256"], "checkpoint": "export-download"})
-                            except Exception:
-                                # The button may open a server-side export dialog. Record the
-                                # observable modal, but never fabricate an export result.
-                                await page.wait_for_timeout(1_000)
-                                modal_text = await page.locator('[role="dialog"]').all_inner_texts()
-                                interactions.append({"action": "export_clicked", "target": label, "modalObserved": bool(modal_text), "checkpoint": "export-click"})
+                                await download_export(export_target, f"account-daily-{period}", "account_daily", period)
+                            except Exception as error:
+                                scope_error = f"OFFICIAL_EXPORT_FAILED:account_daily:{period}:{type(error).__name__}"
+                                return
                     if image_tasks:
                         await asyncio.gather(*tuple(image_tasks), return_exceptions=True)
 
@@ -334,6 +341,21 @@ class DouyinAdapter:
         (self.run_root / "xhr").mkdir(parents=True, exist_ok=True)
         (self.run_root / "xhr" / "schema-report.md").write_text(schema_markdown, encoding="utf-8")
         all_exports = [item for page in capability["pages"] for item in page["exports"]]
+        if scope != "discover":
+            observed_exports = {
+                (str(item.get("datasetType") or ""), str(item.get("period") or ""))
+                for item in all_exports
+            }
+            required_exports = {
+                ("content_list", ""),
+                ("account_daily", "yesterday"),
+                ("account_daily", "7d"),
+                ("account_daily", "30d"),
+            }
+            missing_exports = sorted(required_exports - observed_exports)
+            if missing_exports:
+                missing = ",".join(f"{dataset}:{period or 'all'}" for dataset, period in missing_exports)
+                raise RuntimeError(f"OFFICIAL_EXPORT_INCOMPLETE:{missing}")
         candidates = [candidate for capture in captured for candidate in find_work_candidates(capture.get("response"))]
         works_by_id: dict[str, dict[str, Any]] = {}
         for candidate in candidates:

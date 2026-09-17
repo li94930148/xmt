@@ -94,7 +94,7 @@ export async function heartbeat(
         account_id: config.accountId,
         device_name: state.deviceName,
         os: state.os,
-        agent_version: "2.13.12-agent",
+        agent_version: "2.14.0-agent",
         protocol_version: 1,
         browser_login_status: state.browserLoginStatus,
         browser_type: browser.type,
@@ -118,7 +118,7 @@ export async function upload(
     taskId?: string;
   } = {},
 ) {
-  const payload = snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId, options.taskId) : toUnifiedCreatorPayload(snapshot, options);
+  const payload = snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId) : toUnifiedCreatorPayload(snapshot, options);
   return uploadCanonicalPayload(config, agentToken, payload, snapshot.agent_version, snapshot.collected_at || new Date().toISOString());
 }
 export async function uploadCanonicalPayload(config: AgentConfig, agentToken: string, payload: Record<string, unknown>, agentVersion: string, collectedAt: string) {

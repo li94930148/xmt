@@ -16,6 +16,22 @@ from xml.etree import ElementTree as ET
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 CONTENT_HEADERS = {"作品名称": "title", "发布时间": "published_at", "播放量": "views", "点赞量": "likes", "评论量": "comments", "分享量": "shares", "收藏量": "favorites", "主页访问量": "profile_visits", "粉丝增量": "followers_gained", "完播率": "completion_rate", "5s完播率": "five_second_completion_rate", "封面点击率": "cover_click_rate", "2s跳出率": "two_second_bounce_rate", "平均播放时长": "watch_time_seconds", "体裁": "content_format", "审核状态": "review_status"}
 INCOME_HEADERS = {"日期": "metric_date", "收获音浪": "sound_wave_amount"}
+ACCOUNT_DAILY_HEADERS = {
+    "日期": "metric_date",
+    "投稿量": "posts",
+    "总播放量": "views",
+    "总点赞量": "likes",
+    "总分享量": "shares",
+    "总评论量": "comments",
+    "5秒完播率": "five_second_completion_rate",
+    "5s完播率": "five_second_completion_rate",
+    "2秒跳出率": "two_second_bounce_rate",
+    "2s跳出率": "two_second_bounce_rate",
+    "封面点击率": "cover_click_rate",
+    "平均播放时长": "watch_time_seconds",
+}
+ACCOUNT_DAILY_REQUIRED = {"日期", "投稿量", "总播放量"}
+ACCOUNT_DAILY_PERIODS = {"yesterday", "7d", "30d"}
 
 def _letters(ref: str) -> int:
     value = 0
@@ -60,15 +76,46 @@ def _date(value: str) -> str | None:
         except ValueError: pass
     return None
 
+def _official_period(source: dict[str, Any]) -> str | None:
+    value = str(source.get("period") or "").strip()
+    return value if value in ACCOUNT_DAILY_PERIODS else None
+
 def parse_official_export(file: Path, source: dict[str, Any]) -> dict[str, Any]:
-    rows = _rows(file); header_index = next((i for i, row in enumerate(rows[:20]) if len(set(row) & set(CONTENT_HEADERS)) >= 3 or len(set(row) & set(INCOME_HEADERS)) >= 2), None)
+    rows = _rows(file); header_index = next((i for i, row in enumerate(rows[:20]) if len(set(row) & set(CONTENT_HEADERS)) >= 3 or len(set(row) & set(INCOME_HEADERS)) >= 2 or ACCOUNT_DAILY_REQUIRED.issubset(set(row))), None)
     if header_index is None: return {"file": source, "confidence": "unknown", "quality": {"source_rows": len(rows), "accepted_rows": 0, "duplicate_rows": 0, "rejected_rows": 0, "warnings": ["HEADER_UNRECOGNIZED"]}, "datasets": {}}
-    headers = rows[header_index]; mapping = {name: index for index, name in enumerate(headers) if name in CONTENT_HEADERS or name in INCOME_HEADERS}
-    content = len(set(headers) & set(CONTENT_HEADERS)) >= 3; accepted: list[dict[str, Any]] = []; rejected = 0; seen: set[str] = set(); warnings: list[str] = []
+    headers = rows[header_index]
+    is_account_daily = ACCOUNT_DAILY_REQUIRED.issubset(set(headers))
+    header_dictionary = ACCOUNT_DAILY_HEADERS if is_account_daily else {**CONTENT_HEADERS, **INCOME_HEADERS}
+    mapping = {name: index for index, name in enumerate(headers) if name in header_dictionary}
+    content = not is_account_daily and len(set(headers) & set(CONTENT_HEADERS)) >= 3
+    accepted: list[dict[str, Any]] = []; rejected = 0; seen: set[str] = set(); warnings: list[str] = []
+    period = _official_period(source) if is_account_daily else None
+    if is_account_daily and period is None:
+        return {"file": source, "confidence": "unknown", "quality": {"source_rows": max(0, len(rows) - header_index - 1), "accepted_rows": 0, "duplicate_rows": 0, "rejected_rows": 0, "warnings": ["ACCOUNT_DAILY_PERIOD_MISSING"]}, "datasets": {}}
     for row in rows[header_index + 1:]:
         read = lambda name: row[mapping[name]].strip() if name in mapping and mapping[name] < len(row) else ""
         if not any(row): continue
-        if content:
+        if is_account_daily:
+            date = _date(read("日期"))
+            if not date:
+                rejected += 1
+                continue
+            metric_date = date[:10]
+            if metric_date in seen:
+                rejected += 1
+                warnings.append("ACCOUNT_DAILY_DATE_DUPLICATE")
+                continue
+            seen.add(metric_date)
+            metrics = {
+                standard: _number(read(label))
+                for label, standard in ACCOUNT_DAILY_HEADERS.items()
+                if standard != "metric_date" and label in mapping and _number(read(label)) is not None
+            }
+            if not {"posts", "views"}.issubset(metrics):
+                rejected += 1
+                continue
+            accepted.append({"metric_date": metric_date, "period": period, "metrics": metrics})
+        elif content:
             title, published = read("作品名称"), _date(read("发布时间"))
             if not title or not published: rejected += 1; continue
             item_key = hashlib.sha256(f"douyin\n{source.get('accountId', '')}\n{title.strip()}\n{published}".encode()).hexdigest()
@@ -81,4 +128,5 @@ def parse_official_export(file: Path, source: dict[str, Any]) -> dict[str, Any]:
             key = f"{date}:sound_wave_amount"
             if key in seen: continue
             seen.add(key); accepted.append({"metric_date": date[:10], "metric_code": "sound_wave_amount", "value": str(amount), "unit": "sound_wave"})
-    return {"file": source, "confidence": "confirmed" if content or "收获音浪" in mapping else "probable", "quality": {"source_rows": max(0, len(rows) - header_index - 1), "accepted_rows": len(accepted), "duplicate_rows": 0, "rejected_rows": rejected, "warnings": warnings}, "datasets": {"content_metrics": accepted} if content else {"income_metrics": accepted}}
+    datasets = {"account_daily_metrics": accepted} if is_account_daily else {"content_metrics": accepted} if content else {"income_metrics": accepted}
+    return {"file": source, "confidence": "confirmed" if is_account_daily or content or "收获音浪" in mapping else "probable", "quality": {"source_rows": max(0, len(rows) - header_index - 1), "accepted_rows": len(accepted), "duplicate_rows": 0, "rejected_rows": rejected, "warnings": warnings}, "datasets": datasets}

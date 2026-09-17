@@ -12,6 +12,7 @@ import { productionMaterialsWorkspaceMigration } from './010_production_material
 import { productionMaterialDraftMigration } from './011_production_material_draft';
 import { activityLogTimeRetentionMigration } from './012_activity_log_time_retention';
 import { publishingDouyinLinkMigration } from './013_publishing_douyin_link';
+import { creatorOfficialDailyMetricsMigration } from './014_creator_official_daily_metrics';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -27,4 +28,5 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   productionMaterialDraftMigration,
   activityLogTimeRetentionMigration,
   publishingDouyinLinkMigration,
+  creatorOfficialDailyMetricsMigration,
 ];

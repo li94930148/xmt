@@ -16,8 +16,8 @@ function GrowthBlock({ title, data }: { title: string; data: DouyinDashboardData
     <p className="text-sm font-medium">{title}</p>
     {data ? <div className="mt-4 grid grid-cols-3 gap-3 text-center">
       <div><b className="text-emerald-500">{data.fans == null ? '暂不可用' : `${data.fans >= 0 ? '+' : ''}${formatNumber(data.fans)}`}</b><span className="mt-1 block text-xs text-studio-text-muted">粉丝</span></div>
-      <div><b className="text-cyan-500">{data.plays >= 0 ? '+' : ''}{formatNumber(data.plays)}</b><span className="mt-1 block text-xs text-studio-text-muted">播放</span></div>
-      <div><b className="text-rose-500">{data.interactions >= 0 ? '+' : ''}{formatNumber(data.interactions)}</b><span className="mt-1 block text-xs text-studio-text-muted">互动</span></div>
+      <div><b className="text-cyan-500">{data.plays == null ? '暂不可用' : `${data.plays >= 0 ? '+' : ''}${formatNumber(data.plays)}`}</b><span className="mt-1 block text-xs text-studio-text-muted">播放</span></div>
+      <div><b className="text-rose-500">{data.interactions == null ? '暂不可用' : `${data.interactions >= 0 ? '+' : ''}${formatNumber(data.interactions)}`}</b><span className="mt-1 block text-xs text-studio-text-muted">互动</span></div>
     </div> : <p className="mt-4 text-sm text-studio-text-muted">历史快照不足，完成跨周期同步后显示增长。</p>}
   </div>;
 }

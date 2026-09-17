@@ -324,7 +324,6 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   const rankedWorks = [...analyzed.works].sort((left, right) => Number(right.performance.is_viral) - Number(left.performance.is_viral) || right.performance.score - left.performance.score || number(right.play_count) - number(left.play_count));
   const accountFansAvailable = number(account.fans_count_available) === 1;
   const fansAvailable = accountFansAvailable || Boolean(latestFanSnapshot);
-  const missingFields = fansAvailable ? [] : ['fans_count', 'fan_growth'];
   const mode = officialDashboardMode();
   const official = mode === 'existing_only' ? null : await officialMetricsForDashboard(creatorAccountId);
   const reconciliation = officialReconciliationSummary(totals.plays, official?.plays ?? null);
@@ -335,6 +334,11 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   const displayPlays = useOfficial ? official.plays : totals.plays;
   const displayInteractions = useOfficial ? official.likes + official.comments + official.shares + official.collects : totals.interactions;
   const displayShares = useOfficial ? official.shares : totals.shares;
+  const unavailableOfficialGrowth = useOfficial ? ['period_play_growth', 'period_interaction_growth'] : [];
+  const missingFields = [...(fansAvailable ? [] : ['fans_count', 'fan_growth']), ...unavailableOfficialGrowth];
+  const displayGrowth = (value: ReturnType<typeof growthFor>) => useOfficial && value
+    ? { ...value, plays: null, interactions: null }
+    : value;
   return {
     account,
     metrics: {
@@ -348,8 +352,8 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     },
     health: calculateDouyinAccountHealth(account, analyzed.works, snapshots),
     baselines: analyzed.baselines,
-    growth_7d: growthFor(7),
-    growth_30d: growthFor(30),
+    growth_7d: displayGrowth(growthFor(7)),
+    growth_30d: displayGrowth(growthFor(30)),
     top_works: await resolveWorkCovers(account, rankedWorks.slice(0, 5)),
     snapshot_count: snapshots.length,
     snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
@@ -357,10 +361,13 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     data_source: useOfficial ? 'douyin_official_export' : 'douyin_creator_center_collection',
     last_success_at: account.last_sync_time ?? null,
     missing_fields: missingFields,
-    warnings: fansAvailable ? [] : ['当前采集响应没有提供粉丝总数；该字段不会按 0 展示或参与增长评分。'],
+    warnings: [
+      ...(fansAvailable ? [] : ['当前采集响应没有提供粉丝总数；该字段不会按 0 展示或参与增长评分。']),
+      ...(useOfficial ? ['当前官方导出只提供累计指标，旧采集快照与官方口径不可直接相减；播放和互动周期增长暂不展示。'] : []),
+    ],
     metric_sources: {
       account: 'douyin_accounts',
-      growth: 'douyin_daily_snapshots',
+      growth: useOfficial ? 'unavailable_without_comparable_official_baseline' : 'douyin_daily_snapshots',
       scoring: 'douyin_works',
       works: useOfficial ? 'creator_official_metrics.distinct_source_item_key' : 'douyin_works',
       play_count: useOfficial ? 'creator_official_metrics.views' : 'douyin_works',
@@ -550,9 +557,9 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
       }, { viral: 0, excellent: 0, normal: 0, low: 0 }),
     },
     growth: {
-      plays: growthValue('play_count'),
+      plays: useOfficial ? null : growthValue('play_count'),
       fans: fanGrowth,
-      interactions: hasGrowthBaseline && latest && start
+      interactions: useOfficial ? null : hasGrowthBaseline && latest && start
         ? number(latest.like_count) + number(latest.comment_count) + number(latest.share_count)
           - number(start.like_count) - number(start.comment_count) - number(start.share_count)
         : null,
@@ -565,8 +572,8 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
       period_start: start?.snapshot_date ?? null,
       period_end: latest?.snapshot_date ?? null,
       fans_available: fansAvailable,
-      missing_fields: fansAvailable ? [] : ['fans_count', 'fan_growth'],
-      metric_definition: useOfficial ? '作品数、播放、点赞、评论、分享和收藏以抖音创作者中心官方导出汇总为准；周期增长仅在期初期末快照日期可比时计算。' : '累计播放为去重后每个入库作品当前播放量之和；周期增长仅在期初期末快照日期可比时计算。',
+      missing_fields: [...(fansAvailable ? [] : ['fans_count', 'fan_growth']), ...(useOfficial ? ['period_play_growth', 'period_interaction_growth'] : [])],
+      metric_definition: useOfficial ? '作品数、播放、点赞、评论、分享和收藏以抖音创作者中心官方导出汇总为准；当前只有累计官方口径，旧采集快照不可直接相减，播放和互动周期增长暂不展示。' : '累计播放为去重后每个入库作品当前播放量之和；周期增长仅在期初期末快照日期可比时计算。',
       official_snapshot_at: useOfficial ? official.collected_at : null,
     },
   };

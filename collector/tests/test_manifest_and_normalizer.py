@@ -32,6 +32,14 @@ def test_douyin_normalizer_restores_legacy_metric_aliases_without_missing_zeroes
     assert normalize_work({"aweme_id": "zero", "statistics": {"play_count": 0}})["metrics"] == {"play_count": 0}
 
 
+def test_douyin_normalizer_keeps_work_status_sqlite_safe():
+    assert normalize_work({"aweme_id": "scalar", "status": "published"})["status"] == "published"
+    assert normalize_work({"aweme_id": "nested", "status": {"value": 2, "label": "published"}})["status"] == 2
+    assert normalize_work({"aweme_id": "unsafe", "status": {"payload": {"unexpected": True}}})["status"] is None
+    assert normalize_work({"aweme_id": "array", "status": ["published"]})["status"] is None
+    assert normalize_work({"aweme_id": "non-finite", "status": {"value": float("nan")}})["status"] is None
+
+
 def test_account_metadata_accepts_current_creator_center_aliases_without_inventing_zeroes():
     account = normalize_account_metadata([
         {"response": {"user_profile": {"nickname": "账号", "follower_count": "2163", "following_count": 44, "aweme_count": 43, "total_favorited": 16000}}}

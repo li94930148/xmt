@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -17,13 +18,29 @@ def _first_present(*values: Any) -> Any:
     return next((value for value in values if value is not None and value != ""), None)
 
 
+def _status_text(value: Any) -> str | int | float | bool | None:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        for key in ("status", "value", "code", "text", "label", "name"):
+            candidate = value.get(key)
+            if candidate is None or isinstance(candidate, (dict, list)):
+                continue
+            if isinstance(candidate, float) and not math.isfinite(candidate):
+                continue
+            return candidate
+    return None
+
+
 def normalize_work(raw: dict[str, Any]) -> dict[str, Any]:
     metrics = _normalize_metrics(raw)
     return {
         "item_id": str(_first_present(raw.get("item_id"), raw.get("aweme_id"), raw.get("id")) or ""),
         "title": str(_first_present(raw.get("title"), raw.get("desc"), raw.get("caption"), raw.get("item_title")) or ""),
         "published_at": _first_present(raw.get("create_time"), raw.get("publish_time")),
-        "status": _first_present(raw.get("status"), raw.get("audit_status"), raw.get("status_value"), raw.get("chapter_review_status")),
+        "status": _status_text(_first_present(raw.get("status"), raw.get("audit_status"), raw.get("status_value"), raw.get("chapter_review_status"))),
         "type": _first_present(raw.get("type"), raw.get("aweme_type")),
         # Cover payloads commonly contain expiring signed URLs. They are neither
         # needed by the upload contract nor safe to emit over the worker protocol.

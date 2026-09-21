@@ -1,1 +1,17 @@
-import type { SyncInterval } from '../types.js';export function intervalMs(interval:SyncInterval){return interval==='12h'?12*60*60*1000:interval==='daily'?24*60*60*1000:0;}export function nextDailyDelay(hour:number){const now=new Date();const next=new Date(now);next.setHours(hour,0,0,0);if(next<=now)next.setDate(next.getDate()+1);return next.getTime()-now.getTime();}
+import type { SyncInterval } from '../types.js';
+
+export function intervalMs(interval: SyncInterval) {
+  return interval === '12h' ? 12 * 60 * 60 * 1000 : interval === 'daily' ? 24 * 60 * 60 * 1000 : 0;
+}
+
+export function nextDailyDelay(hour: number) {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(hour, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next.getTime() - now.getTime();
+}
+
+export function usesExportFocusedSync(interval: SyncInterval) {
+  return interval === '12h' || interval === 'daily';
+}

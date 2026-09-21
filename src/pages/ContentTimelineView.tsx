@@ -6,12 +6,14 @@ import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDoc
 import { getTimelineView, type BuildUnifiedTimelineSources, type UnifiedTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime } from '../lib/utils';
+import { parseStoredBjt } from '@shared/time';
+import { productionHistoryTimestamp } from '../lib/productionHistoryTime';
 
 function eventText(event: UnifiedTimelineEvent) {
   const version = event.payload?.version ? ` ${String(event.payload.version)}` : '';
   if (event.type === 'version') return `生成了版本${version}`;
   if (event.type === 'save') return '保存了内容';
-  if (event.type === 'snapshot') return '生成了内容快照';
+  if (event.type === 'snapshot') return `归档了版本${version}`;
   if (event.type === 'conflict') return '发现并处理协作冲突';
   return '编辑了内容';
 }
@@ -37,17 +39,17 @@ async function loadPersistedSources(docId: string): Promise<BuildUnifiedTimeline
   if (kind === 'production') {
     const [production, history] = await Promise.all([getProductionById(id), getProductionHistory(id)]);
     return {
-      versionEvents: [
-        ...history.map((entry) => ({ id: `history-${entry.id}`, timestamp: new Date(entry.created_at).getTime(), version: entry.version, changeType: entry.change_type, operatorName: entry.operator_name })),
-        { id: `current-${production.id}`, timestamp: new Date(production.updated_at || production.created_at).getTime(), version: production.version, changeType: 'current', operatorName: production.operator_name },
-      ],
+      // History rows snapshot the *previous* version when a newer one is made.
+      // The current row's updated_at is the last save, not its creation time.
+      versionEvents: history.map((entry) => ({ id: `history-${entry.id}`, timestamp: productionHistoryTimestamp(entry.created_at), type: 'snapshot', version: entry.version, operatorName: entry.operator_name })),
+      saveEvents: [{ id: `current-${production.id}`, timestamp: parseStoredBjt(production.updated_at || production.created_at)?.getTime(), operatorName: production.operator_name }],
     };
   }
 
   if (kind === 'shooting') {
     const shooting = await getShootingById(id);
     return {
-      versionEvents: [{ id: `shooting-${id}`, timestamp: new Date(shooting.updated_at || shooting.created_at).getTime(), version: shooting.production?.version, operatorName: shooting.production?.operator_name, label: '成片记录' }],
+      saveEvents: [{ id: `shooting-${id}`, timestamp: parseStoredBjt(shooting.updated_at || shooting.created_at)?.getTime(), operatorName: shooting.operator_name, label: '成片记录' }],
     };
   }
   return {};
@@ -80,7 +82,9 @@ export default function ContentTimelineView() {
   const timeline = useMemo(() => getTimelineView(document.docId, sources), [document.docId, sources]);
   const sessions = useMemo(() => timeline.sessions.slice().reverse(), [timeline.sessions]);
   const people = useMemo(() => new Set(timeline.timeline.map((event) => event.userId).filter(Boolean)).size, [timeline.timeline]);
-  const versionCount = timeline.timeline.filter((event) => event.type === 'version').length;
+  const versionCount = document.docId.startsWith('production:')
+    ? (sources.versionEvents?.length || 0) + (sources.saveEvents?.length ? 1 : 0)
+    : timeline.timeline.filter((event) => event.type === 'version').length;
   const latest = timeline.timeline[timeline.timeline.length - 1];
 
   const chooseDocument = (docId: string, title: string) => {

@@ -58,3 +58,7 @@ export interface CollaborationTypingPayload {
 export function getCollaborationRoomId(type: CollaborationDocType, id: number | string) {
   return `${type}:${id}`;
 }
+
+export function getProductionVersionRoomId(id: number | string, version: string) {
+  return `production:${id}@${version}`;
+}

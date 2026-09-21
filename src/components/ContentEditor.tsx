@@ -150,9 +150,13 @@ export default function ContentEditor({
     if (status === 'conflicted') emitEditorState('conflict:event', collaborationKey, { source: 'ContentEditorRuntime' });
   }, [adapter, collaborationKey]);
 
-  const handleEditorChange = useCallback((content: string) => {
+  const handleEditorChange = useCallback((content: string, local: boolean) => {
     onChange(content);
     if (saveStrategy !== 'autosave') return;
+    // A remote update may arrive while this client has an unsaved local edit.
+    // Refresh that pending save with the merged Yjs document, but do not let
+    // an otherwise passive observer become a second database writer.
+    if (!local && runtimeHandleRef.current?.getStatus() !== 'saving') return;
     runtimeRevisionRef.current += 1;
     runtimeHandleRef.current?.scheduleSave(content, runtimeRevisionRef.current);
   }, [onChange, saveStrategy]);

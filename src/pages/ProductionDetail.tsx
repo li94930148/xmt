@@ -21,11 +21,13 @@ import ContentEditor from '../components/ContentEditor';
 import EditorLeaveFailureDialog from '../components/editor/EditorLeaveFailureDialog';
 import { ConfirmModal } from '../components/common';
 import { ActionButton, EmptyState, GlassPanel, PageShell, StatusPill, StudioSkeletonCard } from '../components/studio';
-import { getCollaborationRoomId } from '../collaboration/core/events';
+import { getCollaborationRoomId, getProductionVersionRoomId } from '../collaboration/core/events';
 import { createProductionEditorAdapter } from '../editor/adapters/productionEditorAdapter';
-import { getTimelineView, recordTimelineEvent } from '../editor/timeline/unifiedContentTimeline';
+import { getTimelineView } from '../editor/timeline/unifiedContentTimeline';
 import { usePermission } from '../hooks/usePermission';
-import { formatBeijingTime } from '../lib/utils';
+import { formatBeijingTime, formatUtcToBeijingTime } from '../lib/utils';
+import { parseStoredBjt } from '@shared/time';
+import { productionHistoryTimestamp } from '../lib/productionHistoryTime';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
@@ -148,9 +150,10 @@ export default function ProductionDetail() {
       ),
   );
   const canDelete = canEditProduction && hasPermission('production:delete');
-  const activeDocId = production ? getCollaborationRoomId('production', production.id) : undefined;
+  const activeDocId = production ? getProductionVersionRoomId(production.id, production.version) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
   const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
+  const persistedContentRef = useRef('');
   const {
     requestLeave,
     retry: retryLeave,
@@ -215,6 +218,7 @@ export default function ProductionDetail() {
     try {
       const productionData = await getProductionById(Number.parseInt(id, 10));
       setProduction(productionData);
+      persistedContentRef.current = productionData.content || '';
       setCurrentContentDocument(
         getCollaborationRoomId('production', productionData.id),
         productionData.topic_title || `创作 ${productionData.id}`,
@@ -290,15 +294,17 @@ export default function ProductionDetail() {
   const timelineView = useMemo(() => {
     if (!production) return getTimelineView('production:unknown');
     return getTimelineView(getCollaborationRoomId('production', production.id), {
-      versionEvents: versionEntries.map((entry) => ({
+      versionEvents: versionEntries.filter((entry) => !entry.isCurrent).map((entry) => ({
         id: entry.id,
-        timestamp: new Date(entry.createdAt).getTime(),
+        timestamp: productionHistoryTimestamp(entry.createdAt),
+        type: 'snapshot',
         version: entry.version,
         changeType: entry.changeType,
         operatorName: entry.operatorName,
         status: entry.status,
-        label: entry.isCurrent ? '当前版本' : '历史版本',
+        label: '历史版本快照',
       })),
+      saveEvents: [{ id: `current-${production.id}`, timestamp: parseStoredBjt(production.updated_at || production.created_at)?.getTime(), operatorName: production.operator_name }],
     });
   }, [production, versionEntries]);
 
@@ -335,28 +341,6 @@ export default function ProductionDetail() {
     });
   }, [versionEntries]);
 
-  useEffect(() => {
-    if (!production) return;
-
-    const docId = getCollaborationRoomId('production', production.id);
-    for (const entry of versionEntries) {
-      recordTimelineEvent({
-        id: `production:${production.id}:version:${entry.id}`,
-        docId,
-        timestamp: new Date(entry.createdAt).getTime(),
-        type: 'version',
-        source: 'version',
-        userId: entry.operatorName,
-        payload: {
-          version: entry.version,
-          changeType: entry.changeType,
-          status: entry.status,
-          label: entry.isCurrent ? '当前版本' : '历史版本',
-        },
-      });
-    }
-  }, [production, versionEntries]);
-
   const startEditing = () => {
     if (!production) return;
     setSelectedVersionId('current');
@@ -368,7 +352,7 @@ export default function ProductionDetail() {
 
   const productionEditorAdapter = useMemo(() => {
     if (!production) return undefined;
-    const room = getCollaborationRoomId('production', production.id);
+    const room = getProductionVersionRoomId(production.id, production.version);
     return createProductionEditorAdapter({
       documentId: room,
       collaborationRoom: room,
@@ -380,15 +364,24 @@ export default function ProductionDetail() {
         immersive: true,
         pageScroll: true,
       },
-      persist: (content) => updateProduction(production.id, {
-        topic_id: production.topic_id,
-        version: production.version,
-        content,
-        status: editData.status,
-        version_action: 'none',
-      }).then(() => undefined),
+      persist: async (content) => {
+        try {
+          await updateProduction(production.id, {
+            topic_id: production.topic_id,
+            version: production.version,
+            content,
+            expected_content: persistedContentRef.current,
+            status: editData.status,
+            version_action: 'none',
+          });
+        } catch (error) {
+          appStore.addNotification({ title: '本次修改尚未保存', message: (error as Error).message, type: 'error' });
+          throw error;
+        }
+        persistedContentRef.current = content;
+      },
     });
-  }, [canEditProduction, editData.content, editData.status, production, selectedVersionId, superseded]);
+  }, [appStore, canEditProduction, editData.content, editData.status, production, selectedVersionId, superseded]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
     if (!production || !canEditProduction || superseded) return;
@@ -398,6 +391,7 @@ export default function ProductionDetail() {
         topic_id: production.topic_id,
         version: production.version,
         content: editData.content,
+        expected_content: persistedContentRef.current,
         status: editData.status,
         change_type: versionAction,
         version_action: versionAction,
@@ -427,6 +421,7 @@ export default function ProductionDetail() {
         topic_id: production.topic_id,
         version: production.version,
         content: editData.content,
+        expected_content: persistedContentRef.current,
         status: 'review',
         version_action: 'none',
       });
@@ -455,6 +450,7 @@ export default function ProductionDetail() {
         topic_id: production.topic_id,
         version: production.version,
         content: production.content,
+        expected_content: persistedContentRef.current,
         status,
         version_action: 'none',
       });
@@ -670,7 +666,7 @@ export default function ProductionDetail() {
                 value={editData.content}
                 onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
                 mode="rich"
-                collaborationKey={getCollaborationRoomId('production', production.id)}
+                collaborationKey={getProductionVersionRoomId(production.id, production.version)}
                 persistenceStatus={syncStatus}
                 immersive
                 pageScroll
@@ -730,7 +726,7 @@ export default function ProductionDetail() {
                       {versionSyncLabel(entry, selectedVersionId === entry.id && editorLocked)}
                     </StatusPill>
                   </div>
-                  <p className="mt-2 text-xs text-studio-text-muted">{formatBeijingTime(entry.createdAt)}</p>
+                  <p className="mt-2 text-xs text-studio-text-muted">{entry.isCurrent ? formatBeijingTime(entry.createdAt) : formatUtcToBeijingTime(entry.createdAt)}</p>
                   <p className="mt-1 text-xs text-studio-text-secondary">{entry.operatorName || '系统记录'}</p>
                 </button>
               ))}

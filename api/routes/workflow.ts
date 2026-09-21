@@ -4,9 +4,10 @@ import { authenticate } from '../middleware/auth';
 import { requireAllPermissions, requirePermission } from '../middleware/permissions';
 import { canEditProduction, canViewAllContent, canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, resolveCommentTopicScope } from '../utils/access';
 import { syncPublishedArchive } from '../services/publishedArchive';
+import { resolveProductionVersionAction } from '../services/productionVersionAction';
 import { buildWorkflowRuntimeContext } from '@shared/workflow/workflow_runtime';
 import { broadcastToRoom, getSocketIO } from '../utils/socket';
-import { getCollaborationRoomId, COLLABORATION_EVENTS, type VersionSupersededPayload } from '../../src/collaboration/core/events.js';
+import { getCollaborationRoomId, getProductionVersionRoomId, COLLABORATION_EVENTS, type VersionSupersededPayload } from '../../src/collaboration/core/events.js';
 import {
   getPublishingDouyinCandidates,
   reconcilePublishingDouyinLinks,
@@ -446,6 +447,7 @@ router.put('/production/:id', authenticate, async (req, res) => {
       status,
       change_type = 'minor',
       version_action,
+      expected_content,
     } = req.body;
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
     const existingProduction = await queryOne(`SELECT * FROM production WHERE id = ?`, [id]);
@@ -460,16 +462,15 @@ router.put('/production/:id', authenticate, async (req, res) => {
     if (version && String(version) !== currentVersion) {
       return res.status(409).json({ message: `当前版本 ${version} 已被 ${currentVersion} 替代，请切换到最新版本后继续编辑`, code: 'PRODUCTION_VERSION_SUPERSEDED', currentVersion });
     }
-    const resolvedVersionAction: VersionAction =
-      version_action === 'major' || version_action === 'minor' || version_action === 'none'
-        ? version_action
-        : status === existingProduction.status &&
-            content === existingProduction.content &&
-            Number(topic_id) === Number(existingProduction.topic_id)
-          ? 'none'
-          : change_type === 'major'
-            ? 'major'
-            : 'minor';
+    if (typeof expected_content === 'string' && expected_content !== String(existingProduction.content || '')) {
+      if (version_action === 'none' && content === existingProduction.content && status === existingProduction.status) {
+        return res.json({ message: '创作记录已同步', version: currentVersion });
+      }
+      return res.status(409).json({ message: '其他协作者已保存更新，你的内容尚未覆盖对方。请先复制当前编辑内容，再刷新页面核对。', code: 'PRODUCTION_CONTENT_CONFLICT' });
+    }
+    // Ordinary edits (including older clients omitting version_action) never create a version.
+    // Only an explicit version command may do so.
+    const resolvedVersionAction: VersionAction = resolveProductionVersionAction(version_action);
 
     const shouldCreateHistory =
       resolvedVersionAction !== 'none' && (
@@ -479,6 +480,35 @@ router.put('/production/:id', authenticate, async (req, res) => {
         status !== existingProduction.status ||
         Number(topic_id) !== Number(existingProduction.topic_id)
       );
+
+    const existingVersions = await queryAll<{ version: string | null }>(
+      `SELECT version FROM production_history WHERE production_id = ?`,
+      [id],
+    );
+    const newVersion =
+      resolvedVersionAction === 'none'
+        ? currentVersion
+        : getNextVersion(currentVersion, resolvedVersionAction, [
+            { version: currentVersion },
+            ...existingVersions,
+          ]);
+
+    const contentMarkdown = req.body.contentMarkdown || content;
+    const contentJson = req.body.contentJson || content;
+    const guarded = typeof expected_content === 'string';
+    const changed = await execute(
+      `UPDATE production SET topic_id = ?, version = ?, content = ?, content_markdown = ?, content_json = ?, status = ?, operator_id = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?${guarded ? " AND COALESCE(content, '') = ? AND COALESCE(version, 'v1.0') = ?" : ''}`,
+      guarded
+        ? [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, id, expected_content, currentVersion]
+        : [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, id],
+    );
+    if (guarded && changed === 0) {
+      const latest = await queryOne<{ version: string; content: string; status: string }>('SELECT version,content,status FROM production WHERE id = ?', [id]);
+      if (version_action === 'none' && latest?.version === newVersion && latest.content === content && latest.status === status) {
+        return res.json({ message: '创作记录已同步', version: latest.version });
+      }
+      return res.status(409).json({ message: '其他协作者已保存更新，你的内容尚未覆盖对方。请先复制当前编辑内容，再刷新页面核对。', code: 'PRODUCTION_CONTENT_CONFLICT' });
+    }
 
     if (shouldCreateHistory) {
       await execute(
@@ -498,22 +528,6 @@ router.put('/production/:id', authenticate, async (req, res) => {
         ],
       );
     }
-
-    const existingVersions = await queryAll<{ version: string | null }>(
-      `SELECT version FROM production_history WHERE production_id = ?`,
-      [id],
-    );
-    const newVersion =
-      resolvedVersionAction === 'none'
-        ? currentVersion
-        : getNextVersion(currentVersion, resolvedVersionAction, [
-            { version: currentVersion },
-            ...existingVersions,
-          ]);
-
-    const contentMarkdown = req.body.contentMarkdown || content;
-    const contentJson = req.body.contentJson || content;
-    await execute(`UPDATE production SET topic_id = ?, version = ?, content = ?, content_markdown = ?, content_json = ?, status = ?, operator_id = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`, [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, id]);
 
     if (resolvedVersionAction === 'major') {
       await execute(`UPDATE production_history SET superseded_by_version = ? WHERE production_id = ? AND version = ? AND version_state = 'superseded'`, [newVersion, id, currentVersion]);
@@ -543,6 +557,7 @@ router.put('/production/:id', authenticate, async (req, res) => {
         createdBy: { id: Number(req.user?.id), name: String(req.user?.name || '协作者') }, createdAt: beijingNow(),
       };
       getSocketIO()?.to(getCollaborationRoomId('production', id)).emit(COLLABORATION_EVENTS.VERSION_SUPERSEDED, payload);
+      getSocketIO()?.to(getProductionVersionRoomId(id, currentVersion)).emit(COLLABORATION_EVENTS.VERSION_SUPERSEDED, payload);
     }
     res.json({ message: '创作记录更新成功', version: newVersion });
   } catch (error) {

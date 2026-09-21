@@ -1,13 +1,15 @@
 import { getTopicScopeByProductionId, getTopicScopeByShootingId } from '../../utils/access.js';
 import type { User } from '../../types/index.js';
+import { queryOne } from '../../database/utils.js';
 
-export type CollaborationDocument = { kind: 'production' | 'shooting'; id: number; roomId: string };
+export type CollaborationDocument = { kind: 'production' | 'shooting'; id: number; roomId: string; version?: string };
 
 export function parseCollaborationRoom(roomId: unknown): CollaborationDocument | null {
-  const match = typeof roomId === 'string' ? /^(production|shooting):(\d+)$/.exec(roomId) : null;
+  const match = typeof roomId === 'string' ? /^(production|shooting):(\d+)(?:@(v\d+\.\d+))?$/.exec(roomId) : null;
   if (!match) return null;
+  if (match[1] !== 'production' && match[3]) return null;
   const id = Number(match[2]);
-  return Number.isSafeInteger(id) && id > 0 ? { kind: match[1] as CollaborationDocument['kind'], id, roomId: String(roomId) } : null;
+  return Number.isSafeInteger(id) && id > 0 ? { kind: match[1] as CollaborationDocument['kind'], id, roomId: String(roomId), ...(match[3] ? { version: match[3] } : {}) } : null;
 }
 
 export class CollaborationAccessPolicy {
@@ -15,6 +17,10 @@ export class CollaborationAccessPolicy {
     const document = parseCollaborationRoom(roomId);
     if (!document) return null;
     const scope = document.kind === 'production' ? await getTopicScopeByProductionId(document.id) : await getTopicScopeByShootingId(document.id);
+    if (document.version) {
+      const current = await queryOne<{ version: string }>('SELECT version FROM production WHERE id = ?', [document.id]);
+      if (current?.version !== document.version) return null;
+    }
     return scope ? { document, scope } : null;
   }
 

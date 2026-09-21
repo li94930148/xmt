@@ -23,10 +23,11 @@ import TableOfContents from './TableOfContents';
 import { createEditorExtensions } from './extensions/editorExtensions';
 import type { FormatPainterMode } from './formatPainter';
 import { resolveEditorInsertionSelection } from './editorInsertion';
+import { isLocalEditorChange } from './editorChangeOrigin';
 
 interface EditorProps {
   value: string;
-  onChange: (html: string) => void;
+  onChange: (html: string, local: boolean) => void;
   onSave?: () => void;
   readOnly?: boolean;
   placeholder?: string;
@@ -141,13 +142,14 @@ export default function Editor({
     ],
     content: collaboration?.provider ? '' : value || '',
     editable: !readOnly,
-    onUpdate: ({ editor }) => {
+    onUpdate: ({ editor, transaction }) => {
       const html = editor.getHTML();
       if (html === lastValueRef.current) return;
       lastValueRef.current = html;
       setWordCount(editor.getText().replace(/\s+/g, '').length);
-      onChange(html);
-      if (collaboration?.provider) {
+      const local = isLocalEditorChange(transaction, Boolean(collaboration?.provider));
+      onChange(html, local);
+      if (local && collaboration?.provider) {
         collaboration.provider.setTyping(true);
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => {

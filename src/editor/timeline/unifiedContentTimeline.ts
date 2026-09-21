@@ -148,7 +148,7 @@ export function buildUnifiedTimeline(docId: string, sources: BuildUnifiedTimelin
   }, docId));
   const yjsEvents = (sources.yjsEvents || []).map((event) => normalizeTimelineEvent(event, docId));
   const saveEvents = (sources.saveEvents || []).map((event) => normalizeTimelineEvent({ ...event, type: 'save' }, docId));
-  const versionEvents = (sources.versionEvents || []).map((event) => normalizeTimelineEvent({ ...event, type: 'version' }, docId));
+  const versionEvents = (sources.versionEvents || []).map((event) => normalizeTimelineEvent({ ...event, type: event.type || 'version' }, docId));
   const seen = new Set<string>();
 
   return [...registered, ...telemetry, ...yjsEvents, ...saveEvents, ...versionEvents]

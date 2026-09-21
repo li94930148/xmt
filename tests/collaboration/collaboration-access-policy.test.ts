@@ -27,6 +27,10 @@ assert.deepEqual(parseCollaborationRoom(`production:${productionId}`), { kind: '
 assert.equal(parseCollaborationRoom('production:0'), null);
 assert.equal(parseCollaborationRoom('topic:1'), null);
 assert.equal(await collaborationAccessPolicy.canViewDocument(owner, `production:${productionId}`), true);
+await (await import('../../api/database/utils.js')).execute('UPDATE production SET version = ? WHERE id = ?', ['v1.0', productionId]);
+assert.deepEqual(parseCollaborationRoom(`production:${productionId}@v1.0`), { kind: 'production', id: productionId, roomId: `production:${productionId}@v1.0`, version: 'v1.0' });
+assert.equal(await collaborationAccessPolicy.canEditDocument(owner, `production:${productionId}@v1.0`), true);
+assert.equal(await collaborationAccessPolicy.canEditDocument(owner, `production:${productionId}@v2.0`), false);
 assert.equal(await collaborationAccessPolicy.canEditDocument(owner, `production:${productionId}`), true);
 assert.equal(await collaborationAccessPolicy.canViewDocument(owner, `shooting:${shootingId}`), true);
 assert.equal(await collaborationAccessPolicy.canViewDocument(outsider, `production:${productionId}`), false);

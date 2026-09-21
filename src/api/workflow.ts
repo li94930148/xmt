@@ -44,7 +44,7 @@ export async function getProductionById(id: number): Promise<Production> {
   return response.json();
 }
 
-export async function updateProduction(id: number, data: { topic_id: number; version?: string; content?: string; contentMarkdown?: string; contentJson?: string; status?: string; change_type?: string; version_action?: 'minor' | 'major' | 'none' }): Promise<{ message: string; version?: string }> {
+export async function updateProduction(id: number, data: { topic_id: number; version?: string; content?: string; expected_content?: string; contentMarkdown?: string; contentJson?: string; status?: string; change_type?: string; version_action?: 'minor' | 'major' | 'none' }): Promise<{ message: string; version?: string }> {
   const response = await fetch(`${BASE_URL}/workflow/production/${id}`, {
     method: 'PUT',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },

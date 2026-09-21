@@ -37,7 +37,7 @@ import { applyCollectorLoginRequired, heartbeatLoginStatus } from "./collectorAu
 import { capabilities, mayConfirmLogin, profileAuthenticationFromBrowser, type LoginWindowState, type ProfileAuthentication } from "./loginState.js";
 import { coverInspectionFailureCode } from './coverInspectionState.js';
 import { bind, heartbeat, uploadCanonicalPayload } from "../core/uploader/client.js";
-import { intervalMs, nextDailyDelay } from "../core/scheduler/scheduler.js";
+import { intervalMs, nextDailyDelay, usesExportFocusedSync } from "../core/scheduler/scheduler.js";
 import type { AgentConfig, SyncResult } from "../core/types.js";
 import type { DesktopState, SetupInput } from "./types.js";
 import { CreatorDatabase } from "../core/database/creatorDatabase.js";
@@ -46,8 +46,8 @@ import { UploadQueueScheduler } from "../core/uploader/queueScheduler.js";
 import type { RebindInput } from "./types.js";
 import { rendererAccountIdentity, rendererSettings } from './mainOnlyAccountIdentity.js';
 import { sanitizeRendererState } from './browserSafeRendererContract.js';
-const AGENT_VERSION = '2.14.2-agent';
-const SYSTEM_VERSION = '3.0.2';
+const AGENT_VERSION = '2.14.3-agent';
+const SYSTEM_VERSION = '3.0.3';
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
 const resourceDirectory = process.resourcesPath;
@@ -508,7 +508,7 @@ async function schedule() {
       : intervalMs(config.syncConfig.interval);
   timer = setTimeout(async () => {
     try {
-      await performSync();
+      await performSync(usesExportFocusedSync(config.syncConfig.interval));
     } catch (error) {
       await log(
         `自动同步失败：${error instanceof Error ? error.message : String(error)}`,

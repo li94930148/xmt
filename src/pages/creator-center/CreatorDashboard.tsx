@@ -7,18 +7,24 @@ import CreatorProfileCard from '@/components/xmt-ui/CreatorProfileCard';
 import { EmptyState, ErrorState, LoadingState, MetricCard, PageHeader, Panel, asRecord, formatDate, formatNumber, num } from './shared';
 import { ReactBitsPageScene } from '@/features/reactbits-appearance/slots/ReactBitsPageScene';
 import { ReactBitsHeadingSlot } from '@/features/reactbits-appearance/slots/ReactBitsHeadingSlot';
-import { ReactBitsMetricSlot } from '@/features/reactbits-appearance/slots/ReactBitsMetricSlot';
 import { ReactBitsCardSlot } from '@/features/reactbits-appearance/ReactBitsCardSlot';
 import { ReactBitsRevealSlot } from '@/features/reactbits-appearance/ReactBitsRevealSlot';
 
-function GrowthBlock({ title, data }: { title: string; data: DouyinDashboardData['growth_7d'] }) {
+export function GrowthBlock({ title, data, official }: { title: string; data: DouyinDashboardData['growth_7d']; official: boolean }) {
+  const metrics = [
+    { label: '粉丝净变化', value: data?.fans, color: 'text-emerald-500', missing: '缺少可比粉丝快照' },
+    { label: official ? '新增播放' : '播放变化', value: data?.plays, color: 'text-cyan-500', missing: official ? '缺少该周期官方导出' : '缺少可比历史快照' },
+    { label: official ? '新增互动' : '互动变化', value: data?.interactions, color: 'text-rose-500', missing: official ? '缺少该周期官方导出' : '缺少可比历史快照' },
+  ];
   return <div className="rounded-xl bg-studio-surface p-4">
     <p className="text-sm font-medium">{title}</p>
-    {data ? <div className="mt-4 grid grid-cols-3 gap-3 text-center">
-      <div><b className="text-emerald-500">{data.fans == null ? '暂不可用' : `${data.fans >= 0 ? '+' : ''}${formatNumber(data.fans)}`}</b><span className="mt-1 block text-xs text-studio-text-muted">粉丝</span></div>
-      <div><b className="text-cyan-500">{data.plays == null ? '暂不可用' : `${data.plays >= 0 ? '+' : ''}${formatNumber(data.plays)}`}</b><span className="mt-1 block text-xs text-studio-text-muted">播放</span></div>
-      <div><b className="text-rose-500">{data.interactions == null ? '暂不可用' : `${data.interactions >= 0 ? '+' : ''}${formatNumber(data.interactions)}`}</b><span className="mt-1 block text-xs text-studio-text-muted">互动</span></div>
-    </div> : <p className="mt-4 text-sm text-studio-text-muted">历史快照不足，完成跨周期同步后显示增长。</p>}
+    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {metrics.map(metric => <div key={metric.label} className="min-w-0 text-center">
+        <b className={metric.color}>{metric.value == null ? '—' : `${metric.value >= 0 ? '+' : ''}${formatNumber(metric.value)}`}</b>
+        <span className="mt-1 block text-xs text-studio-text-muted">{metric.label}</span>
+        {metric.value == null ? <span className="mt-1 block text-xs text-amber-600">{metric.missing}</span> : null}
+      </div>)}
+    </div>
   </div>;
 }
 
@@ -82,8 +88,8 @@ export default function CreatorDashboard() {
       <MetricCard label="爆款作品" value={data.metrics.viral_works_count} icon={Gauge} accent="emerald" />
     </section></ReactBitsRevealSlot>
     <section className="grid gap-6 xl:grid-cols-[1fr_1.4fr]">
-      <Panel title="周期增长" description={`${data.snapshot_count} 个日快照`}>
-        <div className="grid gap-4"><GrowthBlock title="近 7 天" data={data.growth_7d} /><GrowthBlock title="近 30 天" data={data.growth_30d} /></div>
+      <Panel title="周期表现" description={official ? '播放、互动按官方周期逐日合计；粉丝按真实期初与期末总量计算' : `${data.snapshot_count} 个日快照`}>
+        <div className="grid gap-4"><GrowthBlock title="近 7 天" data={data.growth_7d} official={official} /><GrowthBlock title="近 30 天" data={data.growth_30d} official={official} /></div>
         <button type="button" onClick={() => navigate('/analytics/creator-center/trends')} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-studio-cyan"><CalendarRange className="h-4 w-4" />查看完整趋势</button>
       </Panel>
       <ReactBitsCardSlot semantic="content-highlight" className="min-w-0"><Panel title="作品表现 TOP 5">

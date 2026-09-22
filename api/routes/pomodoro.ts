@@ -1,7 +1,6 @@
 ﻿﻿import express from 'express';
 import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
 import { authenticate } from '../middleware/auth';
-import { createMessage } from '../utils/messageHelper';
 
 const router = express.Router();
 
@@ -9,7 +8,10 @@ const router = express.Router();
 router.post('/start', authenticate, async (req, res) => {
   try {
     const userId = req.user?.id;
-    const { duration, topic_id } = req.body;
+    const { duration = 25, topic_id } = req.body;
+    if (!Number.isSafeInteger(duration) || duration < 1 || duration > 180) {
+      return res.status(400).json({ message: '专注时长无效' });
+    }
 
     const activeSession = await queryOne(
       `SELECT * FROM pomodoro_sessions WHERE user_id = ? AND completed = 0`,
@@ -22,12 +24,23 @@ router.post('/start', authenticate, async (req, res) => {
 
     const sessionId = await executeInsert(
       `INSERT INTO pomodoro_sessions (user_id, duration, topic_id) VALUES (?, ?, ?)`,
-      [userId, duration || 25, topic_id]
+      [userId, duration, topic_id ?? null]
     );
 
-    res.json({ message: '番茄钟已开始, sessionId' });
-  } catch (error) {
-    res.status(500).json({ message: '开始番茄钟失败', error });
+    res.json({ message: '番茄钟已开始', sessionId });
+  } catch {
+    res.status(500).json({ message: '开始番茄钟失败' });
+  }
+});
+
+router.post('/:id/cancel', authenticate, async (req, res) => {
+  try {
+    const session = await queryOne('SELECT id FROM pomodoro_sessions WHERE id = ? AND user_id = ? AND completed = 0', [req.params.id, req.user?.id]);
+    if (!session) return res.status(404).json({ message: '进行中的番茄钟不存在' });
+    await execute('DELETE FROM pomodoro_sessions WHERE id = ? AND user_id = ? AND completed = 0', [req.params.id, req.user?.id]);
+    return res.json({ message: '番茄钟已放弃' });
+  } catch {
+    return res.status(500).json({ message: '放弃番茄钟失败' });
   }
 });
 
@@ -56,8 +69,8 @@ router.post('/:id/complete', authenticate, async (req, res) => {
     );
 
     res.json({ message: '番茄钟完成！' });
-  } catch (error) {
-    res.status(500).json({ message: '完成番茄钟失败', error });
+  } catch {
+    res.status(500).json({ message: '完成番茄钟失败' });
   }
 });
 
@@ -68,7 +81,7 @@ router.get('/stats', authenticate, async (req, res) => {
 
     const todayResult = await queryOne(`
       SELECT COUNT(*) as count FROM pomodoro_sessions 
-      WHERE user_id = ? AND completed = 1 AND DATE(ended_at) = DATE('now')
+      WHERE user_id = ? AND completed = 1 AND DATE(ended_at) = DATE('now', '+8 hours')
     `, [userId]);
 
     const weekResult = await queryOne(`
@@ -87,8 +100,8 @@ router.get('/stats', authenticate, async (req, res) => {
       week: weekResult?.count || 0,
       totalMinutes: totalResult?.total || 0
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取统计失败', error });
+  } catch {
+    res.status(500).json({ message: '获取统计失败' });
   }
 });
 
@@ -114,8 +127,8 @@ router.get('/ranking', authenticate, async (req, res) => {
     `);
 
     res.json({ data: ranking });
-  } catch (error) {
-    res.status(500).json({ message: '获取排行榜失败, error' });
+  } catch {
+    res.status(500).json({ message: '获取排行榜失败' });
   }
 });
 

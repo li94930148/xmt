@@ -317,9 +317,8 @@ app.use(express.static(distPath, {
   },
 }))
 
-app.use('/api/auth', authRoutes)
-// Auth is mounted first so its dedicated login limiters never consume the shared API quota.
 app.use('/api/', apiLimiter)
+app.use('/api/auth', authRoutes)
 app.use('/api/topics', topicResourcesRoutes)
 app.use('/api/topics', topicsRoutes)
 app.use('/api/productions', productionResourcesRoutes)

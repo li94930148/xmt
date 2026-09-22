@@ -95,7 +95,6 @@ const CalendarPage = lazyWithRetry(() => import('@/pages/Calendar'), 'CalendarPa
 const Inspirations = lazyWithRetry(() => import('@/pages/Inspirations'), 'Inspirations');
 const Achievements = lazyWithRetry(() => import('@/pages/Achievements'), 'Achievements');
 const ActivityLog = lazyWithRetry(() => import('@/pages/ActivityLog'), 'ActivityLog');
-const DouyinAnalytics = lazyWithRetry(() => import('@/pages/DouyinAnalytics'), 'DouyinAnalytics');
 const CreatorDashboard = lazyWithRetry(() => import('@/pages/creator-center/CreatorDashboard'), 'CreatorDashboard');
 const CreatorWorks = lazyWithRetry(() => import('@/pages/creator-center/CreatorWorks'), 'CreatorWorks');
 const CreatorWorkDetail = lazyWithRetry(() => import('@/pages/creator-center/CreatorWorkDetail'), 'CreatorWorkDetail');
@@ -112,10 +111,6 @@ const BackupPage = lazyWithRetry(() => import('@/pages/BackupPage'), 'BackupPage
 const DailyReportPage = lazyWithRetry(() => import('@/pages/DailyReportPage'), 'DailyReportPage');
 const RetrospectivesPage = lazyWithRetry(() => import('@/pages/RetrospectivesPage'), 'RetrospectivesPage');
 const RetrospectiveDetailPage = lazyWithRetry(() => import('@/pages/RetrospectiveDetailPage'), 'RetrospectiveDetailPage');
-const SocialReview = lazyWithRetry(() => import('@/pages/SocialReview'), 'SocialReview');
-const SocialReviewAccountDetail = lazyWithRetry(() => import('@/pages/SocialReviewAccountDetail'), 'SocialReviewAccountDetail');
-const SocialReviewVideoDetail = lazyWithRetry(() => import('@/pages/SocialReviewVideoDetail'), 'SocialReviewVideoDetail');
-const SocialLoginRecovery = lazyWithRetry(() => import('@/pages/SocialLoginRecovery'), 'SocialLoginRecovery');
 const AuthRolloutStatus = lazyWithRetry(() => import('@/pages/AuthRolloutStatus'), 'AuthRolloutStatus');
 
 function PageLoading() {
@@ -237,10 +232,6 @@ export default function App() {
                   <Route path="/analytics/creator-center/reports" element={<CreatorReports />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
-                  <Route path="/social-review" element={<SocialReview />} />
-                  <Route path="/social-review/accounts/:id" element={<SocialReviewAccountDetail />} />
-                  <Route path="/social-review/accounts/:accountId/videos/:videoId" element={<SocialReviewVideoDetail />} />
-                  <Route path="/social-review/login-recovery/:sessionId" element={<SocialLoginRecovery />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:retro:view']} />}>
                   <Route path="/retrospectives" element={<RetrospectivesPage />} />
@@ -268,7 +259,7 @@ export default function App() {
                   <Route path="/activity" element={<ActivityLog />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['system:douyin']} />}>
-                  <Route path="/douyin" element={<DouyinAnalytics />} />
+                  <Route path="/douyin" element={<CreatorDashboard />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['system:template']} />}>
                   <Route path="/workflow-designer" element={<WorkflowDesigner />} />

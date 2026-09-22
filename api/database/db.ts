@@ -1534,6 +1534,14 @@ async function initTables() {
       args: ['member2', member2Password, 'member2@local.dev', 'member', '员工李四', 1, 1]
     });
   }
+  // Default users are created after the original role backfill. Reconcile only
+  // those bootstrap accounts when no explicit RBAC assignment exists.
+  await db.execute(`
+    INSERT OR IGNORE INTO user_roles (user_id, role_id)
+    SELECT u.id, r.id FROM users u JOIN roles r ON r.code = u.role
+    WHERE u.username IN ('admin', 'director', 'member1', 'member2')
+      AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id)
+  `);
 }
 
 async function migrateAnonymousFeedback() {

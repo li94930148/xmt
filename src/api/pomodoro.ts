@@ -10,7 +10,7 @@ function getAuthHeader(): Record<string, string> {
 
 export type { PomodoroSession, PomodoroStats, PomodoroRanking };
 
-export async function startPomodoro(data?: { duration?: number; topic_id?: number }): Promise<PomodoroSession> {
+export async function startPomodoro(data?: { duration?: number; topic_id?: number }): Promise<{ sessionId: number; message: string }> {
   const response = await fetch(`${BASE_URL}/pomodoro/start`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -18,6 +18,13 @@ export async function startPomodoro(data?: { duration?: number; topic_id?: numbe
   });
   if (!response.ok) throw new Error('开始番茄钟失败');
   return response.json();
+}
+
+export async function cancelPomodoro(id: number): Promise<void> {
+  const response = await fetch(`${BASE_URL}/pomodoro/${id}/cancel`, {
+    method: 'POST', headers: getAuthHeader()
+  });
+  if (!response.ok) throw new Error('放弃番茄钟失败');
 }
 
 export async function completePomodoro(id: number): Promise<{ message: string }> {
@@ -29,7 +36,7 @@ export async function completePomodoro(id: number): Promise<{ message: string }>
   return response.json();
 }
 
-export async function getPomodoroStats(): Promise<PomodoroStats> {
+export async function getPomodoroStats(): Promise<{ today: number; week: number; totalMinutes: number }> {
   const response = await fetch(`${BASE_URL}/pomodoro/stats`, {
     headers: getAuthHeader()
   });

@@ -3,9 +3,6 @@ import { X, Sparkles, ArrowRight } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { changelog, getChangeTypeLabel, getChangeTypeColor } from '../data/changelog';
 
-// 声明全局变量
-declare const __APP_VERSION__: string;
-
 interface UpdateNotificationProps {
   onClose: () => void;
   onGoToChangelog: () => void;
@@ -30,23 +27,18 @@ export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateN
 
   return (
     <div
-      className={`fixed inset-0 z-[300] flex items-center justify-center p-4 transition-all duration-300 ${
+      className={`pointer-events-none fixed bottom-4 right-4 z-[300] w-[calc(100vw-2rem)] max-w-lg transition-all duration-300 ${
         isVisible ? 'opacity-100' : 'opacity-0'
       }`}
-      onClick={handleClose}
     >
-      {/* 背景遮罩 */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-
-      {/* 弹窗内容 */}
       <div
-        className={`relative w-full max-w-lg ${styles.card} rounded-2xl shadow-2xl overflow-hidden transform transition-all duration-300 ${
+        className={`pointer-events-auto relative flex max-h-[calc(100vh-2rem)] w-full flex-col ${styles.card} rounded-2xl shadow-2xl overflow-hidden transform transition-all duration-300 ${
           isVisible ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 顶部装饰 */}
-        <div className="relative h-32 bg-gradient-to-br from-[#5c7cfa] to-[#748ffc] overflow-hidden">
+        <div className="relative h-32 shrink-0 bg-gradient-to-br from-[#5c7cfa] to-[#748ffc] overflow-hidden">
           <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48cGF0aCBkPSJNMjAgMjBjMC01LjUyMyA0LjQ3Ny0xMCAxMC0xMHYtMkMxNC40NzcgOCA4IDE0LjQ3OCA4IDIwaDEyem0tMTAgMTBjLTUuNTIzIDAtMTAtNC40NzctMTAtMTBoLTJjMCA2LjYyNyA1LjM3MyAxMiAxMiAxMnYtMnoiLz48L2c+PC9nPjwvc3ZnPg==')] opacity-30" />
           <div className="absolute bottom-4 left-6 flex items-center gap-3">
             <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
@@ -59,6 +51,7 @@ export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateN
           </div>
           <button
             onClick={handleClose}
+            aria-label="关闭系统更新提示"
             className="absolute top-4 right-4 w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center hover:bg-white/30 transition-colors"
           >
             <X className="w-4 h-4 text-white" />
@@ -66,7 +59,7 @@ export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateN
         </div>
 
         {/* 内容区域 */}
-        <div className="p-6 max-h-[400px] overflow-y-auto">
+        <div className="min-h-0 overflow-y-auto p-6">
           <h3 className={`text-lg font-semibold ${styles.textPrimary} mb-2`}>
             {latestVersion.title}
           </h3>
@@ -112,7 +105,7 @@ export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateN
         </div>
 
         {/* 底部按钮 */}
-        <div className={`p-6 border-t ${styles.border} flex gap-3`}>
+        <div className={`flex shrink-0 gap-3 border-t p-6 ${styles.border}`}>
           <button
             onClick={handleClose}
             className={`flex-1 px-4 py-2.5 rounded-xl ${styles.buttonSecondary} text-sm font-medium transition-colors`}

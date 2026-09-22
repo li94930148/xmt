@@ -389,7 +389,7 @@ router.get('/shadow-decisions', authenticate, requirePermission('system:template
 router.get('/production', authenticate, async (req, res) => {
   try {
     const { topic_id } = req.query;
-    let query = `SELECT p.*, p.content as contentMarkdown, p.content as contentJson, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p 
+    let query = `SELECT p.*, COALESCE(p.content_markdown, p.content) as contentMarkdown, COALESCE(p.content_json, p.content) as contentJson, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p
                  LEFT JOIN users u ON p.operator_id = u.id 
                  LEFT JOIN topics t ON p.topic_id = t.id WHERE 1=1`;
     const params: any[] = [];

@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
+import { sendSafeServerError } from '../utils/response';
 import { execute, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils';
 import {
   RESOURCE_LIBRARY_TYPES,
@@ -119,7 +120,7 @@ router.get('/resources', requirePermission('resource:view'), async (req, res) =>
       pagination: { page, page_size: pageSize, total: Number(totalRow?.total || 0), total_pages: Math.ceil(Number(totalRow?.total || 0) / pageSize) },
     });
   } catch (error) {
-    res.status(500).json({ message: '查询资料失败', error: error instanceof Error ? error.message : String(error) });
+    sendSafeServerError(res, '查询资料失败', 'resource-center:list', error);
   }
 });
 
@@ -151,7 +152,7 @@ router.get('/search', requirePermission('resource:view'), async (req, res) => {
       total: rows.length,
     });
   } catch (error) {
-    res.status(500).json({ message: '全文搜索失败', error: error instanceof Error ? error.message : String(error) });
+    sendSafeServerError(res, '全文搜索失败', 'resource-center:search', error);
   }
 });
 
@@ -180,7 +181,7 @@ router.post('/resources', requirePermission('resource:create'), async (req, res)
     await recordResourceAudit(resourceId, req.user!.id, 'create', { title, library_type: libraryType, category_id: categoryId, visibility });
     res.status(201).json({ message: '资料创建成功', id: resourceId });
   } catch (error) {
-    res.status(500).json({ message: '创建资料失败', error: error instanceof Error ? error.message : String(error) });
+    sendSafeServerError(res, '创建资料失败', 'resource-center:create', error);
   }
 });
 
@@ -200,7 +201,7 @@ router.get('/resources/:id', requirePermission('resource:view'), async (req, res
     ]);
     res.json({ ...resource, category, tags, files, relations, versions: [], audit_summary: audit });
   } catch (error) {
-    res.status(500).json({ message: '获取资料详情失败', error: error instanceof Error ? error.message : String(error) });
+    sendSafeServerError(res, '获取资料详情失败', 'resource-center:detail', error);
   }
 });
 
@@ -261,8 +262,7 @@ router.put('/resources/:id', requirePermission('resource:update'), async (req, r
     });
     res.json({ message: '资料更新成功' });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    res.status(message.includes('无效') || message.includes('不存在') ? 400 : 500).json({ message });
+    sendSafeServerError(res, '更新资料失败', 'resource-center:update', error);
   }
 });
 
@@ -274,7 +274,7 @@ router.delete('/resources/:id', requirePermission('resource:delete'), async (req
     await execute(`UPDATE resources SET status='deleted', deleted_at=datetime('now','+8 hours'), updated_by=?, updated_at=datetime('now','+8 hours') WHERE id=?`, [req.user!.id, resource.id]);
     await recordResourceAudit(Number(resource.id), req.user!.id, 'delete', { previous_status: resource.status });
     res.json({ message: '资料已移入回收状态' });
-  } catch (error) { res.status(500).json({ message: '删除资料失败', error: error instanceof Error ? error.message : String(error) }); }
+  } catch (error) { sendSafeServerError(res, '删除资料失败', 'resource-center:delete', error); }
 });
 
 router.post('/resources/:id/restore', requirePermission('resource:delete'), async (req, res) => {
@@ -285,7 +285,7 @@ router.post('/resources/:id/restore', requirePermission('resource:delete'), asyn
     await execute(`UPDATE resources SET status='published', deleted_at=NULL, updated_by=?, updated_at=datetime('now','+8 hours') WHERE id=?`, [req.user!.id, resource.id]);
     await recordResourceAudit(Number(resource.id), req.user!.id, 'restore', { previous_status: resource.status });
     res.json({ message: '资料已恢复' });
-  } catch (error) { res.status(500).json({ message: '恢复资料失败', error: error instanceof Error ? error.message : String(error) }); }
+  } catch (error) { sendSafeServerError(res, '恢复资料失败', 'resource-center:restore', error); }
 });
 
 router.get('/categories', requirePermission('resource:view'), async (req, res) => {
@@ -307,7 +307,7 @@ router.post('/categories', requirePermission('resource:category_manage'), async 
     const path = `${parent?.path || ''}/${name}`.replace(/^\/+/, '/');
     const id = await executeInsert(`INSERT INTO resource_categories(library_type,parent_id,name,code,path,sort_order,enabled,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,datetime('now','+8 hours'),datetime('now','+8 hours'))`, [libraryType,parentId,name,cleanOptionalText(req.body.code),path,nonNegativeInteger(req.body.sort_order) || 0,req.user!.id]);
     res.status(201).json({ message: '分类创建成功', id });
-  } catch (error) { res.status(400).json({ message: '创建分类失败', error: error instanceof Error ? error.message : String(error) }); }
+  } catch (error) { sendSafeServerError(res, '创建分类失败', 'resource-center:category-create', error); }
 });
 
 router.put('/categories/:id', requirePermission('resource:category_manage'), async (req, res) => {
@@ -323,7 +323,7 @@ router.put('/categories/:id', requirePermission('resource:category_manage'), asy
     const path = `${parent?.path || ''}/${name}`.replace(/^\/+/, '/');
     await execute(`UPDATE resource_categories SET parent_id=?,name=?,code=?,path=?,sort_order=?,enabled=?,updated_at=datetime('now','+8 hours') WHERE id=?`, [parentId,name,req.body.code === undefined ? current.code : cleanOptionalText(req.body.code),path,req.body.sort_order === undefined ? current.sort_order : nonNegativeInteger(req.body.sort_order),req.body.enabled === undefined ? current.enabled : req.body.enabled ? 1 : 0,id]);
     res.json({ message: '分类更新成功' });
-  } catch (error) { res.status(400).json({ message: '更新分类失败', error: error instanceof Error ? error.message : String(error) }); }
+  } catch (error) { sendSafeServerError(res, '更新分类失败', 'resource-center:category-update', error); }
 });
 
 router.delete('/categories/:id', requirePermission('resource:category_manage'), async (req, res) => {

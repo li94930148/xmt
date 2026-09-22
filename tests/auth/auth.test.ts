@@ -122,8 +122,8 @@ async function authenticateFreezeTests(token: string) {
   const roleChanged = await fetch(`${baseUrl}/api/auth-freeze/protected`, {
     headers: { authorization: `Bearer ${token}` },
   });
-  assert.equal(roleChanged.status, 200);
-  assert.deepEqual(await roleChanged.json(), { id: enabledUserId, role: 'director' });
+  assert.equal(roleChanged.status, 403);
+  assert.deepEqual(await roleChanged.json(), { code: 'PASSWORD_CHANGE_REQUIRED', message: '请先修改密码' });
 }
 
 async function getMeFreezeTests(token: string) {
@@ -259,8 +259,14 @@ try {
   await loginFailureTests();
   await authenticateFreezeTests(token);
   await getMeFreezeTests(token);
-  await profileFreezeTests(token);
+  const blockedProfile = await fetch(`${baseUrl}/api/auth/profile`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '不应保存' }),
+  });
+  assert.equal(blockedProfile.status, 403);
   const tokenAfterPasswordChange = await changePasswordFreezeTests(token);
+  await profileFreezeTests(tokenAfterPasswordChange);
   await logoutFreezeTest(tokenAfterPasswordChange);
   console.log('Auth legacy behavior freeze tests passed');
 } finally {

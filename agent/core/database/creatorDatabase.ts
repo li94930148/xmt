@@ -73,12 +73,19 @@ export class CreatorDatabase {
         stat.run(itemId,this.text('snapshot_time',snapshot.collected_at),this.json('work_metrics_json',item.metrics),this.json('work_detail_json',snapshot.work_details.find((detail)=>String(detail.item_id)===itemId)),this.text('snapshot_id',snapshot.snapshot_id));
       }
     });
-    this.attempt(status,'dashboard',()=>this.db.prepare('INSERT OR IGNORE INTO creator_dashboard_statistics(snapshot_time,range_key,statistics_json,snapshot_id) VALUES(?,?,?,?)').run(this.text('snapshot_time',snapshot.collected_at),'all',this.json('dashboard_statistics_json',{dashboard:snapshot.dashboard,content_analysis:snapshot.content_analysis}),this.text('snapshot_id',snapshot.snapshot_id)));
-    this.attempt(status,'fans',()=>{
-      this.db.prepare('INSERT OR IGNORE INTO creator_fans_snapshots(account_id,snapshot_time,fans_count,raw_json,created_at,snapshot_id) VALUES(?,?,?,?,?,?)').run(requiredText('account_id',String(snapshot.account.uid)),this.text('snapshot_time',snapshot.collected_at),requiredInteger('fans_count',Number(snapshot.account.fans_count || 0)),this.json('fans_raw_json',snapshot.fans),this.text('created_at',snapshot.collected_at),this.text('snapshot_id',snapshot.snapshot_id));
-      this.db.prepare('INSERT OR IGNORE INTO creator_fans_statistics(snapshot_time,statistics_json,snapshot_id) VALUES(?,?,?)').run(this.text('snapshot_time',snapshot.collected_at),this.json('fans_statistics_json',snapshot.fans),this.text('snapshot_id',snapshot.snapshot_id));
+    this.attempt(status,'dashboard',()=>{
+      if (!Object.keys(snapshot.dashboard).length && !Object.keys(snapshot.content_analysis).length) throw new Error('未采集到看板数据');
+      this.db.prepare('INSERT OR IGNORE INTO creator_dashboard_statistics(snapshot_time,range_key,statistics_json,snapshot_id) VALUES(?,?,?,?)').run(this.text('snapshot_time',snapshot.collected_at),'all',this.json('dashboard_statistics_json',{dashboard:snapshot.dashboard,content_analysis:snapshot.content_analysis}),this.text('snapshot_id',snapshot.snapshot_id));
     });
-    this.attempt(status,'raw',()=>this.db.prepare('INSERT OR IGNORE INTO creator_raw_snapshots(snapshot_time,source,raw_json,snapshot_id) VALUES(?,?,?,?)').run(this.text('snapshot_time',snapshot.collected_at),this.text('snapshot_source',snapshot.source),this.json('snapshot_raw_json',snapshot.raw),this.text('snapshot_id',snapshot.snapshot_id)));
+    this.attempt(status,'fans',()=>{
+      if (snapshot.account.metadata_observed?.fans_count !== true || snapshot.account.fans_count === null) throw new Error('未采集到粉丝数');
+      this.db.prepare('INSERT OR IGNORE INTO creator_fans_snapshots(account_id,snapshot_time,fans_count,raw_json,created_at,snapshot_id) VALUES(?,?,?,?,?,?)').run(requiredText('account_id',String(snapshot.account.uid)),this.text('snapshot_time',snapshot.collected_at),requiredInteger('fans_count',snapshot.account.fans_count),this.json('fans_raw_json',snapshot.fans),this.text('created_at',snapshot.collected_at),this.text('snapshot_id',snapshot.snapshot_id));
+      if (Object.keys(snapshot.fans).length) this.db.prepare('INSERT OR IGNORE INTO creator_fans_statistics(snapshot_time,statistics_json,snapshot_id) VALUES(?,?,?)').run(this.text('snapshot_time',snapshot.collected_at),this.json('fans_statistics_json',snapshot.fans),this.text('snapshot_id',snapshot.snapshot_id));
+    });
+    this.attempt(status,'raw',()=>{
+      if (!snapshot.raw.captures.length) throw new Error('未采集到原始响应');
+      this.db.prepare('INSERT OR IGNORE INTO creator_raw_snapshots(snapshot_time,source,raw_json,snapshot_id) VALUES(?,?,?,?)').run(this.text('snapshot_time',snapshot.collected_at),this.text('snapshot_source',snapshot.source),this.json('snapshot_raw_json',snapshot.raw),this.text('snapshot_id',snapshot.snapshot_id));
+    });
     return status;
   }
   snapshotCounts(){

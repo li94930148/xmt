@@ -103,7 +103,6 @@ export class TopicService {
   async deleteTopic(_actor: TopicActor, id: number | string) {
     const topic = await this.dependencies.repository.findById(id);
     if (!topic) throw new TopicServiceError('TOPIC_NOT_FOUND', '选题不存在');
-    await this.dependencies.repository.deleteLegacyRelations(id);
     await this.dependencies.repository.deleteTopic(id);
     this.dependencies.broadcast('topics', 'topic:deleted', { id: String(id) });
   }

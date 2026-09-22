@@ -45,11 +45,3 @@ export type SocketAuthHandshake = {
   mode: SocketAuthMode;
   contractVersion?: number;
 };
-
-export type SocketRoomJoinInput = {
-  userId: number;
-  roomId: string;
-  permission?: string | null;
-  ownerId?: number | null;
-  scope?: string | null;
-};

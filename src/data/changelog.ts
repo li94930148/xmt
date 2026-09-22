@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '3.1.0', date: '2026-09-22', title: '权限与业务入口修复', impactScope: ['登录安全', '资料中心', '协作编辑', '番茄钟', '抖音运营中心'], changes: [{ type: 'security', description: '需要修改密码的账号先完成改密才能使用业务接口；资料写入和协作编辑按授权范围检查。' }, { type: 'fix', description: '番茄钟计时和统计接入服务端，旧抖音技术页转到运营中心，失效的社媒复盘入口停止开放。' }] },
   { version: '3.0.5', date: '2026-09-22', title: '抖音周期指标可用性修复', impactScope: ['抖音运营中心'], changes: [{ type: 'fix', description: '周期卡片展示官方播放、互动值及粉丝基线缺失原因，官方作品导出不再伪造当日粉丝快照。' }] },
   { version: '3.0.4', date: '2026-09-21', title: '协作编辑与版本记录修复', impactScope: ['创作管理', '内容动态'], changes: [{ type: 'fix', description: '多人同时编辑时保留各自新增的内容；普通粘贴不再自动生成新版。' }, { type: 'fix', description: '版本记录按北京时间展示真实保存事件及操作人，历史快照不再重复显示为新版本。' }] },
   { version: '3.0.3', date: '2026-09-21', title: '抖音定时官方导出稳定化', impactScope: ['Creator Agent', '抖音运营中心'], changes: [{ type: 'fix', description: '每日与 12 小时自动任务使用官方四文件采集路径，避免全量滚动异常阻断定时导出。' }] },

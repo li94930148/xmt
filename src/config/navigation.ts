@@ -156,7 +156,6 @@ export const navigationSections: NavigationSection[] = [
       { id: 'content-intelligence', label: '内容智能面板', icon: BookOpenCheck, path: '/content-intelligence', permissions: ['analytics:view'] },
       { id: 'content-generation', label: '内容生成面板', icon: Sparkles, path: '/content-generation', permissions: ['analytics:view'] },
       { id: 'content-os', label: '内容操作系统', icon: LayoutDashboard, path: '/content-os', permissions: ['analytics:view'] },
-      { id: 'douyin', label: '抖音技术入口', icon: Video, path: '/douyin', permissions: ['system:douyin'] },
       { id: 'pomodoro', label: '专注计时器', icon: FileClock, path: '/pomodoro' },
     ],
   },

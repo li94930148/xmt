@@ -1,9 +1,18 @@
 ﻿﻿import express from 'express';
 import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
 import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { canManageOwnedResource, isPrivilegedUser } from '../utils/access';
+import { sendSafeServerError } from '../utils/response';
 
 const router = express.Router();
+
+function validResourcePath(value: unknown) {
+  if (value === undefined || value === null || value === '') return true;
+  if (typeof value !== 'string' || value.length > 2048) return false;
+  if (/^https:\/\/[^\s]+$/i.test(value)) return true;
+  return /^\/(?!\/)[^\\\s]*$/.test(value) && !value.split('/').includes('..');
+}
 
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -11,7 +20,7 @@ router.get('/', authenticate, async (req, res) => {
     
     let query = `SELECT r.id, r.name, r.type, r.file_path, r.category, r.content, r.uploader_id, r.created_at, r.updated_at, u.name as uploader_name FROM resources r 
                  LEFT JOIN users u ON r.uploader_id = u.id WHERE 1=1`;
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (category) {
       query += ` AND r.category = ?`;
@@ -35,7 +44,7 @@ router.get('/', authenticate, async (req, res) => {
       limit: parseInt(limit as string)
     });
   } catch (error) {
-    res.status(500).json({ message: '获取资源列表失败', error });
+    sendSafeServerError(res, '获取资源列表失败', 'resources:list', error);
   }
 });
 
@@ -94,7 +103,7 @@ router.get('/archives', authenticate, async (req, res) => {
     
     res.json({ data, total: countResult?.total || 0, page: parseInt(page as string), limit: parseInt(limit as string) });
   } catch (error) {
-    res.status(500).json({ message: '获取归档列表失败', error });
+    sendSafeServerError(res, '获取归档列表失败', 'resources:archive-list', error);
   }
 });
 
@@ -127,7 +136,7 @@ router.get('/archives/:id', authenticate, async (req, res) => {
       archive: archiveData
     });
   } catch (error) {
-    res.status(500).json({ message: '获取归档详情失败', error });
+    sendSafeServerError(res, '获取归档详情失败', 'resources:archive-detail', error);
   }
 });
 
@@ -138,9 +147,9 @@ router.get('/categories', authenticate, async (req, res) => {
       isPrivilegedUser(req.user) ? [] : [req.user?.id],
     );
     
-    res.json(categories.map((c: any) => c.category));
+    res.json(categories.map((c) => c.category));
   } catch (error) {
-    res.status(500).json({ message: '获取分类列表失败', error });
+    sendSafeServerError(res, '获取分类列表失败', 'resources:categories', error);
   }
 });
 
@@ -160,28 +169,29 @@ router.get('/:id', authenticate, async (req, res) => {
     
     res.json(resource);
   } catch (error) {
-    res.status(500).json({ message: '获取资源详情失败', error });
+    sendSafeServerError(res, '获取资源详情失败', 'resources:detail', error);
   }
 });
 
-router.post('/', authenticate, async (req, res) => {
+router.post('/', authenticate, requirePermission('resource:create'), async (req, res) => {
   try {
     const { name, type, file_path, category, content } = req.body;
     
     if (!name) {
       return res.status(400).json({ message: '资源名称不能为空' });
     }
+    if (!validResourcePath(file_path)) return res.status(400).json({ message: '资源路径无效' });
     
     const resourceId = await executeInsert(`INSERT INTO resources (name, type, file_path, category, content, uploader_id) 
             VALUES (?, ?, ?, ?, ?, ?)`, [name, type, file_path, category, content, req.user?.id]);
     
     res.json({ message: '资源上传成功', resourceId });
   } catch (error) {
-    res.status(500).json({ message: '上传资源失败', error });
+    sendSafeServerError(res, '上传资源失败', 'resources:create', error);
   }
 });
 
-router.put('/:id', authenticate, async (req, res) => {
+router.put('/:id', authenticate, requirePermission('resource:update'), async (req, res) => {
   try {
     const { id } = req.params;
     const { name, type, file_path, category, content } = req.body;
@@ -193,9 +203,10 @@ router.put('/:id', authenticate, async (req, res) => {
     if (!canManageOwnedResource(req.user, resource as Record<string, unknown>)) {
       return res.status(403).json({ message: '无权限修改该资源' });
     }
+    if (!validResourcePath(file_path)) return res.status(400).json({ message: '资源路径无效' });
     
     const updateFields: string[] = [];
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (name !== undefined) { updateFields.push('name = ?'); params.push(name); }
     if (type !== undefined) { updateFields.push('type = ?'); params.push(type); }
@@ -213,11 +224,11 @@ router.put('/:id', authenticate, async (req, res) => {
     
     res.json({ message: '资源更新成功' });
   } catch (error) {
-    res.status(500).json({ message: '更新资源失败', error });
+    sendSafeServerError(res, '更新资源失败', 'resources:update', error);
   }
 });
 
-router.delete('/:id', authenticate, async (req, res) => {
+router.delete('/:id', authenticate, requirePermission('resource:delete'), async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -233,7 +244,7 @@ router.delete('/:id', authenticate, async (req, res) => {
     
     res.json({ message: '资源删除成功' });
   } catch (error) {
-    res.status(500).json({ message: '删除资源失败', error });
+    sendSafeServerError(res, '删除资源失败', 'resources:delete', error);
   }
 });
 

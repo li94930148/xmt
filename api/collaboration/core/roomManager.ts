@@ -14,7 +14,6 @@ import {
 } from '../yjs/documentStore.js';
 import { logCollaborationEvent } from '../analytics/collaborationLogger.js';
 import { canEdit, getDocLock, isReadOnly, releaseLock, setDocLocked } from '../control/collaborationGuard.js';
-import { authorizeSocketRoomJoin } from '../../modules/auth/socket/socket-auth.service.js';
 import { collaborationAccessPolicy } from '../access/CollaborationAccessPolicy.js';
 import type { User } from '../../types/index.js';
 
@@ -74,8 +73,10 @@ export async function joinRoom(io: Server, socket: Socket, payload: Collaboratio
   const auth = socket.data.auth as { userId?: number } | undefined;
   const authenticated = socketUser(socket);
   const authenticatedUserId = Number(auth?.userId ?? authenticated?.id ?? 0);
-  if (!authorizeSocketRoomJoin({ userId: authenticatedUserId, roomId })) return;
-  if (!authenticated || authenticated.id !== authenticatedUserId || !await collaborationAccessPolicy.canViewDocument(authenticated, roomId)) return;
+  if (!authenticated || authenticatedUserId <= 0 || authenticated.id !== authenticatedUserId || !await collaborationAccessPolicy.canViewDocument(authenticated, roomId)) {
+    socket.emit(COLLABORATION_EVENTS.CONFLICT_DETECTED, { roomId, reason: 'Room access denied', timestamp: Date.now() });
+    return;
+  }
 
   const user: RuntimeUser = {
     ...payload.user,

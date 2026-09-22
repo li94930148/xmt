@@ -22,6 +22,7 @@ const shootingId = await executeInsert(`INSERT INTO shooting (topic_id,status,op
 const owner = { id: ownerId, role: 'member', enabled: true } as never;
 const outsider = { id: outsiderId, role: 'member', enabled: true } as never;
 const disabledOwner = { id: ownerId, role: 'member', enabled: false } as never;
+const unassignedEditor = { id: outsiderId, role: 'editor', enabled: true } as never;
 
 assert.deepEqual(parseCollaborationRoom(`production:${productionId}`), { kind: 'production', id: productionId, roomId: `production:${productionId}` });
 assert.equal(parseCollaborationRoom('production:0'), null);
@@ -35,6 +36,7 @@ assert.equal(await collaborationAccessPolicy.canEditDocument(owner, `production:
 assert.equal(await collaborationAccessPolicy.canViewDocument(owner, `shooting:${shootingId}`), true);
 assert.equal(await collaborationAccessPolicy.canViewDocument(outsider, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canEditDocument(outsider, `shooting:${shootingId}`), false);
+assert.equal(await collaborationAccessPolicy.canEditDocument(unassignedEditor, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(disabledOwner, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(owner, 'production:999999'), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(undefined, `production:${productionId}`), false);
@@ -58,9 +60,11 @@ handleAwarenessUpdate(fakeSocket, { roomId, update: [] });
 handleTyping(fakeIo, fakeSocket, { roomId, typing: true });
 assert.equal(broadcasts.some((item) => item.event === 'collaboration:update' || item.event === 'collaboration:awareness-update' || item.event === 'collaboration:typing'), false);
 assert.equal((await (await import('../../api/database/utils.js')).queryOne<{ content: string }>('SELECT content FROM production WHERE id = ?', [productionId]))?.content, beforeContent?.content);
-const deniedSocket = { ...fakeSocket, id: 'collaboration-denied-socket', data: { user: { ...outsider, name: 'Outsider' }, auth: { userId: outsiderId } }, emit: () => undefined } as never;
+const deniedEvents: string[] = [];
+const deniedSocket = { ...fakeSocket, id: 'collaboration-denied-socket', data: { user: { ...outsider, name: 'Outsider' }, auth: { userId: outsiderId } }, emit: (event: string) => deniedEvents.push(event) } as never;
 await joinRoom(fakeIo, deniedSocket, { roomId, user: { id: ownerId, name: 'forged owner', role: 'admin', color: '#000' } });
 assert.equal(Boolean((deniedSocket.data.collaborationRooms as Set<string> | undefined)?.has(roomId)), false);
+assert.equal(deniedEvents.includes('collaboration:conflict-detected'), true);
 const anonymousSocket = { ...fakeSocket, id: 'collaboration-anonymous-socket', data: {}, emit: () => undefined } as never;
 await joinRoom(fakeIo, anonymousSocket, { roomId, user: { id: ownerId, name: 'Owner', role: 'member', color: '#000' } });
 assert.equal(Boolean((anonymousSocket.data.collaborationRooms as Set<string> | undefined)?.has(roomId)), false);

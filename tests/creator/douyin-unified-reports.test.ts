@@ -120,6 +120,13 @@ try {
   await creatorAnalyticsService.deleteReport(creatorAccountId, Number(report.id));
   assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) count FROM creator_reports WHERE id=?', [report.id]))?.count), 0);
 
+  await execute("UPDATE douyin_daily_snapshots SET fans_count_available=0 WHERE account_id=? AND snapshot_date='2026-09-09'", [douyinAccountId]);
+  const withoutFanBaseline = await getDouyinDashboard(creatorAccountId);
+  assert.equal(withoutFanBaseline?.growth_7d?.fans, null, '没有真实期初粉丝观测时不得推断 7 天粉丝增长');
+  assert.equal(withoutFanBaseline?.growth_7d?.plays, 300, '粉丝基线缺失不得遮挡可计算的官方播放量');
+  assert(withoutFanBaseline?.missing_fields.includes('fan_growth_7d'));
+  assert.equal(withoutFanBaseline?.data_status, 'partial');
+
   console.log('Unified Douyin report tests passed: official totals, exact-period daily flows, fans, stale-silo isolation, scoped deletion.');
 } finally {
   db.close();

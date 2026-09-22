@@ -10,6 +10,7 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
+  { version: '3.0.4', date: '2026-09-22', title: '抖音周期指标可用性修复', impactScope: ['抖音运营中心'], changes: [{ type: 'fix', description: '周期卡片展示官方播放、互动值及粉丝基线缺失原因，官方作品导出不再伪造当日粉丝快照。' }] },
   { version: '3.0.3', date: '2026-09-21', title: '抖音定时官方导出稳定化', impactScope: ['Creator Agent', '抖音运营中心'], changes: [{ type: 'fix', description: '每日与 12 小时自动任务使用官方四文件采集路径，避免全量滚动异常阻断定时导出。' }] },
   { version: '3.0.2', date: '2026-09-19', title: '抖音作品状态标量兼容', impactScope: ['Creator Agent', '抖音运营中心'], changes: [{ type: 'fix', description: '兼容抖音对象形态的作品状态，未知结构按缺失处理，避免普通作品快照部分失败。' }] },
   { version: '3.0.1', date: '2026-09-17', title: '抖音作品数据导出定位修复', impactScope: ['Creator Agent', '抖音运营中心'], changes: [{ type: 'fix', description: '固定选择数据中心“作品数据”区域的导出按钮，避免误下载粉丝指标文件。' }] },

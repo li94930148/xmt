@@ -1,40 +1,74 @@
+/* XMT Studio Atelier — 唯一设计令牌源。详见项目根目录 DESIGN.md */
+
 :root,
 html.dark {
-  --xmt-app-bg: #070A12;
-  --xmt-app-bg-soft: #0B1020;
-  --xmt-surface: #111827;
-  --xmt-surface-soft: #151B2E;
-  --xmt-surface-glass: rgba(17, 24, 39, 0.72);
-  --xmt-border-soft: rgba(148, 163, 184, 0.14);
-  --xmt-border-active: rgba(79, 124, 255, 0.55);
-  --xmt-text-primary: #F8FAFC;
-  --xmt-text-secondary: #A8B3C7;
-  --xmt-text-muted: #64748B;
-  --xmt-primary: #4F7CFF;
-  --xmt-cyan: #22D3EE;
-  --xmt-violet: #8B5CF6;
-  --xmt-coral: #FF5F7A;
-  --xmt-amber: #F8B84E;
-  --xmt-success: #20D69B;
-  --xmt-primary-contrast: #BFD0FF;
-  --xmt-cyan-contrast: #A5F3FC;
-  --xmt-violet-contrast: #DDD6FE;
-  --xmt-coral-contrast: #FFC2CC;
-  --xmt-amber-contrast: #FDE7B2;
-  --xmt-success-contrast: #B8F7E3;
-  --xmt-danger: #FF5F7A;
-  --xmt-warning: #F8B84E;
-  --xmt-glow-primary: 0 0 32px rgba(79, 124, 255, 0.28);
-  --xmt-glow-cyan: 0 0 28px rgba(34, 211, 238, 0.22);
-  --xmt-card-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
-  --xmt-floating-shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
-  --xmt-modal-shadow: 0 28px 90px rgba(0, 0, 0, 0.5);
-  --xmt-font-heading: 'Inter', system-ui, sans-serif;
-  --xmt-font-body: 'Inter', system-ui, sans-serif;
+  color-scheme: dark;
+
+  --xmt-app-bg: #080B12;
+  --xmt-app-bg-soft: #0C1018;
+  --xmt-surface: #121826;
+  --xmt-surface-soft: #171E2E;
+  --xmt-surface-elevated: #1C2436;
+  --xmt-surface-glass: rgba(18, 24, 38, 0.72);
+  --xmt-border-soft: rgba(148, 163, 184, 0.12);
+  --xmt-border-active: rgba(107, 140, 255, 0.50);
+  --xmt-text-primary: #F2F5FA;
+  --xmt-text-secondary: #A3AFC4;
+  --xmt-text-muted: #6B7A93;
+
+  --xmt-primary: #6B8CFF;
+  --xmt-cyan: #5CE1E6;
+  --xmt-violet: #A78BFA;
+  --xmt-coral: #FF7A93;
+  --xmt-amber: #F5C86B;
+  --xmt-success: #3DDBA0;
+  --xmt-danger: #FF7A93;
+  --xmt-warning: #F5C86B;
+
+  --xmt-primary-contrast: #C9D6FF;
+  --xmt-cyan-contrast: #B5F6F8;
+  --xmt-violet-contrast: #E4DAFF;
+  --xmt-coral-contrast: #FFD0D8;
+  --xmt-amber-contrast: #FDEFC8;
+  --xmt-success-contrast: #B9F5DC;
+
+  --xmt-glow-primary: 0 0 0 1px rgba(107, 140, 255, 0.18), 0 12px 40px rgba(107, 140, 255, 0.16);
+  --xmt-glow-cyan: 0 0 0 1px rgba(92, 225, 230, 0.14), 0 12px 36px rgba(92, 225, 230, 0.12);
+  --xmt-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 18px 48px rgba(0, 0, 0, 0.36);
+  --xmt-floating-shadow: 0 24px 64px rgba(0, 0, 0, 0.44);
+  --xmt-modal-shadow: 0 32px 96px rgba(0, 0, 0, 0.52);
+  --xmt-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.10) 0%,
+    rgba(255, 255, 255, 0.03) 18%,
+    transparent 42%
+  );
+  --xmt-sheen-line: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.28) 45%,
+    rgba(167, 139, 250, 0.22) 70%,
+    transparent 100%
+  );
+  --xmt-ambient-a: rgba(107, 140, 255, 0.14);
+  --xmt-ambient-b: rgba(92, 225, 230, 0.08);
+  --xmt-grid-line: rgba(148, 163, 184, 0.055);
+
+  --xmt-font-heading: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  --xmt-font-body: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
   --xmt-font-data: 'Inter', ui-monospace, SFMono-Regular, monospace;
-  --xmt-radius-card: 20px;
-  --xmt-radius-panel: 24px;
-  --xmt-radius-button: 14px;
+
+  --xmt-radius-card: 18px;
+  --xmt-radius-panel: 22px;
+  --xmt-radius-button: 12px;
+  --xmt-radius-chip: 999px;
+
+  --xmt-motion-micro: 120ms;
+  --xmt-motion-standard: 200ms;
+  --xmt-motion-page: 320ms;
+  --xmt-motion-enter: 220ms;
+  --xmt-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
   --system-font-size: 14px;
   --sidebar-nav-font-size: 0.9375rem;
   --sidebar-subnav-font-size: 0.875rem;
@@ -45,50 +79,92 @@ html.dark {
   --color-bg-primary: var(--xmt-app-bg);
   --color-bg-secondary: var(--xmt-surface);
   --color-bg-tertiary: var(--xmt-surface-soft);
-  --color-bg-elevated: #1C2540;
+  --color-bg-elevated: var(--xmt-surface-elevated);
   --color-text-primary: var(--xmt-text-primary);
   --color-text-secondary: var(--xmt-text-secondary);
   --color-text-muted: var(--xmt-text-muted);
   --color-border: var(--xmt-border-soft);
   --color-border-light: rgba(148, 163, 184, 0.08);
   --color-accent: var(--xmt-primary);
-  --color-accent-hover: #6A91FF;
+  --color-accent-hover: #8AA4FF;
   --color-success: var(--xmt-success);
-  --color-warning: var(--xmt-amber);
-  --color-danger: var(--xmt-coral);
+  --color-warning: var(--xmt-warning);
+  --color-danger: var(--xmt-danger);
+
+  --editor-fg: var(--xmt-text-primary);
+  --editor-muted: var(--xmt-text-muted);
+  --editor-bg: #0E1320;
+  --editor-panel: var(--xmt-surface);
+  --editor-border: var(--xmt-border-soft);
+  --editor-soft: var(--xmt-surface-soft);
+  --editor-hover: var(--xmt-surface-elevated);
+  --editor-code-bg: #0A0F1A;
 }
 
 html.light {
-  --xmt-app-bg: #F5F7FB;
-  --xmt-app-bg-soft: #EEF3FF;
-  --xmt-surface: #FFFFFF;
-  --xmt-surface-soft: #F1F5FF;
-  --xmt-surface-glass: rgba(255, 255, 255, 0.78);
-  --xmt-border-soft: rgba(30, 41, 59, 0.12);
-  --xmt-border-active: rgba(79, 124, 255, 0.46);
-  --xmt-text-primary: #111827;
-  --xmt-text-secondary: #475569;
-  --xmt-text-muted: #64748B;
-  --xmt-primary-contrast: #1D4ED8;
-  --xmt-cyan-contrast: #0E7490;
-  --xmt-violet-contrast: #6D28D9;
-  --xmt-coral-contrast: #BE123C;
-  --xmt-amber-contrast: #92400E;
-  --xmt-success-contrast: #047857;
+  color-scheme: light;
 
-  --color-bg-primary: var(--xmt-app-bg);
-  --color-bg-secondary: var(--xmt-surface);
-  --color-bg-tertiary: var(--xmt-surface-soft);
-  --color-bg-elevated: #E7EEFF;
-  --color-text-primary: var(--xmt-text-primary);
-  --color-text-secondary: var(--xmt-text-secondary);
-  --color-text-muted: var(--xmt-text-muted);
-  --color-border: var(--xmt-border-soft);
-  --color-border-light: rgba(30, 41, 59, 0.08);
-  --color-accent: var(--xmt-primary);
-  --color-accent-hover: #315FE6;
-  --xmt-floating-shadow: 0 22px 60px rgba(15, 23, 42, 0.16);
-  --xmt-modal-shadow: 0 28px 90px rgba(15, 23, 42, 0.22);
+  --xmt-app-bg: #F4F6FA;
+  --xmt-app-bg-soft: #EAF0FF;
+  --xmt-surface: #FFFFFF;
+  --xmt-surface-soft: #EEF2F8;
+  --xmt-surface-elevated: #E7EEFF;
+  --xmt-surface-glass: rgba(255, 255, 255, 0.78);
+  --xmt-border-soft: rgba(15, 23, 42, 0.10);
+  --xmt-border-active: rgba(61, 90, 254, 0.42);
+  --xmt-text-primary: #0F172A;
+  --xmt-text-secondary: #475569;
+  --xmt-text-muted: #6B7A93;
+
+  --xmt-primary: #3D5AFE;
+  --xmt-cyan: #0891B2;
+  --xmt-violet: #7C5CFC;
+  --xmt-coral: #E11D48;
+  --xmt-amber: #B45309;
+  --xmt-success: #0F9F6E;
+  --xmt-danger: #E11D48;
+  --xmt-warning: #B45309;
+
+  --xmt-primary-contrast: #1E3A8A;
+  --xmt-cyan-contrast: #155E75;
+  --xmt-violet-contrast: #5B21B6;
+  --xmt-coral-contrast: #9F1239;
+  --xmt-amber-contrast: #78350F;
+  --xmt-success-contrast: #065F46;
+
+  --xmt-glow-primary: 0 0 0 1px rgba(61, 90, 254, 0.10), 0 14px 36px rgba(15, 23, 42, 0.08);
+  --xmt-glow-cyan: 0 0 0 1px rgba(8, 145, 178, 0.10), 0 14px 32px rgba(15, 23, 42, 0.06);
+  --xmt-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 10px 30px rgba(15, 23, 42, 0.06);
+  --xmt-floating-shadow: 0 22px 60px rgba(15, 23, 42, 0.14);
+  --xmt-modal-shadow: 0 28px 90px rgba(15, 23, 42, 0.20);
+  --xmt-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.85) 0%,
+    rgba(255, 255, 255, 0.35) 18%,
+    transparent 42%
+  );
+  --xmt-sheen-line: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(61, 90, 254, 0.28) 45%,
+    rgba(124, 92, 252, 0.18) 70%,
+    transparent 100%
+  );
+  --xmt-ambient-a: rgba(61, 90, 254, 0.10);
+  --xmt-ambient-b: rgba(8, 145, 178, 0.06);
+  --xmt-grid-line: rgba(15, 23, 42, 0.04);
+
+  --color-accent-hover: #2A3FD0;
+  --color-border-light: rgba(15, 23, 42, 0.06);
+
+  --editor-fg: var(--xmt-text-primary);
+  --editor-muted: var(--xmt-text-muted);
+  --editor-bg: #FFFFFF;
+  --editor-panel: #FFFFFF;
+  --editor-border: rgba(15, 23, 42, 0.10);
+  --editor-soft: #F8FAFC;
+  --editor-hover: #F1F5F9;
+  --editor-code-bg: #EEF2F7;
 }
 
 @media (prefers-reduced-motion: reduce) {

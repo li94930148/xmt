@@ -79,7 +79,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
         id: `topic-${topic.id}`,
         label: topic.title,
         group: '选题',
-        icon: <FileText className="w-4 h-4 text-[#5c7cfa]" />,
+        icon: <FileText className="w-4 h-4 text-studio-primary" />,
         action: () => navigate(`/topics/${topic.id}`),
       });
     });
@@ -104,7 +104,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
         id: `user-${user.id}`,
         label: user.name,
         group: '用户',
-        icon: <Users className="w-4 h-4 text-[#cc5de8]" />,
+        icon: <Users className="w-4 h-4 text-studio-violet" />,
         action: () => navigate('/users'),
         permissions: ['user:view'],
       });
@@ -166,14 +166,17 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
   let globalIndex = -1;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-start justify-center pt-[15vh]" onClick={onClose}>
+    <div
+      className="xmt-overlay xmt-overlay-top"
+      onClick={onClose}
+    >
       <div
-        className={`${styles.modal} mx-4 w-full max-w-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150`}
+        className={`${styles.modal} studio-sheen xmt-panel-enter relative mx-4 w-full max-w-xl overflow-hidden rounded-panel border border-studio-border-soft shadow-floating`}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        <div className={`flex items-center gap-3 border-b px-4 py-3 ${styles.divider}`}>
-          <Search className={`h-5 w-5 flex-shrink-0 ${styles.textMuted}`} />
+        <div className="relative z-[1] flex items-center gap-3 border-b border-studio-border-soft px-4 py-3.5">
+          <Search className="h-5 w-5 flex-shrink-0 text-studio-text-muted" />
           <input
             ref={inputRef}
             type="text"
@@ -183,18 +186,18 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
               setSelectedIndex(0);
             }}
             placeholder="搜索选题、页面、用户..."
-            className={`flex-1 bg-transparent text-sm outline-none ${styles.textPrimary} ${styles.textPlaceholder}`}
+            className="flex-1 bg-transparent text-sm outline-none text-studio-text-primary placeholder:text-studio-text-muted"
           />
-          <kbd className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${styles.bgTertiary} ${styles.textMuted}`}>ESC</kbd>
+          <kbd className="rounded-md border border-studio-border-soft bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-studio-text-muted">ESC</kbd>
         </div>
 
-        <div ref={listRef} className="max-h-[360px] overflow-y-auto py-2">
+        <div ref={listRef} className="relative z-[1] max-h-[360px] overflow-y-auto py-2">
           {filteredItems.length === 0 ? (
-            <div className={`px-4 py-8 text-center text-sm ${styles.textMuted}`}>没有找到匹配结果</div>
+            <div className="px-4 py-8 text-center text-sm text-studio-text-muted">没有找到匹配结果</div>
           ) : (
             Object.entries(groupedItems).map(([group, items]) => (
               <div key={group}>
-                <div className={`px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider ${styles.textMuted}`}>
+                <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-studio-text-muted">
                   {group}
                 </div>
                 {items.map((item) => {
@@ -205,10 +208,10 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
                     <button
                       key={item.id}
                       data-index={index}
-                      className={`flex w-full items-center gap-3 px-4 py-2.5 text-sm transition-colors duration-100 ${
+                      className={`mx-2 flex w-[calc(100%-1rem)] items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors duration-150 ${
                         isSelected
-                          ? `${styles.isDark ? 'bg-[#252840]' : 'bg-[#f1f3f5]'} ${styles.textPrimary}`
-                          : styles.textSecondary
+                          ? 'bg-white/[0.07] text-studio-text-primary shadow-[inset_0_0_0_1px_var(--xmt-border-active)]'
+                          : 'text-studio-text-secondary hover:bg-white/[0.04]'
                       }`}
                       onClick={() => handleSelect(item)}
                       onMouseEnter={() => setSelectedIndex(index)}
@@ -224,15 +227,15 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
           )}
         </div>
 
-        <div className={`flex items-center gap-4 border-t px-4 py-2.5 text-[11px] ${styles.divider} ${styles.textMuted}`}>
+        <div className="relative z-[1] flex items-center gap-4 border-t border-studio-border-soft px-4 py-2.5 text-[11px] text-studio-text-muted">
           <span className="flex items-center gap-1">
-            <kbd className={`rounded px-1 py-0.5 font-mono ${styles.bgTertiary}`}>↑↓</kbd> 导航
+            <kbd className="rounded-md border border-studio-border-soft bg-white/[0.04] px-1 py-0.5 font-mono">↑↓</kbd> 导航
           </span>
           <span className="flex items-center gap-1">
-            <kbd className={`rounded px-1 py-0.5 font-mono ${styles.bgTertiary}`}>↵</kbd> 选择
+            <kbd className="rounded-md border border-studio-border-soft bg-white/[0.04] px-1 py-0.5 font-mono">↵</kbd> 选择
           </span>
           <span className="flex items-center gap-1">
-            <kbd className={`rounded px-1 py-0.5 font-mono ${styles.bgTertiary}`}>ESC</kbd> 关闭
+            <kbd className="rounded-md border border-studio-border-soft bg-white/[0.04] px-1 py-0.5 font-mono">ESC</kbd> 关闭
           </span>
         </div>
       </div>

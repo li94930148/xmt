@@ -1,8 +1,6 @@
 @import './styles/tokens.css';
 
-/* Inter 自托管（可变字体，单文件覆盖 300-800 全部字重）。
-   原先从 fonts.googleapis.com 加载：既被 CSP 的 font-src 'self' 阻断，
-   在境内网络下也本就不可达。改为本地托管后无需为第三方放宽 CSP。 */
+/* Inter 自托管（可变字体，单文件覆盖 300-800 全部字重）。 */
 @font-face {
   font-family: 'Inter';
   font-style: normal;
@@ -29,92 +27,60 @@
   --xmt-keyboard-height: 0px;
 }
 
-:root {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
-  line-height: 1.6;
-  font-weight: 400;
-  letter-spacing: 0;
-  --editor-fg: #111827;
-  --editor-muted: #6b7280;
-  --editor-bg: #ffffff;
-  --editor-panel: #ffffff;
-  --editor-border: #e5e7eb;
-  --editor-soft: #f9fafb;
-  --editor-hover: #f3f4f6;
-  --editor-code-bg: #eef2f7;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
 @layer base {
-  html.dark {
-    --color-bg-primary: #0f1117;
-    --color-bg-secondary: #161822;
-    --color-bg-tertiary: #1e2030;
-    --color-bg-elevated: #252840;
-    --color-text-primary: #e8eaed;
-    --color-text-secondary: #9aa0b0;
-    --color-text-muted: #636983;
-    --color-border: #2a2d3e;
-    --color-border-light: #1e2030;
-    --color-accent: #5c7cfa;
-    --color-accent-hover: #748ffc;
-    --color-success: #51cf66;
-    --color-warning: #ffd43b;
-    --color-danger: #ff6b6b;
-    --editor-fg: #e5e7eb;
-    --editor-muted: #9ca3af;
-    --editor-bg: #111827;
-    --editor-panel: #1f2937;
-    --editor-border: #374151;
-    --editor-soft: #0f172a;
-    --editor-hover: #374151;
-    --editor-code-bg: #0b1220;
+  :root {
+    font-family: var(--xmt-font-body);
+    line-height: 1.6;
+    font-weight: 400;
+    letter-spacing: 0;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  html.light {
-    --color-bg-primary: #ffffff;
-    --color-bg-secondary: #f8f9fa;
-    --color-bg-tertiary: #f1f3f5;
-    --color-bg-elevated: #ffffff;
-    --color-text-primary: #1a1d2e;
-    --color-text-secondary: #5f6672;
-    --color-text-muted: #9aa0b0;
-    --color-border: #e5e7eb;
-    --color-border-light: #f1f3f5;
-    --color-accent: #4263eb;
-    --color-accent-hover: #3b5bdb;
-    --color-success: #37b24d;
-    --color-warning: #f08c00;
-    --color-danger: #e03131;
-    --editor-fg: #111827;
-    --editor-muted: #6b7280;
-    --editor-bg: #ffffff;
-    --editor-panel: #ffffff;
-    --editor-border: #e5e7eb;
-    --editor-soft: #f9fafb;
-    --editor-hover: #f3f4f6;
-    --editor-code-bg: #eef2f7;
+  html {
+    background: var(--xmt-app-bg);
   }
-}
 
-body {
-  margin: 0;
-  min-height: 100vh;
-  background:
-    radial-gradient(circle at 16% 8%, rgba(79, 124, 255, 0.12), transparent 28rem),
-    radial-gradient(circle at 88% 12%, rgba(34, 211, 238, 0.09), transparent 24rem),
-    var(--color-bg-primary);
-  color: var(--color-text-primary);
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse 50% 36% at 14% 0%, var(--xmt-ambient-a), transparent 70%),
+      radial-gradient(ellipse 42% 30% at 88% 8%, var(--xmt-ambient-b), transparent 68%),
+      var(--color-bg-primary);
+    color: var(--color-text-primary);
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--xmt-primary) 35%, transparent);
+    color: var(--xmt-text-primary);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--xmt-primary);
+    outline-offset: 2px;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--xmt-font-heading);
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
 }
 
 /* 现代滚动条 */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -122,15 +88,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 3px;
+  background: color-mix(in srgb, var(--xmt-text-muted) 35%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: color-mix(in srgb, var(--xmt-text-muted) 55%, transparent);
+  background-clip: content-box;
 }
-
-
 
 /* 动画 */
 @keyframes slide-in {
@@ -145,10 +112,9 @@ body {
 }
 
 .animate-slide-in {
-  animation: slide-in 0.3s ease-out;
+  animation: slide-in 0.28s var(--xmt-ease-out);
 }
 
-/* 新条目从顶部滑入 */
 @keyframes slideInFromTop {
   from {
     opacity: 0;
@@ -163,27 +129,25 @@ body {
 }
 
 .animate-new-item {
-  animation: slideInFromTop 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: slideInFromTop 0.36s var(--xmt-ease-out);
 }
 
-/* 新条目背景高亮渐隐 */
 @keyframes highlightFade {
-  from { background-color: rgba(92, 124, 250, 0.12); }
+  from { background-color: color-mix(in srgb, var(--xmt-primary) 14%, transparent); }
   to   { background-color: transparent; }
 }
 
 .new-item-highlight {
-  animation: highlightFade 2s ease-out;
+  animation: highlightFade 1.8s var(--xmt-ease-out);
 }
 
-/* 投票数字脉冲 */
 @keyframes pulseScale {
   0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.35); }
+  50%      { transform: scale(1.28); }
 }
 
 .animate-pulse-vote {
-  animation: pulseScale 0.3s ease-in-out;
+  animation: pulseScale 0.28s var(--xmt-ease-out);
 }
 
 @keyframes float {
@@ -192,28 +156,31 @@ body {
     opacity: 0.3;
   }
   50% {
-    transform: translateY(-20px) translateX(10px);
-    opacity: 0.8;
+    transform: translateY(-16px) translateX(8px);
+    opacity: 0.75;
   }
 }
 
 .animate-float {
-  animation: float 5s ease-in-out infinite;
+  animation: float 5.5s ease-in-out infinite;
 }
 
-/* 骨架屏 shimmer 动画 */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
 .skeleton-shimmer {
-  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.08) 50%, transparent 75%);
+  background: linear-gradient(
+    90deg,
+    transparent 25%,
+    color-mix(in srgb, var(--xmt-text-primary) 8%, transparent) 50%,
+    transparent 75%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
 
-/* 转盘旋转动画 */
 @keyframes spin-bounce {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(1800deg); }
@@ -223,22 +190,28 @@ body {
   animation: spin-bounce 3s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
-/* 缩放动画 */
 @keyframes scale-in {
-  from { transform: scale(0.8); opacity: 0; }
+  from { transform: scale(0.92); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
 
 .animate-scale-in {
-  animation: scale-in 0.2s ease-out;
+  animation: scale-in 0.18s var(--xmt-ease-out);
 }
 
-.xmt-data-number { font-variant-numeric: tabular-nums; font-family: var(--xmt-font-data); }
-.xmt-progress-fill { transition: width 520ms cubic-bezier(0.16, 1, 0.3, 1); }
-.xmt-empty-illustration { animation: xmt-empty-breathe 3.2s ease-in-out infinite; }
+.xmt-data-number {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--xmt-font-data);
+}
+
+.xmt-progress-fill { transition: width 480ms var(--xmt-ease-out); }
+.xmt-empty-illustration { animation: xmt-empty-breathe 3.4s ease-in-out infinite; }
 @keyframes xmt-empty-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-.xmt-modal-enter { animation: xmt-modal-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
-@keyframes xmt-modal-enter { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.xmt-modal-enter { animation: xmt-modal-enter 220ms var(--xmt-ease-out) both; }
+@keyframes xmt-modal-enter {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 
 /* 富文本编辑器 */
 .rich-text-editor {
@@ -259,7 +232,6 @@ body {
   color: var(--editor-fg);
 }
 
-/* Shared ContentEditor runtime surface: long unbroken text must wrap inside its flex item. */
 .editor-content,
 .editor-content .ProseMirror {
   min-width: 0;
@@ -329,51 +301,65 @@ body {
 
 .rich-text-editor::selection,
 .rich-text-editor *::selection {
-  background-color: #93c5fd !important;
-  color: #111827 !important;
+  background-color: color-mix(in srgb, var(--xmt-primary) 35%, transparent) !important;
+  color: var(--xmt-text-primary) !important;
   text-shadow: none !important;
 }
 
 .rich-text-editor span.highlight-selected,
 .rich-text-editor span.highlight-selected * {
-  background-color: #93c5fd !important;
-  color: #111827 !important;
+  background-color: color-mix(in srgb, var(--xmt-primary) 35%, transparent) !important;
+  color: var(--xmt-text-primary) !important;
 }
 
 .dark .rich-text-editor::selection,
 .dark .rich-text-editor *::selection {
-  background-color: #5c7cfa !important;
-  color: #f9fafb !important;
+  background-color: color-mix(in srgb, var(--xmt-primary) 55%, transparent) !important;
+  color: #F9FAFB !important;
   text-shadow: none !important;
 }
 
 .dark .rich-text-editor span.highlight-selected,
 .dark .rich-text-editor span.highlight-selected * {
-  background-color: #5c7cfa !important;
-  color: #f9fafb !important;
+  background-color: color-mix(in srgb, var(--xmt-primary) 55%, transparent) !important;
+  color: #F9FAFB !important;
 }
 
-/* 玻璃态效果 */
 @layer components {
   .glass {
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--xmt-surface-glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--xmt-border-soft);
   }
 
   .glass-light {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: color-mix(in srgb, var(--xmt-surface) 82%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--xmt-border-soft);
   }
 
   .studio-grid-bg {
     background-image:
-      linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+      linear-gradient(var(--xmt-grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--xmt-grid-line) 1px, transparent 1px);
     background-size: 32px 32px;
+    background-position: center top;
+  }
+
+  .studio-sheen {
+    position: relative;
+  }
+
+  .studio-sheen::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: var(--xmt-sheen);
+    opacity: 0.55;
   }
 
   .studio-edge-line {
@@ -386,11 +372,191 @@ body {
     inset: 0;
     pointer-events: none;
     border-radius: inherit;
-    background: linear-gradient(135deg, rgba(34, 211, 238, 0.28), transparent 28%, rgba(255, 95, 122, 0.16) 72%, transparent);
+    background: var(--xmt-sheen-line);
     mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
     -webkit-mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
     mask-composite: exclude;
     -webkit-mask-composite: xor;
     padding: 1px;
+    opacity: 0.85;
+  }
+
+  .xmt-card {
+    border-radius: var(--xmt-radius-card);
+    border: 1px solid var(--xmt-border-soft);
+    background: var(--xmt-surface-glass);
+    box-shadow: var(--xmt-card-shadow);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    transition:
+      border-color var(--xmt-motion-standard) var(--xmt-ease-out),
+      box-shadow var(--xmt-motion-standard) var(--xmt-ease-out),
+      transform var(--xmt-motion-standard) var(--xmt-ease-out);
+  }
+
+  .xmt-card:hover {
+    border-color: var(--xmt-border-active);
+    box-shadow: var(--xmt-glow-primary);
+    transform: translateY(-2px);
+  }
+
+  .xmt-btn {
+    display: inline-flex;
+    min-height: 2.5rem;
+    width: fit-content;
+    max-width: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--xmt-radius-button);
+    border: 1px solid transparent;
+    padding: 0.55rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25;
+    vertical-align: middle;
+    transition:
+      background-color var(--xmt-motion-micro) var(--xmt-ease-out),
+      border-color var(--xmt-motion-micro) var(--xmt-ease-out),
+      color var(--xmt-motion-micro) var(--xmt-ease-out),
+      box-shadow var(--xmt-motion-micro) var(--xmt-ease-out),
+      transform var(--xmt-motion-micro) var(--xmt-ease-out);
+  }
+
+  .xmt-btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .xmt-btn:active {
+    transform: scale(0.98);
+  }
+
+  .xmt-btn:disabled {
+    pointer-events: none;
+    opacity: 0.5;
+    transform: none;
+  }
+
+  .xmt-btn-primary {
+    border-color: color-mix(in srgb, var(--xmt-primary) 55%, transparent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--xmt-primary) 96%, white), var(--xmt-primary));
+    color: #fff;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 8px 20px color-mix(in srgb, var(--xmt-primary) 28%, transparent);
+  }
+
+  .xmt-btn-primary:hover {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--xmt-primary) 88%, white), color-mix(in srgb, var(--xmt-primary) 92%, black));
+  }
+
+  .xmt-btn-secondary {
+    border-color: var(--xmt-border-soft);
+    background: color-mix(in srgb, var(--xmt-surface) 88%, transparent);
+    color: var(--xmt-text-primary);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  }
+
+  .xmt-btn-secondary:hover {
+    border-color: var(--xmt-border-active);
+    background: var(--xmt-surface-soft);
+  }
+
+  .xmt-btn-ghost {
+    border-color: transparent;
+    background: transparent;
+    color: var(--xmt-text-secondary);
+  }
+
+  .xmt-btn-ghost:hover {
+    background: color-mix(in srgb, var(--xmt-text-primary) 6%, transparent);
+    color: var(--xmt-text-primary);
+  }
+
+  .xmt-btn-danger {
+    border-color: color-mix(in srgb, var(--xmt-coral) 40%, transparent);
+    background: color-mix(in srgb, var(--xmt-coral) 14%, transparent);
+    color: var(--xmt-coral-contrast);
+  }
+
+  .xmt-btn-danger:hover {
+    background: color-mix(in srgb, var(--xmt-coral) 22%, transparent);
+  }
+
+  .xmt-field {
+    min-height: 2.5rem;
+    width: 100%;
+    border-radius: var(--xmt-radius-button);
+    border: 1px solid var(--xmt-border-soft);
+    background: color-mix(in srgb, var(--xmt-text-primary) 4%, transparent);
+    padding: 0.55rem 0.85rem;
+    color: var(--xmt-text-primary);
+    outline: none;
+    transition:
+      border-color var(--xmt-motion-micro) var(--xmt-ease-out),
+      box-shadow var(--xmt-motion-micro) var(--xmt-ease-out),
+      background-color var(--xmt-motion-micro) var(--xmt-ease-out);
+  }
+
+  .xmt-field::placeholder {
+    color: var(--xmt-text-muted);
+  }
+
+  .xmt-field:hover {
+    border-color: color-mix(in srgb, var(--xmt-border-active) 55%, var(--xmt-border-soft));
+  }
+
+  .xmt-field:focus {
+    border-color: var(--xmt-border-active);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--xmt-primary) 18%, transparent);
+    background: color-mix(in srgb, var(--xmt-text-primary) 5%, transparent);
+  }
+}
+
+@layer components {
+  /* 统一浮层编排：遮罩淡入 + 面板上浮缩放（命令面板 / 模态 / 帮助） */
+  .xmt-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: color-mix(in srgb, var(--xmt-app-bg) 55%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    animation: xmt-overlay-in 180ms var(--xmt-ease-out) both;
+  }
+
+  .xmt-overlay-top {
+    align-items: flex-start;
+    padding-top: 15vh;
+  }
+
+  .xmt-overlay-center {
+    align-items: center;
+  }
+
+  .xmt-panel-enter {
+    animation: xmt-panel-in 220ms var(--xmt-ease-out) both;
+  }
+
+  .xmt-panel-enter-delayed {
+    animation: xmt-panel-in 240ms var(--xmt-ease-out) 40ms both;
+  }
+}
+
+@keyframes xmt-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes xmt-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }

@@ -130,14 +130,14 @@ export default function EditorContextMenu({
   const hasSelection = !editor.state.selection.empty;
 
   const itemClass = `flex items-center gap-2.5 w-full px-3 py-2 text-sm transition-colors ${
-    isDark ? 'text-gray-200 hover:bg-blue-600/20' : 'text-gray-700 hover:bg-blue-50'
+    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary'
   }`;
   const disabledClass = `flex items-center gap-2.5 w-full px-3 py-2 text-sm ${
-    isDark ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 cursor-not-allowed'
+    isDark ? 'text-studio-text-muted cursor-not-allowed' : 'text-studio-text-secondary cursor-not-allowed'
   }`;
-  const divider = <div className={`my-1 border-t ${isDark ? 'border-gray-700' : 'border-gray-100'}`} />;
+  const divider = <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />;
   const subMenuClass = `flex items-center justify-between w-full px-3 py-2 text-sm transition-colors ${
-    isDark ? 'text-gray-200 hover:bg-blue-600/20' : 'text-gray-700 hover:bg-blue-50'
+    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary'
   }`;
   const close = () => setVisible(false);
   const act = (fn: () => void) => { fn(); close(); };
@@ -146,31 +146,31 @@ export default function EditorContextMenu({
     <>
       <div data-testid="editor-context-menu-backdrop" className="fixed inset-0 z-[200]" onClick={close} />
       <div data-testid="editor-context-menu" data-anchor-x={anchor.x} data-anchor-y={anchor.y} ref={menuRef} className={`fixed z-[201] min-w-[200px] rounded-xl shadow-2xl border py-1.5 backdrop-blur-sm ${
-        isDark ? 'bg-gray-800/95 border-gray-600' : 'bg-white/95 border-gray-200'
+        isDark ? 'bg-studio-surface-soft/95 border-studio-border-soft' : 'bg-white/95 border-studio-border-soft'
       }`} style={{ left: position.x, top: position.y, visibility: measured ? 'visible' : 'hidden' }}>
 
         {/* 剪贴板 */}
         <button onClick={() => act(() => document.execCommand('copy'))} className={hasSelection ? itemClass : disabledClass} disabled={!hasSelection}>
-          <Copy className="w-4 h-4" /> 复制 <span className={`ml-auto text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Ctrl+C</span>
+          <Copy className="w-4 h-4" /> 复制 <span className={`ml-auto text-xs text-studio-text-muted`}>Ctrl+C</span>
         </button>
         <button onClick={() => act(() => document.execCommand('cut'))} className={hasSelection ? itemClass : disabledClass} disabled={!hasSelection}>
-          <Scissors className="w-4 h-4" /> 剪切 <span className={`ml-auto text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Ctrl+X</span>
+          <Scissors className="w-4 h-4" /> 剪切 <span className={`ml-auto text-xs text-studio-text-muted`}>Ctrl+X</span>
         </button>
         <button onClick={() => act(() => document.execCommand('paste'))} className={itemClass}>
-          <Clipboard className="w-4 h-4" /> 粘贴 <span className={`ml-auto text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Ctrl+V</span>
+          <Clipboard className="w-4 h-4" /> 粘贴 <span className={`ml-auto text-xs text-studio-text-muted`}>Ctrl+V</span>
         </button>
 
         {divider}
 
         {/* 格式 */}
         <button onClick={() => act(() => editor.chain().focus().toggleBold().run())} className={itemClass}>
-          <Bold className="w-4 h-4" /> 加粗 <span className={`ml-auto text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Ctrl+B</span>
+          <Bold className="w-4 h-4" /> 加粗 <span className={`ml-auto text-xs text-studio-text-muted`}>Ctrl+B</span>
         </button>
         <button onClick={() => act(() => editor.chain().focus().toggleItalic().run())} className={itemClass}>
-          <Italic className="w-4 h-4" /> 斜体 <span className={`ml-auto text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Ctrl+I</span>
+          <Italic className="w-4 h-4" /> 斜体 <span className={`ml-auto text-xs text-studio-text-muted`}>Ctrl+I</span>
         </button>
         <button onClick={() => act(() => editor.chain().focus().toggleUnderline().run())} className={itemClass}>
-          <Underline className="w-4 h-4" /> 下划线 <span className={`ml-auto text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Ctrl+U</span>
+          <Underline className="w-4 h-4" /> 下划线 <span className={`ml-auto text-xs text-studio-text-muted`}>Ctrl+U</span>
         </button>
         <button onClick={() => act(() => editor.chain().focus().toggleStrike().run())} className={itemClass}>
           <Strikethrough className="w-4 h-4" /> 删除线
@@ -184,7 +184,7 @@ export default function EditorContextMenu({
             <span className="flex items-center gap-2.5"><Type className="w-4 h-4" /> 文字颜色</span>
             <ChevronRight className="w-3 h-3" />
           </div>
-          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`}>
+          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'}`}>
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {TEXT_COLORS.map((c) => (
                 <button key={c.value || 'default'}
@@ -193,8 +193,8 @@ export default function EditorContextMenu({
                     else editor.chain().focus().unsetColor().run();
                   })}
                   className="w-6 h-6 rounded border transition-all hover:scale-110 flex items-center justify-center"
-                  style={{ borderColor: isDark ? '#4b5563' : '#d1d5db' }} title={c.name}>
-                  <span className="w-4 h-4 rounded-sm font-bold text-xs flex items-center justify-center" style={{ color: c.value || (isDark ? '#fff' : '#000') }}>A</span>
+                  style={{ borderColor: 'var(--xmt-border-soft)' }} title={c.name}>
+                  <span className="w-4 h-4 rounded-sm font-bold text-xs flex items-center justify-center" style={{ color: c.value || 'var(--editor-fg)' }}>A</span>
                 </button>
               ))}
             </div>
@@ -207,7 +207,7 @@ export default function EditorContextMenu({
             <span className="flex items-center gap-2.5"><Highlighter className="w-4 h-4" /> 高亮颜色</span>
             <ChevronRight className="w-3 h-3" />
           </div>
-          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`}>
+          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'}`}>
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {HIGHLIGHT_COLORS.map((c) => (
                 <button key={c.value}
@@ -216,12 +216,12 @@ export default function EditorContextMenu({
                     else editor.chain().focus().setHighlight({ color: c.value }).run();
                   })}
                   className="w-6 h-6 rounded border-2 transition-all hover:scale-110"
-                  style={{ backgroundColor: c.bg, borderColor: editor.isActive('highlight', { color: c.value }) ? '#3b82f6' : 'transparent' }} title={c.name} />
+                  style={{ backgroundColor: c.bg, borderColor: editor.isActive('highlight', { color: c.value }) ? 'var(--xmt-primary)' : 'transparent' }} title={c.name} />
               ))}
             </div>
             {editor.isActive('highlight') && (
               <button onClick={() => act(() => editor.chain().focus().unsetHighlight().run())}
-                className={`flex items-center gap-1.5 w-full px-3 py-1.5 text-xs ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'}`}>
+                className={`flex items-center gap-1.5 w-full px-3 py-1.5 text-xs ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                 <X className="w-3 h-3" /> 取消高亮
               </button>
             )}
@@ -236,7 +236,7 @@ export default function EditorContextMenu({
             <button onClick={() => { const c = comment; act(() => onEditComment?.(c.commentId, c.commentText)); }} className={itemClass}>
               <MessageSquarePlus className="w-4 h-4" /> 编辑批注
             </button>
-            <button onClick={() => { const c = comment; act(() => onDeleteComment?.(c.commentId)); }} className={`${itemClass} text-red-500`}>
+            <button onClick={() => { const c = comment; act(() => onDeleteComment?.(c.commentId)); }} className={`${itemClass} text-studio-coral`}>
               <MessageSquareX className="w-4 h-4" /> 删除批注
             </button>
           </>
@@ -275,7 +275,7 @@ export default function EditorContextMenu({
 
         {/* 删除选中 */}
         <button onClick={() => act(() => editor.chain().focus().deleteSelection().run())}
-          className={hasSelection ? `${itemClass} text-red-500` : disabledClass} disabled={!hasSelection}>
+          className={hasSelection ? `${itemClass} text-studio-coral` : disabledClass} disabled={!hasSelection}>
           <Trash2 className="w-4 h-4" /> 删除选中
         </button>
       </div>

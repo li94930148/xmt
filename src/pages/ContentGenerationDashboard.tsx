@@ -7,9 +7,9 @@ import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDoc
 import ContentDocumentPicker from '../components/ContentDocumentPicker';
 
 function priorityClass(priority: string) {
-  if (priority === 'high') return 'bg-red-500/10 text-red-400';
-  if (priority === 'medium') return 'bg-amber-500/10 text-amber-400';
-  return 'bg-emerald-500/10 text-emerald-400';
+  if (priority === 'high') return 'bg-studio-coral/10 text-studio-coral';
+  if (priority === 'medium') return 'bg-studio-amber/10 text-studio-amber';
+  return 'bg-studio-success/10 text-studio-success';
 }
 
 function priorityLabel(priority: string) {
@@ -57,7 +57,7 @@ export default function ContentGenerationDashboard() {
           <div>
             <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>内容生成助手</p>
             <h1 className={`mt-1 flex items-center gap-2 text-2xl font-bold ${styles.textPrimary}`}>
-              <Sparkles className="h-6 w-6 text-blue-400" />
+              <Sparkles className="h-6 w-6 text-studio-primary" />
               内容生成助手
             </h1>
           </div>
@@ -70,7 +70,7 @@ export default function ContentGenerationDashboard() {
             />
             <button
               onClick={() => loadData(docId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4" />
               生成
@@ -92,7 +92,7 @@ export default function ContentGenerationDashboard() {
           </div>
           <div className="flex flex-wrap gap-2">
             {title.alternatives.map((item) => (
-              <span key={item} className="rounded-full bg-blue-500/10 px-3 py-1 text-xs text-blue-400">
+              <span key={item} className="rounded-full bg-studio-primary/10 px-3 py-1 text-xs text-studio-primary">
                 {item}
               </span>
             ))}
@@ -103,7 +103,7 @@ export default function ContentGenerationDashboard() {
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_1fr]">
         <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
           <div className={`flex items-center gap-2 border-b ${styles.border} px-5 py-4`}>
-            <FilePenLine className="h-5 w-5 text-emerald-400" />
+            <FilePenLine className="h-5 w-5 text-studio-success" />
             <h2 className={`text-base font-semibold ${styles.textPrimary}`}>一键总结</h2>
           </div>
           <div className="space-y-4 p-5">
@@ -125,7 +125,7 @@ export default function ContentGenerationDashboard() {
 
         <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
           <div className={`flex items-center gap-2 border-b ${styles.border} px-5 py-4`}>
-            <Lightbulb className="h-5 w-5 text-amber-400" />
+            <Lightbulb className="h-5 w-5 text-studio-amber" />
             <h2 className={`text-base font-semibold ${styles.textPrimary}`}>结构优化建议</h2>
           </div>
           <div className="space-y-4 p-5">
@@ -175,7 +175,7 @@ export default function ContentGenerationDashboard() {
               <div key={section.section} className={`rounded-xl ${styles.bgTertiary} p-4`}>
                 <p className={`text-sm font-medium ${styles.textPrimary}`}>{section.section}</p>
                 <p className={`mt-2 text-sm ${styles.textSecondary}`}>{section.reason}</p>
-                <p className={`mt-2 text-xs ${section.rewriteRecommended ? 'text-amber-400' : styles.textMuted}`}>
+                <p className={`mt-2 text-xs ${section.rewriteRecommended ? 'text-studio-amber' : styles.textMuted}`}>
                   {section.rewriteRecommended ? '建议重写' : '可保留，仅需轻量优化'}
                 </p>
               </div>

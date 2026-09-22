@@ -13,9 +13,23 @@ export const XMTTheme = {
     body: 'var(--xmt-font-body)',
     data: 'var(--xmt-font-data)',
   },
-  radius: { small: 'var(--xmt-radius-button)', medium: 'var(--xmt-radius-card)' },
-  shadow: { card: 'var(--xmt-card-shadow)', floating: 'var(--xmt-floating-shadow)', modal: 'var(--xmt-modal-shadow)' },
-  motion: { fast: '140ms', normal: '220ms', slow: '300ms' },
+  radius: {
+    small: 'var(--xmt-radius-button)',
+    medium: 'var(--xmt-radius-card)',
+    large: 'var(--xmt-radius-panel)',
+  },
+  shadow: {
+    card: 'var(--xmt-card-shadow)',
+    floating: 'var(--xmt-floating-shadow)',
+    modal: 'var(--xmt-modal-shadow)',
+  },
+  motion: {
+    micro: 'var(--xmt-motion-micro)',
+    standard: 'var(--xmt-motion-standard)',
+    page: 'var(--xmt-motion-page)',
+    enter: 'var(--xmt-motion-enter)',
+    ease: 'var(--xmt-ease-out)',
+  },
 } as const;
 
 export type XMTThemeToken = typeof XMTTheme;

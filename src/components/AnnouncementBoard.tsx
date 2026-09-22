@@ -57,9 +57,9 @@ async function deleteAnnouncement(id: number): Promise<void> {
 }
 
 const typeConfig: Record<string, { label: string; icon: typeof Pin; color: string; bgLight: string; bgDark: string; border: string }> = {
-  note: { label: '便签', icon: StickyNote, color: '#5c7cfa', bgLight: 'bg-[#5c7cfa]/5', bgDark: 'bg-[#5c7cfa]/10', border: 'border-[#5c7cfa]/20' },
-  announcement: { label: '公告', icon: Megaphone, color: '#51cf66', bgLight: 'bg-[#51cf66]/5', bgDark: 'bg-[#51cf66]/10', border: 'border-[#51cf66]/20' },
-  important: { label: '重要', icon: AlertTriangle, color: '#ff6b6b', bgLight: 'bg-[#ff6b6b]/5', bgDark: 'bg-[#ff6b6b]/10', border: 'border-[#ff6b6b]/20' },
+  note: { label: '便签', icon: StickyNote, color: 'var(--xmt-primary)', bgLight: 'bg-studio-primary/5', bgDark: 'bg-studio-primary/10', border: 'border-studio-primary/20' },
+  announcement: { label: '公告', icon: Megaphone, color: 'var(--xmt-success)', bgLight: 'bg-studio-success/5', bgDark: 'bg-studio-success/10', border: 'border-studio-success/20' },
+  important: { label: '重要', icon: AlertTriangle, color: 'var(--xmt-coral)', bgLight: 'bg-studio-coral/5', bgDark: 'bg-studio-coral/10', border: 'border-studio-coral/20' },
 };
 
 export default function AnnouncementBoard() {
@@ -178,7 +178,7 @@ export default function AnnouncementBoard() {
               onClick={() => setNewPinned(!newPinned)}
               className={`inline-flex min-h-8 items-center gap-1 rounded-button border px-3 py-1.5 text-xs font-medium transition-colors ${
                 newPinned
-                  ? `bg-[#ffd43b]/10 border-[#ffd43b]/30 text-[#ffd43b]`
+                  ? `bg-studio-amber/10 border-studio-amber/30 text-studio-amber`
                   : 'border-studio-border-soft bg-white/[0.04] text-studio-text-muted hover:text-studio-text-primary'
               }`}
             >
@@ -189,7 +189,7 @@ export default function AnnouncementBoard() {
             <button
               onClick={handleCreate}
               disabled={!newContent.trim() || submitting}
-              className="inline-flex min-h-8 items-center justify-center rounded-button border border-studio-primary/40 bg-studio-primary px-4 py-1.5 text-xs font-semibold text-white transition-all hover:bg-[#6A91FF] disabled:pointer-events-none disabled:opacity-40"
+              className="inline-flex min-h-8 items-center justify-center rounded-button border border-studio-primary/40 bg-studio-primary px-4 py-1.5 text-xs font-semibold text-white transition-all hover:bg-studio-primary disabled:pointer-events-none disabled:opacity-40"
             >
               {submitting ? '发布中...' : '发布'}
             </button>
@@ -224,7 +224,7 @@ export default function AnnouncementBoard() {
                     <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-studio-text-primary">{item.content}</p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-2">
                       {item.pinned && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] text-[#ffd43b]">
+                        <span className="inline-flex items-center gap-0.5 text-[10px] text-studio-amber">
                           <Pin className="w-2.5 h-2.5" /> 置顶
                         </span>
                       )}
@@ -238,7 +238,7 @@ export default function AnnouncementBoard() {
                     className="rounded p-1 opacity-0 transition-opacity hover:bg-studio-coral/10 group-hover:opacity-100"
                     title="删除"
                   >
-                    <Trash2 className="w-3.5 h-3.5 text-[#ff6b6b]" />
+                    <Trash2 className="w-3.5 h-3.5 text-studio-coral" />
                   </button>
                 </div>
               </div>

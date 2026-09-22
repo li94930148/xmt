@@ -160,7 +160,7 @@ export default function ShootingDetail() {
     planned: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
     in_progress: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
     completed: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
-    cancelled: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+    cancelled: 'bg-studio-surface-soft/20 text-studio-text-muted border-studio-border-soft/30',
   };
 
   const statusText: Record<string, string> = {
@@ -218,7 +218,7 @@ export default function ShootingDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="w-8 h-8 border-4 border-studio-primary border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
@@ -226,7 +226,7 @@ export default function ShootingDetail() {
   if (!shooting) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-gray-400">成片制作记录不存在</p>
+        <p className="text-studio-text-muted">成片制作记录不存在</p>
       </div>
     );
   }
@@ -257,9 +257,9 @@ export default function ShootingDetail() {
                 {statusText[shooting.status]}
               </span>
               {hasLocalScriptEdit && (
-                <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-400">本地编辑版</span>
+                <span className="rounded-full bg-studio-primary/15 px-2 py-0.5 text-xs text-studio-primary">本地编辑版</span>
               )}
-              <span className={`text-xs ${syncStatus === 'conflicted' ? 'text-red-400' : syncStatus === 'saving' ? 'text-blue-400' : styles.textMuted}`}>
+              <span className={`text-xs ${syncStatus === 'conflicted' ? 'text-studio-coral' : syncStatus === 'saving' ? 'text-studio-primary' : styles.textMuted}`}>
                 {editorStateLabel(syncStatus)}
               </span>
               <span className={`text-xs ${styles.textMuted}`}>时间轴 {timelineView.timeline.length} 个节点</span>
@@ -281,7 +281,7 @@ export default function ShootingDetail() {
             {shooting.status === 'planned' && (
               <button
                 onClick={() => handleStatusChange('in_progress')}
-                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700"
+                className="flex items-center gap-1.5 rounded-lg bg-studio-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-studio-primary"
               >
                 <Camera className="w-4 h-4" />
                 开始制作
@@ -291,7 +291,7 @@ export default function ShootingDetail() {
             {shooting.status === 'in_progress' && (
               <button
                 onClick={() => handleStatusChange('completed')}
-                className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-700"
+                className="flex items-center gap-1.5 rounded-lg bg-studio-success px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-studio-success"
               >
                 <CheckCircle className="w-4 h-4" />
                 完成制作
@@ -301,7 +301,7 @@ export default function ShootingDetail() {
             {shooting.status === 'cancelled' && (
               <button
                 onClick={() => handleStatusChange('planned')}
-                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700"
+                className="flex items-center gap-1.5 rounded-lg bg-studio-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-studio-primary"
               >
                 <Clock className="w-4 h-4" />
                 重新计划
@@ -309,7 +309,7 @@ export default function ShootingDetail() {
             )}
 
             {shooting.status === 'completed' && (
-              <span className="flex items-center gap-1.5 rounded-lg bg-green-500/20 px-3 py-1.5 text-xs text-green-400">
+              <span className="flex items-center gap-1.5 rounded-lg bg-studio-success/20 px-3 py-1.5 text-xs text-studio-success">
                 <CheckCircle className="w-4 h-4" />
                 已完成
               </span>
@@ -389,8 +389,8 @@ export default function ShootingDetail() {
                     const Icon = step.icon;
                     return (
                       <div key={step.key} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${styles.bgTertiary}`}>
-                        <Icon className={`h-4 w-4 ${stepStatus === 'current' ? 'text-blue-400' : styles.textMuted}`} />
-                        <span className={stepStatus === 'current' ? 'text-blue-400' : styles.textSecondary}>
+                        <Icon className={`h-4 w-4 ${stepStatus === 'current' ? 'text-studio-primary' : styles.textMuted}`} />
+                        <span className={stepStatus === 'current' ? 'text-studio-primary' : styles.textSecondary}>
                           {step.label}
                         </span>
                       </div>

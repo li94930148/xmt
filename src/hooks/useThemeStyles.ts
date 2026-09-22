@@ -27,49 +27,39 @@ export function useThemeStyles() {
     textPrimary: 'text-theme-text',
     textSecondary: 'text-theme-text-secondary',
     textMuted: 'text-theme-text-muted',
-    textPlaceholder: isDark ? 'placeholder-[#636983]' : 'placeholder-[#9aa0b0]',
+    textPlaceholder: 'placeholder-studio-text-muted',
 
     // === 交互 ===
-    hoverBg: isDark ? 'hover:bg-[#1e2030]' : 'hover:bg-[#f1f3f5]',
-    hoverBgLight: isDark ? 'hover:bg-[#252840]' : 'hover:bg-[#e9ecef]',
-    focusRing: 'focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500',
+    hoverBg: 'hover:bg-studio-surface-soft',
+    hoverBgLight: 'hover:bg-studio-surface-elevated',
+    focusRing: 'focus:outline-none focus:ring-2 focus:ring-studio-primary/35 focus:border-studio-border-active',
 
     // === 表格 ===
     tableHeader: 'bg-theme-tertiary',
     tableRow: 'border-theme-border',
-    tableHover: isDark ? 'hover:bg-[#1e2030]/50' : 'hover:bg-[#f8f9fa]',
+    tableHover: 'hover:bg-studio-surface-soft/55',
 
     // === 按钮 ===
-    buttonPrimary: isDark
-      ? 'bg-brand-500 hover:bg-brand-400 text-white shadow-sm shadow-brand-500/20'
-      : 'bg-brand-700 hover:bg-brand-800 text-white shadow-sm shadow-brand-700/20',
+    buttonPrimary: 'xmt-btn xmt-btn-primary min-h-9 px-4 py-2 text-sm text-white',
     buttonSecondary: 'bg-theme-tertiary hover:bg-theme-elevated text-theme-text border border-theme-border',
-    buttonDanger: isDark
-      ? 'text-[#ff6b6b] hover:text-[#ff8787] hover:bg-theme-tertiary'
-      : 'text-[#e03131] hover:text-[#c92a2a] hover:bg-[#fff5f5]',
-    buttonInfo: isDark
-      ? 'text-brand-500 hover:text-brand-400 hover:bg-theme-tertiary'
-      : 'text-brand-700 hover:text-brand-800 hover:bg-brand-50',
-    buttonSuccess: isDark
-      ? 'text-[#51cf66] hover:text-[#69db7c] hover:bg-theme-tertiary'
-      : 'text-[#37b24d] hover:text-[#2f9e44] hover:bg-[#ebfbee]',
+    buttonDanger: 'xmt-btn xmt-btn-danger min-h-9 px-4 py-2 text-sm',
+    buttonInfo: 'text-studio-primary hover:bg-studio-primary/10',
+    buttonSuccess: 'text-studio-success-contrast hover:bg-studio-success/12',
 
     // === 组合样式 ===
-    card: isDark
-      ? 'bg-theme-secondary border border-theme-border rounded-2xl'
-      : 'bg-white border border-theme-border rounded-2xl shadow-sm',
-    modal: 'bg-theme-secondary border border-theme-border rounded-2xl shadow-2xl',
-    input: 'bg-theme-tertiary border border-theme-border text-theme-text rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 placeholder-theme-text-muted',
+    card: 'xmt-card rounded-card bg-studio-surface-glass',
+    modal: 'rounded-panel border border-studio-border-soft bg-studio-surface shadow-floating',
+    input: 'xmt-field',
     pageTitle: 'text-2xl font-bold text-theme-text',
     subtitle: 'text-sm text-theme-text-secondary',
     divider: 'border-theme-border',
     badge: 'px-2.5 py-0.5 rounded-full text-xs font-medium border',
 
     // === 杂项 ===
-    spinner: isDark ? 'border-brand-500' : 'border-brand-700',
+    spinner: 'border-studio-primary',
     progressBg: 'bg-theme-tertiary',
     completedStep: 'bg-theme-success',
-    pendingStep: isDark ? 'bg-[#636983]' : 'bg-[#ced4da]',
+    pendingStep: 'bg-studio-text-muted',
     overlay: 'bg-black/60 backdrop-blur-sm',
 
     // === 原始值 ===

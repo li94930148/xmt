@@ -60,7 +60,7 @@ export default function MyRetroActionsPanel({ actions, loading, onRefresh, onOpe
                 {retroActionStatusLabels[action.status]}
               </span>
               <span className="text-studio-text-muted">截止 {formatDate(action.dueDate)}</span>
-              {isOverdue(action) ? <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-red-300">已逾期</span> : null}
+              {isOverdue(action) ? <span className="rounded-full bg-studio-coral/10 px-2 py-0.5 text-studio-coral">已逾期</span> : null}
             </div>
           </button>
         ))}

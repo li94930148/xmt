@@ -24,11 +24,11 @@ function formatTime(timestamp?: number | null) {
 
 function eventColor(type: UnifiedTimelineEvent['type']) {
   const colors: Record<UnifiedTimelineEvent['type'], string> = {
-    edit: 'bg-blue-500/15 text-blue-400',
-    save: 'bg-emerald-500/15 text-emerald-400',
-    version: 'bg-purple-500/15 text-purple-400',
-    snapshot: 'bg-purple-500/15 text-purple-400',
-    conflict: 'bg-red-500/15 text-red-400',
+    edit: 'bg-studio-primary/15 text-studio-primary',
+    save: 'bg-studio-success/15 text-studio-success',
+    version: 'bg-studio-violet/15 text-studio-violet',
+    snapshot: 'bg-studio-violet/15 text-studio-violet',
+    conflict: 'bg-studio-coral/15 text-studio-coral',
   };
   return colors[type];
 }
@@ -105,7 +105,7 @@ export default function CollaborationDashboard() {
             />
             <button
               onClick={() => loadData(docId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4" />
               刷新
@@ -141,7 +141,7 @@ export default function CollaborationDashboard() {
             <div key={item.label} className={`${styles.bgSecondary} border ${styles.border} rounded-xl p-4`}>
               <div className="flex items-center justify-between">
                 <span className={`text-sm ${styles.textMuted}`}>{item.label}</span>
-                <Icon className="h-4 w-4 text-blue-400" />
+                <Icon className="h-4 w-4 text-studio-primary" />
               </div>
               <p className={`mt-3 text-2xl font-semibold ${styles.textPrimary}`}>{item.value}</p>
             </div>
@@ -153,7 +153,7 @@ export default function CollaborationDashboard() {
         <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
           <div className={`flex items-center justify-between border-b ${styles.border} px-5 py-4`}>
             <div className="flex items-center gap-2">
-              <History className="h-5 w-5 text-blue-400" />
+              <History className="h-5 w-5 text-studio-primary" />
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>
                 {humanReadableMode ? '叙事视图' : '时间轴'}
               </h2>
@@ -204,7 +204,7 @@ export default function CollaborationDashboard() {
                         {formatTime(event.timestamp)}
                       </span>
                     </div>
-                    {event.type === 'snapshot' && <p className="mt-2 truncate text-xs text-purple-400">{event.id}</p>}
+                    {event.type === 'snapshot' && <p className="mt-2 truncate text-xs text-studio-violet">{event.id}</p>}
                     {event.payload && (
                       <p className={`mt-3 rounded-lg p-3 text-xs ${styles.bgSecondary} ${styles.textSecondary}`}>
                         {diffSummary(event.payload)}
@@ -236,7 +236,7 @@ export default function CollaborationDashboard() {
                   {conflicts.length ? (
                     <div className="flex flex-wrap gap-2">
                       {conflicts.map((event) => (
-                        <span key={event.id} className="rounded-full bg-red-500/10 px-3 py-1 text-xs text-red-300">
+                        <span key={event.id} className="rounded-full bg-studio-coral/10 px-3 py-1 text-xs text-studio-coral">
                           {event.payload?.label ? String(event.payload.label) : event.id}
                         </span>
                       ))}
@@ -251,7 +251,7 @@ export default function CollaborationDashboard() {
 
           <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
             <div className={`flex items-center gap-2 border-b ${styles.border} px-5 py-4`}>
-              <BarChart3 className="h-5 w-5 text-emerald-400" />
+              <BarChart3 className="h-5 w-5 text-studio-success" />
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>用户贡献</h2>
             </div>
             <div className="p-5">
@@ -266,7 +266,7 @@ export default function CollaborationDashboard() {
                         <span className={styles.textMuted}>{item.impactScore}</span>
                       </div>
                       <div className={`h-2 rounded-full ${styles.bgTertiary}`}>
-                        <div className="h-2 rounded-full bg-blue-500" style={{ width: `${Math.min(item.impactScore * 10, 100)}%` }} />
+                        <div className="h-2 rounded-full bg-studio-primary" style={{ width: `${Math.min(item.impactScore * 10, 100)}%` }} />
                       </div>
                     </div>
                   ))}
@@ -307,9 +307,9 @@ export default function CollaborationDashboard() {
               ) : (
                 <div className="space-y-2">
                   {conflicts.map((event) => (
-                    <div key={event.id} className="rounded-lg border border-red-500/20 bg-red-500/10 p-3">
-                      <p className="text-sm font-medium text-red-300">{event.userId}</p>
-                      <p className="mt-1 text-xs text-red-200/80">{formatTime(event.timestamp)}</p>
+                    <div key={event.id} className="rounded-lg border border-studio-coral/20 bg-studio-coral/10 p-3">
+                      <p className="text-sm font-medium text-studio-coral">{event.userId}</p>
+                      <p className="mt-1 text-xs text-studio-coral/80">{formatTime(event.timestamp)}</p>
                     </div>
                   ))}
                 </div>

@@ -407,9 +407,9 @@ export default function Editor({
   const statusIndicator = () => {
     const statusConfig = {
       idle: null,
-      saving: { icon: '⟳', color: 'text-blue-500', label: '保存中...', animate: true },
-      synced: { icon: '✓', color: 'text-green-500', label: editorStateLabel('synced'), animate: false },
-      conflicted: { icon: '⚠', color: 'text-red-500', label: editorStateLabel('conflicted'), animate: false },
+      saving: { icon: '⟳', color: 'text-studio-primary', label: '保存中...', animate: true },
+      synced: { icon: '✓', color: 'text-studio-success', label: editorStateLabel('synced'), animate: false },
+      conflicted: { icon: '⚠', color: 'text-studio-coral', label: editorStateLabel('conflicted'), animate: false },
     };
     const status = stateDocId ? eventSaveStatus : saveStatus;
     const config = statusConfig[status as keyof typeof statusConfig];
@@ -419,7 +419,7 @@ export default function Editor({
       <div
         className={`save-status flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full transition-all ${
           config.color
-        } ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}
+        } ${isDark ? 'bg-studio-surface-soft' : 'bg-studio-surface-soft'}`}
       >
         <span className={config.animate ? 'animate-spin inline-block' : ''}>
           {config.icon}
@@ -479,8 +479,8 @@ export default function Editor({
               onClick={() => void handleCopyAll()}
               className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
                 isDark
-                  ? 'border-white/15 text-gray-200 hover:bg-white/10'
-                  : 'border-gray-300 text-gray-700 hover:bg-gray-100'
+                  ? 'border-white/15 text-studio-text-secondary hover:bg-white/10'
+                  : 'border-studio-border-soft text-studio-text-muted hover:bg-studio-surface-soft'
               }`}
               title="复制编辑器全部内容（文本和 HTML）"
             >
@@ -491,7 +491,7 @@ export default function Editor({
             <div className="flex items-center gap-2">
               <span
                 className={`h-2 w-2 rounded-full ${
-                  collaboration.connected ? 'bg-emerald-500' : 'bg-amber-500'
+                  collaboration.connected ? 'bg-studio-success' : 'bg-studio-amber'
                 }`}
                 title={collaboration.connected ? '协作已连接' : '协作重连中'}
               />
@@ -508,7 +508,7 @@ export default function Editor({
                 ))}
               </div>
               {collaboration.users.some((user) => user.typing) && (
-                <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                <span className={`text-xs ${isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'}`}>
                   正在输入...
                 </span>
               )}
@@ -573,12 +573,12 @@ export default function Editor({
           style={{
             left: Math.min(clickedComment.x, window.innerWidth - 160),
             top: clickedComment.y + 10,
-            background: isDark ? '#1f2937' : '#fff',
-            borderColor: isDark ? '#374151' : '#e5e7eb',
+            background: 'var(--editor-panel)',
+            borderColor: 'var(--editor-border)',
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className={`px-3 py-1.5 text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} border-b ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
+          <div className={`px-3 py-1.5 text-xs ${isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'} border-b ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`}>
             {clickedComment.commentText.slice(0, 40)}{clickedComment.commentText.length > 40 ? '...' : ''}
           </div>
           <button
@@ -586,7 +586,7 @@ export default function Editor({
               handleEditComment(clickedComment.commentId, clickedComment.commentText);
               setClickedComment(null);
             }}
-            className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}
+            className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}
           >
             编辑批注
           </button>
@@ -595,7 +595,7 @@ export default function Editor({
               handleDeleteComment(clickedComment.commentId);
               setClickedComment(null);
             }}
-            className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors text-red-500 ${isDark ? 'hover:bg-red-900/20' : 'hover:bg-red-50'}`}
+            className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors text-studio-coral ${isDark ? 'hover:bg-studio-coral/20' : 'hover:bg-studio-coral'}`}
           >
             删除批注
           </button>
@@ -607,11 +607,11 @@ export default function Editor({
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/30">
           <div
             className={`rounded-lg shadow-xl p-4 w-80 ${
-              isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white'
+              isDark ? 'bg-studio-surface-soft border border-studio-border-soft' : 'bg-white'
             }`}
           >
             <div className="mb-2">
-              <span className={`text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+              <span className={`text-sm font-medium ${isDark ? 'text-studio-text-secondary' : 'text-studio-text-muted'}`}>
                 {commentState.mode === 'add'
                   ? `为「${commentState.selectedText.slice(0, 20)}${commentState.selectedText.length > 20 ? '...' : ''}」添加批注`
                   : '编辑批注'}
@@ -623,8 +623,8 @@ export default function Editor({
               placeholder="输入批注内容..."
               className={`w-full p-2 border rounded text-sm resize-none ${
                 isDark
-                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400'
-                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+                  ? 'bg-studio-surface-soft border-studio-border-soft text-white placeholder-gray-400'
+                  : 'bg-white border-studio-border-soft text-studio-text-primary placeholder-gray-400'
               }`}
               rows={3}
               autoFocus
@@ -640,7 +640,7 @@ export default function Editor({
               <button
                 onClick={cancelComment}
                 className={`px-3 py-1.5 text-sm rounded transition-colors ${
-                  isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                  isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
                 }`}
               >
                 取消
@@ -648,7 +648,7 @@ export default function Editor({
               <button
                 onClick={confirmComment}
                 disabled={!commentText.trim()}
-                className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-3 py-1.5 text-sm rounded bg-studio-primary text-white hover:bg-studio-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {commentState.mode === 'add' ? '确认' : '保存'}
               </button>
@@ -661,7 +661,7 @@ export default function Editor({
         .tiptap p.is-editor-empty:first-child::before {
           content: attr(data-placeholder);
           float: left;
-          color: ${isDark ? '#6b7280' : '#9ca3af'};
+          color: var(--editor-muted);
           pointer-events: none;
           height: 0;
         }
@@ -683,7 +683,7 @@ export default function Editor({
           text-indent: 2em;
         }
         .tiptap .ProseMirror-selectednode {
-          outline: 2px solid #3b82f6;
+          outline: 2px solid var(--xmt-primary);
           border-radius: 4px;
         }
         /* === 标题样式 === */
@@ -756,10 +756,10 @@ export default function Editor({
         .tiptap ul[data-type="taskList"] li input[type="checkbox"] {
           width: 16px;
           height: 16px;
-          accent-color: #3b82f6;
+          accent-color: var(--xmt-primary);
         }
         .tiptap blockquote {
-          border-left: 3px solid #3b82f6;
+          border-left: 3px solid var(--xmt-primary);
           padding-left: 1rem;
           margin-left: 0;
           color: var(--editor-muted);
@@ -781,7 +781,7 @@ export default function Editor({
           font-size: 0.9em;
         }
         .tiptap a {
-          color: #3b82f6;
+          color: var(--xmt-primary);
           text-decoration: underline;
           cursor: pointer;
         }
@@ -814,8 +814,8 @@ export default function Editor({
         /* === 批注样式 === */
         .tiptap .comment-mark,
         .tiptap span[data-comment-id] {
-          background-color: ${isDark ? '#422006' : '#fef3c7'} !important;
-          border-bottom: 2px solid #f59e0b !important;
+          background-color: color-mix(in srgb, var(--xmt-amber) 18%, transparent) !important;
+          border-bottom: 2px solid var(--xmt-amber) !important;
           cursor: help;
           position: relative;
         }
@@ -823,9 +823,9 @@ export default function Editor({
           content: "【批注：" attr(data-comment-text) "】" !important;
           display: inline !important;
           font-size: 0.75em !important;
-          color: ${isDark ? '#d97706' : '#92400e'} !important;
-          background: ${isDark ? '#1f2937' : '#fffbeb'} !important;
-          border: 1px solid ${isDark ? '#924006' : '#fbbf24'} !important;
+          color: var(--xmt-amber-contrast) !important;
+          background: var(--editor-panel) !important;
+          border: 1px solid color-mix(in srgb, var(--xmt-amber) 45%, transparent) !important;
           border-radius: 4px !important;
           padding: 1px 6px !important;
           margin-left: 4px !important;
@@ -843,8 +843,8 @@ export default function Editor({
         mark[data-color="cyan"] { background-color: #a5f3fc; }
         mark:not([data-color]) { background-color: #fef08a; }
         span[data-comment-id] {
-          background-color: ${isDark ? '#422006' : '#fef3c7'} !important;
-          border-bottom: 2px solid #f59e0b !important;
+          background-color: color-mix(in srgb, var(--xmt-amber) 18%, transparent) !important;
+          border-bottom: 2px solid var(--xmt-amber) !important;
           cursor: help;
         }
         .production-preview em,
@@ -858,9 +858,9 @@ export default function Editor({
           content: "【批注：" attr(data-comment-text) "】" !important;
           display: inline !important;
           font-size: 0.75em !important;
-          color: ${isDark ? '#d97706' : '#92400e'} !important;
-          background: ${isDark ? '#1f2937' : '#fffbeb'} !important;
-          border: 1px solid ${isDark ? '#924006' : '#fbbf24'} !important;
+          color: var(--xmt-amber-contrast) !important;
+          background: var(--editor-panel) !important;
+          border: 1px solid color-mix(in srgb, var(--xmt-amber) 45%, transparent) !important;
           border-radius: 4px !important;
           padding: 1px 6px !important;
           margin-left: 4px !important;
@@ -882,17 +882,17 @@ export default function Editor({
         @media print {
           .tiptap .comment-mark,
           .tiptap span[data-comment-id] {
-            background-color: #fef3c7 !important;
-            border-bottom: 2px solid #f59e0b !important;
+            background-color: color-mix(in srgb, var(--xmt-amber) 18%, transparent) !important;
+            border-bottom: 2px solid var(--xmt-amber) !important;
             cursor: default !important;
           }
           .tiptap span[data-comment-id]::after {
             display: inline !important;
             content: "【批注：" attr(data-comment-text) "】" !important;
             font-size: 7pt;
-            color: #92400e;
-            background: #fffbeb;
-            border: 1px solid #fbbf24;
+            color: var(--xmt-amber-contrast);
+            background: var(--editor-panel);
+            border: 1px solid color-mix(in srgb, var(--xmt-amber) 45%, transparent);
             border-radius: 2pt;
             padding: 0 4pt;
             margin-left: 4pt;

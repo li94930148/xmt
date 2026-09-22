@@ -205,8 +205,8 @@ export default function DouyinAnalytics() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className={`${styles.card} p-5`}>
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/15 flex items-center justify-center">
-                <Users className="w-5 h-5 text-blue-400" />
+              <div className="w-10 h-10 rounded-lg bg-studio-primary/15 flex items-center justify-center">
+                <Users className="w-5 h-5 text-studio-primary" />
               </div>
               <span className={`text-sm ${styles.textSecondary}`}>粉丝数</span>
             </div>
@@ -215,7 +215,7 @@ export default function DouyinAnalytics() {
                 {Number(latestSnapshot.followers).toLocaleString()}
               </span>
               {followerDiff !== 0 && (
-                <span className={`text-sm font-medium ${followerDiff > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                <span className={`text-sm font-medium ${followerDiff > 0 ? 'text-studio-success' : 'text-studio-coral'}`}>
                   {followerDiff > 0 ? '+' : ''}{followerDiff}
                 </span>
               )}
@@ -224,8 +224,8 @@ export default function DouyinAnalytics() {
 
           <div className={`${styles.card} p-5`}>
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-lg bg-red-500/15 flex items-center justify-center">
-                <Heart className="w-5 h-5 text-red-400" />
+              <div className="w-10 h-10 rounded-lg bg-studio-coral/15 flex items-center justify-center">
+                <Heart className="w-5 h-5 text-studio-coral" />
               </div>
               <span className={`text-sm ${styles.textSecondary}`}>总获赞</span>
             </div>
@@ -234,7 +234,7 @@ export default function DouyinAnalytics() {
                 {Number(latestSnapshot.likes).toLocaleString()}
               </span>
               {likeDiff !== 0 && (
-                <span className={`text-sm font-medium ${likeDiff > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                <span className={`text-sm font-medium ${likeDiff > 0 ? 'text-studio-success' : 'text-studio-coral'}`}>
                   {likeDiff > 0 ? '+' : ''}{likeDiff}
                 </span>
               )}
@@ -243,8 +243,8 @@ export default function DouyinAnalytics() {
 
           <div className={`${styles.card} p-5`}>
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-lg bg-purple-500/15 flex items-center justify-center">
-                <Video className="w-5 h-5 text-purple-400" />
+              <div className="w-10 h-10 rounded-lg bg-studio-violet/15 flex items-center justify-center">
+                <Video className="w-5 h-5 text-studio-violet" />
               </div>
               <span className={`text-sm ${styles.textSecondary}`}>作品数</span>
             </div>
@@ -255,8 +255,8 @@ export default function DouyinAnalytics() {
 
           <div className={`${styles.card} p-5`}>
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-lg bg-green-500/15 flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-green-400" />
+              <div className="w-10 h-10 rounded-lg bg-studio-success/15 flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-studio-success" />
               </div>
               <span className={`text-sm ${styles.textSecondary}`}>平均点赞</span>
             </div>
@@ -305,7 +305,7 @@ export default function DouyinAnalytics() {
                 href={currentAccount.profile_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1`}
+                className={`text-sm text-studio-primary hover:text-studio-primary flex items-center gap-1`}
               >
                 在抖音中查看 <ExternalLink className="w-3.5 h-3.5" />
               </a>
@@ -320,7 +320,7 @@ export default function DouyinAnalytics() {
           <div className={`px-5 py-4 border-b ${styles.borderLight}`}>
             <h3 className={`text-sm font-semibold ${styles.textPrimary}`}>历史记录</h3>
           </div>
-          <div className="divide-y divide-gray-700/30">
+          <div className="divide-y divide-studio-text-muted/30">
             {snapshots.map((snap) => (
               <div key={snap.id}>
                 <div
@@ -367,7 +367,7 @@ export default function DouyinAnalytics() {
                             </td>
                             <td className="py-2 text-center">
                               {video.is_pinned ? (
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">置顶</span>
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-studio-amber/20 text-studio-amber">置顶</span>
                               ) : '-'}
                             </td>
                           </tr>

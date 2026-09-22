@@ -151,7 +151,7 @@ export default function RetroActionTable({
                   <td className="px-3 py-4 text-studio-text-secondary">{action.ownerName || '-'}</td>
                   <td className="px-3 py-4">
                     <div className="text-studio-text-secondary">{formatDate(action.dueDate)}</div>
-                    {isOverdue(action) ? <span className="mt-1 inline-flex rounded-full bg-red-500/10 px-2 py-0.5 text-xs text-red-300">已逾期</span> : null}
+                    {isOverdue(action) ? <span className="mt-1 inline-flex rounded-full bg-studio-coral/10 px-2 py-0.5 text-xs text-studio-coral">已逾期</span> : null}
                   </td>
                   <td className="px-3 py-4">
                     {canUpdate ? (

@@ -453,12 +453,12 @@ export default function NotificationSettings() {
                 key={key}
                 onClick={() => setActiveTab(key)}
                 className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${
-                  activeTab === key ? 'bg-blue-500/10 text-blue-400' : `${styles.textSecondary} ${styles.hoverBg}`
+                  activeTab === key ? 'bg-studio-primary/10 text-studio-primary' : `${styles.textSecondary} ${styles.hoverBg}`
                 }`}
               >
                 <Icon className="h-4 w-4" />
                 {meta.label}
-                <ChevronRight className={`ml-auto h-3 w-3 ${activeTab === key ? 'text-blue-400' : styles.textMuted}`} />
+                <ChevronRight className={`ml-auto h-3 w-3 ${activeTab === key ? 'text-studio-primary' : styles.textMuted}`} />
               </button>
             );
           })}
@@ -503,14 +503,14 @@ export default function NotificationSettings() {
 
                 <div className="mt-5 grid gap-4 md:grid-cols-3">
                   <button onClick={desktopNotify.toggleEnabled} className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left ${styles.border} ${styles.hoverBg}`}>
-                    {desktopNotify.enabled ? <BellRing className="h-5 w-5 text-green-400" /> : <BellOff className="h-5 w-5 text-gray-400" />}
+                    {desktopNotify.enabled ? <BellRing className="h-5 w-5 text-studio-success" /> : <BellOff className="h-5 w-5 text-studio-text-muted" />}
                     <div>
                       <p className={`text-sm font-medium ${styles.textPrimary}`}>桌面通知</p>
                       <p className={`text-xs ${styles.textMuted}`}>{desktopNotify.enabled ? '已开启' : '已关闭'}</p>
                     </div>
                   </button>
                   <button onClick={desktopNotify.toggleSound} className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left ${styles.border} ${styles.hoverBg}`}>
-                    {desktopNotify.soundEnabled ? <Volume2 className="h-5 w-5 text-blue-400" /> : <VolumeX className="h-5 w-5 text-gray-400" />}
+                    {desktopNotify.soundEnabled ? <Volume2 className="h-5 w-5 text-studio-primary" /> : <VolumeX className="h-5 w-5 text-studio-text-muted" />}
                     <div>
                       <p className={`text-sm font-medium ${styles.textPrimary}`}>提示音</p>
                       <p className={`text-xs ${styles.textMuted}`}>{desktopNotify.soundEnabled ? '已开启' : '已关闭'}</p>
@@ -523,7 +523,7 @@ export default function NotificationSettings() {
                     }}
                     className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left ${styles.border} ${styles.hoverBg}`}
                   >
-                    <Sparkles className="h-5 w-5 text-yellow-400" />
+                    <Sparkles className="h-5 w-5 text-studio-amber" />
                     <div>
                       <p className={`text-sm font-medium ${styles.textPrimary}`}>发送测试</p>
                       <p className={`text-xs ${styles.textMuted}`}>检查声音与桌面通知</p>
@@ -563,7 +563,7 @@ export default function NotificationSettings() {
                                   onClick={() => handleTogglePreference(channel.id, event.id)}
                                   className={`rounded-full px-3 py-1 text-xs font-medium ${
                                     isEnabled(channel.id, event.id)
-                                      ? 'bg-green-500/10 text-green-400'
+                                      ? 'bg-studio-success/10 text-studio-success'
                                       : `${styles.bgTertiary} ${styles.textMuted}`
                                   }`}
                                 >
@@ -679,14 +679,14 @@ export default function NotificationSettings() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <button onClick={() => setAppearanceTheme('light')} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${styles.border} ${styles.hoverBg}`}>
-                  <Sun className="h-5 w-5 text-amber-400" />
+                  <Sun className="h-5 w-5 text-studio-amber" />
                   <div className="text-left">
                     <p className={`text-sm font-medium ${styles.textPrimary}`}>浅色模式</p>
                     <p className={`text-xs ${styles.textMuted}`}>适合明亮办公环境</p>
                   </div>
                 </button>
                 <button onClick={() => setAppearanceTheme('dark')} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${styles.border} ${styles.hoverBg}`}>
-                  <Moon className="h-5 w-5 text-blue-400" />
+                  <Moon className="h-5 w-5 text-studio-primary" />
                   <div className="text-left">
                     <p className={`text-sm font-medium ${styles.textPrimary}`}>深色模式</p>
                     <p className={`text-xs ${styles.textMuted}`}>适合长时间创作</p>
@@ -748,7 +748,7 @@ export default function NotificationSettings() {
               <div>
                 <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>品牌 Logo</label>
                 <div className="flex items-center gap-4">
-                  <div className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed ${systemSettings.branding.logo ? 'border-blue-500' : `${styles.border} ${styles.bgTertiary}`}`}>
+                  <div className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed ${systemSettings.branding.logo ? 'border-studio-primary' : `${styles.border} ${styles.bgTertiary}`}`}>
                     {systemSettings.branding.logo ? (
                       <img src={systemSettings.branding.logo} alt="系统 Logo" className="h-full w-full object-contain" />
                     ) : (
@@ -763,7 +763,7 @@ export default function NotificationSettings() {
                     {systemSettings.branding.logo && (
                       <button
                         onClick={() => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, logo: '' } }))}
-                        className="rounded-lg border border-red-500/30 px-4 py-2 text-red-400 hover:bg-red-500/10"
+                        className="rounded-lg border border-studio-coral/30 px-4 py-2 text-studio-coral hover:bg-studio-coral/10"
                       >
                         移除 Logo
                       </button>
@@ -893,12 +893,12 @@ export default function NotificationSettings() {
               <div className="space-y-5">
                 {changelog.map((entry, index) => (
                   <div key={entry.version} className={`overflow-hidden rounded-2xl ${styles.card}`}>
-                    <div className={`px-6 py-4 ${index === 0 ? 'bg-gradient-to-r from-[#5c7cfa]/10 to-[#748ffc]/10' : styles.bgTertiary}`}>
+                    <div className={`px-6 py-4 ${index === 0 ? 'bg-gradient-to-r from-studio-primary/10 to-studio-primary/10' : styles.bgTertiary}`}>
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="flex items-center gap-2">
                             <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>v{entry.version}</h3>
-                            {index === 0 && <span className="rounded-full bg-blue-500 px-2 py-0.5 text-xs text-white">最新</span>}
+                            {index === 0 && <span className="rounded-full bg-studio-primary px-2 py-0.5 text-xs text-white">最新</span>}
                           </div>
                           <p className={`mt-1 text-sm ${styles.textMuted}`}>{entry.title}</p>
                         </div>
@@ -941,7 +941,7 @@ export default function NotificationSettings() {
               </div>
 
               <div className="flex items-center gap-4">
-                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-500 text-3xl text-white">
+                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-studio-primary to-studio-cyan text-3xl text-white">
                   {systemSettings.branding.logo ? <img src={systemSettings.branding.logo} alt="Logo" className="h-full w-full object-contain" /> : systemSettings.system.icon}
                 </div>
                 <div>
@@ -971,7 +971,7 @@ export default function NotificationSettings() {
                 <div className="grid gap-2 md:grid-cols-3">
                   {['选题管理', '创作管理', '拍摄管理', '发布管理', '数据分析', '资源库', '消息中心', '权限管理', '系统设置'].map((item) => (
                     <div key={item} className={`flex items-center gap-2 text-sm ${styles.textSecondary}`}>
-                      <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      <div className="h-1.5 w-1.5 rounded-full bg-studio-success" />
                       {item}
                     </div>
                   ))}

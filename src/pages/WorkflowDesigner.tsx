@@ -341,9 +341,9 @@ export default function WorkflowDesigner() {
   };
 
   const getRiskBadgeClass = (level: string) => {
-    if (level === 'high') return 'bg-red-500/15 text-red-400 border-red-500/30';
-    if (level === 'medium') return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
-    return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+    if (level === 'high') return 'bg-studio-coral/15 text-studio-coral border-studio-coral/30';
+    if (level === 'medium') return 'bg-studio-amber/15 text-studio-amber border-studio-amber/30';
+    return 'bg-studio-success/15 text-studio-success border-studio-success/30';
   };
 
   const getNodeCardClass = (node: WorkflowNode) => {
@@ -351,11 +351,11 @@ export default function WorkflowDesigner() {
     const uiState = mapDecisionToUI(getNodeRuntimeContext(node));
 
     if (!policyResult.allowed || uiState.status === 'blocked') {
-      return 'border-red-500/60 bg-red-500/5';
+      return 'border-studio-coral/60 bg-studio-coral/5';
     }
 
     if (uiState.status === 'warning') {
-      return 'border-amber-500/60 bg-amber-500/5';
+      return 'border-studio-amber/60 bg-studio-amber/5';
     }
 
     return `${styles.bgTertiary} ${styles.border}`;
@@ -368,7 +368,7 @@ export default function WorkflowDesigner() {
   }
 
   return (
-    <ReactBitsPageScene page="workflow" fallbackClassName="bg-gradient-to-br from-slate-950/30 to-indigo-950/20">
+    <ReactBitsPageScene page="workflow" fallbackClassName="bg-gradient-to-br from-studio-surface-soft/30 to-studio-primary/20">
     <div className="space-y-6">
       <PageHeader
         title={<ReactBitsHeadingSlot>审批流设计</ReactBitsHeadingSlot>}
@@ -442,7 +442,7 @@ export default function WorkflowDesigner() {
                       {!template.is_default ? (
                         <button
                           onClick={() => setDeleteTarget(template)}
-                          className="rounded-lg p-2 text-red-400 hover:bg-red-500/10"
+                          className="rounded-lg p-2 text-studio-coral hover:bg-studio-coral/10"
                           title="删除"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -528,16 +528,16 @@ export default function WorkflowDesigner() {
                               {uiState.risk} 路 {Math.round(runtimeContext.confidence * 100)}%
                             </span>
                             {uiState.status === 'warning' ? (
-                              <span className={`text-[11px] ${uiState.risk === 'high' ? 'text-red-400' : 'text-amber-400'}`}>建议复核</span>
+                              <span className={`text-[11px] ${uiState.risk === 'high' ? 'text-studio-coral' : 'text-studio-amber'}`}>建议复核</span>
                             ) : null}
                             {!policyResult.allowed || uiState.status === 'blocked' ? (
-                              <span className="text-[11px] text-red-400">必须修复：{explainability.blockExplain.blockedReason}</span>
+                              <span className="text-[11px] text-studio-coral">必须修复：{explainability.blockExplain.blockedReason}</span>
                             ) : null}
                             {runtimeContext.suggestedTransition ? (
                               <button
                                 type="button"
                                 onClick={() => updateNode(index, 'status_to', runtimeContext.suggestedTransition)}
-                                className={`rounded-full border px-2 py-0.5 text-[11px] ${styles.border} ${styles.hoverBg} text-blue-400`}
+                                className={`rounded-full border px-2 py-0.5 text-[11px] ${styles.border} ${styles.hoverBg} text-studio-primary`}
                                 title={explainUI.tooltip}
                               >
                                 应用建议：{getStatusLabel(runtimeContext.suggestedTransition)}
@@ -549,7 +549,7 @@ export default function WorkflowDesigner() {
                     </div>
                     <button
                       onClick={() => removeNode(index)}
-                      className="rounded p-1 text-red-400 hover:bg-red-500/10"
+                      className="rounded p-1 text-studio-coral hover:bg-studio-coral/10"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -623,7 +623,7 @@ export default function WorkflowDesigner() {
                           type="checkbox"
                           checked={node.is_required}
                           onChange={(event) => updateNode(index, 'is_required', event.target.checked)}
-                          className="rounded border-gray-300"
+                          className="rounded border-studio-border-soft"
                         />
                         必须审批
                       </label>

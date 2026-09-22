@@ -21,41 +21,123 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
   const heavyAllowed = config.motionMode !== 'off' && variant !== 'danger';
   const surface = variant === 'primary' || variant === 'ai' ? config.buttonSurface.component : 'standard';
   const interaction = heavyAllowed ? config.buttonInteraction.component : 'none';
-  const common = 'inline-flex min-h-10 w-fit max-w-full shrink-0 appearance-none items-center justify-center gap-2 rounded-button border px-4 py-2.5 text-sm font-semibold leading-[1.25] align-middle transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50';
+  const common = twMerge(
+    'xmt-btn inline-flex min-h-10 w-fit max-w-full shrink-0 appearance-none items-center justify-center gap-2 rounded-button border px-4 py-2.5 text-sm font-semibold leading-[1.25] align-middle',
+    'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary',
+    'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
+  );
   const variantClasses: Record<ReactBitsButtonVariant, string> = {
-    primary: light ? 'border-blue-700 bg-blue-600 text-white shadow-sm shadow-blue-600/25 hover:bg-blue-700' : 'border-blue-400/45 bg-blue-600 text-white shadow-sm shadow-blue-500/20 hover:bg-blue-500',
-    ai: light ? 'border-violet-700 bg-violet-600 text-white shadow-sm shadow-violet-500/25 hover:bg-violet-700' : 'border-violet-300/35 bg-violet-600 text-white shadow-sm shadow-violet-400/15 hover:bg-violet-500',
-    secondary: light ? 'border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50' : 'border-slate-500/45 bg-slate-900/70 text-slate-100 hover:bg-slate-800',
-    ghost: light ? 'border-transparent bg-transparent text-slate-700 hover:bg-slate-200/70' : 'border-transparent bg-transparent text-slate-100 hover:bg-white/10',
-    danger: light ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100' : 'border-red-400/40 bg-red-500/15 text-red-100 hover:bg-red-500/25',
-    icon: light ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50' : 'border-slate-500/45 bg-slate-900/70 text-slate-100 hover:bg-slate-800',
+    primary: 'xmt-btn-primary border-transparent text-white',
+    ai: light
+      ? 'border-violet-300/50 bg-violet-600 text-white shadow-[0_8px_20px_rgba(124,58,237,0.22)] hover:bg-violet-700'
+      : 'border-violet-300/35 bg-violet-500/90 text-white shadow-[0_8px_20px_rgba(167,139,250,0.22)] hover:bg-violet-400/95',
+    secondary: 'xmt-btn-secondary',
+    ghost: 'xmt-btn-ghost',
+    danger: 'xmt-btn-danger',
+    icon: 'xmt-btn-secondary px-3',
   };
-  const specularClasses = heavyAllowed && surface === 'specular-button'
-    ? "relative overflow-hidden ring-1 ring-inset ring-white/25 before:pointer-events-none before:absolute before:inset-x-[12%] before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/80 before:to-transparent before:content-['']"
-    : '';
+  const specularClasses =
+    heavyAllowed && surface === 'specular-button'
+      ? "relative overflow-hidden ring-1 ring-inset ring-white/20 before:pointer-events-none before:absolute before:inset-x-[12%] before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/80 before:to-transparent before:content-['']"
+      : '';
   const base = twMerge(common, variantClasses[variant], specularClasses, className);
-  let button: ReactNode = <button {...props} type={props.type || 'button'} className={base} data-reactbits-button={variant}>{children}</button>;
+  let button: ReactNode = (
+    <button {...props} type={props.type || 'button'} className={base} data-reactbits-button={variant}>
+      {children}
+    </button>
+  );
 
-  if (heavyAllowed && surface === 'border-glow') button = <Suspense fallback={button}><BorderGlow buttonSurface className="inline-flex w-fit max-w-full rounded-button" backgroundColor={light ? '#FFFFFF' : '#0F172A'} glowColor={light ? '215 90 48' : '190 90 60'} borderRadius={14}>{button}</BorderGlow></Suspense>;
-  if (heavyAllowed && surface === 'electric-border') button = <Suspense fallback={button}><ElectricBorder className="inline-flex w-fit max-w-full overflow-visible" color={light ? '#2563EB' : '#67E8F9'} borderRadius={14}>{button}</ElectricBorder></Suspense>;
-  if (heavyAllowed && surface === 'star-border') button = <Suspense fallback={button}><StarBorder
-    as="button"
-    type={props.type || 'button'}
-    disabled={props.disabled}
-    onClick={props.onClick}
-    title={props.title}
-    aria-label={props['aria-label']}
-    aria-describedby={props['aria-describedby']}
-    name={props.name}
-    value={props.value}
-    form={props.form}
-    data-reactbits-button={variant}
-    className={base}
-    color={light ? '#93C5FD' : '#67E8F9'}
-    speed="4s"
-  >{children}</StarBorder></Suspense>;
-  if (interaction === 'magnet') button = <Suspense fallback={button}><Magnet padding={20} magnetStrength={3} disabled={props.disabled} wrapperClassName="inline-flex w-fit max-w-full align-middle" innerClassName="inline-flex w-fit max-w-full">{button}</Magnet></Suspense>;
-  if (interaction === 'click-spark') button = <span className="relative inline-flex w-fit max-w-full align-middle"><Suspense fallback={button}><ClickSpark sparkColor={light ? '#1D4ED8' : '#DBEAFE'} sparkSize={8} sparkRadius={18} sparkCount={8} duration={400}>{button}</ClickSpark></Suspense></span>;
-  if (interaction === 'glare-hover') button = <span className="inline-flex w-fit max-w-full align-middle"><Suspense fallback={button}><GlareHover width="fit-content" height="auto" background="transparent" borderColor="transparent" borderRadius="inherit" glareColor={light ? '#2563EB' : '#A5B4FC'} glareOpacity={0.38} className="inline-flex w-fit max-w-full align-middle">{button}</GlareHover></Suspense></span>;
+  if (heavyAllowed && surface === 'border-glow') {
+    button = (
+      <Suspense fallback={button}>
+        <BorderGlow
+          buttonSurface
+          className="inline-flex w-fit max-w-full rounded-button"
+          backgroundColor={light ? '#FFFFFF' : '#121826'}
+          glowColor={light ? '107 140 255' : '107 140 255'}
+          borderRadius={12}
+        >
+          {button}
+        </BorderGlow>
+      </Suspense>
+    );
+  }
+  if (heavyAllowed && surface === 'electric-border') {
+    button = (
+      <Suspense fallback={button}>
+        <ElectricBorder
+          className="inline-flex w-fit max-w-full overflow-visible"
+          color={light ? '#3D5AFE' : '#5CE1E6'}
+          borderRadius={12}
+        >
+          {button}
+        </ElectricBorder>
+      </Suspense>
+    );
+  }
+  if (heavyAllowed && surface === 'star-border') {
+    button = (
+      <Suspense fallback={button}>
+        <StarBorder
+          as="button"
+          type={props.type || 'button'}
+          disabled={props.disabled}
+          onClick={props.onClick}
+          title={props.title}
+          aria-label={props['aria-label']}
+          aria-describedby={props['aria-describedby']}
+          name={props.name}
+          value={props.value}
+          form={props.form}
+          data-reactbits-button={variant}
+          className={base}
+          color={light ? '#93C5FD' : '#A5B4FC'}
+          speed="4s"
+        >
+          {children}
+        </StarBorder>
+      </Suspense>
+    );
+  }
+  if (interaction === 'magnet') {
+    button = (
+      <Suspense fallback={button}>
+        <Magnet padding={20} magnetStrength={3} disabled={props.disabled} wrapperClassName="inline-flex w-fit max-w-full align-middle" innerClassName="inline-flex w-fit max-w-full">
+          {button}
+        </Magnet>
+      </Suspense>
+    );
+  }
+  if (interaction === 'click-spark') {
+    button = (
+      <span className="relative inline-flex w-fit max-w-full align-middle">
+        <Suspense fallback={button}>
+          <ClickSpark sparkColor={light ? '#1E3A8A' : '#C9D6FF'} sparkSize={8} sparkRadius={18} sparkCount={8} duration={400}>
+            {button}
+          </ClickSpark>
+        </Suspense>
+      </span>
+    );
+  }
+  if (interaction === 'glare-hover') {
+    button = (
+      <span className="inline-flex w-fit max-w-full align-middle">
+        <Suspense fallback={button}>
+          <GlareHover
+            width="fit-content"
+            height="auto"
+            background="transparent"
+            borderColor="transparent"
+            borderRadius="inherit"
+            glareColor={light ? '#3D5AFE' : '#A5B4FC'}
+            glareOpacity={0.32}
+            className="inline-flex w-fit max-w-full align-middle"
+          >
+            {button}
+          </GlareHover>
+        </Suspense>
+      </span>
+    );
+  }
   return <>{button}</>;
 }

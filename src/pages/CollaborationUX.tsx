@@ -86,7 +86,7 @@ export default function CollaborationUX() {
             />
             <button
               onClick={() => loadData(docId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4" />
               生成
@@ -97,7 +97,7 @@ export default function CollaborationUX() {
 
       <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
         <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-blue-400" />
+          <Sparkles className="h-5 w-5 text-studio-primary" />
           <h2 className={`text-base font-semibold ${styles.textPrimary}`}>解释摘要</h2>
           <span className={`ml-auto text-xs ${styles.textMuted}`}>{displayDocId(activeDocId)}</span>
         </div>
@@ -111,7 +111,7 @@ export default function CollaborationUX() {
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl overflow-hidden`}>
           <div className={`flex items-center gap-2 border-b ${styles.border} px-5 py-4`}>
-            <BookOpen className="h-5 w-5 text-emerald-400" />
+            <BookOpen className="h-5 w-5 text-studio-success" />
             <h2 className={`text-base font-semibold ${styles.textPrimary}`}>文档编辑故事线</h2>
           </div>
           <div className="max-h-[620px] overflow-y-auto p-5">
@@ -140,7 +140,7 @@ export default function CollaborationUX() {
         <div className="space-y-5">
           <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
             <div className="flex items-center gap-2">
-              <User className="h-5 w-5 text-purple-400" />
+              <User className="h-5 w-5 text-studio-violet" />
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>最活跃用户</h2>
             </div>
             <p className={`mt-4 text-2xl font-semibold ${styles.textPrimary}`}>
@@ -150,7 +150,7 @@ export default function CollaborationUX() {
 
           <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
             <div className="flex items-center gap-2">
-              <Flame className="h-5 w-5 text-amber-400" />
+              <Flame className="h-5 w-5 text-studio-amber" />
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>热点区域</h2>
             </div>
             <p className={`mt-4 text-sm ${styles.textSecondary}`}>
@@ -160,13 +160,13 @@ export default function CollaborationUX() {
 
           <section className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
             <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-red-400" />
+              <AlertTriangle className="h-5 w-5 text-studio-coral" />
               <h2 className={`text-base font-semibold ${styles.textPrimary}`}>冲突解释</h2>
             </div>
             {conflictHotspots.length ? (
               <div className="mt-4 space-y-2">
                 {conflictHotspots.map((hotspot) => (
-                  <div key={hotspot} className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                  <div key={hotspot} className="rounded-lg border border-studio-coral/20 bg-studio-coral/10 px-3 py-2 text-sm text-studio-coral">
                     {hotspot}
                   </div>
                 ))}

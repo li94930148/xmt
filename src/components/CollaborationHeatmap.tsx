@@ -40,12 +40,12 @@ export default function CollaborationHeatmap({ topics }: CollaborationHeatmapPro
   }, [heatmapData]);
 
   const getColor = (value: number) => {
-    if (value === 0) return styles.isDark ? 'bg-[#1e2030]' : 'bg-[#f1f3f5]';
+    if (value === 0) return styles.isDark ? 'bg-studio-surface-soft' : 'bg-studio-surface-soft';
     const intensity = value / maxVal;
-    if (intensity < 0.25) return styles.isDark ? 'bg-[#5c7cfa]/20' : 'bg-[#4263eb]/20';
-    if (intensity < 0.5) return styles.isDark ? 'bg-[#5c7cfa]/40' : 'bg-[#4263eb]/40';
-    if (intensity < 0.75) return styles.isDark ? 'bg-[#5c7cfa]/70' : 'bg-[#4263eb]/70';
-    return styles.isDark ? 'bg-[#5c7cfa]' : 'bg-[#4263eb]';
+    if (intensity < 0.25) return styles.isDark ? 'bg-studio-primary/20' : 'bg-studio-primary/20';
+    if (intensity < 0.5) return styles.isDark ? 'bg-studio-primary/40' : 'bg-studio-primary/40';
+    if (intensity < 0.75) return styles.isDark ? 'bg-studio-primary/70' : 'bg-studio-primary/70';
+    return styles.isDark ? 'bg-studio-primary' : 'bg-studio-primary';
   };
 
   // 只显示部分小时标签（每3小时）
@@ -54,7 +54,7 @@ export default function CollaborationHeatmap({ topics }: CollaborationHeatmapPro
   return (
     <div className={`${styles.bgSecondary} rounded-xl p-6 ${styles.border}`}>
       <div className="flex items-center gap-2 mb-5">
-        <Activity className="w-5 h-5 text-[#5c7cfa]" />
+        <Activity className="w-5 h-5 text-studio-primary" />
         <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>协作热力图</h3>
         <span className={`text-xs ${styles.textMuted} ml-2`}>一周 7 天 × 24 小时产出分布</span>
       </div>
@@ -88,7 +88,7 @@ export default function CollaborationHeatmap({ topics }: CollaborationHeatmapPro
                       >
                         {/* Tooltip */}
                         <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 rounded text-[10px] whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-20 ${
-                          styles.isDark ? 'bg-[#252840] text-[#e8eaed]' : 'bg-[#1a1d2e] text-white'
+                          styles.isDark ? 'bg-studio-surface-elevated text-studio-text-primary' : 'bg-studio-text-primary text-white'
                         }`}>
                           {day} {hour}:00 · {value}次
                         </div>
@@ -108,14 +108,14 @@ export default function CollaborationHeatmap({ topics }: CollaborationHeatmapPro
                 key={i}
                 className={`w-3 h-3 rounded-sm ${
                   intensity === 0
-                    ? styles.isDark ? 'bg-[#1e2030]' : 'bg-[#f1f3f5]'
+                    ? styles.isDark ? 'bg-studio-surface-soft' : 'bg-studio-surface-soft'
                     : intensity < 0.25
-                      ? styles.isDark ? 'bg-[#5c7cfa]/20' : 'bg-[#4263eb]/20'
+                      ? styles.isDark ? 'bg-studio-primary/20' : 'bg-studio-primary/20'
                       : intensity < 0.5
-                        ? styles.isDark ? 'bg-[#5c7cfa]/40' : 'bg-[#4263eb]/40'
+                        ? styles.isDark ? 'bg-studio-primary/40' : 'bg-studio-primary/40'
                         : intensity < 0.75
-                          ? styles.isDark ? 'bg-[#5c7cfa]/70' : 'bg-[#4263eb]/70'
-                          : styles.isDark ? 'bg-[#5c7cfa]' : 'bg-[#4263eb]'
+                          ? styles.isDark ? 'bg-studio-primary/70' : 'bg-studio-primary/70'
+                          : styles.isDark ? 'bg-studio-primary' : 'bg-studio-primary'
                 }`}
               />
             ))}

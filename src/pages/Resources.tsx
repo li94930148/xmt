@@ -396,7 +396,7 @@ export default function Resources() {
                     {archive.topicHistory.map((history, index) => (
                       <div key={index} className="flex gap-4">
                         <div className="flex flex-col items-center">
-                          <div className={`mt-1.5 h-3 w-3 rounded-full ${index === 0 ? 'bg-studio-cyan shadow-glow-cyan' : 'bg-slate-600'}`} />
+                          <div className={`mt-1.5 h-3 w-3 rounded-full ${index === 0 ? 'bg-studio-cyan shadow-glow-cyan' : 'bg-studio-surface-soft'}`} />
                           {index < (archive.topicHistory?.length ?? 0) - 1 ? <div className="my-1 w-px flex-1 bg-studio-border-soft" /> : null}
                         </div>
                         <div className="flex-1 pb-4">

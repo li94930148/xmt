@@ -69,8 +69,8 @@ export default function TopicSpinner() {
   // 生成转盘扇区颜色
   const getSectorColor = (index: number) => {
     const colors = [
-      '#5c7cfa', '#748ffc', '#51cf66', '#ff922b', '#cc5de8',
-      '#ff6b6b', '#20c997', '#ffa94d', '#845ef7', '#339af0',
+      'var(--xmt-primary)', 'var(--xmt-primary)', 'var(--xmt-success)', 'var(--xmt-amber)', 'var(--xmt-violet)',
+      'var(--xmt-coral)', 'var(--xmt-success)', 'var(--xmt-amber)', 'var(--xmt-violet)', 'var(--xmt-cyan)',
     ];
     return colors[index % colors.length];
   };
@@ -78,8 +78,8 @@ export default function TopicSpinner() {
   return (
     <div className={`${styles.card} p-6`}>
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[#ff922b]/10">
-          <Sparkles className="w-5 h-5 text-[#ff922b]" />
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-studio-amber/10">
+          <Sparkles className="w-5 h-5 text-studio-amber" />
         </div>
         <div>
           <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>随机选题转盘</h3>
@@ -89,7 +89,7 @@ export default function TopicSpinner() {
 
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-[#5c7cfa]" />
+          <Loader2 className="w-6 h-6 animate-spin text-studio-primary" />
         </div>
       ) : inspirations.length === 0 ? (
         <div className="text-center py-12">
@@ -101,7 +101,7 @@ export default function TopicSpinner() {
           <div className="relative w-64 h-64">
             {/* 指针 */}
             <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-2 z-10">
-              <div className="w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[20px] border-t-[#ff6b6b] drop-shadow-md" />
+              <div className="w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[20px] border-t-studio-coral drop-shadow-md" />
             </div>
 
             {/* 转盘 */}

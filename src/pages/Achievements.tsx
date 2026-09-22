@@ -179,8 +179,8 @@ export default function Achievements() {
         <div className={`${styles.card} p-5 relative overflow-hidden`}>
           <div className="absolute top-2 right-2 text-4xl opacity-20">{currentLevel.icon}</div>
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-yellow-500/20 to-orange-500/20 flex items-center justify-center">
-              <Crown className="w-6 h-6 text-yellow-400" />
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-studio-amber/20 to-studio-amber/20 flex items-center justify-center">
+              <Crown className="w-6 h-6 text-studio-amber" />
             </div>
             <div>
               <p className={`text-2xl font-bold ${styles.textPrimary}`}>
@@ -197,7 +197,7 @@ export default function Achievements() {
             <div className="mt-3">
               <div className={`h-1.5 rounded-full ${styles.progressBg}`}>
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-yellow-500 to-orange-500 transition-all duration-500"
+                  className="h-full rounded-full bg-gradient-to-r from-studio-amber to-studio-amber transition-all duration-500"
                   style={{ width: `${Math.min(100, ((stats?.totalPoints || 0) - currentLevel.minPoints) / (nextLevel.minPoints - currentLevel.minPoints) * 100)}%` }}
                 />
               </div>
@@ -208,8 +208,8 @@ export default function Achievements() {
         {/* 已解锁 */}
         <div className={`${styles.card} p-5`}>
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-[#5c7cfa]/15 flex items-center justify-center">
-              <Trophy className="w-6 h-6 text-[#5c7cfa]" />
+            <div className="w-12 h-12 rounded-xl bg-studio-primary/15 flex items-center justify-center">
+              <Trophy className="w-6 h-6 text-studio-primary" />
             </div>
             <div>
               <p className={`text-2xl font-bold ${styles.textPrimary}`}>
@@ -223,8 +223,8 @@ export default function Achievements() {
         {/* 总积分 */}
         <div className={`${styles.card} p-5`}>
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-yellow-500/15 flex items-center justify-center">
-              <Star className="w-6 h-6 text-yellow-400" />
+            <div className="w-12 h-12 rounded-xl bg-studio-amber/15 flex items-center justify-center">
+              <Star className="w-6 h-6 text-studio-amber" />
             </div>
             <div>
               <p className={`text-2xl font-bold ${styles.textPrimary}`}>{stats?.totalPoints || 0}</p>
@@ -236,8 +236,8 @@ export default function Achievements() {
         {/* 完成度 */}
         <div className={`${styles.card} p-5`}>
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-green-500/15 flex items-center justify-center">
-              <Award className="w-6 h-6 text-green-400" />
+            <div className="w-12 h-12 rounded-xl bg-studio-success/15 flex items-center justify-center">
+              <Award className="w-6 h-6 text-studio-success" />
             </div>
             <div>
               <p className={`text-2xl font-bold ${styles.textPrimary}`}>
@@ -345,7 +345,7 @@ export default function Achievements() {
                     key={achievement.id}
                     className={`${styles.card} p-5 transition-all duration-300 hover:shadow-soft-lg ${
                       isEarned
-                        ? `border-[${rarityConfig.value === 'legendary' ? '#ffd43b' : '#5c7cfa'}]/30 hover:-translate-y-0.5`
+                        ? `border-[${rarityConfig.value === 'legendary' ? 'var(--xmt-amber)' : 'var(--xmt-primary)'}]/30 hover:-translate-y-0.5`
                         : 'opacity-70 hover:opacity-90'
                     }`}
                   >
@@ -353,7 +353,7 @@ export default function Achievements() {
                       {/* 图标 */}
                       <div className={`w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform duration-200 ${
                         isEarned
-                          ? 'bg-gradient-to-br from-yellow-500/20 to-orange-500/20'
+                          ? 'bg-gradient-to-br from-studio-amber/20 to-studio-amber/20'
                           : styles.bgTertiary
                       }`}>
                         {isEarned ? (
@@ -369,7 +369,7 @@ export default function Achievements() {
                           <h3 className={`text-sm font-semibold ${styles.textPrimary} truncate`}>
                             {achievement.name}
                           </h3>
-                          {isEarned && <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />}
+                          {isEarned && <CheckCircle className="w-4 h-4 text-studio-success flex-shrink-0" />}
                         </div>
 
                         {/* 描述 */}
@@ -401,7 +401,7 @@ export default function Achievements() {
                             </div>
                             <div className={`h-1.5 rounded-full ${styles.progressBg}`}>
                               <div
-                                className="h-full rounded-full bg-gradient-to-r from-[#5c7cfa] to-[#748ffc] transition-all duration-500"
+                                className="h-full rounded-full bg-gradient-to-r from-studio-primary to-studio-primary transition-all duration-500"
                                 style={{ width: `${prog.percentage}%` }}
                               />
                             </div>
@@ -430,8 +430,8 @@ export default function Achievements() {
           {/* 积分排行榜 */}
           <div className={`${styles.card} p-6`}>
             <div className="flex items-center gap-2.5 mb-5">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-yellow-500/10`}>
-                <Crown className="w-4 h-4 text-yellow-400" />
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-studio-amber/10`}>
+                <Crown className="w-4 h-4 text-studio-amber" />
               </div>
               <h3 className={`text-base font-semibold ${styles.textPrimary}`}>积分排行榜</h3>
             </div>
@@ -450,7 +450,7 @@ export default function Achievements() {
                     <div
                       key={entry.user_id}
                       className={`flex items-center gap-4 p-3 rounded-xl transition-colors ${
-                        isTop3 ? 'bg-yellow-500/5' : styles.hoverBg
+                        isTop3 ? 'bg-studio-amber/5' : styles.hoverBg
                       }`}
                     >
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${
@@ -458,7 +458,7 @@ export default function Achievements() {
                       }`}>
                         {isTop3 ? medals[index] : index + 1}
                       </div>
-                      <div className={`w-9 h-9 rounded-full bg-gradient-to-br from-[#5c7cfa] to-[#748ffc] flex items-center justify-center text-white font-bold text-sm`}>
+                      <div className={`w-9 h-9 rounded-full bg-gradient-to-br from-studio-primary to-studio-primary flex items-center justify-center text-white font-bold text-sm`}>
                         {entry.user_name?.charAt(0) || '?'}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -479,8 +479,8 @@ export default function Achievements() {
           {/* 成就分类统计 */}
           <div className={`${styles.card} p-6`}>
             <div className="flex items-center gap-2.5 mb-5">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-[#5c7cfa]/10`}>
-                <TrendingUp className="w-4 h-4 text-[#5c7cfa]" />
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-studio-primary/10`}>
+                <TrendingUp className="w-4 h-4 text-studio-primary" />
               </div>
               <h3 className={`text-base font-semibold ${styles.textPrimary}`}>分类统计</h3>
             </div>
@@ -503,7 +503,7 @@ export default function Achievements() {
                     </div>
                     <div className={`h-1.5 rounded-full ${styles.progressBg}`}>
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-[#5c7cfa] to-[#748ffc] transition-all duration-500"
+                        className="h-full rounded-full bg-gradient-to-r from-studio-primary to-studio-primary transition-all duration-500"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
@@ -538,8 +538,8 @@ export default function Achievements() {
       {viewMode === 'feed' && (
         <div className={`${styles.card} p-6`}>
           <div className="flex items-center gap-2.5 mb-5">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-purple-500/10`}>
-              <Sparkles className="w-4 h-4 text-purple-400" />
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-studio-violet/10`}>
+              <Sparkles className="w-4 h-4 text-studio-violet" />
             </div>
             <h3 className={`text-base font-semibold ${styles.textPrimary}`}>最近获得的成就</h3>
           </div>
@@ -559,7 +559,7 @@ export default function Achievements() {
                     className={`flex items-center gap-4 p-4 rounded-xl transition-all duration-200 ${styles.hoverBg}`}
                     style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#5c7cfa] to-[#748ffc] flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-studio-primary to-studio-primary flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
                       {item.user_name?.charAt(0) || '?'}
                     </div>
                     <div className="flex-1 min-w-0">

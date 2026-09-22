@@ -17,7 +17,7 @@ export default function StageProgress({ stages, className = '' }: { stages: Stag
               ? 'bg-studio-cyan shadow-glow-cyan'
               : state === 'blocked'
                 ? 'bg-studio-coral'
-                : 'bg-slate-600';
+                : 'bg-studio-surface-soft';
 
         return (
           <div key={`${stage.label}-${index}`} className="flex min-w-0 flex-1 items-center gap-2">

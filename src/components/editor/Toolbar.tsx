@@ -207,18 +207,16 @@ export default function Toolbar({
     `inline-flex min-h-10 min-w-10 items-center justify-center rounded transition-colors ${
       active
         ? isDark
-          ? 'bg-blue-600 text-white'
-          : 'bg-blue-100 text-blue-600'
-        : isDark
-          ? 'text-gray-300 hover:bg-gray-700'
-          : 'text-gray-600 hover:bg-gray-200'
+          ? 'bg-studio-primary text-white'
+          : 'bg-studio-primary/15 text-studio-primary'
+        : 'text-studio-text-secondary hover:bg-studio-surface-soft'
     }`;
 
-  const divider = <div className={`editor-toolbar-divider w-px h-6 mx-1 shrink-0 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />;
+  const divider = <div className={`editor-toolbar-divider w-px h-6 mx-1 shrink-0 bg-studio-border-soft`} />;
 
   const groupLabel = (text: string) => (
     <span className={`editor-group-label text-[10px] font-medium uppercase tracking-wider select-none ${
-      isDark ? 'text-gray-500' : 'text-gray-400'
+      isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'
     }`}>
       {text}
     </span>
@@ -285,8 +283,8 @@ export default function Toolbar({
         mark[data-color="cyan"]{background-color:#a5f3fc}
         mark:not([data-color]){background-color:#fef08a}
         /* 批注 */
-        .comment-mark,span[data-comment-id]{background-color:#fef3c7!important;border-bottom:2px solid #f59e0b!important}
-        span[data-comment-id]::after{content:"【批注："attr(data-comment-text)"】";font-size:7pt;color:#92400e;background:#fffbeb;border:1px solid #fbbf24;border-radius:2pt;padding:0 4pt;margin-left:4pt;vertical-align:middle;white-space:nowrap}
+        .comment-mark,span[data-comment-id]{background-color:#fef3c7!important;border-bottom:2px solid #F5C86B!important}
+        span[data-comment-id]::after{content:"【批注："attr(data-comment-text)"】";font-size:7pt;color:#FDEFC8;background:#121826;border:1px solid #F5C86B;border-radius:2pt;padding:0 4pt;margin-left:4pt;vertical-align:middle;white-space:nowrap}
         @media print{body{padding:20px}}
       </style></head><body>${printContent}</body></html>`);
       printWindow.document.close();
@@ -381,14 +379,14 @@ export default function Toolbar({
   };
 
   const dropdownClass = `absolute top-full left-0 mt-1 z-50 rounded-lg shadow-xl border py-1 ${
-    isDark ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'
+    isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'
   }`;
 
   if (variant === 'basic') {
     return (
       <div
         className={`editor-toolbar flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-2 ${
-          isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+          isDark ? 'border-studio-border-soft bg-studio-surface-soft' : 'border-studio-border-soft bg-white'
         }`}
         aria-label="基础富文本工具栏"
       >
@@ -477,11 +475,11 @@ export default function Toolbar({
                   className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${
                     opt.level === 0
                       ? !editor.isActive('heading')
-                        ? isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-600'
-                        : isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'
+                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-studio-primary'
+                        : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
                       : editor.isActive('heading', { level: opt.level })
-                        ? isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-600'
-                        : isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'
+                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-studio-primary'
+                        : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
                   }`}
                 >
                   <opt.icon className="w-4 h-4" />
@@ -539,12 +537,12 @@ export default function Toolbar({
                     key={c.value || 'default'}
                     onClick={() => handleTextColor(c.value)}
                     className="w-8 h-8 rounded-lg border-2 transition-all hover:scale-110 flex items-center justify-center"
-                    style={{ borderColor: isDark ? '#4b5563' : '#d1d5db' }}
+                    style={{ borderColor: 'var(--xmt-border-soft)' }}
                     title={c.name}
                   >
                     <span
                       className="font-bold text-sm flex items-center justify-center"
-                      style={{ color: c.value || (isDark ? '#fff' : '#000') }}
+                      style={{ color: c.value || 'var(--editor-fg)' }}
                     >
                       A
                     </span>
@@ -594,7 +592,7 @@ export default function Toolbar({
                     setShowHighlightPicker(false);
                   }}
                   className={`w-full text-xs py-1 rounded transition-colors ${
-                    isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'
+                    isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
                   }`}
                 >
                   取消高亮
@@ -669,7 +667,7 @@ export default function Toolbar({
     <div
       ref={toolbarRef}
       className={`editor-toolbar shrink-0 flex items-center flex-wrap gap-1 px-3 py-2 border-b ${compact ? 'editor-toolbar-compact' : ''} ${
-        isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+        isDark ? 'border-studio-border-soft bg-studio-surface-soft' : 'border-studio-border-soft bg-white'
       }`}
     >
       {/* 文件组 */}
@@ -688,13 +686,13 @@ export default function Toolbar({
         </button>
         {showFileMenu && (
           <div className={`${dropdownClass} w-40`}>
-            <button onClick={exportMarkdown} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+            <button onClick={exportMarkdown} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
               <FileText className="w-4 h-4" /> 导出 Markdown
             </button>
-            <button onClick={exportHTML} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+            <button onClick={exportHTML} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
               <FileCode className="w-4 h-4" /> 导出 HTML
             </button>
-            <button onClick={exportJSON} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+            <button onClick={exportJSON} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
               <FileJson className="w-4 h-4" /> 导出 JSON
             </button>
           </div>
@@ -720,47 +718,47 @@ export default function Toolbar({
             {showMoreMenu && (
               <div className={`${dropdownClass} right-0 w-56`}>
                 {/* 段落 */}
-                <div className={`px-3 py-1 text-xs font-medium ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>段落</div>
-                <button onClick={() => editor.chain().focus().setTextAlign('left').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <div className={`px-3 py-1 text-xs font-medium text-studio-text-muted`}>段落</div>
+                <button onClick={() => editor.chain().focus().setTextAlign('left').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <AlignLeft className="w-4 h-4" /> 左对齐
                 </button>
-                <button onClick={() => editor.chain().focus().setTextAlign('center').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => editor.chain().focus().setTextAlign('center').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <AlignCenter className="w-4 h-4" /> 居中
                 </button>
-                <button onClick={() => editor.chain().focus().setTextAlign('right').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => editor.chain().focus().setTextAlign('right').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <AlignRight className="w-4 h-4" /> 右对齐
                 </button>
-                <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <AlignJustify className="w-4 h-4" /> 两端对齐
                 </button>
-                <button onClick={() => { toggleFirstLineIndent(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isTextIndentActive() ? (isDark ? 'bg-blue-600/20 text-blue-400' : 'bg-blue-50 text-blue-600') : (isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100')}`}>
+                <button onClick={() => { toggleFirstLineIndent(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isTextIndentActive() ? (isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-studio-primary') : (isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft')}`}>
                   <IndentIncrease className="w-4 h-4" /> 首行缩进
                 </button>
-                <div className={`my-1 border-t ${isDark ? 'border-gray-700' : 'border-gray-200'}`} />
+                <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />
                 {/* 插入 */}
-                <div className={`px-3 py-1 text-xs font-medium ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>插入</div>
-                <button onClick={() => { addImage(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <div className={`px-3 py-1 text-xs font-medium text-studio-text-muted`}>插入</div>
+                <button onClick={() => { addImage(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <ImageIcon className="w-4 h-4" /> 图片
                 </button>
-                <button onClick={() => { insertTable(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => { insertTable(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <TableIcon className="w-4 h-4" /> 表格
                 </button>
-                <button onClick={() => { editor.chain().focus().toggleBlockquote().run(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => { editor.chain().focus().toggleBlockquote().run(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <Quote className="w-4 h-4" /> 引用
                 </button>
-                <button onClick={() => { editor.chain().focus().toggleCodeBlock().run(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => { editor.chain().focus().toggleCodeBlock().run(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <Code className="w-4 h-4" /> 代码块
                 </button>
-                <button onClick={() => { editor.chain().focus().setHorizontalRule().run(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => { editor.chain().focus().setHorizontalRule().run(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <Minus className="w-4 h-4" /> 分割线
                 </button>
-                <button onClick={() => { editor.chain().focus().toggleTaskList().run(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => { editor.chain().focus().toggleTaskList().run(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <CheckSquare className="w-4 h-4" /> 待办
                 </button>
-                <button onClick={() => { setLink(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => { setLink(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <LinkIcon className="w-4 h-4" /> 链接
                 </button>
-                <button onClick={() => { onAddComment?.(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                <button onClick={() => { onAddComment?.(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <MessageSquare className="w-4 h-4" /> 批注
                 </button>
               </div>

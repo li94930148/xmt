@@ -91,20 +91,21 @@ export default function Sidebar({
     persistExpandedGroup(nextGroup, location.pathname);
   }, [location.pathname]);
 
-  const desktopAsideClass = collapsed ? 'w-[72px]' : 'w-[232px]';
+  const desktopAsideClass = collapsed ? 'w-[72px]' : 'w-[240px]';
   const shellClass =
     'border-studio-border-soft bg-studio-surface-glass text-studio-text-primary shadow-card backdrop-blur-2xl';
 
   const renderMenu = (isMobile: boolean) => (
     <div className="flex h-full flex-col overflow-hidden">
       <div className={`flex min-h-20 items-center border-b border-studio-border-soft py-3 ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-4'}`}>
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[16px] border border-studio-border-soft bg-white/[0.06] shadow-glow-primary">
-          <img src={systemSettings.branding.logo || '/logo.png'} alt="XMT" className="h-8 w-8 object-contain" />
+        <div className="studio-sheen relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-studio-border-soft bg-white/[0.05] shadow-glow-primary">
+          <img src={systemSettings.branding.logo || '/logo.png'} alt="XMT" className="relative z-[1] h-8 w-8 object-contain" />
         </div>
 
         {(!collapsed || isMobile) && (
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-bold tracking-normal text-studio-text-primary">
+            <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-studio-text-muted">Studio</p>
+            <h1 className="truncate text-sm font-semibold tracking-tight text-studio-text-primary">
               {systemSettings.system.name || '新媒体工作台'}
             </h1>
           </div>

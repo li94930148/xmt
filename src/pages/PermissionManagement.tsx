@@ -236,7 +236,7 @@ export default function PermissionManagement() {
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
                   role.code === 'admin' ? 'bg-brand-500/10 text-brand-500' :
-                  role.code === 'director' ? 'bg-[#51cf66]/10 text-[#51cf66]' :
+                  role.code === 'director' ? 'bg-studio-success/10 text-studio-success' :
                   'bg-theme-tertiary text-theme-text-secondary'
                 }`}>
                   <Shield className="w-5 h-5" />
@@ -279,7 +279,7 @@ export default function PermissionManagement() {
                     {!role.is_system && (
                       <button
                         onClick={() => handleDeleteRole(role.id)}
-                        className={`p-2 rounded-lg hover:bg-red-500/10 text-red-400`}
+                        className={`p-2 rounded-lg hover:bg-studio-coral/10 text-studio-coral`}
                         title="删除"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -400,7 +400,7 @@ export default function PermissionManagement() {
                                 type="checkbox"
                                 checked={formData.permission_ids.includes(perm.id)}
                                 onChange={() => togglePermission(perm.id)}
-                                className="rounded border-gray-300"
+                                className="rounded border-studio-border-soft"
                               />
                               <span className={`text-sm ${styles.textPrimary}`}>{perm.name}</span>
                               <span className={`text-xs ${styles.textMuted}`}>{perm.code}</span>

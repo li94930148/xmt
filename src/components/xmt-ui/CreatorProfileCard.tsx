@@ -21,7 +21,7 @@ function avatarFallback(name: string) {
     '"': '&quot;',
     "'": '&apos;',
   })[character] || character);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0ea5e9"/><stop offset="1" stop-color="#312e81"/></linearGradient></defs><rect width="100%" height="100%" rx="48" fill="url(#g)"/><text x="50%" y="48%" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="220" font-family="sans-serif">${initial}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6B8CFF"/><stop offset="1" stop-color="#0A0F1C"/></linearGradient></defs><rect width="100%" height="100%" rx="48" fill="url(#g)"/><text x="50%" y="48%" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="220" font-family="sans-serif">${initial}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 

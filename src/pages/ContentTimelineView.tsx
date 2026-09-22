@@ -19,10 +19,10 @@ function eventText(event: UnifiedTimelineEvent) {
 }
 
 function eventTone(type: UnifiedTimelineEvent['type']) {
-  if (type === 'conflict') return 'bg-red-500';
-  if (type === 'version') return 'bg-violet-500';
-  if (type === 'save') return 'bg-emerald-500';
-  return 'bg-blue-500';
+  if (type === 'conflict') return 'bg-studio-coral';
+  if (type === 'version') return 'bg-studio-violet';
+  if (type === 'save') return 'bg-studio-success';
+  return 'bg-studio-primary';
 }
 
 function timeRange(start: number, end: number) {
@@ -110,12 +110,12 @@ export default function ContentTimelineView() {
           <div><p className={`text-xs font-medium ${styles.textMuted}`}>内容生产记录</p><h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>内容动态</h1><p className={`mt-2 text-sm ${styles.textMuted}`}>按时间查看这篇内容的编辑、保存和版本变化</p></div>
           <div className="flex w-full gap-2 lg:w-auto">
             <ContentDocumentPicker value={input} onChange={setInput} onPick={chooseDocument} className={`min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm lg:w-80 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`} />
-            <button type="button" onClick={applyInput} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>查看</button>
+            <button type="button" onClick={applyInput} className="inline-flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-sm font-medium text-white"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>查看</button>
           </div>
         </div>
       </header>
 
-      {error ? <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500">{error}</div> : null}
+      {error ? <div role="alert" className="rounded-xl border border-studio-coral/30 bg-studio-coral/10 p-4 text-sm text-studio-coral">{error}</div> : null}
 
       <section className="grid gap-4 sm:grid-cols-3">
         <div className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}><div className={`flex items-center gap-2 text-xs ${styles.textMuted}`}><FileClock className="h-4 w-4"/>最近更新</div><p className={`mt-3 text-base font-semibold ${styles.textPrimary}`}>{latest ? formatBeijingTime(latest.timestamp, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '暂无记录'}</p></div>

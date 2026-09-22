@@ -13,13 +13,13 @@ import {
 } from 'lucide-react';
 
 const columns = [
-  { status: 'pending', label: '待审核', icon: Clock, color: 'bg-yellow-500', textColor: 'text-yellow-400' },
-  { status: 'approved', label: '已通过', icon: CheckCircle, color: 'bg-green-500', textColor: 'text-green-400' },
-  { status: 'rejected', label: '已驳回', icon: XCircle, color: 'bg-red-500', textColor: 'text-red-400' },
-  { status: 'production', label: '创作中', icon: FileText, color: 'bg-blue-500', textColor: 'text-blue-400' },
-  { status: 'shooting', label: '拍摄中', icon: Camera, color: 'bg-purple-500', textColor: 'text-purple-400' },
-  { status: 'publishing', label: '发布中', icon: Send, color: 'bg-indigo-500', textColor: 'text-indigo-400' },
-  { status: 'completed', label: '已完成', icon: CheckCircle, color: 'bg-gray-500', textColor: 'text-gray-400' },
+  { status: 'pending', label: '待审核', icon: Clock, color: 'bg-studio-amber', textColor: 'text-studio-amber' },
+  { status: 'approved', label: '已通过', icon: CheckCircle, color: 'bg-studio-success', textColor: 'text-studio-success' },
+  { status: 'rejected', label: '已驳回', icon: XCircle, color: 'bg-studio-coral', textColor: 'text-studio-coral' },
+  { status: 'production', label: '创作中', icon: FileText, color: 'bg-studio-primary', textColor: 'text-studio-primary' },
+  { status: 'shooting', label: '拍摄中', icon: Camera, color: 'bg-studio-violet', textColor: 'text-studio-violet' },
+  { status: 'publishing', label: '发布中', icon: Send, color: 'bg-studio-primary', textColor: 'text-studio-primary' },
+  { status: 'completed', label: '已完成', icon: CheckCircle, color: 'bg-studio-surface-soft', textColor: 'text-studio-text-muted' },
 ];
 
 const platformOptions = ['全部', '抖音', '快手', '小红书', 'B站', '视频号', '公众号'];
@@ -176,7 +176,7 @@ export default function Kanban() {
                       return (
                         <div
                           key={topic.id}
-                          className={`${styles.bgTertiary} rounded-xl p-3.5 border ${styles.border} hover:border-[#5c7cfa]/30 transition-all duration-200 group cursor-pointer`}
+                          className={`${styles.bgTertiary} rounded-xl p-3.5 border ${styles.border} hover:border-studio-primary/30 transition-all duration-200 group cursor-pointer`}
                           onClick={() => handleTopicClick(topic)}
                         >
                           <div className={`text-sm font-medium ${styles.textPrimary} mb-2 line-clamp-2 flex items-center justify-between gap-2`}>
@@ -195,7 +195,7 @@ export default function Kanban() {
                               {topic.assignee_name || '未分配'}
                             </span>
                             {topic.deadline && (
-                              <span className={new Date(topic.deadline) < new Date() ? 'text-red-400' : styles.textMuted}>
+                              <span className={new Date(topic.deadline) < new Date() ? 'text-studio-coral' : styles.textMuted}>
                                 {formatBeijingDate(topic.deadline)}
                               </span>
                             )}
@@ -209,9 +209,9 @@ export default function Kanban() {
                                   className={`text-[10px] px-2.5 py-1 rounded-lg font-medium transition-colors ${
                                     ns.status === 'rejected' || ns.status === 'completed'
                                       ? ns.status === 'rejected'
-                                        ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
-                                        : 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
-                                      : 'bg-[#5c7cfa]/10 text-[#5c7cfa] hover:bg-[#5c7cfa]/20'
+                                        ? 'bg-studio-coral/10 text-studio-coral hover:bg-studio-coral/20'
+                                        : 'bg-studio-success/10 text-studio-success hover:bg-studio-success/20'
+                                      : 'bg-studio-primary/10 text-studio-primary hover:bg-studio-primary/20'
                                   }`}
                                 >
                                   {ns.label}

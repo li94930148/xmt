@@ -6,7 +6,10 @@ export default function AppShell({
   ...props
 }: ComponentPropsWithoutRef<'div'> & { children: ReactNode }) {
   return (
-    <div className={`studio-grid-bg min-h-screen bg-studio-app-bg text-studio-text-primary ${className}`} {...props}>
+    <div
+      className={`studio-grid-bg relative min-h-screen bg-studio-app-bg text-studio-text-primary ${className}`}
+      {...props}
+    >
       {children}
     </div>
   );

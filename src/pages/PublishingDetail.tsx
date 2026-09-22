@@ -141,7 +141,7 @@ export default function PublishingDetail() {
     return (
       <PageShell>
         <div className="flex h-64 items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-studio-primary border-t-transparent" />
         </div>
       </PageShell>
     );
@@ -158,7 +158,7 @@ export default function PublishingDetail() {
   }
 
   const hasLocalEdit = data.script_content !== null && data.script_content !== undefined;
-  const displayContent = scriptContent || '<p class="text-gray-500">暂无剧本内容</p>';
+  const displayContent = scriptContent || '<p class="text-studio-text-muted">暂无剧本内容</p>';
 
   return (
     <PageShell className="space-y-6">
@@ -166,7 +166,7 @@ export default function PublishingDetail() {
       <div className="flex items-center justify-between">
         <button
           onClick={() => navigate('/publishing')}
-          className={`flex items-center gap-2 ${styles.textSecondary} hover:text-blue-400 transition-colors`}
+          className={`flex items-center gap-2 ${styles.textSecondary} hover:text-studio-primary transition-colors`}
         >
           <ChevronLeft className="w-5 h-5" />
           返回发布管理
@@ -186,7 +186,7 @@ export default function PublishingDetail() {
       {/* 标题卡片 */}
       <div className={`${styles.card} p-6`}>
         <h1 className={`text-2xl font-bold ${styles.textPrimary} flex items-center gap-2`}>
-          <Send className="w-6 h-6 text-blue-400" />
+          <Send className="w-6 h-6 text-studio-primary" />
           {data.topic_title}
         </h1>
         <p className={`${styles.textSecondary} mt-1`}>发布管理详情 · 关联选题 #{data.topic_id}</p>
@@ -202,19 +202,19 @@ export default function PublishingDetail() {
             return (
               <div key={step.key} className="flex items-center flex-1">
                 <div className={`flex items-center gap-2 px-3 py-2 rounded-lg flex-1 ${
-                  status === 'completed' ? 'bg-green-500/10 border border-green-500/30' :
-                  status === 'current' ? 'bg-blue-500/10 border border-blue-500/30 ring-2 ring-blue-500/20' :
+                  status === 'completed' ? 'bg-studio-success/10 border border-studio-success/30' :
+                  status === 'current' ? 'bg-studio-primary/10 border border-studio-primary/30 ring-2 ring-studio-primary/20' :
                   `${styles.bgTertiary} border ${styles.border}`
                 }`}>
                   <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                    status === 'completed' ? 'bg-green-500 text-white' :
-                    status === 'current' ? 'bg-blue-500 text-white' :
-                    'bg-gray-600 text-gray-400'
+                    status === 'completed' ? 'bg-studio-success text-white' :
+                    status === 'current' ? 'bg-studio-primary text-white' :
+                    'bg-studio-surface-soft text-studio-text-muted'
                   }`}>
                     {status === 'completed' ? <CheckCircle className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
                   </div>
                   <span className={`text-xs font-medium ${
-                    status === 'current' ? 'text-blue-400' :
+                    status === 'current' ? 'text-studio-primary' :
                     status === 'completed' ? styles.textPrimary :
                     styles.textMuted
                   }`}>
@@ -223,7 +223,7 @@ export default function PublishingDetail() {
                 </div>
                 {index < WORKFLOW_STEPS.length - 1 && (
                   <ArrowRight className={`w-4 h-4 mx-1 flex-shrink-0 ${
-                    getStepStatus(WORKFLOW_STEPS[index + 1].key) !== 'pending' ? 'text-green-500' : styles.textMuted
+                    getStepStatus(WORKFLOW_STEPS[index + 1].key) !== 'pending' ? 'text-studio-success' : styles.textMuted
                   }`} />
                 )}
               </div>
@@ -237,7 +237,7 @@ export default function PublishingDetail() {
         {/* 选题信息 */}
         <div className={`${styles.card} p-6`}>
           <h2 className={`text-lg font-semibold ${styles.textPrimary} mb-4 flex items-center gap-2`}>
-            <FileText className="w-5 h-5 text-blue-400" />
+            <FileText className="w-5 h-5 text-studio-primary" />
             选题信息
           </h2>
           <div className="space-y-3">
@@ -261,7 +261,7 @@ export default function PublishingDetail() {
         {/* 发布信息 */}
         <div className={`${styles.card} p-6`}>
           <h2 className={`text-lg font-semibold ${styles.textPrimary} mb-4 flex items-center gap-2`}>
-            <Send className="w-5 h-5 text-green-400" />
+            <Send className="w-5 h-5 text-studio-success" />
             发布信息
           </h2>
           <div className="space-y-3">
@@ -276,7 +276,7 @@ export default function PublishingDetail() {
             <div className="flex items-start gap-3">
               <span className={`text-xs ${styles.textMuted} w-16 shrink-0 pt-0.5`}>发布链接</span>
               {data.url ? (
-                <a href={data.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
+                <a href={data.url} target="_blank" rel="noopener noreferrer" className="text-sm text-studio-primary hover:text-studio-primary flex items-center gap-1">
                   查看 <ExternalLink className="w-3 h-3" />
                 </a>
               ) : <span className={`text-sm ${styles.textPrimary}`}>-</span>}
@@ -291,7 +291,7 @@ export default function PublishingDetail() {
         {/* 成片制作信息 */}
         <div className={`${styles.card} p-6`}>
           <h2 className={`text-lg font-semibold ${styles.textPrimary} mb-4 flex items-center gap-2`}>
-            <Camera className="w-5 h-5 text-purple-400" />
+            <Camera className="w-5 h-5 text-studio-violet" />
             成片制作
           </h2>
           {data.shooting ? (
@@ -321,7 +321,7 @@ export default function PublishingDetail() {
         {/* 创作信息 */}
         <div className={`${styles.card} p-6`}>
           <h2 className={`text-lg font-semibold ${styles.textPrimary} mb-4 flex items-center gap-2`}>
-            <FileText className="w-5 h-5 text-orange-400" />
+            <FileText className="w-5 h-5 text-studio-amber" />
             创作审核
           </h2>
           {data.production ? (
@@ -332,15 +332,15 @@ export default function PublishingDetail() {
               </div>
               <div className="flex items-start gap-3">
                 <span className={`text-xs ${styles.textMuted} w-16 shrink-0 pt-0.5`}>状态</span>
-                <span className="text-sm text-green-400">已通过</span>
+                <span className="text-sm text-studio-success">已通过</span>
               </div>
               <div className="flex items-start gap-3">
                 <span className={`text-xs ${styles.textMuted} w-16 shrink-0 pt-0.5`}>操作人</span>
                 <span className={`text-sm ${styles.textPrimary}`}>{data.production.operator_name || '-'}</span>
               </div>
               {hasLocalEdit && (
-                <div className="mt-2 px-3 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                  <p className="text-xs text-blue-400">📝 已有本地编辑版本（不回写创作管理）</p>
+                <div className="mt-2 px-3 py-2 bg-studio-primary/10 border border-studio-primary/30 rounded-lg">
+                  <p className="text-xs text-studio-primary">📝 已有本地编辑版本（不回写创作管理）</p>
                 </div>
               )}
             </div>
@@ -354,10 +354,10 @@ export default function PublishingDetail() {
       <div className={`${styles.card} overflow-hidden`}>
         <div className={`flex items-center justify-between px-6 py-4 border-b ${styles.border}`}>
           <h2 className={`text-lg font-semibold ${styles.textPrimary} flex items-center gap-2`}>
-            <FileText className="w-5 h-5 text-blue-400" />
+            <FileText className="w-5 h-5 text-studio-primary" />
             剧本内容
             {hasLocalEdit && (
-              <span className="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded-full">本地编辑版</span>
+              <span className="text-xs px-2 py-0.5 bg-studio-primary/20 text-studio-primary rounded-full">本地编辑版</span>
             )}
           </h2>
           <div className="flex items-center gap-2">
@@ -372,7 +372,7 @@ export default function PublishingDetail() {
                 <button
                   onClick={handleSaveScript}
                   disabled={saving}
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-studio-primary hover:bg-studio-primary text-white transition-colors disabled:opacity-50"
                 >
                   <Save className="w-4 h-4" />
                   {saving ? '保存中...' : '保存'}
@@ -381,7 +381,7 @@ export default function PublishingDetail() {
             ) : (
               <button
                 onClick={() => setEditMode(true)}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-studio-primary hover:bg-studio-primary text-white transition-colors"
               >
                 <FileText className="w-4 h-4" />
                 编辑剧本
@@ -430,14 +430,14 @@ export default function PublishingDetail() {
       {data.topicHistory && data.topicHistory.length > 0 && (
         <div className={`${styles.card} p-6`}>
           <h2 className={`text-lg font-semibold ${styles.textPrimary} mb-4 flex items-center gap-2`}>
-            <Clock className="w-5 h-5 text-gray-400" />
+            <Clock className="w-5 h-5 text-studio-text-muted" />
             选题流转记录
           </h2>
           <div className="space-y-0">
             {data.topicHistory.map((h, i) => (
               <div key={i} className="flex gap-4">
                 <div className="flex flex-col items-center">
-                  <div className={`w-3 h-3 rounded-full ${i === 0 ? 'bg-blue-500' : 'bg-gray-500'} mt-1.5`} />
+                  <div className={`w-3 h-3 rounded-full ${i === 0 ? 'bg-studio-primary' : 'bg-studio-surface-soft'} mt-1.5`} />
                   {i < data.topicHistory.length - 1 && <div className={`w-px flex-1 ${styles.border} my-1`} />}
                 </div>
                 <div className="pb-4 flex-1">

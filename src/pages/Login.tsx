@@ -102,11 +102,11 @@ function ChangePasswordModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-slate-950 p-8 text-white shadow-2xl">
-        <p className="text-xs uppercase tracking-[0.28em] text-white/35">首次登录</p>
+    <div className="xmt-overlay xmt-overlay-center z-50 px-4">
+      <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-studio-app-bg p-8 text-white shadow-2xl">
+        <p className="text-xs uppercase tracking-[0.28em] text-studio-text-secondary">首次登录</p>
         <h3 className="mt-3 text-2xl font-semibold">请先修改初始密码</h3>
-        <p className="mt-3 text-sm leading-6 text-white/55">
+        <p className="mt-3 text-sm leading-6 text-studio-text-secondary">
           为保障账号安全，首次登录后需先设置新密码。
         </p>
 
@@ -115,21 +115,21 @@ function ChangePasswordModal({
             type="password"
             value={oldPwd}
             onChange={(event) => onOldPwdChange(event.target.value)}
-            className="h-12 w-full rounded-2xl border border-white/10 bg-white/[0.05] px-4 text-white outline-none placeholder:text-white/25"
+            className="h-12 w-full rounded-2xl border border-studio-border-soft bg-white/[0.05] px-4 text-white outline-none placeholder:text-studio-text-secondary"
             placeholder="当前密码"
           />
           <input
             type="password"
             value={newPwd}
             onChange={(event) => onNewPwdChange(event.target.value)}
-            className="h-12 w-full rounded-2xl border border-white/10 bg-white/[0.05] px-4 text-white outline-none placeholder:text-white/25"
+            className="h-12 w-full rounded-2xl border border-studio-border-soft bg-white/[0.05] px-4 text-white outline-none placeholder:text-studio-text-secondary"
             placeholder="新密码（至少 6 位）"
           />
           <input
             type="password"
             value={confirmPwd}
             onChange={(event) => onConfirmPwdChange(event.target.value)}
-            className="h-12 w-full rounded-2xl border border-white/10 bg-white/[0.05] px-4 text-white outline-none placeholder:text-white/25"
+            className="h-12 w-full rounded-2xl border border-studio-border-soft bg-white/[0.05] px-4 text-white outline-none placeholder:text-studio-text-secondary"
             placeholder="确认新密码"
           />
         </div>
@@ -137,7 +137,7 @@ function ChangePasswordModal({
         <div className="mt-6 flex justify-end gap-3">
           <button
             onClick={onCancel}
-            className="rounded-2xl border border-white/10 px-4 py-2 text-sm text-white/70 transition hover:bg-white/[0.06]"
+            className="rounded-2xl border border-white/10 px-4 py-2 text-sm text-studio-text-secondary transition hover:bg-white/[0.06]"
           >
             退出登录
           </button>
@@ -160,11 +160,11 @@ function StyleShell({ children }: { children: ReactNode }) {
 
 function FilingLinks({ light = false }: { light?: boolean }) {
   const linkClass = light
-    ? 'text-slate-400 hover:text-slate-600'
-    : 'text-slate-400/80 hover:text-[#c8a832]';
+    ? 'text-studio-text-secondary hover:text-studio-text-primary'
+    : 'text-studio-text-muted/80 hover:text-studio-primary';
 
   return (
-    <div className="pointer-events-auto absolute inset-x-0 bottom-4 z-20 px-4 text-center text-xs leading-6 text-slate-400 sm:bottom-5">
+    <div className="pointer-events-auto absolute inset-x-0 bottom-4 z-20 px-4 text-center text-xs leading-6 text-studio-text-muted sm:bottom-5">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-x-4 gap-y-1">
         <a
           href="https://beian.miit.gov.cn/"
@@ -223,25 +223,25 @@ function LoginForm({
   dark = true,
 }: LoginFormProps) {
   const surfaceClass = dark
-    ? 'border-white/10 bg-white/[0.04] text-white placeholder:text-white/25'
-    : 'border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-300';
-  const labelClass = dark ? 'text-white/45' : 'text-slate-600';
-  const helperClass = dark ? 'text-white/55' : 'text-slate-400';
-  const linkClass = dark ? 'text-amber-300/80 hover:text-amber-200' : 'text-amber-600 hover:text-amber-700';
+    ? 'border-studio-border-soft bg-white/[0.05] text-studio-text-primary placeholder:text-studio-text-muted focus:border-studio-border-active'
+    : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-primary placeholder:text-studio-text-secondary';
+  const labelClass = dark ? 'text-studio-text-secondary' : 'text-studio-text-muted';
+  const helperClass = dark ? 'text-studio-text-secondary' : 'text-studio-text-muted';
+  const linkClass = dark ? 'text-studio-primary-contrast hover:text-studio-primary' : 'text-studio-primary hover:opacity-80';
   const buttonClass = dark
-    ? 'bg-white text-black hover:bg-white/92'
-    : 'bg-slate-900 text-white hover:bg-slate-800';
+    ? 'xmt-btn-primary text-white'
+    : 'bg-studio-primary text-white hover:opacity-92';
 
   return (
     <>
       <div className="mb-6">
-        <h2 className={`text-2xl font-semibold ${dark ? 'text-white' : 'text-slate-900'}`}>{welcomeTitle}</h2>
+        <h2 className={`text-2xl font-semibold ${dark ? 'text-white' : 'text-studio-text-primary'}`}>{welcomeTitle}</h2>
         <p className={`mt-2 text-sm ${helperClass}`}>{welcomeMessage}</p>
       </div>
 
       {errorMessage && (
-        <div className={`mb-5 flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${dark ? 'border-red-500/20 bg-red-500/[0.06] text-red-200/90' : 'border-red-200 bg-red-50 text-red-600'}`}>
-          <span className="text-red-400">!</span>
+        <div className={`mb-5 flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${dark ? 'border-studio-coral/20 bg-studio-coral/[0.06] text-studio-coral/90' : 'border-studio-coral bg-studio-coral text-studio-coral'}`}>
+          <span className="text-studio-coral">!</span>
           {errorMessage}
         </div>
       )}
@@ -272,7 +272,7 @@ function LoginForm({
             <button
               type="button"
               onClick={onTogglePassword}
-              className={`absolute right-4 top-1/2 -translate-y-1/2 ${dark ? 'text-white/35 hover:text-white/70' : 'text-slate-300 hover:text-slate-500'}`}
+              className={`absolute right-4 top-1/2 -translate-y-1/2 ${dark ? 'text-studio-text-secondary hover:text-studio-text-secondary' : 'text-studio-text-secondary hover:text-studio-text-muted'}`}
               aria-label="切换密码可见状态"
             >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -286,7 +286,7 @@ function LoginForm({
               type="checkbox"
               checked={remember}
               onChange={(event) => onRememberChange(event.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-amber-500 focus:ring-amber-400/30 focus:ring-offset-0"
+              className="h-4 w-4 rounded border-studio-border-soft text-studio-primary focus:ring-studio-primary/30 focus:ring-offset-0"
             />
             记住密码
           </label>
@@ -301,7 +301,7 @@ function LoginForm({
           className={`group mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-70 ${buttonClass}`}
         >
           {loading ? (
-            <span className={`h-4 w-4 animate-spin rounded-full border-2 ${dark ? 'border-black/20 border-t-black' : 'border-white/30 border-t-white'}`} />
+            <span className={`h-4 w-4 animate-spin rounded-full border-2 ${dark ? 'border-white/25 border-t-white' : 'border-white/30 border-t-white'}`} />
           ) : (
             <>
               进入系统
@@ -573,29 +573,29 @@ export default function Login() {
     if (layout === 'style2') {
       return (
         <StyleShell>
-          <div className="relative min-h-screen overflow-hidden bg-[#050508]">
+          <div className="relative min-h-screen overflow-hidden bg-studio-app-bg">
             <LoginHero />
             <div className="absolute inset-0">
-              <div className="absolute left-[15%] top-[8%] h-[700px] w-[700px] rounded-full bg-amber-500/[0.07] blur-[200px]" />
-              <div className="absolute right-[10%] top-[12%] h-[500px] w-[500px] rounded-full bg-yellow-600/[0.05] blur-[180px]" />
-              <div className="absolute bottom-[5%] left-[40%] h-[400px] w-[400px] rounded-full bg-orange-500/[0.04] blur-[160px]" />
+              <div className="absolute left-[15%] top-[8%] h-[700px] w-[700px] rounded-full bg-studio-primary/[0.12] blur-[200px]" />
+              <div className="absolute right-[10%] top-[12%] h-[500px] w-[500px] rounded-full bg-studio-violet/[0.10] blur-[180px]" />
+              <div className="absolute bottom-[5%] left-[40%] h-[400px] w-[400px] rounded-full bg-studio-cyan/[0.08] blur-[160px]" />
             </div>
 
             <div className={`relative z-10 flex min-h-screen items-center justify-center px-5 py-12 pb-24 transition-all duration-1000 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
               <div className="w-full max-w-[460px]">
                 <div className="mb-10 text-center">
-                  <div className="relative mx-auto mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full border border-amber-500/25 bg-gradient-to-br from-amber-500/10 via-yellow-600/5 to-transparent text-3xl font-light text-amber-200/90 shadow-[0_0_60px_rgba(212,175,55,0.12)]">
+                  <div className="relative mx-auto mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full border border-studio-border-active bg-gradient-to-br from-studio-primary/15 via-studio-violet/10 to-transparent text-3xl font-light text-studio-primary-contrast shadow-glow-primary">
                     <BrandMark settings={settings} roundedClass="rounded-full" />
                   </div>
                   <div className="flex items-center justify-center gap-4 mb-5">
-                    <div className="h-px w-12 bg-gradient-to-r from-transparent to-amber-500/40" />
-                    <p className="text-[11px] uppercase tracking-[0.4em] text-amber-400/50 font-medium">{brandName}</p>
-                    <div className="h-px w-12 bg-gradient-to-l from-transparent to-amber-500/40" />
+                    <div className="h-px w-12 bg-gradient-to-r from-transparent to-studio-primary/50" />
+                    <p className="text-[11px] uppercase tracking-[0.4em] text-studio-cyan font-medium">{brandName}</p>
+                    <div className="h-px w-12 bg-gradient-to-l from-transparent to-studio-primary/50" />
                   </div>
-                  <p className="mx-auto max-w-md text-sm leading-6 text-white/35">{brandDescription}</p>
+                  <p className="mx-auto max-w-md text-sm leading-6 text-studio-text-secondary">{brandDescription}</p>
                 </div>
 
-                <div className="rounded-[32px] border border-amber-500/10 bg-black/60 p-10 shadow-[0_40px_100px_rgba(0,0,0,0.6)] backdrop-blur-3xl">
+                <div className="studio-sheen relative overflow-hidden rounded-panel border border-studio-border-soft bg-studio-surface-glass p-10 shadow-floating backdrop-blur-3xl">
                   <LoginForm {...commonFormProps} dark />
                 </div>
               </div>
@@ -612,41 +612,41 @@ export default function Login() {
           <div className="relative min-h-screen overflow-hidden bg-white pb-20">
             <LoginHero />
             <div className="min-h-screen lg:grid lg:grid-cols-2">
-              <div className="relative hidden bg-[#0c0f1a] lg:flex lg:flex-col lg:justify-between overflow-hidden p-12 xl:p-16">
+              <div className="relative hidden bg-studio-app-bg lg:flex lg:flex-col lg:justify-between overflow-hidden p-12 xl:p-16">
                 <div className={`relative z-10 transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white/[0.06] text-sm font-semibold text-amber-300/80">
+                    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white/[0.06] text-sm font-semibold text-studio-primary-contrast">
                       <BrandMark settings={settings} roundedClass="rounded-xl" />
                     </div>
-                    <span className="text-sm font-medium text-white/70">{settings.system.name}</span>
+                    <span className="text-sm font-medium text-studio-text-secondary">{settings.system.name}</span>
                   </div>
                 </div>
 
                 <div className={`relative z-10 max-w-md transition-all duration-700 delay-200 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-                  <p className="text-xs uppercase tracking-[0.3em] text-amber-400/50 font-medium">{brandName}</p>
+                  <p className="text-xs uppercase tracking-[0.3em] text-studio-cyan font-medium">{brandName}</p>
                   <h1 className="mt-5 text-[clamp(2.5rem,5vw,4.5rem)] font-bold leading-[1.05] tracking-tight text-white">
                     {welcomeTitle}
                   </h1>
-                  <p className="mt-6 text-base leading-7 text-white/35">{brandDescription}</p>
+                  <p className="mt-6 text-base leading-7 text-studio-text-secondary">{brandDescription}</p>
                 </div>
 
                 <div className={`relative z-10 transition-all duration-700 delay-500 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
-                  <p className="text-[11px] text-white/12 tracking-wider">{settings.system.name} · 内容生产协作平台</p>
+                  <p className="text-[11px] text-studio-text-muted tracking-wider">{settings.system.name} · 内容生产协作平台</p>
                 </div>
               </div>
 
               <div className="flex min-h-screen items-center justify-center bg-white px-6 py-12">
                 <div className={`w-full max-w-[380px] transition-all duration-700 delay-300 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
                   <div className="mb-10 lg:hidden">
-                    <div className="mb-4 flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-base font-semibold text-white">
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-studio-surface text-base font-semibold text-white">
                       <BrandMark settings={settings} roundedClass="rounded-2xl" />
                     </div>
-                    <h1 className="text-2xl font-bold text-slate-900">{brandName}</h1>
-                    <p className="mt-2 text-sm text-slate-400">{brandDescription}</p>
+                    <h1 className="text-2xl font-bold text-studio-text-primary">{brandName}</h1>
+                    <p className="mt-2 text-sm text-studio-text-muted">{brandDescription}</p>
                   </div>
 
                   <LoginForm {...commonFormProps} dark={false} />
-                  <p className="mt-8 text-center text-[11px] text-slate-300 tracking-wider">{settings.system.name}</p>
+                  <p className="mt-8 text-center text-[11px] text-studio-text-secondary tracking-wider">{settings.system.name}</p>
                 </div>
               </div>
             </div>
@@ -658,7 +658,7 @@ export default function Login() {
 
     return (
       <StyleShell>
-        <div className="relative min-h-screen overflow-hidden bg-[#0a0a0a] text-white">
+        <div className="relative min-h-screen overflow-hidden bg-studio-app-bg text-white">
           <LoginHero />
           <div
             className="pointer-events-none fixed inset-0 z-50 opacity-[0.03]"
@@ -669,14 +669,14 @@ export default function Login() {
             }}
           />
 
-          <div className="pointer-events-none fixed right-0 top-0 h-full w-px translate-x-[30vw] rotate-12 bg-gradient-to-b from-transparent via-[#c8a832]/20 to-transparent" />
-          <div className="pointer-events-none fixed right-0 top-0 h-full w-px translate-x-[32vw] rotate-12 bg-gradient-to-b from-transparent via-[#c8a832]/10 to-transparent" />
+          <div className="pointer-events-none fixed right-0 top-0 h-full w-px translate-x-[30vw] rotate-12 bg-gradient-to-b from-transparent via-studio-primary/20 to-transparent" />
+          <div className="pointer-events-none fixed right-0 top-0 h-full w-px translate-x-[32vw] rotate-12 bg-gradient-to-b from-transparent via-studio-primary/10 to-transparent" />
 
           <div className="min-h-screen flex pb-20">
             <div className="hidden lg:flex lg:w-[55%] relative items-center justify-center overflow-hidden">
               <div className="absolute inset-0">
-                <div className="absolute left-1/4 top-1/3 h-[500px] w-[500px] rounded-full bg-[#c8a832]/5 blur-[150px]" />
-                <div className="absolute bottom-1/4 right-1/3 h-[300px] w-[300px] rounded-full bg-[#c8a832]/3 blur-[100px]" />
+                <div className="absolute left-1/4 top-1/3 h-[500px] w-[500px] rounded-full bg-studio-primary/[0.08] blur-[150px]" />
+                <div className="absolute bottom-1/4 right-1/3 h-[300px] w-[300px] rounded-full bg-studio-primary/[0.06] blur-[100px]" />
               </div>
 
               <div className="absolute inset-0 opacity-[0.04]">
@@ -699,26 +699,26 @@ export default function Login() {
               <div className="relative z-10 px-16 max-w-xl">
                 <div className={`transition-all duration-1000 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
                   <div className="mb-12 flex items-center gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center border border-[#c8a832]/40">
-                      <div className="h-3 w-3 bg-[#c8a832]" />
+                    <div className="flex h-12 w-12 items-center justify-center border border-studio-primary/40">
+                      <div className="h-3 w-3 bg-studio-primary" />
                     </div>
-                    <div className="h-px w-16 bg-[#c8a832]/30" />
-                    <span className="text-[#c8a832]/60 text-xs tracking-[0.3em] uppercase font-medium">STR.2025</span>
+                    <div className="h-px w-16 bg-studio-primary/[0.06]0" />
+                    <span className="text-studio-primary/80 text-xs tracking-[0.3em] uppercase font-medium">STR.2025</span>
                   </div>
                 </div>
 
                 <div className={`transition-all duration-1000 delay-200 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
-                  <h1 className="mb-2 text-[clamp(3rem,8vw,7rem)] font-extralight leading-[0.9] tracking-tight text-white/90">
+                  <h1 className="mb-2 text-[clamp(3rem,8vw,7rem)] font-extralight leading-[0.9] tracking-tight text-studio-text-primary">
                     岚曜
                   </h1>
                   <div className="mb-10 mt-6 flex items-center gap-6">
-                    <div className="h-px w-24 bg-gradient-to-r from-[#c8a832] to-transparent" />
-                    <span className="text-sm font-medium tracking-[0.2em] text-[#c8a832]">LAN YAO</span>
+                    <div className="h-px w-24 bg-gradient-to-r from-studio-primary to-transparent" />
+                    <span className="text-sm font-medium tracking-[0.2em] text-studio-primary">LAN YAO</span>
                   </div>
                 </div>
 
                 <div className={`transition-all duration-1000 delay-400 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
-                  <p className="max-w-md text-lg font-light leading-relaxed text-white/30">
+                  <p className="max-w-md text-lg font-light leading-relaxed text-studio-text-secondary">
                     从一个选题开始，
                     <br />
                     经过脚本、拍摄与剪辑，
@@ -728,7 +728,7 @@ export default function Login() {
                 </div>
 
                 <div className={`mt-16 transition-all duration-1000 delay-600 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
-                  <div className="flex items-center gap-3 text-xs tracking-widest text-white/15">
+                  <div className="flex items-center gap-3 text-xs tracking-widest text-studio-text-muted">
                     <div className="h-1.5 w-1.5 rotate-45 border border-white/20" />
                     <span>新媒体协作管理系统</span>
                   </div>
@@ -738,25 +738,25 @@ export default function Login() {
 
             <div className="w-full lg:w-[45%] flex items-center justify-center relative">
               <div className="absolute left-0 right-0 top-8 text-center lg:hidden">
-                <h1 className="text-3xl font-extralight tracking-tight text-white/80">岚曜</h1>
-                <p className="mt-1 text-xs uppercase tracking-[0.3em] text-white/20">新媒体协作管理系统</p>
+                <h1 className="text-3xl font-extralight tracking-tight text-studio-text-primary">岚曜</h1>
+                <p className="mt-1 text-xs uppercase tracking-[0.3em] text-studio-text-muted">新媒体协作管理系统</p>
               </div>
 
               <div className={`w-full max-w-[400px] px-8 lg:px-0 transition-all duration-1000 delay-300 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-12'}`}>
                 <div className="mb-10">
-                  <h2 className="mb-2 text-2xl font-light tracking-tight text-white/80">欢迎回来</h2>
-                  <p className="text-sm text-white/25">请输入你的账户信息</p>
+                  <h2 className="mb-2 text-2xl font-light tracking-tight text-studio-text-primary">欢迎回来</h2>
+                  <p className="text-sm text-studio-text-secondary">请输入你的账户信息</p>
                 </div>
 
                 {errorMessage && (
-                  <div className="mb-6 rounded border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-200/90">
+                  <div className="mb-6 rounded border border-studio-coral/20 bg-studio-coral/5 px-4 py-3 text-sm text-studio-coral/90">
                     {errorMessage}
                   </div>
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div className="group">
-                    <label className="mb-3 block text-xs font-medium uppercase tracking-wider text-white/30">用户名</label>
+                    <label className="mb-3 block text-xs font-medium uppercase tracking-wider text-studio-text-secondary">用户名</label>
                     <div className="relative">
                       <input
                         type="text"
@@ -767,17 +767,17 @@ export default function Login() {
                             setErrorMessage('');
                           }
                         }}
-                        className="w-full border-b border-white/10 bg-transparent pb-3 text-base text-white/90 placeholder-white/15 transition-colors duration-500 focus:border-[#c8a832]/60 focus:outline-none"
+                        className="w-full border-b border-studio-border-soft bg-transparent pb-3 text-base text-studio-text-primary placeholder-studio-text-muted transition-colors duration-500 focus:border-studio-border-active focus:outline-none"
                         placeholder="输入用户名"
                         autoComplete="username"
                         required
                       />
-                      <div className="absolute bottom-0 left-0 h-px w-0 bg-[#c8a832] transition-all duration-700 group-focus-within:w-full" />
+                      <div className="absolute bottom-0 left-0 h-px w-0 bg-studio-primary transition-all duration-700 group-focus-within:w-full" />
                     </div>
                   </div>
 
                   <div className="group">
-                    <label className="mb-3 block text-xs font-medium uppercase tracking-wider text-white/30">密码</label>
+                    <label className="mb-3 block text-xs font-medium uppercase tracking-wider text-studio-text-secondary">密码</label>
                     <div className="relative">
                       <input
                         type={showPassword ? 'text' : 'password'}
@@ -788,7 +788,7 @@ export default function Login() {
                             setErrorMessage('');
                           }
                         }}
-                        className="w-full border-b border-white/10 bg-transparent pb-3 pr-10 text-base text-white/90 placeholder-white/15 transition-colors duration-500 focus:border-[#c8a832]/60 focus:outline-none"
+                        className="w-full border-b border-studio-border-soft bg-transparent pb-3 pr-10 text-base text-studio-text-primary placeholder-studio-text-muted transition-colors duration-500 focus:border-studio-border-active focus:outline-none"
                         placeholder="输入密码"
                         autoComplete="current-password"
                         required
@@ -796,44 +796,41 @@ export default function Login() {
                       <button
                         type="button"
                         onClick={() => setShowPassword((prev) => !prev)}
-                        className="absolute bottom-3 right-0 text-white/20 transition-colors hover:text-white/50"
+                        className="absolute bottom-3 right-0 text-studio-text-muted transition-colors hover:text-white/50"
                         aria-label="切换密码可见状态"
                       >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
-                      <div className="absolute bottom-0 left-0 h-px w-0 bg-[#c8a832] transition-all duration-700 group-focus-within:w-full" />
+                      <div className="absolute bottom-0 left-0 h-px w-0 bg-studio-primary transition-all duration-700 group-focus-within:w-full" />
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 pt-1">
-                    <label className="flex cursor-pointer items-center gap-2 text-xs tracking-wider text-white/30 transition-colors hover:text-white/50">
+                    <label className="flex cursor-pointer items-center gap-2 text-xs tracking-wider text-studio-text-secondary transition-colors hover:text-white/50">
                       <input
                         type="checkbox"
                         id="remember"
                         checked={remember}
                         onChange={(event) => setRemember(event.target.checked)}
-                        className="h-3.5 w-3.5 cursor-pointer rounded border-white/20 bg-transparent text-[#c8a832] focus:ring-[#c8a832]/40 focus:ring-offset-0"
+                        className="h-3.5 w-3.5 cursor-pointer rounded border-white/20 bg-transparent text-studio-primary focus:ring-studio-primary/30 focus:ring-offset-0"
                       />
                       记住密码
                     </label>
                   </div>
 
                   <div className="pt-4">
-                    <button type="submit" disabled={loading} className="relative w-full overflow-hidden group/btn">
-                      <div className="absolute inset-0 border border-[#c8a832]/30 transition-all duration-500 group-hover/btn:border-[#c8a832]/60 group-hover/btn:bg-[#c8a832]/5" />
-                      <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-[#c8a832]/10 to-transparent transition-transform duration-1000 group-hover/btn:translate-x-full" />
-                      <div className="relative flex items-center justify-center gap-3 px-6 py-4">
+                    <button type="submit" disabled={loading} className="xmt-btn xmt-btn-primary relative w-full overflow-hidden group/btn min-h-12 rounded-button px-6 py-4 text-sm font-semibold tracking-[0.18em] text-white">
+                      <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/25 to-transparent transition-transform duration-700 group-hover/btn:translate-x-full" />
+                      <div className="relative flex items-center justify-center gap-3">
                         {loading ? (
                           <div className="flex items-center gap-3">
-                            <div className="h-4 w-4 animate-spin rounded-full border border-[#c8a832]/40 border-t-[#c8a832]" />
-                            <span className="text-sm tracking-wider text-[#c8a832]/80">验证中</span>
+                            <div className="h-4 w-4 animate-spin rounded-full border border-white/30 border-t-white" />
+                            <span className="text-sm tracking-wider">验证中</span>
                           </div>
                         ) : (
                           <>
-                            <span className="text-sm font-medium tracking-[0.2em] text-[#c8a832]/80 transition-colors group-hover/btn:text-[#c8a832]">
-                              登录
-                            </span>
-                            <ArrowRight className="h-4 w-4 text-[#c8a832]/40 transition-all duration-300 group-hover/btn:translate-x-1 group-hover/btn:text-[#c8a832]/80" />
+                            <span className="text-sm font-semibold tracking-[0.18em]">登录</span>
+                            <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover/btn:translate-x-1" />
                           </>
                         )}
                       </div>
@@ -843,9 +840,9 @@ export default function Login() {
 
                 <div className={`mt-10 transition-all duration-1000 delay-900 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
                   <div className="mb-5 flex items-center gap-3">
-                    <div className="h-px flex-1 bg-white/5" />
-                    <span className="text-xs tracking-wider text-white/15">其他方式</span>
-                    <div className="h-px flex-1 bg-white/5" />
+                    <div className="h-px flex-1 bg-studio-border-soft" />
+                    <span className="text-xs tracking-wider text-studio-text-muted">其他方式</span>
+                    <div className="h-px flex-1 bg-studio-border-soft" />
                   </div>
                   <div className="flex gap-3">
                     {[
@@ -855,8 +852,8 @@ export default function Login() {
                     ].map((item) => (
                       <button key={item.name} className="flex-1 group/other" type="button">
                         <div className="flex flex-col items-center gap-2 border border-white/5 py-3 transition-all duration-300 group-hover/other:border-white/15 group-hover/other:bg-white/[0.02]">
-                          <span className="text-sm font-light text-white/25 transition-colors group-hover/other:text-white/50">{item.char}</span>
-                          <span className="text-[10px] tracking-wider text-white/15">{item.name}</span>
+                          <span className="text-sm font-light text-studio-text-secondary transition-colors group-hover/other:text-white/50">{item.char}</span>
+                          <span className="text-[10px] tracking-wider text-studio-text-muted">{item.name}</span>
                         </div>
                       </button>
                     ))}
@@ -864,7 +861,7 @@ export default function Login() {
                 </div>
 
                 <div className="mt-12 text-center">
-                  <p className="text-[10px] uppercase tracking-widest text-white/10">
+                  <p className="text-[10px] uppercase tracking-widest text-studio-text-muted">
                     LANYAO MEDIA MANAGEMENT SYSTEM
                   </p>
                 </div>

@@ -32,7 +32,7 @@ const roleColors: Record<string, string> = {
   copywriter: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
   post_production: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
   camera: 'bg-studio-cyan/15 text-studio-cyan-contrast border-studio-cyan/30',
-  member: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  member: 'bg-studio-surface-soft/20 text-studio-text-muted border-studio-border-soft/30',
 };
 
 function buildDefaultForm(roleCode = 'member'): UserFormData {
@@ -296,7 +296,7 @@ export default function Users() {
         value={searchTerm}
         onChange={(event) => setSearchTerm(event.target.value)}
         placeholder={activeTab === 'users' ? '搜索用户名、姓名或邮箱...' : '搜索操作、用户或目标...'}
-        className={`w-full rounded-lg py-2 pl-10 pr-4 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+        className={`w-full rounded-lg py-2 pl-10 pr-4 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
       />
     </div>
   );
@@ -305,7 +305,7 @@ export default function Users() {
     <select
       value={formData.role}
       onChange={(event) => setFormData({ ...formData, role: event.target.value })}
-      className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+      className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
     >
       {roles.map((role) => (
         <option key={role.id} value={role.code}>
@@ -358,7 +358,7 @@ export default function Users() {
                       <tr key={user.id} className={`border-t ${styles.tableRow} ${styles.tableHover}`}>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-cyan-500">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-studio-primary to-studio-cyan">
                               <UserIcon className="h-5 w-5 text-white" />
                             </div>
                             <span className={`font-medium ${styles.textPrimary}`}>{user.username}</span>
@@ -396,12 +396,12 @@ export default function Users() {
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
                             {canUpdateUser && (
-                              <button onClick={() => void openEditModal(user)} className={`rounded-lg p-2 text-blue-400 transition-colors ${styles.hoverBg} hover:text-blue-300`} title="编辑">
+                              <button onClick={() => void openEditModal(user)} className={`rounded-lg p-2 text-studio-primary transition-colors ${styles.hoverBg} hover:text-studio-primary`} title="编辑">
                                 <Edit3 className="h-5 w-5" />
                               </button>
                             )}
                             {canDeleteUser && (
-                              <button onClick={() => setPendingDeleteUser(user)} className={`rounded-lg p-2 text-red-400 transition-colors ${styles.hoverBg} hover:text-red-300`} title="删除">
+                              <button onClick={() => setPendingDeleteUser(user)} className={`rounded-lg p-2 text-studio-coral transition-colors ${styles.hoverBg} hover:text-studio-coral`} title="删除">
                                 <Trash2 className="h-5 w-5" />
                               </button>
                             )}
@@ -456,19 +456,19 @@ export default function Users() {
         <div className="space-y-4">
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>用户名 *</label>
-            <input type="text" value={formData.username} onChange={(event) => setFormData({ ...formData, username: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="请输入用户名" />
+            <input type="text" value={formData.username} onChange={(event) => setFormData({ ...formData, username: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`} placeholder="请输入用户名" />
           </div>
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>密码 *</label>
-            <input type="password" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="请输入密码" />
+            <input type="password" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`} placeholder="请输入密码" />
           </div>
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>姓名</label>
-            <input type="text" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="请输入姓名" />
+            <input type="text" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`} placeholder="请输入姓名" />
           </div>
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>邮箱</label>
-            <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="请输入邮箱" />
+            <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`} placeholder="请输入邮箱" />
           </div>
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>角色</label>
@@ -481,26 +481,26 @@ export default function Users() {
         <div className="space-y-4">
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>用户名</label>
-            <input type="text" value={formData.username} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`} disabled />
+            <input type="text" value={formData.username} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`} disabled />
           </div>
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>密码（留空则不修改）</label>
-            <input type="password" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} placeholder="留空则不修改密码" />
+            <input type="password" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`} placeholder="留空则不修改密码" />
           </div>
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>姓名</label>
-            <input type="text" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} />
+            <input type="text" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`} />
           </div>
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>邮箱</label>
-            <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-blue-500`} />
+            <input type="email" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.textPlaceholder} focus:outline-none focus:ring-2 focus:ring-studio-primary`} />
           </div>
           <div>
             <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>角色</label>
             {renderRoleSelect}
           </div>
           <div className="flex items-center gap-3">
-            <input type="checkbox" id="enabled" checked={formData.enabled} onChange={(event) => setFormData({ ...formData, enabled: event.target.checked })} className={`h-5 w-5 rounded ${styles.borderInput} ${styles.bgInput} text-blue-600 focus:ring-blue-500`} />
+            <input type="checkbox" id="enabled" checked={formData.enabled} onChange={(event) => setFormData({ ...formData, enabled: event.target.checked })} className={`h-5 w-5 rounded ${styles.borderInput} ${styles.bgInput} text-studio-primary focus:ring-studio-primary`} />
             <label htmlFor="enabled" className={styles.textSecondary}>启用用户</label>
           </div>
         </div>

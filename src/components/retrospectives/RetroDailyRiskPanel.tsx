@@ -87,7 +87,7 @@ export default function RetroDailyRiskPanel({
   return (
     <GlassPanel className="p-5">
       <div className="flex items-start gap-3">
-        <div className="rounded-full border border-amber-400/30 bg-amber-400/10 p-2 text-amber-300">
+        <div className="rounded-full border border-studio-amber/30 bg-studio-amber/10 p-2 text-studio-amber">
           <AlertTriangle className="h-4 w-4" />
         </div>
         <div>

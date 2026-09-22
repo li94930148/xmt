@@ -106,14 +106,14 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-              styles.isDark ? 'bg-[#ff6b6b]/10' : 'bg-[#e03131]/10'
+              styles.isDark ? 'bg-studio-coral/10' : 'bg-studio-coral/10'
             }`}>
-              <Timer className="w-4 h-4 text-[#ff6b6b]" />
+              <Timer className="w-4 h-4 text-studio-coral" />
             </div>
             <h3 className={`text-base font-semibold ${styles.textPrimary}`}>番茄钟</h3>
           </div>
           <div className="flex items-center gap-1.5">
-            <CheckCircle className="w-3.5 h-3.5 text-[#51cf66]" />
+            <CheckCircle className="w-3.5 h-3.5 text-studio-success" />
             <span className={`text-xs ${styles.textSecondary}`}>今日 {todayCount} 个</span>
           </div>
         </div>
@@ -122,10 +122,10 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           {/* Mini progress ring */}
           <div className="relative w-16 h-16 flex-shrink-0">
             <svg className="w-16 h-16 -rotate-90" viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="44" stroke={styles.isDark ? '#1e2030' : '#e9ecef'} strokeWidth="8" fill="none" />
+              <circle cx="50" cy="50" r="44" stroke={styles.isDark ? 'var(--xmt-surface-elevated)' : 'var(--xmt-surface-soft)'} strokeWidth="8" fill="none" />
               <circle
                 cx="50" cy="50" r="44"
-                stroke={timeLeft === 0 ? '#51cf66' : '#ff6b6b'}
+                stroke={timeLeft === 0 ? 'var(--xmt-success)' : 'var(--xmt-coral)'}
                 strokeWidth="8" fill="none"
                 strokeLinecap="round"
                 strokeDasharray={circumference}
@@ -141,7 +141,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           <div className="flex-1 space-y-2">
             {topicTitle && (
               <div className="flex items-center gap-1.5">
-                <Link className="w-3 h-3 text-[#5c7cfa]" />
+                <Link className="w-3 h-3 text-studio-primary" />
                 <span className={`text-xs ${styles.textSecondary} truncate`}>{topicTitle}</span>
               </div>
             )}
@@ -174,14 +174,14 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2.5">
           <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-            styles.isDark ? 'bg-[#ff6b6b]/10' : 'bg-[#e03131]/10'
+            styles.isDark ? 'bg-studio-coral/10' : 'bg-studio-coral/10'
           }`}>
-            <Timer className="w-4 h-4 text-[#ff6b6b]" />
+            <Timer className="w-4 h-4 text-studio-coral" />
           </div>
           <h3 className={`text-base font-semibold ${styles.textPrimary}`}>番茄钟</h3>
         </div>
         <div className="flex items-center gap-1.5">
-          <CheckCircle className="w-4 h-4 text-[#51cf66]" />
+          <CheckCircle className="w-4 h-4 text-studio-success" />
           <span className={`text-sm ${styles.textSecondary}`}>今日已完成 <span className={`font-semibold ${styles.textPrimary}`}>{todayCount}</span> 个</span>
         </div>
       </div>
@@ -190,10 +190,10 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
       <div className="flex flex-col items-center mb-6">
         <div className="relative w-40 h-40">
           <svg className="w-40 h-40 -rotate-90" viewBox="0 0 100 100">
-            <circle cx="50" cy="50" r="44" stroke={styles.isDark ? '#1e2030' : '#e9ecef'} strokeWidth="6" fill="none" />
+            <circle cx="50" cy="50" r="44" stroke={styles.isDark ? 'var(--xmt-surface-elevated)' : 'var(--xmt-surface-soft)'} strokeWidth="6" fill="none" />
             <circle
               cx="50" cy="50" r="44"
-              stroke={timeLeft === 0 ? '#51cf66' : '#ff6b6b'}
+              stroke={timeLeft === 0 ? 'var(--xmt-success)' : 'var(--xmt-coral)'}
               strokeWidth="6" fill="none"
               strokeLinecap="round"
               strokeDasharray={circumference}
@@ -215,9 +215,9 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
       {/* Topic Link */}
       {topicTitle && (
         <div className={`flex items-center justify-center gap-2 mb-4 px-3 py-2 rounded-lg ${
-          styles.isDark ? 'bg-[#1e2030]' : 'bg-[#f8f9fa]'
+          styles.isDark ? 'bg-studio-surface-soft' : 'bg-studio-surface-soft'
         }`}>
-          <Link className="w-3.5 h-3.5 text-[#5c7cfa]" />
+          <Link className="w-3.5 h-3.5 text-studio-primary" />
           <span className={`text-sm ${styles.textSecondary}`}>{topicTitle}</span>
         </div>
       )}

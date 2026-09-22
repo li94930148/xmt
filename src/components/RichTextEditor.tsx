@@ -935,14 +935,14 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
     ? 'bg-[var(--editor-panel)] border-[var(--editor-border)] shadow-lg shadow-black/20'
     : 'bg-[var(--editor-panel)] border-[var(--editor-border)] shadow-md';
   const toolbarButtonClass = isDark
-    ? 'text-gray-300 hover:bg-[var(--editor-hover)]'
-    : 'text-gray-600 hover:bg-[var(--editor-hover)]';
+    ? 'text-studio-text-secondary hover:bg-[var(--editor-hover)]'
+    : 'text-studio-text-secondary hover:bg-[var(--editor-hover)]';
   const dropdownClass = isDark
     ? 'bg-[var(--editor-panel)] border-[var(--editor-border)] text-[var(--editor-fg)] shadow-xl shadow-black/25'
     : 'bg-[var(--editor-panel)] border-[var(--editor-border)] text-[var(--editor-fg)] shadow-lg';
   const dropdownItemClass = isDark
-    ? 'text-gray-200 hover:bg-[var(--editor-hover)]'
-    : 'text-gray-700 hover:bg-[var(--editor-hover)]';
+    ? 'text-studio-text-primary hover:bg-[var(--editor-hover)]'
+    : 'text-studio-text-primary hover:bg-[var(--editor-hover)]';
 
   return (
     <div className="flex gap-4">
@@ -955,7 +955,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
             {toolbarButtons.map((btn, index) => {
               if (btn.divider) {
                 return (
-                  <div key={index} className={`w-px h-6 mx-2 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />
+                  <div key={index} className={`w-px h-6 mx-2 bg-studio-border-soft`} />
                 );
               }
               const Icon = btn.icon;
@@ -967,12 +967,12 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                   className={`p-2 rounded transition-colors ${toolbarButtonClass}`}
                   title={btn.title}
                 >
-                  <Icon className={`w-4 h-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
+                  <Icon className={`w-4 h-4 text-studio-text-secondary`} />
                 </button>
               );
             })}
 
-            <div className={`w-px h-6 mx-2 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />
+            <div className={`w-px h-6 mx-2 bg-studio-border-soft`} />
             
             <div className="relative mr-1 font-size-button">
               <button
@@ -984,8 +984,8 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                 className={`p-2 rounded transition-colors flex items-center gap-1 min-w-[80px] h-[28px] justify-center ${toolbarButtonClass}`}
                 title="字体大小"
               >
-                <span className={`text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{selectedFontSize}</span>
-                <ChevronDown className={`w-3 h-3 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+                <span className={`text-xs font-medium text-studio-text-secondary`}>{selectedFontSize}</span>
+                <ChevronDown className={`w-3 h-3 text-studio-text-muted`} />
               </button>
               {showFontSizePicker && (
                 <div className={`font-size-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg border z-50 min-w-[100px] ${dropdownClass}`}>
@@ -994,7 +994,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                       <button
                         key={item.size}
                         onClick={() => handleFontSize(item.size)}
-                        className={`px-3 py-2 rounded text-left flex items-center justify-between ${selectedFontSize === item.size ? 'bg-blue-500/10 text-blue-500' : dropdownItemClass}`}
+                        className={`px-3 py-2 rounded text-left flex items-center justify-between ${selectedFontSize === item.size ? 'bg-studio-primary/12 text-studio-primary' : dropdownItemClass}`}
                         style={{ fontSize: item.size }}
                       >
                         <span>{item.label}</span>
@@ -1005,7 +1005,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
               )}
             </div>
 
-            <div className={`w-px h-6 mx-2 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />
+            <div className={`w-px h-6 mx-2 bg-studio-border-soft`} />
 
             <div className="relative mr-1 color-picker-button">
               <button
@@ -1016,8 +1016,8 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                 className={`p-2 rounded transition-colors relative min-w-[36px] h-[28px] flex items-center justify-center ${toolbarButtonClass}`}
                 title="文字颜色"
               >
-                <span className={`text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>A</span>
-                <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full bg-red-500 border border-white shadow-sm"></span>
+                <span className={`text-xs font-medium text-studio-text-secondary`}>A</span>
+                <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full bg-studio-coral border border-white/20 shadow-sm"></span>
               </button>
               {showTextColorPicker && (
                 <div className={`color-picker-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg border z-50 min-w-[140px] ${dropdownClass}`}>
@@ -1045,8 +1045,8 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                 className={`p-2 rounded transition-colors relative min-w-[36px] h-[28px] flex items-center justify-center ${toolbarButtonClass}`}
                 title="背景颜色"
               >
-                <span className={`text-xs font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>A</span>
-                <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full bg-yellow-300 border border-white shadow-sm"></span>
+                <span className={`text-xs font-medium text-studio-text-secondary`}>A</span>
+                <span className="absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full bg-studio-amber border border-white/20 shadow-sm"></span>
               </button>
               {showBgColorPicker && (
                 <div className={`color-picker-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg border z-50 min-w-[140px] ${dropdownClass}`}>
@@ -1065,14 +1065,14 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
               )}
             </div>
 
-            <div className={`w-px h-6 mx-2 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />
+            <div className={`w-px h-6 mx-2 bg-studio-border-soft`} />
 
             <button
               onClick={handleAddAnnotation}
               className={`p-2 rounded transition-colors ${toolbarButtonClass}`}
               title="添加批注"
             >
-              <MessageSquare className={`w-4 h-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
+              <MessageSquare className={`w-4 h-4 text-studio-text-secondary`} />
             </button>
 
             <button
@@ -1080,7 +1080,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
               className={`p-2 rounded transition-colors ${toolbarButtonClass}`}
               title="打印"
             >
-              <Printer className={`w-4 h-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
+              <Printer className={`w-4 h-4 text-studio-text-secondary`} />
             </button>
           </div>
 
@@ -1091,15 +1091,15 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                 className={`p-1.5 rounded transition-colors ${toolbarButtonClass}`}
                 title="缩小"
               >
-                <Minus className={`w-3.5 h-3.5 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
+                <Minus className={`w-3.5 h-3.5 text-studio-text-secondary`} />
               </button>
-              <span className={`text-sm font-medium min-w-[48px] text-center ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{zoom}%</span>
+              <span className={`text-sm font-medium min-w-[48px] text-center text-studio-text-secondary`}>{zoom}%</span>
               <button
                 onClick={() => setZoom(prev => Math.min(prev + 10, 200))}
                 className={`p-1.5 rounded transition-colors ${toolbarButtonClass}`}
                 title="放大"
               >
-                <Plus className={`w-3.5 h-3.5 ${isDark ? 'text-gray-300' : 'text-gray-600'}`} />
+                <Plus className={`w-3.5 h-3.5 text-studio-text-secondary`} />
               </button>
             </div>
           </div>
@@ -1120,7 +1120,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
             cursor-text
             rich-text-editor
             empty:before:content-[attr(data-placeholder)]
-            ${isDark ? 'empty:before:text-gray-500' : 'empty:before:text-gray-400'}
+            empty:before:text-studio-text-muted
             empty:before:pointer-events-none
           `}
           style={{ 
@@ -1133,20 +1133,20 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
           suppressContentEditableWarning
         />
         
-        <div className={`shrink-0 px-4 py-2 border-t ${isDark ? 'border-gray-700 bg-gray-800/50' : 'border-gray-200 bg-gray-50'}`}>
+        <div className={`shrink-0 px-4 py-2 border-t border-studio-border-soft bg-studio-surface-soft/60`}>
           <div className="flex items-center justify-between text-xs">
             <div className="flex items-center gap-4">
-              <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>
-                中文字数: <span className={isDark ? 'text-gray-200 font-medium' : 'text-gray-700 font-medium'}>{getCharacterCount().chinese}</span>
+              <span className={isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'}>
+                中文字数: <span className={isDark ? 'text-studio-text-secondary font-medium' : 'text-studio-text-muted font-medium'}>{getCharacterCount().chinese}</span>
               </span>
-              <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>
-                英文字母: <span className={isDark ? 'text-gray-200 font-medium' : 'text-gray-700 font-medium'}>{getCharacterCount().english}</span>
+              <span className={isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'}>
+                英文字母: <span className={isDark ? 'text-studio-text-secondary font-medium' : 'text-studio-text-muted font-medium'}>{getCharacterCount().english}</span>
               </span>
-              <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>
-                总字符数: <span className={isDark ? 'text-gray-200 font-medium' : 'text-gray-700 font-medium'}>{getCharacterCount().total}</span>
+              <span className={isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'}>
+                总字符数: <span className={isDark ? 'text-studio-text-secondary font-medium' : 'text-studio-text-muted font-medium'}>{getCharacterCount().total}</span>
               </span>
             </div>
-            <div className={isDark ? 'text-gray-500' : 'text-gray-400'}>
+            <div className={isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'}>
               批注数: {annotations.length}
             </div>
           </div>
@@ -1156,21 +1156,21 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
       {annotations.length > 0 && showAnnotationPanel && (
         <div className={`w-72 flex-shrink-0 rounded-xl border overflow-hidden ${
           isDark 
-            ? 'bg-gray-800 border-gray-700' 
-            : 'bg-white border-gray-200'
+            ? 'bg-studio-surface-soft border-studio-border-soft' 
+            : 'bg-white border-studio-border-soft'
         }`}>
           <div className={`flex items-center justify-between px-4 py-3 border-b ${
-            isDark ? 'border-gray-700 bg-amber-500/10' : 'border-gray-200 bg-amber-50'
+            isDark ? 'border-studio-border-soft bg-studio-amber/10' : 'border-studio-border-soft bg-studio-amber'
           }`}>
-            <h3 className={`font-semibold flex items-center gap-2 ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
+            <h3 className={`font-semibold flex items-center gap-2 ${isDark ? 'text-studio-amber' : 'text-studio-amber'}`}>
               <MessageSquare className="w-4 h-4" />
               批注 ({annotations.length})
             </h3>
             <button
               onClick={() => setShowAnnotationPanel(false)}
-              className={`p-1 rounded hover:${isDark ? 'bg-gray-700' : 'bg-gray-200'} transition-colors`}
+              className={`p-1 rounded hover:${isDark ? 'bg-studio-surface-soft' : 'bg-studio-surface-soft'} transition-colors`}
             >
-              <X className={`w-4 h-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`} />
+              <X className={`w-4 h-4 text-studio-text-muted`} />
             </button>
           </div>
           
@@ -1180,12 +1180,12 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                 key={annotation.id}
                 onClick={() => handleAnnotationClick(annotation.id)}
                 className={`p-4 border-b cursor-pointer transition-colors ${
-                  isDark ? 'border-gray-700 hover:bg-gray-700/50' : 'border-gray-100 hover:bg-gray-50'
-                } ${activeAnnotationId === annotation.id ? (isDark ? 'bg-amber-500/10' : 'bg-amber-50') : ''}`}
+                  isDark ? 'border-studio-border-soft hover:bg-studio-surface-soft/50' : 'border-studio-border-soft hover:bg-studio-surface-soft'
+                } ${activeAnnotationId === annotation.id ? (isDark ? 'bg-studio-amber/10' : 'bg-studio-amber') : ''}`}
               >
                 <div className="flex items-start justify-between mb-2">
                   <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                    isDark ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-700'
+                    isDark ? 'bg-studio-amber/20 text-studio-amber' : 'bg-studio-amber text-studio-amber'
                   }`}>
                     批注
                   </span>
@@ -1194,15 +1194,15 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                       e.stopPropagation();
                       handleDeleteAnnotation(annotation.id);
                     }}
-                    className={`p-1 rounded hover:${isDark ? 'bg-red-500/20' : 'bg-red-100'} transition-colors`}
+                    className={`p-1 rounded hover:${isDark ? 'bg-studio-coral/20' : 'bg-studio-coral'} transition-colors`}
                     title="删除批注"
                   >
-                    <Trash2 className={`w-3 h-3 ${isDark ? 'text-red-400' : 'text-red-500'}`} />
+                    <Trash2 className={`w-3 h-3 ${isDark ? 'text-studio-coral' : 'text-studio-coral'}`} />
                   </button>
                 </div>
-                <p className={`text-sm mb-2 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>"{annotation.text}"</p>
-                <p className={`text-sm ${isDark ? 'text-gray-100' : 'text-gray-900'} font-medium`}>{annotation.comment}</p>
-                <p className={`text-xs mt-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{annotation.createdAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</p>
+                <p className={`text-sm mb-2 text-studio-text-secondary`}>"{annotation.text}"</p>
+                <p className={`text-sm ${isDark ? 'text-studio-text-secondary' : 'text-studio-text-primary'} font-medium`}>{annotation.comment}</p>
+                <p className={`text-xs mt-2 ${isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'}`}>{annotation.createdAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</p>
               </div>
             ))}
           </div>
@@ -1214,31 +1214,31 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
           onClick={() => setShowAnnotationPanel(true)}
           className={`fixed right-4 top-1/2 -translate-y-1/2 p-3 rounded-lg shadow-lg ${
             isDark 
-              ? 'bg-gray-800 border border-gray-700 hover:bg-gray-700' 
-              : 'bg-white border border-gray-200 hover:bg-gray-50'
+              ? 'bg-studio-surface-soft border border-studio-border-soft hover:bg-studio-surface-soft' 
+              : 'bg-white border border-studio-border-soft hover:bg-studio-surface-soft'
           } transition-colors`}
           title="显示批注面板"
         >
-          <MessageSquare className={`w-5 h-5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
-          <span className={`absolute -top-1 -right-1 w-5 h-5 rounded-full text-xs flex items-center justify-center ${isDark ? 'bg-amber-500 text-white' : 'bg-amber-500 text-white'}`}>{annotations.length}</span>
+          <MessageSquare className={`w-5 h-5 ${isDark ? 'text-studio-amber' : 'text-studio-amber'}`} />
+          <span className={`absolute -top-1 -right-1 w-5 h-5 rounded-full text-xs flex items-center justify-center ${isDark ? 'bg-studio-amber text-white' : 'bg-studio-amber text-white'}`}>{annotations.length}</span>
         </button>
       )}
 
       {showAnnotationModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className={`${isDark ? 'bg-gray-800' : 'bg-white'} rounded-xl p-6 w-full max-w-md mx-4 ${isDark ? 'border border-gray-700' : 'border border-gray-200'}`}>
-            <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'} mb-2 flex items-center gap-2`}>
-              <MessageSquare className="w-5 h-5 text-amber-500" />
+          <div className={`${isDark ? 'bg-studio-surface-soft' : 'bg-white'} rounded-xl p-6 w-full max-w-md mx-4 ${isDark ? 'border border-studio-border-soft' : 'border border-studio-border-soft'}`}>
+            <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-studio-text-primary'} mb-2 flex items-center gap-2`}>
+              <MessageSquare className="w-5 h-5 text-studio-amber" />
               添加批注
             </h3>
-            <p className={`text-sm mb-4 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-              选中文本: <span className={`font-medium ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>"{selectedText}"</span>
+            <p className={`text-sm mb-4 text-studio-text-muted`}>
+              选中文本: <span className={`font-medium ${isDark ? 'text-studio-amber' : 'text-studio-amber'}`}>"{selectedText}"</span>
             </p>
             <textarea
               value={annotationComment}
               onChange={(e) => setAnnotationComment(e.target.value)}
               placeholder="请输入批注内容..."
-              className={`w-full px-3 py-2 ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'} border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none`}
+              className={`w-full px-3 py-2 ${isDark ? 'bg-studio-surface-soft border-studio-border-soft text-white' : 'bg-studio-surface-soft border-studio-border-soft text-studio-text-primary'} border rounded-lg focus:outline-none focus:ring-2 focus:ring-studio-amber resize-none`}
               rows={4}
               autoFocus
             />
@@ -1250,14 +1250,14 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                   setSelectedText('');
                   setSelectedRange(null);
                 }}
-                className={`flex-1 px-4 py-2 ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'} rounded-lg transition-colors`}
+                className={`flex-1 px-4 py-2 ${isDark ? 'bg-studio-surface-soft hover:bg-studio-surface-soft text-white' : 'bg-studio-surface-soft hover:bg-studio-surface-soft text-studio-text-muted'} rounded-lg transition-colors`}
               >
                 取消
               </button>
               <button
                 onClick={handleSaveAnnotation}
                 disabled={!annotationComment.trim()}
-                className="flex-1 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                className="flex-1 px-4 py-2 bg-studio-amber hover:bg-studio-amber disabled:bg-studio-amber disabled:cursor-not-allowed text-white rounded-lg transition-colors"
               >
                 确认
               </button>

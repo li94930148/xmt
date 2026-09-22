@@ -120,7 +120,7 @@ export default function Inspirations() {
         showRealtimeToast({
           title: '新灵感',
           message: `「${data.title}」已添加到灵感池`,
-          icon: <Lightbulb className="w-5 h-5 text-yellow-400" />,
+          icon: <Lightbulb className="w-5 h-5 text-studio-amber" />,
         });
       },
       'inspiration:voted': (data: { id: number; votes: number; userId: number }) => {
@@ -312,11 +312,11 @@ export default function Inspirations() {
   };
 
   const categoryColors: Record<string, string> = {
-    口播: 'bg-blue-500/15 text-blue-400',
-    带货: 'bg-orange-500/15 text-orange-400',
-    科普: 'bg-green-500/15 text-green-400',
-    故事: 'bg-purple-500/15 text-purple-400',
-    其他: 'bg-gray-500/15 text-gray-400',
+    口播: 'bg-studio-primary/15 text-studio-primary',
+    带货: 'bg-studio-amber/15 text-studio-amber',
+    科普: 'bg-studio-success/15 text-studio-success',
+    故事: 'bg-studio-violet/15 text-studio-violet',
+    其他: 'bg-studio-surface-soft/15 text-studio-text-muted',
   };
 
   return (
@@ -390,7 +390,7 @@ export default function Inspirations() {
                   event.preventDefault();
                   void openDetail(inspiration.id);
                 }}
-                className={`${styles.card} p-5 text-left hover:border-[#5c7cfa]/30 hover:-translate-y-0.5 transition-all duration-200 group ${newItemIds.has(inspiration.id) ? 'animate-new-item new-item-highlight' : ''}`}
+                className={`${styles.card} p-5 text-left hover:border-studio-primary/30 hover:-translate-y-0.5 transition-all duration-200 group ${newItemIds.has(inspiration.id) ? 'animate-new-item new-item-highlight' : ''}`}
               >
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="min-w-0 flex-1">
@@ -419,12 +419,12 @@ export default function Inspirations() {
                     </span>
                   )}
                   {isPromoted && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 font-medium">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-studio-success/15 text-studio-success font-medium">
                       已转选题
                     </span>
                   )}
                   {recentCommentIds.has(inspiration.id) && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 font-medium">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-studio-cyan/15 text-studio-cyan font-medium">
                       有新评论
                     </span>
                   )}
@@ -440,8 +440,8 @@ export default function Inspirations() {
                       }}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                         inspiration.voted
-                          ? 'bg-[#5c7cfa]/15 text-[#5c7cfa]'
-                          : `${styles.bgTertiary} ${styles.textSecondary} hover:bg-[#5c7cfa]/10 hover:text-[#5c7cfa]`
+                          ? 'bg-studio-primary/15 text-studio-primary'
+                          : `${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-primary/10 hover:text-studio-primary`
                       } ${voteAnimatingIds.has(inspiration.id) ? 'animate-pulse-vote' : ''}`}
                     >
                       <ThumbsUp className="w-3.5 h-3.5" />
@@ -453,7 +453,7 @@ export default function Inspirations() {
                         event.stopPropagation();
                         void openDetail(inspiration.id);
                       }}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-[#5c7cfa]/10 hover:text-[#5c7cfa] transition-all`}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-primary/10 hover:text-studio-primary transition-all`}
                     >
                       <MessageCircle className="w-3.5 h-3.5" />
                       {inspiration.comment_count || 0}
@@ -472,7 +472,7 @@ export default function Inspirations() {
                           void handlePromote(inspiration.id);
                         }}
                         disabled={promotingId === inspiration.id}
-                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-green-500/10 hover:text-green-400 transition-all disabled:opacity-50`}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-success/10 hover:text-studio-success transition-all disabled:opacity-50`}
                       >
                         {promotingId === inspiration.id ? (
                           <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -507,7 +507,7 @@ export default function Inspirations() {
           <div className={`${styles.modal} p-6 w-full max-w-md mx-4`}>
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-[#5c7cfa]" />
+                <Sparkles className="w-5 h-5 text-studio-primary" />
                 <h2 className={`text-lg font-bold ${styles.textPrimary}`}>提交灵感</h2>
               </div>
               <button onClick={() => setShowCreateModal(false)} className={styles.textMuted}>

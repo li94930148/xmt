@@ -28,6 +28,10 @@ export class CollaborationAccessPolicy {
     return user.role === 'admin' || user.role === 'director' || Number(scope.creator_id) === user.id || Number(scope.assignee_id) === user.id || Number(scope.participant_id) === user.id;
   }
 
+  private hasEditScope(user: User, scope: { creator_id: number | null; assignee_id: number | null }) {
+    return user.role === 'admin' || user.role === 'director' || Number(scope.creator_id) === user.id || Number(scope.assignee_id) === user.id;
+  }
+
   async canViewDocument(user: User | undefined, roomId: unknown): Promise<boolean> {
     if (!user || user.enabled === false) return false;
     const resolved = await this.scope(roomId);
@@ -38,7 +42,7 @@ export class CollaborationAccessPolicy {
     if (!user || user.enabled === false) return false;
     const resolved = await this.scope(roomId);
     if (!resolved) return false;
-    return this.hasViewScope(user, resolved.scope);
+    return this.hasEditScope(user, resolved.scope);
   }
 
   async canManageDocument(user: User | undefined, roomId: unknown): Promise<boolean> {

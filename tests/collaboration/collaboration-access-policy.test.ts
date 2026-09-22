@@ -15,12 +15,14 @@ await initDatabase();
 
 const ownerId = await executeInsert(`INSERT INTO users (username,password,email,role,name,enabled,force_change_password) VALUES (?,?,?,?,?,?,?)`, ['collaboration-owner', 'unused', 'owner@example.invalid', 'member', 'Owner', 1, 0]);
 const outsiderId = await executeInsert(`INSERT INTO users (username,password,email,role,name,enabled,force_change_password) VALUES (?,?,?,?,?,?,?)`, ['collaboration-outsider', 'unused', 'outsider@example.invalid', 'member', 'Outsider', 1, 0]);
+const participantId = await executeInsert(`INSERT INTO users (username,password,email,role,name,enabled,force_change_password) VALUES (?,?,?,?,?,?,?)`, ['collaboration-participant', 'unused', 'participant@example.invalid', 'member', 'Participant', 1, 0]);
 const topicId = await executeInsert(`INSERT INTO topics (title,description,platform,creator_id,status) VALUES (?,?,?,?,?)`, ['协作授权', '', 'douyin', ownerId, 'pending']);
-const productionId = await executeInsert(`INSERT INTO production (topic_id,version,content,status,operator_id) VALUES (?,?,?,?,?)`, [topicId, 1, '', 'draft', ownerId]);
+const productionId = await executeInsert(`INSERT INTO production (topic_id,version,content,status,operator_id) VALUES (?,?,?,?,?)`, [topicId, 1, '', 'draft', participantId]);
 const shootingId = await executeInsert(`INSERT INTO shooting (topic_id,status,operator_id) VALUES (?,?,?)`, [topicId, 'planned', ownerId]);
 
 const owner = { id: ownerId, role: 'member', enabled: true } as never;
 const outsider = { id: outsiderId, role: 'member', enabled: true } as never;
+const participant = { id: participantId, role: 'member', enabled: true } as never;
 const disabledOwner = { id: ownerId, role: 'member', enabled: false } as never;
 const unassignedEditor = { id: outsiderId, role: 'editor', enabled: true } as never;
 
@@ -37,6 +39,8 @@ assert.equal(await collaborationAccessPolicy.canViewDocument(owner, `shooting:${
 assert.equal(await collaborationAccessPolicy.canViewDocument(outsider, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canEditDocument(outsider, `shooting:${shootingId}`), false);
 assert.equal(await collaborationAccessPolicy.canEditDocument(unassignedEditor, `production:${productionId}`), false);
+assert.equal(await collaborationAccessPolicy.canViewDocument(participant, `production:${productionId}`), true);
+assert.equal(await collaborationAccessPolicy.canEditDocument(participant, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(disabledOwner, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(owner, 'production:999999'), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(undefined, `production:${productionId}`), false);

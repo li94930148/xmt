@@ -1,27 +1,147 @@
 # 测试与 CI 说明
 
-## 当前 CI
+> 配置文件：`.github/workflows/ci.yml`  
+> 触发条件：`main` 分支 `push` 与 `pull_request`
 
-`.github/workflows/ci.yml` 在 `main` 分支 push 和 pull request 时执行：
+---
 
-- `npm ci`
-- `npm run check`
-- `npm run build`
+## 1. 总览
 
-全仓 `npm run lint` 暂不纳入 CI 阻塞项，因为当前仍有既有 238 个 lint 问题。后续建议先增加专项 lint，再逐步治理历史债务。
+CI 在 GitHub Actions（`CI` workflow）中并行执行 **6 个 Job**。其中合并 `main` 的分支保护要求 **2 项必需状态检查**：
 
-## 第 11 轮本地真实回归
+| 必需检查 | Job 名 | 作用 |
+|---------|--------|------|
+| 1 | `fast-gate` | 依赖、审计、版本、类型检查、生产构建 |
+| 2 | `core-security-contract` | 业务契约与安全回归（Auth / RBAC / Socket / Origin / Mobile / Ops） |
 
-- `npm run check`：通过。
-- `npm run build`：通过。
-- `npm run lint`：失败，仍为既有 238 个问题。
-- 专项 eslint：通过。
-- 日报 smoke：真实 token 链路通过。
-- 复盘 smoke：真实 token 链路通过。
-- E2E：登录态分支通过。
-- API health：smoke 后为 `ok`。
+其余 Job 为平台与端上契约验证，失败会标红 workflow，但不计入上表两项 required checks。
 
-## 本地 Smoke 命令
+> 直推 `main` 会被拒绝。变更必须通过 Pull Request，并等待上述 2 项检查通过后合并。
+
+---
+
+## 2. Job 说明
+
+### 2.1 `fast-gate`（必需）
+
+| 步骤 | 命令 | 说明 |
+|------|------|------|
+| 安装 | `npm ci` | 按 `package-lock.json` 锁定安装 |
+| 入口完整性 | `npm run test:entrypoints` | 校验测试入口脚本存在且可解析 |
+| 依赖审计 | `npm audit --audit-level=high` | 高危及以上漏洞直接失败 |
+| 版本一致性 | `npm run version:check` | 版本号与发布契约对齐 |
+| 类型检查 | `npm run check` | `tsc --noEmit` |
+| 生产构建 | `npm run build` | `tsc -b && vite build` |
+
+环境：`ubuntu-latest` · Node.js **22** · npm cache
+
+### 2.2 `core-security-contract`（必需）
+
+在 `npm ci` 后串行执行核心契约与安全测试，覆盖：
+
+- **内容与 API**：选题、API 契约、创作资料、内容文档
+- **认证与权限**：Auth / RBAC 不变量 / Session / V1 / Login Gateway / 角色授予上限
+- **实时协作**：Socket 生命周期、协调器、Yjs 非法 update、协作授权
+- **安全边界**：Origin / CORS、错误响应脱敏、HTML 净化、Webhook fail-closed、会话撤销、401 Recovery
+- **移动端与原生**：Safe Draft、网络、消息分类、返回键、深链、设备注册、Android 运行时与生产门禁
+- **运维**：CI 状态决策、备份锁/清单/恢复演练、迁移就绪、版本治理、部署安全
+
+### 2.3 `android-debug-apk`
+
+| 步骤 | 说明 |
+|------|------|
+| Java 21 (temurin) | Android 构建 |
+| `npm run mobile:sync:production` | 同步生产端点契约 |
+| `test:android-build-endpoints` | 端点契约 |
+| `./gradlew assembleDebug` | Debug APK |
+| `test:apk-endpoint-artifact` | 产物内端点校验 |
+| 上传产物 | `xmt-android-debug` |
+
+### 2.4 `creator-agent-package-contract`（Windows）
+
+Creator Agent Electron 打包契约：
+
+- `npm --prefix agent ci` + `electron:build`
+- `test:package-runtime`（包运行时安全）
+
+### 2.5 `creator-agent-macos-arm64-package-contract`（macOS 14）
+
+- Python 3.11 venv + `electron:build:mac`
+- `test:package-runtime:mac`
+- 上传 `xmt-creator-agent-macos-arm64`（`agent/release/XMT-Creator-Agent-v*-macos-arm64.zip`）
+- 产物路径按 `agent/package.json` 版本推导，**禁止**在 CI 写死旧版本号
+
+### 2.6 `collector-contract`
+
+Python 采集器契约：
+
+- `collector/requirements.lock` 安装
+- Renderer 安全 / Collector Bridge / 浏览器认证 / CLI 导出断言
+- `pytest collector/tests`
+
+---
+
+## 3. 读取 CI 结论
+
+```bash
+# 需要本机已登录 gh 或提供 GITHUB_TOKEN
+npm run ops:ci-status -- <commit-sha>
+```
+
+输出 JSON 中的 `decision`：
+
+| 值 | 含义 |
+|----|------|
+| `PASS` | `fast-gate` 与 `core-security-contract` 均为 success |
+| `FAIL` | 任一必需 Job 失败 / 取消 / 超时 |
+| `IN_PROGRESS` | 仍在运行 |
+| `NO_RUN` | 该 SHA 无 CI 运行 |
+| `UNAVAILABLE` | GitHub API 网络错误或限流 |
+
+判定逻辑见 `api/modules/ops/ci-status-decision.ts`（有对应单测 `test:ops-ci-status`）。
+
+---
+
+## 4. 提交前本地检查
+
+UI / 业务改动至少执行：
+
+```bash
+npm run check
+npm run build
+```
+
+建议同时：
+
+```bash
+npm run lint
+```
+
+全仓 ESLint 仍有历史债务，**未纳入 CI 阻塞**；新增代码不应扩大 lint 问题。
+
+### 4.1 UI / 设计系统改动
+
+涉及 `src/styles/tokens.css`、`src/index.css`、`src/components/studio/**`、`src/design-system/**` 或业务页配色时，额外确认：
+
+1. 颜色、圆角、阴影、动效只走 token（`DESIGN.md`）
+2. 不新增 hex 硬编码色板
+3. 浮层使用 `xmt-overlay` + `xmt-panel-enter`
+4. 空态 / 骨架 / 错误态走统一组件
+5. 尊重 `prefers-reduced-motion`
+
+### 4.2 发布版本
+
+1. 更新 `package.json` 的 `version`
+2. 同步根目录 `CHANGELOG.md` 与 `docs/CHANGELOG.md`
+3. 更新 `src/data/changelog.ts`（更新弹窗数据）
+4. 更新 `README.md` 当前版本号
+5. 执行 `npm run version:check`
+
+---
+
+## 5. 本地 Smoke / E2E（不进 CI）
+
+以下需要真实服务与临时凭据，**只在本地隔离环境执行**，CI 不注入 token。
 
 日报：
 
@@ -41,21 +161,41 @@ E2E：
 E2E_BASE_URL=http://localhost:5174 E2E_USERNAME=本地测试账号 E2E_PASSWORD=本地测试密码 npm run test:e2e
 ```
 
-不要把 token、账号或密码写入代码、脚本、文档、CI 配置或提交记录。
+> 不要将真实 Token、账号、密码或生产密钥写入代码、脚本、文档、CI 配置或提交记录。
 
-## 后续纳入 CI 的建议
+---
 
-- 准备隔离测试数据库和稳定测试账号后，再考虑把 smoke 或 E2E 纳入非生产 CI。
-- 不在 GitHub Actions 中写入真实生产 token。
-- 全仓 lint 应在历史债务分批清理后再作为 CI 阻塞项。
+## 6. 产物
 
-## 第 12 轮中文化专项补充
+| Job | Artifact 名 | 内容 |
+|-----|-------------|------|
+| android-debug-apk | `xmt-android-debug` | Android Debug APK |
+| creator-agent-macos-arm64-package-contract | `xmt-creator-agent-macos-arm64` | macOS ARM64 Creator Agent 安装包 |
 
-- smoke 脚本后续不再生成英文测试标题或英文测试正文。
-- 本地已将明确匹配 `Smoke retrospective%` 和 `Smoke follow-up action` 的开发测试数据改为中文。
-- 非沙箱 `npm run build` 已通过。
-- 专项 eslint 已通过。
-- 日报 smoke 和复盘 smoke 均已使用本地临时 token 真实链路通过。
-- 登录态 E2E smoke 已通过。
-- 中文化浏览器深度补测已覆盖日报、复盘列表、复盘详情、Markdown 导出、HTML 打印页、暗色模式和移动端窄屏。
-- CI 仍只执行 `check/build`，不注入真实 token，不把 smoke/E2E 作为阻塞项。
+Windows Creator Agent 与 collector 契约 Job 当前只验证、不上传产物。
+
+---
+
+## 7. 分支保护与合并
+
+1. 禁止直推 `main`
+2. 变更走 PR（建议分支名如 `feat/*` / `fix/*` / `codex/*`）
+3. Required status checks：**fast-gate**、**core-security-contract**
+4. 全绿后由仓库管理员合并；合并后本地 `git pull` 对齐
+
+---
+
+## 8. 后续建议
+
+- 在隔离测试库与稳定测试账号就绪后，再考虑把 smoke / E2E 作为非生产阻塞项
+- 分批清理历史 lint 债务后，将 `npm run lint` 纳入 `fast-gate`
+- 新增契约测试时同步更新本文 Job 表，避免文档与 `ci.yml` 再次漂移
+
+---
+
+## 9. 修订记录
+
+| 日期 | 说明 |
+|------|------|
+| 2026-09-22 | 按当前 `ci.yml` 全量重写：6 Job、2 项必需检查、产物、本地检查与 UI 设计系统约定 |
+| 早期版本 | 仅记录 `check/build`，已过时 |

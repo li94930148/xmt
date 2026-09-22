@@ -628,6 +628,8 @@ Socket 连接需要携带有效 JWT。具体事件名称以协作模块中的事
 
 ## 测试与质量检查
 
+> 完整 CI / 测试说明见 [`docs/测试与CI说明.md`](./docs/测试与CI说明.md)。
+
 ### 提交前基础检查
 
 ```bash
@@ -641,7 +643,32 @@ npm run build
 npm run lint
 ```
 
-当前仓库可能仍存在历史 ESLint 债务，因此 CI 的主要阻塞项以类型检查和生产构建为主。新增或修改的代码不应继续扩大 lint 问题。
+### CI（GitHub Actions）
+
+推送到 `main` 或向 `main` 发起 Pull Request 时，`.github/workflows/ci.yml` 会执行 6 个 Job。
+
+**合并 `main` 的必需状态检查（2 项）：**
+
+| 检查 | 内容 |
+|------|------|
+| `fast-gate` | `npm ci` · 入口完整性 · `npm audit --audit-level=high` · 版本一致性 · `npm run check` · `npm run build` |
+| `core-security-contract` | Auth / RBAC / Socket / Origin / 错误脱敏 / 移动端与原生 / 运维备份与迁移等契约与安全回归 |
+
+其余 Job：`android-debug-apk`、`creator-agent-package-contract`、`creator-agent-macos-arm64-package-contract`、`collector-contract`（端上与采集器契约，失败会标红 workflow）。
+
+分支保护禁止直推 `main`；变更必须通过 PR，并等待上述 2 项检查通过后合并。
+
+查询指定提交的 CI 结论：
+
+```bash
+npm run ops:ci-status -- <commit-sha>
+```
+
+当前全仓 ESLint 仍有历史债务，`npm run lint` 暂未作为 CI 阻塞项。新增或修改的代码不应继续扩大 lint 问题。
+
+### UI / 设计系统改动
+
+涉及视觉与交互的改动请遵循 [`DESIGN.md`](./DESIGN.md) 与 [`AGENTS.md`](./AGENTS.md)：颜色/圆角/阴影/动效只走 token，浮层使用统一 `xmt-overlay` 入场编排，空态与骨架使用统一组件。
 
 ### 日报模块测试
 

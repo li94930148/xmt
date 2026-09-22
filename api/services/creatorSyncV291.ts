@@ -105,7 +105,7 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       COALESCE(m.completion_rate,0) completion_rate,COALESCE(m.cover_click_rate,0) cover_click_rate
       FROM creator_content_items i LEFT JOIN creator_content_metrics m ON m.id=(SELECT id FROM creator_content_metrics WHERE content_id=i.id ORDER BY snapshot_time DESC,id DESC LIMIT 1)
       WHERE i.account_id=?`, [account.id]);
-    const douyinAccount = await tx.queryOne<{ id:number; fans_count:number; fans_count_available:number }>('SELECT id,fans_count,fans_count_available FROM douyin_accounts WHERE creator_account_id=? ORDER BY last_sync_time DESC,id DESC LIMIT 1', [account.id]);
+    const douyinAccount = await tx.queryOne<{ id:number }>('SELECT id FROM douyin_accounts WHERE creator_account_id=? ORDER BY last_sync_time DESC,id DESC LIMIT 1', [account.id]);
     const workCandidates = douyinAccount ? await tx.queryAll<{ id:number; title:string; publish_time:string | null; play_count:number; like_count:number; comment_count:number; share_count:number; collect_count:number; completion_rate:number }>('SELECT id,title,publish_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate FROM douyin_works WHERE account_id=?', [douyinAccount.id]) : [];
     const latestContent = await tx.queryOne<{collected_at:string}>('SELECT collected_at FROM creator_official_metrics WHERE account_id=? AND source_item_key IS NOT NULL ORDER BY collected_at DESC,id DESC LIMIT 1', [account.id]);
     const staleContentBatch = Boolean(latestContent && Date.parse(latestContent.collected_at) > Date.parse(snapshotTime));
@@ -179,7 +179,9 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       const officialTotal = (code:string) => contentMetrics.reduce((sum,item) => sum + Number((item.metrics as JsonRecord | undefined)?.[code] || 0), 0);
       await tx.execute(`INSERT INTO douyin_daily_snapshots(account_id,snapshot_date,fans_count,fans_count_available,works_count,play_count,like_count,comment_count,share_count)
         VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,snapshot_date) DO UPDATE SET fans_count=CASE WHEN excluded.fans_count_available=1 THEN excluded.fans_count ELSE douyin_daily_snapshots.fans_count END,fans_count_available=MAX(douyin_daily_snapshots.fans_count_available,excluded.fans_count_available),works_count=excluded.works_count,play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count`,
-      [douyinAccount.id,dateKey(snapshotTime),douyinAccount.fans_count,douyinAccount.fans_count_available,contentMetrics.length,officialTotal('views'),officialTotal('likes'),officialTotal('comments'),officialTotal('shares')]);
+      // The official works export contains no account fan total. Never turn a
+      // previously observed account value into a new dated fan observation.
+      [douyinAccount.id,dateKey(snapshotTime),0,0,contentMetrics.length,officialTotal('views'),officialTotal('likes'),officialTotal('comments'),officialTotal('shares')]);
     }
     const warnings = [
       ...(unmatchedContentRows ? [`${unmatchedContentRows} 条官方作品未找到标题与发布日期完全一致的本地记录，已保留官方汇总但未覆盖作品明细`] : []),

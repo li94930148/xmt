@@ -402,10 +402,17 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     ...(official7d?.summary ? [] : ['growth_7d']),
     ...(official30d?.summary ? [] : ['growth_30d']),
   ] : [];
-  const missingFields = [...(fansAvailable ? [] : ['fans_count', 'fan_growth']), ...unavailableOfficialGrowth];
   const displayGrowth = (value: ReturnType<typeof growthFor>, daily: OfficialDailySummary | null | undefined) => useOfficial
     ? { fans: value?.fans ?? null, plays: daily?.views ?? null, interactions: daily ? daily.likes + daily.comments + daily.shares : null }
     : value;
+  const growth7d = displayGrowth(growthFor(7), official7d?.summary);
+  const growth30d = displayGrowth(growthFor(30), official30d?.summary);
+  const missingFields = [
+    ...(fansAvailable ? [] : ['fans_count']),
+    ...(growth7d?.fans == null ? ['fan_growth_7d'] : []),
+    ...(growth30d?.fans == null ? ['fan_growth_30d'] : []),
+    ...unavailableOfficialGrowth,
+  ];
   return {
     account,
     metrics: {
@@ -419,8 +426,8 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     },
     health: calculateDouyinAccountHealth(account, analyzed.works, snapshots),
     baselines: analyzed.baselines,
-    growth_7d: displayGrowth(growthFor(7), official7d?.summary),
-    growth_30d: displayGrowth(growthFor(30), official30d?.summary),
+    growth_7d: growth7d,
+    growth_30d: growth30d,
     top_works: await resolveWorkCovers(account, rankedWorks.slice(0, 5)),
     snapshot_count: snapshots.length,
     snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
@@ -430,6 +437,7 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     missing_fields: missingFields,
     warnings: [
       ...(fansAvailable ? [] : ['当前采集响应没有提供粉丝总数；该字段不会按 0 展示或参与增长评分。']),
+      ...(growth7d?.fans == null || growth30d?.fans == null ? ['粉丝周期变化需要期初与期末两次真实粉丝总量；官方作品导出不包含该字段，历史总量不会冒充当日快照。'] : []),
       ...(useOfficial ? ['播放与互动周期值来自对应的近7天、近30天官方逐日导出；计数按日求和，比例与时长按播放量加权。'] : []),
     ],
     metric_sources: {

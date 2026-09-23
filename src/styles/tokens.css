@@ -53,6 +53,13 @@ html.dark {
   --xmt-ambient-a: rgba(107, 140, 255, 0.14);
   --xmt-ambient-b: rgba(92, 225, 230, 0.08);
   --xmt-grid-line: rgba(148, 163, 184, 0.055);
+  --xmt-overlay-tint: rgba(255, 255, 255, 0.04);
+
+  --xmt-z-sticky: 30;
+  --xmt-z-page-overlay: 80;
+  --xmt-z-modal: 200;
+  --xmt-z-command: 300;
+  --xmt-z-editor-menu: 400;
 
   --xmt-font-heading: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
   --xmt-font-body: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
@@ -155,6 +162,7 @@ html.light {
   --xmt-ambient-a: rgba(61, 90, 254, 0.10);
   --xmt-ambient-b: rgba(8, 145, 178, 0.06);
   --xmt-grid-line: rgba(15, 23, 42, 0.04);
+  --xmt-overlay-tint: rgba(15, 23, 42, 0.045);
 
   --color-accent-hover: #2A3FD0;
   --color-border-light: rgba(15, 23, 42, 0.06);

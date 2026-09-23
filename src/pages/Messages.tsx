@@ -97,8 +97,12 @@ export default function Messages() {
         await markMessageAsRead(message.id);
         setMessages((current) => current.map((item) => (item.id === message.id ? { ...item, read: true } : item)));
         markStoreMessageAsRead(message.id);
-      } catch {
-        // Mark-as-read failure should not block navigation.
+      } catch (error) {
+        addNotification({
+          title: '标记已读失败',
+          message: error instanceof Error ? error.message : '消息仍保持未读，请稍后重试',
+          type: 'error',
+        });
       }
     }
 

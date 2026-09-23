@@ -11,6 +11,18 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '3.2.0',
+    date: '2026-09-23',
+    title: '产品工作流全面改造',
+    impactScope: ['工作台', '内容生产', '导航', '移动端', '系统设置'],
+    changes: [
+      { type: 'feature', description: '首页改为按角色聚合今日任务、逾期提醒、七阶段内容流和最近变化的工作台。' },
+      { type: 'fix', description: '打通灵感转选题、审核选题进入创作和已有稿件更新链路，避免修改时误建重复稿件。' },
+      { type: 'improvement', description: '日常导航收敛为五个业务分组，命令面板、移动状态和系统设置统一使用业务语言。' },
+      { type: 'improvement', description: '创作列表增加兼容式分页和精确总数，旧调用方式保持可用。' },
+    ],
+  },
+  {
     version: '3.1.2',
     date: '2026-09-23',
     title: '版本操作按钮跨设备显示修复',
@@ -55,8 +67,8 @@ export const changelog: ChangelogEntry[] = [
   { version: '2.22.1', date: '2026-09-16', title: '抖音官方数据校准', impactScope: ['抖音运营中心', '复盘报告', 'Creator Agent'], changes: [{ type: 'fix', description: '修复创作者中心实时粉丝字段漏采，粉丝总数不再停留在旧值。' }, { type: 'improvement', description: '作品数、累计播放和互动统一使用最新一次官方导出，多次导出不会叠加。' }, { type: 'improvement', description: '仅对标题与发布日期完全一致的作品校准明细；缺少可比快照时不再误算周期变化。' }] },
   { version: '2.22.0', date: '2026-09-16', title: '抖音运营数据统一与复盘完善', impactScope: ['抖音运营中心', '复盘报告', '登录安全升级'], changes: [{ type: 'improvement', description: '运营概览、累计播放、粉丝、趋势和复盘报告统一读取同一套抖音标准化数据，缺失指标会明确标注。' }, { type: 'feature', description: '复盘报告支持账号范围内安全删除；下线没有真实数据来源的粉丝画像入口。' }, { type: 'fix', description: '登录安全升级只把真实外部监控抓取视为观测证据，不再把进程内指标误判为已接入监控。' }] },
   { version: '2.21.4', date: '2026-09-16', title: '管理与运营入口收敛', impactScope: ['内容动态', '登录安全升级', '备份管理', '抖音运营中心'], changes: [{ type: 'improvement', description: '内容记录和认证升级改为直接给出可理解、可执行的信息，抖音运营导航移除重复入口。' }, { type: 'fix', description: '备份管理可汇总应用、部署应急和服务器定时备份，并显示不可访问来源。' }] },
-  { version: '2.21.3', date: '2026-09-15', title: '放了些小惊喜', impactScope: ['日常使用'], changes: [{ type: 'improvement', description: '放了些小惊喜，优化了日常使用体验。' }] },
-  { version: '2.21.2', date: '2026-09-15', title: '放了些小惊喜', impactScope: ['日常使用'], changes: [{ type: 'improvement', description: '放了些小惊喜。' }] },
+  { version: '2.21.3', date: '2026-09-15', title: '里程碑反馈优化', impactScope: ['日常使用'], changes: [{ type: 'improvement', description: '重要业务操作完成后增加轻量庆祝反馈，让阶段成果更容易被感知。' }] },
+  { version: '2.21.2', date: '2026-09-15', title: '日常交互细节优化', impactScope: ['日常使用'], changes: [{ type: 'improvement', description: '优化常用页面的操作反馈与过渡体验。' }] },
   { version: '2.21.1', date: '2026-09-15', title: '发布与分析数据一致性修复', impactScope: ['发布管理', '数据分析', '权限与统计'], changes: [{ type: 'fix', description: '多日分析快照不再造成发布重复或跨日期覆盖，部分指标更新会保留其他字段。' }, { type: 'improvement', description: '发布页统计改为全量北京时间口径，抖音关联权威字段增加服务端保护。' }] },
   { version: '2.21.0', date: '2026-09-12', title: '发布管理接入抖音作品数据', impactScope: ['发布管理', '抖音运营中心', 'Creator 数据同步'], changes: [{ type: 'feature', description: '发布稿件可自动或人工关联抖音作品，并支持候选搜索与解除关联。' }, { type: 'improvement', description: '关联后的发布时间、状态和互动指标实时以抖音运营中心为准，原稿件数据继续保留。' }] },
   { version: '2.20.25', date: '2026-09-12', title: '创作只读与首页数据联动', impactScope: ['创作管理', '首页驾驶舱', '抖音运营中心'], changes: [{ type: 'fix', description: '已审核稿件的创作资料严格只读，不再因自动保存连续提示失败。' }, { type: 'improvement', description: '首页聚合内容生产链路和抖音播放数据，并按最深业务阶段计算内容生产指数。' }] },

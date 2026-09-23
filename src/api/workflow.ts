@@ -17,8 +17,14 @@ async function getErrorMessage(response: Response, fallback: string) {
 }
 
 // Production
-export async function getProduction(params?: { topic_id?: number }): Promise<Production[]> {
-  const query = new URLSearchParams(params as Record<string, string>);
+export async function getProduction(): Promise<Production[]>;
+export async function getProduction(params: { topic_id: number }): Promise<Production[]>;
+export async function getProduction(params: { topic_id?: number; page: number; limit: number }): Promise<PaginatedWorkflowResult<Production>>;
+export async function getProduction(params?: { topic_id?: number; page?: number; limit?: number }): Promise<Production[] | PaginatedWorkflowResult<Production>> {
+  const query = new URLSearchParams();
+  if (params?.topic_id !== undefined) query.set('topic_id', String(params.topic_id));
+  if (params?.page !== undefined) query.set('page', String(params.page));
+  if (params?.limit !== undefined) query.set('limit', String(params.limit));
   const response = await fetch(`${BASE_URL}/workflow/production?${query}`, {
     headers: getAuthHeader()
   });

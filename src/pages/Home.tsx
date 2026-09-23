@@ -1,53 +1,69 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
-  BarChart3,
-  BookOpen,
-  Calendar,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CircleAlert,
   Clock3,
-  Compass,
-  Download,
-  FileClock,
-  Flame,
+  FilePenLine,
   Lightbulb,
-  Timer,
-  TrendingUp,
-  Users,
+  MessageSquareText,
+  PenLine,
+  Send,
+  Sparkles,
+  Video,
 } from 'lucide-react';
-import { getInspirations, getMonthlyStats, getProduction, getPublishing, getTeamStats, getTopics, voteInspiration } from '../api';
-import { getDouyinDashboard } from '../api/creatorCenter';
-import type { Inspiration, MonthlyStats, Production, Publishing, TeamStats, Topic, TopicStatus } from '../types';
+import { getInspirations, getProduction, getPublishing, getTopics } from '../api';
+import type { Inspiration, Production, Publishing, Topic, TopicStatus } from '../types';
 import { useAuthStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
-import AnnouncementBoard from '../components/AnnouncementBoard';
-import PomodoroTimer from '../components/PomodoroTimer';
 import {
   ActionButton,
   EmptyState,
   GlassPanel,
-  MetricCard,
+  PageHeader,
   PageShell,
   StatusPill,
   StudioSkeletonCard,
 } from '../components/studio';
-import { formatBeijingDate } from '../lib/utils';
-import { ProgressBar, XMTCard } from '../design-system';
-import DashboardBento from '../components/xmt-ui/DashboardBento';
-import { buildHomeDashboardMetrics } from '../components/xmt-ui/homeDashboardMetrics';
+import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 
-const statusText: Record<TopicStatus, string> = {
-  pending: '待审核',
-  approved: '已通过',
-  rejected: '已驳回',
-  production: '创作中',
-  shooting: '制作中',
-  publishing: '待发布',
-  completed: '已完成',
+type Tone = 'primary' | 'cyan' | 'violet' | 'coral' | 'amber' | 'success' | 'muted';
+
+type TaskItem = {
+  id: string;
+  title: string;
+  context: string;
+  meta: string;
+  path: string;
+  action: string;
+  tone: Tone;
+  icon: typeof Clock3;
 };
 
-const statusTone: Record<TopicStatus, 'primary' | 'cyan' | 'violet' | 'coral' | 'amber' | 'success' | 'muted'> = {
+type ChangeItem = {
+  id: string;
+  type: string;
+  title: string;
+  detail: string;
+  time: string;
+  path: string;
+  tone: Tone;
+};
+
+const topicStatusText: Record<TopicStatus, string> = {
+  pending: '待审核',
+  approved: '已通过',
+  rejected: '已退回',
+  production: '创作中',
+  shooting: '成片制作',
+  publishing: '待发布',
+  completed: '已发布',
+};
+
+const topicStatusTone: Record<TopicStatus, Tone> = {
   pending: 'amber',
   approved: 'success',
   rejected: 'coral',
@@ -57,294 +73,226 @@ const statusTone: Record<TopicStatus, 'primary' | 'cyan' | 'violet' | 'coral' | 
   completed: 'success',
 };
 
-const DASHBOARD_PAGE_SIZE = 100;
+const stageToneClasses: Record<string, string> = {
+  amber: 'bg-studio-amber/12 text-studio-amber',
+  cyan: 'bg-studio-cyan/12 text-studio-cyan',
+  violet: 'bg-studio-violet/12 text-studio-violet',
+  success: 'bg-studio-success/12 text-studio-success',
+  primary: 'bg-studio-primary/12 text-studio-primary',
+};
 
-async function getDashboardTopics() {
-  const first = await getTopics({ limit: DASHBOARD_PAGE_SIZE });
-  const pageCount = Math.ceil(first.total / first.limit);
-  if (pageCount <= 1) return first.data;
-  const remaining = await Promise.all(
-    Array.from({ length: pageCount - 1 }, (_, index) => getTopics({ page: index + 2, limit: first.limit })),
-  );
-  return [...first.data, ...remaining.flatMap((page) => page.data)];
+function isOverdue(topic: Topic) {
+  return Boolean(topic.deadline && topic.status !== 'completed' && formatBeijingDate(topic.deadline) < formatBeijingDate(new Date().toISOString()));
 }
 
-async function getDashboardPublishing() {
-  const first = await getPublishing({ limit: DASHBOARD_PAGE_SIZE });
-  const pageCount = Math.ceil(first.total / first.limit);
-  if (pageCount <= 1) return first.data;
-  const remaining = await Promise.all(
-    Array.from({ length: pageCount - 1 }, (_, index) => getPublishing({ page: index + 2, limit: first.limit })),
-  );
-  return [...first.data, ...remaining.flatMap((page) => page.data)];
+function sortByUpdatedAt<T extends { updated_at: string }>(items: T[]) {
+  return [...items].sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at));
 }
 
 export default function Home() {
-  const [teamStats, setTeamStats] = useState<TeamStats | null>(null);
-  const [monthlyStats, setMonthlyStats] = useState<MonthlyStats | null>(null);
   const [pendingTopics, setPendingTopics] = useState<Topic[]>([]);
-  const [pendingTopicTotal, setPendingTopicTotal] = useState(0);
-  const [dashboardTopics, setDashboardTopics] = useState<Topic[]>([]);
-  const [recentTopics, setRecentTopics] = useState<Topic[]>([]);
+  const [productionTopics, setProductionTopics] = useState<Topic[]>([]);
+  const [shootingTopics, setShootingTopics] = useState<Topic[]>([]);
+  const [publishingTopics, setPublishingTopics] = useState<Topic[]>([]);
+  const [completedTopics, setCompletedTopics] = useState<Topic[]>([]);
   const [productions, setProductions] = useState<Production[]>([]);
   const [publishing, setPublishing] = useState<Publishing[]>([]);
-  const [douyinViews, setDouyinViews] = useState<number | null>(null);
-  const [todayTopicCount, setTodayTopicCount] = useState(0);
-  const [hotInspirations, setHotInspirations] = useState<Inspiration[]>([]);
+  const [inspirations, setInspirations] = useState<Inspiration[]>([]);
+  const [stageTotals, setStageTotals] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [showChanges, setShowChanges] = useState(true);
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
-  const { permissions, loading: permissionsLoading } = usePermission();
-  const canViewAnalytics = user?.role === 'admin' || permissions.includes('*') || permissions.includes('analytics:view');
-  const canViewCreatorData = user?.role === 'admin' || permissions.includes('*') || permissions.includes('creator:data:view');
+  const { loading: permissionsLoading, hasPermission } = usePermission();
 
   useEffect(() => {
-    if (user && permissionsLoading) {
-      return;
-    }
+    if (!user || permissionsLoading) return;
 
-    const fetchData = async () => {
-      try {
-        const [team, monthly, pending, recent, productionList, publishingList, douyin, inspirations] = await Promise.allSettled([
-          canViewAnalytics ? getTeamStats() : Promise.resolve(null),
-          canViewAnalytics ? getMonthlyStats() : Promise.resolve(null),
-          getTopics({ status: 'pending', limit: 100 }),
-          getDashboardTopics(),
-          getProduction(),
-          getDashboardPublishing(),
-          canViewCreatorData ? getDouyinDashboard() : Promise.resolve(null),
-          getInspirations({ limit: 6 }),
-        ]);
+    let cancelled = false;
+    const fetchDashboard = async () => {
+      setLoading(true);
+      setLoadError('');
+      const requests = await Promise.allSettled([
+        getInspirations({ limit: 4 }),
+        getTopics({ status: 'pending', limit: 5 }),
+        getTopics({ status: 'production', limit: 5 }),
+        getTopics({ status: 'shooting', limit: 5 }),
+        getTopics({ status: 'publishing', limit: 5 }),
+        getTopics({ status: 'completed', limit: 5 }),
+        getProduction({ page: 1, limit: 12 }),
+        getPublishing({ page: 1, limit: 12 }),
+      ]);
 
-        if (team.status === 'fulfilled' && team.value) setTeamStats(team.value);
-        if (monthly.status === 'fulfilled' && monthly.value) setMonthlyStats(monthly.value);
-        if (pending.status === 'fulfilled') {
-          setPendingTopicTotal(pending.value.total);
-          setPendingTopics(pending.value.data.slice(0, 5));
-        }
-        if (recent.status === 'fulfilled') {
-          const today = formatBeijingDate(new Date().toISOString());
-          setTodayTopicCount(recent.value.filter((topic) => formatBeijingDate(topic.created_at) === today).length);
-          setDashboardTopics(recent.value);
-          setRecentTopics(recent.value.slice(0, 6));
-        }
-        if (productionList.status === 'fulfilled') setProductions(productionList.value);
-        if (publishingList.status === 'fulfilled') setPublishing(publishingList.value);
-        if (douyin.status === 'fulfilled' && douyin.value) setDouyinViews(douyin.value.metrics.play_count);
-        if (inspirations.status === 'fulfilled') {
-          setHotInspirations([...inspirations.value.data].sort((a, b) => (b.votes || 0) - (a.votes || 0)).slice(0, 6));
-        }
-      } catch (error) {
-        console.error('Failed to fetch dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
+      if (cancelled) return;
+      const [ideaResult, pendingResult, productionResult, shootingResult, publishingTopicResult, completedResult, productionListResult, publishingListResult] = requests;
+
+      if (ideaResult.status === 'fulfilled') setInspirations(ideaResult.value.data);
+      if (pendingResult.status === 'fulfilled') setPendingTopics(pendingResult.value.data);
+      if (productionResult.status === 'fulfilled') setProductionTopics(productionResult.value.data);
+      if (shootingResult.status === 'fulfilled') setShootingTopics(shootingResult.value.data);
+      if (publishingTopicResult.status === 'fulfilled') setPublishingTopics(publishingTopicResult.value.data);
+      if (completedResult.status === 'fulfilled') setCompletedTopics(completedResult.value.data);
+      if (productionListResult.status === 'fulfilled') setProductions(productionListResult.value.data);
+      if (publishingListResult.status === 'fulfilled') setPublishing(publishingListResult.value.data);
+
+      setStageTotals({
+        ideas: ideaResult.status === 'fulfilled' ? ideaResult.value.total : 0,
+        pending: pendingResult.status === 'fulfilled' ? pendingResult.value.total : 0,
+        production: productionResult.status === 'fulfilled' ? productionResult.value.total : 0,
+        shooting: shootingResult.status === 'fulfilled' ? shootingResult.value.total : 0,
+        publishing: publishingTopicResult.status === 'fulfilled' ? publishingTopicResult.value.total : 0,
+        completed: completedResult.status === 'fulfilled' ? completedResult.value.total : 0,
+        review: publishingListResult.status === 'fulfilled' ? publishingListResult.value.summary.published : 0,
+      });
+
+      if (requests.every((result) => result.status === 'rejected')) setLoadError('工作台暂时无法加载，请稍后重试。');
+      setLoading(false);
     };
 
-    void fetchData();
-  }, [canViewAnalytics, canViewCreatorData, permissionsLoading, user]);
+    void fetchDashboard();
+    return () => { cancelled = true; };
+  }, [permissionsLoading, user]);
 
-  const dashboardMetrics = useMemo(
-    () => buildHomeDashboardMetrics(dashboardTopics, productions, publishing),
-    [dashboardTopics, productions, publishing],
+  const allTopics = useMemo(
+    () => [...pendingTopics, ...productionTopics, ...shootingTopics, ...publishingTopics, ...completedTopics],
+    [completedTopics, pendingTopics, productionTopics, publishingTopics, shootingTopics],
   );
 
-  const toolActions = [
-    { id: 'daily', label: '今日日报', desc: '填写今日进展', icon: FileClock, path: '/daily-report', tone: 'coral' },
-    { id: 'topics', label: '新建选题', desc: '发起内容源头', icon: Compass, path: '/topics/add', tone: 'cyan' },
-    { id: 'calendar', label: '排期日历', desc: '查看发布节奏', icon: Calendar, path: '/calendar', tone: 'primary' },
-    { id: 'timer', label: '专注创作', desc: '番茄钟工作块', icon: Timer, path: '/pomodoro', tone: 'amber' },
-    { id: 'resources', label: '资源库', desc: '素材与档案', icon: BookOpen, path: '/resources', tone: 'success' },
-    { id: 'export', label: '报告中心', desc: '日报/周报/导出', icon: Download, path: '/export', tone: 'violet' },
+  const tasks = useMemo<TaskItem[]>(() => {
+    const result: TaskItem[] = [];
+    if (hasPermission('topic:audit')) {
+      pendingTopics.forEach((topic) => result.push({
+        id: `audit-${topic.id}`,
+        title: '审核选题',
+        context: topic.title,
+        meta: `${topic.creator_name || '团队成员'} · ${formatBeijingDate(topic.created_at)}`,
+        path: `/topics/${topic.id}`,
+        action: '开始审核',
+        tone: 'amber',
+        icon: MessageSquareText,
+      }));
+    }
+
+    productions
+      .filter((item) => item.operator_id === user?.id && ['draft', 'rejected'].includes(item.status))
+      .forEach((item) => result.push({
+        id: `production-${item.id}`,
+        title: item.status === 'rejected' ? '处理退回稿件' : '继续写稿',
+        context: item.topic_title || `创作记录 #${item.id}`,
+        meta: `${item.version || '当前版本'} · ${formatBeijingTime(item.updated_at)}`,
+        path: `/production/${item.id}`,
+        action: item.status === 'rejected' ? '处理退回' : '继续写稿',
+        tone: item.status === 'rejected' ? 'coral' : 'cyan',
+        icon: FilePenLine,
+      }));
+
+    if (hasPermission('workflow:publishing')) {
+      publishing
+        .filter((item) => ['pending', 'scheduled'].includes(item.status))
+        .forEach((item) => result.push({
+          id: `publishing-${item.id}`,
+          title: item.status === 'scheduled' ? '确认发布排期' : '准备发布',
+          context: item.topic_title || `发布记录 #${item.id}`,
+          meta: item.publish_time ? formatBeijingTime(item.publish_time) : '尚未设置发布时间',
+          path: `/publishing/${item.id}`,
+          action: item.status === 'scheduled' ? '确认排期' : '去发布',
+          tone: 'primary',
+          icon: Send,
+        }));
+    }
+
+    return result.slice(0, 6);
+  }, [hasPermission, pendingTopics, productions, publishing, user?.id]);
+
+  const attentionTopics = useMemo(() => sortByUpdatedAt(allTopics.filter(isOverdue)).slice(0, 4), [allTopics]);
+
+  const recentChanges = useMemo<ChangeItem[]>(() => {
+    const topicChanges: ChangeItem[] = allTopics.map((topic) => ({
+      id: `topic-${topic.id}`,
+      type: '状态变化',
+      title: topic.title,
+      detail: `当前阶段：${topicStatusText[topic.status]}`,
+      time: topic.updated_at,
+      path: `/topics/${topic.id}`,
+      tone: topicStatusTone[topic.status],
+    }));
+    const productionChanges: ChangeItem[] = productions.map((item) => ({
+      id: `production-${item.id}`,
+      type: '稿件更新',
+      title: item.topic_title || `创作记录 #${item.id}`,
+      detail: `更新至 ${item.version || '当前版本'}`,
+      time: item.updated_at,
+      path: `/production/${item.id}`,
+      tone: 'cyan',
+    }));
+    const publishingChanges: ChangeItem[] = publishing.map((item) => ({
+      id: `publishing-${item.id}`,
+      type: '发布进度',
+      title: item.topic_title || `发布记录 #${item.id}`,
+      detail: item.status === 'published' ? '已完成发布' : item.status === 'failed' ? '发布需要处理' : '发布准备中',
+      time: item.updated_at,
+      path: `/publishing/${item.id}`,
+      tone: item.status === 'failed' ? 'coral' : item.status === 'published' ? 'success' : 'primary',
+    }));
+    return [...topicChanges, ...productionChanges, ...publishingChanges]
+      .sort((left, right) => Date.parse(right.time) - Date.parse(left.time))
+      .slice(0, 6);
+  }, [allTopics, productions, publishing]);
+
+  const stages = [
+    { id: 'ideas', label: '灵感池', count: stageTotals.ideas || 0, icon: Lightbulb, tone: 'amber', path: '/inspirations', items: inspirations.map((item) => item.title).slice(0, 2) },
+    { id: 'pending', label: '待审', count: stageTotals.pending || 0, icon: Clock3, tone: 'cyan', path: '/topics?status=pending', items: pendingTopics.map((item) => item.title).slice(0, 2) },
+    { id: 'production', label: '创作中', count: stageTotals.production || 0, icon: PenLine, tone: 'violet', path: '/topics?status=production', items: productionTopics.map((item) => item.title).slice(0, 2) },
+    { id: 'shooting', label: '成片', count: stageTotals.shooting || 0, icon: Video, tone: 'success', path: '/topics?status=shooting', items: shootingTopics.map((item) => item.title).slice(0, 2) },
+    { id: 'publishing', label: '待发', count: stageTotals.publishing || 0, icon: Send, tone: 'amber', path: '/topics?status=publishing', items: publishingTopics.map((item) => item.title).slice(0, 2) },
+    { id: 'completed', label: '已发', count: stageTotals.completed || 0, icon: CheckCircle2, tone: 'primary', path: '/topics?status=completed', items: completedTopics.map((item) => item.title).slice(0, 2) },
+    { id: 'review', label: '复盘', count: stageTotals.review || 0, icon: Sparkles, tone: 'violet', path: '/retrospectives', items: ['从发布记录开始复盘'] },
   ];
 
-  const handleVoteInspiration = async (id: number) => {
-    try {
-      await voteInspiration(id);
-      setHotInspirations((prev) => prev.map((item) => (item.id === id ? { ...item, votes: (item.votes || 0) + 1, voted: true } : item)));
-    } catch {
-      // Voting is non-critical on the dashboard.
-    }
-  };
-
-  const handleDashboardNavigate = useCallback((path: string) => navigate(path), [navigate]);
-
   if (loading) {
-    return (
-      <PageShell>
-        <div className="grid gap-4 md:grid-cols-4">
-          {[1, 2, 3, 4].map((item) => <StudioSkeletonCard key={item} />)}
-        </div>
-        <div className="grid gap-5 lg:grid-cols-3">
-          <div className="lg:col-span-2"><StudioSkeletonCard /></div>
-          <StudioSkeletonCard />
-        </div>
-      </PageShell>
-    );
+    return <PageShell><StudioSkeletonCard /><div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]"><StudioSkeletonCard /><StudioSkeletonCard /></div><StudioSkeletonCard /></PageShell>;
   }
 
   return (
     <PageShell>
-      <DashboardBento
-        pendingTopics={pendingTopicTotal}
-        inProduction={dashboardMetrics.inProduction}
-        toPublish={dashboardMetrics.toPublish}
-        todayTopics={todayTopicCount}
-        completionRate={dashboardMetrics.productionIndex}
-        totalViews={douyinViews ?? monthlyStats?.total_views ?? 0}
-        hotInspirations={hotInspirations.length}
-        onNavigate={handleDashboardNavigate}
+      <PageHeader
+        title="工作台"
+        description={`你好，${user?.name || user?.username || '伙伴'}。今天做什么、卡在哪里、谁需要处理，都在这里。`}
+        actions={<><ActionButton onClick={() => navigate('/inspirations')}><Lightbulb className="h-4 w-4" />记灵感</ActionButton><ActionButton variant="primary" onClick={() => navigate('/topics/add')}><PenLine className="h-4 w-4" />新建选题</ActionButton></>}
       />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="已完成内容" value={dashboardMetrics.completedContent} unit="项" icon={CheckCircle2} tone="success" trend={{ label: '创作与发布', up: true }} />
-        <MetricCard title="逾期任务" value={teamStats?.overdue_count || 0} unit="项" icon={Clock3} tone="coral" trend={{ label: '需关注', up: false }} />
-        <XMTCard className="p-5">
-          <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold text-studio-text-muted">生产指数</p><p className="mt-3 text-3xl font-bold text-studio-text-primary xmt-data-number">{dashboardMetrics.productionIndex}%</p></div><div className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-gradient-to-br from-studio-cyan to-studio-primary shadow-lg shadow-studio-cyan/20"><TrendingUp className="h-5 w-5 text-white" /></div></div>
-          <div className="mt-4"><ProgressBar value={dashboardMetrics.productionIndex} tone="success" label="当前内容链路进度" /></div>
-        </XMTCard>
-        <MetricCard title="播放量" value={(douyinViews ?? monthlyStats?.total_views ?? 0).toLocaleString()} unit="累计" icon={BarChart3} tone="violet" trend={{ label: douyinViews == null ? '数据复盘' : '抖音运营中心', up: true }} />
-      </div>
+      {loadError ? <GlassPanel className="border-studio-coral/35 p-5 text-sm text-studio-coral-contrast">{loadError}</GlassPanel> : null}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]">
-        <GlassPanel className="p-5">
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-studio-text-primary">今日待办</h2>
-              <p className="mt-1 text-xs text-studio-text-muted">优先处理阻塞内容流的节点</p>
-            </div>
-            <ActionButton variant="ghost" onClick={() => navigate('/topics')}>
-              查看全部 <ArrowRight className="h-4 w-4" />
-            </ActionButton>
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <GlassPanel className="overflow-visible">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft px-5 py-4">
+            <div><h2 className="text-base font-semibold text-studio-text-primary">我的今日任务</h2><p className="mt-1 text-xs text-studio-text-muted">先处理最能推动内容流的下一步</p></div>
+            <ActionButton variant="ghost" onClick={() => navigate('/topics')}>查看全部任务 <ArrowRight className="h-4 w-4" /></ActionButton>
           </div>
-
-          {pendingTopics.length > 0 ? (
-            <div className="space-y-2">
-              {pendingTopics.map((topic) => (
-                <button
-                  key={topic.id}
-                  onClick={() => navigate(`/topics/${topic.id}`)}
-                  className="group flex w-full items-center gap-4 rounded-card border border-transparent bg-studio-surface-soft/45 p-4 text-left transition-all duration-200 hover:border-studio-border-active hover:bg-studio-surface-elevated/60"
-                >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-studio-amber/12 text-studio-amber">
-                    <Clock3 className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-studio-text-primary">{topic.title}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-studio-text-muted">
-                      <span>{topic.creator_name || '未分配'} 发起</span>
-                      <span>·</span>
-                      <span>{formatBeijingDate(topic.created_at)}</span>
-                    </div>
-                  </div>
-                  <StatusPill className="shrink-0" tone={statusTone[topic.status]}>{statusText[topic.status]}</StatusPill>
-                  <span className="translate-x-2 text-xs font-semibold text-studio-cyan opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100">
-                    去审核
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <EmptyState icon={CheckCircle2} title="今日没有待审核选题" description="当前内容源头没有阻塞，可以推进创作、发布或复盘。" actionLabel="查看选题池" onAction={() => navigate('/topics')} />
-          )}
+          {tasks.length > 0 ? <div className="divide-y divide-studio-border-soft">
+            {tasks.map((task) => <div key={task.id} className="group flex flex-col gap-3 px-5 py-4 transition hover:bg-studio-surface-soft/55 sm:flex-row sm:items-center">
+              <div className="flex min-w-0 flex-1 items-center gap-3"><div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-button ${stageToneClasses[task.tone] || stageToneClasses.primary}`}><task.icon className="h-5 w-5" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-semibold text-studio-text-primary">{task.title}</p><StatusPill tone={task.tone}>{task.action}</StatusPill></div><p className="mt-1 truncate text-sm text-studio-text-secondary">{task.context}</p><p className="mt-1 text-xs text-studio-text-muted">{task.meta}</p></div></div>
+              <ActionButton className="shrink-0" variant={task.tone === 'coral' ? 'danger' : 'primary'} onClick={() => navigate(task.path)}>{task.action}<ChevronRight className="h-4 w-4" /></ActionButton>
+            </div>)}
+          </div> : <EmptyState icon={CheckCircle2} title="今天没有必须处理的任务" description="可以从记录灵感或创建选题开始下一轮内容生产。" actionLabel="新建选题" onAction={() => navigate('/topics/add')} />}
         </GlassPanel>
 
-        <div className="space-y-5">
-          <GlassPanel className="p-5">
-            <h2 className="text-base font-semibold text-studio-text-primary">实用工具</h2>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              {toolActions.map((action) => (
-                <button
-                  key={action.id}
-                  onClick={() => navigate(action.path)}
-                  className="group rounded-card border border-studio-border-soft bg-studio-surface-soft/50 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-studio-border-active hover:bg-studio-surface-elevated/70"
-                >
-                  <action.icon className="h-5 w-5 text-studio-cyan transition group-hover:text-studio-text-primary" />
-                  <p className="mt-3 text-sm font-semibold text-studio-text-primary">{action.label}</p>
-                  <p className="mt-1 text-xs text-studio-text-muted">{action.desc}</p>
-                </button>
-              ))}
-            </div>
-          </GlassPanel>
-
-          <PomodoroTimer compact />
-        </div>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-3">
-        <GlassPanel className="p-5 xl:col-span-2">
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-studio-text-primary">最近内容流</h2>
-              <p className="mt-1 text-xs text-studio-text-muted">快速判断每个选题当前卡在哪一步</p>
-            </div>
-            <ActionButton variant="ghost" onClick={() => navigate('/topics')}>
-              进入链路 <ArrowRight className="h-4 w-4" />
-            </ActionButton>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {recentTopics.map((topic) => (
-              <button key={topic.id} onClick={() => navigate(`/topics/${topic.id}`)} className="rounded-card border border-studio-border-soft bg-studio-surface-soft/45 p-4 text-left transition hover:border-studio-border-active hover:bg-studio-surface-elevated/60">
-                <div className="flex items-start justify-between gap-3">
-                  <p className="line-clamp-2 text-sm font-semibold text-studio-text-primary">{topic.title}</p>
-                  <StatusPill className="shrink-0" tone={statusTone[topic.status]}>{statusText[topic.status]}</StatusPill>
-                </div>
-                <div className="mt-4 flex items-center justify-between text-xs text-studio-text-muted">
-                  <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />{topic.assignee_name || topic.creator_name || '待认领'}</span>
-                  <span>{topic.platform}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </GlassPanel>
-
-        <GlassPanel className="p-5">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-[14px] bg-studio-coral/12 text-studio-coral">
-              <Flame className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-studio-text-primary">热门灵感</h2>
-              <p className="text-xs text-studio-text-muted">创意池信号</p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            {hotInspirations.length > 0 ? hotInspirations.map((item) => (
-              <div key={item.id} className="group flex w-full items-center gap-3 rounded-button bg-studio-surface-soft/45 p-3 text-left transition hover:bg-studio-surface-elevated/70">
-                <Lightbulb className="h-4 w-4 shrink-0 text-studio-amber" />
-                <button
-                  type="button"
-                  onClick={() => navigate('/inspirations')}
-                  className="min-w-0 flex-1 truncate text-left text-sm text-studio-text-secondary group-hover:text-studio-text-primary"
-                >
-                  {item.title}
-                </button>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void handleVoteInspiration(item.id);
-                  }}
-                  className="text-xs font-semibold text-studio-coral"
-                >
-                  {item.votes || 0}
-                </button>
-              </div>
-            )) : <p className="rounded-button bg-studio-surface-soft/45 p-4 text-sm text-studio-text-muted">暂无灵感数据</p>}
-          </div>
+        <GlassPanel>
+          <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4"><div><h2 className="text-base font-semibold text-studio-text-primary">需要关注</h2><p className="mt-1 text-xs text-studio-text-muted">逾期或长时间未推进的内容</p></div><StatusPill tone={attentionTopics.length > 0 ? 'coral' : 'success'}>{attentionTopics.length}</StatusPill></div>
+          {attentionTopics.length > 0 ? <div className="space-y-2 p-3">{attentionTopics.map((topic) => <button key={topic.id} type="button" onClick={() => navigate(`/topics/${topic.id}`)} className="flex w-full items-start gap-3 rounded-card border border-studio-border-soft bg-studio-surface-soft/45 p-3 text-left transition hover:border-studio-border-active hover:bg-studio-surface-elevated/60"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-studio-coral" /><div className="min-w-0 flex-1"><p className="line-clamp-2 text-sm font-semibold text-studio-text-primary">{topic.title}</p><p className="mt-1 text-xs text-studio-coral-contrast">已超过截止时间 · {formatBeijingDate(topic.deadline)}</p><p className="mt-1 text-xs text-studio-text-muted">{topicStatusText[topic.status]} · {topic.assignee_name || '待认领'}</p></div><ChevronRight className="mt-1 h-4 w-4 shrink-0 text-studio-text-muted" /></button>)}</div> : <EmptyState icon={CheckCircle2} title="没有逾期卡点" description="当前内容都在计划内推进。" />}
         </GlassPanel>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-3">
-        <div className="xl:col-span-2"><AnnouncementBoard /></div>
-        <GlassPanel className="flex min-h-32 items-center justify-between gap-5 p-5">
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold text-studio-text-primary">意见箱</h2>
-            <p className="mt-1 text-sm leading-6 text-studio-text-muted">有想法、建议或问题？留下你的声音</p>
-          </div>
-          <ActionButton className="shrink-0" variant="ghost" onClick={() => navigate('/anonymous-feedback')}>进入意见墙 <ArrowRight className="h-4 w-4" /></ActionButton>
-        </GlassPanel>
-      </div>
+      <GlassPanel className="overflow-visible">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft px-5 py-4"><div><h2 className="text-base font-semibold text-studio-text-primary">内容流</h2><p className="mt-1 text-xs text-studio-text-muted">从灵感到复盘，一眼看清每个阶段</p></div><ActionButton variant="ghost" onClick={() => navigate('/topics')}>进入内容生产 <ArrowRight className="h-4 w-4" /></ActionButton></div>
+        <div className="overflow-x-auto p-4"><div className="grid min-w-[1050px] grid-cols-7 gap-2">{stages.map((stage, index) => <div key={stage.id} className="relative min-w-0">{index < stages.length - 1 ? <ChevronRight className="absolute -right-3 top-7 z-10 h-4 w-4 text-studio-text-muted" /> : null}<button type="button" onClick={() => navigate(stage.path)} className="h-full w-full rounded-card border border-studio-border-soft bg-studio-surface-soft/45 p-3 text-left transition hover:-translate-y-0.5 hover:border-studio-border-active hover:bg-studio-surface-elevated/65"><div className="flex items-center justify-between gap-2"><div className={`flex h-8 w-8 items-center justify-center rounded-button ${stageToneClasses[stage.tone]}`}><stage.icon className="h-4 w-4" /></div><span className="xmt-data-number text-xl font-semibold text-studio-text-primary">{stage.count}</span></div><p className="mt-3 text-sm font-semibold text-studio-text-primary">{stage.label}</p><div className="mt-3 space-y-1.5">{stage.items.length > 0 ? stage.items.map((item) => <p key={item} className="truncate text-xs text-studio-text-muted">{item}</p>) : <p className="text-xs text-studio-text-muted">当前没有内容</p>}</div></button></div>)}</div></div>
+      </GlassPanel>
+
+      <GlassPanel>
+        <button type="button" onClick={() => setShowChanges((current) => !current)} className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"><div><h2 className="text-base font-semibold text-studio-text-primary">最近变化</h2><p className="mt-1 text-xs text-studio-text-muted">稿件、状态与发布进度的最新变化</p></div>{showChanges ? <ChevronDown className="h-5 w-5 text-studio-text-muted" /> : <ChevronRight className="h-5 w-5 text-studio-text-muted" />}</button>
+        {showChanges ? <div className="border-t border-studio-border-soft"><div className="divide-y divide-studio-border-soft">{recentChanges.length > 0 ? recentChanges.map((change) => <button key={change.id} type="button" onClick={() => navigate(change.path)} className="grid w-full gap-2 px-5 py-3 text-left transition hover:bg-studio-surface-soft/55 sm:grid-cols-[110px_minmax(0,1fr)_minmax(0,1fr)_150px] sm:items-center"><StatusPill className="justify-self-start" tone={change.tone}>{change.type}</StatusPill><span className="truncate text-sm font-medium text-studio-text-primary">{change.title}</span><span className="truncate text-sm text-studio-text-secondary">{change.detail}</span><span className="text-xs text-studio-text-muted sm:text-right">{formatBeijingTime(change.time)}</span></button>) : <EmptyState title="还没有最近变化" description="稿件或状态更新后会显示在这里。" />}</div></div> : null}
+      </GlassPanel>
     </PageShell>
   );
 }

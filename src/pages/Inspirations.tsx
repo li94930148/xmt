@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
 import {
   getInspirations,
@@ -61,6 +62,7 @@ export default function Inspirations() {
   const [commentText, setCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const appStore = useAppStore();
+  const navigate = useNavigate();
   const authStore = useAuthStore();
   const styles = useThemeStyles();
   const { hasPermission } = usePermission();
@@ -272,7 +274,9 @@ export default function Inspirations() {
         message: `已创建选题 #${result.topicId}`,
         type: 'success',
       });
-      syncInspirationPatch(id, { status: 'promoted' });
+      syncInspirationPatch(id, { status: 'promoted', topic_id: result.topicId });
+      closeDetail();
+      navigate(`/topics/${result.topicId}`);
     } catch (error) {
       appStore.addNotification({
         title: '转为选题失败',

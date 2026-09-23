@@ -389,19 +389,36 @@ router.get('/shadow-decisions', authenticate, requirePermission('system:template
 router.get('/production', authenticate, async (req, res) => {
   try {
     const { topic_id } = req.query;
+    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
+    const page = Math.max(1, Number.parseInt(String(req.query.page || '1'), 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || '20'), 10) || 20));
     let query = `SELECT p.*, COALESCE(p.content_markdown, p.content) as contentMarkdown, COALESCE(p.content_json, p.content) as contentJson, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p
                  LEFT JOIN users u ON p.operator_id = u.id 
                  LEFT JOIN topics t ON p.topic_id = t.id WHERE 1=1`;
+    let countQuery = `SELECT COUNT(*) as total FROM production p
+                      LEFT JOIN topics t ON p.topic_id = t.id WHERE 1=1`;
     const params: any[] = [];
-    if (topic_id) { query += ` AND p.topic_id = ?`; params.push(topic_id); }
+    const countParams: any[] = [];
+    if (topic_id) {
+      query += ` AND p.topic_id = ?`;
+      countQuery += ` AND p.topic_id = ?`;
+      params.push(topic_id);
+      countParams.push(topic_id);
+    }
     if (!canViewAllContent(req.user)) {
       const userId = req.user!.id;
       query += ` AND (t.creator_id = ? OR t.assignee_id = ? OR p.operator_id = ?)`;
+      countQuery += ` AND (t.creator_id = ? OR t.assignee_id = ? OR p.operator_id = ?)`;
       params.push(userId, userId, userId);
+      countParams.push(userId, userId, userId);
     }
     query += ` ORDER BY p.created_at DESC`;
+    if (hasPagination) query += ` LIMIT ? OFFSET ?`;
+    if (hasPagination) params.push(limit, (page - 1) * limit);
     const productions = await queryAll(query, params);
-    res.json(productions);
+    if (!hasPagination) return res.json(productions);
+    const totalRow = await queryOne<{ total: number }>(countQuery, countParams);
+    res.json({ data: productions, total: Number(totalRow?.total || 0), page, limit });
   } catch {
     res.status(500).json({ message: '获取创作列表失败' });
   }

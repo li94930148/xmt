@@ -23,7 +23,6 @@ import {
   Settings,
   Shield,
   Sparkles,
-  Trophy,
   Users,
   Video,
   Database,
@@ -54,11 +53,10 @@ export interface NavigationSection {
 
 /**
  * 一级导航定位：
- * - 首页：工作驾驶舱
+ * - 工作台：个人任务与提醒
  * - 内容生产：内容生命周期
  * - 资料中心：知识和资产沉淀
- * - 运营复盘：数据分析和增长
- * - 组织协作：团队协同
+ * - 运营数据：数据分析和增长
  * - 系统管理：管理员治理
  *
  * 技术型页面仅保留为管理员调试入口，不能占用日常导航空间。
@@ -66,16 +64,23 @@ export interface NavigationSection {
 export const navigationSections: NavigationSection[] = [
   {
     id: 'home',
-    label: '首页',
+    label: '工作台',
     icon: LayoutDashboard,
-    items: [{ id: 'home', label: '首页仪表盘', icon: LayoutDashboard, path: '/' }],
+    items: [
+      { id: 'home', label: '工作台', icon: LayoutDashboard, path: '/' },
+      { id: 'messages', label: '消息中心', icon: Bell, path: '/messages' },
+      { id: 'daily-reports', label: '日报与总结', icon: FileClock, path: '/daily-report' },
+    ],
   },
   {
     id: 'content-production',
     label: '内容生产',
     icon: FileText,
     items: [
+      { id: 'inspirations', label: '灵感库', icon: Lightbulb, path: '/inspirations' },
       { id: 'topics', label: '选题管理', icon: FileText, path: '/topics' },
+      { id: 'kanban', label: '创意看板', icon: Kanban, path: '/kanban' },
+      { id: 'calendar', label: '排期日历', icon: Calendar, path: '/calendar' },
       { id: 'production', label: '创作管理', icon: Video, path: '/production' },
       { id: 'shooting', label: '成片制作', icon: Camera, path: '/shooting', permissions: ['workflow:shooting'] },
       { id: 'publishing', label: '发布管理', icon: Send, path: '/publishing', permissions: ['workflow:publishing'] },
@@ -84,7 +89,7 @@ export const navigationSections: NavigationSection[] = [
   },
   {
     id: 'asset-center',
-    label: '资料中心',
+    label: '资料与资产',
     icon: Archive,
     items: [
       { id: 'asset-center', label: '资料中心概览', icon: Archive, path: '/asset-center' },
@@ -96,35 +101,14 @@ export const navigationSections: NavigationSection[] = [
   },
   {
     id: 'douyin-operations',
-    label: '抖音运营中心',
+    label: '运营数据',
     icon: BarChart3,
     items: [
       { id: 'creator-dashboard', label: '运营概览', icon: Database, path: '/analytics/creator-center', permissions: ['creator:data:view'] },
       { id: 'creator-works', label: '作品管理', icon: ListFilter, path: '/analytics/creator-center/works', permissions: ['creator:data:view'] },
       { id: 'creator-trends', label: '数据趋势', icon: BarChart3, path: '/analytics/creator-center/trends', permissions: ['creator:data:view'] },
       { id: 'creator-reports', label: '复盘报告', icon: FileBarChart, path: '/analytics/creator-center/reports', permissions: ['creator:report:view'] },
-    ],
-  },
-  {
-    id: 'daily-reports',
-    label: '日报系统',
-    icon: FileClock,
-    items: [
-      { id: 'daily-reports', label: '日报系统', icon: FileClock, path: '/daily-report' },
-      { id: 'daily-report-team', label: '团队日报', icon: Users, path: '/daily-report/team', permissions: ['report:daily:view_team'] },
-      { id: 'daily-report-summary', label: '总结归档', icon: Archive, path: '/daily-report/summary' },
-    ],
-  },
-  {
-    id: 'organization-collaboration',
-    label: '组织协作',
-    icon: Users,
-    items: [
-      { id: 'messages', label: '消息中心', icon: Bell, path: '/messages' },
-      { id: 'calendar', label: '排期日历', icon: Calendar, path: '/calendar' },
-      { id: 'kanban', label: '创意看板', icon: Kanban, path: '/kanban' },
-      { id: 'inspirations', label: '灵感库', icon: Lightbulb, path: '/inspirations' },
-      { id: 'achievements', label: '团队成就', icon: Trophy, path: '/achievements' },
+      { id: 'retrospectives', label: '内容复盘', icon: History, path: '/retrospectives', permissions: ['analytics:view'] },
     ],
   },
   {

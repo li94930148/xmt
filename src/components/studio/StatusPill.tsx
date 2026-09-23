@@ -9,7 +9,7 @@ const toneClass: Record<StatusTone, string> = {
   coral: 'border-studio-coral/35 bg-studio-coral/12 text-studio-coral-contrast',
   amber: 'border-studio-amber/35 bg-studio-amber/12 text-studio-amber-contrast',
   success: 'border-studio-success/35 bg-studio-success/12 text-studio-success-contrast',
-  muted: 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary',
+  muted: 'border-studio-border-soft bg-[var(--xmt-overlay-tint)] text-studio-text-secondary',
 };
 
 export default function StatusPill({

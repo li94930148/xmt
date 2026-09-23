@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore, useAppStore } from '../store';
-import { getTopic, auditTopic, updateTopicStatus, updateTopic } from '../api';
+import { getTopic, auditTopic, updateTopicStatus, updateTopic, getProduction, createProduction } from '../api';
 import { celebrateMilestone } from '../utils/confetti';
 import { getUsers } from '../api';
 import { Topic, User } from '../types';
@@ -39,6 +39,7 @@ export default function TopicDetail() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAuditModal, setShowAuditModal] = useState(false);
+  const [startingProduction, setStartingProduction] = useState(false);
   const [auditData, setAuditData] = useState({ status: 'approved' as 'approved' | 'rejected', comment: '', assignee_id: 0 });
   
   const [editTitle, setEditTitle] = useState(false);
@@ -218,6 +219,41 @@ export default function TopicDetail() {
     }
   };
 
+  const handleStartProduction = async () => {
+    if (!topic) return;
+    setStartingProduction(true);
+    try {
+      const existing = await getProduction({ topic_id: topic.id });
+      const current = existing[0];
+      if (current) {
+        navigate(`/production/${current.id}`);
+        return;
+      }
+
+      const created = await createProduction({
+        topic_id: topic.id,
+        version: 'v1.0',
+        content: topic.outline || '',
+        status: 'draft',
+      });
+      try {
+        await updateTopicStatus(topic.id, 'production');
+      } catch {
+        appStore.addNotification({
+          title: '创作已建立',
+          message: '稿件已创建，但选题阶段尚未自动推进，可稍后在选题页重试。',
+          type: 'warning',
+        });
+      }
+      appStore.addNotification({ title: '创作已建立', message: '已带入选题大纲，可以直接开始写稿。', type: 'success' });
+      navigate(`/production/${created.productionId}`);
+    } catch (error) {
+      appStore.addNotification({ title: '开始创作失败', message: (error as Error).message, type: 'error' });
+    } finally {
+      setStartingProduction(false);
+    }
+  };
+
   const persistTopicAggregate = (saveSnapshot: TopicDetailAggregateDraft, saveRevision: number) => (
     aggregateSaveGateRef.current.run(async () => {
       setIsAggregateSaving(true);
@@ -350,6 +386,7 @@ export default function TopicDetail() {
 
   const canAudit = hasPermission('topic:audit');
   const canEditTopicPermission = hasPermission('topic:update');
+  const canStartProduction = hasPermission('production:update');
   const canManageTopicResources = canEditTopicPermission && hasPermission('resource:view');
   const canEditTopic = Boolean(
     topic &&
@@ -691,6 +728,16 @@ export default function TopicDetail() {
                 审核选题
               </button>
             )}
+            {canStartProduction && (topic.status === 'approved' || topic.status === 'production') && (
+              <button
+                onClick={() => { void handleStartProduction(); }}
+                disabled={startingProduction}
+                className="flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <FileIcon className="h-4 w-4" />
+                {startingProduction ? '正在准备…' : topic.status === 'approved' ? '开始创作' : '进入创作'}
+              </button>
+            )}
             {!isEditing && (
               permissionsLoading || canEditTopic ? (
                 <button
@@ -707,7 +754,7 @@ export default function TopicDetail() {
                 </span>
               )
             )}
-            {canEditTopic && topic.status !== 'completed' && topic.status !== 'rejected' && (
+            {canEditTopic && topic.status !== 'approved' && topic.status !== 'production' && topic.status !== 'completed' && topic.status !== 'rejected' && (
               <button
                 onClick={() => handleUpdateStatus(nextStatuses[topic.status])}
                 className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-studio-primary to-studio-cyan px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90"
@@ -860,7 +907,7 @@ export default function TopicDetail() {
         }
       >
         <p className={`text-sm leading-6 ${styles.textSecondary}`}>
-          当前提示只依据 TopicDetail 的 aggregate draft 是否相对 baseline 发生变化；不会使用编辑器 Runtime dispose 结果判断保存完成。
+          系统检测到当前选题还有未保存的修改。保存完成后会自动前往你刚才选择的页面。
         </p>
       </BaseModal>
     </div>

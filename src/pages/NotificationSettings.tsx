@@ -81,7 +81,7 @@ const tabMeta = {
   branding: { label: '品牌设置', icon: Tag },
   login: { label: '登录页设置', icon: Sparkles },
   database: { label: '数据与备份', icon: Database },
-  changelog: { label: '系统更新说明', icon: History },
+  changelog: { label: '版本更新', icon: History },
   about: { label: '关于系统', icon: Info },
 } as const;
 
@@ -838,11 +838,11 @@ export default function NotificationSettings() {
                 <div className="grid gap-4 text-sm md:grid-cols-4">
                   <div>
                     <p className={styles.textMuted}>存储方式</p>
-                    <p className={styles.textPrimary}>SQLite (libsql)</p>
+                    <p className={styles.textPrimary}>本地安全存储</p>
                   </div>
                   <div>
-                    <p className={styles.textMuted}>数据文件</p>
-                    <p className={styles.textPrimary}>data/xmt.db</p>
+                    <p className={styles.textMuted}>数据范围</p>
+                    <p className={styles.textPrimary}>应用业务数据</p>
                   </div>
                   <div>
                     <p className={styles.textMuted}>备份策略</p>
@@ -887,7 +887,7 @@ export default function NotificationSettings() {
           {activeTab === 'changelog' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>系统更新说明</h2>
+                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>版本更新</h2>
                 <span className={`text-sm ${styles.textMuted}`}>当前版本：v{__APP_VERSION__}</span>
               </div>
               <div className="space-y-5">
@@ -952,10 +952,10 @@ export default function NotificationSettings() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 {[
-                  { label: '前端框架', value: 'React 18 + TypeScript' },
-                  { label: 'UI 框架', value: 'Tailwind CSS' },
-                  { label: '后端服务', value: 'Express + SQLite' },
-                  { label: '实时通信', value: 'Socket.IO' },
+                  { label: '内容生产协作', value: '已启用' },
+                  { label: '实时协作', value: '已启用' },
+                  { label: '数据与备份', value: '本地安全存储' },
+                  { label: '运行状态', value: '正常' },
                   { label: '默认登录页', value: systemSettings.login.layout },
                   { label: '当前用户角色', value: getRoleDisplayName(authStore.user?.role) },
                 ].map((item) => (

@@ -83,7 +83,7 @@ export default function CreatorWorkDetail() {
               {work.title}
             </h1>
             {performance.is_viral ? (
-              <span className="rounded-lg bg-rose-500/10 px-3 py-1 text-sm font-medium text-rose-500">
+              <span className="rounded-lg bg-studio-coral/10 px-3 py-1 text-sm font-medium text-studio-coral">
                 爆款
               </span>
             ) : null}

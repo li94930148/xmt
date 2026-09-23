@@ -237,26 +237,26 @@ export default function ContentEditor({
     <ReactBitsPageScene page="editor" className="!isolate" fallbackClassName="bg-transparent">
     <div className={className} style={wrapperStyle}>
       {mode === 'rich' && collaborationEnabled && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-gray-200/60 px-4 py-2 text-xs dark:border-gray-800/80">
+        <div className="flex flex-wrap items-center gap-2 border-b border-studio-border-soft px-4 py-2 text-xs">
           <span className={`rounded-full px-2 py-0.5 ${
             realtimeUnavailable
-              ? 'bg-amber-500/10 text-amber-500'
+              ? 'bg-studio-amber/12 text-studio-amber-contrast'
               : editorState === 'conflicted'
-              ? 'bg-red-500/10 text-red-500'
+              ? 'bg-studio-coral/12 text-studio-coral-contrast'
               : editorState === 'saving' || editorState === 'syncing'
-                ? 'bg-blue-500/10 text-blue-500'
-                : 'bg-emerald-500/10 text-emerald-500'
+                ? 'bg-studio-primary/12 text-studio-primary'
+                : 'bg-studio-success/12 text-studio-success-contrast'
           }`}>
             {realtimeUnavailable ? '实时同步离线' : saveHint}
           </span>
           {editingRegions.length > 0 ? (
             visibleEditingRegions.map((region) => (
-              <span key={`${region.userId}-${region.region}`} className="text-gray-500 dark:text-gray-400">
+              <span key={`${region.userId}-${region.region}`} className="text-studio-text-muted">
                 {region.message}
               </span>
             ))
           ) : (
-            <span className="text-gray-500 dark:text-gray-400">{primaryHint}</span>
+            <span className="text-studio-text-muted">{primaryHint}</span>
           )}
         </div>
       )}

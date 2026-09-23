@@ -367,7 +367,7 @@ export default function Topics() {
   };
 
   return (
-    <ReactBitsPageScene page="topics" fallbackClassName="bg-gradient-to-br from-slate-950/30 to-indigo-950/20"><PageShell>
+    <ReactBitsPageScene page="topics" fallbackClassName="bg-gradient-to-br from-studio-surface-soft/30 to-studio-primary/20"><PageShell>
       <PageHeader
         title={<ReactBitsHeadingSlot>选题管理</ReactBitsHeadingSlot>}
         description="从提报、审核到生产流转，快速判断每个内容节点卡在哪一步、谁负责、下一步做什么。"

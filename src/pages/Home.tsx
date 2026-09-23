@@ -224,7 +224,7 @@ export default function Home() {
                 <button
                   key={topic.id}
                   onClick={() => navigate(`/topics/${topic.id}`)}
-                  className="group flex w-full items-center gap-4 rounded-card border border-transparent bg-white/[0.035] p-4 text-left transition-all duration-200 hover:border-studio-border-active hover:bg-white/[0.06]"
+                  className="group flex w-full items-center gap-4 rounded-card border border-transparent bg-studio-surface-soft/45 p-4 text-left transition-all duration-200 hover:border-studio-border-active hover:bg-studio-surface-elevated/60"
                 >
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-studio-amber/12 text-studio-amber">
                     <Clock3 className="h-5 w-5" />
@@ -257,7 +257,7 @@ export default function Home() {
                 <button
                   key={action.id}
                   onClick={() => navigate(action.path)}
-                  className="group rounded-card border border-studio-border-soft bg-white/[0.04] p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-studio-border-active hover:bg-white/[0.07]"
+                  className="group rounded-card border border-studio-border-soft bg-studio-surface-soft/50 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-studio-border-active hover:bg-studio-surface-elevated/70"
                 >
                   <action.icon className="h-5 w-5 text-studio-cyan transition group-hover:text-studio-text-primary" />
                   <p className="mt-3 text-sm font-semibold text-studio-text-primary">{action.label}</p>
@@ -284,7 +284,7 @@ export default function Home() {
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {recentTopics.map((topic) => (
-              <button key={topic.id} onClick={() => navigate(`/topics/${topic.id}`)} className="rounded-card border border-studio-border-soft bg-white/[0.035] p-4 text-left transition hover:border-studio-border-active hover:bg-white/[0.06]">
+              <button key={topic.id} onClick={() => navigate(`/topics/${topic.id}`)} className="rounded-card border border-studio-border-soft bg-studio-surface-soft/45 p-4 text-left transition hover:border-studio-border-active hover:bg-studio-surface-elevated/60">
                 <div className="flex items-start justify-between gap-3">
                   <p className="line-clamp-2 text-sm font-semibold text-studio-text-primary">{topic.title}</p>
                   <StatusPill className="shrink-0" tone={statusTone[topic.status]}>{statusText[topic.status]}</StatusPill>
@@ -310,7 +310,7 @@ export default function Home() {
           </div>
           <div className="space-y-2">
             {hotInspirations.length > 0 ? hotInspirations.map((item) => (
-              <div key={item.id} className="group flex w-full items-center gap-3 rounded-button bg-white/[0.035] p-3 text-left transition hover:bg-white/[0.07]">
+              <div key={item.id} className="group flex w-full items-center gap-3 rounded-button bg-studio-surface-soft/45 p-3 text-left transition hover:bg-studio-surface-elevated/70">
                 <Lightbulb className="h-4 w-4 shrink-0 text-studio-amber" />
                 <button
                   type="button"
@@ -330,7 +330,7 @@ export default function Home() {
                   {item.votes || 0}
                 </button>
               </div>
-            )) : <p className="rounded-button bg-white/[0.035] p-4 text-sm text-studio-text-muted">暂无灵感数据</p>}
+            )) : <p className="rounded-button bg-studio-surface-soft/45 p-4 text-sm text-studio-text-muted">暂无灵感数据</p>}
           </div>
         </GlassPanel>
       </div>

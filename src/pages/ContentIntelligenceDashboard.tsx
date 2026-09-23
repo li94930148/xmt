@@ -55,7 +55,7 @@ export default function ContentIntelligenceDashboard() {
           <div>
             <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>内容智能理解</p>
             <h1 className={`mt-1 flex items-center gap-2 text-2xl font-bold ${styles.textPrimary}`}>
-              <Brain className="h-6 w-6 text-blue-400" />
+              <Brain className="h-6 w-6 text-studio-primary" />
               内容智能理解
             </h1>
           </div>
@@ -68,7 +68,7 @@ export default function ContentIntelligenceDashboard() {
             />
             <button
               onClick={() => loadData(docId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4" />
               分析
@@ -88,7 +88,7 @@ export default function ContentIntelligenceDashboard() {
             <div key={item.label} className={`${styles.bgSecondary} border ${styles.border} rounded-xl p-4`}>
               <div className="flex items-center justify-between">
                 <span className={`text-sm ${styles.textMuted}`}>{item.label}</span>
-                <Icon className="h-4 w-4 text-blue-400" />
+                <Icon className="h-4 w-4 text-studio-primary" />
               </div>
               <p className={`mt-3 text-2xl font-semibold ${styles.textPrimary}`}>{item.value}</p>
             </div>

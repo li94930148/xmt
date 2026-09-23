@@ -18,9 +18,9 @@ export default function KeyboardHelp({ isOpen, onClose }: KeyboardHelpProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center" onClick={onClose}>
+    <div className="xmt-overlay xmt-overlay-center" onClick={onClose}>
       <div
-        className={`${styles.modal} w-full max-w-md mx-4 p-6 animate-in fade-in zoom-in-95 duration-150`}
+        className={`${styles.modal} studio-sheen xmt-panel-enter w-full max-w-md mx-4 rounded-panel border border-studio-border-soft p-6 shadow-floating`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-5">
@@ -38,7 +38,7 @@ export default function KeyboardHelp({ isOpen, onClose }: KeyboardHelpProps) {
             <div
               key={index}
               className={`flex items-center justify-between py-2.5 px-3 rounded-lg ${
-                styles.isDark ? 'bg-[#1e2030]' : 'bg-[#f8f9fa]'
+                styles.isDark ? 'bg-studio-surface-soft' : 'bg-studio-surface-soft'
               }`}
             >
               <span className={`text-sm ${styles.textPrimary}`}>{shortcut.description}</span>

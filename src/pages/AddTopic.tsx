@@ -104,7 +104,7 @@ export default function AddTopic() {
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate('/topics')}
-            className={`flex items-center gap-2 text-gray-400 ${styles.textSecondary} transition-colors`}
+            className={`flex items-center gap-2 text-studio-text-muted ${styles.textSecondary} transition-colors`}
           >
             <ChevronLeft className="w-5 h-5" />
             返回选题列表
@@ -116,7 +116,7 @@ export default function AddTopic() {
             onClick={() => setShowPreview(!showPreview)}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
               showPreview 
-                ? 'bg-blue-600 text-white' 
+                ? 'bg-studio-primary text-white' 
                 : `${styles.buttonSecondary}`
             }`}
           >
@@ -133,7 +133,7 @@ export default function AddTopic() {
           <button
             onClick={handleSubmit}
             disabled={submitting}
-            className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded-lg transition-colors"
+            className="flex items-center gap-2 px-6 py-2 bg-studio-primary hover:bg-studio-primary disabled:bg-studio-surface-soft text-white rounded-lg transition-colors"
           >
             <Send className="w-4 h-4" />
             {submitting ? '提交中...' : '提报选题'}
@@ -146,7 +146,7 @@ export default function AddTopic() {
           <div className={`${styles.bgSecondary} rounded-xl ${styles.border} overflow-hidden`}>
             <div className={`px-6 py-4 border-b ${styles.border}`}>
               <h2 className={`text-lg font-medium ${styles.textPrimary} flex items-center gap-2`}>
-                <FileText className="w-5 h-5 text-blue-400" />
+                <FileText className="w-5 h-5 text-studio-primary" />
                 基本信息
               </h2>
             </div>
@@ -202,7 +202,7 @@ export default function AddTopic() {
           <div className={`${styles.bgSecondary} rounded-xl ${styles.border} overflow-hidden`}>
             <div className={`px-6 py-4 border-b ${styles.border}`}>
               <h2 className={`text-lg font-medium ${styles.textPrimary} flex items-center gap-2`}>
-                <FileText className="w-5 h-5 text-blue-400" />
+                <FileText className="w-5 h-5 text-studio-primary" />
                 项目资料
               </h2>
             </div>
@@ -234,7 +234,7 @@ export default function AddTopic() {
           <div className={`${styles.bgSecondary} rounded-xl ${styles.border} overflow-hidden`}>
             <div className={`px-6 py-4 border-b ${styles.border}`}>
               <h2 className={`text-lg font-medium ${styles.textPrimary} flex items-center gap-2`}>
-                <List className="w-5 h-5 text-green-400" />
+                <List className="w-5 h-5 text-studio-success" />
                 大纲结构
               </h2>
               <p className={`${styles.textSecondary} text-sm mt-1`}>请根据模板填写内容，可修改结构和添加新内容</p>
@@ -261,19 +261,19 @@ export default function AddTopic() {
             </div>
             <div className="p-4 space-y-4">
               <div>
-                <p className={`text-xs text-gray-500 mb-1`}>选题标题</p>
+                <p className={`text-xs text-studio-text-muted mb-1`}>选题标题</p>
                 <p className={`${styles.textPrimary} font-medium`}>{formData.title || '未输入标题'}</p>
               </div>
               <div>
-                <p className={`text-xs text-gray-500 mb-1`}>发布平台</p>
+                <p className={`text-xs text-studio-text-muted mb-1`}>发布平台</p>
                 <p className={`${styles.textSecondary}`}>{formData.platform || '-'}</p>
               </div>
               <div>
-                <p className={`text-xs text-gray-500 mb-1`}>截止日期</p>
+                <p className={`text-xs text-studio-text-muted mb-1`}>截止日期</p>
                 <p className={`${styles.textSecondary}`}>{formatBeijingDate(formData.deadline)}</p>
               </div>
               <div>
-                <p className={`text-xs text-gray-500 mb-1`}>负责人</p>
+                <p className={`text-xs text-studio-text-muted mb-1`}>负责人</p>
                 <p className={`${styles.textSecondary}`}>
                   {formData.assignee_id 
                     ? users.find(u => u.id === parseInt(formData.assignee_id))?.name 
@@ -281,13 +281,13 @@ export default function AddTopic() {
                 </p>
               </div>
               <div className={`pt-4 border-t ${styles.border}`}>
-                <p className={`text-xs text-gray-500 mb-1`}>状态</p>
-                <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">
+                <p className={`text-xs text-studio-text-muted mb-1`}>状态</p>
+                <span className="inline-flex items-center gap-1 px-2 py-1 bg-studio-amber/20 text-studio-amber rounded-full text-xs">
                   待审核
                 </span>
               </div>
               <div className={`pt-4 border-t ${styles.border}`}>
-                <p className={`text-xs text-gray-500 mb-1`}>创建人</p>
+                <p className={`text-xs text-studio-text-muted mb-1`}>创建人</p>
                 <p className={`${styles.textSecondary}`}>{authStore.user?.name}</p>
               </div>
             </div>
@@ -302,13 +302,13 @@ export default function AddTopic() {
                 <div>
                   <div className={`flex justify-between text-xs mb-1`}>
                     <span className={`${styles.textSecondary}`}>基本信息</span>
-                    <span className={`${formData.title ? 'text-green-400' : 'text-gray-500'}`}>
+                    <span className={`${formData.title ? 'text-studio-success' : 'text-studio-text-muted'}`}>
                       {formData.title ? '已填写' : '未填写'}
                     </span>
                   </div>
                   <div className={`h-1.5 ${styles.progressBg} rounded-full overflow-hidden`}>
                     <div 
-                      className={`h-full rounded-full transition-all ${formData.title ? 'bg-green-500' : 'bg-gray-600'}`}
+                      className={`h-full rounded-full transition-all ${formData.title ? 'bg-studio-success' : 'bg-studio-surface-soft'}`}
                       style={{ width: formData.title ? '100%' : '0%' }}
                     ></div>
                   </div>
@@ -316,13 +316,13 @@ export default function AddTopic() {
                 <div>
                   <div className={`flex justify-between text-xs mb-1`}>
                     <span className={`${styles.textSecondary}`}>项目资料</span>
-                    <span className={`${formData.projectBackground || formData.targetAudience || formData.expectedGoal || formData.budget ? 'text-green-400' : 'text-gray-500'}`}>
+                    <span className={`${formData.projectBackground || formData.targetAudience || formData.expectedGoal || formData.budget ? 'text-studio-success' : 'text-studio-text-muted'}`}>
                       {formData.projectBackground || formData.targetAudience || formData.expectedGoal || formData.budget ? '已填写' : '未填写'}
                     </span>
                   </div>
                   <div className={`h-1.5 ${styles.progressBg} rounded-full overflow-hidden`}>
                     <div 
-                      className={`h-full rounded-full transition-all ${formData.projectBackground || formData.targetAudience || formData.expectedGoal || formData.budget ? 'bg-green-500' : 'bg-gray-600'}`}
+                      className={`h-full rounded-full transition-all ${formData.projectBackground || formData.targetAudience || formData.expectedGoal || formData.budget ? 'bg-studio-success' : 'bg-studio-surface-soft'}`}
                       style={{ width: formData.projectBackground || formData.targetAudience || formData.expectedGoal || formData.budget ? '100%' : '0%' }}
                     ></div>
                   </div>
@@ -330,13 +330,13 @@ export default function AddTopic() {
                 <div>
                   <div className={`flex justify-between text-xs mb-1`}>
                     <span className={`${styles.textSecondary}`}>大纲结构</span>
-                    <span className={`${formData.outline.includes('请输入') ? 'text-gray-500' : 'text-green-400'}`}>
+                    <span className={`${formData.outline.includes('请输入') ? 'text-studio-text-muted' : 'text-studio-success'}`}>
                       {formData.outline.includes('请输入') ? '未填写' : '已填写'}
                     </span>
                   </div>
                   <div className={`h-1.5 ${styles.progressBg} rounded-full overflow-hidden`}>
                     <div 
-                      className={`h-full rounded-full transition-all ${formData.outline.includes('请输入') ? 'bg-gray-600' : 'bg-green-500'}`}
+                      className={`h-full rounded-full transition-all ${formData.outline.includes('请输入') ? 'bg-studio-surface-soft' : 'bg-studio-success'}`}
                       style={{ width: formData.outline.includes('请输入') ? '0%' : '100%' }}
                     ></div>
                   </div>

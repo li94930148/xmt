@@ -125,7 +125,7 @@ export default function WeeklyReport() {
     return (
       <div className={`${styles.card} p-6`}>
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-[#5c7cfa]" />
+          <Loader2 className="w-6 h-6 animate-spin text-studio-primary" />
         </div>
       </div>
     );
@@ -138,8 +138,8 @@ export default function WeeklyReport() {
     <div className={`${styles.card} p-6`}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[#cc5de8]/10">
-            <FileText className="w-5 h-5 text-[#cc5de8]" />
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-studio-violet/10">
+            <FileText className="w-5 h-5 text-studio-violet" />
           </div>
           <div>
             <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>周报生成</h3>
@@ -173,10 +173,10 @@ export default function WeeklyReport() {
           {/* 摘要卡片 */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: '完成选题', value: summary.completedTopics, icon: FileText, color: '#51cf66' },
-              { label: '发布视频', value: summary.publishedVideos, icon: Video, color: '#5c7cfa' },
-              { label: '总播放量', value: formatNumber(summary.totalViews), icon: Eye, color: '#ff922b' },
-              { label: '总点赞量', value: formatNumber(summary.totalLikes), icon: Heart, color: '#ff6b6b' },
+              { label: '完成选题', value: summary.completedTopics, icon: FileText, color: 'var(--xmt-success)' },
+              { label: '发布视频', value: summary.publishedVideos, icon: Video, color: 'var(--xmt-primary)' },
+              { label: '总播放量', value: formatNumber(summary.totalViews), icon: Eye, color: 'var(--xmt-amber)' },
+              { label: '总点赞量', value: formatNumber(summary.totalLikes), icon: Heart, color: 'var(--xmt-coral)' },
             ].map((item, idx) => {
               const Icon = item.icon;
               return (
@@ -209,13 +209,13 @@ export default function WeeklyReport() {
           {details.completedTopics.length > 0 && (
             <div>
               <h4 className={`text-sm font-semibold ${styles.textPrimary} mb-3 flex items-center gap-2`}>
-                <FileText className="w-4 h-4 text-[#51cf66]" />
+                <FileText className="w-4 h-4 text-studio-success" />
                 本周完成的选题
               </h4>
               <div className="space-y-2">
                 {details.completedTopics.map((topic) => (
                   <div key={topic.id} className={`flex items-center gap-3 p-3 ${styles.bgTertiary} rounded-lg`}>
-                    <div className="w-2 h-2 rounded-full bg-[#51cf66] flex-shrink-0" />
+                    <div className="w-2 h-2 rounded-full bg-studio-success flex-shrink-0" />
                     <span className={`text-sm ${styles.textPrimary} flex-1`}>{topic.title}</span>
                     {topic.creator_name && (
                       <span className={`text-xs ${styles.textMuted}`}>{topic.creator_name}</span>
@@ -230,13 +230,13 @@ export default function WeeklyReport() {
           {details.publishedVideos.length > 0 && (
             <div>
               <h4 className={`text-sm font-semibold ${styles.textPrimary} mb-3 flex items-center gap-2`}>
-                <Video className="w-4 h-4 text-[#5c7cfa]" />
+                <Video className="w-4 h-4 text-studio-primary" />
                 本周发布的视频
               </h4>
               <div className="space-y-2">
                 {details.publishedVideos.map((video) => (
                   <div key={video.id} className={`flex items-center gap-3 p-3 ${styles.bgTertiary} rounded-lg`}>
-                    <div className="w-2 h-2 rounded-full bg-[#5c7cfa] flex-shrink-0" />
+                    <div className="w-2 h-2 rounded-full bg-studio-primary flex-shrink-0" />
                     <span className={`text-sm ${styles.textPrimary} flex-1`}>{video.topic_title}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${styles.bgInput} ${styles.textMuted}`}>{video.platform}</span>
                   </div>
@@ -249,13 +249,13 @@ export default function WeeklyReport() {
           {details.topInspirations.length > 0 && (
             <div>
               <h4 className={`text-sm font-semibold ${styles.textPrimary} mb-3 flex items-center gap-2`}>
-                <Lightbulb className="w-4 h-4 text-[#ff922b]" />
+                <Lightbulb className="w-4 h-4 text-studio-amber" />
                 热门灵感
               </h4>
               <div className="space-y-2">
                 {details.topInspirations.map((insp) => (
                   <div key={insp.id} className={`flex items-center gap-3 p-3 ${styles.bgTertiary} rounded-lg`}>
-                    <div className="w-2 h-2 rounded-full bg-[#ff922b] flex-shrink-0" />
+                    <div className="w-2 h-2 rounded-full bg-studio-amber flex-shrink-0" />
                     <span className={`text-sm ${styles.textPrimary} flex-1`}>{insp.title}</span>
                     <span className={`text-xs ${styles.textMuted}`}>{insp.votes}票</span>
                   </div>

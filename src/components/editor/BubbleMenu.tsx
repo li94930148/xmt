@@ -61,11 +61,11 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
   const btnClass = (active?: boolean) =>
     `p-1.5 rounded transition-colors ${
       active
-        ? isDark ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-600'
-        : isDark ? 'text-gray-300 hover:bg-gray-600' : 'text-gray-600 hover:bg-gray-200'
+        ? isDark ? 'bg-studio-primary text-white' : 'bg-studio-primary text-studio-primary'
+        : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
     }`;
 
-  const divider = <div className={`w-px h-5 mx-0.5 ${isDark ? 'bg-gray-600' : 'bg-gray-300'}`} />;
+  const divider = <div className={`w-px h-5 mx-0.5 bg-studio-border-soft`} />;
 
   const setLink = () => {
     const previousUrl = editor.getAttributes('link').href;
@@ -114,8 +114,8 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
       }}
       className={`flex items-center gap-0.5 px-2 py-1.5 rounded-lg shadow-xl border backdrop-blur-sm ${
         isDark
-          ? 'bg-gray-800/95 border-gray-600 text-gray-200'
-          : 'bg-white/95 border-gray-200 text-gray-700'
+          ? 'bg-studio-surface-soft/95 border-studio-border-soft text-studio-text-secondary'
+          : 'bg-white/95 border-studio-border-soft text-studio-text-muted'
       }`}
       style={{ minWidth: 'fit-content' }}
     >
@@ -142,14 +142,14 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
         {showTextColor && (
-          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`} style={{ minWidth: '176px' }}>
+          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'}`} style={{ minWidth: '176px' }}>
             <div className="text-xs font-medium mb-2 opacity-60">文字颜色</div>
             <div className="grid grid-cols-4 gap-2.5">
               {TEXT_COLORS.map((c) => (
                 <button key={c.value || 'default'} onClick={() => handleTextColor(c.value)}
                   className="w-8 h-8 rounded-lg border-2 transition-all hover:scale-110 flex items-center justify-center"
-                  style={{ borderColor: isDark ? '#4b5563' : '#d1d5db' }} title={c.name}>
-                  <span className="font-bold text-sm" style={{ color: c.value || (isDark ? '#fff' : '#000') }}>A</span>
+                  style={{ borderColor: 'var(--xmt-border-soft)' }} title={c.name}>
+                  <span className="font-bold text-sm" style={{ color: c.value || 'var(--editor-fg)' }}>A</span>
                 </button>
               ))}
             </div>
@@ -164,19 +164,19 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
         {showHighlight && (
-          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200'}`} style={{ minWidth: '176px' }}>
+          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'}`} style={{ minWidth: '176px' }}>
             <div className="text-xs font-medium mb-2 opacity-60">高亮颜色</div>
             <div className="grid grid-cols-4 gap-2.5 mb-1">
               {HIGHLIGHT_COLORS.map((c) => (
                 <button key={c.value} onClick={() => handleHighlight(c.value)}
                   className="w-8 h-8 rounded-lg border-2 transition-all hover:scale-110"
-                  style={{ backgroundColor: c.bg, borderColor: editor.isActive('highlight', { color: c.value }) ? '#3b82f6' : 'transparent' }}
+                  style={{ backgroundColor: c.bg, borderColor: editor.isActive('highlight', { color: c.value }) ? 'var(--xmt-primary)' : 'transparent' }}
                   title={c.name} />
               ))}
             </div>
             {editor.isActive('highlight') && (
               <button onClick={() => { editor.chain().focus().unsetHighlight().run(); setShowHighlight(false); }}
-                className={`w-full text-xs py-1 rounded flex items-center justify-center gap-1 ${isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-600 hover:bg-gray-100'}`}>
+                className={`w-full text-xs py-1 rounded flex items-center justify-center gap-1 ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                 <X className="w-3 h-3" /> 取消高亮
               </button>
             )}

@@ -51,7 +51,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
       <div><p className="text-xs text-studio-text-muted">XMT 移动办公</p><h1 className="text-base font-semibold">{current?.label ?? '工作台'}</h1></div>
       <button onClick={onLogout} aria-label="退出登录" className="flex h-11 w-11 items-center justify-center rounded-xl text-studio-text-secondary"><LogOut className="h-5 w-5" /></button>
     </header>
-    {networkState !== 'online' ? <div role="status" className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-300">{networkState === 'offline' ? '网络不可用，正在使用本地内容与草稿。' : networkState === 'poor_network' ? '网络较弱，草稿会保存在本机；请确认后再提交。' : '网络已恢复，正在重新连接。'}</div> : null}
+    {networkState !== 'online' ? <div role="status" className="border-b border-studio-amber/30 bg-studio-amber/10 px-4 py-2 text-center text-xs text-studio-amber">{networkState === 'offline' ? '网络不可用，正在使用本地内容与草稿。' : networkState === 'poor_network' ? '网络较弱，草稿会保存在本机；请确认后再提交。' : '网络已恢复，正在重新连接。'}</div> : null}
     <main className="min-h-[calc(100dvh-8.5rem)] px-4 py-4 pb-28" style={{ fontSize: 'var(--system-font-size)' }}>
       <div className="mx-auto w-full max-w-xl"><Outlet /></div>
     </main>
@@ -60,7 +60,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
         const Icon = tab.icon; const active = current?.path === tab.path;
         return <button key={tab.path} onClick={() => navigate(tab.path)} className={`relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-xs ${active ? 'text-studio-cyan' : 'text-studio-text-muted'}`}>
           <Icon className="h-5 w-5" />{tab.label}
-          {tab.path === '/messages' && unreadCount > 0 ? <span className="absolute ml-5 -mt-6 rounded-full bg-red-500 px-1 text-[10px] text-white">{unreadCount > 9 ? '9+' : unreadCount}</span> : null}
+          {tab.path === '/messages' && unreadCount > 0 ? <span className="absolute ml-5 -mt-6 rounded-full bg-studio-coral px-1 text-[10px] text-white">{unreadCount > 9 ? '9+' : unreadCount}</span> : null}
         </button>;
       })}
     </nav>

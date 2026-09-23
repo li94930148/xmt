@@ -42,29 +42,29 @@ function NotificationItem({ notification }: { notification: Notification }) {
   }, [notification.id, removeNotification]);
 
   const typeStyles: Record<Notification['type'], { bg: string; border: string; text: string; icon: string }> = {
-    success: { bg: 'bg-[#51cf66]/10', border: 'border-[#51cf66]/30', text: 'text-[#51cf66]', icon: '✓' },
-    error: { bg: 'bg-[#ff6b6b]/10', border: 'border-[#ff6b6b]/30', text: 'text-[#ff6b6b]', icon: '×' },
-    warning: { bg: 'bg-[#ffd43b]/10', border: 'border-[#ffd43b]/30', text: 'text-[#ffd43b]', icon: '!' },
-    info: { bg: 'bg-[#5c7cfa]/10', border: 'border-[#5c7cfa]/30', text: 'text-[#5c7cfa]', icon: 'i' },
+    success: { bg: 'bg-studio-success/10', border: 'border-studio-success/30', text: 'text-studio-success-contrast', icon: '✓' },
+    error: { bg: 'bg-studio-coral/10', border: 'border-studio-coral/30', text: 'text-studio-coral-contrast', icon: '×' },
+    warning: { bg: 'bg-studio-amber/10', border: 'border-studio-amber/30', text: 'text-studio-amber-contrast', icon: '!' },
+    info: { bg: 'bg-studio-primary/10', border: 'border-studio-primary/30', text: 'text-studio-primary-contrast', icon: 'i' },
   };
 
   const style = typeStyles[notification.type] || typeStyles.info;
 
   return (
-    <div className={`max-w-sm rounded-xl border p-4 shadow-soft backdrop-blur-sm ${style.bg} ${style.border}`}>
-      <div className="flex items-start gap-3">
+    <div className={`studio-sheen relative max-w-sm overflow-hidden rounded-card border p-4 shadow-floating backdrop-blur-xl ${style.bg} ${style.border}`}>
+      <div className="relative z-[1] flex items-start gap-3">
         <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${style.bg} ${style.text}`}>
           {style.icon}
         </div>
         <div className="min-w-0 flex-1">
-          <p className={`text-sm font-semibold ${style.text}`}>{notification.title}</p>
-          <p className="mt-1 text-xs opacity-80" style={{ color: 'var(--color-text-secondary)' }}>
+          <p className={`text-sm font-semibold tracking-tight ${style.text}`}>{notification.title}</p>
+          <p className="mt-1 text-xs leading-relaxed opacity-85 text-studio-text-secondary">
             {notification.message}
           </p>
         </div>
         <button
           onClick={() => removeNotification(notification.id)}
-          className="flex-shrink-0 text-current opacity-40 transition-opacity hover:opacity-70"
+          className="flex-shrink-0 text-current opacity-40 transition hover:opacity-80"
           aria-label="关闭通知"
         >
           <span className="text-sm">&times;</span>
@@ -79,18 +79,23 @@ function Breadcrumbs() {
   const crumbs = useMemo(() => buildBreadcrumbs(location.pathname), [location.pathname]);
 
   return (
-    <nav aria-label="面包屑" className="flex flex-wrap items-center gap-2 text-sm text-theme-text-secondary">
+    <nav aria-label="面包屑" className="flex flex-wrap items-center gap-1.5 text-[13px] text-studio-text-secondary">
       {crumbs.map((crumb, index) => {
         const isLast = index === crumbs.length - 1;
         return (
-          <div key={`${crumb.label}-${index}`} className="flex items-center gap-2">
-            {index > 0 && <ChevronRight className="h-4 w-4 opacity-45" />}
+          <div key={`${crumb.label}-${index}`} className="flex items-center gap-1.5">
+            {index > 0 && <ChevronRight className="h-3.5 w-3.5 opacity-40" />}
             {crumb.path && !isLast ? (
-              <Link to={crumb.path} className="transition-colors hover:text-theme-text">
+              <Link
+                to={crumb.path}
+                className="rounded-md px-1 py-0.5 transition-colors hover:bg-white/[0.05] hover:text-studio-text-primary"
+              >
                 {crumb.label}
               </Link>
             ) : (
-              <span className={isLast ? 'font-medium text-theme-text' : ''}>{crumb.label}</span>
+              <span className={`px-1 py-0.5 ${isLast ? 'font-medium tracking-tight text-studio-text-primary' : ''}`}>
+                {crumb.label}
+              </span>
             )}
           </div>
         );
@@ -172,7 +177,7 @@ export default function Layout() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     void StatusBar.setStyle({ style: theme === 'dark' ? Style.Light : Style.Dark });
-    void StatusBar.setBackgroundColor({ color: theme === 'dark' ? '#0b1018' : '#f7f9fc' });
+    void StatusBar.setBackgroundColor({ color: theme === 'dark' ? '#080B12' : '#F4F6FA' });
   }, [theme]);
 
   useEffect(() => {
@@ -345,7 +350,7 @@ export default function Layout() {
     );
   }
 
-  const sidebarWidth = sidebarCollapsed ? '72px' : '232px';
+  const sidebarWidth = sidebarCollapsed ? '72px' : '240px';
 
   if (isAndroid()) {
     return <MobileShell user={user} unreadCount={unreadCount} onLogout={handleLogout} />;
@@ -381,14 +386,10 @@ export default function Layout() {
 
             <button onClick={() => setShowCmdPalette(true)} className="relative hidden min-w-0 items-center md:flex">
               <Search className="absolute left-3 h-4 w-4 text-studio-text-muted" />
-              <div
-                className="w-[min(18rem,34vw)] min-w-0 rounded-button border border-studio-border-soft bg-white/[0.05] py-2 pl-9 pr-16 text-left text-sm text-studio-text-muted transition-all duration-200 hover:border-studio-border-active"
-              >
+              <div className="xmt-field w-[min(18rem,34vw)] min-w-0 cursor-pointer py-2 pl-9 pr-16 text-left text-sm text-studio-text-muted">
                 搜索选题、稿件、成员...
               </div>
-              <kbd
-                className="absolute right-3 rounded border border-studio-border-soft px-1.5 py-0.5 text-[10px] text-studio-text-muted"
-              >
+              <kbd className="absolute right-3 rounded-md border border-studio-border-soft bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-studio-text-muted">
                 Ctrl K
               </kbd>
             </button>
@@ -397,16 +398,12 @@ export default function Layout() {
           <div className="flex shrink-0 items-center gap-2">
             <button
               onClick={() => navigate('/messages')}
-              className={`relative rounded-xl p-2.5 transition-all duration-200 ${
-                theme === 'dark'
-                  ? 'text-[#9aa0b0] hover:bg-[#1e2030] hover:text-[#e8eaed]'
-                  : 'text-[#5f6672] hover:bg-[#f1f3f5] hover:text-[#1a1d2e]'
-              }`}
+              className="relative rounded-xl p-2.5 text-studio-text-secondary transition-all duration-200 hover:bg-white/[0.06] hover:text-studio-text-primary"
               aria-label="打开消息中心"
             >
               <Bell className="h-[18px] w-[18px]" />
               {unreadCount > 0 && (
-                <span className="absolute right-1.5 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#ff6b6b] px-1 text-[10px] font-bold text-white">
+                <span className="absolute right-1.5 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-studio-coral px-1 text-[10px] font-bold text-white shadow-[0_0_10px_rgba(255,122,147,0.45)]">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
@@ -414,55 +411,47 @@ export default function Layout() {
 
             <button
               onClick={toggleTheme}
-              className={`rounded-xl p-2.5 transition-all duration-200 ${
-                theme === 'dark'
-                  ? 'text-[#9aa0b0] hover:bg-[#1e2030] hover:text-[#ffd43b]'
-                  : 'text-[#5f6672] hover:bg-[#f1f3f5] hover:text-[#f08c00]'
-              }`}
+              className="rounded-xl p-2.5 text-studio-text-secondary transition-all duration-200 hover:bg-white/[0.06] hover:text-studio-amber"
               title={theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}
               aria-label="切换主题"
             >
               {theme === 'dark' ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
             </button>
 
-            <div className={`relative ml-1 border-l pl-3 ${theme === 'dark' ? 'border-[#2a2d3e]' : 'border-[#e5e7eb]'}`}>
+            <div className="relative ml-1 border-l border-studio-border-soft pl-3">
               <button
                 onClick={() => setUserMenuOpen((value) => !value)}
-                className="flex items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-theme-hover"
+                className="flex items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-white/[0.06]"
                 aria-label="打开用户菜单"
               >
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#5c7cfa] to-[#748ffc] shadow-sm shadow-[#5c7cfa]/20">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-studio-primary to-studio-violet shadow-sm shadow-studio-primary/25 ring-1 ring-inset ring-white/15">
                   <User className="h-4 w-4 text-white" />
                 </div>
                 <div className="hidden text-right lg:block">
-                  <p className={`text-sm font-semibold leading-tight ${theme === 'dark' ? 'text-[#e8eaed]' : 'text-[#1a1d2e]'}`}>
+                  <p className="text-sm font-semibold leading-tight tracking-tight text-studio-text-primary">
                     {user?.name}
                   </p>
-                  <p className={`text-[11px] ${theme === 'dark' ? 'text-[#636983]' : 'text-[#9aa0b0]'}`}>
+                  <p className="text-[11px] text-studio-text-muted">
                     {getRoleDisplayName(user?.role)}
                   </p>
                 </div>
               </button>
 
               {userMenuOpen && (
-                <div
-                  className={`absolute right-0 top-[calc(100%+10px)] w-52 rounded-2xl border p-2 shadow-2xl ${
-                    theme === 'dark' ? 'border-[#2a2d3e] bg-[#161822]' : 'border-[#e5e7eb] bg-white'
-                  }`}
-                >
+                <div className="xmt-modal-enter absolute right-0 top-[calc(100%+10px)] w-52 rounded-card border border-studio-border-soft bg-studio-surface p-2 shadow-floating backdrop-blur-xl">
                   <button
                     onClick={() => {
                       setUserMenuOpen(false);
                       navigate('/notification-settings');
                     }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-theme-text-secondary transition hover:bg-theme-hover hover:text-theme-text"
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-studio-text-secondary transition hover:bg-white/[0.06] hover:text-studio-text-primary"
                   >
                     <Settings className="h-4 w-4" />
                     {settingsMenuLabel}
                   </button>
                   <button
                     onClick={handleLogout}
-                    className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-theme-text-secondary transition hover:bg-theme-hover hover:text-[#ff6b6b]"
+                    className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-studio-text-secondary transition hover:bg-studio-coral/10 hover:text-studio-coral-contrast"
                   >
                     <LogOut className="h-4 w-4" />
                     退出登录

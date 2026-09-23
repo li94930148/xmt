@@ -40,7 +40,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
   }, []);
 
   const menuBtnClass = `flex items-center gap-2 w-full px-3 py-2 text-sm rounded transition-colors ${
-    isDark ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'
+    isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
   }`;
 
   const handleInsert = (action: () => void) => {
@@ -117,7 +117,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
     closeAll();
   };
 
-  const menuBg = isDark ? 'bg-gray-800 border-gray-600' : 'bg-white border-gray-200';
+  const menuBg = isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft';
 
   return (
     <TiptapFloatingMenu
@@ -135,8 +135,8 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
           onClick={() => { setShowInsertMenu(!showInsertMenu); setShowBlockMenu(false); }}
           className={`p-1 rounded-md transition-colors ${
             showInsertMenu
-              ? isDark ? 'bg-gray-600 text-white' : 'bg-gray-200 text-gray-800'
-              : isDark ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
+              ? isDark ? 'bg-studio-surface-soft text-white' : 'bg-studio-surface-soft text-studio-text-primary'
+              : isDark ? 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-muted'
           }`}
           title="插入"
         >
@@ -144,7 +144,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
         </button>
         {showInsertMenu && (
           <div className={`absolute left-full top-0 ml-1 z-50 w-48 rounded-lg shadow-xl border py-1 ${menuBg}`}>
-            <div className={`px-3 py-1.5 text-xs font-medium ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>插入内容</div>
+            <div className={`px-3 py-1.5 text-xs font-medium ${isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'}`}>插入内容</div>
             <button onClick={() => handleInsert(() => editor.chain().focus().setParagraph().run())} className={menuBtnClass}>
               <Type className="w-4 h-4" /> 正文
             </button>
@@ -160,7 +160,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
             <button onClick={() => handleInsert(() => editor.chain().focus().toggleHeading({ level: 4 }).run())} className={menuBtnClass}>
               <Heading4 className="w-4 h-4" /> 标题 4
             </button>
-            <div className={`my-1 border-t ${isDark ? 'border-gray-700' : 'border-gray-200'}`} />
+            <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />
             <button onClick={() => handleInsert(addImage)} className={menuBtnClass}>
               <ImageIcon className="w-4 h-4" /> 图片
             </button>
@@ -189,8 +189,8 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
           onClick={() => { setShowBlockMenu(!showBlockMenu); setShowInsertMenu(false); }}
           className={`p-1 rounded-md transition-colors ${
             showBlockMenu
-              ? isDark ? 'bg-gray-600 text-white' : 'bg-gray-200 text-gray-800'
-              : isDark ? 'text-gray-400 hover:bg-gray-700 hover:text-gray-200' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'
+              ? isDark ? 'bg-studio-surface-soft text-white' : 'bg-studio-surface-soft text-studio-text-primary'
+              : isDark ? 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-muted'
           }`}
           title="块操作"
         >
@@ -201,10 +201,10 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
             <button onClick={copyBlock} className={menuBtnClass}>
               <Copy className="w-4 h-4" /> 复制块
             </button>
-            <button onClick={deleteBlock} className={`${menuBtnClass} text-red-500`}>
+            <button onClick={deleteBlock} className={`${menuBtnClass} text-studio-coral`}>
               <Trash2 className="w-4 h-4" /> 删除块
             </button>
-            <div className={`my-1 border-t ${isDark ? 'border-gray-700' : 'border-gray-200'}`} />
+            <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />
             <button onClick={moveUp} className={menuBtnClass}>
               <ArrowUp className="w-4 h-4" /> 上移
             </button>

@@ -22,12 +22,12 @@ const variantConfig: Record<ConfirmVariant, { icon: typeof Trash2; iconClass: st
   danger: {
     icon: Trash2,
     iconClass: 'bg-studio-coral/15 text-studio-coral-contrast',
-    buttonClass: 'bg-red-600 hover:bg-red-700 text-white',
+    buttonClass: 'bg-studio-coral hover:bg-studio-coral text-white',
   },
   warning: {
     icon: AlertTriangle,
     iconClass: 'bg-studio-amber/15 text-studio-amber-contrast',
-    buttonClass: 'bg-amber-500 hover:bg-amber-400 text-black',
+    buttonClass: 'bg-studio-amber hover:bg-studio-amber text-black',
   },
   default: {
     icon: ShieldAlert,

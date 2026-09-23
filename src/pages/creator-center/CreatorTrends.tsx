@@ -47,7 +47,7 @@ export default function CreatorTrends() {
       const summary = useFlowTotal ? (percent ? officialInteractionRate : values.reduce((sum, value) => sum + value, 0)) : latest;
       const display = (value: number) => percent ? `${(value * 100).toFixed(2)}%` : formatNumber(value);
       return <Panel key={label} title={label} description={`周期内 ${values.length} 个日数据`}>
-        <div className="mb-4 flex items-center justify-between"><span className="grid h-10 w-10 place-items-center rounded-xl bg-studio-surface" style={{ color }}><Icon className="h-5 w-5" /></span><div className="text-right"><p className="text-2xl font-semibold">{display(summary)}</p>{useFlowTotal ? <p className="text-xs text-studio-text-muted">周期合计</p> : <p className={`text-xs ${latest - first >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>周期变化 {latest - first >= 0 ? '+' : ''}{display(latest - first)}</p>}</div></div>
+        <div className="mb-4 flex items-center justify-between"><span className="grid h-10 w-10 place-items-center rounded-xl bg-studio-surface" style={{ color }}><Icon className="h-5 w-5" /></span><div className="text-right"><p className="text-2xl font-semibold">{display(summary)}</p>{useFlowTotal ? <p className="text-xs text-studio-text-muted">周期合计</p> : <p className={`text-xs ${latest - first >= 0 ? 'text-studio-success' : 'text-studio-coral'}`}>周期变化 {latest - first >= 0 ? '+' : ''}{display(latest - first)}</p>}</div></div>
         <LineChart values={values} color={color} />
       </Panel>;
     })}</section>

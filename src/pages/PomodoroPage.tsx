@@ -43,7 +43,7 @@ export default function PomodoroPage() {
         {/* 排行榜 */}
         <div className="rounded-2xl bg-theme-secondary border border-theme-border p-6">
           <div className="flex items-center gap-2.5 mb-5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-md">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-studio-amber to-studio-amber flex items-center justify-center shadow-md">
               <Trophy className="w-4 h-4 text-white" />
             </div>
             <h3 className="text-base font-semibold text-theme-text">专注排行榜</h3>
@@ -57,9 +57,9 @@ export default function PomodoroPage() {
                   className="flex items-center gap-3 p-3 rounded-xl bg-theme-tertiary/50 hover:bg-theme-tertiary transition-colors"
                 >
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                    index === 0 ? 'bg-amber-400/20 text-amber-400' :
-                    index === 1 ? 'bg-gray-300/20 text-gray-300' :
-                    index === 2 ? 'bg-orange-400/20 text-orange-400' :
+                    index === 0 ? 'bg-studio-amber/20 text-studio-amber' :
+                    index === 1 ? 'bg-studio-surface-soft/20 text-studio-text-secondary' :
+                    index === 2 ? 'bg-studio-amber/20 text-studio-amber' :
                     'bg-theme-tertiary text-theme-text-muted'
                   }`}>
                     {index + 1}

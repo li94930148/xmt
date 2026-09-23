@@ -53,7 +53,7 @@ export default function BaseModal({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center px-4 py-6 ${styles.overlay}`}
+      className="xmt-overlay xmt-overlay-center z-50 px-4 py-6"
       onClick={(event) => {
         if (!closeOnOverlayClick) {
           return;
@@ -63,7 +63,7 @@ export default function BaseModal({
         }
       }}
     >
-      <div className={`xmt-modal-enter w-full ${sizeClassMap[size]} ${styles.modal} ${className}`.trim()}>
+      <div className={`studio-sheen xmt-panel-enter w-full ${sizeClassMap[size]} ${styles.modal} ${className}`.trim()}>
         {title || description || showCloseButton ? (
           <div className={`flex items-start justify-between gap-4 border-b px-6 py-5 ${styles.border}`}>
             <div className="min-w-0 flex-1">

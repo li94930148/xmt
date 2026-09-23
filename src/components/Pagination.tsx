@@ -55,7 +55,7 @@ export default function Pagination({ page, total, limit, onChange }: PaginationP
               onClick={() => onChange(pageNum)}
               className={`w-8 h-8 rounded-lg text-xs font-medium transition-all duration-200 ${
                 pageNum === page
-                  ? 'bg-[#5c7cfa] text-white shadow-sm shadow-[#5c7cfa]/20'
+                  ? 'bg-studio-primary text-white shadow-sm shadow-studio-primary/25'
                   : `${styles.textMuted} ${styles.hoverBg}`
               }`}
             >

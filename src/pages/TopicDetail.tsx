@@ -387,7 +387,7 @@ export default function TopicDetail() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="w-8 h-8 border-4 border-studio-primary border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
@@ -431,12 +431,12 @@ export default function TopicDetail() {
                   type="text"
                   value={title}
                   onChange={(e) => changeTitle(e.target.value)}
-                  className={`text-2xl font-bold ${styles.textPrimary} ${styles.bgInput} border border-blue-500 rounded-lg px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 w-96`}
+                  className={`text-2xl font-bold ${styles.textPrimary} ${styles.bgInput} border border-studio-primary rounded-lg px-3 py-1 focus:outline-none focus:ring-2 focus:ring-studio-primary w-96`}
                   autoFocus
                 />
               ) : (
                 <h1
-                  className={`text-2xl font-bold ${styles.textPrimary} cursor-pointer hover:text-blue-400 transition-colors`}
+                  className={`text-2xl font-bold ${styles.textPrimary} cursor-pointer hover:text-studio-primary transition-colors`}
                   onClick={() => {
                     if (canEditTopic) setEditTitle(true);
                   }}
@@ -477,7 +477,7 @@ export default function TopicDetail() {
               <select
                 value={details.assignee_id}
                 onChange={(e) => changeDetails({ ...details, assignee_id: parseInt(e.target.value) })}
-                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
               >
                 <option value={0}>未分配</option>
                 {users.filter(u => u.enabled).map(user => (
@@ -486,7 +486,7 @@ export default function TopicDetail() {
               </select>
             ) : (
               <p
-                className={`${styles.textPrimary} font-medium cursor-pointer hover:text-blue-400 transition-colors`}
+                className={`${styles.textPrimary} font-medium cursor-pointer hover:text-studio-primary transition-colors`}
                 onClick={() => {
                   if (canEditTopic) setEditDetails(true);
                 }}
@@ -505,7 +505,7 @@ export default function TopicDetail() {
                 type="date"
                 value={details.deadline}
                 onChange={(e) => changeDetails({ ...details, deadline: e.target.value })}
-                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
               />
             ) : (
               <p
@@ -528,12 +528,12 @@ export default function TopicDetail() {
                 type="text"
                 value={details.platform}
                 onChange={(e) => changeDetails({ ...details, platform: e.target.value })}
-                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500 ${styles.textPlaceholder}`}
+                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary ${styles.textPlaceholder}`}
                 placeholder="输入发布平台"
               />
             ) : (
               <p
-                className={`${styles.textPrimary} font-medium cursor-pointer hover:text-blue-400 transition-colors`}
+                className={`${styles.textPrimary} font-medium cursor-pointer hover:text-studio-primary transition-colors`}
                 onClick={() => {
                   if (canEditTopic) setEditDetails(true);
                 }}
@@ -550,7 +550,7 @@ export default function TopicDetail() {
             <div className="flex items-center justify-between mb-2">
               <h3 className={`${styles.textSecondary} text-sm font-medium`}>项目背景</h3>
               {canEditTopic && isEditing && (
-                <button onClick={() => setEditDescription(true)} className="text-xs text-blue-400 hover:text-blue-300">编辑</button>
+                <button onClick={() => setEditDescription(true)} className="text-xs text-studio-primary hover:text-studio-primary">编辑</button>
               )}
             </div>
             {editDescription ? (
@@ -558,7 +558,7 @@ export default function TopicDetail() {
                 value={parsedFields.projectBackground}
                 onChange={(e) => changeParsedFields({ ...parsedFields, projectBackground: e.target.value })}
                 rows={4}
-                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none`}
+                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary resize-none`}
                 placeholder="项目背景..."
               />
             ) : (
@@ -571,7 +571,7 @@ export default function TopicDetail() {
             <div className="flex items-center justify-between mb-2">
               <h3 className={`${styles.textSecondary} text-sm font-medium`}>目标受众</h3>
               {canEditTopic && isEditing && (
-                <button onClick={() => setEditDescription(true)} className="text-xs text-blue-400 hover:text-blue-300">编辑</button>
+                <button onClick={() => setEditDescription(true)} className="text-xs text-studio-primary hover:text-studio-primary">编辑</button>
               )}
             </div>
             {editDescription ? (
@@ -579,7 +579,7 @@ export default function TopicDetail() {
                 value={parsedFields.targetAudience}
                 onChange={(e) => changeParsedFields({ ...parsedFields, targetAudience: e.target.value })}
                 rows={4}
-                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none`}
+                className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary resize-none`}
                 placeholder="目标受众..."
               />
             ) : (
@@ -596,7 +596,7 @@ export default function TopicDetail() {
             <h3 className={`${styles.textSecondary} text-sm font-medium`}>剧本大纲</h3>
             <div className="flex items-center gap-2">
               {canEditTopic && !editOutline && isEditing && (
-                <button onClick={() => setEditOutline(true)} className="text-xs text-blue-400 hover:text-blue-300">编辑大纲</button>
+                <button onClick={() => setEditOutline(true)} className="text-xs text-studio-primary hover:text-studio-primary">编辑大纲</button>
               )}
             </div>
           </div>
@@ -630,7 +630,7 @@ export default function TopicDetail() {
             <button
               onClick={handleSave}
               disabled={isAggregateSaving}
-              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
+              className="flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-white transition-colors hover:bg-studio-primary"
             >
               <Save className="w-4 h-4" />
               保存
@@ -658,7 +658,7 @@ export default function TopicDetail() {
                 <div key={step.status} className="flex items-center">
                   <div className={`flex flex-col items-center ${isCurrent ? 'scale-110' : ''}`}>
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      isCurrent ? 'bg-blue-600 text-white' : isCompleted ? 'bg-studio-success/15 text-studio-success-contrast' : `${styles.bgTertiary} text-studio-text-muted`
+                      isCurrent ? 'bg-studio-primary text-white' : isCompleted ? 'bg-studio-success/15 text-studio-success-contrast' : `${styles.bgTertiary} text-studio-text-muted`
                     }`}>
                       <Icon className="w-5 h-5" />
                     </div>
@@ -671,7 +671,7 @@ export default function TopicDetail() {
                     </span>
                   </div>
                   {index < workflowSteps.length - 1 && (
-                    <div className={`w-16 h-1 mx-2 rounded-full ${isCompleted ? 'bg-green-500' : styles.progressBg}`}></div>
+                    <div className={`w-16 h-1 mx-2 rounded-full ${isCompleted ? 'bg-studio-success' : styles.progressBg}`}></div>
                   )}
                 </div>
               );
@@ -685,7 +685,7 @@ export default function TopicDetail() {
             {topic.status === 'pending' && canAudit && (
               <button
                 onClick={() => setShowAuditModal(true)}
-                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
+                className="flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-white transition-colors hover:bg-studio-primary"
               >
                 <CheckCircle className="w-4 h-4" />
                 审核选题
@@ -710,7 +710,7 @@ export default function TopicDetail() {
             {canEditTopic && topic.status !== 'completed' && topic.status !== 'rejected' && (
               <button
                 onClick={() => handleUpdateStatus(nextStatuses[topic.status])}
-                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90"
+                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-studio-primary to-studio-cyan px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90"
               >
                 <ArrowRight className="w-4 h-4" />
                 推进到下一阶段
@@ -752,7 +752,7 @@ export default function TopicDetail() {
                     onClick={() => setAuditData({ ...auditData, status: 'approved' })}
                     className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
                       auditData.status === 'approved' 
-                        ? 'bg-green-600 text-white' 
+                        ? 'bg-studio-success text-white' 
                         : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
                     }`}
                   >
@@ -763,7 +763,7 @@ export default function TopicDetail() {
                     onClick={() => setAuditData({ ...auditData, status: 'rejected' })}
                     className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
                       auditData.status === 'rejected' 
-                        ? 'bg-red-600 text-white' 
+                        ? 'bg-studio-coral text-white' 
                         : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
                     }`}
                   >
@@ -779,7 +779,7 @@ export default function TopicDetail() {
                   <select
                     value={auditData.assignee_id}
                     onChange={(e) => setAuditData({ ...auditData, assignee_id: parseInt(e.target.value) })}
-                    className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                    className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
                   >
                     <option value={0}>请选择负责人</option>
                     {users.filter(u => u.enabled && u.role !== 'admin').map(user => (
@@ -795,7 +795,7 @@ export default function TopicDetail() {
                   value={auditData.comment}
                   onChange={(e) => setAuditData({ ...auditData, comment: e.target.value })}
                   rows={3}
-                  className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${styles.textPlaceholder}`}
+                  className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary resize-none ${styles.textPlaceholder}`}
                   placeholder="请输入审核意见..."
                 />
               </div>
@@ -810,7 +810,7 @@ export default function TopicDetail() {
                 <button
                   onClick={handleAudit}
                   className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
-                    auditData.status === 'approved' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                    auditData.status === 'approved' ? 'bg-studio-success hover:bg-studio-success' : 'bg-studio-coral hover:bg-studio-coral'
                   } text-white`}
                 >
                   {auditData.status === 'approved' ? '通过审核' : '驳回选题'}
@@ -844,7 +844,7 @@ export default function TopicDetail() {
               type="button"
               onClick={() => { void discardTopicAndLeave(); }}
               disabled={topicLeaveState === 'saving'}
-              className="rounded-xl bg-red-600 px-4 py-2.5 text-sm text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+              className="rounded-xl bg-studio-coral px-4 py-2.5 text-sm text-white transition-colors hover:bg-studio-coral disabled:opacity-60"
             >
               放弃离开
             </button>

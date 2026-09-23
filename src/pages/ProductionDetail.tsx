@@ -786,7 +786,7 @@ export default function ProductionDetail() {
       </div>
 
       {superseded && canEditProduction ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="production-version-superseded-title">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-studio-app-bg/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="production-version-superseded-title">
           <GlassPanel className="w-full max-w-lg border-studio-coral/45 p-6 shadow-glow-primary">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-studio-coral">版本同步提醒</p>
             <h2 id="production-version-superseded-title" className="mt-3 text-xl font-bold text-studio-text-primary">检测到新的大版本已创建</h2>

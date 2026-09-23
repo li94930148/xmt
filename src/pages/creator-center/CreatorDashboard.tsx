@@ -12,9 +12,9 @@ import { ReactBitsRevealSlot } from '@/features/reactbits-appearance/ReactBitsRe
 
 export function GrowthBlock({ title, data, official }: { title: string; data: DouyinDashboardData['growth_7d']; official: boolean }) {
   const metrics = [
-    { label: '粉丝净变化', value: data?.fans, color: 'text-emerald-500', missing: '缺少可比粉丝快照' },
-    { label: official ? '新增播放' : '播放变化', value: data?.plays, color: 'text-cyan-500', missing: official ? '缺少该周期官方导出' : '缺少可比历史快照' },
-    { label: official ? '新增互动' : '互动变化', value: data?.interactions, color: 'text-rose-500', missing: official ? '缺少该周期官方导出' : '缺少可比历史快照' },
+    { label: '粉丝净变化', value: data?.fans, color: 'text-studio-success', missing: '缺少可比粉丝快照' },
+    { label: official ? '新增播放' : '播放变化', value: data?.plays, color: 'text-studio-cyan', missing: official ? '缺少该周期官方导出' : '缺少可比历史快照' },
+    { label: official ? '新增互动' : '互动变化', value: data?.interactions, color: 'text-studio-coral', missing: official ? '缺少该周期官方导出' : '缺少可比历史快照' },
   ];
   return <div className="rounded-xl bg-studio-surface p-4">
     <p className="text-sm font-medium">{title}</p>
@@ -22,7 +22,7 @@ export function GrowthBlock({ title, data, official }: { title: string; data: Do
       {metrics.map(metric => <div key={metric.label} className="min-w-0 text-center">
         <b className={metric.color}>{metric.value == null ? '—' : `${metric.value >= 0 ? '+' : ''}${formatNumber(metric.value)}`}</b>
         <span className="mt-1 block text-xs text-studio-text-muted">{metric.label}</span>
-        {metric.value == null ? <span className="mt-1 block text-xs text-amber-600">{metric.missing}</span> : null}
+        {metric.value == null ? <span className="mt-1 block text-xs text-studio-amber">{metric.missing}</span> : null}
       </div>)}
     </div>
   </div>;
@@ -62,7 +62,7 @@ export default function CreatorDashboard() {
   const official = data.data_source === 'douyin_official_export';
 
   return <ReactBitsPageScene page="creator"><div className="mx-auto max-w-[1500px] space-y-6 pb-12">
-    <div className="sr-only"><ReactBitsHeadingSlot>抖音数据驾驶舱</ReactBitsHeadingSlot></div><PageHeader title="抖音数据驾驶舱" description="账号与内容表现概览" loading={loading} onRefresh={() => void load()} refreshLabel="刷新数据" actions={<span className={`inline-flex h-10 items-center rounded-lg px-3 text-sm ${agent?.online?'bg-emerald-500/10 text-emerald-500':'bg-amber-500/10 text-amber-600'}`}>{agent?.online?'采集端在线':'采集端离线'}</span>} />
+    <div className="sr-only"><ReactBitsHeadingSlot>抖音数据驾驶舱</ReactBitsHeadingSlot></div><PageHeader title="抖音数据驾驶舱" description="账号与内容表现概览" loading={loading} onRefresh={() => void load()} refreshLabel="刷新数据" actions={<span className={`inline-flex h-10 items-center rounded-lg px-3 text-sm ${agent?.online?'bg-studio-success/10 text-studio-success':'bg-studio-amber/10 text-studio-amber'}`}>{agent?.online?'采集端在线':'采集端离线'}</span>} />
     <ReactBitsRevealSlot className="block"><ReactBitsCardSlot semantic="creator-profile" className="min-w-0"><CreatorProfileCard
       avatarUrl={typeof account.avatar === 'string' ? account.avatar : undefined}
       name={String(account.nickname || account.account_name || '抖音账号')}
@@ -75,10 +75,10 @@ export default function CreatorDashboard() {
     /></ReactBitsCardSlot></ReactBitsRevealSlot>
     <Panel title="Creator Agent" description="本机采集设备与浏览器状态">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div><span className="text-xs text-studio-text-muted">设备</span><p className="mt-1 font-medium">{agent?.device_name||'尚未绑定'}</p></div><div><span className="text-xs text-studio-text-muted">浏览器</span><p className="mt-1 font-medium">{agent?.browser_type||'未就绪'} {agent?.browser_version||''}</p></div><div><span className="text-xs text-studio-text-muted">兼容状态</span><p className="mt-1 font-medium">{agent?.browser_compatibility||'未检测'}</p></div><div><span className="text-xs text-studio-text-muted">抖音登录</span><p className="mt-1 font-medium">{agent?.browser_login_status==='valid'?'正常':'未确认'}</p></div></div>
-      <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" disabled={bindingBusy||!account.douyin_uid} className="h-10 rounded-lg bg-studio-cyan px-4 text-sm font-medium text-slate-950 disabled:cursor-not-allowed disabled:opacity-50" onClick={()=>{setBindingBusy(true);setBindingError('');void createCreatorAgentBindingCode(String(account.douyin_uid||'')).then(value=>setBinding({code:value.binding_code,expiresAt:value.expires_at})).catch(cause=>setBindingError(cause instanceof Error?cause.message:'绑定码创建失败')).finally(()=>setBindingBusy(false));}}>{bindingBusy?'正在创建…':'创建一次性绑定码'}</button>{binding?<div className="rounded-lg bg-studio-surface px-4 py-2"><code className="font-semibold">{binding.code}</code><span className="ml-3 text-xs text-studio-text-muted">15 分钟内有效，仅可使用一次</span></div>:null}</div>
-      {bindingError?<p role="alert" className="mt-3 text-sm text-red-500">{bindingError}</p>:null}
+      <div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" disabled={bindingBusy||!account.douyin_uid} className="h-10 rounded-lg bg-studio-cyan px-4 text-sm font-medium text-studio-text-primary disabled:cursor-not-allowed disabled:opacity-50" onClick={()=>{setBindingBusy(true);setBindingError('');void createCreatorAgentBindingCode(String(account.douyin_uid||'')).then(value=>setBinding({code:value.binding_code,expiresAt:value.expires_at})).catch(cause=>setBindingError(cause instanceof Error?cause.message:'绑定码创建失败')).finally(()=>setBindingBusy(false));}}>{bindingBusy?'正在创建…':'创建一次性绑定码'}</button>{binding?<div className="rounded-lg bg-studio-surface px-4 py-2"><code className="font-semibold">{binding.code}</code><span className="ml-3 text-xs text-studio-text-muted">15 分钟内有效，仅可使用一次</span></div>:null}</div>
+      {bindingError?<p role="alert" className="mt-3 text-sm text-studio-coral">{bindingError}</p>:null}
     </Panel>
-    <div className={`rounded-xl border p-4 text-sm ${data.data_status==='ready'?'border-emerald-500/30 bg-emerald-500/10':'border-amber-500/30 bg-amber-500/10'}`}><b>{data.data_status==='ready'?'数据正常':'数据不完整'}</b><span className="ml-3 text-studio-text-muted">{official?'抖音官方导出优先':'采集数据'} · 更新于 {formatDate(official?data.official_snapshot_at:data.last_success_at,true)} · {data.metrics.works_count} 条作品</span></div>
+    <div className={`rounded-xl border p-4 text-sm ${data.data_status==='ready'?'border-studio-success/30 bg-studio-success/10':'border-studio-amber/30 bg-studio-amber/10'}`}><b>{data.data_status==='ready'?'数据正常':'数据不完整'}</b><span className="ml-3 text-studio-text-muted">{official?'抖音官方导出优先':'采集数据'} · 更新于 {formatDate(official?data.official_snapshot_at:data.last_success_at,true)} · {data.metrics.works_count} 条作品</span></div>
     <ReactBitsRevealSlot className="block"><section data-testid="creator-core-metrics" className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <MetricCard label="粉丝" value={data.metrics.fans_count == null ? '暂无数据' : data.metrics.fans_count} icon={Users} />
       <MetricCard label={official?'官方作品':'入库作品'} value={data.metrics.works_count} icon={Video} accent="violet" />
@@ -111,7 +111,7 @@ export default function CreatorDashboard() {
         <MetricCard label="成功作品" value={num(lastLog?.success_count)} icon={Video} accent="emerald" />
         <MetricCard label="识别失败" value={num(lastLog?.failed_count)} icon={Activity} accent="rose" />
       </div>
-      {lastLog?.error_message ? <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-500">{String(lastLog.error_message)}</p> : null}
+      {lastLog?.error_message ? <p className="mt-4 rounded-lg bg-studio-coral/10 p-3 text-sm text-studio-coral">{String(lastLog.error_message)}</p> : null}
     </Panel>
   </div></ReactBitsPageScene>;
 }

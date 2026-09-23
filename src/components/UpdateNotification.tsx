@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
 import { X, Sparkles, ArrowRight } from 'lucide-react';
-import { useThemeStyles } from '../hooks/useThemeStyles';
 import { changelog, getChangeTypeLabel, getChangeTypeColor } from '../data/changelog';
+
+// 声明全局变量
+declare const __APP_VERSION__: string;
 
 interface UpdateNotificationProps {
   onClose: () => void;
@@ -9,70 +10,63 @@ interface UpdateNotificationProps {
 }
 
 export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateNotificationProps) {
-  const styles = useThemeStyles();
-  const [isVisible, setIsVisible] = useState(false);
-
-  // 动画效果
-  useEffect(() => {
-    setTimeout(() => setIsVisible(true), 100);
-  }, []);
-
   const latestVersion = changelog[0];
   if (!latestVersion) return null;
 
-  const handleClose = () => {
-    setIsVisible(false);
-    setTimeout(onClose, 300);
-  };
+  const handleClose = () => onClose();
 
   return (
     <div
-      className={`pointer-events-none fixed bottom-4 right-4 z-[300] w-[calc(100vw-2rem)] max-w-lg transition-all duration-300 ${
-        isVisible ? 'opacity-100' : 'opacity-0'
-      }`}
+      className="xmt-overlay xmt-overlay-center z-[300]"
+      onClick={handleClose}
     >
+
+      {/* 弹窗内容 */}
       <div
-        className={`pointer-events-auto relative flex max-h-[calc(100vh-2rem)] w-full flex-col ${styles.card} rounded-2xl shadow-2xl overflow-hidden transform transition-all duration-300 ${
-          isVisible ? 'scale-100 translate-y-0' : 'scale-95 translate-y-4'
-        }`}
+        className="studio-sheen xmt-panel-enter relative w-full max-w-lg overflow-hidden rounded-panel border border-studio-border-soft bg-studio-surface-glass shadow-floating backdrop-blur-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 顶部装饰 */}
-        <div className="relative h-32 shrink-0 bg-gradient-to-br from-[#5c7cfa] to-[#748ffc] overflow-hidden">
+        <div className="relative h-36 overflow-hidden bg-gradient-to-br from-studio-primary via-studio-violet to-studio-cyan">
           <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48cGF0aCBkPSJNMjAgMjBjMC01LjUyMyA0LjQ3Ny0xMCAxMC0xMHYtMkMxNC40NzcgOCA4IDE0LjQ3OCA4IDIwaDEyem0tMTAgMTBjLTUuNTIzIDAtMTAtNC40NzctMTAtMTBoLTJjMCA2LjYyNyA1LjM3MyAxMiAxMiAxMnYtMnoiLz48L2c+PC9nPjwvc3ZnPg==')] opacity-30" />
           <div className="absolute bottom-4 left-6 flex items-center gap-3">
             <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
               <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div>
-              <p className="text-white/80 text-sm font-medium">系统更新</p>
-              <h2 className="text-white text-2xl font-bold">v{latestVersion.version}</h2>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/75">系统更新 · System Update</p>
+              <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white">
+                v{latestVersion.version}
+              </h2>
             </div>
           </div>
           <button
             onClick={handleClose}
-            aria-label="关闭系统更新提示"
-            className="absolute top-4 right-4 w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center hover:bg-white/30 transition-colors"
+            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg bg-white/15 text-white transition-colors hover:bg-white/25"
+            aria-label="关闭更新提示"
           >
-            <X className="w-4 h-4 text-white" />
+            <X className="h-4 w-4" />
           </button>
+          <div className="absolute right-14 top-5 rounded-full border border-white/25 bg-white/10 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-white/90 backdrop-blur-sm">
+            {__APP_VERSION__ ? `当前 v${__APP_VERSION__}` : '已更新'}
+          </div>
         </div>
 
         {/* 内容区域 */}
-        <div className="min-h-0 overflow-y-auto p-6">
-          <h3 className={`text-lg font-semibold ${styles.textPrimary} mb-2`}>
+        <div className="p-6 max-h-[400px] overflow-y-auto">
+          <h3 className="mb-2 text-lg font-semibold tracking-tight text-studio-text-primary">
             {latestVersion.title}
           </h3>
-          <p className={`text-sm ${styles.textMuted} mb-4`}>
+          <p className="mb-4 text-sm text-studio-text-muted">
             发布日期：{latestVersion.date}
           </p>
 
           {latestVersion.impactScope?.length ? (
             <div className="mb-5">
-              <p className={`mb-2 text-xs font-medium ${styles.textMuted}`}>影响范围</p>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-studio-text-muted">影响范围</p>
               <div className="flex flex-wrap gap-2">
                 {latestVersion.impactScope.map((scope) => (
-                  <span key={scope} className={`rounded-full border px-2.5 py-1 text-xs ${styles.border} ${styles.textSecondary}`}>
+                  <span key={scope} className="rounded-full border border-studio-border-soft bg-studio-surface-soft/50 px-2.5 py-1 text-xs text-studio-text-secondary">
                     {scope}
                   </span>
                 ))}
@@ -91,13 +85,13 @@ export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateN
                 >
                   {getChangeTypeLabel(change.type)}
                 </span>
-                <p className={`text-sm ${styles.textSecondary} flex-1`}>
+                <p className="flex-1 text-sm leading-relaxed text-studio-text-secondary">
                   {change.description}
                 </p>
               </div>
             ))}
             {latestVersion.changes.length > 6 && (
-              <p className={`text-sm ${styles.textMuted} pl-2`}>
+              <p className="pl-2 text-sm text-studio-text-muted">
                 ...还有 {latestVersion.changes.length - 6} 项更新
               </p>
             )}
@@ -105,10 +99,10 @@ export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateN
         </div>
 
         {/* 底部按钮 */}
-        <div className={`flex shrink-0 gap-3 border-t p-6 ${styles.border}`}>
+        <div className="flex gap-3 border-t border-studio-border-soft p-6">
           <button
             onClick={handleClose}
-            className={`flex-1 px-4 py-2.5 rounded-xl ${styles.buttonSecondary} text-sm font-medium transition-colors`}
+            className="xmt-btn xmt-btn-secondary flex-1 text-sm"
           >
             我知道了
           </button>
@@ -117,10 +111,10 @@ export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateN
               handleClose();
               onGoToChangelog();
             }}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-[#5c7cfa] text-white text-sm font-medium hover:bg-[#4263eb] transition-colors flex items-center justify-center gap-2"
+            className="xmt-btn xmt-btn-primary flex-1 text-sm"
           >
             查看完整更新日志
-            <ArrowRight className="w-4 h-4" />
+            <ArrowRight className="h-4 w-4" />
           </button>
         </div>
       </div>

@@ -177,17 +177,17 @@ export default function Analytics() {
   ];
 
   const statCards = [
-    { title: '本月完成', value: teamStats?.completed_count || 0, unit: '个选题', icon: BarChart3, color: '#51cf66' },
-    { title: '完成率', value: `${teamStats?.completion_rate || '0'}%`, unit: '团队整体', icon: TrendingUp, color: '#5c7cfa' },
-    { title: '逾期率', value: `${teamStats?.overdue_rate || '0'}%`, unit: '当前周期', icon: TrendingUp, color: '#ff6b6b' },
-    { title: '平均耗时', value: teamStats?.avg_days || '0', unit: '天 / 选题', icon: Users, color: '#cc5de8' },
+    { title: '本月完成', value: teamStats?.completed_count || 0, unit: '个选题', icon: BarChart3, color: 'var(--xmt-success)' },
+    { title: '完成率', value: `${teamStats?.completion_rate || '0'}%`, unit: '团队整体', icon: TrendingUp, color: 'var(--xmt-primary)' },
+    { title: '逾期率', value: `${teamStats?.overdue_rate || '0'}%`, unit: '当前周期', icon: TrendingUp, color: 'var(--xmt-coral)' },
+    { title: '平均耗时', value: teamStats?.avg_days || '0', unit: '天 / 选题', icon: Users, color: 'var(--xmt-violet)' },
   ];
 
   const metricCards = [
-    { label: '播放量', value: (monthlyStats?.total_views || 0).toLocaleString(), icon: Play, color: 'text-blue-400' },
-    { label: '点赞量', value: (monthlyStats?.total_likes || 0).toLocaleString(), icon: Heart, color: 'text-red-400' },
-    { label: '分享量', value: (monthlyStats?.total_shares || 0).toLocaleString(), icon: Share2, color: 'text-emerald-400' },
-    { label: '评论量', value: (monthlyStats?.total_comments || 0).toLocaleString(), icon: MessageCircle, color: 'text-purple-400' },
+    { label: '播放量', value: (monthlyStats?.total_views || 0).toLocaleString(), icon: Play, color: 'text-studio-primary' },
+    { label: '点赞量', value: (monthlyStats?.total_likes || 0).toLocaleString(), icon: Heart, color: 'text-studio-coral' },
+    { label: '分享量', value: (monthlyStats?.total_shares || 0).toLocaleString(), icon: Share2, color: 'text-studio-success' },
+    { label: '评论量', value: (monthlyStats?.total_comments || 0).toLocaleString(), icon: MessageCircle, color: 'text-studio-violet' },
   ];
 
   return (
@@ -377,11 +377,11 @@ export default function Analytics() {
                           <span
                             className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
                               index === 0
-                                ? 'bg-yellow-500 text-white'
+                                ? 'bg-studio-amber text-white'
                                 : index === 1
-                                  ? 'bg-gray-400 text-white'
+                                  ? 'bg-studio-surface-soft text-white'
                                   : index === 2
-                                    ? 'bg-orange-600 text-white'
+                                    ? 'bg-studio-amber text-white'
                                     : `${styles.bgTertiary} ${styles.textSecondary}`
                             }`}
                           >

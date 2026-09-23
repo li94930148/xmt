@@ -78,7 +78,7 @@ export default function TopicResourcesPanel({ topicId, canManage }: { topicId: n
       <div className="mb-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm text-studio-text-secondary">关联资料</h3>
-          {canManage ? <button type="button" onClick={() => setShowPicker(true)} className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white transition-colors hover:bg-blue-700"><Link2 className="h-4 w-4" />关联资料</button> : null}
+          {canManage ? <button type="button" onClick={() => setShowPicker(true)} className="flex items-center gap-2 rounded-lg bg-studio-primary px-3 py-2 text-sm text-white transition-colors hover:bg-studio-primary"><Link2 className="h-4 w-4" />关联资料</button> : null}
         </div>
         {loading ? <LoadingState type="table" rows={3} /> : loadError ? <ErrorState onRetry={() => void load()} /> : items.length === 0 ? <EmptyState title="暂无关联资料" /> : (
           <div className="overflow-hidden rounded-xl border border-studio-border-soft">
@@ -90,7 +90,7 @@ export default function TopicResourcesPanel({ topicId, canManage }: { topicId: n
       </div>
 
       <BaseModal open={showPicker} onClose={() => setShowPicker(false)} title="关联资料" size="lg">
-        <form onSubmit={search} className="flex gap-3"><SearchBar value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索资料" className="flex-1" /><button type="submit" className="rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700"><Search className="mr-2 inline h-4 w-4" />搜索</button></form>
+        <form onSubmit={search} className="flex gap-3"><SearchBar value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索资料" className="flex-1" /><button type="submit" className="rounded-lg bg-studio-primary px-4 text-sm text-white hover:bg-studio-primary"><Search className="mr-2 inline h-4 w-4" />搜索</button></form>
         <div className="mt-4 max-h-[440px] space-y-2 overflow-y-auto">
           {searching ? <LoadingState type="inline" /> : results.length ? results.map((result) => <div key={result.id} className="flex items-start gap-3 rounded-xl border border-studio-border-soft p-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-studio-text-primary">{result.title}</p><p className="mt-1 text-xs text-studio-text-secondary">{libraryNames[result.library_type]} · {result.category?.name || '—'}</p><p className="mt-2 line-clamp-2 text-xs leading-5 text-studio-text-muted">{result.snippet}</p></div><button type="button" disabled={addingId === result.id} onClick={() => void add(result)} className="rounded-lg border border-studio-primary/40 px-3 py-1.5 text-xs text-studio-primary-contrast disabled:opacity-50">{addingId === result.id ? '关联中' : '关联'}</button></div>) : keyword ? <EmptyState title="暂无资料" /> : null}
         </div>

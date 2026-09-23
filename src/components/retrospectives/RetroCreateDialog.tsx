@@ -194,7 +194,7 @@ export default function RetroCreateDialog({ open, templates, users, currentUserI
         </label>
       </div>
 
-      {error ? <p className="mt-4 rounded-button border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p> : null}
+      {error ? <p className="mt-4 rounded-button border border-studio-coral/30 bg-studio-coral/10 px-3 py-2 text-sm text-studio-coral">{error}</p> : null}
     </BaseModal>
   );
 }

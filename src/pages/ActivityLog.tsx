@@ -26,13 +26,13 @@ const actionLabels: Record<string, string> = {
 };
 
 const actionColors: Record<string, string> = {
-  create: '#51cf66',
-  update: '#5c7cfa',
-  delete: '#ff6b6b',
-  login: '#cc5de8',
-  publish: '#ff922b',
-  audit: '#ffd43b',
-  status_change: '#20c997',
+  create: 'var(--xmt-success)',
+  update: 'var(--xmt-primary)',
+  delete: 'var(--xmt-coral)',
+  login: 'var(--xmt-violet)',
+  publish: 'var(--xmt-amber)',
+  audit: 'var(--xmt-amber)',
+  status_change: 'var(--xmt-success)',
 };
 
 export default function ActivityLog() {
@@ -100,7 +100,7 @@ export default function ActivityLog() {
 
   const getActionColor = (action: string) => {
     const key = Object.keys(actionColors).find(k => action.toLowerCase().includes(k));
-    return key ? actionColors[key] : (styles.isDark ? '#636983' : '#9aa0b0');
+    return key ? actionColors[key] : (styles.isDark ? 'var(--xmt-text-muted)' : 'var(--xmt-text-secondary)');
   };
 
   const getActionLabel = (action: string) => {
@@ -141,7 +141,7 @@ export default function ActivityLog() {
       <div className={`${styles.card} p-6`}>
         {loading ? (
           <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-6 h-6 animate-spin text-[#5c7cfa]" />
+            <Loader2 className="w-6 h-6 animate-spin text-studio-primary" />
           </div>
         ) : logs.length === 0 ? (
           <div className="text-center py-16">

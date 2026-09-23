@@ -166,7 +166,7 @@ export default function Production() {
     production: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
     shooting: 'bg-studio-violet/15 text-studio-violet-contrast border-studio-violet/30',
     publishing: 'bg-studio-cyan/15 text-studio-cyan-contrast border-studio-cyan/30',
-    completed: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+    completed: 'bg-studio-surface-soft/20 text-studio-text-muted border-studio-border-soft/30',
   };
 
   const topicStatusText: Record<string, string> = {
@@ -258,7 +258,7 @@ export default function Production() {
                     <td className="px-6 py-4">
                       <button 
                         onClick={() => navigate(`/production/${production.id}`)}
-                        className="flex items-center gap-2 text-blue-400 hover:text-blue-300"
+                        className="flex items-center gap-2 text-studio-primary hover:text-studio-primary"
                       >
                         <FileText className="w-4 h-4" />
                         <span className={`${styles.textPrimary} font-medium`}>{production.topic_title}</span>

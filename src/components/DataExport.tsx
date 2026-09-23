@@ -106,8 +106,8 @@ export default function DataExport() {
   return (
     <div className={`${styles.card} p-6`}>
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[#5c7cfa]/10">
-          <Download className="w-5 h-5 text-[#5c7cfa]" />
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-studio-primary/10">
+          <Download className="w-5 h-5 text-studio-primary" />
         </div>
         <div>
           <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>数据导出</h3>
@@ -123,11 +123,11 @@ export default function DataExport() {
               onClick={() => setExportType('topics')}
               className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all duration-200 ${
                 exportType === 'topics'
-                  ? `border-[#5c7cfa] ${styles.bgInput}`
+                  ? `border-studio-primary ${styles.bgInput}`
                   : `${styles.border} ${styles.hoverBg}`
               }`}
             >
-              <FileText className={`w-5 h-5 ${exportType === 'topics' ? 'text-[#5c7cfa]' : styles.textMuted}`} />
+              <FileText className={`w-5 h-5 ${exportType === 'topics' ? 'text-studio-primary' : styles.textMuted}`} />
               <div className="text-left">
                 <p className={`text-sm font-medium ${styles.textPrimary}`}>选题数据</p>
                 <p className={`text-xs ${styles.textMuted}`}>导出所有选题信息</p>
@@ -138,11 +138,11 @@ export default function DataExport() {
               onClick={() => setExportType('analytics')}
               className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all duration-200 ${
                 exportType === 'analytics'
-                  ? `border-[#5c7cfa] ${styles.bgInput}`
+                  ? `border-studio-primary ${styles.bgInput}`
                   : `${styles.border} ${styles.hoverBg}`
               }`}
             >
-              <BarChart3 className={`w-5 h-5 ${exportType === 'analytics' ? 'text-[#5c7cfa]' : styles.textMuted}`} />
+              <BarChart3 className={`w-5 h-5 ${exportType === 'analytics' ? 'text-studio-primary' : styles.textMuted}`} />
               <div className="text-left">
                 <p className={`text-sm font-medium ${styles.textPrimary}`}>数据分析</p>
                 <p className={`text-xs ${styles.textMuted}`}>导出播放、点赞等指标</p>

@@ -10,7 +10,20 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
-  { version: '3.1.0', date: '2026-09-22', title: '权限与业务入口修复', impactScope: ['登录安全', '资料中心', '协作编辑', '番茄钟', '抖音运营中心'], changes: [{ type: 'security', description: '需要修改密码的账号先完成改密才能使用业务接口；资料写入和协作编辑按授权范围检查。' }, { type: 'fix', description: '番茄钟计时和统计接入服务端，旧抖音技术页转到运营中心，失效的社媒复盘入口停止开放。' }] },
+  {
+    version: '3.1.0',
+    date: '2026-09-22',
+    title: 'Studio Atelier 与项目完整性升级',
+    impactScope: ['全局界面', '登录安全', '资料中心', '协作编辑', '番茄钟', '抖音运营中心'],
+    changes: [
+      { type: 'feature', description: '引入 Studio Atelier 设计系统：统一深空墨蓝色板、发丝线玻璃材质与镜面高光卡片。' },
+      { type: 'improvement', description: '按钮、输入框、状态标签、空态/骨架/错误态全面 token 化，深浅主题对比度提升。' },
+      { type: 'improvement', description: '命令面板、模态与更新弹窗共用统一浮层入场编排，交互节奏更一致。' },
+      { type: 'improvement', description: '登录页与首页驾驶舱按新视觉精修，编辑器工具栏 chrome 对齐系统材质。' },
+      { type: 'security', description: '需要修改密码的账号先完成改密才能使用业务接口；资料写入和协作编辑按授权范围检查。' },
+      { type: 'fix', description: '番茄钟计时和统计接入服务端，旧抖音技术页转到运营中心，失效的社媒复盘入口停止开放。' },
+    ],
+  },
   { version: '3.0.5', date: '2026-09-22', title: '抖音周期指标可用性修复', impactScope: ['抖音运营中心'], changes: [{ type: 'fix', description: '周期卡片展示官方播放、互动值及粉丝基线缺失原因，官方作品导出不再伪造当日粉丝快照。' }] },
   { version: '3.0.4', date: '2026-09-21', title: '协作编辑与版本记录修复', impactScope: ['创作管理', '内容动态'], changes: [{ type: 'fix', description: '多人同时编辑时保留各自新增的内容；普通粘贴不再自动生成新版。' }, { type: 'fix', description: '版本记录按北京时间展示真实保存事件及操作人，历史快照不再重复显示为新版本。' }] },
   { version: '3.0.3', date: '2026-09-21', title: '抖音定时官方导出稳定化', impactScope: ['Creator Agent', '抖音运营中心'], changes: [{ type: 'fix', description: '每日与 12 小时自动任务使用官方四文件采集路径，避免全量滚动异常阻断定时导出。' }] },
@@ -595,10 +608,10 @@ export function getChangeTypeLabel(type: string): string {
 
 export function getChangeTypeColor(type: string): string {
   const colors: Record<string, string> = {
-    feature: 'bg-green-500/20 text-green-400 border-green-500/30',
-    improvement: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    fix: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-    security: 'bg-red-500/20 text-red-400 border-red-500/30',
+    feature: 'bg-studio-success/12 text-studio-success-contrast border-studio-success/35',
+    improvement: 'bg-studio-primary/12 text-studio-primary-contrast border-studio-primary/35',
+    fix: 'bg-studio-amber/12 text-studio-amber-contrast border-studio-amber/35',
+    security: 'bg-studio-coral/12 text-studio-coral-contrast border-studio-coral/35',
   };
-  return colors[type] || 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+  return colors[type] || 'bg-studio-surface-soft text-studio-text-secondary border-studio-border-soft';
 }

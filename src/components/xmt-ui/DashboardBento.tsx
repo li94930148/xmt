@@ -34,7 +34,7 @@ export default function DashboardBento({
   const todayTasks = pendingTopics + inProduction + toPublish;
   const cards = useMemo<BentoCardProps[]>(() => [
     {
-      color: '#071522',
+      color: '#121826',
       label: '内容生产指数',
       title: `${completionRate}%`,
       description: '按选题、创作、发布的实际推进阶段计算',
@@ -43,7 +43,7 @@ export default function DashboardBento({
       onClick: () => onNavigate('/topics'),
     },
     {
-      color: '#0d1b31',
+      color: '#171E2E',
       label: '今日任务',
       title: `${todayTasks} 项`,
       description: `${inProduction} 项正在创作 · ${toPublish} 项等待发布`,
@@ -51,7 +51,7 @@ export default function DashboardBento({
       onClick: () => onNavigate('/production'),
     },
     {
-      color: '#10243a',
+      color: '#1C2436',
       label: '新增选题',
       title: `${todayTopics} 个`,
       description: '今日进入选题池的内容线索',
@@ -59,7 +59,7 @@ export default function DashboardBento({
       onClick: () => onNavigate('/topics/add'),
     },
     {
-      color: '#191631',
+      color: '#1A1630',
       label: '待审核',
       title: `${pendingTopics} 个`,
       description: '需要优先处理的内容源头',
@@ -67,7 +67,7 @@ export default function DashboardBento({
       onClick: () => onNavigate('/topics?status=pending'),
     },
     {
-      color: '#0b2527',
+      color: '#0D2224',
       label: '发布数据',
       title: `${toPublish} 条`,
       description: '当前等待发布的内容与排期',
@@ -75,7 +75,7 @@ export default function DashboardBento({
       onClick: () => onNavigate('/publishing'),
     },
     {
-      color: '#172033',
+      color: '#161C2C',
       label: '播放表现',
       title: `${formatCompact(totalViews)} 次`,
       description: '抖音运营中心作品累计播放',
@@ -99,36 +99,36 @@ export default function DashboardBento({
   ];
 
   return (
-    <section aria-labelledby="home-showcase-title" className="relative isolate overflow-hidden rounded-[32px] border border-slate-700/70 bg-[#030b18] px-4 py-5 text-white shadow-[0_32px_90px_rgba(4,12,30,0.3)] sm:px-6 sm:py-7 lg:px-8 lg:py-8">
-      <ReactBitsBackgroundSlot page="home" className="-z-20 opacity-80" fallbackClassName="bg-[radial-gradient(circle_at_78%_8%,rgba(34,211,238,0.23),transparent_32%),radial-gradient(circle_at_90%_22%,rgba(126,34,206,0.22),transparent_35%),linear-gradient(145deg,#020817,#071325)]" />
+    <section aria-labelledby="home-showcase-title" className="studio-sheen relative isolate overflow-hidden rounded-panel border border-studio-border-soft bg-studio-app-bg px-4 py-5 text-white shadow-card sm:px-6 sm:py-7 lg:px-8 lg:py-8">
+      <ReactBitsBackgroundSlot page="home" className="-z-20 opacity-80" fallbackClassName="bg-[radial-gradient(circle_at_78%_8%,rgba(107,140,255,0.24),transparent_34%),radial-gradient(circle_at_90%_22%,rgba(167,139,250,0.18),transparent_36%),linear-gradient(145deg,#080B12,#0C1018_50%,#0A0F1C)]" />
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(100deg,rgba(2,8,23,0.98)_0%,rgba(2,8,23,0.9)_43%,rgba(2,8,23,0.38)_76%,rgba(2,8,23,0.72)_100%)]" />
       <div className="pointer-events-none absolute inset-0 -z-10 opacity-30 [background-image:linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] [background-size:48px_48px]" />
 
       <ReactBitsRevealSlot className="block">
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(480px,0.9fr)] lg:items-end">
           <div className="max-w-3xl">
-            <p className="text-sm font-semibold tracking-[0.08em] text-cyan-300">岚曜 XMT 新媒体协作平台</p>
-            <h1 id="home-showcase-title" className="mt-4 text-[clamp(2.45rem,5vw,4.9rem)] font-black leading-[1.08] tracking-[-0.05em] text-white"><ReactBitsTextSlot semantic="brand-title" className="text-inherit">内容生产驾驶舱</ReactBitsTextSlot></h1>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-studio-cyan">岚曜 XMT 新媒体协作平台</p>
+            <h1 id="home-showcase-title" className="mt-4 text-[clamp(2.35rem,5vw,4.6rem)] font-semibold leading-[1.08] tracking-[-0.04em] text-white"><ReactBitsTextSlot semantic="brand-title" className="text-inherit">内容生产驾驶舱</ReactBitsTextSlot></h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
               让选题、创作、发布与复盘在同一节奏里前进。
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
-              <ReactBitsButtonSlot type="button" variant="primary" onClick={() => onNavigate('/topics')} className="h-12 rounded-xl bg-cyan-400 text-slate-950">
+              <ReactBitsButtonSlot type="button" variant="primary" onClick={() => onNavigate('/topics')} className="h-11 rounded-button">
                 进入选题池 <ArrowRight className="h-4 w-4" />
               </ReactBitsButtonSlot>
-              <ReactBitsButtonSlot type="button" variant="secondary" onClick={() => onNavigate('/calendar')} className="h-12 rounded-xl border-white/20 bg-white/[0.06] text-white">
+              <ReactBitsButtonSlot type="button" variant="secondary" onClick={() => onNavigate('/calendar')} className="h-11 rounded-button border-white/15 bg-white/10 text-white hover:bg-white/15">
                 查看今日排期 <CalendarDays className="h-4 w-4" />
               </ReactBitsButtonSlot>
             </div>
           </div>
 
           <ReactBitsRevealSlot className="block">
-            <div className="grid grid-cols-2 overflow-hidden rounded-2xl border border-white/15 bg-slate-950/45 shadow-[0_18px_60px_rgba(2,8,23,0.35)] backdrop-blur-xl sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-2 overflow-hidden rounded-card border border-studio-border-soft bg-studio-surface-glass shadow-floating backdrop-blur-xl sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
               {heroMetrics.map((metric) => (
-                <button key={metric.label} type="button" disabled={!metric.path} onClick={() => metric.path && onNavigate(metric.path)} className="group min-w-0 border-b border-r border-white/10 p-4 text-left transition hover:bg-white/[0.08] disabled:cursor-default sm:border-b-0 lg:border-b xl:border-b-0">
-                  <metric.icon className="h-4 w-4 text-cyan-300 transition group-hover:scale-110" />
-                  <p className="mt-4 text-xs text-slate-400">{metric.label}</p>
-                  <p className="mt-1 text-2xl font-bold tabular-nums text-white">{metric.value}</p>
+                <button key={metric.label} type="button" disabled={!metric.path} onClick={() => metric.path && onNavigate(metric.path)} className="group min-w-0 border-b border-r border-studio-border-soft p-4 text-left transition hover:bg-white/[0.08] disabled:cursor-default sm:border-b-0 lg:border-b xl:border-b-0">
+                  <metric.icon className="h-4 w-4 text-studio-cyan transition group-hover:scale-110" />
+                  <p className="mt-4 text-xs text-slate-400/90">{metric.label}</p>
+                  <p className="xmt-data-number mt-1 text-2xl font-semibold tracking-tight text-white">{metric.value}</p>
                 </button>
               ))}
             </div>
@@ -151,10 +151,10 @@ export default function DashboardBento({
             .xmt-home-bento .card__description { margin-top: .7rem; color: rgba(203, 213, 225, 0.76); }
             .xmt-home-bento .card__progress { margin-top: 22px; }
             .xmt-home-bento .card__progress-track { height: 7px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, 0.2); }
-            .xmt-home-bento .card__progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22d3ee, #818cf8, #c084fc); box-shadow: 0 0 24px rgba(34, 211, 238, 0.55); }
+            .xmt-home-bento .card__progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--xmt-cyan), var(--xmt-primary), var(--xmt-violet)); box-shadow: 0 0 24px rgba(34, 211, 238, 0.55); }
             .xmt-home-bento .card:first-child { min-height: 360px; background-image: radial-gradient(circle at 15% 100%, rgba(34,211,238,.2), transparent 38%), radial-gradient(circle at 90% 15%, rgba(129,140,248,.22), transparent 42%); }
             .xmt-home-bento .card:not(:first-child):not(:nth-child(3)):not(:nth-child(4)):not(:nth-child(5)):not(:nth-child(6)) { min-height: clamp(190px, 16vw, 230px); }
-            .xmt-home-bento .card:first-child .card__title { font-size: clamp(4.75rem, 9vw, 7.8rem); line-height: 1.12; color: #67e8f9; text-shadow: 0 0 38px rgba(34,211,238,.28); }
+            .xmt-home-bento .card:first-child .card__title { font-size: clamp(4.75rem, 9vw, 7.8rem); line-height: 1.12; color: var(--xmt-cyan); text-shadow: 0 0 38px color-mix(in srgb, var(--xmt-cyan) 28%, transparent); }
             @media (min-width: 600px) {
               .xmt-home-bento .card-responsive { grid-template-columns: repeat(2, minmax(0, 1fr)); }
               .xmt-home-bento .card:first-child, .xmt-home-bento .card:nth-child(2), .xmt-home-bento .card:nth-child(7) { grid-column: span 2; }

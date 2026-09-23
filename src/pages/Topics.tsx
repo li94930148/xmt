@@ -36,6 +36,7 @@ import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { useSocket } from '../hooks/useSocket';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 import { useAppStore } from '../store';
+import { createListFetchController, listErrorKey } from '../utils/listFetchNotify';
 import { Topic } from '../types';
 import Pagination from '../components/Pagination';
 import XMTCard from '../design-system/components/XMTCard';
@@ -132,8 +133,8 @@ export default function Topics() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [total, setTotal] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [limit] = useState(15);
   const [sortField, setSortField] = useState<SortField>('created_at');
@@ -143,8 +144,10 @@ export default function Topics() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const navigate = useNavigate();
-  const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
   const [searchParams] = useSearchParams();
+  const statusFromUrl = searchParams.get('status') || '';
+  const [statusFilter, setStatusFilter] = useState(statusFromUrl);
   const debouncedSearch = useDebounce(searchTerm, 400);
   const socket = useSocket();
   const { hasPermission } = usePermission();
@@ -187,28 +190,49 @@ export default function Topics() {
 
   const allSelected = sortedTopics.length > 0 && sortedTopics.every((topic) => selected.has(topic.id));
 
-  const fetchTopics = useCallback(async () => {
+  const fetchControllerRef = useRef(createListFetchController());
+
+  const fetchTopics = useCallback(async (options?: { resetErrorNotify?: boolean }) => {
+    const controller = fetchControllerRef.current;
+    if (options?.resetErrorNotify) {
+      controller.resetErrorNotify();
+    }
+    const requestId = controller.begin();
     setLoading(true);
     try {
       const result = await getTopics({ status: statusFilter, search: debouncedSearch, page, limit });
+      if (!controller.isCurrent(requestId)) {
+        return;
+      }
       setTopics(result.data);
       setTotal(result.total);
+      setLoadError(null);
+      controller.markSettledSuccess();
     } catch (error) {
-      appStore.addNotification({
-        title: '获取选题列表失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
+      if (!controller.isCurrent(requestId)) {
+        return;
+      }
+      const message = error instanceof Error && error.message ? error.message : '获取选题列表失败';
+      setLoadError(message);
+      const key = listErrorKey('获取选题列表失败', message, 'error');
+      if (controller.shouldNotifyError(key)) {
+        addNotification({
+          title: '获取选题列表失败',
+          message,
+          type: 'error',
+        });
+      }
     } finally {
-      setLoading(false);
+      if (controller.isCurrent(requestId)) {
+        setLoading(false);
+      }
     }
-  }, [appStore, debouncedSearch, limit, page, statusFilter]);
+  }, [addNotification, debouncedSearch, limit, page, statusFilter]);
 
   useEffect(() => {
-    const status = searchParams.get('status') || '';
-    setStatusFilter(status);
+    setStatusFilter(statusFromUrl);
     setPage(1);
-  }, [searchParams]);
+  }, [statusFromUrl]);
 
   useEffect(() => {
     void fetchTopics();
@@ -294,7 +318,7 @@ export default function Topics() {
   const handleDelete = async (id: number) => {
     try {
       await deleteTopic(id);
-      appStore.addNotification({
+      addNotification({
         title: '删除成功',
         message: '选题已删除',
         type: 'success',
@@ -307,7 +331,7 @@ export default function Topics() {
         return next;
       });
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '删除失败',
         message: (error as Error).message,
         type: 'error',
@@ -340,7 +364,7 @@ export default function Topics() {
         success++;
       } catch {}
     }
-    appStore.addNotification({
+    addNotification({
       title: '批量删除完成',
       message: `成功 ${success}/${selected.size}`,
       type: 'success',
@@ -357,7 +381,7 @@ export default function Topics() {
         success++;
       } catch {}
     }
-    appStore.addNotification({
+    addNotification({
       title: '批量审核完成',
       message: `成功 ${success}/${selected.size}`,
       type: 'success',
@@ -497,6 +521,20 @@ export default function Topics() {
                     </div>
                   </td>
                 </tr>
+              ) : loadError ? (
+                <tr>
+                  <td colSpan={10} className="p-6">
+                    <EmptyState
+                      icon={AlertTriangle}
+                      title="获取选题列表失败"
+                      description={loadError}
+                      actionLabel="重试"
+                      onAction={() => {
+                        void fetchTopics({ resetErrorNotify: true });
+                      }}
+                    />
+                  </td>
+                </tr>
               ) : sortedTopics.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="p-6">
@@ -504,6 +542,16 @@ export default function Topics() {
                       icon={FileText}
                       title="暂无选题"
                       description={searchTerm || statusFilter ? '没有匹配当前筛选条件的选题。' : '提报选题后会在这里进入生产链路。'}
+                      actionLabel={searchTerm || statusFilter ? '清除筛选' : undefined}
+                      onAction={
+                        searchTerm || statusFilter
+                          ? () => {
+                              setSearchTerm('');
+                              setStatusFilter('');
+                              setPage(1);
+                            }
+                          : undefined
+                      }
                     />
                   </td>
                 </tr>

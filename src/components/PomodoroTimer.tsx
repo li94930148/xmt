@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useAppStore } from '../store';
 import { Play, Pause, RotateCcw, Timer, CheckCircle, Link } from 'lucide-react';
+import { cancelPomodoro, completePomodoro, getPomodoroStats, startPomodoro } from '../api/pomodoro';
 
 interface PomodoroTimerProps {
   topicId?: number;
@@ -10,17 +11,6 @@ interface PomodoroTimerProps {
 }
 
 const DURATION = 25 * 60; // 25 minutes in seconds
-
-// Mock API — replace with real endpoints when backend is ready
-async function startPomodoro(topicId?: number) {
-  return { session_id: Date.now() };
-}
-async function completePomodoro(sessionId: number) {
-  return { message: 'ok' };
-}
-async function getPomodoroStats(): Promise<{ today_count: number; total_count: number }> {
-  return { today_count: 0, total_count: 0 };
-}
 
 export default function PomodoroTimer({ topicId, topicTitle, compact = false }: PomodoroTimerProps) {
   const styles = useThemeStyles();
@@ -33,7 +23,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
 
   // Fetch stats
   useEffect(() => {
-    getPomodoroStats().then((s) => setTodayCount(s.today_count)).catch(() => {});
+    getPomodoroStats().then((s) => setTodayCount(s.today)).catch(() => {});
   }, []);
 
   // Timer logic
@@ -53,22 +43,25 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
     if (timeLeft === 0 && isRunning) {
       setIsRunning(false);
       if (sessionId) {
-        completePomodoro(sessionId).catch(() => {});
-      }
-      setTodayCount((c) => c + 1);
-      appStore.addNotification({
-        title: '🍅 番茄钟完成！',
-        message: topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成，休息一下吧！',
-        type: 'success',
-      });
-      // Browser notification
-      if (Notification.permission === 'granted') {
-        new Notification('🍅 番茄钟完成！', {
-          body: topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成',
-        });
+        void completePomodoro(sessionId)
+          .then(() => {
+            setSessionId(null);
+            void getPomodoroStats().then((stats) => setTodayCount(stats.today)).catch(() => {});
+            appStore.addNotification({
+              title: '🍅 番茄钟完成！',
+              message: topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成，休息一下吧！',
+              type: 'success',
+            });
+            if (Notification.permission === 'granted') {
+              new Notification('🍅 番茄钟完成！', {
+                body: topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成',
+              });
+            }
+          })
+          .catch(() => appStore.addNotification({ title: '番茄钟保存失败', message: '本次专注未计入统计，请刷新后重试。', type: 'error' }));
       }
     }
-  }, [timeLeft, isRunning]);
+  }, [appStore, isRunning, sessionId, timeLeft, topicTitle]);
 
   const handleStart = useCallback(async () => {
     if (isRunning) {
@@ -80,19 +73,31 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
       Notification.requestPermission();
     }
     try {
-      const res = await startPomodoro(topicId);
-      setSessionId(res.session_id);
+      if (sessionId) {
+        setIsRunning(true);
+        return;
+      }
+      const res = await startPomodoro({ duration: 25, topic_id: topicId });
+      setSessionId(res.sessionId);
       setIsRunning(true);
     } catch {
-      setIsRunning(true); // Start anyway
+      appStore.addNotification({ title: '番茄钟启动失败', message: '请稍后重试。', type: 'error' });
     }
-  }, [isRunning, topicId]);
+  }, [appStore, isRunning, sessionId, topicId]);
 
-  const handleReset = useCallback(() => {
+  const handleReset = useCallback(async () => {
+    if (sessionId) {
+      try {
+        await cancelPomodoro(sessionId);
+      } catch {
+        appStore.addNotification({ title: '番茄钟重置失败', message: '请刷新后重试。', type: 'error' });
+        return;
+      }
+    }
     setIsRunning(false);
     setTimeLeft(DURATION);
     setSessionId(null);
-  }, []);
+  }, [appStore, sessionId]);
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;

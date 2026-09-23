@@ -63,8 +63,8 @@ export async function deleteProduction(id: number): Promise<{ message: string }>
   return response.json();
 }
 
-export async function getProductionHistory(productionId: number): Promise<ProductionHistory[]> {
-  const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/history`, {
+export async function getProductionHistory(productionId: number, page = 1, limit = 20, includeContent = true): Promise<{ data: ProductionHistory[]; total: number; page: number; limit: number }> {
+  const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/history?page=${page}&limit=${limit}&include_content=${includeContent ? '1' : '0'}`, {
     headers: getAuthHeader()
   });
   if (!response.ok) throw new Error('获取版本历史失败');

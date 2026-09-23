@@ -92,7 +92,7 @@ const storedCover = await queryOne<{ size_bytes: number; bytes: Uint8Array }>(`S
 assert.equal(Number(storedCover?.size_bytes), managedCover.byteLength);
 assert.deepEqual(Buffer.from(storedCover?.bytes || []), managedCover, 'validated cover bytes must persist idempotently');
 
-await sync({ ...currentPayload, snapshot_id: 'snapshot-invalid-number', contents: [{ ...works[0], aweme_id: 739000000000000001 }] });
+await sync({ ...currentPayload, snapshot_id: 'snapshot-invalid-number', contents: [{ ...works[0], aweme_id: Number('739000000000000001') }] });
 const invalidLog = await queryOne<{ summary_json: string }>('SELECT summary_json FROM douyin_sync_logs WHERE account_id=? AND snapshot_id=?', [douyinAccount.id, 'snapshot-invalid-number']);
 assert.equal(JSON.parse(String(invalidLog?.summary_json)).rejected_reasons.invalid_id_type, 1);
 

@@ -164,7 +164,7 @@ export default function WorkflowDesigner() {
         const data = await response.json();
         appStore.addNotification({ title: '创建失败', message: data.message, type: 'error' });
       }
-    } catch (error) {
+    } catch {
       appStore.addNotification({ title: '创建失败', message: '网络错误', type: 'error' });
     }
   };
@@ -194,7 +194,7 @@ export default function WorkflowDesigner() {
         const data = await response.json();
         appStore.addNotification({ title: '更新失败', message: data.message, type: 'error' });
       }
-    } catch (error) {
+    } catch {
       appStore.addNotification({ title: '更新失败', message: '网络错误', type: 'error' });
     }
   };
@@ -213,7 +213,7 @@ export default function WorkflowDesigner() {
         const data = await response.json();
         appStore.addNotification({ title: '删除失败', message: data.message, type: 'error' });
       }
-    } catch (error) {
+    } catch {
       appStore.addNotification({ title: '删除失败', message: '网络错误', type: 'error' });
     }
   };

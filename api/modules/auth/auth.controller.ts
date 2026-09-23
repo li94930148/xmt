@@ -93,8 +93,8 @@ export class AuthController {
     }
   };
 
-  logout = async (_req: Request, res: Response) => {
-    await this.service.logout();
+  logout = async (req: Request, res: Response) => {
+    await this.service.logout(req.user?.id);
     res.json({ message: '登出成功' });
   };
 }

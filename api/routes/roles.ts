@@ -50,8 +50,8 @@ router.get('/', authenticate, requirePermission('system:role'), async (_req, res
     }
 
     res.json(rolesWithPermissions);
-  } catch (error) {
-    res.status(500).json({ message: '获取角色列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取角色列表失败' });
   }
 });
 
@@ -64,8 +64,8 @@ router.get('/user/:userId', authenticate, requirePermission('system:role'), asyn
     `, [req.params.userId]);
 
     res.json(roles);
-  } catch (error) {
-    res.status(500).json({ message: '获取用户角色失败', error });
+  } catch {
+    res.status(500).json({ message: '获取用户角色失败' });
   }
 });
 
@@ -103,8 +103,8 @@ router.post('/user/:userId', authenticate, requirePermission('system:role'), asy
 
     clearPermissionCache(Number(userId));
     res.json({ message: '用户角色分配成功' });
-  } catch (error) {
-    res.status(500).json({ message: '分配用户角色失败', error });
+  } catch {
+    res.status(500).json({ message: '分配用户角色失败' });
   }
 });
 
@@ -120,8 +120,8 @@ router.get('/:id', authenticate, requirePermission('system:role'), async (req, r
     `, [req.params.id]);
 
     res.json({ ...role, permissions });
-  } catch (error) {
-    res.status(500).json({ message: '获取角色失败', error });
+  } catch {
+    res.status(500).json({ message: '获取角色失败' });
   }
 });
 
@@ -156,8 +156,8 @@ router.post('/', authenticate, requirePermission('system:role'), async (req, res
 
     clearPermissionCache();
     res.json({ message: '角色创建成功', id: roleId });
-  } catch (error) {
-    res.status(500).json({ message: '创建角色失败', error });
+  } catch {
+    res.status(500).json({ message: '创建角色失败' });
   }
 });
 
@@ -191,8 +191,8 @@ router.put('/:id', authenticate, requirePermission('system:role'), async (req, r
 
     clearPermissionCache();
     res.json({ message: '角色更新成功' });
-  } catch (error) {
-    res.status(500).json({ message: '更新角色失败', error });
+  } catch {
+    res.status(500).json({ message: '更新角色失败' });
   }
 });
 
@@ -217,8 +217,8 @@ router.delete('/:id', authenticate, requirePermission('system:role'), async (req
 
     clearPermissionCache();
     res.json({ message: '角色删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除角色失败', error });
+  } catch {
+    res.status(500).json({ message: '删除角色失败' });
   }
 });
 

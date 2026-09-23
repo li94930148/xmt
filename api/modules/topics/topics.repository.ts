@@ -68,7 +68,6 @@ export interface TopicRepository {
   findParticipantIds(creatorId: unknown, assigneeId: unknown): Promise<number[]>;
   withTransaction<T>(work: (tx: TopicTransaction) => Promise<T>): Promise<T>;
   updateTopic(id: number | string, patch: TopicPersistencePatch): Promise<void>;
-  deleteLegacyRelations(topicId: number | string): Promise<void>;
   deleteTopic(topicId: number | string): Promise<void>;
 }
 

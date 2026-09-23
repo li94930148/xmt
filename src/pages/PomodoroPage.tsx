@@ -5,7 +5,6 @@ import { ChevronLeft, Trophy, Timer } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getPomodoroRanking } from '../api';
 import type { PomodoroRanking } from '../types';
-import { formatBeijingDate } from '../lib/utils';
 
 export default function PomodoroPage() {
   const styles = useThemeStyles();

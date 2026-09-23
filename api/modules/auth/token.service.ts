@@ -39,7 +39,7 @@ export interface TokenService {
 
 export class LegacyJwtTokenService implements TokenService {
   sign(payload: JwtPayload): string {
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: EXPIRES_IN });
+    return jwt.sign({ ...payload, authVersion: payload.authVersion ?? 1 }, JWT_SECRET, { expiresIn: EXPIRES_IN });
   }
 
   verify(token: string): JwtPayload | null {

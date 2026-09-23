@@ -10,7 +10,8 @@ try {
   if (!backup || !path.isAbsolute(backup) || !fs.existsSync(backup)) throw new Error('必须提供存在的绝对 --backup 路径');
   checks.file = { status: 'PASS' }; tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-restore-drill-'));
   const copy = path.join(tempDir, 'restore.db'); fs.copyFileSync(backup, copy);
-  execFileSync('sqlite3', [copy, 'PRAGMA quick_check;'], { encoding: 'utf8' }).trim() === 'ok' ? checks.quick_check = { status: 'PASS' } : checks.quick_check = { status: 'FAIL', reason: 'quick_check 未通过' };
+  if (execFileSync('sqlite3', [copy, 'PRAGMA quick_check;'], { encoding: 'utf8' }).trim() === 'ok') checks.quick_check = { status: 'PASS' };
+  else checks.quick_check = { status: 'FAIL', reason: 'quick_check 未通过' };
   const tables = execFileSync('sqlite3', [copy, "SELECT name FROM sqlite_master WHERE type='table'"], { encoding: 'utf8' });
   const required = ['users', 'roles', 'permissions', 'database_migrations', 'topics', 'production'];
   const missing = required.filter((name) => !tables.split('\n').includes(name));

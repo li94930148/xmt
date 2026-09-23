@@ -418,6 +418,8 @@ async function run() {
         await selectInterfaceFontSize(page, originalFontSize);
         await saveInterfaceFontSize(page, originalFontSize);
       } catch (restoreError) {
+        // Preserve the original test failure; if the test itself passed, surface restoration failure.
+        // eslint-disable-next-line no-unsafe-finally
         if (!fontSizeTestError) throw restoreError;
         console.error(`[reactbits-theme] font-size restoration failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`);
       }

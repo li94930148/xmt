@@ -16,8 +16,8 @@ router.get('/', authenticate, async (req, res) => {
     `);
 
     res.json({ data: announcements });
-  } catch (error) {
-    res.status(500).json({ message: '获取公告列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取公告列表失败' });
   }
 });
 
@@ -37,8 +37,8 @@ router.post('/', authenticate, requirePermission('system:announcement'), async (
     );
 
     res.json({ message: '公告创建成功', id: announcementId });
-  } catch (error) {
-    res.status(500).json({ message: '创建公告失败', error });
+  } catch {
+    res.status(500).json({ message: '创建公告失败' });
   }
 });
 
@@ -70,8 +70,8 @@ router.put('/:id', authenticate, requirePermission('system:announcement'), async
     await execute(`UPDATE announcements SET ${updates.join(', ')} WHERE id = ?`, params);
 
     res.json({ message: '公告更新成功' });
-  } catch (error) {
-    res.status(500).json({ message: '更新公告失败', error });
+  } catch {
+    res.status(500).json({ message: '更新公告失败' });
   }
 });
 
@@ -88,8 +88,8 @@ router.delete('/:id', authenticate, requirePermission('system:announcement'), as
     await execute(`DELETE FROM announcements WHERE id = ?`, [id]);
 
     res.json({ message: '公告删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除公告失败', error });
+  } catch {
+    res.status(500).json({ message: '删除公告失败' });
   }
 });
 

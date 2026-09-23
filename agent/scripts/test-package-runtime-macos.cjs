@@ -76,12 +76,12 @@ async function main() {
     const workerHealth = spawn(worker, [], { cwd: path.dirname(worker), env: { PATH: '/usr/bin:/bin', XMT_COLLECTOR_PYTHON: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
     let output = '';
     workerHealth.stdout.setEncoding('utf8'); workerHealth.stdout.on('data', (chunk) => { output += chunk; });
-    workerHealth.stdin.write(`${JSON.stringify({ id: 'health', method: 'health', params: {} })}\n`);
+    workerHealth.stdin.write(`${JSON.stringify({ id: 'health', method: 'health', params: {}, worker_protocol_version: 1 })}\n`);
     const healthDeadline = Date.now() + 20_000;
     while (Date.now() < healthDeadline && !output.includes('"id":"health"')) await sleep(100);
     workerHealth.kill();
     const health = output.split(/\r?\n/).filter(Boolean).map((line) => { try { return JSON.parse(line); } catch { return null; } }).find((value) => value?.id === 'health');
-    assert(health?.event === 'completed' && health.data?.ready === true && health.data?.scrapling_import === true, 'PACKAGED_WORKER_HEALTH_FAILED');
+    assert(health?.event === 'completed' && health.worker_protocol_version === 1 && health.data?.ready === true && health.data?.scrapling_import === true, 'PACKAGED_WORKER_HEALTH_FAILED');
     let appDiagnostics = ''; const appProcess = spawn(executable, ['--no-sandbox'], { cwd: path.dirname(executable), env: { ...process.env, PATH: '/usr/bin:/bin', HOME: relocation, NODE_ENV: 'test', XMT_AGENT_TEST_DATA_ROOT: testData, XMT_AGENT_RUNTIME_PROBE_FILE: probe, XMT_AGENT_PACKAGE_CONTRACT_BOOTSTRAP: JSON.stringify({ serverUrl: loopback.serverUrl, token: 'package-contract-loopback-token' }), ELECTRON_RENDERER_URL: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
     appProcess.stdout.on('data', (chunk) => { appDiagnostics += String(chunk); }); appProcess.stderr.on('data', (chunk) => { appDiagnostics += String(chunk); });
     try {

@@ -13,8 +13,7 @@ import {
   touchRuntimeDocument,
 } from '../yjs/documentStore.js';
 import { logCollaborationEvent } from '../analytics/collaborationLogger.js';
-import { canEdit, getDocLock, isReadOnly, releaseLock, setDocLocked } from '../control/collaborationGuard.js';
-import { authorizeSocketRoomJoin } from '../../modules/auth/socket/socket-auth.service.js';
+import { getDocLock, isReadOnly, releaseLock, setDocLocked } from '../control/collaborationGuard.js';
 import { collaborationAccessPolicy } from '../access/CollaborationAccessPolicy.js';
 import type { User } from '../../types/index.js';
 
@@ -74,8 +73,10 @@ export async function joinRoom(io: Server, socket: Socket, payload: Collaboratio
   const auth = socket.data.auth as { userId?: number } | undefined;
   const authenticated = socketUser(socket);
   const authenticatedUserId = Number(auth?.userId ?? authenticated?.id ?? 0);
-  if (!authorizeSocketRoomJoin({ userId: authenticatedUserId, roomId })) return;
-  if (!authenticated || authenticated.id !== authenticatedUserId || !await collaborationAccessPolicy.canViewDocument(authenticated, roomId)) return;
+  if (!authenticated || authenticatedUserId <= 0 || authenticated.id !== authenticatedUserId || !await collaborationAccessPolicy.canViewDocument(authenticated, roomId)) {
+    socket.emit(COLLABORATION_EVENTS.CONFLICT_DETECTED, { roomId, reason: 'Room access denied', timestamp: Date.now() });
+    return;
+  }
 
   const user: RuntimeUser = {
     ...payload.user,
@@ -104,7 +105,7 @@ export async function joinRoom(io: Server, socket: Socket, payload: Collaboratio
     roomId,
     update: getRuntimeDocumentState(roomId),
   });
-  const lock = getDocLock(roomId);
+  const lock = await getDocLock(roomId);
   if (lock) {
     socket.emit(COLLABORATION_EVENTS.DOC_LOCKED, lock);
   }
@@ -155,13 +156,22 @@ export async function handleDocumentUpdate(io: Server, socket: Socket, payload: 
   }
   const authenticated = socketUser(socket);
   const userId = String(authenticated?.id ?? 'unknown');
+  const joined = authenticated ? hasJoinedRoom(socket, roomId) : false;
+  const canEdit = authenticated && joined ? await collaborationAccessPolicy.canEditDocument(authenticated, roomId) : false;
+  const lock = authenticated && joined && canEdit ? await getDocLock(roomId) : null;
 
-  if (!authenticated || !hasJoinedRoom(socket, roomId) || !await collaborationAccessPolicy.canEditDocument(authenticated, roomId) || !canEdit(userId, roomId)) {
-    const lock = getDocLock(roomId);
+  if (!authenticated || !joined || !canEdit || lock) {
+    const reason = !authenticated
+      ? 'Authentication required'
+      : !joined
+        ? 'Join the room before editing'
+        : !canEdit
+          ? 'Document edit permission denied'
+          : lock?.reason || 'Document is read-only';
     const conflictPayload = {
       roomId,
       userId,
-      reason: lock?.reason || 'Document is read-only',
+      reason,
       timestamp: Date.now(),
     };
     logCollaborationEvent({
@@ -190,11 +200,11 @@ export function handleAwarenessUpdate(socket: Socket, payload: CollaborationUpda
   socket.to(roomId).emit(COLLABORATION_EVENTS.AWARENESS_UPDATE, payload);
 }
 
-export function handleTyping(io: Server, socket: Socket, payload: CollaborationTypingPayload) {
+export async function handleTyping(io: Server, socket: Socket, payload: CollaborationTypingPayload) {
   const roomId = String(payload?.roomId || '');
   const user = rooms.get(roomId)?.get(socket.id);
   if (!roomId || !user || !hasJoinedRoom(socket, roomId)) return;
-  if (isReadOnly(roomId)) return;
+  if (await isReadOnly(roomId)) return;
 
   user.typing = Boolean(payload.typing);
   user.lastSeen = Date.now();
@@ -210,14 +220,14 @@ export function handleTyping(io: Server, socket: Socket, payload: CollaborationT
   broadcastUserList(io, roomId);
 }
 
-export function lockRoom(io: Server, roomId: string, reason?: string, userId = 'system') {
-  const lock = setDocLocked(roomId, reason, userId);
+export async function lockRoom(io: Server, roomId: string, reason?: string, userId = 'system') {
+  const lock = await setDocLocked(roomId, reason, userId);
   io.to(roomId).emit(COLLABORATION_EVENTS.DOC_LOCKED, lock);
   return lock;
 }
 
-export function unlockRoom(io: Server, roomId: string, userId = 'system') {
-  const released = releaseLock(roomId, userId);
+export async function unlockRoom(io: Server, roomId: string, userId = 'system') {
+  const released = await releaseLock(roomId, userId);
   if (released) {
     io.to(roomId).emit(COLLABORATION_EVENTS.DOC_UNLOCKED, { roomId, timestamp: Date.now() });
   }

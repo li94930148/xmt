@@ -50,6 +50,13 @@ async function repositoryTests() {
 
   await repository.updateTopic(topicId, { title: 'Repository 更新' });
   assert.equal((await repository.findById(topicId))?.title, 'Repository 更新');
+  await execute('INSERT INTO topic_history (topic_id, action, comment, operator_id) VALUES (?, ?, ?, ?)', [topicId, 'created', '保留事务历史', testUserId]);
+  await execute(`CREATE TRIGGER block_topic_delete BEFORE DELETE ON topics BEGIN SELECT RAISE(ABORT, 'blocked'); END`);
+  await assert.rejects(() => repository.deleteTopic(topicId));
+  assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM topic_history WHERE topic_id = ?', [topicId]))?.count, 1);
+  await execute('DROP TRIGGER block_topic_delete');
+  await repository.deleteTopic(topicId);
+  assert.equal(await repository.findById(topicId), null);
 }
 type FakeTopic = {
   id: number;
@@ -84,7 +91,6 @@ function fakeRepository(topic: FakeTopic | null = null) {
       createInitialPublishing: async () => undefined,
     }),
     updateTopic: async () => undefined,
-    deleteLegacyRelations: async () => undefined,
     deleteTopic: async () => undefined,
   };
 }

@@ -29,7 +29,7 @@ export class CollaborationAccessPolicy {
   }
 
   private hasEditScope(user: User, scope: { creator_id: number | null; assignee_id: number | null }) {
-    return Number(scope.creator_id) === user.id || Number(scope.assignee_id) === user.id;
+    return user.role === 'admin' || user.role === 'director' || Number(scope.creator_id) === user.id || Number(scope.assignee_id) === user.id;
   }
 
   async canViewDocument(user: User | undefined, roomId: unknown): Promise<boolean> {
@@ -42,7 +42,6 @@ export class CollaborationAccessPolicy {
     if (!user || user.enabled === false) return false;
     const resolved = await this.scope(roomId);
     if (!resolved) return false;
-    if (user.role === 'admin' || user.role === 'director' || user.role === 'editor' || user.role === 'copywriter' || user.role === 'post_production' || user.role === 'camera') return true;
     return this.hasEditScope(user, resolved.scope);
   }
 

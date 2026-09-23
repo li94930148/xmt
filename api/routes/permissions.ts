@@ -19,8 +19,8 @@ router.get('/', authenticate, requirePermission('system:permission'), async (req
     }
 
     res.json({ permissions, grouped });
-  } catch (error) {
-    res.status(500).json({ message: '获取权限列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取权限列表失败' });
   }
 });
 
@@ -38,8 +38,8 @@ router.get('/my', authenticate, async (req, res) => {
     `, [userId]);
 
     res.json(permissions.map(p => p.code));
-  } catch (error) {
-    res.status(500).json({ message: '获取用户权限失败', error });
+  } catch {
+    res.status(500).json({ message: '获取用户权限失败' });
   }
 });
 
@@ -64,8 +64,8 @@ router.post('/', authenticate, requirePermission('system:permission'), async (re
 
     clearPermissionCache();
     res.json({ message: '权限创建成功', id: permId });
-  } catch (error) {
-    res.status(500).json({ message: '创建权限失败', error });
+  } catch {
+    res.status(500).json({ message: '创建权限失败' });
   }
 });
 
@@ -83,8 +83,8 @@ router.delete('/:id', authenticate, requirePermission('system:permission'), asyn
     await execute(`DELETE FROM permissions WHERE id = ?`, [permId]);
     clearPermissionCache();
     res.json({ message: '权限删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除权限失败', error });
+  } catch {
+    res.status(500).json({ message: '删除权限失败' });
   }
 });
 

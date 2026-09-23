@@ -6,9 +6,16 @@ import { sendSafeServerError } from '../utils/response.js';
 const router = express.Router();
 router.use(authenticate);
 
+class InvalidSummaryQueryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidSummaryQueryError';
+  }
+}
+
 function numberQuery(req: Request, key: string, fallback: number) {
   const value = Number(req.query[key] || fallback);
-  if (!Number.isInteger(value) || value <= 0) throw new Error(`参数 ${key} 不合法`);
+  if (!Number.isInteger(value) || value <= 0) throw new InvalidSummaryQueryError(`参数 ${key} 不合法`);
   return value;
 }
 
@@ -17,9 +24,8 @@ function isAdmin(user: NonNullable<Request['user']>) {
 }
 
 function handle(error: unknown, res: Response) {
-  const message = error instanceof Error ? error.message : '';
-  if (/^(参数 (year|month) 不合法|month 不合法)$/.test(message)) {
-    return res.status(400).json({ success: false, message });
+  if (error instanceof InvalidSummaryQueryError) {
+    return res.status(400).json({ success: false, message: error.message });
   }
   return sendSafeServerError(res, '总结请求失败，请稍后重试。', 'report-summaries', error);
 }
@@ -62,7 +68,7 @@ async function getRecord(req: Request, res: Response, kind: 'monthly' | 'yearly'
   try {
     const year = numberQuery(req, 'year', new Date().getFullYear());
     const month = kind === 'monthly' ? numberQuery(req, 'month', new Date().getMonth() + 1) : null;
-    if (month && month > 12) throw new Error('month 不合法');
+    if (month && month > 12) throw new InvalidSummaryQueryError('month 不合法');
     const table = kind === 'monthly' ? 'monthly_summaries' : 'yearly_summaries';
     const where = kind === 'monthly' ? 'user_id = ? AND year = ? AND month = ?' : 'user_id = ? AND year = ?';
     const args = kind === 'monthly' ? [req.user!.id, year, month] : [req.user!.id, year];
@@ -80,7 +86,7 @@ async function saveRecord(req: Request, res: Response, kind: 'monthly' | 'yearly
   try {
     const year = numberQuery(req, 'year', new Date().getFullYear());
     const month = kind === 'monthly' ? numberQuery(req, 'month', new Date().getMonth() + 1) : null;
-    if (month && month > 12) throw new Error('month 不合法');
+    if (month && month > 12) throw new InvalidSummaryQueryError('month 不合法');
     const body = req.body || {};
     const table = kind === 'monthly' ? 'monthly_summaries' : 'yearly_summaries';
     if (kind === 'monthly') {

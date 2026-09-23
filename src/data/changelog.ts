@@ -13,13 +13,15 @@ export const changelog: ChangelogEntry[] = [
   {
     version: '3.1.0',
     date: '2026-09-22',
-    title: 'Studio Atelier 全站视觉与交互升级',
-    impactScope: ['全局界面', '登录', '首页驾驶舱', '命令面板', '编辑器'],
+    title: 'Studio Atelier 与项目完整性升级',
+    impactScope: ['全局界面', '登录安全', '资料中心', '协作编辑', '番茄钟', '抖音运营中心'],
     changes: [
       { type: 'feature', description: '引入 Studio Atelier 设计系统：统一深空墨蓝色板、发丝线玻璃材质与镜面高光卡片。' },
       { type: 'improvement', description: '按钮、输入框、状态标签、空态/骨架/错误态全面 token 化，深浅主题对比度提升。' },
       { type: 'improvement', description: '命令面板、模态与更新弹窗共用统一浮层入场编排，交互节奏更一致。' },
       { type: 'improvement', description: '登录页与首页驾驶舱按新视觉精修，编辑器工具栏 chrome 对齐系统材质。' },
+      { type: 'security', description: '需要修改密码的账号先完成改密才能使用业务接口；资料写入和协作编辑按授权范围检查。' },
+      { type: 'fix', description: '番茄钟计时和统计接入服务端，旧抖音技术页转到运营中心，失效的社媒复盘入口停止开放。' },
     ],
   },
   { version: '3.0.5', date: '2026-09-22', title: '抖音周期指标可用性修复', impactScope: ['抖音运营中心'], changes: [{ type: 'fix', description: '周期卡片展示官方播放、互动值及粉丝基线缺失原因，官方作品导出不再伪造当日粉丝快照。' }] },

@@ -77,8 +77,7 @@ try {
     args: ['existing-user', 'existing-password-hash'],
   });
 
-  assert.equal(databaseMigrations.at(-1)?.version, '005');
-  assert.equal(databaseMigrations.at(-1)?.name, 'auth_session_foundation');
+  assert.equal(databaseMigrations.find((migration) => migration.version === '005')?.name, 'auth_session_foundation');
 
   await applyMigration();
   await applyMigration();

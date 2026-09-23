@@ -8,7 +8,6 @@
  * 修改内容：仅添加本注释；依赖使用 @react-three/fiber@8.17.14 以保持 React 18 兼容；未修改官方视觉行为。
  */
 
-/* eslint-disable react/no-unknown-property */
 import React, { forwardRef, useMemo, useRef, useLayoutEffect, useEffect } from 'react';
 import { Canvas, useFrame, useThree, RootState } from '@react-three/fiber';
 import { Color, Mesh, ShaderMaterial } from 'three';

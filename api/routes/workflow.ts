@@ -250,8 +250,8 @@ router.get('/shadow-logs', authenticate, requirePermission('system:template'), a
     sql += ` ORDER BY created_at DESC LIMIT 100`;
 
     res.json(await queryAll(sql, params));
-  } catch (error) {
-    res.status(500).json({ message: '获取 Workflow Shadow 日志失败', error });
+  } catch {
+    res.status(500).json({ message: '获取 Workflow Shadow 日志失败' });
   }
 });
 
@@ -338,8 +338,8 @@ router.get('/shadow-analytics', authenticate, requirePermission('system:template
         abnormal_pattern_count: Number(row.abnormal_pattern_count || 0),
       })),
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取 Workflow Shadow 分析失败', error });
+  } catch {
+    res.status(500).json({ message: '获取 Workflow Shadow 分析失败' });
   }
 });
 
@@ -381,15 +381,15 @@ router.get('/shadow-decisions', authenticate, requirePermission('system:template
         };
       }),
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取 Workflow Shadow 决策建议失败', error });
+  } catch {
+    res.status(500).json({ message: '获取 Workflow Shadow 决策建议失败' });
   }
 });
 
 router.get('/production', authenticate, async (req, res) => {
   try {
     const { topic_id } = req.query;
-    let query = `SELECT p.*, p.content as contentMarkdown, p.content as contentJson, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p 
+    let query = `SELECT p.*, COALESCE(p.content_markdown, p.content) as contentMarkdown, COALESCE(p.content_json, p.content) as contentJson, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p
                  LEFT JOIN users u ON p.operator_id = u.id 
                  LEFT JOIN topics t ON p.topic_id = t.id WHERE 1=1`;
     const params: any[] = [];
@@ -402,12 +402,12 @@ router.get('/production', authenticate, async (req, res) => {
     query += ` ORDER BY p.created_at DESC`;
     const productions = await queryAll(query, params);
     res.json(productions);
-  } catch (error) {
-    res.status(500).json({ message: '获取创作列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取创作列表失败' });
   }
 });
 
-router.post('/production', authenticate, async (req, res) => {
+router.post('/production', authenticate, requirePermission('production:update'), async (req, res) => {
   try {
     const { topic_id, version, content, status = 'draft' } = req.body;
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
@@ -420,8 +420,8 @@ router.post('/production', authenticate, async (req, res) => {
     if (status === 'approved') await execute(`UPDATE topics SET status = 'production' WHERE id = ?`, [topic_id]);
     broadcastToRoom('production', 'production:created', { id: productionId, topic_id: req.body.topic_id });
     res.json({ message: '创作记录添加成功', productionId });
-  } catch (error) {
-    res.status(500).json({ message: '添加创作记录失败', error });
+  } catch {
+    res.status(500).json({ message: '添加创作记录失败' });
   }
 });
 
@@ -432,12 +432,12 @@ router.get('/production/:id', authenticate, async (req, res) => {
     const topic = await getTopicScopeByProductionId(req.params.id);
     if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该创作记录' });
     res.json(production);
-  } catch (error) {
-    res.status(500).json({ message: '获取创作详情失败', error });
+  } catch {
+    res.status(500).json({ message: '获取创作详情失败' });
   }
 });
 
-router.put('/production/:id', authenticate, async (req, res) => {
+router.put('/production/:id', authenticate, requirePermission('production:update'), async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -560,8 +560,8 @@ router.put('/production/:id', authenticate, async (req, res) => {
       getSocketIO()?.to(getProductionVersionRoomId(id, currentVersion)).emit(COLLABORATION_EVENTS.VERSION_SUPERSEDED, payload);
     }
     res.json({ message: '创作记录更新成功', version: newVersion });
-  } catch (error) {
-    res.status(500).json({ message: '更新创作记录失败', error });
+  } catch {
+    res.status(500).json({ message: '更新创作记录失败' });
   }
 });
 
@@ -571,8 +571,8 @@ router.delete('/production/:id', authenticate, requirePermission('production:del
     await execute(`DELETE FROM production_history WHERE production_id = ?`, [req.params.id]);
     broadcastToRoom('production', 'production:deleted', { id: Number(req.params.id) });
     res.json({ message: '创作记录删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除创作记录失败', error });
+  } catch {
+    res.status(500).json({ message: '删除创作记录失败' });
   }
 });
 
@@ -584,10 +584,29 @@ router.get('/production/:id/history', authenticate, async (req, res) => {
       `SELECT version FROM production WHERE id = ?`,
       [req.params.id],
     );
-    const history = await queryAll(`SELECT ph.*, u.name as operator_name FROM production_history ph LEFT JOIN users u ON ph.operator_id = u.id WHERE ph.production_id = ? ORDER BY ph.created_at DESC`, [req.params.id]);
-    res.json(getLatestHistoryRowsByMajor(history, production?.version || undefined));
-  } catch (error) {
-    res.status(500).json({ message: '获取版本历史失败', error });
+    const page = Number(req.query.page ?? 1);
+    const limit = Number(req.query.limit ?? 20);
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) return res.status(400).json({ message: '分页参数无效' });
+    // Walk small metadata batches to identify the latest minor in each major.
+    // Large historical content is fetched only for the requested page.
+    const metadata: Array<VersionRow & { id: number }> = [];
+    let offset = 0;
+    while (true) {
+      const batch = await queryAll<VersionRow & { id: number }>('SELECT id, version, created_at FROM production_history WHERE production_id = ? ORDER BY created_at DESC, id DESC LIMIT 200 OFFSET ?', [req.params.id, offset]);
+      metadata.push(...batch);
+      if (batch.length < 200) break;
+      offset += batch.length;
+    }
+    const selected = getLatestHistoryRowsByMajor(metadata, production?.version || undefined);
+    const ids = selected.slice((page - 1) * limit, page * limit).map((row) => row.id);
+    if (!ids.length) return res.json({ data: [], total: selected.length, page, limit });
+    const includeContent = req.query.include_content !== '0';
+    const fields = includeContent ? 'ph.id,ph.production_id,ph.version,ph.content,ph.content_markdown,ph.status,ph.change_type,ph.comment,ph.operator_id,ph.created_at,ph.version_state,ph.superseded_by_version,ph.superseded_at' : 'ph.id,ph.production_id,ph.version,ph.status,ph.change_type,ph.operator_id,ph.created_at,ph.version_state';
+    const rows = await queryAll<Record<string, unknown>>(`SELECT ${fields},u.name AS operator_name FROM production_history ph LEFT JOIN users u ON ph.operator_id=u.id WHERE ph.production_id=? AND ph.id IN (${ids.map(() => '?').join(',')})`, [req.params.id, ...ids]);
+    const byId = new Map(rows.map((row) => [Number(row.id), row]));
+    res.json({ data: ids.map((id) => byId.get(id)).filter(Boolean), total: selected.length, page, limit });
+  } catch {
+    res.status(500).json({ message: '获取版本历史失败' });
   }
 });
 
@@ -607,8 +626,8 @@ router.get('/shooting', authenticate, async (req, res) => {
     query += ` ORDER BY s.created_at DESC LIMIT ? OFFSET ?`;
     const data = await queryAll(query, [...params, limit, offset]);
     res.json({ data, total: total?.total || 0, page, limit });
-  } catch (error) {
-    res.status(500).json({ message: '获取拍摄列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取拍摄列表失败' });
   }
 });
 
@@ -626,8 +645,8 @@ router.get('/shooting/:id', authenticate, async (req, res) => {
       ...shooting,
       production: production || null
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取成片制作记录失败', error });
+  } catch {
+    res.status(500).json({ message: '获取成片制作记录失败' });
   }
 });
 
@@ -676,8 +695,8 @@ router.put('/shooting/:id', authenticate, requirePermission('workflow:shooting')
     }
     broadcastToRoom('shooting', 'shooting:updated', { id: Number(req.params.id) });
     res.json({ message: '成片制作记录更新成功' });
-  } catch (error) {
-    res.status(500).json({ message: '更新成片制作记录失败', error });
+  } catch {
+    res.status(500).json({ message: '更新成片制作记录失败' });
   }
 });
 
@@ -689,8 +708,8 @@ router.delete('/shooting/:id', authenticate, requirePermission('workflow:shootin
     if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限删除该成片制作记录' });
     await execute(`DELETE FROM shooting WHERE id = ?`, [req.params.id]);
     res.json({ message: '成片制作记录删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除成片制作记录失败', error });
+  } catch {
+    res.status(500).json({ message: '删除成片制作记录失败' });
   }
 });
 
@@ -705,8 +724,8 @@ router.post('/shooting', authenticate, requirePermission('workflow:shooting'), a
     if (status === 'completed') await execute(`UPDATE topics SET status = 'publishing' WHERE id = ?`, [topic_id]);
     broadcastToRoom('shooting', 'shooting:created', { id: shootingId, topic_id: req.body.topic_id });
     res.json({ message: '成片制作计划添加成功', shootingId });
-  } catch (error) {
-    res.status(500).json({ message: '添加成片制作计划失败', error });
+  } catch {
+    res.status(500).json({ message: '添加成片制作计划失败' });
   }
 });
 
@@ -823,8 +842,8 @@ router.get('/publishing/:id', authenticate, async (req, res) => {
       shooting: shooting || null,
       topicHistory: topicHistory || []
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取发布详情失败', error });
+  } catch {
+    res.status(500).json({ message: '获取发布详情失败' });
   }
 });
 
@@ -865,8 +884,8 @@ router.get('/publishing', authenticate, async (req, res) => {
         failed: Number(summary?.failed || 0),
       },
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取发布列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取发布列表失败' });
   }
 });
 
@@ -932,8 +951,8 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
     }
     broadcastToRoom('publishing', 'publishing:created', { id: publishingId, topic_id: req.body.topic_id });
     res.json({ message: '发布记录添加成功', publishingId });
-  } catch (error) {
-    res.status(500).json({ message: '添加发布记录失败', error });
+  } catch {
+    res.status(500).json({ message: '添加发布记录失败' });
   }
 });
 
@@ -1036,8 +1055,8 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
 
     broadcastToRoom('publishing', 'publishing:updated', { id: Number(req.params.id) });
     res.json({ message: '发布记录更新成功' });
-  } catch (error) {
-    res.status(500).json({ message: '更新发布记录失败', error });
+  } catch {
+    res.status(500).json({ message: '更新发布记录失败' });
   }
 });
 
@@ -1049,8 +1068,8 @@ router.delete('/publishing/:id', authenticate, requirePermission('workflow:publi
     if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限删除该发布记录' });
     if (publishing) await execute(`DELETE FROM publishing WHERE id = ?`, [req.params.id]);
     res.json({ message: '发布记录删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除发布记录失败', error });
+  } catch {
+    res.status(500).json({ message: '删除发布记录失败' });
   }
 });
 
@@ -1063,8 +1082,8 @@ router.get('/comments', authenticate, async (req, res) => {
     if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该评论' });
     const comments = await queryAll(`SELECT c.*, u.name as operator_name FROM comments c LEFT JOIN users u ON c.operator_id = u.id WHERE c.target_type = ? AND c.target_id = ? ORDER BY c.created_at DESC`, [target_type, target_id]);
     res.json(comments);
-  } catch (error) {
-    res.status(500).json({ message: '获取评论失败', error });
+  } catch {
+    res.status(500).json({ message: '获取评论失败' });
   }
 });
 
@@ -1077,8 +1096,8 @@ router.post('/comments', authenticate, requirePermission('workflow:comment'), as
     if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限评论该对象' });
     const commentId = await executeInsert(`INSERT INTO comments (target_type, target_id, content, operator_id) VALUES (?, ?, ?, ?)`, [target_type, target_id, content, req.user?.id]);
     res.json({ message: '评论添加成功', commentId });
-  } catch (error) {
-    res.status(500).json({ message: '添加评论失败', error });
+  } catch {
+    res.status(500).json({ message: '添加评论失败' });
   }
 });
 
@@ -1086,8 +1105,8 @@ router.delete('/comments/:id', authenticate, requirePermission('comment:delete')
   try {
     await execute(`DELETE FROM comments WHERE id = ?`, [req.params.id]);
     res.json({ message: '评论删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除评论失败', error });
+  } catch {
+    res.status(500).json({ message: '删除评论失败' });
   }
 });
 

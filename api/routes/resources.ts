@@ -1,9 +1,22 @@
 ﻿﻿import express from 'express';
-import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
+import { queryOne, queryAll, execute } from '../database/utils';
 import { authenticate } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import { canManageOwnedResource, isPrivilegedUser } from '../utils/access';
+import { sendSafeServerError } from '../utils/response';
 
 const router = express.Router();
+
+router.use((_, res, next) => {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Link', '</api/resource-center/resources>; rel="successor-version"');
+  next();
+});
+
+const legacyWriteRetired = (_req: express.Request, res: express.Response) => res.status(410).json({
+  message: '旧资料写入接口已停用，请使用资料中心',
+  successor: '/api/resource-center/resources',
+});
 
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -11,7 +24,7 @@ router.get('/', authenticate, async (req, res) => {
     
     let query = `SELECT r.id, r.name, r.type, r.file_path, r.category, r.content, r.uploader_id, r.created_at, r.updated_at, u.name as uploader_name FROM resources r 
                  LEFT JOIN users u ON r.uploader_id = u.id WHERE 1=1`;
-    const params: any[] = [];
+    const params: unknown[] = [];
     
     if (category) {
       query += ` AND r.category = ?`;
@@ -35,7 +48,7 @@ router.get('/', authenticate, async (req, res) => {
       limit: parseInt(limit as string)
     });
   } catch (error) {
-    res.status(500).json({ message: '获取资源列表失败', error });
+    sendSafeServerError(res, '获取资源列表失败', 'resources:list', error);
   }
 });
 
@@ -94,7 +107,7 @@ router.get('/archives', authenticate, async (req, res) => {
     
     res.json({ data, total: countResult?.total || 0, page: parseInt(page as string), limit: parseInt(limit as string) });
   } catch (error) {
-    res.status(500).json({ message: '获取归档列表失败', error });
+    sendSafeServerError(res, '获取归档列表失败', 'resources:archive-list', error);
   }
 });
 
@@ -127,7 +140,21 @@ router.get('/archives/:id', authenticate, async (req, res) => {
       archive: archiveData
     });
   } catch (error) {
-    res.status(500).json({ message: '获取归档详情失败', error });
+    sendSafeServerError(res, '获取归档详情失败', 'resources:archive-detail', error);
+  }
+});
+
+router.delete('/archives/:id', authenticate, requirePermission('resource:delete'), async (req, res) => {
+  try {
+    const resource = await queryOne('SELECT * FROM resources WHERE id = ? AND category = ?', [req.params.id, '已完成']);
+    if (!resource) return res.status(404).json({ message: '归档不存在' });
+    if (!canManageOwnedResource(req.user, resource as Record<string, unknown>)) {
+      return res.status(403).json({ message: '无权限删除该归档' });
+    }
+    await execute('DELETE FROM resources WHERE id = ?', [req.params.id]);
+    return res.json({ message: '归档删除成功' });
+  } catch (error) {
+    return sendSafeServerError(res, '删除归档失败', 'resources:archive-delete', error);
   }
 });
 
@@ -138,9 +165,9 @@ router.get('/categories', authenticate, async (req, res) => {
       isPrivilegedUser(req.user) ? [] : [req.user?.id],
     );
     
-    res.json(categories.map((c: any) => c.category));
+    res.json(categories.map((c) => c.category));
   } catch (error) {
-    res.status(500).json({ message: '获取分类列表失败', error });
+    sendSafeServerError(res, '获取分类列表失败', 'resources:categories', error);
   }
 });
 
@@ -160,81 +187,14 @@ router.get('/:id', authenticate, async (req, res) => {
     
     res.json(resource);
   } catch (error) {
-    res.status(500).json({ message: '获取资源详情失败', error });
+    sendSafeServerError(res, '获取资源详情失败', 'resources:detail', error);
   }
 });
 
-router.post('/', authenticate, async (req, res) => {
-  try {
-    const { name, type, file_path, category, content } = req.body;
-    
-    if (!name) {
-      return res.status(400).json({ message: '资源名称不能为空' });
-    }
-    
-    const resourceId = await executeInsert(`INSERT INTO resources (name, type, file_path, category, content, uploader_id) 
-            VALUES (?, ?, ?, ?, ?, ?)`, [name, type, file_path, category, content, req.user?.id]);
-    
-    res.json({ message: '资源上传成功', resourceId });
-  } catch (error) {
-    res.status(500).json({ message: '上传资源失败', error });
-  }
-});
+router.post('/', authenticate, requirePermission('resource:create'), legacyWriteRetired);
 
-router.put('/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { name, type, file_path, category, content } = req.body;
-    
-    const resource = await queryOne(`SELECT * FROM resources WHERE id = ?`, [id]);
-    if (!resource) {
-      return res.status(404).json({ message: '资源不存在' });
-    }
-    if (!canManageOwnedResource(req.user, resource as Record<string, unknown>)) {
-      return res.status(403).json({ message: '无权限修改该资源' });
-    }
-    
-    const updateFields: string[] = [];
-    const params: any[] = [];
-    
-    if (name !== undefined) { updateFields.push('name = ?'); params.push(name); }
-    if (type !== undefined) { updateFields.push('type = ?'); params.push(type); }
-    if (file_path !== undefined) { updateFields.push('file_path = ?'); params.push(file_path); }
-    if (category !== undefined) { updateFields.push('category = ?'); params.push(category); }
-    if (content !== undefined) { updateFields.push('content = ?'); params.push(content); }
-    
-    if (updateFields.length === 0) {
-      return res.status(400).json({ message: '没有需要更新的字段' });
-    }
-    
-    params.push(id);
-    
-    await execute(`UPDATE resources SET ${updateFields.join(', ')}, updated_at = datetime('now', '+8 hours') WHERE id = ?`, params);
-    
-    res.json({ message: '资源更新成功' });
-  } catch (error) {
-    res.status(500).json({ message: '更新资源失败', error });
-  }
-});
+router.put('/:id', authenticate, requirePermission('resource:update'), legacyWriteRetired);
 
-router.delete('/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    const resource = await queryOne(`SELECT * FROM resources WHERE id = ?`, [id]);
-    if (!resource) {
-      return res.status(404).json({ message: '资源不存在' });
-    }
-    if (!canManageOwnedResource(req.user, resource as Record<string, unknown>)) {
-      return res.status(403).json({ message: '无权限删除该资源' });
-    }
-    
-    await execute(`DELETE FROM resources WHERE id = ?`, [id]);
-    
-    res.json({ message: '资源删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除资源失败', error });
-  }
-});
+router.delete('/:id', authenticate, requirePermission('resource:delete'), legacyWriteRetired);
 
 export default router;

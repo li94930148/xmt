@@ -92,8 +92,8 @@ router.get('/', authenticate, async (req, res) => {
       page: parseInt(page as string, 10),
       limit: parseInt(limit as string, 10),
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取灵感列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取灵感列表失败' });
   }
 });
 
@@ -116,8 +116,8 @@ router.post('/', authenticate, async (req, res) => {
     broadcastToRoom('inspirations', 'inspiration:created', newInspiration);
 
     res.json({ message: '灵感创建成功', id: inspirationId });
-  } catch (error) {
-    res.status(500).json({ message: '创建灵感失败', error });
+  } catch {
+    res.status(500).json({ message: '创建灵感失败' });
   }
 });
 
@@ -146,8 +146,8 @@ router.get('/:id', authenticate, async (req, res) => {
     );
 
     res.json({ inspiration, comments });
-  } catch (error) {
-    res.status(500).json({ message: '获取灵感详情失败', error });
+  } catch {
+    res.status(500).json({ message: '获取灵感详情失败' });
   }
 });
 
@@ -205,8 +205,8 @@ router.post('/:id/comments', authenticate, async (req, res) => {
       comment,
       comment_count: commentCountRow?.total || 0,
     });
-  } catch (error) {
-    res.status(500).json({ message: '评论失败', error });
+  } catch {
+    res.status(500).json({ message: '评论失败' });
   }
 });
 
@@ -253,8 +253,8 @@ router.post('/:id/vote', authenticate, async (req, res) => {
 
       res.json({ message: '投票成功', voted: true });
     }
-  } catch (error) {
-    res.status(500).json({ message: '投票操作失败', error });
+  } catch {
+    res.status(500).json({ message: '投票操作失败' });
   }
 });
 
@@ -278,8 +278,8 @@ router.delete('/:id', authenticate, async (req, res) => {
     broadcastToRoom('inspirations', 'inspiration:deleted', { id });
 
     res.json({ message: '灵感删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除灵感失败', error });
+  } catch {
+    res.status(500).json({ message: '删除灵感失败' });
   }
 });
 
@@ -319,8 +319,8 @@ router.post('/:id/promote', authenticate, requirePermission('inspiration:promote
     }
 
     res.json({ message: '灵感已转为选题', topicId });
-  } catch (error) {
-    res.status(500).json({ message: '转为选题失败', error });
+  } catch {
+    res.status(500).json({ message: '转为选题失败' });
   }
 });
 

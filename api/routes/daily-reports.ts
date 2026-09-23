@@ -142,7 +142,7 @@ router.post('/:id/review', requirePermission('report:daily:review'), async (req,
   }
 });
 
-router.get('/archive', async (req, res) => {
+router.get('/archive', requirePermission('report:daily:archive'), async (req, res) => {
   try {
     const userId = getQueryString(req, 'userId');
     const result = await listDailyReportArchive(req.user, {

@@ -37,7 +37,13 @@ async function loadPersistedSources(docId: string): Promise<BuildUnifiedTimeline
   if (!Number.isSafeInteger(id) || id <= 0) return {};
 
   if (kind === 'production') {
-    const [production, history] = await Promise.all([getProductionById(id), getProductionHistory(id)]);
+    const [production, firstPage] = await Promise.all([getProductionById(id), getProductionHistory(id, 1, 100, false)]);
+    const history = [...firstPage.data];
+    for (let page = 2; history.length < firstPage.total; page++) {
+      const next = await getProductionHistory(id, page, 100, false);
+      if (!next.data.length) break;
+      history.push(...next.data);
+    }
     return {
       // History rows snapshot the *previous* version when a newer one is made.
       // The current row's updated_at is the last save, not its creation time.

@@ -19,6 +19,7 @@ jobs:
       - run: npm run test:entrypoints
       - run: npm audit --audit-level=high
       - run: npm run version:check
+      - run: npm run lint
       - run: npm run check
       - run: npm run build
 
@@ -95,6 +96,7 @@ jobs:
       - run: npm run test:role-management-security
       - run: npm run test:error-response-sanitization
       - run: npm run test:error-response-sanitization-http
+      - run: npm run test:integrity
 
   android-debug-apk:
     runs-on: ubuntu-latest

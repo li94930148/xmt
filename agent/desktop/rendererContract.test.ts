@@ -32,3 +32,11 @@ test('metadata-only bridge takes no renderer account parameter and renderer sour
     assert.doesNotMatch(source,/localStorage|sessionStorage|console\.|cause\.message|accountName|accountId/);
   }
 });
+
+test('every server URL mutation is guarded by the TLS assertion',()=>{
+  const source=readFileSync(path.join(process.cwd(),'desktop/main.ts'),'utf8');
+  assert.match(source,/function assertSecureServerUrl/);
+  assert.equal((source.match(/assertSecureServerUrl\(serverUrl\)/g)||[]).length,3);
+  assert.match(source,/https:\\\/\\\//);
+  assert.match(source,/localhost\|127\\\.0\\\.0\\\.1/);
+});

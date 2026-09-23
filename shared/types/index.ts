@@ -423,40 +423,6 @@ export interface CalendarEvent {
   updated_at?: string;
 }
 
-// ==================== 抖音数据 ====================
-
-export interface DouyinAccount {
-  id: number;
-  name: string;
-  profile_url: string;
-  douyin_id?: string;
-  created_at: string;
-}
-
-export interface DouyinSnapshot {
-  id: number;
-  account_id: number;
-  username: string;
-  followers: number;
-  likes: number;
-  following_count: number;
-  ip_location: string;
-  bio: string;
-  video_count: number;
-  raw_data?: string;
-  scraped_at: string;
-}
-
-export interface DouyinVideo {
-  id: number;
-  snapshot_id: number;
-  title: string;
-  likes: number;
-  comments: number;
-  shares: number;
-  is_pinned: number;
-}
-
 // ==================== 备份 ====================
 
 export interface BackupFile {
@@ -477,6 +443,7 @@ export interface JwtPayload {
   userId: number;
   username: string;
   role: string;
+  authVersion?: number;
 }
 
 export type {

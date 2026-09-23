@@ -3,6 +3,7 @@ import { apiMetaSchema, requestIdSchema } from './common.schema';
 
 export const apiErrorCodeSchema = z.enum([
   'AUTH_REQUIRED',
+  'PASSWORD_CHANGE_REQUIRED',
   'AUTH_INVALID_CREDENTIALS',
   'AUTH_SESSION_EXPIRED',
   'AUTH_SESSION_REVOKED',

@@ -65,7 +65,8 @@ export async function createTopic(data: { title: string; description: string; ou
     body: JSON.stringify(data)
   });
   if (!response.ok) throw new Error('创建选题失败');
-  return response.json();
+  const result = await response.json();
+  return { message: result.message, topicId: result.data.topicId };
 }
 
 export async function updateTopic(id: number, data: Partial<Topic>): Promise<{ message: string }> {

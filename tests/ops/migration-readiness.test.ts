@@ -17,6 +17,10 @@ const run = () => spawnSync('npx', ['tsx', 'scripts/migration-readiness.ts'], { 
 assert.equal(run().status, 0, 'safe expand migration may proceed');
 await client.execute({ sql: `UPDATE database_migrations SET status = 'failed' WHERE version = ?`, args: ['001'] });
 assert.equal(run().status, 0, 'matching failed safe expand migration may retry');
+const migration015 = databaseMigrations.find((migration) => migration.version === '015')!;
+await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?', args: ['015'] });
+assert.equal(run().status, 0, 'pending integrity remediation migration remains rollback compatible');
+await client.execute({ sql: 'INSERT INTO database_migrations (version, name, checksum, status) VALUES (?, ?, ?, ?)', args: [migration015.version, migration015.name, migration015.checksum, 'applied'] });
 await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?', args: ['006'] });
 const review = run(); assert.notEqual(review.status, 0); assert.match(review.stdout, /REVIEW_REQUIRED/);
 await client.execute({ sql: 'INSERT INTO database_migrations (version, name, checksum, status) VALUES (?, ?, ?, ?)', args: ['006', databaseMigrations.find((migration) => migration.version === '006')!.name, 'invalid', 'applied'] });

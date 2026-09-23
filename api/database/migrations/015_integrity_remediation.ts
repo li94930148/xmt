@@ -3,7 +3,7 @@ import type { DatabaseMigration } from './types';
 export const integrityRemediationMigration: DatabaseMigration = {
   version: '015',
   name: 'integrity_remediation',
-  checksum: '015-integrity-remediation-v1',
+  checksum: '015-integrity-remediation-v2',
   async up(executor) {
     const userColumns = await executor.execute('PRAGMA table_info(users)');
     if (!userColumns.rows.some((row) => String(row.name) === 'auth_version')) {
@@ -27,8 +27,5 @@ export const integrityRemediationMigration: DatabaseMigration = {
     await executor.execute(`CREATE INDEX IF NOT EXISTS idx_collaboration_lock_events_doc_time
       ON collaboration_lock_events(doc_id, timestamp DESC)`);
 
-    await executor.execute(`DELETE FROM role_permissions
-      WHERE permission_id IN (SELECT id FROM permissions WHERE code = 'workflow:production')`);
-    await executor.execute(`DELETE FROM permissions WHERE code = 'workflow:production'`);
   },
 };

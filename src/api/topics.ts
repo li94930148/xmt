@@ -10,10 +10,27 @@ function getAuthHeader(): Record<string, string> {
 
 async function getErrorMessage(response: Response, fallback: string) {
   const payload = await response.json().catch(() => null);
-  if (payload && typeof payload === 'object' && 'message' in payload) {
-    return String((payload as { message: unknown }).message);
+  if (payload && typeof payload === 'object') {
+    const record = payload as { message?: unknown; error?: unknown };
+    if (typeof record.message === 'string' && record.message) {
+      return record.message;
+    }
+    if (typeof record.error === 'string' && record.error) {
+      return record.error;
+    }
   }
   return fallback;
+}
+
+function buildTopicsQuery(params?: { status?: string; search?: string; page?: number; limit?: number }): string {
+  const query = new URLSearchParams();
+  const status = params?.status?.trim();
+  const search = params?.search?.trim();
+  if (status) query.set('status', status);
+  if (search) query.set('search', search);
+  query.set('page', String(params?.page ?? 1));
+  query.set('limit', String(params?.limit ?? 10));
+  return query.toString();
 }
 
 type TopicsListResponse = {
@@ -24,11 +41,11 @@ type TopicsListResponse = {
 };
 
 export async function getTopics(params?: { status?: string; search?: string; page?: number; limit?: number }): Promise<TopicsListResponse> {
-  const query = new URLSearchParams(params as Record<string, string>);
+  const query = buildTopicsQuery(params);
   const response = await fetch(`${BASE_URL}/topics?${query}`, {
     headers: getAuthHeader()
   });
-  if (!response.ok) throw new Error('获取选题列表失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '获取选题列表失败'));
 
   const result = await response.json();
 

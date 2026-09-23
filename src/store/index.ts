@@ -168,6 +168,12 @@ const loadSidebarCollapsed = (): boolean => {
   }
 };
 
+let notificationSeq = 0;
+function nextNotificationId() {
+  notificationSeq += 1;
+  return notificationSeq;
+}
+
 export const useAppStore = create<AppState>((set) => ({
   sidebarCollapsed: loadSidebarCollapsed(),
   toggleSidebar: () => set((state) => {
@@ -176,9 +182,20 @@ export const useAppStore = create<AppState>((set) => ({
     return { sidebarCollapsed };
   }),
   notifications: [],
-  addNotification: (notification) => set((state) => ({
-    notifications: [...state.notifications, { ...notification, id: Date.now() }]
-  })),
+  addNotification: (notification) => set((state) => {
+    const last = state.notifications[state.notifications.length - 1];
+    if (
+      last
+      && last.title === notification.title
+      && last.message === notification.message
+      && last.type === notification.type
+    ) {
+      return state;
+    }
+    return {
+      notifications: [...state.notifications, { ...notification, id: nextNotificationId() }],
+    };
+  }),
   removeNotification: (id) => set((state) => ({
     notifications: state.notifications.filter(n => n.id !== id)
   })),

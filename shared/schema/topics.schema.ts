@@ -10,9 +10,11 @@ export const topicStatusSchema = z.enum([
   'completed',
 ]);
 
+const emptyToUndefined = (value: unknown) => (value === '' || value === undefined || value === null ? undefined : value);
+
 export const topicQuerySchema = z.object({
-  status: topicStatusSchema.optional(),
-  search: z.string().trim().max(200).optional(),
+  status: z.preprocess(emptyToUndefined, topicStatusSchema.optional()),
+  search: z.preprocess(emptyToUndefined, z.string().trim().max(200).optional()),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(200).default(10),
 }).strict();

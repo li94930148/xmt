@@ -49,5 +49,6 @@ export async function getPomodoroRanking(): Promise<PomodoroRanking[]> {
     headers: getAuthHeader()
   });
   if (!response.ok) throw new Error('获取番茄钟排行榜失败');
-  return response.json();
+  const payload = await response.json() as { data?: PomodoroRanking[] };
+  return Array.isArray(payload.data) ? payload.data : [];
 }

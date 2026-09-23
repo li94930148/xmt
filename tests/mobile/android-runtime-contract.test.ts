@@ -10,11 +10,14 @@ const activity = read('android/app/src/main/java/com/lanyaomedia/xmt/MainActivit
 const capacitorConfig = read('capacitor.config.ts');
 const runtime = read('src/platform/runtime.ts');
 const debugManifest = read('android/app/src/debug/AndroidManifest.xml');
+const secureCredential = read('android/app/src/main/java/com/lanyaomedia/xmt/SecureCredentialPlugin.java');
+const deepLinks = JSON.parse(read('shared/mobile-deep-links.json')) as Array<{ host: string }>;
 
 assert.match(capacitorConfig, /appId:\s*'com\.lanyaomedia\.xmt'/);
 assert.match(buildGradle, /versionCode\s+22002/);
 assert.match(buildGradle, /versionName\s+"2\.20\.2"/);
 assert.match(manifest, /android:usesCleartextTraffic="false"/);
+assert.match(manifest, /android:allowBackup="false"/);
 assert.match(debugManifest, /android:usesCleartextTraffic="true"/);
 assert.match(debugManifest, /tools:replace="android:usesCleartextTraffic"/);
 assert.match(runtime, /VITE_ANDROID_ALLOW_CLEARTEXT/);
@@ -37,8 +40,15 @@ const nativeAuthRuntime = read('src/auth/native/native-auth-runtime.ts');
 assert.match(nativeAuthRuntime, /createNativeAuthRuntime/);
 assert.match(nativeAuthRuntime, /refreshInFlight/);
 assert.match(manifest, /android:launchMode="singleTask"/);
-for (const host of ['topics', 'production', 'messages', 'daily-report']) {
+for (const { host } of deepLinks) {
   assert.match(manifest, new RegExp(`<data android:scheme="xmt" android:host="${host}"`));
 }
 assert.match(activity, /registerPlugin\(SecureCredentialPlugin\.class\)/);
+assert.match(secureCredential, /KeyStore\.getInstance\("AndroidKeyStore"\)/);
+assert.match(secureCredential, /KEY_ALGORITHM_AES/);
+assert.match(secureCredential, /BLOCK_MODE_GCM/);
+assert.match(secureCredential, /ENCRYPTION_PADDING_NONE/);
+assert.match(secureCredential, /Context\.MODE_PRIVATE/);
+assert.match(secureCredential, /getIV\(\).*\+\s*":"\s*\+/);
+assert.match(secureCredential, /GCMParameterSpec\(128/);
 console.log('Android runtime contract tests passed');

@@ -386,7 +386,6 @@ router.post('/accounts/:id/sync-export', requirePermission('analytics:view'), as
 router.post('/accounts/:id/performance-sync', requirePermission('analytics:view'), async (req, res) => {
   try {
     const accountId = Number(req.params.id);
-    if (accountId !== 2) return res.status(200).json({ success: false, errorType: 'performance_sync_failed', message: '仅支持账号 2 的性能同步。' });
     const account = await getSocialAccount(accountId);
     if (!account || account.platform !== 'douyin' || !account.active) return res.status(200).json({ success: false, errorType: 'performance_sync_failed', message: '账号不可用于性能同步。' });
     const credential = await getCredentialSummaryByAccountId(accountId);

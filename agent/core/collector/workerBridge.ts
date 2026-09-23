@@ -4,7 +4,8 @@ import { createInterface } from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export type WorkerEvent = { id: string; event: 'started'|'progress'|'login_required'|'capture'|'export'|'warning'|'error'|'completed'|'cancelled'; data: Record<string, unknown> };
+export type WorkerEvent = { id: string; event: 'started'|'progress'|'login_required'|'capture'|'export'|'warning'|'error'|'completed'|'cancelled'; worker_protocol_version?: number; data: Record<string, unknown> };
+const WORKER_PROTOCOL_VERSION = 1;
 type Pending = { resolve: (value: WorkerEvent) => void; reject: (reason: Error) => void; timer: NodeJS.Timeout };
 export class CollectorLoginRequiredError extends Error {
   readonly code = "COLLECTOR_LOGIN_REQUIRED" as const;
@@ -64,12 +65,21 @@ export class ScraplingWorkerBridge {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Scrapling Worker ${method} 超时`)); }, timeout);
       this.pending.set(id, { resolve, reject, timer });
     });
-    this.child?.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+    this.child?.stdin.write(`${JSON.stringify({ id, method, params, worker_protocol_version: WORKER_PROTOCOL_VERSION })}\n`);
     return response;
   }
   async shutdown() { try { await this.request('shutdown', {}, 10_000); } finally { this.child?.kill(); this.child = null; } }
   private receive(line: string) {
     let message: WorkerEvent; try { message = JSON.parse(line) as WorkerEvent; } catch { this.onDiagnostic('Collector 输出了无效 JSON，已忽略。'); return; }
+    if (message.worker_protocol_version !== WORKER_PROTOCOL_VERSION) {
+      const pending = this.pending.get(message.id);
+      if (pending) {
+        clearTimeout(pending.timer); this.pending.delete(message.id);
+        pending.reject(new Error('COLLECTOR_WORKER_PROTOCOL_MISMATCH'));
+      }
+      this.onDiagnostic('Collector Worker 协议版本不兼容。');
+      return;
+    }
     this.listeners.forEach(listener => listener(message));
     if (!['completed', 'error', 'login_required', 'cancelled'].includes(message.event)) return;
     const pending = this.pending.get(message.id); if (!pending) return;

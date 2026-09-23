@@ -510,7 +510,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on(COLLABORATION_EVENTS.TYPING, (payload) => {
-    handleTyping(io, socket, payload)
+    void handleTyping(io, socket, payload)
   })
 
   socket.on(COLLABORATION_EVENTS.DOC_LOCKED, (payload) => {
@@ -518,7 +518,7 @@ io.on('connection', (socket) => {
       const socketUser = socket.data.user as User | undefined
       const roomId = String(payload?.roomId || payload?.docId || '')
       if (!socketUser || !await collaborationAccessPolicy.canManageDocument(socketUser, roomId)) return
-      lockCollaborationRoom(io, roomId, String(payload?.reason || 'Document locked'), String(socketUser.id))
+      await lockCollaborationRoom(io, roomId, String(payload?.reason || 'Document locked'), String(socketUser.id))
     })()
   })
 
@@ -527,7 +527,7 @@ io.on('connection', (socket) => {
       const socketUser = socket.data.user as User | undefined
       const roomId = String(payload?.roomId || payload?.docId || '')
       if (!socketUser || !await collaborationAccessPolicy.canManageDocument(socketUser, roomId)) return
-      unlockCollaborationRoom(io, roomId, String(socketUser.id))
+      await unlockCollaborationRoom(io, roomId, String(socketUser.id))
     })()
   })
 

@@ -106,7 +106,7 @@ class Worker:
                 "scrapling_import": True,
                 "python": sys.version.split()[0],
                 "scrapling": scrapling.__version__,
-                "protocol_version": PROTOCOL_VERSION,
+                "worker_protocol_version": PROTOCOL_VERSION,
             })
         elif request.method == "cancel":
             target = self.running.get(str(request.params.get("jobId", request.id)))

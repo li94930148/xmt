@@ -40,6 +40,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   try {
     const legacyPayload = verifyToken(token);
     let userId = Number(legacyPayload?.userId);
+    const isLegacyToken = Number.isSafeInteger(userId) && userId > 0;
+    let legacyAuthVersion = Number(legacyPayload?.authVersion);
 
     // The legacy verifier deliberately does not constrain issuer/audience, so it can
     // decode a V1 token without producing a legacy userId. Recognise V1 explicitly
@@ -56,6 +58,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
           sessionUserId > 0
         ) {
           userId = sessionUserId;
+          legacyAuthVersion = Number.NaN;
         }
       }
     }
@@ -77,6 +80,9 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     }
     
     const resultRecord = result as Record<string, unknown>;
+    if (isLegacyToken && legacyAuthVersion !== Number(resultRecord.auth_version ?? 1)) {
+      return res.status(401).json({ message: '登录已失效，请重新登录' });
+    }
     const user: User = {
       id: Number(resultRecord.id),
       username: String(resultRecord.username),

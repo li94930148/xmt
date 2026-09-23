@@ -104,6 +104,7 @@ const PermissionManagement = lazyWithRetry(() => import('@/pages/PermissionManag
 const AnonymousFeedbackAdmin = lazyWithRetry(() => import('@/pages/AnonymousFeedbackAdmin'), 'AnonymousFeedbackAdmin');
 const AnonymousFeedback = lazyWithRetry(() => import('@/pages/AnonymousFeedback'), 'AnonymousFeedback');
 const WorkflowDesigner = lazyWithRetry(() => import('@/pages/WorkflowDesigner'), 'WorkflowDesigner');
+const TemplateManagement = lazyWithRetry(() => import('@/pages/TemplateManagement'), 'TemplateManagement');
 const NotificationSettings = lazyWithRetry(() => import('@/pages/NotificationSettings'), 'NotificationSettings');
 const ExportPage = lazyWithRetry(() => import('@/pages/ExportPage'), 'ExportPage');
 const PomodoroPage = lazyWithRetry(() => import('@/pages/PomodoroPage'), 'PomodoroPage');
@@ -263,6 +264,7 @@ export default function App() {
                 </Route>
                 <Route element={<RoleGuard permissions={['system:template']} />}>
                   <Route path="/workflow-designer" element={<WorkflowDesigner />} />
+                  <Route path="/templates" element={<TemplateManagement />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['export:data']} />}>
                   <Route path="/export" element={<ExportPage />} />

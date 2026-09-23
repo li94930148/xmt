@@ -36,6 +36,7 @@ function actor(req: Request): TopicActor {
 }
 
 function legacyError(res: Response, error: unknown, action: TopicAction) {
+  if (error instanceof ZodError) return sendError(res, '请求参数不合法', 400);
   if (error instanceof TopicServiceError) {
     if (error.code === 'TOPIC_NOT_FOUND') return sendNotFound(res, error.message);
     if (error.code === 'TOPIC_FORBIDDEN') return sendError(res, error.message, 403);
@@ -92,22 +93,21 @@ export class TopicController {
 
   legacyList = async (req: Request, res: Response) => {
     try {
-      const { status, search, page = 1, limit = 10 } = req.query;
+      const query = parse(topicQuerySchema, req.query);
       const result = await this.service.listTopics(actor(req), {
-        status,
-        search,
-        page: parseInt(page as string),
-        limit: parseInt(limit as string),
+        ...query,
+        page: query.page ?? 1,
+        limit: query.limit ?? 10,
       });
       return sendSuccessWithPagination(res, result.topics, result.total, result.page, result.limit);
-    } catch {
-      return sendServerError(res, '获取选题列表失败');
+    } catch (error) {
+      return legacyError(res, error, 'get');
     }
   };
 
   legacyGet = async (req: Request, res: Response) => {
     try {
-      return sendSuccess(res, await this.service.getTopic(actor(req), req.params.id));
+      return sendSuccess(res, await this.service.getTopic(actor(req), parse(idSchema, req.params.id)));
     } catch (error) {
       return legacyError(res, error, 'get');
     }
@@ -115,7 +115,14 @@ export class TopicController {
 
   legacyCreate = async (req: Request, res: Response) => {
     try {
-      const result = await this.service.createTopic(actor(req), req.body);
+      const input = parse(createTopicInputSchema, req.body);
+      const result = await this.service.createTopic(actor(req), {
+        ...input,
+        description: input.description ?? '',
+        platform: input.platform ?? '',
+        deadline: input.deadline ?? '',
+        outlineJson: typeof input.outlineJson === 'object' && input.outlineJson !== null ? JSON.stringify(input.outlineJson) : input.outlineJson,
+      });
       return sendSuccess(res, result, '选题提交成功');
     } catch (error) {
       return legacyError(res, error, 'create');
@@ -124,7 +131,11 @@ export class TopicController {
 
   legacyUpdate = async (req: Request, res: Response) => {
     try {
-      await this.service.updateTopic(actor(req), req.params.id, req.body);
+      const input = parse(updateTopicInputSchema, req.body);
+      await this.service.updateTopic(actor(req), parse(idSchema, req.params.id), {
+        ...input,
+        outlineJson: typeof input.outlineJson === 'object' && input.outlineJson !== null ? JSON.stringify(input.outlineJson) : input.outlineJson,
+      });
       return sendSuccess(res, null, '选题更新成功');
     } catch (error) {
       return legacyError(res, error, 'update');
@@ -133,7 +144,7 @@ export class TopicController {
 
   legacyDelete = async (req: Request, res: Response) => {
     try {
-      await this.service.deleteTopic(actor(req), req.params.id);
+      await this.service.deleteTopic(actor(req), parse(idSchema, req.params.id));
       return sendSuccess(res, null, '选题删除成功');
     } catch (error) {
       return legacyError(res, error, 'delete');
@@ -142,8 +153,9 @@ export class TopicController {
 
   legacyAudit = async (req: Request, res: Response) => {
     try {
-      await this.service.auditTopic(actor(req), req.params.id, req.body);
-      const statusText = req.body.status === 'approved' ? '审核通过' : '审核驳回';
+      const input = parse(auditTopicInputSchema, req.body);
+      await this.service.auditTopic(actor(req), parse(idSchema, req.params.id), { ...input, comment: input.comment ?? '' });
+      const statusText = input.status === 'approved' ? '审核通过' : '审核驳回';
       return sendSuccess(res, null, `选题${statusText}`);
     } catch (error) {
       return legacyError(res, error, 'audit');
@@ -152,7 +164,7 @@ export class TopicController {
 
   legacyTransition = async (req: Request, res: Response) => {
     try {
-      await this.service.transitionTopic(actor(req), req.params.id, req.body);
+      await this.service.transitionTopic(actor(req), parse(idSchema, req.params.id), parse(transitionTopicInputSchema, req.body));
       return sendSuccess(res, null, '状态更新成功');
     } catch (error) {
       return legacyError(res, error, 'transition');

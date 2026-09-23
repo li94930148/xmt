@@ -1,0 +1,6 @@
+[
+  { "host": "topics", "pathPrefix": "/topics" },
+  { "host": "production", "pathPrefix": "/production" },
+  { "host": "messages", "pathPrefix": "/messages", "ignorePath": true },
+  { "host": "daily-report", "pathPrefix": "/daily-report", "ignorePath": true }
+]

@@ -53,8 +53,8 @@ router.get('/preferences', authenticate, async (req, res) => {
     `, [userId]);
 
     res.json(preferences);
-  } catch (error) {
-    res.status(500).json({ message: '获取通知偏好失败', error });
+  } catch {
+    res.status(500).json({ message: '获取通知偏好失败' });
   }
 });
 
@@ -91,8 +91,8 @@ router.put('/preferences', authenticate, async (req, res) => {
     });
 
     res.json({ message: '通知偏好更新成功' });
-  } catch (error) {
-    res.status(500).json({ message: '更新通知偏好失败', error });
+  } catch {
+    res.status(500).json({ message: '更新通知偏好失败' });
   }
 });
 

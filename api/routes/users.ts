@@ -36,7 +36,7 @@ router.get('/assignable-roles', authenticate, requirePermission('user:create', '
   try {
     const roles = await getAssignableRoles({ id: req.user!.id, role: req.user!.role });
     res.json(roles);
-  } catch (error) {
+  } catch {
     res.status(500).json({ message: '获取可分配角色失败' });
   }
 });
@@ -57,8 +57,8 @@ router.get('/', authenticate, requirePermission('user:view'), async (req, res) =
       page: pagination.page,
       limit: pagination.limit
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取用户列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取用户列表失败' });
   }
 });
 
@@ -82,8 +82,8 @@ router.get('/logs', authenticate, requirePermission('user:logs'), async (req, re
       page: pagination.page,
       limit: pagination.limit
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取操作日志失败', error });
+  } catch {
+    res.status(500).json({ message: '获取操作日志失败' });
   }
 });
 
@@ -120,8 +120,8 @@ router.get('/activity-logs', authenticate, requirePermission('user:logs'), async
       page: pagination.page,
       limit: pagination.limit
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取活动日志失败', error });
+  } catch {
+    res.status(500).json({ message: '获取活动日志失败' });
   }
 });
 
@@ -137,8 +137,8 @@ router.get('/:id', authenticate, requirePermission('user:view'), async (req, res
     }
     
     res.json(user);
-  } catch (error) {
-    res.status(500).json({ message: '获取用户详情失败', error });
+  } catch {
+    res.status(500).json({ message: '获取用户详情失败' });
   }
 });
 
@@ -181,7 +181,7 @@ router.post('/', authenticate, requirePermission('user:create'), async (req, res
     ]);
     
     res.json({ message: '用户创建成功', userId });
-  } catch (error) {
+  } catch {
     res.status(500).json({ message: '创建用户失败' });
   }
 });
@@ -212,6 +212,7 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
     
     const updates: string[] = [];
     const params: unknown[] = [];
+    const identityChanged = Boolean(password || role) || (enabled !== undefined && !enabled);
     
     if (password) {
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -222,6 +223,7 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
     if (role) { updates.push('role = ?'); params.push(role); }
     if (name !== undefined) { updates.push('name = ?'); params.push(name); }
     if (enabled !== undefined) { updates.push('enabled = ?'); params.push(enabled ? 1 : 0); }
+    if (identityChanged) updates.push('auth_version = auth_version + 1');
     
     if (updates.length === 0) {
       return res.status(400).json({ message: '没有需要更新的字段' });
@@ -243,8 +245,7 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
       clearPermissionCache(Number(id));
     }
 
-    const identityChanged = Boolean(role) || (enabled !== undefined && !Boolean(enabled));
-    if (enabled !== undefined && !Boolean(enabled)) {
+    if (enabled !== undefined && !enabled) {
       await new SessionService({ repository: new SqliteSessionRepository() }).revokeUserSessions(Number(id), 'user_disabled');
     }
     if (identityChanged) disconnectUserSockets(Number(id));
@@ -254,7 +255,7 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
     ]);
     
     res.json({ message: '用户更新成功' });
-  } catch (error) {
+  } catch {
     res.status(500).json({ message: '更新用户失败' });
   }
 });
@@ -282,8 +283,8 @@ router.delete('/:id', authenticate, requirePermission('user:delete'), async (req
     ]);
     
     res.json({ message: '用户删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除用户失败', error });
+  } catch {
+    res.status(500).json({ message: '删除用户失败' });
   }
 });
 

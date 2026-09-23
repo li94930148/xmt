@@ -40,8 +40,8 @@ router.get('/', authenticate, async (req, res) => {
       page: parseInt(page as string),
       limit: parseInt(limit as string)
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取消息列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取消息列表失败' });
   }
 });
 
@@ -50,8 +50,8 @@ router.get('/unread', authenticate, async (req, res) => {
   try {
     const countResult = await queryOne(`SELECT COUNT(*) as count FROM messages WHERE user_id = ? AND read = 0`, [req.user?.id]);
     res.json({ unreadCount: countResult?.count || 0 });
-  } catch (error) {
-    res.status(500).json({ message: '获取未读消息数失败', error });
+  } catch {
+    res.status(500).json({ message: '获取未读消息数失败' });
   }
 });
 
@@ -65,8 +65,8 @@ router.put('/:id', authenticate, async (req, res) => {
     }
     await execute(`UPDATE messages SET read = 1 WHERE id = ?`, [id]);
     res.json({ message: '消息已标记为已读' });
-  } catch (error) {
-    res.status(500).json({ message: '更新消息状态失败', error });
+  } catch {
+    res.status(500).json({ message: '更新消息状态失败' });
   }
 });
 
@@ -88,8 +88,8 @@ router.post('/read-all', authenticate, async (req, res) => {
       await execute(`UPDATE messages SET read = 1 WHERE user_id = ? AND read = 0`, [req.user?.id]);
       res.json({ message: '所有消息已标记为已读' });
     }
-  } catch (error) {
-    res.status(500).json({ message: '批量标记失败', error });
+  } catch {
+    res.status(500).json({ message: '批量标记失败' });
   }
 });
 
@@ -98,8 +98,8 @@ router.delete('/', authenticate, async (req, res) => {
   try {
     await execute(`DELETE FROM messages WHERE user_id = ?`, [req.user?.id]);
     res.json({ message: '消息已清空' });
-  } catch (error) {
-    res.status(500).json({ message: '清空消息失败', error });
+  } catch {
+    res.status(500).json({ message: '清空消息失败' });
   }
 });
 

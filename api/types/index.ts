@@ -54,10 +54,6 @@ export type {
   PomodoroRanking,
   // 日历
   CalendarEvent,
-  // 抖音
-  DouyinAccount,
-  DouyinSnapshot,
-  DouyinVideo,
   // 备份
   BackupFile,
   // JWT

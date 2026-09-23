@@ -111,9 +111,8 @@ router.get('/ranking', authenticate, async (req, res) => {
     const ranking = await queryAll(`
       SELECT 
         u.id as user_id,
-        u.name,
-        u.avatar,
-        COUNT(ps.id) as count,
+        u.name as user_name,
+        COUNT(ps.id) as total_sessions,
         COALESCE(SUM(ps.duration), 0) as total_minutes
       FROM users u
       LEFT JOIN pomodoro_sessions ps ON ps.user_id = u.id 
@@ -121,12 +120,17 @@ router.get('/ranking', authenticate, async (req, res) => {
         AND ps.ended_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
       WHERE u.enabled = 1
       GROUP BY u.id
-      HAVING count > 0
-      ORDER BY count DESC
+      HAVING total_sessions > 0
+      ORDER BY total_sessions DESC
       LIMIT 20
     `);
-
-    res.json({ data: ranking });
+    const canSeeNames = req.user?.role === 'admin' || req.user?.role === 'director';
+    res.json({ data: ranking.map((row, index) => ({
+      user_id: canSeeNames || Number(row.user_id) === req.user?.id ? row.user_id : -(index + 1),
+      user_name: canSeeNames || Number(row.user_id) === req.user?.id ? row.user_name : `第 ${index + 1} 名同事`,
+      total_sessions: row.total_sessions,
+      total_minutes: row.total_minutes,
+    })) });
   } catch {
     res.status(500).json({ message: '获取排行榜失败' });
   }

@@ -25,8 +25,8 @@ router.get('/', authenticate, async (req, res) => {
 
     const achievements = await queryAll(sql, params);
     res.json({ data: achievements });
-  } catch (error) {
-    res.status(500).json({ message: '获取成就列表失败', error });
+  } catch {
+    res.status(500).json({ message: '获取成就列表失败' });
   }
 });
 
@@ -45,8 +45,8 @@ router.get('/me', authenticate, async (req, res) => {
     `, [userId]);
 
     res.json({ data: achievements });
-  } catch (error) {
-    res.status(500).json({ message: '获取用户成就失败', error });
+  } catch {
+    res.status(500).json({ message: '获取用户成就失败' });
   }
 });
 
@@ -143,8 +143,8 @@ router.get('/progress', authenticate, async (req, res) => {
     }
 
     res.json({ data: progress });
-  } catch (error) {
-    res.status(500).json({ message: '获取成就进度失败', error });
+  } catch {
+    res.status(500).json({ message: '获取成就进度失败' });
   }
 });
 
@@ -188,8 +188,8 @@ router.get('/stats', authenticate, async (req, res) => {
     res.json({
       data: { total, earned, totalPoints, byCategory, byRarity }
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取成就统计失败', error });
+  } catch {
+    res.status(500).json({ message: '获取成就统计失败' });
   }
 });
 
@@ -213,8 +213,8 @@ router.get('/leaderboard', authenticate, async (req, res) => {
     `);
 
     res.json({ data: leaderboard });
-  } catch (error) {
-    res.status(500).json({ message: '获取排行榜失败', error });
+  } catch {
+    res.status(500).json({ message: '获取排行榜失败' });
   }
 });
 
@@ -232,8 +232,8 @@ router.get('/recent', authenticate, async (req, res) => {
     `, [limit]);
 
     res.json({ data: recent });
-  } catch (error) {
-    res.status(500).json({ message: '获取最近成就失败', error });
+  } catch {
+    res.status(500).json({ message: '获取最近成就失败' });
   }
 });
 
@@ -253,8 +253,8 @@ router.post('/', authenticate, requirePermission('system:achievement'), async (r
     );
 
     res.json({ message: '成就创建成功', id: achievementId });
-  } catch (error) {
-    res.status(500).json({ message: '创建成就失败', error });
+  } catch {
+    res.status(500).json({ message: '创建成就失败' });
   }
 });
 
@@ -278,8 +278,8 @@ router.put('/:id', authenticate, requirePermission('system:achievement'), async 
     );
 
     res.json({ message: '成就更新成功' });
-  } catch (error) {
-    res.status(500).json({ message: '更新成就失败', error });
+  } catch {
+    res.status(500).json({ message: '更新成就失败' });
   }
 });
 
@@ -290,8 +290,8 @@ router.delete('/:id', authenticate, requirePermission('system:achievement'), asy
     await execute(`DELETE FROM user_achievements WHERE achievement_id = ?`, [id]);
     await execute(`DELETE FROM achievements WHERE id = ?`, [id]);
     res.json({ message: '成就删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除成就失败', error });
+  } catch {
+    res.status(500).json({ message: '删除成就失败' });
   }
 });
 
@@ -394,8 +394,8 @@ router.post('/check', authenticate, async (req, res) => {
       message: newAchievements.length > 0 ? `获得 ${newAchievements.length} 个新成就` : '暂无新成就',
       newAchievements
     });
-  } catch (error) {
-    res.status(500).json({ message: '检查成就失败', error });
+  } catch {
+    res.status(500).json({ message: '检查成就失败' });
   }
 });
 
@@ -451,8 +451,8 @@ router.post('/seed', authenticate, requirePermission('system:achievement'), asyn
     }
 
     res.json({ message: `成功初始化 ${seeds.length} 个成就` });
-  } catch (error) {
-    res.status(500).json({ message: '初始化成就失败', error });
+  } catch {
+    res.status(500).json({ message: '初始化成就失败' });
   }
 });
 

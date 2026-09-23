@@ -72,8 +72,8 @@ router.get('/', authenticate, async (req, res) => {
     });
 
     res.json({ data: allEvents });
-  } catch (error) {
-    res.status(500).json({ message: '获取日历事件失败', error });
+  } catch {
+    res.status(500).json({ message: '获取日历事件失败' });
   }
 });
 
@@ -103,8 +103,8 @@ router.post('/', authenticate, async (req, res) => {
     );
 
     res.json({ message: '日历事件创建成功', id: eventId });
-  } catch (error) {
-    res.status(500).json({ message: '创建日历事件失败', error });
+  } catch {
+    res.status(500).json({ message: '创建日历事件失败' });
   }
 });
 
@@ -137,8 +137,8 @@ router.put('/:id', authenticate, async (req, res) => {
     await execute(`UPDATE calendar_events SET ${updates.join(', ')} WHERE id = ?`, params);
 
     res.json({ message: '日历事件更新成功' });
-  } catch (error) {
-    res.status(500).json({ message: '更新日历事件失败', error });
+  } catch {
+    res.status(500).json({ message: '更新日历事件失败' });
   }
 });
 
@@ -157,8 +157,8 @@ router.delete('/:id', authenticate, async (req, res) => {
     await execute(`DELETE FROM calendar_events WHERE id = ?`, [id]);
 
     res.json({ message: '日历事件删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除日历事件失败', error });
+  } catch {
+    res.status(500).json({ message: '删除日历事件失败' });
   }
 });
 

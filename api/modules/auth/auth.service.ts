@@ -43,6 +43,7 @@ export class AuthService {
       userId: user.id,
       username: user.username,
       role: user.role,
+      authVersion: user.authVersion,
     });
 
     await this.dependencies.repository.recordLogin(user);
@@ -108,7 +109,7 @@ export class AuthService {
     return this.getCurrentUser(user.id);
   }
 
-  async logout(): Promise<void> {
-    // Legacy logout intentionally has no server-side token or session state.
+  async logout(userId?: number): Promise<void> {
+    if (userId) await this.dependencies.repository.revokeLegacyTokens(userId);
   }
 }

@@ -99,14 +99,14 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
     await tx.execute(`INSERT INTO creator_ingest_batches(agent_id,batch_id,account_id,parser_version) VALUES(?,?,?,?)`, [agent.id,batchId,account.id,parserVersion]);
     const batch = await tx.queryOne<{id:number}>('SELECT id FROM creator_ingest_batches WHERE agent_id=? AND batch_id=?', [agent.id,batchId]); if (!batch) throw new Error('批次创建失败');
     for (const file of sourceFiles) await tx.execute('INSERT INTO creator_ingest_files(batch_id,sha256,file_type,file_name,size_bytes,dataset_type,source_period) VALUES(?,?,?,?,?,?,?)', [batch.id,text(file.sha256),text(file.file_type),text(file.file_name),Number(file.size_bytes),text(file.dataset_type)||null,text(file.period)||null]);
-    const contentCandidates = await tx.queryAll<{ id:number; title:string; publish_time:string | null; play_count:number; like_count:number; comment_count:number; share_count:number; favorite_count:number; play_duration:number; completion_rate:number; cover_click_rate:number }>(`SELECT i.id,i.title,i.publish_time,
+    const contentCandidates = await tx.queryAll<{ id:number; platform_item_id:string; title:string; publish_time:string | null; play_count:number; like_count:number; comment_count:number; share_count:number; favorite_count:number; play_duration:number; completion_rate:number; cover_click_rate:number }>(`SELECT i.id,i.platform_item_id,i.title,i.publish_time,
       COALESCE(m.play_count,0) play_count,COALESCE(m.like_count,0) like_count,COALESCE(m.comment_count,0) comment_count,
       COALESCE(m.share_count,0) share_count,COALESCE(m.favorite_count,0) favorite_count,COALESCE(m.play_duration,0) play_duration,
       COALESCE(m.completion_rate,0) completion_rate,COALESCE(m.cover_click_rate,0) cover_click_rate
       FROM creator_content_items i LEFT JOIN creator_content_metrics m ON m.id=(SELECT id FROM creator_content_metrics WHERE content_id=i.id ORDER BY snapshot_time DESC,id DESC LIMIT 1)
       WHERE i.account_id=?`, [account.id]);
     const douyinAccount = await tx.queryOne<{ id:number }>('SELECT id FROM douyin_accounts WHERE creator_account_id=? ORDER BY last_sync_time DESC,id DESC LIMIT 1', [account.id]);
-    const workCandidates = douyinAccount ? await tx.queryAll<{ id:number; title:string; publish_time:string | null; play_count:number; like_count:number; comment_count:number; share_count:number; collect_count:number; completion_rate:number }>('SELECT id,title,publish_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate FROM douyin_works WHERE account_id=?', [douyinAccount.id]) : [];
+    const workCandidates = douyinAccount ? await tx.queryAll<{ id:number; aweme_id:string; title:string; publish_time:string | null; play_count:number; like_count:number; comment_count:number; share_count:number; collect_count:number; completion_rate:number }>('SELECT id,aweme_id,title,publish_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate FROM douyin_works WHERE account_id=?', [douyinAccount.id]) : [];
     const latestContent = await tx.queryOne<{collected_at:string}>('SELECT collected_at FROM creator_official_metrics WHERE account_id=? AND source_item_key IS NOT NULL ORDER BY collected_at DESC,id DESC LIMIT 1', [account.id]);
     const staleContentBatch = Boolean(latestContent && Date.parse(latestContent.collected_at) > Date.parse(snapshotTime));
     let inserted=0, updated=0, unchanged=0, rejected=0, staleIgnored=0, dailyInserted=0, dailyUpdated=0, dailyUnchanged=0, reconciledContentRows=0, reconciledWorkRows=0, unmatchedContentRows=0, ambiguousContentRows=0;
@@ -134,10 +134,13 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       if (staleContentBatch) continue;
 
       const titleKey = normalizedOfficialTitle(item.title);
-      if (!titleKey) { unmatchedContentRows++; continue; }
       const sameWork = <T extends { title:string; publish_time:string | null }>(candidate:T) => normalizedOfficialTitle(candidate.title) === titleKey && dateKey(candidate.publish_time) === date;
-      const matchedContents = contentCandidates.filter(sameWork);
-      const matchedWorks = workCandidates.filter(sameWork);
+      const matchedContents = contentCandidates.filter((candidate) => sourceItemKey && candidate.platform_item_id === sourceItemKey).length
+        ? contentCandidates.filter((candidate) => candidate.platform_item_id === sourceItemKey)
+        : titleKey ? contentCandidates.filter(sameWork) : [];
+      const matchedWorks = workCandidates.filter((candidate) => sourceItemKey && candidate.aweme_id === sourceItemKey).length
+        ? workCandidates.filter((candidate) => candidate.aweme_id === sourceItemKey)
+        : titleKey ? workCandidates.filter(sameWork) : [];
       if (!matchedContents.length && !matchedWorks.length) { unmatchedContentRows++; continue; }
       if (matchedContents.length > 1 || matchedWorks.length > 1) { ambiguousContentRows++; continue; }
       const views=optionalNumber(metrics.views), likes=optionalNumber(metrics.likes), comments=optionalNumber(metrics.comments), shares=optionalNumber(metrics.shares), favorites=optionalNumber(metrics.favorites);
@@ -183,6 +186,7 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       // previously observed account value into a new dated fan observation.
       [douyinAccount.id,dateKey(snapshotTime),0,0,contentMetrics.length,officialTotal('views'),officialTotal('likes'),officialTotal('comments'),officialTotal('shares')]);
     }
+    if (douyinAccount) await tx.execute('UPDATE douyin_accounts SET last_sync_time=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [snapshotTime,douyinAccount.id]);
     const warnings = [
       ...(unmatchedContentRows ? [`${unmatchedContentRows} 条官方作品未找到标题与发布日期完全一致的本地记录，已保留官方汇总但未覆盖作品明细`] : []),
       ...(ambiguousContentRows ? [`${ambiguousContentRows} 条官方作品存在多个标题与发布日期相同的本地候选，已保留官方汇总并等待人工确认`] : []),

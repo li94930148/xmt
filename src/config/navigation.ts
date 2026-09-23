@@ -136,6 +136,7 @@ export const navigationSections: NavigationSection[] = [
       { id: 'users', label: '组织权限', icon: Users, path: '/users', permissions: ['user:view'] },
       { id: 'permissions', label: '角色权限', icon: Shield, path: '/permissions', permissions: ['system:role', 'system:permission'], requireAllPermissions: true },
       { id: 'workflow-designer', label: '审批流设计', icon: GitBranch, path: '/workflow-designer', permissions: ['system:template'] },
+      { id: 'topic-templates', label: '选题模板', icon: BookOpen, path: '/templates', permissions: ['system:template'] },
       { id: 'notification-settings', label: '系统配置', icon: Settings, path: '/notification-settings' },
       { id: 'backup', label: '备份管理', icon: Archive, path: '/backup', permissions: ['system:backup'] },
       { id: 'activity', label: '活动日志', icon: Activity, path: '/activity', permissions: ['user:logs'] },

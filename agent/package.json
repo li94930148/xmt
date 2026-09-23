@@ -18,7 +18,7 @@
     "electron:build:mac": "npm run build && npm run collector:runtime:build && node scripts/build-electron-macos.cjs",
     "test:package-runtime": "node scripts/test-package-runtime.cjs",
     "test:package-runtime:mac": "node scripts/test-package-runtime-macos.cjs",
-    "test:collector-cli-export-assertion": "npm run build && node --test dist-desktop/core/collector/exportAssertion.test.js",
+    "test:collector-cli-export-assertion": "npm run build && node --test dist-desktop/core/collector/exportAssertion.test.js dist-desktop/core/uploader/unifiedPayload.test.js",
     "test:cross-platform": "npm run build && node --test dist-desktop/core/browser/session.test.js dist-desktop/core/browser/browserSession.test.js dist-desktop/desktop/coverInspectionState.test.js",
     "browser:list": "npm run build && node dist-desktop/core/browser/cli.js list",
     "browser:test": "npm run build && node dist-desktop/core/browser/cli.js test",

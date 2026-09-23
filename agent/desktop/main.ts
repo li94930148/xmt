@@ -386,6 +386,11 @@ function loopbackUrl(value: string) {
   try { return ['localhost', '127.0.0.1', '::1'].includes(new URL(value).hostname); }
   catch { return false; }
 }
+function assertSecureServerUrl(value: string) {
+  if (!/^https:\/\//i.test(value) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(value)) {
+    throw new Error('服务器地址必须使用 HTTPS');
+  }
+}
 function mayRunQueueScheduler(config: AgentConfig) {
   // An unpackaged development run must never drain a user's persisted
   // production endpoint. Tests may exercise the real sender against loopback.
@@ -612,11 +617,7 @@ function createTray() {
 ipcMain.handle("agent:get-state", () => state());
 ipcMain.handle("agent:setup", async (_event, input: SetupInput) => {
   const serverUrl = input.serverUrl.replace(/\/$/, "");
-  if (
-    !/^https:\/\//i.test(serverUrl) &&
-    !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(serverUrl)
-  )
-    throw new Error("服务器地址必须使用 HTTPS");
+  assertSecureServerUrl(serverUrl);
   const deviceId = fingerprint(),
     browser = defaultBrowserConfig();
   const bound = await bind(serverUrl, input.bindingCode, {
@@ -650,11 +651,7 @@ ipcMain.handle("agent:setup", async (_event, input: SetupInput) => {
 });
 ipcMain.handle("agent:rebind", async (_event, input: RebindInput) => {
   const serverUrl = input.serverUrl.replace(/\/$/, "");
-  if (
-    !/^https:\/\//i.test(serverUrl) &&
-    !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(serverUrl)
-  )
-    throw new Error("服务器地址必须使用 HTTPS");
+  assertSecureServerUrl(serverUrl);
   const config = await readConfig();
   if (!config) throw new Error("请先完成连接");
   stopUploadQueueScheduler();
@@ -743,7 +740,9 @@ ipcMain.handle(
     const found = discoverBrowsers({ customPath: input.executablePath }),
       selected = found.find((item) => item.id === input.browserId) || found[0];
     if (!selected) throw new Error("没有发现可用浏览器");
-    config.serverUrl = input.serverUrl.replace(/\/$/, "");
+    const serverUrl = input.serverUrl.replace(/\/$/, "");
+    assertSecureServerUrl(serverUrl);
+    config.serverUrl = serverUrl;
     config.browserConfig = {
       ...config.browserConfig,
       id: selected.id,

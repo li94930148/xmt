@@ -11,11 +11,13 @@ import {
   getDocStats,
   getUserContributionMap,
 } from '../collaboration/dashboard/collaborationAnalytics';
+import { collaborationAccessPolicy } from '../collaboration/access/CollaborationAccessPolicy';
 
 const router = express.Router();
 
-router.get('/timeline/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
+router.get('/timeline/:docId', authenticate, requirePermission('analytics:view'), async (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
+  if (!await collaborationAccessPolicy.canViewDocument(req.user, docId)) return res.status(403).json({ message: '无权限查看该协作文档' });
   res.json({
     docId,
     events: getTimelineEvents(docId),
@@ -31,8 +33,9 @@ router.get('/timeline/:docId', authenticate, requirePermission('analytics:view')
   });
 });
 
-router.get('/replay/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
+router.get('/replay/:docId', authenticate, requirePermission('analytics:view'), async (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
+  if (!await collaborationAccessPolicy.canViewDocument(req.user, docId)) return res.status(403).json({ message: '无权限查看该协作文档' });
   const from = req.query.from ? Number(req.query.from) : undefined;
   const to = req.query.to ? Number(req.query.to) : undefined;
   const eventId = typeof req.query.eventId === 'string' ? req.query.eventId : null;
@@ -44,8 +47,9 @@ router.get('/replay/:docId', authenticate, requirePermission('analytics:view'), 
   });
 });
 
-router.get('/stats/:docId', authenticate, requirePermission('analytics:view'), (req, res) => {
+router.get('/stats/:docId', authenticate, requirePermission('analytics:view'), async (req, res) => {
   const docId = decodeURIComponent(req.params.docId);
+  if (!await collaborationAccessPolicy.canViewDocument(req.user, docId)) return res.status(403).json({ message: '无权限查看该协作文档' });
   res.json({
     stats: getDocStats(docId),
     contributions: getUserContributionMap(docId),

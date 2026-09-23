@@ -193,7 +193,15 @@
     "test:role-management-security": "tsx tests/auth/role-management-security.test.ts",
     "test:error-response-sanitization": "tsx tests/security/error-response-sanitization.test.ts",
     "test:error-response-sanitization-http": "tsx tests/security/error-response-http-contract.test.ts",
-    "test:code-review-remediation": "tsx tests/security/code-review-remediation.test.ts"
+    "test:code-review-remediation": "tsx tests/security/code-review-remediation.test.ts",
+    "test:integrity:history": "tsx tests/integrity/history-pagination.test.ts",
+    "test:integrity:resources-pomodoro": "tsx tests/integrity/resource-pomodoro.test.ts",
+    "test:integrity:templates": "tsx tests/integrity/template-management.test.ts",
+    "test:integrity:workflow": "tsx tests/integrity/workflow-stage-crud.test.ts",
+    "test:integrity:retrospectives": "tsx tests/integrity/retro-permissions.test.ts",
+    "test:integrity:collaboration-dashboard": "tsx tests/integrity/collaboration-dashboard-access.test.ts",
+    "test:integrity:frontend": "tsx tests/integrity/frontend-mounted-contract.test.ts",
+    "test:integrity": "npm run test:integrity:history && npm run test:integrity:resources-pomodoro && npm run test:integrity:templates && npm run test:integrity:workflow && npm run test:integrity:retrospectives && npm run test:integrity:collaboration-dashboard && npm run test:integrity:frontend"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",

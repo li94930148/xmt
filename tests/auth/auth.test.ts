@@ -77,6 +77,7 @@ async function loginSuccessTest() {
   assert.equal(decoded.userId, enabledUserId);
   assert.equal(decoded.username, 'auth-freeze-user');
   assert.equal(decoded.role, 'member');
+  assert.equal(decoded.authVersion, 1);
   assert.equal((decoded.exp ?? 0) - (decoded.iat ?? 0), 7 * 24 * 60 * 60);
 
   const loginActivity = await queryOne<Record<string, unknown>>(
@@ -197,6 +198,10 @@ async function changePasswordFreezeTests(token: string) {
   assert.equal(success.status, 200);
   assert.deepEqual(await success.json(), { message: '密码修改成功' });
 
+  const invalidatedAfterPasswordChange = await fetch(`${baseUrl}/api/auth-freeze/protected`, { headers });
+  assert.equal(invalidatedAfterPasswordChange.status, 401);
+  assert.deepEqual(await invalidatedAfterPasswordChange.json(), { message: '登录已失效，请重新登录' });
+
   const updatedUser = await queryOne<Record<string, unknown>>(
     'SELECT password, force_change_password FROM users WHERE id = ?',
     [enabledUserId],
@@ -250,8 +255,8 @@ async function logoutFreezeTest(token: string) {
   assert.deepEqual(await logout.json(), { message: '登出成功' });
 
   const afterLogout = await fetch(`${baseUrl}/api/auth-freeze/protected`, { headers });
-  assert.equal(afterLogout.status, 200);
-  assert.deepEqual(await afterLogout.json(), { id: enabledUserId, role: 'director' });
+  assert.equal(afterLogout.status, 401);
+  assert.deepEqual(await afterLogout.json(), { message: '登录已失效，请重新登录' });
 }
 
 try {

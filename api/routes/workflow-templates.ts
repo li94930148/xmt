@@ -20,8 +20,8 @@ router.get('/', authenticate, async (req, res) => {
     `);
 
     res.json(templates);
-  } catch (error) {
-    res.status(500).json({ message: '获取审批流模板失败', error });
+  } catch {
+    res.status(500).json({ message: '获取审批流模板失败' });
   }
 });
 
@@ -45,8 +45,8 @@ router.get('/:id', authenticate, async (req, res) => {
     `, [req.params.id]);
 
     res.json({ ...template, nodes });
-  } catch (error) {
-    res.status(500).json({ message: '获取审批流模板失败', error });
+  } catch {
+    res.status(500).json({ message: '获取审批流模板失败' });
   }
 });
 
@@ -79,8 +79,8 @@ router.post('/', authenticate, requirePermission('system:template'), async (req,
     });
 
     res.json({ message: '审批流模板创建成功', id: templateId });
-  } catch (error) {
-    res.status(500).json({ message: '创建审批流模板失败', error });
+  } catch {
+    res.status(500).json({ message: '创建审批流模板失败' });
   }
 });
 
@@ -116,8 +116,8 @@ router.put('/:id', authenticate, requirePermission('system:template'), async (re
     });
 
     res.json({ message: '审批流模板更新成功' });
-  } catch (error) {
-    res.status(500).json({ message: '更新审批流模板失败', error });
+  } catch {
+    res.status(500).json({ message: '更新审批流模板失败' });
   }
 });
 
@@ -145,8 +145,8 @@ router.delete('/:id', authenticate, requirePermission('system:template'), async 
     });
 
     res.json({ message: '审批流模板删除成功' });
-  } catch (error) {
-    res.status(500).json({ message: '删除审批流模板失败', error });
+  } catch {
+    res.status(500).json({ message: '删除审批流模板失败' });
   }
 });
 
@@ -170,8 +170,8 @@ router.get('/topic/:topicId/records', authenticate, async (req, res) => {
     `, [req.params.topicId]);
 
     res.json(records);
-  } catch (error) {
-    res.status(500).json({ message: '获取审批记录失败', error });
+  } catch {
+    res.status(500).json({ message: '获取审批记录失败' });
   }
 });
 
@@ -344,8 +344,8 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
         : undefined,
       explainability,
     });
-  } catch (error) {
-    res.status(500).json({ message: '审批操作失败', error });
+  } catch {
+    res.status(500).json({ message: '审批操作失败' });
   }
 });
 

@@ -25,6 +25,8 @@ def parse_request(line: str) -> Request:
         raise ProtocolError("invalid_json") from error
     if not isinstance(raw, dict) or not isinstance(raw.get("id"), str) or not isinstance(raw.get("method"), str):
         raise ProtocolError("invalid_request")
+    if raw.get("worker_protocol_version") != PROTOCOL_VERSION:
+        raise ProtocolError("unsupported_worker_protocol")
     params = raw.get("params", {})
     if not isinstance(params, dict):
         raise ProtocolError("invalid_params")
@@ -32,4 +34,4 @@ def parse_request(line: str) -> Request:
 
 
 def event(request_id: str, name: str, data: dict[str, Any]) -> str:
-    return json.dumps({"id": request_id, "event": name, "protocol_version": PROTOCOL_VERSION, "data": data}, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps({"id": request_id, "event": name, "worker_protocol_version": PROTOCOL_VERSION, "data": data}, ensure_ascii=False, separators=(",", ":"))

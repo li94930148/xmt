@@ -2,7 +2,7 @@
  * BubbleMenu - 选中文字浮动工具栏
  * 选中文字后在选区上方显示，支持格式化、颜色、链接、批注等
  */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from 'react';
 import { Editor } from '@tiptap/react';
 import { BubbleMenu as TiptapBubbleMenu } from '@tiptap/react/menus';
 import { useAppStore } from '../../store';
@@ -57,6 +57,11 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const keepEditorSelection = (event: ReactMouseEvent) => {
+    // 阻止工具栏按钮抢焦点，避免编辑器 blur 后 native selection 变为 inactive 浅色
+    event.preventDefault();
+  };
 
   const btnClass = (active?: boolean) =>
     `p-1.5 rounded transition-colors ${
@@ -120,16 +125,16 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
       style={{ minWidth: 'fit-content' }}
     >
       {/* 文字格式 */}
-      <button onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} title="加粗">
+      <button onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} onMouseDown={keepEditorSelection} title="加粗">
         <Bold className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} title="斜体">
+      <button onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} onMouseDown={keepEditorSelection} title="斜体">
         <Italic className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} title="下划线">
+      <button onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} onMouseDown={keepEditorSelection} title="下划线">
         <Underline className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => editor.chain().focus().toggleStrike().run()} className={btnClass(editor.isActive('strike'))} title="删除线">
+      <button onClick={() => editor.chain().focus().toggleStrike().run()} className={btnClass(editor.isActive('strike'))} onMouseDown={keepEditorSelection} title="删除线">
         <Strikethrough className="w-3.5 h-3.5" />
       </button>
 
@@ -137,7 +142,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
 
       {/* 文字颜色 */}
       <div className="relative" ref={textColorRef}>
-        <button onClick={() => { setShowTextColor(!showTextColor); setShowHighlight(false); }} className={`${btnClass()} flex items-center gap-0.5`} title="文字颜色">
+        <button onMouseDown={keepEditorSelection} onClick={() => { setShowTextColor(!showTextColor); setShowHighlight(false); }} className={`${btnClass()} flex items-center gap-0.5`} title="文字颜色">
           <Type className="w-3.5 h-3.5" />
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
@@ -159,7 +164,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
 
       {/* 高亮颜色 */}
       <div className="relative" ref={highlightRef}>
-        <button onClick={() => { setShowHighlight(!showHighlight); setShowTextColor(false); }} className={`${btnClass(editor.isActive('highlight'))} flex items-center gap-0.5`} title="高亮">
+        <button onMouseDown={keepEditorSelection} onClick={() => { setShowHighlight(!showHighlight); setShowTextColor(false); }} className={`${btnClass(editor.isActive('highlight'))} flex items-center gap-0.5`} title="高亮">
           <Highlighter className="w-3.5 h-3.5" />
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
@@ -192,12 +197,12 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
       </button>
 
       {/* 代码 */}
-      <button onClick={() => editor.chain().focus().toggleCode().run()} className={btnClass(editor.isActive('code'))} title="行内代码">
+      <button onClick={() => editor.chain().focus().toggleCode().run()} className={btnClass(editor.isActive('code'))} onMouseDown={keepEditorSelection} title="行内代码">
         <Code className="w-3.5 h-3.5" />
       </button>
 
       {/* 引用 */}
-      <button onClick={() => editor.chain().focus().toggleBlockquote().run()} className={btnClass(editor.isActive('blockquote'))} title="引用">
+      <button onClick={() => editor.chain().focus().toggleBlockquote().run()} className={btnClass(editor.isActive('blockquote'))} onMouseDown={keepEditorSelection} title="引用">
         <Quote className="w-3.5 h-3.5" />
       </button>
 

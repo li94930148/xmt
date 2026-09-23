@@ -1,5 +1,12 @@
 # Changelog
 
+## v3.1.1 - 2026-09-23
+
+- 修复富文本编辑器文字选中在亮色/暗色主题下对比度过低、几乎不可见的问题。
+- 编辑器选区改用主题变量 `--editor-selection-bg` / `--editor-selection-fg`：亮色中深蓝底 + 白字，暗色较亮蓝底 + 白字。
+- 覆盖 Tiptap / contenteditable / 彩色文字与高亮 span 的 native selection，并保持 BubbleMenu 操作时选区清晰。
+- 仅调整选区视觉反馈，不修改正文 HTML/JSON/颜色数据。
+
 ## v3.1.0 - 2026-09-22
 
 - 全站视觉升级为 Studio Atelier 设计系统：统一深空墨蓝色板、发丝线、玻璃层与镜面高光。

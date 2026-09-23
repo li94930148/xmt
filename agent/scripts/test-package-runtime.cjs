@@ -64,11 +64,11 @@ async function main() {
   });
   const request = async (id, method, params, predicate) => {
     const response = waitFor(child, id, predicate);
-    child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+    child.stdin.write(`${JSON.stringify({ id, method, params, worker_protocol_version: 1 })}\n`);
     return response;
   };
   try {
-    await request('health', 'health', {}, (response) => response.event === 'completed' && response.data?.ready === true && response.data?.collector_import === true && response.data?.scrapling_import === true);
+    await request('health', 'health', {}, (response) => response.event === 'completed' && response.worker_protocol_version === 1 && response.data?.ready === true && response.data?.collector_import === true && response.data?.scrapling_import === true);
     await request('collect-smoke', 'collect', {
       platform: 'unsupported',
       browser: { type: 'chromium', engine: 'chromium', runtime: 'playwright', executablePath: 'C:\\Program Files\\XMT\\playwright-chromium.exe', headless: false },

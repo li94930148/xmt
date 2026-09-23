@@ -11,6 +11,16 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '3.1.1',
+    date: '2026-09-23',
+    title: '编辑器文字选中可见性修复',
+    impactScope: ['富文本编辑器', '创作管理', '亮色/暗色主题'],
+    changes: [
+      { type: 'fix', description: '修复亮色/暗色下编辑器文字选区对比度过低、几乎不可见的问题。' },
+      { type: 'improvement', description: '选区统一使用主题高对比色：亮色中深蓝底白字，暗色较亮蓝底白字；彩色文字与高亮亦可辨认。' },
+    ],
+  },
+  {
     version: '3.1.0',
     date: '2026-09-22',
     title: 'Studio Atelier 与项目完整性升级',

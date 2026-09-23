@@ -54,7 +54,7 @@
   }
 
   ::selection {
-    background: color-mix(in srgb, var(--xmt-primary) 35%, transparent);
+    background: color-mix(in srgb, var(--xmt-primary) 28%, transparent);
     color: var(--xmt-text-primary);
   }
 
@@ -299,30 +299,47 @@
   background: var(--editor-code-bg);
 }
 
+/* 编辑器文字选中：统一高对比 selection，仅作用于编辑器内容区 */
 .rich-text-editor::selection,
-.rich-text-editor *::selection {
-  background-color: color-mix(in srgb, var(--xmt-primary) 35%, transparent) !important;
-  color: var(--xmt-text-primary) !important;
+.rich-text-editor *::selection,
+.editor-content::selection,
+.editor-content *::selection,
+.editor-content .ProseMirror::selection,
+.editor-content .ProseMirror *::selection,
+.tiptap::selection,
+.tiptap *::selection,
+[data-contenteditable="true"]::selection,
+[data-contenteditable="true"] *::selection {
+  background-color: var(--editor-selection-bg) !important;
+  color: var(--editor-selection-fg) !important;
   text-shadow: none !important;
 }
 
+.rich-text-editor::-moz-selection,
+.rich-text-editor *::-moz-selection,
+.editor-content::-moz-selection,
+.editor-content *::-moz-selection,
+.editor-content .ProseMirror::-moz-selection,
+.editor-content .ProseMirror *::-moz-selection,
+.tiptap::-moz-selection,
+.tiptap *::-moz-selection,
+[data-contenteditable="true"]::-moz-selection,
+[data-contenteditable="true"] *::-moz-selection {
+  background-color: var(--editor-selection-bg) !important;
+  color: var(--editor-selection-fg) !important;
+  text-shadow: none !important;
+}
+
+/* 彩色/高亮 span 上的辅助选区类，与 native selection 同色 */
 .rich-text-editor span.highlight-selected,
-.rich-text-editor span.highlight-selected * {
-  background-color: color-mix(in srgb, var(--xmt-primary) 35%, transparent) !important;
-  color: var(--xmt-text-primary) !important;
-}
-
-.dark .rich-text-editor::selection,
-.dark .rich-text-editor *::selection {
-  background-color: color-mix(in srgb, var(--xmt-primary) 55%, transparent) !important;
-  color: #F9FAFB !important;
+.rich-text-editor span.highlight-selected *,
+.editor-content span.highlight-selected,
+.editor-content span.highlight-selected *,
+.tiptap span.highlight-selected,
+.tiptap span.highlight-selected * {
+  background-color: var(--editor-selection-bg) !important;
+  color: var(--editor-selection-fg) !important;
   text-shadow: none !important;
-}
-
-.dark .rich-text-editor span.highlight-selected,
-.dark .rich-text-editor span.highlight-selected * {
-  background-color: color-mix(in srgb, var(--xmt-primary) 55%, transparent) !important;
-  color: #F9FAFB !important;
 }
 
 @layer components {

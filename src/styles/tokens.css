@@ -99,6 +99,8 @@ html.dark {
   --editor-soft: var(--xmt-surface-soft);
   --editor-hover: var(--xmt-surface-elevated);
   --editor-code-bg: #0A0F1A;
+  --editor-selection-bg: #5B8CFF;
+  --editor-selection-fg: #FFFFFF;
 }
 
 html.light {
@@ -165,6 +167,8 @@ html.light {
   --editor-soft: #F8FAFC;
   --editor-hover: #F1F5F9;
   --editor-code-bg: #EEF2F7;
+  --editor-selection-bg: #2F5BFF;
+  --editor-selection-fg: #FFFFFF;
 }
 
 @media (prefers-reduced-motion: reduce) {

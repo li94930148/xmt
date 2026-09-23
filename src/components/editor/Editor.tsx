@@ -670,6 +670,18 @@ export default function Editor({
           background: var(--editor-bg);
           color: var(--editor-fg);
         }
+        .tiptap::selection,
+        .tiptap *::selection {
+          background-color: var(--editor-selection-bg) !important;
+          color: var(--editor-selection-fg) !important;
+          text-shadow: none !important;
+        }
+        .tiptap::-moz-selection,
+        .tiptap *::-moz-selection {
+          background-color: var(--editor-selection-bg) !important;
+          color: var(--editor-selection-fg) !important;
+          text-shadow: none !important;
+        }
         .tiptap .ProseMirror {
           min-height: 100%;
           outline: none;

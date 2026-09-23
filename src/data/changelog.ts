@@ -11,6 +11,16 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '3.1.2',
+    date: '2026-09-23',
+    title: '版本操作按钮跨设备显示修复',
+    impactScope: ['创作管理', '版本操作', '跨分辨率'],
+    changes: [
+      { type: 'fix', description: '修复部分电脑/缩放下「另开新版」等版本操作按钮完全不显示的问题。' },
+      { type: 'improvement', description: '核心操作按钮始终可见，空间不足时自动换行，不再被侧栏隐藏或裁切。' },
+    ],
+  },
+  {
     version: '3.1.1',
     date: '2026-09-23',
     title: '编辑器文字选中可见性修复',

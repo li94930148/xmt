@@ -134,7 +134,7 @@ export default function ProductionDetail() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
   const [editData, setEditData] = useState({
     content: '',
     status: 'draft',
@@ -610,7 +610,7 @@ export default function ProductionDetail() {
           <div className="flex flex-wrap items-center gap-2">
             <ActionButton onClick={() => setShowSidebar((prev) => !prev)} className="px-3 py-2" title={showSidebar ? '收起版本历史' : '展开版本历史'}>
               {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
-              版本
+              版本历史
             </ActionButton>
             <ActionButton onClick={startEditing} className="px-3 py-2">
               <FileText className="h-4 w-4" />
@@ -714,19 +714,24 @@ export default function ProductionDetail() {
           )}
         </GlassPanel>
 
-        <GlassPanel className={`${showSidebar ? 'flex' : 'hidden'} self-start flex-col xl:flex`}>
+        <GlassPanel className="flex flex-col self-start overflow-visible">
           <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4">
             <div>
               <p className="text-xs font-semibold text-studio-text-muted">版本历史</p>
               <h2 className="mt-1 text-sm font-semibold text-studio-text-primary">版本记录</h2>
             </div>
-            <button type="button" onClick={() => setShowSidebar(false)} className="rounded-lg p-2 text-studio-text-muted transition hover:bg-white/[0.06] hover:text-studio-text-primary">
-              <PanelRightClose className="h-4 w-4" />
+            <button
+              type="button"
+              onClick={() => setShowSidebar((prev) => !prev)}
+              className="rounded-lg p-2 text-studio-text-muted transition hover:bg-white/[0.06] hover:text-studio-text-primary"
+              title={showSidebar ? '收起版本历史' : '展开版本历史'}
+            >
+              {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
             </button>
           </div>
 
           <div className="space-y-5 p-5">
-            <div className="space-y-2">
+            <div className={`space-y-2 ${showSidebar ? '' : 'hidden'}`}>
               {sidebarVersionEntries.map((entry) => (
                 <button
                   key={entry.id}
@@ -757,16 +762,18 @@ export default function ProductionDetail() {
               {canEditProduction && !editorLocked && <ActionButton onClick={startEditing} className="w-full">
                 当前版本查看 / 编辑
               </ActionButton>}
-              {canEditProduction && !editorLocked && <div className="grid grid-cols-2 gap-2">
-                <ActionButton onClick={() => handleVersionedSave('minor')} className="px-3 py-2">
-                  <Save className="h-4 w-4" />
-                  小修保存
-                </ActionButton>
-                <ActionButton onClick={() => handleVersionedSave('major')} className="px-3 py-2" variant="primary">
-                  <Save className="h-4 w-4" />
-                  另开新版
-                </ActionButton>
-              </div>}
+              {canEditProduction && !editorLocked && (
+                <div className="flex flex-wrap gap-2">
+                  <ActionButton onClick={() => handleVersionedSave('minor')} className="min-w-0 flex-1 px-3 py-2">
+                    <Save className="h-4 w-4" />
+                    小修保存
+                  </ActionButton>
+                  <ActionButton onClick={() => handleVersionedSave('major')} className="min-w-0 flex-1 px-3 py-2" variant="primary">
+                    <Save className="h-4 w-4" />
+                    另开新版
+                  </ActionButton>
+                </div>
+              )}
               {canEditProduction && !editorLocked && editData.status === 'draft' ? (
                 <ActionButton onClick={handleSubmitReview} variant="primary" className="w-full">
                   <ArrowRight className="h-4 w-4" />

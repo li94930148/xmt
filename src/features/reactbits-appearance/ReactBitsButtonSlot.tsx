@@ -22,7 +22,7 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
   const surface = variant === 'primary' || variant === 'ai' ? config.buttonSurface.component : 'standard';
   const interaction = heavyAllowed ? config.buttonInteraction.component : 'none';
   const common = twMerge(
-    'xmt-btn inline-flex min-h-10 w-fit max-w-full shrink-0 appearance-none items-center justify-center gap-2 rounded-button border px-4 py-2.5 text-sm font-semibold leading-[1.25] align-middle',
+    'xmt-btn inline-flex min-h-10 w-fit max-w-full min-w-0 shrink appearance-none items-center justify-center gap-2 rounded-button border px-4 py-2.5 text-sm font-semibold leading-[1.25] align-middle',
     'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary',
     'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
   );

@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "3.1.1",
+  "version": "3.1.2",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -17,6 +17,7 @@
     "test:topics": "tsx tests/topics/topics.test.ts",
     "test:topics-list-notify": "tsx tests/topics/list-fetch-notify.test.ts",
     "test:editor-selection-style": "tsx tests/editor/selection-style-contract.test.ts",
+    "test:version-actions-visibility": "tsx tests/production/version-actions-visibility.test.ts",
     "test:socket": "tsx tests/socket-lifecycle-observability.test.ts",
     "test:socket-client-lifecycle": "tsx tests/socket-client-lifecycle.test.ts",
     "test:api-contract": "tsx tests/api-contract/api-contract.test.ts",

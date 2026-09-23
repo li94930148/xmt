@@ -66,11 +66,6 @@ export function requirePermission(...permissionCodes: string[]) {
     try {
       const userPermissions = await getUserPermissions(req.user.id);
 
-      // admin 角色拥有所有权限
-      if (req.user.role === 'admin') {
-        return next();
-      }
-
       // 检查是否拥有所需权限（任一权限即可）
       const hasPermission = permissionCodes.some(code => userPermissions.includes(code));
 
@@ -112,11 +107,6 @@ export function requireAllPermissions(...permissionCodes: string[]) {
 
     try {
       const userPermissions = await getUserPermissions(req.user.id);
-
-      // admin 角色拥有所有权限
-      if (req.user.role === 'admin') {
-        return next();
-      }
 
       // 检查是否拥有所需的所有权限
       const hasAllPermissions = permissionCodes.every(code => userPermissions.includes(code));

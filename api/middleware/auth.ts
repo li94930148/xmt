@@ -40,6 +40,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   try {
     const legacyPayload = verifyToken(token);
     let userId = Number(legacyPayload?.userId);
+    const isLegacyToken = Number.isSafeInteger(userId) && userId > 0;
+    let legacyAuthVersion = Number(legacyPayload?.authVersion);
 
     // The legacy verifier deliberately does not constrain issuer/audience, so it can
     // decode a V1 token without producing a legacy userId. Recognise V1 explicitly
@@ -56,6 +58,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
           sessionUserId > 0
         ) {
           userId = sessionUserId;
+          legacyAuthVersion = Number.NaN;
         }
       }
     }
@@ -77,6 +80,9 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     }
     
     const resultRecord = result as Record<string, unknown>;
+    if (isLegacyToken && legacyAuthVersion !== Number(resultRecord.auth_version ?? 1)) {
+      return res.status(401).json({ message: '登录已失效，请重新登录' });
+    }
     const user: User = {
       id: Number(resultRecord.id),
       username: String(resultRecord.username),
@@ -97,6 +103,16 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     }
     
     req.user = user;
+    // A password reset is a server-side gate, including direct API callers.
+    // The legacy change-password flow must remain reachable to clear the flag.
+    if (user.force_change_password && ![
+      '/api/auth/change-password', '/api/auth/logout', '/api/auth/me',
+    ].includes(req.path === '/' ? req.baseUrl : `${req.baseUrl}${req.path}`)) {
+      if (req.originalUrl.startsWith('/api/v1/')) {
+        return sendV1Error(req, res, { code: 'PASSWORD_CHANGE_REQUIRED', message: '请先修改密码' }, 403);
+      }
+      return res.status(403).json({ code: 'PASSWORD_CHANGE_REQUIRED', message: '请先修改密码' });
+    }
     next();
   } catch {
     if (req.originalUrl.startsWith('/api/v1/')) {

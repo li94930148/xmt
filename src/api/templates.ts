@@ -15,7 +15,8 @@ export async function getTemplates(): Promise<Template[]> {
     headers: getAuthHeader()
   });
   if (!response.ok) throw new Error('获取模板列表失败');
-  return response.json();
+  const payload = await response.json() as { data?: Template[] };
+  return Array.isArray(payload.data) ? payload.data : [];
 }
 
 export async function createTemplate(data: { name: string; platform?: string; description?: string; template_data: string }): Promise<{ message: string; id: number }> {

@@ -18,6 +18,7 @@ export class SqliteAuthRepository implements AuthRepository {
       name: String(record.name),
       enabled: Number(record.enabled) === 1,
       forceChangePassword: Number(record.force_change_password) === 1,
+      authVersion: Number(record.auth_version ?? 1),
       createdAt: String(record.created_at),
       updatedAt: String(record.updated_at),
     };
@@ -37,16 +38,21 @@ export class SqliteAuthRepository implements AuthRepository {
       name: String(record.name),
       enabled: Number(record.enabled) === 1,
       forceChangePassword: Number(record.force_change_password) === 1,
+      authVersion: Number(record.auth_version ?? 1),
       createdAt: String(record.created_at),
       updatedAt: String(record.updated_at),
     };
   }
 
   async updatePassword(userId: number, passwordHash: string): Promise<void> {
-    await execute("UPDATE users SET password = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", [
+    await execute("UPDATE users SET password = ?, auth_version = auth_version + 1, updated_at = datetime('now', '+8 hours') WHERE id = ?", [
       passwordHash,
       userId,
     ]);
+  }
+
+  async revokeLegacyTokens(userId: number): Promise<void> {
+    await execute("UPDATE users SET auth_version = auth_version + 1, updated_at = datetime('now', '+8 hours') WHERE id = ?", [userId]);
   }
 
   async updateProfile(userId: number, profile: { name: string; email: string }): Promise<void> {

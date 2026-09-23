@@ -805,6 +805,8 @@ async function run() {
         await page.getByRole('button', { name: '外观与动效', exact: true }).click();
         assert(await getThemeMode(page) === originalTheme && await getPresetId(page) === originalPreset, 'Appearance state did not persist after restoration');
       } catch (restoreError) {
+        // Preserve the original test failure; if the test itself passed, surface restoration failure.
+        // eslint-disable-next-line no-unsafe-finally
         if (!failure) throw restoreError;
         console.error(`[reactbits-scene] Creator appearance restoration failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`);
       }

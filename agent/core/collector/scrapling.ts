@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import type { CollectionMode, CreatorSnapshot, CreatorWork } from "../types.js";
+import type { CollectionMode, CreatorSnapshot, CreatorWork, NetworkCapture } from "../types.js";
 import { ScraplingWorkerBridge } from "./workerBridge.js";
 import type { ExportReceipt } from "./exportAssertion.js";
 import type { CollectorBrowserLaunch } from "./browserLaunch.js";
@@ -39,6 +39,7 @@ export class ScraplingCreatorCollector {
       works?: Array<Record<string, unknown>>;
       pages?: number;
       account?: Record<string, unknown>;
+      captures?: Array<Record<string, unknown>>;
       collectionCompleteness?: Record<string, unknown>;
       exports?: ExportReceipt[];
       officialData?: Array<Record<string, unknown>>;
@@ -58,6 +59,16 @@ export class ScraplingCreatorCollector {
       ...work,
     }));
     const workerAccount = data.account || {};
+    const captures: NetworkCapture[] = (data.captures || []).map((capture) => ({
+      page: String(capture.page || 'unknown'),
+      url: String(capture.url || ''),
+      method: String(capture.method || 'GET'),
+      status: Number(capture.status || 0),
+      headers: {},
+      response: capture.response,
+      response_size: Buffer.byteLength(JSON.stringify(capture.response ?? null)),
+      captured_at: String(capture.captured_at || ''),
+    }));
     const observed = (workerAccount.metadata_observed || {}) as Record<string, boolean>;
     const metadata = (key: string) => observed[key] === true ? workerAccount[key] : undefined;
     if ((options.collectionMode || "full_snapshot") === "full_snapshot" && (data.collectionCompleteness?.exhausted !== true || (data.collectionCompleteness?.viewScope as Record<string, unknown> | undefined)?.verified !== true)) {
@@ -66,7 +77,7 @@ export class ScraplingCreatorCollector {
     return {
       schema_version: 1,
       protocol_version: 1,
-      agent_version: "2.14.3-agent",
+      agent_version: "2.14.4-agent",
       platform: "douyin",
       source: "local_creator_center",
       contract_version: "2.10.2",
@@ -97,7 +108,7 @@ export class ScraplingCreatorCollector {
       dashboard: {},
       content_analysis: {},
       fans: {},
-      raw: { api_map: [], captures: [] },
+      raw: { api_map: [], captures },
       videos: works,
       operations: {
         last7Days: {},

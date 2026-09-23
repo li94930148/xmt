@@ -17,6 +17,31 @@ from xmt_collector.platforms.douyin.browser_launch import BrowserLaunchError, pa
 from xmt_collector.runtime.protocol import ProtocolError, event, parse_request
 
 
+def bounded_captures(captures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Forward sanitized XHR evidence over the bridge with a strict size bound."""
+    output: list[dict[str, Any]] = []
+    remaining = 2 * 1024 * 1024
+    for capture in captures[:120]:
+        response = capture.get("response")
+        encoded = json.dumps(response, ensure_ascii=False).encode("utf-8")
+        if len(encoded) > 128 * 1024:
+            response = {"truncated": True, "original_bytes": len(encoded)}
+        item = {
+            "page": capture.get("page", "unknown"),
+            "url": str(capture.get("request_url", "")).split("?", 1)[0],
+            "method": capture.get("method", "GET"),
+            "status": capture.get("response_status", 0),
+            "captured_at": capture.get("captured_at", ""),
+            "response": response,
+        }
+        size = len(json.dumps(item, ensure_ascii=False).encode("utf-8"))
+        if size > remaining:
+            break
+        output.append(item)
+        remaining -= size
+    return output
+
+
 # The frozen Windows Worker talks JSON Lines to Electron over pipes.  The
 # process locale may be a legacy code page, while protocol messages contain
 # Chinese text; make the wire encoding deterministic before emitting events.
@@ -81,7 +106,7 @@ class Worker:
                 "scrapling_import": True,
                 "python": sys.version.split()[0],
                 "scrapling": scrapling.__version__,
-                "protocol_version": PROTOCOL_VERSION,
+                "worker_protocol_version": PROTOCOL_VERSION,
             })
         elif request.method == "cancel":
             target = self.running.get(str(request.params.get("jobId", request.id)))
@@ -144,7 +169,7 @@ class Worker:
             task_id = str(params.get("taskId") or request_id)
             result = await adapter.collect(account_id, str(params.get("scope", "audit")), task_id)
             self.emit(request_id, "capture", {"xhrResponses": result["manifest"]["xhrResponses"]})
-            self.emit(request_id, "completed", {"pages": len(result["capability"]["pages"]), "tabs": sum(len(page["tabs"]) for page in result["capability"]["pages"]), "xhrResponses": result["manifest"]["xhrResponses"], "exports": result["manifest"]["exports"], "manifest": result["manifest"], "capability": result["capability"], "works": result["works"], "account": result["account"], "collectionCompleteness": result["collectionCompleteness"]})
+            self.emit(request_id, "completed", {"pages": len(result["capability"]["pages"]), "tabs": sum(len(page["tabs"]) for page in result["capability"]["pages"]), "xhrResponses": result["manifest"]["xhrResponses"], "exports": result["manifest"]["exports"], "manifest": result["manifest"], "capability": result["capability"], "works": result["works"], "account": result["account"], "captures": bounded_captures(result["captures"]), "collectionCompleteness": result["collectionCompleteness"]})
         except LoginRequired:
             self.emit(request_id, "login_required", {"code": "WAITING_FOR_USER_LOGIN", "message": "请在 Creator Agent 专用浏览器中正常扫码或完成验证码后重试。"})
         except asyncio.CancelledError:

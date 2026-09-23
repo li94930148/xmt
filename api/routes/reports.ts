@@ -2,7 +2,7 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { execute,executeInsert,queryAll,queryOne } from '../database/utils.js';
-const router=express.Router();router.use(authenticate);
+const router=express.Router();router.use((_req,res,next)=>{res.setHeader('Deprecation','true');res.setHeader('Link','</api/daily-reports>; rel="successor-version"');next();});router.use(authenticate);
 const manager=(role?:string)=>role==='admin'||role==='director';
 const encodeIds=(value:unknown)=>JSON.stringify(Array.isArray(value)?value:[]);
 const shape=(row:Record<string,unknown>)=>({...row,receiver_ids:JSON.parse(String(row.receiver_ids||'[]')),cc_user_ids:JSON.parse(String(row.cc_user_ids||'[]'))});

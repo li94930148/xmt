@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { usePermission } from '@/hooks/usePermission';
 
 const actions = [
-  { label: '我的创作', description: '撰写、协作与提交稿件', icon: FilePenLine, path: '/production/content', permission: 'workflow:production' },
+  { label: '我的创作', description: '撰写、协作与提交稿件', icon: FilePenLine, path: '/production/content', permission: 'production:update' },
   { label: '写日报', description: '记录今天的工作进展', icon: PenLine, path: '/daily-report', permission: 'report:daily:submit' },
   { label: '日历', description: '查看排期与重要节点', icon: CalendarDays, path: '/calendar' },
   { label: '看板', description: '跟进流程与待办状态', icon: ListTodo, path: '/kanban' },
@@ -15,7 +15,7 @@ export default function MobileWorkHub() {
   const navigate = useNavigate();
   const { hasPermission, loading } = usePermission();
   const visibleActions = actions.filter((action) => !action.permission || (!loading && hasPermission(action.permission)));
-  const canCreateProduction = !loading && hasPermission('workflow:production');
+  const canCreateProduction = !loading && hasPermission('production:update');
   return <div className="space-y-5">
     <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-5">
       <p className="text-sm text-studio-text-muted">移动工作中心</p>

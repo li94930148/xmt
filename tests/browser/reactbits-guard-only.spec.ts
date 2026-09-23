@@ -82,7 +82,10 @@ async function writeState(page: Page, state: State) {
   const preset = appearance(page).getByRole('region', { name: '视觉方案预设', exact: true }).getByRole('button', { name: new RegExp(`^${presetLabels[state.preset]}(?:\\s|$)`) });
   assert(await preset.count() === 1, `Preset is not unique: ${state.preset}`); await preset.click();
   const analytics = appearance(page).getByLabel('应用到Analytics', { exact: true });
-  if (await analytics.isChecked() !== state.analytics) state.analytics ? await analytics.check() : await analytics.uncheck();
+  if (await analytics.isChecked() !== state.analytics) {
+    if (state.analytics) await analytics.check();
+    else await analytics.uncheck();
+  }
   await motion(page).selectOption(state.motion); await save(page);
   await page.getByRole('combobox', { name: '界面字号', exact: true }).selectOption(state.fontSize); await theme(page).selectOption(state.theme); await savePersonal(page);
 }

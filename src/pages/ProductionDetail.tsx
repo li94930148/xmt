@@ -129,6 +129,9 @@ export default function ProductionDetail() {
   const [production, setProduction] = useState<ProductionType | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null);
   const [history, setHistory] = useState<HistoryVersion[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
@@ -234,7 +237,9 @@ export default function ProductionDetail() {
       ]);
 
       setTopic(topicData);
-      setHistory(historyData);
+      setHistory(historyData.data);
+      setHistoryPage(historyData.page);
+      setHistoryTotal(historyData.total);
       setSelectedVersionId('current');
       setSuperseded(null);
     } catch (error) {
@@ -247,6 +252,19 @@ export default function ProductionDetail() {
       setLoading(false);
     }
   }, [appStore, id]);
+
+  const loadMoreHistory = useCallback(async () => {
+    if (!id || historyLoading || history.length >= historyTotal) return;
+    setHistoryLoading(true);
+    try {
+      const next = await getProductionHistory(Number.parseInt(id, 10), historyPage + 1);
+      setHistory((existing) => [...existing, ...next.data]);
+      setHistoryPage(next.page);
+      setHistoryTotal(next.total);
+    } catch {
+      appStore.addNotification({ title: '加载历史版本失败', message: '请稍后重试', type: 'error' });
+    } finally { setHistoryLoading(false); }
+  }, [appStore, history.length, historyLoading, historyPage, historyTotal, id]);
 
   useEffect(() => {
     void fetchData();
@@ -731,6 +749,7 @@ export default function ProductionDetail() {
                 </button>
               ))}
               {sidebarVersionEntries.length === 0 ? <EmptyState title="暂无版本历史" description="保存版本后会在这里形成时间线。" /> : null}
+              {history.length < historyTotal && <button type="button" disabled={historyLoading} onClick={() => void loadMoreHistory()} className="w-full rounded-lg border border-studio-border-soft px-3 py-2 text-sm text-studio-text-secondary disabled:opacity-50">{historyLoading ? '正在加载…' : '查看更多历史版本'}</button>}
             </div>
 
             <div className="space-y-3 border-t border-studio-border-soft pt-5">

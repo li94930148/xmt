@@ -61,7 +61,7 @@ router.post('/create', authenticate, requirePermission('system:backup'), async (
     res.json({ message: '备份创建成功', name });
   } catch (error) {
     if (error instanceof BackupLockBusyError) return res.status(409).json({ message: '备份正在进行', code: 'LOCK_BUSY' });
-    res.status(500).json({ message: '备份创建失败', error: (error as Error).message });
+    res.status(500).json({ message: '备份创建失败' });
   }
 });
 
@@ -81,8 +81,8 @@ router.get('/list', authenticate, requirePermission('system:backup'), (req, res)
       })
       .sort((a, b) => b.created.localeCompare(a.created));
     res.json(files);
-  } catch (error) {
-    res.status(500).json({ message: '获取备份列表失败', error: (error as Error).message });
+  } catch {
+    res.status(500).json({ message: '获取备份列表失败' });
   }
 });
 
@@ -114,8 +114,8 @@ router.get('/download/:name', authenticate, requirePermission('system:backup'), 
       return res.status(404).json({ message: '备份文件不存在' });
     }
     res.download(filePath, req.params.name);
-  } catch (error) {
-    res.status(500).json({ message: '下载失败', error: (error as Error).message });
+  } catch {
+    res.status(500).json({ message: '下载失败' });
   }
 });
 
@@ -129,8 +129,8 @@ router.delete('/:name', authenticate, requirePermission('system:backup'), (req, 
     }
     fs.unlinkSync(filePath);
     res.json({ message: '备份已删除' });
-  } catch (error) {
-    res.status(500).json({ message: '删除失败', error: (error as Error).message });
+  } catch {
+    res.status(500).json({ message: '删除失败' });
   }
 });
 

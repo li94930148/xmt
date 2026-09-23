@@ -157,15 +157,14 @@ export class SqliteTopicRepository implements TopicRepository {
     return updateTopic({ execute }, id, patch);
   }
 
-  async deleteLegacyRelations(topicId: number | string) {
-    try { await execute("DELETE FROM comments WHERE target_type = 'topic' AND target_id = ?", [topicId]); } catch { /* legacy best effort */ }
-    try { await execute('DELETE FROM shooting WHERE topic_id = ?', [topicId]); } catch { /* legacy best effort */ }
-    try { await execute('DELETE FROM production_history WHERE production_id IN (SELECT id FROM production WHERE topic_id = ?)', [topicId]); } catch { /* legacy best effort */ }
-    try { await execute('DELETE FROM production WHERE topic_id = ?', [topicId]); } catch { /* legacy best effort */ }
-    try { await execute('DELETE FROM topic_history WHERE topic_id = ?', [topicId]); } catch { /* legacy best effort */ }
-  }
-
   async deleteTopic(topicId: number | string) {
-    await execute('DELETE FROM topics WHERE id = ?', [topicId]);
+    await runInTransaction(async (tx) => {
+      await tx.execute("DELETE FROM comments WHERE target_type = 'topic' AND target_id = ?", [topicId]);
+      await tx.execute('DELETE FROM shooting WHERE topic_id = ?', [topicId]);
+      await tx.execute('DELETE FROM production_history WHERE production_id IN (SELECT id FROM production WHERE topic_id = ?)', [topicId]);
+      await tx.execute('DELETE FROM production WHERE topic_id = ?', [topicId]);
+      await tx.execute('DELETE FROM topic_history WHERE topic_id = ?', [topicId]);
+      await tx.execute('DELETE FROM topics WHERE id = ?', [topicId]);
+    });
   }
 }

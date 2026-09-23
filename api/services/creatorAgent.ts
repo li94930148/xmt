@@ -59,6 +59,7 @@ export async function heartbeatCreatorAgent(body:Record<string,unknown>,authoriz
   const agent=await queryOne<AgentRow>("SELECT id,user_id,platform,account_id,token_hash FROM creator_agents WHERE id=?",[Number(body.agent_id)]);
   if(!token||!agent||!(await bcrypt.compare(token,agent.token_hash)))throw Object.assign(new Error('Agent 身份认证失败'),{statusCode:401});
   if(String(body.account_id||'')!==agent.account_id)throw Object.assign(new Error('Agent 账号绑定不匹配'),{statusCode:403});
+  if(body.protocol_version!==1)throw Object.assign(new Error('Agent 协议版本不受支持'),{statusCode:400});
   await execute(`UPDATE creator_agents SET device_name=?,os=?,agent_version=?,protocol_version=?,browser_login_status=?,browser_type=?,browser_version=?,browser_engine=?,browser_runtime=?,browser_session_mode=?,browser_compatibility=?,last_heartbeat_at=CURRENT_TIMESTAMP,last_active_at=CURRENT_TIMESTAMP WHERE id=?`,[String(body.device_name||''),String(body.os||''),String(body.agent_version||''),Number(body.protocol_version)||1,String(body.browser_login_status||'unknown'),String(body.browser_type||''),String(body.browser_version||''),String(body.browser_engine||''),String(body.browser_runtime||''),String(body.session_mode||''),String(body.compatibility_status||'not_tested'),agent.id]);
   return{success:true,server_time:new Date().toISOString(),protocol_version:1};
 }

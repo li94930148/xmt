@@ -2,6 +2,7 @@ import express from 'express';
 import { beijingNow, beijingToday, queryOne, queryAll } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
+import { sendSafeServerError } from '../utils/response';
 
 const router = express.Router();
 
@@ -68,7 +69,7 @@ router.get('/topics', authenticate, requirePermission('export:data'), async (req
 
     res.json({ data: topics, stats, exportTime: beijingNow() });
   } catch (error) {
-    res.status(500).json({ message: '导出选题数据失败', error });
+    sendSafeServerError(res, '导出选题数据失败', 'export:topics', error);
   }
 });
 
@@ -131,7 +132,7 @@ router.get('/analytics', authenticate, requirePermission('export:data'), async (
       exportTime: beijingNow(),
     });
   } catch (error) {
-    res.status(500).json({ message: '导出分析数据失败', error });
+    sendSafeServerError(res, '导出分析数据失败', 'export:analytics', error);
   }
 });
 
@@ -216,7 +217,7 @@ router.get('/weekly-report', authenticate, requirePermission('export:data'), asy
       generatedAt: beijingNow(),
     });
   } catch (error) {
-    res.status(500).json({ message: '生成周报失败', error });
+    sendSafeServerError(res, '生成周报失败', 'export:weekly', error);
   }
 });
 

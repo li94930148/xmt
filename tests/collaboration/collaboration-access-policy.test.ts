@@ -10,18 +10,33 @@ const { initDatabase, closeDatabase } = await import('../../api/database/db.js')
 const { executeInsert } = await import('../../api/database/utils.js');
 const { collaborationAccessPolicy, parseCollaborationRoom } = await import('../../api/collaboration/access/CollaborationAccessPolicy.js');
 const { joinRoom, handleDocumentUpdate, handleAwarenessUpdate, handleTyping } = await import('../../api/collaboration/core/roomManager.js');
+const { getDocLock, getLockEvents, releaseLock, setDocLocked } = await import('../../api/collaboration/control/collaborationGuard.js');
 
 await initDatabase();
 
+await setDocLocked('production:lock-persistence', '审核中', '7');
+assert.deepEqual(await getDocLock('production:lock-persistence'), {
+  docId: 'production:lock-persistence',
+  reason: '审核中',
+  lockedAt: (await getDocLock('production:lock-persistence'))?.lockedAt,
+});
+assert.equal((await getLockEvents('production:lock-persistence', 1)).length, 1);
+assert.equal(await releaseLock('production:lock-persistence', '7'), true);
+assert.equal(await getDocLock('production:lock-persistence'), null);
+assert.equal((await getLockEvents('production:lock-persistence', 500))[0]?.action, 'unlocked');
+
 const ownerId = await executeInsert(`INSERT INTO users (username,password,email,role,name,enabled,force_change_password) VALUES (?,?,?,?,?,?,?)`, ['collaboration-owner', 'unused', 'owner@example.invalid', 'member', 'Owner', 1, 0]);
 const outsiderId = await executeInsert(`INSERT INTO users (username,password,email,role,name,enabled,force_change_password) VALUES (?,?,?,?,?,?,?)`, ['collaboration-outsider', 'unused', 'outsider@example.invalid', 'member', 'Outsider', 1, 0]);
+const participantId = await executeInsert(`INSERT INTO users (username,password,email,role,name,enabled,force_change_password) VALUES (?,?,?,?,?,?,?)`, ['collaboration-participant', 'unused', 'participant@example.invalid', 'member', 'Participant', 1, 0]);
 const topicId = await executeInsert(`INSERT INTO topics (title,description,platform,creator_id,status) VALUES (?,?,?,?,?)`, ['协作授权', '', 'douyin', ownerId, 'pending']);
-const productionId = await executeInsert(`INSERT INTO production (topic_id,version,content,status,operator_id) VALUES (?,?,?,?,?)`, [topicId, 1, '', 'draft', ownerId]);
+const productionId = await executeInsert(`INSERT INTO production (topic_id,version,content,status,operator_id) VALUES (?,?,?,?,?)`, [topicId, 1, '', 'draft', participantId]);
 const shootingId = await executeInsert(`INSERT INTO shooting (topic_id,status,operator_id) VALUES (?,?,?)`, [topicId, 'planned', ownerId]);
 
 const owner = { id: ownerId, role: 'member', enabled: true } as never;
 const outsider = { id: outsiderId, role: 'member', enabled: true } as never;
+const participant = { id: participantId, role: 'member', enabled: true } as never;
 const disabledOwner = { id: ownerId, role: 'member', enabled: false } as never;
+const unassignedEditor = { id: outsiderId, role: 'editor', enabled: true } as never;
 
 assert.deepEqual(parseCollaborationRoom(`production:${productionId}`), { kind: 'production', id: productionId, roomId: `production:${productionId}` });
 assert.equal(parseCollaborationRoom('production:0'), null);
@@ -35,6 +50,9 @@ assert.equal(await collaborationAccessPolicy.canEditDocument(owner, `production:
 assert.equal(await collaborationAccessPolicy.canViewDocument(owner, `shooting:${shootingId}`), true);
 assert.equal(await collaborationAccessPolicy.canViewDocument(outsider, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canEditDocument(outsider, `shooting:${shootingId}`), false);
+assert.equal(await collaborationAccessPolicy.canEditDocument(unassignedEditor, `production:${productionId}`), false);
+assert.equal(await collaborationAccessPolicy.canViewDocument(participant, `production:${productionId}`), true);
+assert.equal(await collaborationAccessPolicy.canEditDocument(participant, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(disabledOwner, `production:${productionId}`), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(owner, 'production:999999'), false);
 assert.equal(await collaborationAccessPolicy.canViewDocument(undefined, `production:${productionId}`), false);
@@ -55,12 +73,14 @@ const roomId = `production:${productionId}`;
 const beforeContent = await (await import('../../api/database/utils.js')).queryOne<{ content: string }>('SELECT content FROM production WHERE id = ?', [productionId]);
 await handleDocumentUpdate(fakeIo, fakeSocket, { roomId, update: [] });
 handleAwarenessUpdate(fakeSocket, { roomId, update: [] });
-handleTyping(fakeIo, fakeSocket, { roomId, typing: true });
+await handleTyping(fakeIo, fakeSocket, { roomId, typing: true });
 assert.equal(broadcasts.some((item) => item.event === 'collaboration:update' || item.event === 'collaboration:awareness-update' || item.event === 'collaboration:typing'), false);
 assert.equal((await (await import('../../api/database/utils.js')).queryOne<{ content: string }>('SELECT content FROM production WHERE id = ?', [productionId]))?.content, beforeContent?.content);
-const deniedSocket = { ...fakeSocket, id: 'collaboration-denied-socket', data: { user: { ...outsider, name: 'Outsider' }, auth: { userId: outsiderId } }, emit: () => undefined } as never;
+const deniedEvents: string[] = [];
+const deniedSocket = { ...fakeSocket, id: 'collaboration-denied-socket', data: { user: { ...outsider, name: 'Outsider' }, auth: { userId: outsiderId } }, emit: (event: string) => deniedEvents.push(event) } as never;
 await joinRoom(fakeIo, deniedSocket, { roomId, user: { id: ownerId, name: 'forged owner', role: 'admin', color: '#000' } });
 assert.equal(Boolean((deniedSocket.data.collaborationRooms as Set<string> | undefined)?.has(roomId)), false);
+assert.equal(deniedEvents.includes('collaboration:conflict-detected'), true);
 const anonymousSocket = { ...fakeSocket, id: 'collaboration-anonymous-socket', data: {}, emit: () => undefined } as never;
 await joinRoom(fakeIo, anonymousSocket, { roomId, user: { id: ownerId, name: 'Owner', role: 'member', color: '#000' } });
 assert.equal(Boolean((anonymousSocket.data.collaborationRooms as Set<string> | undefined)?.has(roomId)), false);

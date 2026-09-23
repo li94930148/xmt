@@ -5,4 +5,5 @@ export const migrationPolicies: Readonly<Record<string, MigrationPolicy>> = {
   '001': 'SAFE_EXPAND', '002': 'SAFE_EXPAND', '003': 'SAFE_EXPAND', '004': 'SAFE_EXPAND',
   '005': 'SAFE_EXPAND', '006': 'REVIEW_REQUIRED', '007': 'REVIEW_REQUIRED', '008': 'SAFE_EXPAND', '009': 'SAFE_EXPAND',
   '010': 'SAFE_EXPAND', '011': 'SAFE_EXPAND', '012': 'SAFE_EXPAND', '013': 'SAFE_EXPAND', '014': 'SAFE_EXPAND',
+  '015': 'REVIEW_REQUIRED',
 };

@@ -5,7 +5,7 @@ export { getTopics, getTopic, createTopic, updateTopic, deleteTopic, auditTopic,
 export { getUsers, getAssignableRoles, createUser, updateUser, deleteUser, getLogs } from './users';
 export { getMessages, getUnreadCount, markMessageAsRead, clearMessages, markAllAsRead } from './messages';
 export { getTeamStats, getMonthlyStats, getUserStats, createAnalytics, getTopicAnalytics } from './analytics';
-export { getResources, createResource, updateResource, deleteResource, getCategories, getArchives, getArchiveDetail } from './resources';
+export { deleteResource, getCategories, getArchives, getArchiveDetail } from './resources';
 export {
   getProduction, createProduction, getProductionById, updateProduction, deleteProduction, getProductionHistory,
   getComments, addComment, deleteComment,
@@ -41,13 +41,6 @@ export type { CalendarEvent } from './calendar';
 export { exportTopics, exportAnalytics, getWeeklyReport } from './export';
 export * from './retrospectives';
 export { getActivityLogs } from './users';
-
-// 抖音数据
-export {
-  getDouyinAccounts, addDouyinAccount, deleteDouyinAccount,
-  scrapeDouyin, getDouyinSnapshots, getDouyinVideos, getDouyinTrend
-} from './douyin';
-export type { DouyinAccount, DouyinSnapshot, DouyinVideo } from './douyin';
 
 // 权限管理
 export {
@@ -118,20 +111,3 @@ export type {
   SaveDailyReportDraftPayload,
   TeamDailyReportResponse,
 } from './dailyReports';
-export {
-  getSocialAccountsOverview,
-  getSocialHotVideos,
-  getSocialIngestionJobs,
-  getSocialAccount,
-  getSocialDashboard,
-  getSocialDailySummary,
-  getSocialDataQuality,
-} from './socialReview';
-export type {
-  AccountDashboard,
-  DailySummary,
-  DataQuality,
-  IngestionJob,
-  SocialAccountOverview,
-  VideoPerformanceItem,
-} from './socialReview';

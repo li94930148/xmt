@@ -123,17 +123,17 @@ async function saveSettings(settings: ManagedSystemSettings) {
 
 router.get('/public', async (_req, res) => {
   try {
-    res.json({ ...(await loadSettings()), version: APP_VERSION });
-  } catch (error) {
-    res.status(500).json({ message: '获取公开系统设置失败', error });
+    res.json(await loadSettings());
+  } catch {
+    res.status(500).json({ message: '获取公开系统设置失败' });
   }
 });
 
 router.get('/', authenticate, requirePermission('system:settings'), async (_req, res) => {
   try {
     res.json({ ...(await loadSettings()), version: APP_VERSION });
-  } catch (error) {
-    res.status(500).json({ message: '获取系统设置失败', error });
+  } catch {
+    res.status(500).json({ message: '获取系统设置失败' });
   }
 });
 
@@ -148,8 +148,8 @@ router.put('/', authenticate, requirePermission('system:settings'), async (req, 
 
     await saveSettings(next);
     res.json({ ...next, version: APP_VERSION });
-  } catch (error) {
-    res.status(500).json({ message: '保存系统设置失败', error });
+  } catch {
+    res.status(500).json({ message: '保存系统设置失败' });
   }
 });
 

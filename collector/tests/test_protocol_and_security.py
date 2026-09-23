@@ -9,7 +9,7 @@ from xmt_collector.security.sanitizer import sanitize
 
 
 def test_protocol_requires_id_method_and_object_params():
-    request = parse_request('{"id":"a","method":"health","params":{}}')
+    request = parse_request('{"id":"a","method":"health","params":{},"worker_protocol_version":1}')
     assert request.id == "a"
     with pytest.raises(ProtocolError):
         parse_request('{"method":"health"}')
@@ -39,9 +39,9 @@ def test_worker_accepts_health_while_collection_task_is_running():
             await release.wait()
 
         worker.collect = delayed_collect  # type: ignore[method-assign]
-        await worker.handle('{"id":"job","method":"collect","params":{}}')
+        await worker.handle('{"id":"job","method":"collect","params":{},"worker_protocol_version":1}')
         await asyncio.wait_for(started.wait(), timeout=1)
-        await worker.handle('{"id":"health","method":"health","params":{}}')
+        await worker.handle('{"id":"health","method":"health","params":{},"worker_protocol_version":1}')
         assert any(event[0] == "health" and event[1] == "completed" for event in events)
         release.set()
         await asyncio.sleep(0)
@@ -63,9 +63,9 @@ def test_worker_shutdown_waits_for_running_collection_cleanup():
                 raise
 
         worker.collect = waits_for_cancellation  # type: ignore[method-assign]
-        await worker.handle('{"id":"job","method":"collect","params":{}}')
+        await worker.handle('{"id":"job","method":"collect","params":{},"worker_protocol_version":1}')
         await asyncio.sleep(0)
-        await worker.handle('{"id":"stop","method":"shutdown","params":{}}')
+        await worker.handle('{"id":"stop","method":"shutdown","params":{},"worker_protocol_version":1}')
         assert any(event[0] == "stop" and event[1] == "completed" for event in events)
         assert worker.tasks == {}
 

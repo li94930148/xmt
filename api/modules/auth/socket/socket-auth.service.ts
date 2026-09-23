@@ -6,7 +6,6 @@ import type {
   SocketAuthDependencies,
   SocketAuthHandshake,
   SocketAuthIdentity,
-  SocketRoomJoinInput,
 } from './socket-auth.types.js';
 
 export class SocketAuthService {
@@ -78,9 +77,4 @@ export class SocketAuthService {
     if (Number(user.enabled) !== 1) throw new SocketAuthError('USER_DISABLED', 'User disabled');
     return { auth: mapSocketAuthContext(contextInput), user: mapSocketUser(user), session };
   }
-}
-
-export function authorizeSocketRoomJoin(input: SocketRoomJoinInput): boolean {
-  // Reserved policy boundary. Current business room permissions remain unchanged.
-  return Number.isInteger(input.userId) && input.userId > 0 && input.roomId.trim().length > 0;
 }

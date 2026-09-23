@@ -51,8 +51,8 @@ router.get('/monthly', authenticate, requirePermission('analytics:view'), async 
       total_comments: result?.total_comments || 0,
       topic_count: result?.topic_count || 0,
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取月度统计失败', error });
+  } catch {
+    res.status(500).json({ message: '获取月度统计失败' });
   }
 });
 
@@ -86,8 +86,8 @@ router.get('/user', authenticate, requirePermission('analytics:view'), async (re
     );
 
     res.json(userStats);
-  } catch (error) {
-    res.status(500).json({ message: '获取用户统计失败', error });
+  } catch {
+    res.status(500).json({ message: '获取用户统计失败' });
   }
 });
 
@@ -142,8 +142,8 @@ router.get('/team', authenticate, requirePermission('analytics:view'), async (re
           : '0',
       avg_days: avgDays && Number(avgDays.avg_days) ? Number(avgDays.avg_days).toFixed(1) : '0',
     });
-  } catch (error) {
-    res.status(500).json({ message: '获取团队统计失败', error });
+  } catch {
+    res.status(500).json({ message: '获取团队统计失败' });
   }
 });
 
@@ -187,8 +187,8 @@ router.post('/', authenticate, requirePermission('analytics:create'), async (req
     });
 
     res.json({ message: '数据录入成功' });
-  } catch (error) {
-    res.status(500).json({ message: '录入数据失败', error });
+  } catch {
+    res.status(500).json({ message: '录入数据失败' });
   }
 });
 
@@ -201,8 +201,8 @@ router.get('/topic/:topicId', authenticate, requirePermission('analytics:view'),
 
     const analytics = await queryAll(`SELECT * FROM analytics WHERE topic_id = ? ORDER BY data_date DESC`, [topicId]);
     res.json(analytics);
-  } catch (error) {
-    res.status(500).json({ message: '获取选题数据失败', error });
+  } catch {
+    res.status(500).json({ message: '获取选题数据失败' });
   }
 });
 

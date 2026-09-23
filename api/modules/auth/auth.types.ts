@@ -9,6 +9,7 @@ export type AuthUserRecord = {
   name: string;
   enabled: boolean;
   forceChangePassword: boolean;
+  authVersion: number;
   createdAt: string;
   updatedAt: string;
 };

@@ -59,7 +59,7 @@ try {
   assert.match(ipLimited.headers.get('ratelimit') || '', /limit=/i);
   assert.equal(typeof ipBody.retryAfterSeconds, 'number');
 
-  // Auth requests do not consume the shared business API quota.
+  // This fixture mounts only the dedicated login limiter ahead of the shared bucket.
   assert.equal((await login('auth-isolated', 'wrong', '203.0.113.4')).status, 401);
   assert.equal((await fetch(`${baseUrl}/api/data`, { headers: { 'x-forwarded-for': '203.0.113.4' } })).status, 200);
   assert.equal((await fetch(`${baseUrl}/api/data`, { headers: { 'x-forwarded-for': '203.0.113.4' } })).status, 200);
@@ -74,7 +74,24 @@ try {
   assert.equal(parseTrustProxy('1'), 1);
   assert.equal(parseTrustProxy('true'), 1);
   assert.equal(parseTrustProxy('999'), 1);
-  console.log('Rate-limit contract tests passed');
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 }
+
+// Match app.ts ordering: auth requests also consume the shared API bucket.
+const sharedAuthApp = express();
+const sharedAuthLimiter = createRateLimiters({ ...config, api: { enabled: true, windowMs: 60_000, max: 1 } }).apiLimiter;
+sharedAuthApp.use('/api/', sharedAuthLimiter);
+sharedAuthApp.get('/api/auth/me', (_req, res) => res.json({ success: true }));
+const sharedAuthServer = sharedAuthApp.listen(0, '127.0.0.1');
+await new Promise<void>((resolve) => sharedAuthServer.once('listening', resolve));
+const sharedAddress = sharedAuthServer.address();
+assert(sharedAddress && typeof sharedAddress !== 'string');
+try {
+  const authUrl = `http://127.0.0.1:${sharedAddress.port}/api/auth/me`;
+  assert.equal((await fetch(authUrl)).status, 200);
+  assert.equal((await fetch(authUrl)).status, 429);
+} finally {
+  await new Promise<void>((resolve, reject) => sharedAuthServer.close((error) => error ? reject(error) : resolve()));
+}
+console.log('Rate-limit contract tests passed');

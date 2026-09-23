@@ -1231,7 +1231,8 @@ async function initTables() {
       ['topic:audit', '审核选题', 'topic'],
       ['topic:status', '变更选题状态', 'topic'],
       // 工作流模块
-      ['workflow:production', '管理创作阶段', 'workflow'],
+      ['production:view', '查看创作记录', 'production'],
+      ['production:update', '更新创作记录', 'production'],
       ['workflow:shooting', '管理拍摄阶段', 'workflow'],
       ['workflow:publishing', '管理发布阶段', 'workflow'],
       ['workflow:comment', '评论', 'workflow'],
@@ -1295,7 +1296,7 @@ async function initTables() {
 
     // 内容生产角色拥有内容查看和编辑权限，但不授予系统管理、用户管理、角色权限管理或删除权限。
     const contentRoles = await db.execute(`SELECT id, code FROM roles WHERE code IN ('editor', 'copywriter', 'post_production', 'camera')`);
-    const contentPerms = await db.execute(`SELECT id FROM permissions WHERE code IN ('topic:create', 'topic:view', 'topic:update', 'workflow:production', 'workflow:shooting', 'workflow:publishing', 'workflow:comment')`);
+    const contentPerms = await db.execute(`SELECT id FROM permissions WHERE code IN ('topic:create', 'topic:view', 'topic:update', 'production:view', 'production:update', 'workflow:shooting', 'workflow:publishing', 'workflow:comment')`);
     for (const role of contentRoles.rows) {
       for (const perm of contentPerms.rows) {
         await db.execute({ sql: `INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)`, args: [role.id, perm.id] });
@@ -1338,7 +1339,7 @@ async function initTables() {
     `SELECT id, code FROM roles WHERE code IN ('editor', 'copywriter', 'post_production', 'camera')`
   );
   const contentPermissionRows = await db.execute(
-    `SELECT id, code FROM permissions WHERE code IN ('topic:create', 'topic:view', 'topic:update', 'workflow:production', 'workflow:shooting', 'workflow:publishing', 'workflow:comment')`
+    `SELECT id, code FROM permissions WHERE code IN ('topic:create', 'topic:view', 'topic:update', 'production:view', 'production:update', 'workflow:shooting', 'workflow:publishing', 'workflow:comment')`
   );
 
   for (const role of contentRoleRows.rows) {
@@ -1534,6 +1535,14 @@ async function initTables() {
       args: ['member2', member2Password, 'member2@local.dev', 'member', '员工李四', 1, 1]
     });
   }
+  // Default users are created after the original role backfill. Reconcile only
+  // those bootstrap accounts when no explicit RBAC assignment exists.
+  await db.execute(`
+    INSERT OR IGNORE INTO user_roles (user_id, role_id)
+    SELECT u.id, r.id FROM users u JOIN roles r ON r.code = u.role
+    WHERE u.username IN ('admin', 'director', 'member1', 'member2')
+      AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id)
+  `);
 }
 
 async function migrateAnonymousFeedback() {

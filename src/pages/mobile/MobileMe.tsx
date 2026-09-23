@@ -5,6 +5,7 @@ import { changePassword, updateMyProfile } from '@/api';
 import { changelog } from '@/data/changelog';
 import { usePermission } from '@/hooks/usePermission';
 import { useAppStore, useAuthStore } from '@/store';
+import { ROLE_MAP } from '@/constants';
 
 export default function MobileMe() {
   const navigate = useNavigate();
@@ -46,7 +47,7 @@ export default function MobileMe() {
   const row = 'flex min-h-14 w-full items-center justify-between border-t border-studio-border-soft px-4 text-sm';
   return <div className="space-y-4">
     <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-5">
-      <div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-studio-primary/15 text-studio-cyan"><UserRound className="h-5 w-5" /></span><div><p className="text-lg font-semibold">{user?.name ?? '我的账号'}</p><p className="mt-1 text-sm text-studio-text-muted">{user?.role ?? '成员'}</p></div></div>
+      <div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-studio-primary/15 text-studio-cyan"><UserRound className="h-5 w-5" /></span><div><p className="text-lg font-semibold">{user?.name ?? '我的账号'}</p><p className="mt-1 text-sm text-studio-text-muted">{ROLE_MAP[user?.role || ''] || '成员'}</p></div></div>
       <div className="mt-4 space-y-3"><label className="block text-sm">姓名<input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-studio-border-soft bg-transparent px-3" /></label><label className="block text-sm">邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} inputMode="email" className="mt-1 min-h-11 w-full rounded-xl border border-studio-border-soft bg-transparent px-3" /></label><button type="button" disabled={saving} onClick={() => void saveProfile()} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-studio-primary px-4 text-sm text-white disabled:opacity-50"><Save className="h-4 w-4" />{saving ? '保存中…' : '保存个人资料'}</button>{profileNotice ? <p role="status" className="text-sm text-studio-text-secondary">{profileNotice}</p> : null}</div>
     </section>
     <section className="overflow-hidden rounded-2xl border border-studio-border-soft bg-studio-surface"><button type="button" onClick={toggleTheme} className="flex min-h-14 w-full items-center justify-between px-4 text-sm"><span className="inline-flex items-center gap-3">{theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}主题</span><span className="text-studio-text-muted">{theme === 'dark' ? '深色' : '浅色'}</span></button><div className={row}><span className="inline-flex items-center gap-3"><SlidersHorizontal className="h-5 w-5" />字体大小</span><div className="flex gap-1">{[14, 16, 18].map((size) => <button type="button" key={size} onClick={() => setFontSize(size)} className={`min-h-9 min-w-9 rounded-lg text-xs ${fontSize === size ? 'bg-studio-primary text-white' : 'border border-studio-border-soft'}`}>{size}</button>)}</div></div><button type="button" onClick={() => navigate('/notification-settings')} className={row}><span>消息通知偏好</span><ChevronRight className="h-5 w-5 text-studio-text-muted" /></button></section>

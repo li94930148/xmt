@@ -564,12 +564,12 @@ export default function ProductionDetail() {
       `}</style>
 
       <GlassPanel className="overflow-hidden">
-        <div className="flex flex-col gap-4 border-b border-studio-border-soft bg-white/[0.025] px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-col gap-4 border-b border-studio-border-soft bg-[var(--xmt-overlay-tint)] px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <button
               type="button"
               onClick={() => void handleGuardedNavigate('/production')}
-              className="mt-1 rounded-button border border-studio-border-soft bg-white/[0.04] p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+              className="mt-1 rounded-button border border-studio-border-soft bg-studio-surface-soft/70 p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
               title="返回创作管理"
             >
               <ChevronLeft className="h-5 w-5" />
@@ -588,7 +588,7 @@ export default function ProductionDetail() {
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
                 <span>{production.version || 'v1.0'}</span>
-                <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="text-studio-cyan transition hover:text-white">
+                <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="text-studio-cyan transition hover:text-studio-primary-contrast">
                   {topic?.title || production.topic_title || '关联选题'}
                 </button>
                 <span className="inline-flex items-center gap-1">
@@ -662,8 +662,8 @@ export default function ProductionDetail() {
       <ProductionResourcesPanel productionId={production.id} canManage={canManageProductionResources} />
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <GlassPanel className="min-w-0">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft bg-white/[0.025] px-5 py-3">
+        <GlassPanel className="min-w-0 overflow-visible">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft bg-[var(--xmt-overlay-tint)] px-5 py-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-studio-text-primary">{selectedVersion?.version || production.version}</span>
               <StatusPill tone={selectedVersion?.changeType === 'major' ? 'violet' : selectedVersion?.changeType === 'minor' ? 'primary' : 'success'}>
@@ -723,7 +723,7 @@ export default function ProductionDetail() {
             <button
               type="button"
               onClick={() => setShowSidebar((prev) => !prev)}
-              className="rounded-lg p-2 text-studio-text-muted transition hover:bg-white/[0.06] hover:text-studio-text-primary"
+              className="rounded-lg p-2 text-studio-text-muted transition hover:bg-studio-surface-elevated/70 hover:text-studio-text-primary"
               title={showSidebar ? '收起版本历史' : '展开版本历史'}
             >
               {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
@@ -740,7 +740,7 @@ export default function ProductionDetail() {
                   className={`w-full rounded-card border px-4 py-3 text-left transition ${
                     selectedVersionId === entry.id
                       ? 'border-studio-border-active bg-studio-primary/12 shadow-glow-primary'
-                      : 'border-studio-border-soft bg-white/[0.04] hover:border-studio-border-active hover:bg-white/[0.06]'
+                      : 'border-studio-border-soft bg-studio-surface-soft/70 hover:border-studio-border-active hover:bg-studio-surface-elevated/70'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -784,7 +784,7 @@ export default function ProductionDetail() {
 
             <div className="border-t border-studio-border-soft pt-5">
               <p className="text-xs font-semibold uppercase text-studio-text-muted">关联选题</p>
-              <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan transition hover:text-white">
+              <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan transition hover:text-studio-primary-contrast">
                 {topic?.title || production.topic_title || '-'}
               </button>
             </div>

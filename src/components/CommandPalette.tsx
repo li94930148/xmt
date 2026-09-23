@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, FileText, Users, LayoutDashboard, ArrowRight, Settings } from 'lucide-react';
+import { Search, FileText, Users, ArrowRight } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { getTopics, getUsers } from '../api';
 import { usePermission } from '../hooks/usePermission';
+import { navigationSections, canAccessNavigationItem, canAccessNavigationSection } from '../config/navigation';
+import { useAuthStore } from '../store';
 
 interface CommandItem {
   id: string;
@@ -28,24 +30,25 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
   const listRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const styles = useThemeStyles();
-  const { loading, hasAnyPermission } = usePermission();
+  const user = useAuthStore((state) => state.user);
+  const { loading, hasAnyPermission, hasAllPermissions } = usePermission();
 
   const pageItems: CommandItem[] = useMemo(
-    () => [
-      { id: 'page-home', label: '首页', group: '页面导航', icon: <LayoutDashboard className="w-4 h-4" />, action: () => navigate('/') },
-      { id: 'page-topics', label: '选题管理', group: '页面导航', icon: <FileText className="w-4 h-4" />, action: () => navigate('/topics') },
-      { id: 'page-production', label: '创作管理', group: '页面导航', icon: <FileText className="w-4 h-4" />, action: () => navigate('/production') },
-      { id: 'page-shooting', label: '成片制作', group: '页面导航', icon: <FileText className="w-4 h-4" />, action: () => navigate('/shooting'), permissions: ['workflow:shooting'] },
-      { id: 'page-publishing', label: '发布管理', group: '页面导航', icon: <FileText className="w-4 h-4" />, action: () => navigate('/publishing'), permissions: ['workflow:publishing'] },
-      { id: 'page-analytics', label: '实时数据看板', group: '运营复盘', icon: <FileText className="w-4 h-4" />, action: () => navigate('/analytics'), permissions: ['analytics:view'] },
-      { id: 'page-users', label: '人员管理', group: '页面导航', icon: <Users className="w-4 h-4" />, action: () => navigate('/users'), permissions: ['user:view'] },
-      { id: 'page-assets', label: '资料中心', group: '页面导航', icon: <FileText className="w-4 h-4" />, action: () => navigate('/asset-center') },
-      { id: 'page-resources', label: '内容档案库', group: '资料中心', icon: <FileText className="w-4 h-4" />, action: () => navigate('/resources') },
-      { id: 'page-daily-report', label: '日报归档', group: '运营复盘', icon: <FileText className="w-4 h-4" />, action: () => navigate('/daily-report') },
-      { id: 'page-messages', label: '消息中心', group: '页面导航', icon: <FileText className="w-4 h-4" />, action: () => navigate('/messages') },
-      { id: 'page-settings', label: '设置中心', group: '页面导航', icon: <Settings className="w-4 h-4" />, action: () => navigate('/notification-settings') },
-    ],
-    [navigate],
+    () => navigationSections
+      .filter((section) => !section.debugOnly && canAccessNavigationSection(section, user?.role))
+      .flatMap((section) => section.items
+        .filter((item) => canAccessNavigationItem(item, { hasAnyPermission, hasAllPermissions }, user?.role))
+        .map((item) => {
+          const Icon = item.icon;
+          return {
+            id: `page-${item.id}`,
+            label: item.label,
+            group: section.label,
+            icon: <Icon className="h-4 w-4" />,
+            action: () => navigate(item.path),
+          };
+        })),
+    [hasAllPermissions, hasAnyPermission, navigate, user?.role],
   );
 
   useEffect(() => {
@@ -188,7 +191,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
             placeholder="搜索选题、页面、用户..."
             className="flex-1 bg-transparent text-sm outline-none text-studio-text-primary placeholder:text-studio-text-muted"
           />
-          <kbd className="rounded-md border border-studio-border-soft bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-studio-text-muted">ESC</kbd>
+          <kbd className="rounded-md border border-studio-border-soft bg-[var(--xmt-overlay-tint)] px-1.5 py-0.5 font-mono text-[10px] text-studio-text-muted">ESC</kbd>
         </div>
 
         <div ref={listRef} className="relative z-[1] max-h-[360px] overflow-y-auto py-2">
@@ -210,8 +213,8 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
                       data-index={index}
                       className={`mx-2 flex w-[calc(100%-1rem)] items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors duration-150 ${
                         isSelected
-                          ? 'bg-white/[0.07] text-studio-text-primary shadow-[inset_0_0_0_1px_var(--xmt-border-active)]'
-                          : 'text-studio-text-secondary hover:bg-white/[0.04]'
+                          ? 'bg-studio-surface-elevated/75 text-studio-text-primary shadow-[inset_0_0_0_1px_var(--xmt-border-active)]'
+                          : 'text-studio-text-secondary hover:bg-studio-surface-soft/70'
                       }`}
                       onClick={() => handleSelect(item)}
                       onMouseEnter={() => setSelectedIndex(index)}

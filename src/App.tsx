@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -83,7 +83,6 @@ const ContentIntelligenceDashboard = lazyWithRetry(() => import('@/pages/Content
 const ContentGenerationDashboard = lazyWithRetry(() => import('@/pages/ContentGenerationDashboard'), 'ContentGenerationDashboard');
 const ContentOSDashboard = lazyWithRetry(() => import('@/pages/ContentOSDashboard'), 'ContentOSDashboard');
 const Users = lazyWithRetry(() => import('@/pages/Users'), 'Users');
-const Resources = lazyWithRetry(() => import('@/pages/Resources'), 'Resources');
 const AssetCenter = lazyWithRetry(() => import('@/pages/AssetCenter'), 'AssetCenter');
 const ResourceLibrary = lazyWithRetry(() => import('@/pages/ResourceLibrary'), 'ResourceLibrary');
 const KnowledgeLibrary = lazyWithRetry(() => import('@/pages/KnowledgeLibrary'), 'KnowledgeLibrary');
@@ -192,7 +191,7 @@ export default function App() {
                 <Route path="/production/:id" element={isAndroid() ? <MobileProductionEditor /> : <ProductionDetail />} />
                 <Route path="/shooting/:id" element={<ShootingDetail />} />
                 <Route path="/publishing/:id" element={<PublishingDetail />} />
-                <Route path="/resources" element={<Resources />} />
+                <Route path="/resources" element={<Navigate replace to="/asset-center" />} />
                 <Route path="/asset-center" element={<AssetCenter />} />
                 <Route path="/asset-center/resources" element={<ResourceLibrary />} />
                 <Route path="/asset-center/resources/:id" element={<ResourceDetail />} />

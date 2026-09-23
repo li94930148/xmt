@@ -1,14 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
-import { getProduction, createProduction, getTopics } from '../api';
+import { getProduction, createProduction, getTopics, updateProduction } from '../api';
 import { Production as ProductionType, Topic } from '../types';
-import { Plus, Search, FileText, Edit3, CheckCircle, XCircle, Clock, ChevronLeft } from 'lucide-react';
+import { Plus, Search, FileText, Edit3, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useSocket } from '../hooks/useSocket';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
-import { STATUS_COLORS, STATUS_TEXT } from '../constants';
 import { formatBeijingDate } from '../lib/utils';
+
+const PAGE_SIZE = 20;
 
 const useAutoResizeTextarea = (value: string, minHeight = 100, maxHeight = 300) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -49,6 +50,8 @@ export default function Production() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [formData, setFormData] = useState({ topic_id: '', version: '', content: '', status: 'draft' });
@@ -61,24 +64,37 @@ export default function Production() {
   const appStore = useAppStore();
   const styles = useThemeStyles();
 
+  const fetchProductionPage = useCallback(async (nextPage: number) => {
+    const result = await getProduction({ page: nextPage, limit: PAGE_SIZE });
+    setProductions(result.data);
+    setTotal(result.total);
+  }, []);
+
   useEffect(() => {
+    let cancelled = false;
     const fetchData = async () => {
       setLoading(true);
       try {
-        const result = await getProduction();
-        setProductions(result);
-        
-        const topicList = await getTopics();
+        const [productionResult, topicList] = await Promise.all([
+          getProduction({ page, limit: PAGE_SIZE }),
+          getTopics({ page: 1, limit: 100 }),
+        ]);
+        if (cancelled) return;
+        setProductions(productionResult.data);
+        setTotal(productionResult.total);
         setTopics(topicList.data.filter(t => t.status === 'approved' || t.status === 'production'));
       } catch (error) {
-        appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+        if (!cancelled) appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
-    
-    fetchData();
-  }, []);
+
+    void fetchData();
+    return () => { cancelled = true; };
+    // The Zustand action is stable; changing notifications must not refetch the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   const socket = useSocket();
 
@@ -88,8 +104,7 @@ export default function Production() {
     socket,
     events: {
       'production:created': () => {
-        // 有人创建了创作记录，刷新列表
-        getProduction().then(setProductions).catch(() => {});
+        void fetchProductionPage(page).catch(() => {});
       },
       'production:updated': (data) => {
         setProductions(prev => prev.map(p => p.id === data.id ? { ...p, ...data } : p));
@@ -107,18 +122,18 @@ export default function Production() {
     }
     
     try {
-      await createProduction({ 
+      await createProduction({
         topic_id: parseInt(formData.topic_id), 
         version: formData.version, 
         content: formData.content, 
-        status: formData.status 
+        status: formData.status,
       });
       appStore.addNotification({ title: '创建成功', message: '创作记录已添加', type: 'success' });
       setShowCreateModal(false);
       setFormData({ topic_id: '', version: '', content: '', status: 'draft' });
       
-      const result = await getProduction();
-      setProductions(result);
+      if (page !== 1) setPage(1);
+      else await fetchProductionPage(1);
     } catch (error) {
       appStore.addNotification({ title: '创建失败', message: (error as Error).message, type: 'error' });
     }
@@ -142,18 +157,20 @@ export default function Production() {
     }
     
     try {
-      await createProduction({ 
+      await updateProduction(editingProduction.id, {
         topic_id: parseInt(formData.topic_id), 
         version: formData.version, 
         content: formData.content, 
-        status: formData.status 
+        expected_content: editingProduction.content,
+        status: formData.status,
+        version_action: 'none',
       });
+      appStore.addNotification({ title: '更新成功', message: '创作记录已保存', type: 'success' });
       setShowEditModal(false);
       setEditingProduction(null);
       setFormData({ topic_id: '', version: '', content: '', status: 'draft' });
       
-      const result = await getProduction();
-      setProductions(result);
+      await fetchProductionPage(page);
     } catch (error) {
       appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
     }
@@ -198,6 +215,7 @@ export default function Production() {
     String(production.topic_title ?? '').toLowerCase().includes(normalizedSearchTerm) ||
     String(production.version ?? '').toLowerCase().includes(normalizedSearchTerm),
   );
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-6">
@@ -285,6 +303,13 @@ export default function Production() {
                           className={`p-2 ${styles.buttonInfo} rounded-lg transition-colors`}
                           title="查看详情"
                         >
+                          <FileText className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => handleEdit(production)}
+                          className={`p-2 ${styles.buttonSecondary} rounded-lg transition-colors`}
+                          title="编辑记录"
+                        >
                           <Edit3 className="w-5 h-5" />
                         </button>
                       </div>
@@ -294,6 +319,29 @@ export default function Production() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className={`flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${styles.border}`}>
+          <p className={`text-sm ${styles.textMuted}`}>
+            共 {total} 条 · 第 {page} / {totalPages} 页{searchTerm ? ` · 当前页匹配 ${filteredProductions.length} 条` : ''}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={page <= 1 || loading}
+              className={`inline-flex min-h-10 items-center gap-1 rounded-button px-3 py-2 text-sm ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-45`}
+            >
+              <ChevronLeft className="h-4 w-4" /> 上一页
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              disabled={page >= totalPages || loading}
+              className={`inline-flex min-h-10 items-center gap-1 rounded-button px-3 py-2 text-sm ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-45`}
+            >
+              下一页 <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 

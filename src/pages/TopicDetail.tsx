@@ -194,28 +194,50 @@ export default function TopicDetail() {
   const handleAudit = async () => {
     try {
       await auditTopic(parseInt(id!), auditData);
-      appStore.addNotification({ 
-        title: '审核成功', 
-        message: auditData.status === 'approved' ? '选题已通过审核' : '选题已驳回', 
-        type: 'success' 
-      });
-      setShowAuditModal(false);
-      const topicData = await getTopic(parseInt(id!));
-      setTopic(topicData);
     } catch (error) {
       appStore.addNotification({ title: '审核失败', message: (error as Error).message, type: 'error' });
+      return;
+    }
+
+    setShowAuditModal(false);
+    try {
+      const topicData = await getTopic(parseInt(id!));
+      setTopic(topicData);
+      appStore.addNotification({
+        title: '审核成功',
+        message: auditData.status === 'approved' ? '选题已通过审核' : '选题已驳回',
+        type: 'success',
+      });
+    } catch {
+      setTopic((current) => current ? { ...current, status: auditData.status } : current);
+      appStore.addNotification({
+        title: '审核已提交',
+        message: '审核操作已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。',
+        type: 'warning',
+      });
     }
   };
 
   const handleUpdateStatus = async (status: string) => {
     try {
       await updateTopicStatus(parseInt(id!), status);
-      appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
-      if (status === 'shooting' || status === 'completed') celebrateMilestone();
-      const topicData = await getTopic(parseInt(id!));
-      setTopic(topicData);
     } catch (error) {
       appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+      return;
+    }
+
+    if (status === 'shooting' || status === 'completed') celebrateMilestone();
+    try {
+      const topicData = await getTopic(parseInt(id!));
+      setTopic(topicData);
+      appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
+    } catch {
+      setTopic((current) => current ? { ...current, status: status as Topic['status'] } : current);
+      appStore.addNotification({
+        title: '状态已更新',
+        message: '状态更新已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。',
+        type: 'warning',
+      });
     }
   };
 
@@ -258,8 +280,30 @@ export default function TopicDetail() {
     aggregateSaveGateRef.current.run(async () => {
       setIsAggregateSaving(true);
       try {
-        await updateTopic(parseInt(id!), buildTopicDetailUpdatePayload(saveSnapshot));
-        const topicData = await getTopic(parseInt(id!));
+        const updatePayload = buildTopicDetailUpdatePayload(saveSnapshot);
+        await updateTopic(parseInt(id!), updatePayload);
+        let topicData: Topic;
+        try {
+          topicData = await getTopic(parseInt(id!));
+        } catch {
+          setTopic((current) => current ? { ...current, ...updatePayload } : current);
+          if (aggregateRevisionRef.current === saveRevision) {
+            baselineDraftRef.current = cloneTopicDetailDraft(saveSnapshot);
+            setIsTopicDirty(false);
+            setEditTitle(false);
+            setEditDetails(false);
+            setEditDescription(false);
+            setEditOutline(false);
+          } else {
+            setIsTopicDirty(!baselineDraftRef.current || !topicDetailDraftEquals(draftRef.current, baselineDraftRef.current));
+          }
+          appStore.addNotification({
+            title: '保存已提交',
+            message: '选题修改已成功提交，但详情暂时未能刷新；本次修改已保留，请稍后刷新确认最新信息。',
+            type: 'warning',
+          });
+          return;
+        }
         setTopic(topicData);
         if (aggregateRevisionRef.current === saveRevision) {
           const refreshedDraft = createTopicDetailDraft(topicData);

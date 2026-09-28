@@ -108,7 +108,7 @@ export async function deleteTopic(id: number): Promise<{ message: string }> {
     method: 'DELETE',
     headers: getAuthHeader()
   });
-  if (!response.ok) throw new Error('删除选题失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '删除选题失败'));
   return response.json();
 }
 

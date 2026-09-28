@@ -38,6 +38,7 @@ import { useSocket } from '../hooks/useSocket';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 import { useAppStore } from '../store';
 import { createListFetchController, listErrorKey } from '../utils/listFetchNotify';
+import { createBatchMutationNotice } from '../utils/batch-mutation-feedback';
 import { Topic } from '../types';
 import Pagination from '../components/Pagination';
 import TopicSpotlightCard from '../components/xmt-ui/TopicSpotlightCard';
@@ -142,6 +143,8 @@ export default function Topics() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<Topic | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [batchOperation, setBatchOperation] = useState<'approved' | 'rejected' | 'delete' | null>(null);
+  const batchOperationRef = useRef(false);
 
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
@@ -354,40 +357,67 @@ export default function Topics() {
   };
 
   const handleBatchDelete = async () => {
-    if (!confirm(`确定删除选中的 ${selected.size} 个选题吗？`)) {
+    const selectedIds = Array.from(selected);
+    if (selectedIds.length === 0 || batchOperationRef.current) {
       return;
     }
-    let success = 0;
-    for (const id of selected) {
-      try {
-        await deleteTopic(id);
-        success++;
-      } catch {}
+
+    if (!confirm(`确定删除选中的 ${selectedIds.length} 个选题吗？`)) {
+      return;
     }
-    addNotification({
-      title: '批量删除完成',
-      message: `成功 ${success}/${selected.size}`,
-      type: 'success',
-    });
-    setSelected(new Set());
-    await fetchTopics();
+
+    batchOperationRef.current = true;
+    setBatchOperation('delete');
+    const failedIds: number[] = [];
+    let firstError = '';
+    try {
+      for (const id of selectedIds) {
+        try {
+          await deleteTopic(id);
+        } catch (error) {
+          failedIds.push(id);
+          if (!firstError) firstError = error instanceof Error ? error.message : '删除失败，请重试';
+        }
+      }
+
+      const notice = createBatchMutationNotice({ action: 'delete', selectedIds, failedIds, firstError });
+      addNotification(notice);
+      setSelected(new Set(notice.failedIds));
+      await fetchTopics();
+    } finally {
+      batchOperationRef.current = false;
+      setBatchOperation(null);
+    }
   };
 
   const handleBatchAudit = async (status: 'approved' | 'rejected') => {
-    let success = 0;
-    for (const id of selected) {
-      try {
-        await auditTopic(id, { status, comment: '批量审核' });
-        success++;
-      } catch {}
+    const selectedIds = Array.from(selected);
+    if (selectedIds.length === 0 || batchOperationRef.current) {
+      return;
     }
-    addNotification({
-      title: '批量审核完成',
-      message: `成功 ${success}/${selected.size}`,
-      type: 'success',
-    });
-    setSelected(new Set());
-    await fetchTopics();
+
+    batchOperationRef.current = true;
+    setBatchOperation(status);
+    const failedIds: number[] = [];
+    let firstError = '';
+    try {
+      for (const id of selectedIds) {
+        try {
+          await auditTopic(id, { status, comment: '批量审核' });
+        } catch (error) {
+          failedIds.push(id);
+          if (!firstError) firstError = error instanceof Error ? error.message : '审核失败，请重试';
+        }
+      }
+
+      const notice = createBatchMutationNotice({ action: 'audit', selectedIds, failedIds, status, firstError });
+      addNotification(notice);
+      setSelected(new Set(notice.failedIds));
+      await fetchTopics();
+    } finally {
+      batchOperationRef.current = false;
+      setBatchOperation(null);
+    }
   };
 
   return (
@@ -478,7 +508,7 @@ export default function Topics() {
             <thead>
               <tr className="border-b border-studio-border-soft bg-studio-surface-soft text-left text-xs font-semibold uppercase text-studio-text-muted">
                 <th className="w-12 px-4 py-3">
-                  <button type="button" onClick={toggleSelectAll} className="rounded-lg p-1.5 hover:bg-studio-surface-soft">
+                  <button type="button" onClick={toggleSelectAll} disabled={batchOperation !== null} aria-label={allSelected ? '取消全选选题' : '全选当前页选题'} className="rounded-lg p-1.5 hover:bg-studio-surface-soft disabled:cursor-not-allowed disabled:opacity-50">
                     {allSelected ? <CheckSquare className="h-4 w-4 text-studio-cyan" /> : <Square className="h-4 w-4" />}
                   </button>
                 </th>
@@ -567,7 +597,7 @@ export default function Topics() {
                       } ${newTopicIds.has(topic.id) ? 'animate-new-item new-item-highlight' : ''}`}
                     >
                       <td className="px-4 py-4">
-                        <button type="button" onClick={() => toggleSelect(topic.id)} className="rounded-lg p-1.5 hover:bg-studio-surface-soft">
+                        <button type="button" onClick={() => toggleSelect(topic.id)} disabled={batchOperation !== null} aria-label={`${selectedRow ? '取消选择' : '选择'}选题：${topic.title}`} className="rounded-lg p-1.5 hover:bg-studio-surface-soft disabled:cursor-not-allowed disabled:opacity-50">
                           {selectedRow ? <CheckSquare className="h-4 w-4 text-studio-cyan" /> : <Square className="h-4 w-4 text-studio-text-muted" />}
                         </button>
                       </td>
@@ -637,19 +667,19 @@ export default function Topics() {
       {selected.size > 0 ? (
         <GlassPanel className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center gap-3 px-4 py-3">
           <span className="text-sm font-semibold text-studio-text-primary">已选 {selected.size} 个选题</span>
-          <ActionButton onClick={() => handleBatchAudit('approved')} className="px-3 py-2">
+          <ActionButton disabled={batchOperation !== null} onClick={() => handleBatchAudit('approved')} className="px-3 py-2">
             <CheckCircle className="h-4 w-4" />
-            通过
+            {batchOperation === 'approved' ? '审核中…' : '通过'}
           </ActionButton>
-          <ActionButton onClick={() => handleBatchAudit('rejected')} className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10">
+          <ActionButton disabled={batchOperation !== null} onClick={() => handleBatchAudit('rejected')} className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10">
             <XCircle className="h-4 w-4" />
-            驳回
+            {batchOperation === 'rejected' ? '审核中…' : '驳回'}
           </ActionButton>
-          <ActionButton onClick={handleBatchDelete} className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10">
+          <ActionButton disabled={batchOperation !== null} onClick={handleBatchDelete} className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10">
             <Trash2 className="h-4 w-4" />
-            删除
+            {batchOperation === 'delete' ? '删除中…' : '删除'}
           </ActionButton>
-          <ActionButton onClick={() => setSelected(new Set())} variant="ghost" className="px-3 py-2">
+          <ActionButton disabled={batchOperation !== null} onClick={() => setSelected(new Set())} variant="ghost" className="px-3 py-2">
             取消选择
           </ActionButton>
         </GlassPanel>

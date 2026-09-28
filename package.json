@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "3.3.43",
+  "version": "3.3.44",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -15,6 +15,8 @@
     "test:activity-log": "tsx tests/activity/activity-log-time-retention.test.ts",
     "test:rate-limit": "tsx scripts/rate-limit-contract-test.ts",
     "test:topics": "tsx tests/topics/topics.test.ts",
+    "test:topic-batch-feedback": "tsx --test tests/topics/batch-mutation-feedback.test.ts",
+    "test:topic-mutation-feedback-browser": "tsx tests/browser/topic-mutation-feedback.spec.ts",
     "test:topics-list-notify": "tsx tests/topics/list-fetch-notify.test.ts",
     "test:editor-selection-style": "tsx tests/editor/selection-style-contract.test.ts",
     "test:editor-find-replace": "tsx --test tests/editor/find-replace.test.ts",

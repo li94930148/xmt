@@ -1,5 +1,13 @@
 # XMT 升级阶段记录
 
+## v3.3.44 选题批量操作反馈与提交状态准确性（2026-09-28）
+
+- 完成内容：批量审核/删除逐条统计成功和失败；全部成功、部分失败、全部失败使用不同反馈。失败选题继续选中，可直接重试；批量执行期间禁止重复触发和修改选择。选题详情的审核、状态和信息保存将写入与后续详情刷新分离；写入已成功但刷新失败时保留本地状态并提示“已提交”，不再误报写入失败。删除接口错误会保留服务端可展示的原因。
+- 修改范围：选题列表/详情、选题删除错误解析、反馈文案纯函数和隔离浏览器回归。未更改 API 接口形态、权限、数据库或业务状态流转。
+- 验证：npm run test:topic-batch-feedback、npm run test:topics、npm run test:topic-mutation-feedback-browser、npm run check、npm run version:check、版本治理测试及 git diff --check 通过；定向 ESLint 0 错误，保留 TopicDetail 的既有警告。隔离 Playwright 覆盖部分审核失败、删除失败后仅重试失败项、审核/编辑保存成功但详情刷新失败；1440×1000 页面身份、非空、无错误边界及未预期 HTTP/页面错误均通过。截图：/tmp/xmt-topic-mutation-feedback-partial-audit.png、/tmp/xmt-topic-mutation-feedback-delete-retry-success.png、/tmp/xmt-topic-mutation-feedback-audit-saved-refresh-failed.png、/tmp/xmt-topic-mutation-feedback-edit-saved-refresh-failed.png。
+- 风险说明：浏览器使用本地隔离 API fixture，未调用真实账号或生产接口。生产构建和 Capacitor Android Web 资源同步已通过，既有 Silk/Tiptap 大分包提示仍存在；mobile:doctor 确认本机缺 Java、adb 和 Android SDK，APK/真机未验证。合并后 CI 和发布门禁仍待执行；不代表生产已部署。
+- 下一阶段：继续盘查 B8 其他页面的多条/组合 mutation 反馈契约；B10 的 Android APK/真机和真实账号验收仍需要可控账号及 JDK/Android SDK。
+
 ## v3.3.43 桌面消息聚合与业务直达（2026-09-28）
 
 - 完成内容：桌面消息只对明确的 `/topics/:id` 且已知消息类型做五分钟分组；同组通知复用系统 tag，后续更新静音。通知点击只允许本站相对路径，选题通知直达关联页；无关联链接或不安全链接回到消息中心。消息数据库行、未读数及收件箱明细不做合并或改写。消息中心已有“待处理”筛选和列表级关联跳转，本阶段补上系统桌面通知的直达。

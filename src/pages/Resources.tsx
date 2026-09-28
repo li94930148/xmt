@@ -287,7 +287,7 @@ export default function Resources() {
                   className={`flex min-h-12 shrink-0 items-center gap-2 border-b-2 px-5 text-sm font-semibold transition ${
                     activeTab === tab.key
                       ? 'border-studio-cyan bg-studio-cyan/10 text-studio-cyan'
-                      : 'border-transparent text-studio-text-secondary hover:bg-white/[0.04] hover:text-studio-text-primary'
+                      : 'border-transparent text-studio-text-secondary hover:bg-studio-surface-soft hover:text-studio-text-primary'
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -307,7 +307,7 @@ export default function Resources() {
 
                 {script?.content ? (
                   <div
-                    className="editor-content-preview prose prose-invert prose-sm max-w-none rounded-card border border-studio-border-soft bg-white/[0.03] p-5 text-studio-text-secondary"
+                    className="editor-content-preview prose prose-sm max-w-none rounded-card border border-studio-border-soft bg-studio-surface-soft p-5 text-studio-text-secondary"
                     dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(script.content)) }}
                   />
                 ) : (
@@ -318,7 +318,7 @@ export default function Resources() {
                   <div className="space-y-2">
                     <h4 className="font-medium text-studio-text-primary">版本历史</h4>
                     {script.history.map((history, index) => (
-                      <div key={index} className="flex flex-wrap items-center gap-3 rounded-card border border-studio-border-soft bg-white/[0.03] p-3 text-sm">
+                      <div key={index} className="flex flex-wrap items-center gap-3 rounded-card border border-studio-border-soft bg-studio-surface-soft p-3 text-sm">
                         <span className="font-mono text-studio-cyan">{history.version}</span>
                         <span className="text-studio-text-secondary">{history.change_type === 'major' ? '大版本' : '小版本'}</span>
                         {history.comment ? <span className="text-studio-text-muted">· {history.comment}</span> : null}
@@ -440,7 +440,7 @@ export default function Resources() {
         title="资源管理"
         description="沉淀已发布内容、稿件版本、制作批注和发布数据，方便团队复用素材资产。"
         actions={
-          <div className="flex items-center gap-2 rounded-button border border-studio-border-soft bg-white/[0.05] px-3 py-2 text-sm text-studio-text-secondary">
+          <div className="flex items-center gap-2 rounded-button border border-studio-border-soft bg-studio-surface-soft px-3 py-2 text-sm text-studio-text-secondary">
             <Archive className="h-4 w-4 text-studio-cyan" />
             共 {total} 个存档
           </div>

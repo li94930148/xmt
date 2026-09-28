@@ -5,6 +5,7 @@ import { getMe, getPublicSystemSettings, getUnreadCount, registerMobileDevice, r
 import { useAuthStore, useAppStore, useMessageStore } from '../store';
 import { buildBreadcrumbs } from '../config/navigation';
 import Sidebar from './Sidebar';
+import { WritingFocusContext } from './layout/WritingFocusContext';
 import CommandPalette from './CommandPalette';
 import KeyboardHelp from './KeyboardHelp';
 import UpdateNotification from './UpdateNotification';
@@ -42,10 +43,10 @@ function NotificationItem({ notification }: { notification: Notification }) {
   }, [notification.id, removeNotification]);
 
   const typeStyles: Record<Notification['type'], { bg: string; border: string; text: string; icon: string }> = {
-    success: { bg: 'bg-studio-success/10', border: 'border-studio-success/30', text: 'text-studio-success-contrast', icon: '✓' },
-    error: { bg: 'bg-studio-coral/10', border: 'border-studio-coral/30', text: 'text-studio-coral-contrast', icon: '×' },
-    warning: { bg: 'bg-studio-amber/10', border: 'border-studio-amber/30', text: 'text-studio-amber-contrast', icon: '!' },
-    info: { bg: 'bg-studio-primary/10', border: 'border-studio-primary/30', text: 'text-studio-primary-contrast', icon: 'i' },
+    success: { bg: 'bg-studio-success-soft', border: 'border-studio-border-soft', text: 'text-studio-success-contrast', icon: '✓' },
+    error: { bg: 'bg-studio-coral-soft', border: 'border-studio-border-soft', text: 'text-studio-coral-contrast', icon: '×' },
+    warning: { bg: 'bg-studio-amber-soft', border: 'border-studio-border-soft', text: 'text-studio-amber-contrast', icon: '!' },
+    info: { bg: 'bg-studio-primary-soft', border: 'border-studio-border-soft', text: 'text-studio-primary-contrast', icon: 'i' },
   };
 
   const style = typeStyles[notification.type] || typeStyles.info;
@@ -88,7 +89,7 @@ function Breadcrumbs() {
             {crumb.path && !isLast ? (
               <Link
                 to={crumb.path}
-                className="rounded-md px-1 py-0.5 transition-colors hover:bg-white/[0.05] hover:text-studio-text-primary"
+                className="rounded-md px-1 py-0.5 transition-colors hover:bg-studio-surface-soft hover:text-studio-text-primary"
               >
                 {crumb.label}
               </Link>
@@ -104,7 +105,7 @@ function Breadcrumbs() {
   );
 }
 
-export default function Layout() {
+export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [showCmdPalette, setShowCmdPalette] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -114,6 +115,16 @@ export default function Layout() {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const [writingFocusPath, setWritingFocusPath] = useState<string | null>(null);
+  const writingFocused = writingFocusPath === location.pathname;
+  const setWritingFocused = useCallback((focused: boolean) => {
+    setWritingFocusPath(focused ? location.pathname : null);
+  }, [location.pathname]);
+  const writingFocusContext = useMemo(() => ({ focused: writingFocused, setFocused: setWritingFocused }), [setWritingFocused, writingFocused]);
+
+  useEffect(() => {
+    setWritingFocusPath(null);
+  }, [location.pathname]);
 
   const token = useAuthStore((state) => state.token);
   const user = useAuthStore((state) => state.user);
@@ -157,6 +168,7 @@ export default function Layout() {
     onCommandPalette: useCallback(() => setShowCmdPalette((value) => !value), []),
     onShowHelp: useCallback(() => setShowHelp(true), []),
     onEscape: useCallback(() => {
+      setWritingFocusPath(null);
       setShowCmdPalette(false);
       setShowHelp(false);
       setUserMenuOpen(false);
@@ -352,16 +364,22 @@ export default function Layout() {
 
   const sidebarWidth = sidebarCollapsed ? '72px' : '240px';
 
-  if (isAndroid()) {
-    return <MobileShell user={user} unreadCount={unreadCount} onLogout={handleLogout} />;
+  if (mobileLayout) {
+    return <WritingFocusContext.Provider value={writingFocusContext}>
+      <MobileShell user={user} unreadCount={unreadCount} onLogout={handleLogout} />
+      <div className="fixed inset-x-4 bottom-28 z-50 space-y-2" role="status" aria-live="polite">
+        {notifications.map((notification) => <NotificationItem key={notification.id} notification={notification} />)}
+      </div>
+    </WritingFocusContext.Provider>;
   }
 
   return (
+    <WritingFocusContext.Provider value={writingFocusContext}>
     <AppShell
       className="md:grid md:h-screen md:overflow-hidden md:transition-[grid-template-columns] md:duration-300"
-      style={{ gridTemplateColumns: `${sidebarWidth} minmax(0, 1fr)` }}
+      style={{ gridTemplateColumns: writingFocused ? 'minmax(0, 1fr)' : `${sidebarWidth} minmax(0, 1fr)` }}
     >
-      <Sidebar
+      {!writingFocused && <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={toggleSidebar}
         theme={theme}
@@ -371,14 +389,14 @@ export default function Layout() {
           setMobileNavOpen(false);
           setShowCmdPalette(true);
         }}
-      />
+      />}
 
       <div className="min-h-screen min-w-0 md:h-screen md:min-h-0 md:overflow-y-auto">
-        <Topbar>
+        {!writingFocused && <Topbar>
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
               onClick={() => setMobileNavOpen(true)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-button text-studio-text-secondary transition-colors hover:bg-white/[0.06] hover:text-studio-text-primary md:hidden"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-button text-studio-text-secondary transition-colors hover:bg-studio-surface-soft hover:text-studio-text-primary md:hidden"
               aria-label="打开导航菜单"
             >
               <Menu className="h-5 w-5" />
@@ -389,7 +407,7 @@ export default function Layout() {
               <div className="xmt-field w-[min(18rem,34vw)] min-w-0 cursor-pointer py-2 pl-9 pr-16 text-left text-sm text-studio-text-muted">
                 搜索选题、稿件、成员...
               </div>
-              <kbd className="absolute right-3 rounded-md border border-studio-border-soft bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-studio-text-muted">
+              <kbd className="absolute right-3 rounded-md border border-studio-border-soft bg-studio-surface-soft px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-studio-text-muted">
                 Ctrl K
               </kbd>
             </button>
@@ -398,7 +416,7 @@ export default function Layout() {
           <div className="flex shrink-0 items-center gap-2">
             <button
               onClick={() => navigate('/messages')}
-              className="relative rounded-xl p-2.5 text-studio-text-secondary transition-all duration-200 hover:bg-white/[0.06] hover:text-studio-text-primary"
+              className="relative rounded-xl p-2.5 text-studio-text-secondary transition-all duration-200 hover:bg-studio-surface-soft hover:text-studio-text-primary"
               aria-label="打开消息中心"
             >
               <Bell className="h-[18px] w-[18px]" />
@@ -411,7 +429,7 @@ export default function Layout() {
 
             <button
               onClick={toggleTheme}
-              className="rounded-xl p-2.5 text-studio-text-secondary transition-all duration-200 hover:bg-white/[0.06] hover:text-studio-amber"
+              className="rounded-xl p-2.5 text-studio-text-secondary transition-all duration-200 hover:bg-studio-surface-soft hover:text-studio-amber"
               title={theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}
               aria-label="切换主题"
             >
@@ -421,7 +439,7 @@ export default function Layout() {
             <div className="relative ml-1 border-l border-studio-border-soft pl-3">
               <button
                 onClick={() => setUserMenuOpen((value) => !value)}
-                className="flex items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-white/[0.06]"
+                className="flex items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-studio-surface-soft"
                 aria-label="打开用户菜单"
               >
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-studio-primary to-studio-violet shadow-sm shadow-studio-primary/25 ring-1 ring-inset ring-white/15">
@@ -444,7 +462,7 @@ export default function Layout() {
                       setUserMenuOpen(false);
                       navigate('/notification-settings');
                     }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-studio-text-secondary transition hover:bg-white/[0.06] hover:text-studio-text-primary"
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-studio-text-secondary transition hover:bg-studio-surface-soft hover:text-studio-text-primary"
                   >
                     <Settings className="h-4 w-4" />
                     {settingsMenuLabel}
@@ -460,11 +478,11 @@ export default function Layout() {
               )}
             </div>
           </div>
-        </Topbar>
+        </Topbar>}
 
-        <main className="xmt-business-content px-4 py-4 sm:px-6 sm:py-6" style={{ fontSize: 'var(--system-font-size)' }}>
-          <div className="mx-auto w-full max-w-7xl space-y-4">
-            <Breadcrumbs />
+        <main className={`xmt-business-content ${writingFocused ? 'px-3 py-3 sm:px-6 sm:py-5' : 'px-4 py-4 sm:px-6 sm:py-6'}`} style={{ fontSize: 'var(--system-font-size)' }}>
+          <div className={`mx-auto w-full space-y-4 ${writingFocused ? 'max-w-5xl' : 'max-w-7xl'}`}>
+            {!writingFocused && <Breadcrumbs />}
             <AnimatedPage className="min-h-[calc(100vh-8rem)]">
               <Outlet />
             </AnimatedPage>
@@ -484,5 +502,6 @@ export default function Layout() {
       )}
       <KeyboardHelp isOpen={showHelp} onClose={() => setShowHelp(false)} />
     </AppShell>
+    </WritingFocusContext.Provider>
   );
 }

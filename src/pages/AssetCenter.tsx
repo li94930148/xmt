@@ -28,7 +28,7 @@ export default function AssetCenter() {
 
   return (
     <PageShell>
-      <PageHeader title="资料中心" actions={<Link to="/asset-center/search" className="inline-flex items-center gap-2 rounded-button border border-studio-border-soft bg-white/[0.04] px-4 py-2.5 text-sm text-studio-text-primary hover:border-studio-border-active"><Search className="h-4 w-4" />搜索</Link>} />
+      <PageHeader title="资料中心" actions={<Link to="/asset-center/search" className="inline-flex items-center gap-2 rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2.5 text-sm text-studio-text-primary hover:border-studio-border-active"><Search className="h-4 w-4" />搜索</Link>} />
       {state === 'loading' ? <LoadingState type="table" rows={2} /> : state === 'error' ? <ErrorState onRetry={load} /> : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {libraries.map((library) => {

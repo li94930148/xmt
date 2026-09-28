@@ -115,7 +115,7 @@ export default function RetroCreateDialog({ open, templates, users, currentUserI
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none focus:border-studio-border-active"
+            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none focus:border-studio-border-active"
             placeholder="例如：7 月第一周内容运营复盘"
           />
         </label>
@@ -179,7 +179,7 @@ export default function RetroCreateDialog({ open, templates, users, currentUserI
             type="date"
             value={periodStart}
             onChange={(event) => setPeriodStart(event.target.value)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           />
         </label>
 
@@ -189,7 +189,7 @@ export default function RetroCreateDialog({ open, templates, users, currentUserI
             type="date"
             value={periodEnd}
             onChange={(event) => setPeriodEnd(event.target.value)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           />
         </label>
       </div>

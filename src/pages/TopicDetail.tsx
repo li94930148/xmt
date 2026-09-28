@@ -347,12 +347,12 @@ export default function TopicDetail() {
   }, [navigate, requestTopicLeave]);
 
   const statusColors: Record<string, string> = {
-    pending: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
-    approved: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
-    rejected: 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30',
-    production: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
-    shooting: 'bg-studio-violet/15 text-studio-violet-contrast border-studio-violet/30',
-    publishing: 'bg-studio-cyan/15 text-studio-cyan-contrast border-studio-cyan/30',
+    pending: 'bg-studio-amber-soft text-studio-amber-contrast border-studio-border-soft',
+    approved: 'bg-studio-success-soft text-studio-success-contrast border-studio-border-soft',
+    rejected: 'bg-studio-coral-soft text-studio-coral-contrast border-studio-border-soft',
+    production: 'bg-studio-primary-soft text-studio-primary-contrast border-studio-border-soft',
+    shooting: 'bg-studio-violet-soft text-studio-violet-contrast border-studio-border-soft',
+    publishing: 'bg-studio-cyan-soft text-studio-cyan-contrast border-studio-border-soft',
     completed: 'bg-studio-surface-soft text-studio-text-secondary border-studio-border-soft',
   };
 
@@ -640,6 +640,7 @@ export default function TopicDetail() {
           {editOutline ? (
             activeTopicEditorBranch.usesRuntimeManualSave ? (
               <ContentEditor
+                writingGoalKey={`topic:${topic?.id ?? id}`}
                 value={scriptContent}
                 onChange={changeOutline}
                 mode={activeTopicEditorBranch.contentEditorMode}
@@ -650,6 +651,7 @@ export default function TopicDetail() {
               />
             ) : (
               <ContentEditor
+                writingGoalKey={`topic:${topic?.id ?? id}`}
                 value={scriptContent}
                 onChange={changeOutline}
                 mode={activeTopicEditorBranch.contentEditorMode}
@@ -754,7 +756,7 @@ export default function TopicDetail() {
                 </span>
               )
             )}
-            {canEditTopic && topic.status !== 'approved' && topic.status !== 'production' && topic.status !== 'completed' && topic.status !== 'rejected' && (
+            {canEditTopic && (topic.status === 'shooting' || topic.status === 'publishing') && (
               <button
                 onClick={() => handleUpdateStatus(nextStatuses[topic.status])}
                 className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-studio-primary to-studio-cyan px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90"

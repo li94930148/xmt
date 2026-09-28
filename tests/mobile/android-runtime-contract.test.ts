@@ -4,6 +4,9 @@ import path from 'node:path';
 
 const root = process.cwd();
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8');
+const appVersion = JSON.parse(read('package.json')).version as string;
+const [versionMajor, versionMinor, versionPatch] = appVersion.split('.').map(Number);
+const androidVersionCode = versionMajor * 10_000 + versionMinor * 100 + versionPatch;
 const manifest = read('android/app/src/main/AndroidManifest.xml');
 const buildGradle = read('android/app/build.gradle');
 const activity = read('android/app/src/main/java/com/lanyaomedia/xmt/MainActivity.java');
@@ -14,8 +17,8 @@ const secureCredential = read('android/app/src/main/java/com/lanyaomedia/xmt/Sec
 const deepLinks = JSON.parse(read('shared/mobile-deep-links.json')) as Array<{ host: string }>;
 
 assert.match(capacitorConfig, /appId:\s*'com\.lanyaomedia\.xmt'/);
-assert.match(buildGradle, /versionCode\s+22002/);
-assert.match(buildGradle, /versionName\s+"2\.20\.2"/);
+assert.match(buildGradle, new RegExp(`versionCode\\s+${androidVersionCode}`));
+assert.match(buildGradle, new RegExp(`versionName\\s+"${appVersion.replaceAll('.', '\\.')}"`));
 assert.match(manifest, /android:usesCleartextTraffic="false"/);
 assert.match(manifest, /android:allowBackup="false"/);
 assert.match(debugManifest, /android:usesCleartextTraffic="true"/);

@@ -19,12 +19,15 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
   const [isRunning, setIsRunning] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [todayCount, setTodayCount] = useState(0);
+  const [statsError, setStatsError] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch stats
-  useEffect(() => {
-    getPomodoroStats().then((s) => setTodayCount(s.today)).catch(() => {});
+  const refreshStats = useCallback(async () => {
+    try { const stats = await getPomodoroStats(); setTodayCount(stats.today); setStatsError(''); }
+    catch (error) { setStatsError(error instanceof Error ? error.message : '获取番茄钟统计失败'); }
   }, []);
+  useEffect(() => { void refreshStats(); }, [refreshStats]);
 
   // Timer logic
   useEffect(() => {
@@ -46,7 +49,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
         void completePomodoro(sessionId)
           .then(() => {
             setSessionId(null);
-            void getPomodoroStats().then((stats) => setTodayCount(stats.today)).catch(() => {});
+            void refreshStats();
             appStore.addNotification({
               title: '🍅 番茄钟完成！',
               message: topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成，休息一下吧！',
@@ -61,7 +64,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           .catch(() => appStore.addNotification({ title: '番茄钟保存失败', message: '本次专注未计入统计，请刷新后重试。', type: 'error' }));
       }
     }
-  }, [appStore, isRunning, sessionId, timeLeft, topicTitle]);
+  }, [appStore, isRunning, refreshStats, sessionId, timeLeft, topicTitle]);
 
   const handleStart = useCallback(async () => {
     if (isRunning) {
@@ -119,7 +122,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           </div>
           <div className="flex items-center gap-1.5">
             <CheckCircle className="w-3.5 h-3.5 text-studio-success" />
-            <span className={`text-xs ${styles.textSecondary}`}>今日 {todayCount} 个</span>
+            {statsError ? <button type="button" onClick={() => void refreshStats()} className={`text-xs underline ${styles.textSecondary}`}>统计加载失败，重试</button> : <span className={`text-xs ${styles.textSecondary}`}>今日 {todayCount} 个</span>}
           </div>
         </div>
 
@@ -187,7 +190,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
         </div>
         <div className="flex items-center gap-1.5">
           <CheckCircle className="w-4 h-4 text-studio-success" />
-          <span className={`text-sm ${styles.textSecondary}`}>今日已完成 <span className={`font-semibold ${styles.textPrimary}`}>{todayCount}</span> 个</span>
+          {statsError ? <button type="button" onClick={() => void refreshStats()} className={`text-sm underline ${styles.textSecondary}`}>统计加载失败，点击重试</button> : <span className={`text-sm ${styles.textSecondary}`}>今日已完成 <span className={`font-semibold ${styles.textPrimary}`}>{todayCount}</span> 个</span>}
         </div>
       </div>
 

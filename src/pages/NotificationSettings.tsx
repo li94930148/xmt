@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore, useAppStore } from '../store';
 import { changePassword, updateMyProfile, getSystemSettings, updateSystemSettings } from '../api';
 import {
@@ -15,6 +15,11 @@ import { getRoleDisplayName } from '../lib/roles';
 import { ReactBitsAppearancePanel } from '@/features/reactbits-appearance/ReactBitsAppearancePanel';
 import { useDesktopNotification } from '../hooks/useDesktopNotification';
 import { isSecureContext } from '../utils/notification';
+import ErrorState from '../components/common/ErrorState';
+import PageShell from '../components/studio/PageShell';
+import PageHeader from '../components/studio/PageHeader';
+import GlassPanel from '../components/studio/GlassPanel';
+import { getNotificationSettings, NotificationChannel, NotificationEvent, NotificationPreference } from '../api/notificationSettings';
 import { changelog, getChangeTypeLabel, getChangeTypeColor } from '../data/changelog';
 import {
   applyDocumentBranding,
@@ -52,26 +57,6 @@ import {
 
 declare const __APP_VERSION__: string;
 
-type NotificationPreference = {
-  id?: number;
-  channel: string;
-  event_type: string;
-  enabled: boolean;
-  config?: string;
-};
-
-type Channel = {
-  id: string;
-  name: string;
-  description: string;
-};
-
-type EventType = {
-  id: string;
-  name: string;
-  description: string;
-};
-
 const tabMeta = {
   notifications: { label: '通知偏好', icon: Bell },
   profile: { label: '个人资料', icon: User },
@@ -98,7 +83,7 @@ export default function NotificationSettings() {
   const canManageSystem = hasPermission('system:settings');
   const setGlobalSystemSettings = useAppStore((state) => state.setSystemSettings);
 
-  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+  const [requestedTab, setActiveTab] = useState<TabKey>(() => {
     if (sessionStorage.getItem('xmt_show_changelog') === 'true') {
       sessionStorage.removeItem('xmt_show_changelog');
       return 'changelog';
@@ -107,10 +92,13 @@ export default function NotificationSettings() {
   });
 
   const [preferences, setPreferences] = useState<NotificationPreference[]>([]);
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [events, setEvents] = useState<EventType[]>([]);
+  const [channels, setChannels] = useState<NotificationChannel[]>([]);
+  const [events, setEvents] = useState<NotificationEvent[]>([]);
   const [notifyLoading, setNotifyLoading] = useState(true);
+  const [notifyLoaded, setNotifyLoaded] = useState(false);
+  const [notifyLoadError, setNotifyLoadError] = useState('');
   const [notifySaving, setNotifySaving] = useState(false);
+  const logoReaderRef = useRef<FileReader | null>(null);
 
   const [profileName, setProfileName] = useState(authStore.user?.name || '');
   const [profileEmail, setProfileEmail] = useState(authStore.user?.email || '');
@@ -126,29 +114,39 @@ export default function NotificationSettings() {
 
   const [systemSettings, setSystemSettings] = useState<ManagedSystemSettings>(defaultSystemSettings);
   const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
+  const [systemSettingsLoaded, setSystemSettingsLoaded] = useState(false);
+  const [systemSettingsError, setSystemSettingsError] = useState('');
   const [systemSettingsSaving, setSystemSettingsSaving] = useState(false);
   const [fontSize, setFontSize] = useState(appStore.fontSize);
   const [appearanceTheme, setAppearanceTheme] = useState<'light' | 'dark'>(appStore.theme);
 
   const [backupList, setBackupList] = useState<BackupFile[]>([]);
   const [backupLoading, setBackupLoading] = useState(false);
+  const [backupError, setBackupError] = useState('');
   const [backupCreating, setBackupCreating] = useState(false);
 
-  const tabs = useMemo(() => {
-    const base: TabKey[] = ['notifications', 'profile', 'password', 'appearance'];
+  const tabGroups = useMemo(() => {
+    const management: TabKey[] = [];
     if (canManageSystem) {
-      base.push('system', 'branding', 'login');
+      management.push('system', 'branding', 'login');
     }
     if (canManageDatabase) {
-      base.push('database');
+      management.push('database');
     }
-    base.push('changelog', 'about');
-    return base;
+    return [
+      { label: '我的设置', tabs: ['notifications', 'profile', 'password', 'appearance'] as TabKey[] },
+      ...(management.length ? [{ label: '系统管理', tabs: management }] : []),
+      { label: '产品信息', tabs: ['changelog', 'about'] as TabKey[] },
+    ];
   }, [canManageDatabase, canManageSystem]);
+  const activeTab = tabGroups.some((group) => group.tabs.includes(requestedTab)) ? requestedTab : 'notifications';
+  const savedSettings = appStore.systemSettings;
 
   useEffect(() => {
     void fetchNotificationData();
   }, []);
+
+  useEffect(() => () => logoReaderRef.current?.abort(), []);
 
   useEffect(() => {
     setProfileName(authStore.user?.name || '');
@@ -175,29 +173,24 @@ export default function NotificationSettings() {
   }, [activeTab, canManageDatabase]);
 
   async function fetchNotificationData() {
+    setNotifyLoading(true);
+    setNotifyLoaded(false);
+    setNotifyLoadError('');
     if (!token) {
+      setNotifyLoadError('登录状态已失效，请重新登录后再加载通知偏好。');
       setNotifyLoading(false);
       return;
     }
 
     try {
-      const [prefsRes, channelsRes, eventsRes] = await Promise.all([
-        fetch('/api/notifications/preferences', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/notifications/channels', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/notifications/events', { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-
-      if (prefsRes.ok) {
-        setPreferences(await prefsRes.json());
-      }
-      if (channelsRes.ok) {
-        setChannels(await channelsRes.json());
-      }
-      if (eventsRes.ok) {
-        setEvents(await eventsRes.json());
-      }
+      const data = await getNotificationSettings(token);
+      setPreferences(data.preferences);
+      setChannels(data.channels);
+      setEvents(data.events);
+      setNotifyLoaded(true);
     } catch (error) {
       console.error('获取通知设置失败', error);
+      setNotifyLoadError((error as Error).message || '通知偏好加载失败，请重试。');
     } finally {
       setNotifyLoading(false);
     }
@@ -205,17 +198,16 @@ export default function NotificationSettings() {
 
   async function fetchSystemSettings() {
     setSystemSettingsLoading(true);
+    setSystemSettingsLoaded(false);
+    setSystemSettingsError('');
     try {
       const settings = await getSystemSettings();
       setSystemSettings(settings);
       setGlobalSystemSettings(settings);
       applyDocumentBranding(settings);
+      setSystemSettingsLoaded(true);
     } catch (error) {
-      appStore.addNotification({
-        title: '加载失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
+      setSystemSettingsError((error as Error).message || '系统配置加载失败，请重试。');
     } finally {
       setSystemSettingsLoading(false);
     }
@@ -242,7 +234,7 @@ export default function NotificationSettings() {
   }
 
   async function handleSaveNotifications() {
-    if (!token) {
+    if (!token || !notifyLoaded || notifyLoading || notifyLoadError) {
       return;
     }
 
@@ -316,6 +308,7 @@ export default function NotificationSettings() {
   }
 
   async function handleSaveSystemSection(patch: Partial<ManagedSystemSettings>, successMessage: string) {
+    if (!canManageSystem || !systemSettingsLoaded || systemSettingsLoading || systemSettingsSaving) return;
     setSystemSettingsSaving(true);
     try {
       const next = await updateSystemSettings(patch);
@@ -332,26 +325,50 @@ export default function NotificationSettings() {
   }
 
   function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
     const file = event.target.files?.[0];
+    input.value = '';
     if (!file) {
       return;
     }
     if (!file.type.startsWith('image/')) {
-      appStore.addNotification({ title: '上传失败', message: '请选择图片文件', type: 'error' });
+      appStore.addNotification({ title: '选择失败', message: '请选择图片文件', type: 'error' });
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      appStore.addNotification({ title: '上传失败', message: '图片大小不能超过 2MB', type: 'error' });
+      appStore.addNotification({ title: '选择失败', message: '图片大小不能超过 2MB', type: 'error' });
       return;
     }
 
+    logoReaderRef.current?.abort();
     const reader = new FileReader();
+    logoReaderRef.current = reader;
     reader.onload = () => {
-      setSystemSettings((current) => ({
-        ...current,
-        branding: { ...current.branding, logo: String(reader.result || '') },
-      }));
-      appStore.addNotification({ title: '上传成功', message: 'Logo 已选择，请保存品牌设置', type: 'success' });
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      const image = new Image();
+      image.onload = () => {
+        if (logoReaderRef.current !== reader) return;
+        logoReaderRef.current = null;
+        setSystemSettings((current) => ({
+          ...current,
+          branding: { ...current.branding, logo: dataUrl },
+        }));
+        appStore.addNotification({ title: 'Logo 已选择', message: '当前仅更新本页预览；点击“保存品牌设置”后才会应用。', type: 'success' });
+      };
+      image.onerror = () => {
+        if (logoReaderRef.current !== reader) return;
+        logoReaderRef.current = null;
+        appStore.addNotification({ title: '读取图片失败', message: '文件内容无法解码为图片，请换一张图片重试。', type: 'error' });
+      };
+      image.src = dataUrl;
+    };
+    reader.onerror = () => {
+      if (logoReaderRef.current !== reader) return;
+      logoReaderRef.current = null;
+      appStore.addNotification({ title: '读取图片失败', message: '无法读取所选文件，请重试。', type: 'error' });
+    };
+    reader.onabort = () => {
+      if (logoReaderRef.current === reader) logoReaderRef.current = null;
     };
     reader.readAsDataURL(file);
   }
@@ -370,10 +387,11 @@ export default function NotificationSettings() {
 
   async function loadBackupItems() {
     setBackupLoading(true);
+    setBackupError('');
     try {
       setBackupList(await getBackupList());
     } catch (error) {
-      appStore.addNotification({ title: '加载失败', message: (error as Error).message, type: 'error' });
+      setBackupError((error as Error).message || '备份列表加载失败，请重试。');
     } finally {
       setBackupLoading(false);
     }
@@ -433,38 +451,56 @@ export default function NotificationSettings() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className={styles.pageTitle}>设置中心</h1>
-        <p className={styles.subtitle}>
-          {canManageSystem || canManageDatabase
-            ? '统一管理系统配置、个人偏好与运维项'
-            : '管理你的个人偏好与通知设置'}
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="设置中心"
+        description={canManageSystem || canManageDatabase
+          ? '个人偏好在“我的设置”中调整，团队共用配置在“系统管理”中维护。'
+          : '管理你的资料、账号安全、外观与通知偏好。'}
+      />
 
       <div className="flex flex-col gap-6 lg:flex-row">
-        <div className={`w-full flex-shrink-0 self-start lg:w-56 ${styles.card} p-2`}>
-          {tabs.map((key) => {
-            const meta = tabMeta[key];
-            const Icon = meta.icon;
-            return (
-              <button
-                key={key}
-                onClick={() => setActiveTab(key)}
-                className={`flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${
-                  activeTab === key ? 'bg-studio-primary/10 text-studio-primary' : `${styles.textSecondary} ${styles.hoverBg}`
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {meta.label}
-                <ChevronRight className={`ml-auto h-3 w-3 ${activeTab === key ? 'text-studio-primary' : styles.textMuted}`} />
-              </button>
-            );
-          })}
-        </div>
+        <GlassPanel className="w-full flex-shrink-0 self-start p-2 lg:w-56">
+          <nav aria-label="设置分类" className="space-y-3">
+            {tabGroups.map((group) => (
+              <section key={group.label} aria-label={group.label}>
+                <h2 className="px-3 pb-1 pt-2 text-xs font-semibold text-studio-text-muted">{group.label}</h2>
+                <div className="grid grid-cols-2 gap-1 lg:grid-cols-1">
+                  {group.tabs.map((key) => {
+                    const meta = tabMeta[key];
+                    const Icon = meta.icon;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        aria-current={activeTab === key ? 'page' : undefined}
+                        onClick={() => setActiveTab(key)}
+                        className={`xmt-btn xmt-btn-ghost min-w-0 w-full justify-start gap-2 px-3 text-sm ${
+                          activeTab === key ? 'bg-studio-surface-soft text-studio-text-primary' : styles.textSecondary
+                        }`}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="min-w-0 text-left">{meta.label}</span>
+                        <ChevronRight className={`ml-auto h-3 w-3 shrink-0 ${activeTab === key ? 'text-studio-primary' : styles.textMuted}`} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </nav>
+        </GlassPanel>
 
-        <div className={`min-w-0 flex-1 ${styles.card} p-4 sm:p-6`}>
+        <GlassPanel className="min-w-0 flex-1 overflow-visible p-4 sm:p-6">
+          {canManageSystem && ['system', 'branding', 'login'].includes(activeTab) && !systemSettingsLoaded && (
+            systemSettingsError ? (
+              <ErrorState title="系统配置未能加载" description={systemSettingsError} onRetry={() => void fetchSystemSettings()} />
+            ) : (
+              <div className="flex min-h-40 items-center justify-center gap-2 text-studio-text-secondary" role="status">
+                <Loader2 className="h-5 w-5 animate-spin" />正在读取系统配置
+              </div>
+            )
+          )}
           {activeTab === 'notifications' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
@@ -474,7 +510,7 @@ export default function NotificationSettings() {
                 </div>
                 <button
                   onClick={handleSaveNotifications}
-                  disabled={notifySaving}
+                  disabled={notifySaving || notifyLoading || !notifyLoaded || Boolean(notifyLoadError)}
                   className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
                 >
                   {notifySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -537,6 +573,13 @@ export default function NotificationSettings() {
                   <div className={`flex h-40 items-center justify-center ${styles.textMuted}`}>
                     <Loader2 className="h-7 w-7 animate-spin" />
                   </div>
+                ) : notifyLoadError ? (
+                  <ErrorState
+                    className="py-2"
+                    title="通知偏好未能加载"
+                    description={notifyLoadError}
+                    onRetry={() => void fetchNotificationData()}
+                  />
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-white/5">
@@ -702,7 +745,7 @@ export default function NotificationSettings() {
             </div>
           )}
 
-          {activeTab === 'system' && canManageSystem && (
+          {activeTab === 'system' && canManageSystem && systemSettingsLoaded && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -733,11 +776,12 @@ export default function NotificationSettings() {
             </div>
           )}
 
-          {activeTab === 'branding' && canManageSystem && (
+          {activeTab === 'branding' && canManageSystem && systemSettingsLoaded && (
             <div className="space-y-6">
               <div>
                 <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>品牌设置</h2>
                 <p className={`mt-1 text-sm ${styles.textMuted}`}>统一管理品牌名称、Logo 和展示文案。</p>
+                <p className={`mt-1 text-sm ${styles.textMuted}`}>选择或移除只更新本页预览；点击“保存品牌设置”后才会同步应用。</p>
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
@@ -783,7 +827,7 @@ export default function NotificationSettings() {
             </div>
           )}
 
-          {activeTab === 'login' && canManageSystem && (
+          {activeTab === 'login' && canManageSystem && systemSettingsLoaded && (
             <div className="space-y-6">
               <div>
                 <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>登录页设置</h2>
@@ -819,12 +863,12 @@ export default function NotificationSettings() {
 
           {activeTab === 'database' && canManageDatabase && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>数据与备份</h2>
                   <p className={`mt-1 text-sm ${styles.textMuted}`}>创建、下载和清理系统备份。</p>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3">
                   <button onClick={() => void loadBackupItems()} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonSecondary}`}>
                     <RefreshCw className={`h-4 w-4 ${backupLoading ? 'animate-spin' : ''}`} /> 刷新列表
                   </button>
@@ -838,7 +882,7 @@ export default function NotificationSettings() {
                 <div className="grid gap-4 text-sm md:grid-cols-4">
                   <div>
                     <p className={styles.textMuted}>存储方式</p>
-                    <p className={styles.textPrimary}>本地安全存储</p>
+                    <p className={styles.textPrimary}>服务器存储</p>
                   </div>
                   <div>
                     <p className={styles.textMuted}>数据范围</p>
@@ -846,11 +890,11 @@ export default function NotificationSettings() {
                   </div>
                   <div>
                     <p className={styles.textMuted}>备份策略</p>
-                    <p className={styles.textPrimary}>每日自动 + 手动快照</p>
+                    <p className={styles.textPrimary}>手动创建；自动备份以管理员配置为准</p>
                   </div>
                   <div>
                     <p className={styles.textMuted}>当前备份数</p>
-                    <p className={styles.textPrimary}>{backupList.length}</p>
+                    <p className={styles.textPrimary}>{backupLoading || backupError ? '待确认' : backupList.length}</p>
                   </div>
                 </div>
               </div>
@@ -860,19 +904,21 @@ export default function NotificationSettings() {
                   <div className={`flex h-24 items-center justify-center ${styles.textMuted}`}>
                     <Loader2 className="h-6 w-6 animate-spin" />
                   </div>
+                ) : backupError ? (
+                  <ErrorState title="备份列表未能加载" description={backupError} onRetry={() => void loadBackupItems()} />
                 ) : backupList.length === 0 ? (
                   <p className={`py-6 text-center text-sm ${styles.textMuted}`}>暂无备份记录。</p>
                 ) : (
                   <div className="space-y-3">
                     {backupList.map((item) => (
-                      <div key={item.name} className={`flex items-center justify-between rounded-xl border p-3 ${styles.border}`}>
-                        <div>
-                          <p className={`font-mono text-sm ${styles.textPrimary}`}>{item.name}</p>
+                      <div key={item.name} className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 ${styles.border}`}>
+                        <div className="min-w-0">
+                          <p className={`break-all font-mono text-sm ${styles.textPrimary}`}>{item.name}</p>
                           <p className={`mt-1 text-xs ${styles.textMuted}`}>{(item.size / 1024).toFixed(1)} KB · {formatBeijingTime(item.created)}</p>
                         </div>
                         <div className="flex gap-2">
                           <button onClick={() => void handleDownloadBackup(item.name)} className={`rounded-lg px-3 py-1.5 text-sm ${styles.buttonInfo}`}>下载</button>
-                          <button onClick={() => void handleDeleteBackup(item.name)} className={`rounded-lg px-3 py-1.5 text-sm ${styles.buttonDanger}`}>
+                          <button aria-label={`删除备份 ${item.name}`} onClick={() => void handleDeleteBackup(item.name)} className={`rounded-lg px-3 py-1.5 text-sm ${styles.buttonDanger}`}>
                             <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
@@ -937,26 +983,22 @@ export default function NotificationSettings() {
             <div className="space-y-6">
               <div>
                 <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>关于系统</h2>
-                <p className={`mt-1 text-sm ${styles.textMuted}`}>视频内容创作全流程协作与管理平台。</p>
+                <p className={`mt-1 text-sm ${styles.textMuted}`}>{savedSettings.system.description}</p>
               </div>
 
               <div className="flex items-center gap-4">
                 <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-studio-primary to-studio-cyan text-3xl text-white">
-                  {systemSettings.branding.logo ? <img src={systemSettings.branding.logo} alt="Logo" className="h-full w-full object-contain" /> : systemSettings.system.icon}
+                  {savedSettings.branding.logo ? <img src={savedSettings.branding.logo} alt="Logo" className="h-full w-full object-contain" /> : savedSettings.system.icon}
                 </div>
                 <div>
-                  <h3 className={`text-xl font-bold ${styles.textPrimary}`}>{systemSettings.system.name}</h3>
+                  <h3 className={`text-xl font-bold ${styles.textPrimary}`}>{savedSettings.system.name}</h3>
                   <p className={`text-sm ${styles.textSecondary}`}>版本 v{__APP_VERSION__}</p>
                 </div>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
                 {[
-                  { label: '内容生产协作', value: '已启用' },
-                  { label: '实时协作', value: '已启用' },
-                  { label: '数据与备份', value: '本地安全存储' },
-                  { label: '运行状态', value: '正常' },
-                  { label: '默认登录页', value: systemSettings.login.layout },
+                  { label: '品牌名称', value: savedSettings.branding.brandName },
                   { label: '当前用户角色', value: getRoleDisplayName(authStore.user?.role) },
                 ].map((item) => (
                   <div key={item.label} className={`flex items-center justify-between rounded-xl p-4 ${styles.bgTertiary}`}>
@@ -967,9 +1009,10 @@ export default function NotificationSettings() {
               </div>
 
               <div className={`rounded-2xl ${styles.bgTertiary} p-5`}>
-                <h3 className={`mb-3 font-medium ${styles.textPrimary}`}>当前启用模块</h3>
+                <h3 className={`mb-3 font-medium ${styles.textPrimary}`}>内容协作流程</h3>
+                <p className={`mb-3 text-sm ${styles.textSecondary}`}>{savedSettings.branding.brandDescription}</p>
                 <div className="grid gap-2 md:grid-cols-3">
-                  {['选题管理', '创作管理', '拍摄管理', '发布管理', '数据分析', '资源库', '消息中心', '权限管理', '系统设置'].map((item) => (
+                  {['选题策划', '内容创作', '拍摄制作', '审核发布', '数据复盘', '资料积累'].map((item) => (
                     <div key={item} className={`flex items-center gap-2 text-sm ${styles.textSecondary}`}>
                       <div className="h-1.5 w-1.5 rounded-full bg-studio-success" />
                       {item}
@@ -979,8 +1022,8 @@ export default function NotificationSettings() {
               </div>
             </div>
           )}
-        </div>
+        </GlassPanel>
       </div>
-    </div>
+    </PageShell>
   );
 }

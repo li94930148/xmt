@@ -232,13 +232,13 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
 
         <div className="relative z-[1] flex items-center gap-4 border-t border-studio-border-soft px-4 py-2.5 text-[11px] text-studio-text-muted">
           <span className="flex items-center gap-1">
-            <kbd className="rounded-md border border-studio-border-soft bg-white/[0.04] px-1 py-0.5 font-mono">↑↓</kbd> 导航
+            <kbd className="rounded-md border border-studio-border-soft bg-studio-surface-soft px-1 py-0.5 font-mono">↑↓</kbd> 导航
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="rounded-md border border-studio-border-soft bg-white/[0.04] px-1 py-0.5 font-mono">↵</kbd> 选择
+            <kbd className="rounded-md border border-studio-border-soft bg-studio-surface-soft px-1 py-0.5 font-mono">↵</kbd> 选择
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="rounded-md border border-studio-border-soft bg-white/[0.04] px-1 py-0.5 font-mono">ESC</kbd> 关闭
+            <kbd className="rounded-md border border-studio-border-soft bg-studio-surface-soft px-1 py-0.5 font-mono">ESC</kbd> 关闭
           </span>
         </div>
       </div>

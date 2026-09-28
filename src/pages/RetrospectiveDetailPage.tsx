@@ -301,15 +301,15 @@ export default function RetrospectiveDetailPage() {
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
-          <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4">
             <p className="text-xs text-studio-text-muted">模板</p>
             <p className="mt-1 font-semibold text-studio-text-primary">{template?.name || retrospective.templateName || '-'}</p>
           </div>
-          <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4">
             <p className="text-xs text-studio-text-muted">快照指标</p>
             <p className="mt-1 font-semibold text-studio-text-primary">{snapshots.length} 项</p>
           </div>
-          <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4">
             <p className="text-xs text-studio-text-muted">行动项</p>
             <p className="mt-1 flex items-center gap-2 font-semibold text-studio-text-primary">
               <UserRound className="h-4 w-4" />

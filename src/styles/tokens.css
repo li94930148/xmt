@@ -1,7 +1,8 @@
 /* XMT Studio Atelier — 唯一设计令牌源。详见项目根目录 DESIGN.md */
 
 :root,
-html.dark {
+html.dark,
+.xmt-theme-scope[data-theme='dark'] {
   color-scheme: dark;
 
   --xmt-app-bg: #080B12;
@@ -17,6 +18,7 @@ html.dark {
   --xmt-text-muted: #6B7A93;
 
   --xmt-primary: #6B8CFF;
+  --xmt-primary-button: color-mix(in srgb, var(--xmt-primary) 72%, black);
   --xmt-cyan: #5CE1E6;
   --xmt-violet: #A78BFA;
   --xmt-coral: #FF7A93;
@@ -31,6 +33,12 @@ html.dark {
   --xmt-coral-contrast: #FFD0D8;
   --xmt-amber-contrast: #FDEFC8;
   --xmt-success-contrast: #B9F5DC;
+  --xmt-primary-soft: rgba(107, 140, 255, 0.14);
+  --xmt-cyan-soft: rgba(92, 225, 230, 0.14);
+  --xmt-violet-soft: rgba(167, 139, 250, 0.14);
+  --xmt-coral-soft: rgba(255, 122, 147, 0.14);
+  --xmt-amber-soft: rgba(245, 200, 107, 0.14);
+  --xmt-success-soft: rgba(61, 219, 160, 0.14);
 
   --xmt-glow-primary: 0 0 0 1px rgba(107, 140, 255, 0.18), 0 12px 40px rgba(107, 140, 255, 0.16);
   --xmt-glow-cyan: 0 0 0 1px rgba(92, 225, 230, 0.14), 0 12px 36px rgba(92, 225, 230, 0.12);
@@ -108,9 +116,12 @@ html.dark {
   --editor-code-bg: #0A0F1A;
   --editor-selection-bg: #5B8CFF;
   --editor-selection-fg: #FFFFFF;
+  --editor-find-match: color-mix(in srgb, var(--xmt-amber) 38%, transparent);
+  --editor-find-current: color-mix(in srgb, var(--xmt-primary) 58%, transparent);
 }
 
-html.light {
+html.light,
+.xmt-theme-scope[data-theme='light'] {
   color-scheme: light;
 
   --xmt-app-bg: #F4F6FA;
@@ -123,9 +134,10 @@ html.light {
   --xmt-border-active: rgba(61, 90, 254, 0.42);
   --xmt-text-primary: #0F172A;
   --xmt-text-secondary: #475569;
-  --xmt-text-muted: #6B7A93;
+  --xmt-text-muted: #5B667A;
 
   --xmt-primary: #3D5AFE;
+  --xmt-primary-button: var(--xmt-primary);
   --xmt-cyan: #0891B2;
   --xmt-violet: #7C5CFC;
   --xmt-coral: #E11D48;
@@ -140,6 +152,12 @@ html.light {
   --xmt-coral-contrast: #9F1239;
   --xmt-amber-contrast: #78350F;
   --xmt-success-contrast: #065F46;
+  --xmt-primary-soft: rgba(61, 90, 254, 0.08);
+  --xmt-cyan-soft: rgba(21, 94, 117, 0.08);
+  --xmt-violet-soft: rgba(91, 33, 182, 0.08);
+  --xmt-coral-soft: rgba(159, 18, 57, 0.08);
+  --xmt-amber-soft: rgba(120, 53, 15, 0.08);
+  --xmt-success-soft: rgba(6, 95, 70, 0.08);
 
   --xmt-glow-primary: 0 0 0 1px rgba(61, 90, 254, 0.10), 0 14px 36px rgba(15, 23, 42, 0.08);
   --xmt-glow-cyan: 0 0 0 1px rgba(8, 145, 178, 0.10), 0 14px 32px rgba(15, 23, 42, 0.06);
@@ -177,6 +195,8 @@ html.light {
   --editor-code-bg: #EEF2F7;
   --editor-selection-bg: #2F5BFF;
   --editor-selection-fg: #FFFFFF;
+  --editor-find-match: color-mix(in srgb, var(--xmt-amber) 38%, transparent);
+  --editor-find-current: color-mix(in srgb, var(--xmt-primary) 35%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {

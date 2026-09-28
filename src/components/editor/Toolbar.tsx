@@ -379,14 +379,14 @@ export default function Toolbar({
   };
 
   const dropdownClass = `absolute top-full left-0 mt-1 z-50 rounded-lg shadow-xl border py-1 ${
-    isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'
+    isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'
   }`;
 
   if (variant === 'basic') {
     return (
       <div
         className={`editor-toolbar flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-2 ${
-          isDark ? 'border-studio-border-soft bg-studio-surface-soft' : 'border-studio-border-soft bg-white'
+          isDark ? 'border-studio-border-soft bg-studio-surface-soft' : 'border-studio-border-soft bg-studio-surface'
         }`}
         aria-label="基础富文本工具栏"
       >
@@ -475,10 +475,10 @@ export default function Toolbar({
                   className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${
                     opt.level === 0
                       ? !editor.isActive('heading')
-                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-studio-primary'
+                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-white'
                         : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
                       : editor.isActive('heading', { level: opt.level })
-                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-studio-primary'
+                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-white'
                         : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
                   }`}
                 >
@@ -667,7 +667,7 @@ export default function Toolbar({
     <div
       ref={toolbarRef}
       className={`editor-toolbar shrink-0 flex items-center flex-wrap gap-1 px-3 py-2 border-b ${compact ? 'editor-toolbar-compact' : ''} ${
-        isDark ? 'border-studio-border-soft bg-studio-surface-soft' : 'border-studio-border-soft bg-white'
+        isDark ? 'border-studio-border-soft bg-studio-surface-soft' : 'border-studio-border-soft bg-studio-surface'
       }`}
     >
       {/* 文件组 */}
@@ -731,7 +731,7 @@ export default function Toolbar({
                 <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <AlignJustify className="w-4 h-4" /> 两端对齐
                 </button>
-                <button onClick={() => { toggleFirstLineIndent(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isTextIndentActive() ? (isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-studio-primary') : (isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft')}`}>
+                <button onClick={() => { toggleFirstLineIndent(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isTextIndentActive() ? (isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-white') : (isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft')}`}>
                   <IndentIncrease className="w-4 h-4" /> 首行缩进
                 </button>
                 <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />

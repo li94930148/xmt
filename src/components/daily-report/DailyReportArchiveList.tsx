@@ -25,8 +25,8 @@ export default function DailyReportArchiveList({ start, end, reports, loading, c
         <div><h2 className="text-base font-semibold text-studio-text-primary">日报归档</h2><p className="mt-1 text-sm text-studio-text-muted">管理员按日期和成员查看全部日报。</p></div>
         <div className="flex flex-wrap gap-2">
           {canFilterUser ? <select value={selectedUserId} onChange={(event) => onUserChange?.(event.target.value)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"><option value="">全部成员</option>{users.map((user) => <option key={user.id} value={String(user.id)}>{user.name || user.username}</option>)}</select> : null}
-          <input type="date" value={start} onChange={(event) => onStartChange(event.target.value)} className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none" />
-          <input type="date" value={end} onChange={(event) => onEndChange(event.target.value)} className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none" />
+          <input type="date" value={start} onChange={(event) => onStartChange(event.target.value)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none" />
+          <input type="date" value={end} onChange={(event) => onEndChange(event.target.value)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none" />
           <ActionButton onClick={onSearch} disabled={loading}>查询</ActionButton>
         </div>
       </div>

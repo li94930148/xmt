@@ -17,6 +17,7 @@ import { formatBeijingDate } from '../lib/utils';
 import { useAppStore, useAuthStore } from '../store';
 import { Shooting as ShootingType, Topic } from '../types';
 import { celebrateMilestone } from '../utils/confetti';
+import { getWorkflowStatusLabel } from '../platform/workflow-status-labels';
 
 type ConfirmAction =
   | { type: 'delete'; shootingId: number; topicTitle: string }
@@ -29,14 +30,6 @@ const initialFormData = {
   location: '',
   equipment: '',
   status: 'planned',
-};
-
-const shootingStatusText: Record<string, string> = {
-  planned: '计划中',
-  in_progress: '制作中',
-  completed: '已完成',
-  cancelled: '已取消',
-  pending: '计划中',
 };
 
 const shootingStatusTone: Record<string, StatusTone> = {
@@ -319,7 +312,7 @@ export default function Shooting() {
               title={shooting.topic_title || '未命名制作任务'}
               status={
                 <StatusPill tone={shootingStatusTone[shooting.status] || 'muted'}>
-                  {shootingStatusText[shooting.status] || shooting.status}
+                  {getWorkflowStatusLabel('shooting', shooting.status)}
                 </StatusPill>
               }
               meta={

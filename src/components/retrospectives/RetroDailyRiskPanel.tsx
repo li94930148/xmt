@@ -100,11 +100,11 @@ export default function RetroDailyRiskPanel({
 
       <div className="mt-4 space-y-3">
         {loading ? (
-          <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4 text-sm text-studio-text-muted">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
             正在加载日报风险...
           </div>
         ) : risks.length === 0 ? (
-          <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4 text-sm text-studio-text-muted">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
             当前复盘周期内没有可联动的日报风险分段。
           </div>
         ) : (
@@ -124,7 +124,7 @@ export default function RetroDailyRiskPanel({
         )}
 
         {selected ? (
-          <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4">
             <p className="text-xs text-studio-text-muted">
               {formatDate(selected.reportDate)} · {selected.userName || selected.userId} · {riskLabels[selected.riskLevel] || '未知风险'}
             </p>
@@ -135,7 +135,7 @@ export default function RetroDailyRiskPanel({
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 disabled={!canCreate}
-                className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
+                className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
                 placeholder="行动项标题"
               />
               <select
@@ -152,7 +152,7 @@ export default function RetroDailyRiskPanel({
                 value={dueDate}
                 onChange={(event) => setDueDate(event.target.value)}
                 disabled={!canCreate}
-                className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
+                className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
               />
               <ActionButton variant="primary" onClick={handleCreate} disabled={!canCreate || loading || !title.trim()}>
                 <Plus className="h-4 w-4" />

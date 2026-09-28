@@ -16,6 +16,9 @@ import type { CollaborationUserPresence } from '../../collaboration/core/events'
 import { editorStateLabel, useEditorEventState, type EditorState } from '../../editor/state/editorStateManager';
 import { emitEditorState } from '../../editor/state/editorStateEventBus';
 import Toolbar from './Toolbar';
+import FindReplacePanel from './FindReplacePanel';
+import WritingMetrics from './WritingMetrics';
+import { countWritingCharacters } from './writingMetricUtils';
 import BubbleMenuBar from './BubbleMenu';
 
 import EditorContextMenu from './ContextMenu';
@@ -37,14 +40,18 @@ interface EditorProps {
     connected: boolean;
   };
   immersive?: boolean;
+  focusMode?: boolean;
   pageScroll?: boolean;
   stateDocId?: string;
+  writingGoalStorageKey?: string;
   onCommandHandleChange?: (handle: EditorCommandHandle | null) => void;
   toolbarVariant?: 'full' | 'basic';
 }
 
 export interface EditorCommandHandle {
   insertHtmlAtSelectionOrEnd(html: string): boolean;
+  appendHtml(html: string): boolean;
+  getSelectedText(): string | null;
 }
 
 export default function Editor({
@@ -55,7 +62,9 @@ export default function Editor({
   placeholder = '开始编写...',
   collaboration,
   immersive = false,
+  focusMode = false,
   stateDocId,
+  writingGoalStorageKey,
   onCommandHandleChange,
   toolbarVariant = 'full',
 }: EditorProps) {
@@ -64,6 +73,7 @@ export default function Editor({
   const [saveStatus, setSaveStatus] = useState<Extract<EditorState, 'idle' | 'saving' | 'synced' | 'conflicted'>>('idle');
   const eventSaveStatus = useEditorEventState(stateDocId);
   const [showToc, setShowToc] = useState(false);
+  const [showFindReplace, setShowFindReplace] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [commentState, setCommentState] = useState<{
@@ -146,7 +156,7 @@ export default function Editor({
       const html = editor.getHTML();
       if (html === lastValueRef.current) return;
       lastValueRef.current = html;
-      setWordCount(editor.getText().replace(/\s+/g, '').length);
+      setWordCount(countWritingCharacters(editor.getText()));
       const local = isLocalEditorChange(transaction, Boolean(collaboration?.provider));
       onChange(html, local);
       if (local && collaboration?.provider) {
@@ -171,6 +181,11 @@ export default function Editor({
         class: `editor-content prose max-w-none ${immersive ? 'px-4 sm:px-8 lg:px-16 py-8 lg:py-12' : 'px-10 py-8'} min-h-[300px] outline-none ${isDark ? 'prose-invert' : ''}`,
       },
       handleKeyDown: (view, event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          setShowFindReplace(true);
+          return true;
+        }
         if ((event.ctrlKey || event.metaKey) && event.key === 's') {
           event.preventDefault();
           performSave();
@@ -219,13 +234,22 @@ export default function Editor({
   }, [readOnly, collaboration?.provider, baseExtensions]);
 
   useEffect(() => {
-    if (!editor || !onCommandHandleChange) return;
+    if (!editor || editor.isDestroyed || !onCommandHandleChange) return;
     const handle: EditorCommandHandle = {
       insertHtmlAtSelectionOrEnd(html) {
         if (!html || readOnly) return false;
         const docEnd = editor.state.doc.content.size;
         const target = resolveEditorInsertionSelection(lastFocusedSelectionRef.current, docEnd);
         return editor.chain().focus().setTextSelection(target).insertContent(html).run();
+      },
+      appendHtml(html) {
+        if (!html || readOnly || editor.isDestroyed) return false;
+        return editor.chain().focus().insertContentAt(editor.state.doc.content.size, html).run();
+      },
+      getSelectedText() {
+        if (editor.isDestroyed || editor.state.selection.empty) return null;
+        const { from, to } = editor.state.selection;
+        return editor.state.doc.textBetween(from, to, '\n', '\n').trim() || null;
       },
     };
     onCommandHandleChange(handle);
@@ -289,7 +313,7 @@ export default function Editor({
 
   // 外部 value 变化时同步
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || editor.isDestroyed) return;
     if (collaboration?.provider) return;
     if (savingRef.current) return;
     if (value === lastValueRef.current) return;
@@ -313,12 +337,12 @@ export default function Editor({
       // 忽略
     }
 
-    setWordCount(editor.getText().replace(/\s+/g, '').length);
+    setWordCount(countWritingCharacters(editor.getText()));
   }, [editor, value, collaboration?.provider, placeholder]);
 
   useEffect(() => {
-    if (!editor) return;
-    setWordCount(editor.getText().replace(/\s+/g, '').length);
+    if (!editor || editor.isDestroyed) return;
+    setWordCount(countWritingCharacters(editor.getText()));
   }, [editor]);
 
   // 清理定时器
@@ -454,11 +478,12 @@ export default function Editor({
     >
       {/* 工具栏 - overflow-visible 确保下拉菜单不被裁剪 */}
       <div
-        className={`flex items-center justify-between shrink-0 relative z-30 sticky top-0 ${
+        aria-hidden={focusMode}
+        className={`flex flex-wrap sm:flex-nowrap items-center justify-between shrink-0 relative z-30 sticky top-0 ${
           isDark ? 'bg-[var(--editor-panel)]' : 'bg-[var(--editor-panel)]'
-        }`}
+        } ${focusMode ? 'hidden' : ''}`}
       >
-        <div className="flex-1">
+        <div className="min-w-0 w-full sm:w-auto sm:flex-1">
           {editor && !readOnly && (
             <Toolbar
               editor={editor}
@@ -472,7 +497,17 @@ export default function Editor({
             />
           )}
         </div>
-        <div className="flex items-center gap-2 px-3 shrink-0">
+        <div className="flex w-full sm:w-auto items-center justify-end gap-2 px-3 py-1 sm:py-0 shrink-0">
+          {editor && (
+            <button
+              type="button"
+              onClick={() => setShowFindReplace((open) => !open)}
+              className="xmt-btn xmt-btn-ghost"
+              aria-label="查找替换"
+              aria-expanded={showFindReplace}
+              title="查找替换（⌘/Ctrl+F）"
+            >查找</button>
+          )}
           {editor && (
             <button
               type="button"
@@ -518,13 +553,17 @@ export default function Editor({
         </div>
       </div>
 
+      {editor && showFindReplace && !focusMode && (
+        <FindReplacePanel editor={editor} readOnly={readOnly} onClose={() => setShowFindReplace(false)} />
+      )}
+
       {/* 编辑区域 + 目录侧栏 */}
       <div className="editor-shell relative min-w-0 max-w-full">
         <div
           className="relative min-w-0 max-w-full bg-[var(--editor-bg)] text-[var(--editor-fg)]"
         >
           {/* BubbleMenu */}
-          {editor && !readOnly && (
+          {editor && !readOnly && !focusMode && (
             <BubbleMenuBar editor={editor} onAddComment={handleAddComment} contextMenuOpen={contextMenuOpen} />
           )}
 
@@ -534,7 +573,7 @@ export default function Editor({
         </div>
 
         {/* 目录面板 */}
-      {showToc && (
+      {showToc && !focusMode && (
           <div
             className={`toc-panel w-64 border-l shrink-0 ${
               isDark ? 'border-[var(--editor-border)] bg-[var(--editor-panel)]' : 'border-[var(--editor-border)] bg-[var(--editor-soft)]'
@@ -552,11 +591,11 @@ export default function Editor({
             : `${immersive ? 'border-[var(--editor-border)] bg-[var(--editor-bg)]' : 'border-[var(--editor-border)] bg-[var(--editor-soft)]'} text-[var(--editor-muted)]`
         }`}
       >
-        字数 {wordCount}
+        <WritingMetrics key={writingGoalStorageKey || 'current-page'} count={wordCount} readOnly={readOnly} storageKey={writingGoalStorageKey} />
       </div>
 
       {/* 右键菜单 */}
-      {editor && !readOnly && (
+      {editor && !readOnly && !focusMode && (
         <EditorContextMenu
           editor={editor}
           onAddComment={handleAddComment}
@@ -567,7 +606,7 @@ export default function Editor({
       )}
 
       {/* 批注点击气泡：点击带批注文字后显示编辑/删除 */}
-      {clickedComment && (
+      {clickedComment && !focusMode && (
         <div
           className="fixed z-[400] rounded-lg shadow-xl border py-1 min-w-[120px]"
           style={{
@@ -595,7 +634,7 @@ export default function Editor({
               handleDeleteComment(clickedComment.commentId);
               setClickedComment(null);
             }}
-            className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors text-studio-coral ${isDark ? 'hover:bg-studio-coral/20' : 'hover:bg-studio-coral'}`}
+            className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors text-studio-coral ${isDark ? 'hover:bg-studio-coral/20' : 'hover:bg-studio-coral/10'}`}
           >
             删除批注
           </button>
@@ -607,7 +646,7 @@ export default function Editor({
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/30">
           <div
             className={`rounded-lg shadow-xl p-4 w-80 ${
-              isDark ? 'bg-studio-surface-soft border border-studio-border-soft' : 'bg-white'
+              isDark ? 'bg-studio-surface-soft border border-studio-border-soft' : 'bg-studio-surface-glass border border-studio-border-soft'
             }`}
           >
             <div className="mb-2">
@@ -624,7 +663,7 @@ export default function Editor({
               className={`w-full p-2 border rounded text-sm resize-none ${
                 isDark
                   ? 'bg-studio-surface-soft border-studio-border-soft text-white placeholder-gray-400'
-                  : 'bg-white border-studio-border-soft text-studio-text-primary placeholder-gray-400'
+                  : 'bg-studio-surface border-studio-border-soft text-studio-text-primary placeholder:text-studio-text-muted'
               }`}
               rows={3}
               autoFocus
@@ -633,7 +672,10 @@ export default function Editor({
                   e.preventDefault();
                   confirmComment();
                 }
-                if (e.key === 'Escape') cancelComment();
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  cancelComment();
+                }
               }}
             />
             <div className="flex justify-end gap-2 mt-3">

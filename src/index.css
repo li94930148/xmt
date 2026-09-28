@@ -221,6 +221,16 @@
   color: var(--editor-fg);
 }
 
+.editor-content .find-and-replace-result {
+  background: var(--editor-find-match);
+  border-radius: 0.15em;
+}
+
+.editor-content .find-and-replace-result-current {
+  background: var(--editor-find-current);
+  outline: 1px solid var(--xmt-primary);
+}
+
 .editor-content,
 .editor-content-preview,
 .production-preview {
@@ -455,14 +465,14 @@
   }
 
   .xmt-btn-primary {
-    border-color: color-mix(in srgb, var(--xmt-primary) 55%, transparent);
-    background: linear-gradient(180deg, color-mix(in srgb, var(--xmt-primary) 96%, white), var(--xmt-primary));
+    border-color: color-mix(in srgb, var(--xmt-primary-button) 55%, transparent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--xmt-primary-button) 96%, white), var(--xmt-primary-button));
     color: #fff;
     box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 8px 20px color-mix(in srgb, var(--xmt-primary) 28%, transparent);
   }
 
   .xmt-btn-primary:hover {
-    background: linear-gradient(180deg, color-mix(in srgb, var(--xmt-primary) 88%, white), color-mix(in srgb, var(--xmt-primary) 92%, black));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--xmt-primary-button) 98%, white), color-mix(in srgb, var(--xmt-primary-button) 94%, black));
   }
 
   .xmt-btn-secondary {

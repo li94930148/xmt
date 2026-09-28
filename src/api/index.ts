@@ -2,6 +2,7 @@
 export { login, mobileLogin, mobileRefresh, getMe, updateMyProfile, changePassword } from './auth';
 export { getMobileDeviceId, registerMobileDevice, revokeMobileDevice } from './mobileDevices';
 export { getTopics, getTopic, createTopic, updateTopic, deleteTopic, auditTopic, updateTopicStatus } from './topics';
+export { TopicApiError } from './topics';
 export { getUsers, getAssignableRoles, createUser, updateUser, deleteUser, getLogs } from './users';
 export { getMessages, getUnreadCount, markMessageAsRead, clearMessages, markAllAsRead } from './messages';
 export { getTeamStats, getMonthlyStats, getUserStats, createAnalytics, getTopicAnalytics } from './analytics';

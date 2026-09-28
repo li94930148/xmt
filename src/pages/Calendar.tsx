@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
 import { createCalendarEvent, getCalendarEvents, getTopics } from '../api';
 import type { CalendarEvent } from '../api/calendar';
 import type { Topic } from '../types';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock3, Plus, Send, Video, AlertTriangle } from 'lucide-react';
-import { FormModal, LoadingState } from '../components/common';
+import { ErrorState, FormModal, LoadingState } from '../components/common';
 import ActionButton from '../components/studio/ActionButton';
 import GlassPanel from '../components/studio/GlassPanel';
 import MetricCard from '../components/studio/MetricCard';
@@ -47,13 +48,17 @@ function toDateKey(date: Date) {
 }
 
 export default function CalendarPage() {
+  const navigate = useNavigate();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [selectedDate, setSelectedDate] = useState('');
   const [formData, setFormData] = useState({
     title: '',
@@ -61,10 +66,11 @@ export default function CalendarPage() {
     event_type: 'other',
     topic_id: '',
   });
-  const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
 
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const [eventsRes, topicsRes] = await Promise.all([
         getCalendarEvents({ year, month }),
@@ -73,19 +79,15 @@ export default function CalendarPage() {
       setEvents(eventsRes.data || []);
       setTopics(topicsRes.data || []);
     } catch (error) {
-      appStore.addNotification({
-        title: '获取数据失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
+      setLoadError((error as Error).message || '获取日历事件失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [month, year]);
 
   useEffect(() => {
     void fetchEvents();
-  }, [year, month]);
+  }, [fetchEvents]);
 
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
@@ -203,8 +205,9 @@ export default function CalendarPage() {
   };
 
   const handleCreate = async () => {
+    if (submittingRef.current) return;
     if (!formData.title.trim()) {
-      appStore.addNotification({
+      addNotification({
         title: '创建失败',
         message: '请输入事件标题',
         type: 'error',
@@ -212,6 +215,8 @@ export default function CalendarPage() {
       return;
     }
 
+    submittingRef.current = true;
+    setSubmitting(true);
     try {
       await createCalendarEvent({
         title: formData.title,
@@ -220,7 +225,7 @@ export default function CalendarPage() {
         event_type: formData.event_type,
         topic_id: formData.topic_id ? Number(formData.topic_id) : undefined,
       });
-      appStore.addNotification({
+      addNotification({
         title: '创建成功',
         message: '日历事件已创建',
         type: 'success',
@@ -228,11 +233,14 @@ export default function CalendarPage() {
       setShowModal(false);
       void fetchEvents();
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '创建失败',
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   };
 
@@ -249,7 +257,7 @@ export default function CalendarPage() {
               <ChevronLeft className="h-4 w-4" />
               上月
             </ActionButton>
-            <div className="rounded-button border border-studio-border-soft bg-white/[0.05] px-4 py-2 text-sm font-semibold text-studio-text-primary">
+            <div className="rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-sm font-semibold text-studio-text-primary">
               {year}年{month}月
             </div>
             <ActionButton type="button" variant="secondary" onClick={goToNextMonth}>
@@ -260,23 +268,27 @@ export default function CalendarPage() {
         }
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="今日事项" value={todayEvents.length} icon={Clock3} tone="cyan" />
-        <MetricCard title="本月发布" value={thisWeekPublishCount} icon={Send} tone="success" />
-        <MetricCard title="待拍摄" value={shootingCount} icon={Video} tone="primary" />
-        <MetricCard title="风险延期" value={deadlineCount} icon={AlertTriangle} tone="coral" />
-      </div>
+      {!loading && !loadError ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard title="今日事项" value={todayEvents.length} icon={Clock3} tone="cyan" />
+          <MetricCard title="本月发布" value={thisWeekPublishCount} icon={Send} tone="success" />
+          <MetricCard title="待拍摄" value={shootingCount} icon={Video} tone="primary" />
+          <MetricCard title="风险延期" value={deadlineCount} icon={AlertTriangle} tone="coral" />
+        </div>
+      ) : null}
 
       {loading ? (
         <LoadingState type="page" text="正在加载日历..." />
+      ) : loadError ? (
+        <ErrorState title="日历加载失败" description={loadError} actionText="重试加载" onRetry={() => void fetchEvents()} />
       ) : (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <GlassPanel className="min-w-0 overflow-hidden">
-            <div className="min-w-0 overflow-x-auto">
-              <div className="min-w-[820px]">
-                <div className="grid grid-cols-7 border-b border-studio-border-soft bg-white/[0.03]">
+            <div className="min-w-0">
+              <div className="w-full min-w-0 md:min-w-[820px]">
+                <div className="grid grid-cols-7 border-b border-studio-border-soft bg-studio-surface-soft">
                   {WEEKDAYS.map((day) => (
-                    <div key={day} className="px-3 py-3 text-center text-xs font-semibold text-studio-text-muted">
+                    <div key={day} className="px-0.5 py-2 text-center text-[10px] font-semibold text-studio-text-muted sm:px-3 sm:text-xs sm:py-3">
                       周{day}
                     </div>
                   ))}
@@ -290,14 +302,15 @@ export default function CalendarPage() {
                       <button
                         key={index}
                         type="button"
+                        aria-label={`${cell.date}，${cellEvents.length ? `${cellEvents.length} 项日程` : '无日程'}`}
                         onClick={() => handleDateClick(cell.date)}
-                        className={`min-h-[118px] border-b border-r border-studio-border-soft p-2 text-left transition hover:bg-white/[0.05] ${
-                          !cell.isCurrentMonth ? 'bg-white/[0.02] text-studio-text-muted' : 'text-studio-text-primary'
+                        className={`min-h-16 border-b border-r border-studio-border-soft p-1 text-left transition hover:bg-studio-surface-soft sm:min-h-20 sm:p-1.5 md:min-h-[118px] md:p-2 ${
+                          !cell.isCurrentMonth ? 'bg-studio-surface-soft/50 text-studio-text-muted' : 'text-studio-text-primary'
                         } ${isToday(cell.date) ? 'bg-studio-primary/10' : ''}`}
                       >
                         <div className="mb-2 flex items-center justify-between">
                           <span
-                            className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
+                            className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold sm:h-7 sm:w-7 sm:text-sm ${
                               isToday(cell.date)
                                 ? 'bg-studio-primary text-white shadow-glow-primary'
                                 : cell.isCurrentMonth
@@ -308,10 +321,10 @@ export default function CalendarPage() {
                             {cell.day}
                           </span>
                           {cellEvents.length > 0 && cell.isCurrentMonth ? (
-                            <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] text-studio-text-muted">{cellEvents.length}</span>
+                            <span className="rounded-full bg-studio-surface-elevated px-2 py-0.5 text-[10px] text-studio-text-muted">{cellEvents.length}</span>
                           ) : null}
                         </div>
-                        <div className="space-y-1">
+                        <div className="hidden space-y-1 md:block">
                           {cellEvents.slice(0, 3).map((eventItem, eventIndex) => (
                             <div
                               key={eventIndex}
@@ -324,7 +337,7 @@ export default function CalendarPage() {
                                       ? 'border-studio-amber/30 bg-studio-amber/10 text-studio-amber-contrast'
                                       : eventTypeTone[eventItem.event_type || 'other'] === 'cyan'
                                         ? 'border-studio-cyan/30 bg-studio-cyan/10 text-studio-cyan-contrast'
-                                        : 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary'
+                                        : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary'
                               }`}
                             >
                               {eventItem.title}
@@ -332,6 +345,15 @@ export default function CalendarPage() {
                           ))}
                           {cellEvents.length > 3 ? <div className="text-center text-[10px] text-studio-text-muted">+{cellEvents.length - 3} 更多</div> : null}
                         </div>
+                        {cellEvents.length > 0 ? (
+                          <div aria-hidden="true" className="mt-1 flex min-h-1.5 items-center gap-0.5 md:hidden">
+                            {cellEvents.slice(0, 3).map((eventItem, eventIndex) => {
+                              const tone = eventTypeTone[eventItem.event_type || 'other'];
+                              const dot = tone === 'coral' ? 'bg-studio-coral' : tone === 'success' ? 'bg-studio-success' : tone === 'amber' ? 'bg-studio-amber' : tone === 'cyan' ? 'bg-studio-cyan' : 'bg-studio-text-muted';
+                              return <span key={eventIndex} className={`h-1.5 w-1.5 rounded-full ${dot}`} />;
+                            })}
+                          </div>
+                        ) : null}
                       </button>
                     );
                   })}
@@ -362,7 +384,8 @@ export default function CalendarPage() {
                     </StatusPill>
                   }
                 >
-                  {eventItem.topic_title || eventItem.description || '未关联具体内容'}
+                  <div>{eventItem.topic_title || eventItem.description || '未关联具体内容'}</div>
+                  {eventItem.topic_id ? <ActionButton type="button" variant="ghost" className="mt-2 min-h-11" onClick={() => navigate(`/topics/${eventItem.topic_id}`, { state: { mobileReturnTo: '/calendar' } })}>查看关联选题</ActionButton> : null}
                 </TimelineCard>
               ))
             )}
@@ -383,6 +406,7 @@ export default function CalendarPage() {
         description={`日期：${selectedDate}`}
         submitText="创建"
         cancelText="取消"
+        loading={submitting}
         size="md"
       >
         <div className="space-y-4">

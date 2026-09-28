@@ -79,13 +79,13 @@ export default function AnonymousFeedbackModal({
             <h3 className="text-sm font-semibold text-studio-text-primary">大家的意见</h3>
             <span className="text-xs text-studio-text-muted">共 {feedback.length} 条</span>
           </div>
-          <div className="max-h-64 overflow-y-auto rounded-card border border-studio-border-soft bg-white/[0.025]">
+          <div className="max-h-64 overflow-y-auto rounded-card border border-studio-border-soft bg-studio-surface-soft">
             {loading ? <LoadingState type="inline" text="正在加载意见..." className="p-5" /> : feedback.length > 0 ? (
               <div className="divide-y divide-studio-border-soft">
                 {feedback.map((item) => (
                   <article key={item.id} className="p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="rounded-full border border-studio-border-soft bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-studio-text-secondary">{typeLabels[item.type]}</span>
+                      <span className="rounded-full border border-studio-border-soft bg-studio-surface-elevated px-2.5 py-1 text-xs font-medium text-studio-text-secondary">{typeLabels[item.type]}</span>
                       <time className="text-xs text-studio-text-muted">{formatBeijingDate(item.created_at)}</time>
                     </div>
                     <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-studio-text-primary">{item.content}</p>
@@ -120,7 +120,7 @@ export default function AnonymousFeedbackModal({
             </label>
             <label className="block text-sm font-medium text-studio-text-secondary">
               意见内容 <span className="text-studio-coral">*</span>
-              <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={4} placeholder="请输入你的想法..." className="mt-2 w-full resize-y rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2.5 text-studio-text-primary outline-none transition placeholder:text-studio-text-muted focus:border-studio-border-active" />
+              <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={4} placeholder="请输入你的想法..." className="mt-2 w-full resize-y rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-studio-text-primary outline-none transition placeholder:text-studio-text-muted focus:border-studio-border-active" />
               <span className="mt-1 block text-right text-xs text-studio-text-muted">{content.length}/2000</span>
             </label>
             <label className="flex cursor-pointer items-center gap-3 text-sm text-studio-text-secondary">

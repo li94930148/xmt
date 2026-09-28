@@ -7,6 +7,7 @@ import RealtimeToast from '@/components/RealtimeToast';
 import RoleGuard from '@/components/RoleGuard';
 import NotFound from '@/pages/NotFound';
 import { isAndroid } from '@/platform/runtime';
+import { shouldUseMobileLayout } from '@/platform/mobile-layout';
 import { useAuthStore } from '@/store';
 import { installNativeAuthRuntime, refreshNativeSession } from '@/auth/native/native-auth-runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
@@ -161,6 +162,7 @@ function NativeSessionBootstrap({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const [mobileLayout] = useState(() => shouldUseMobileLayout(isAndroid(), window.innerWidth));
   useEffect(() => {
     const savedTheme = (localStorage.getItem('xmt_theme') as 'light' | 'dark') || 'dark';
     applyTheme(savedTheme);
@@ -176,19 +178,19 @@ export default function App() {
             <Route path="/login" element={<Login />} />
 
             <Route element={<ProtectedRoute />}>
-              <Route element={<Layout />}>
-                <Route path="/" element={isAndroid() ? <MobileHome /> : <Home />} />
-                <Route path="/home" element={isAndroid() ? <MobileHome /> : <Home />} />
-                <Route path="/dashboard" element={isAndroid() ? <MobileHome /> : <Home />} />
-                <Route path="/topics" element={isAndroid() ? <MobileTopics /> : <Topics />} />
+              <Route element={<Layout mobileLayout={mobileLayout} />}>
+<Route path="/" element={mobileLayout ? <MobileHome /> : <Home />} />
+                <Route path="/home" element={mobileLayout ? <MobileHome /> : <Home />} />
+                <Route path="/dashboard" element={mobileLayout ? <MobileHome /> : <Home />} />
+                <Route path="/topics" element={mobileLayout ? <MobileTopics /> : <Topics />} />
                 <Route element={<RoleGuard permissions={['topic:create']} />}>
-                  <Route path="/topics/add" element={isAndroid() ? <MobileAddTopic /> : <AddTopic />} />
+                  <Route path="/topics/add" element={mobileLayout ? <MobileAddTopic /> : <AddTopic />} />
                 </Route>
-                <Route path="/topics/:id" element={isAndroid() ? <MobileTopicDetail /> : <TopicDetail />} />
-                <Route path="/production" element={isAndroid() ? <MobileWorkHub /> : <Production />} />
-                <Route path="/production/content" element={isAndroid() ? <MobileProduction /> : <Production />} />
-                <Route path="/production/content/:id" element={isAndroid() ? <MobileProductionEditor /> : <ProductionDetail />} />
-                <Route path="/production/:id" element={isAndroid() ? <MobileProductionEditor /> : <ProductionDetail />} />
+                <Route path="/topics/:id" element={mobileLayout ? <MobileTopicDetail /> : <TopicDetail />} />
+                <Route path="/production" element={mobileLayout ? <MobileWorkHub /> : <Production />} />
+                <Route path="/production/content" element={mobileLayout ? <MobileProduction /> : <Production />} />
+                <Route path="/production/content/:id" element={mobileLayout ? <MobileProductionEditor /> : <ProductionDetail />} />
+                <Route path="/production/:id" element={mobileLayout ? <MobileProductionEditor /> : <ProductionDetail />} />
                 <Route path="/shooting/:id" element={<ShootingDetail />} />
                 <Route path="/publishing/:id" element={<PublishingDetail />} />
                 <Route path="/resources" element={<Navigate replace to="/asset-center" />} />
@@ -199,7 +201,7 @@ export default function App() {
                 <Route path="/asset-center/search" element={<ResourceSearch />} />
                 <Route path="/asset-center/projects" element={<ResourceLibrary fixedLibraryType="project" />} />
                 <Route path="/asset-center/media" element={<ResourceLibrary fixedLibraryType="media" />} />
-                <Route path="/messages" element={isAndroid() ? <MobileMessages /> : <Messages />} />
+                <Route path="/messages" element={mobileLayout ? <MobileMessages /> : <Messages />} />
                 <Route path="/kanban" element={<Kanban />} />
                 <Route path="/calendar" element={<CalendarPage />} />
                 <Route path="/inspirations" element={<Inspirations />} />
@@ -268,7 +270,7 @@ export default function App() {
                 <Route element={<RoleGuard permissions={['export:data']} />}>
                   <Route path="/export" element={<ExportPage />} />
                 </Route>
-                <Route path="/daily-report" element={isAndroid() ? <MobileDaily /> : <DailyReportPage />} />
+                <Route path="/daily-report" element={mobileLayout ? <MobileDaily /> : <DailyReportPage />} />
                 <Route path="/daily-report/team" element={<DailyReportPage />} />
                 <Route path="/daily-report/summary" element={<DailyReportPage />} />
                 <Route element={<RoleGuard permissions={['user:view']} />}>

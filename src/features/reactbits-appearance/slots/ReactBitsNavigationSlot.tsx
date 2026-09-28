@@ -6,5 +6,5 @@ export function ReactBitsNavigationSlot({ semantic, children, className = '', 'a
   const config = useEffectiveReactBitsAppearanceConfig();
   const dock = semantic === 'home-tools' && config.navigation.component === 'dock';
   const pill = semantic !== 'home-tools' && config.navigation.component === 'pill-nav';
-  return <nav aria-label={ariaLabel} data-reactbits-navigation={`${semantic}:${dock ? 'dock' : pill ? 'pill-nav' : 'standard'}`} className={`${className} ${dock ? 'rounded-2xl border border-white/15 bg-slate-950/70 p-2 shadow-xl' : pill ? 'rounded-full border border-studio-border-soft bg-studio-surface/80 p-1.5' : ''}`}>{children}</nav>;
+  return <nav aria-label={ariaLabel} data-reactbits-navigation={`${semantic}:${dock ? 'dock' : pill ? 'pill-nav' : 'standard'}`} className={`${className} ${dock ? 'rounded-2xl border border-studio-border-soft bg-studio-surface-glass p-2 shadow-floating backdrop-blur-xl' : pill ? 'rounded-full border border-studio-border-soft bg-studio-surface-glass p-1.5 backdrop-blur-xl' : ''}`}>{children}</nav>;
 }

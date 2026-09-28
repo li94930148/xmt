@@ -31,6 +31,7 @@ import {
 } from '../api';
 import type { PublishingDouyinCandidate } from '../api';
 import type { PublishingSummary } from '../api/workflow';
+import { getWorkflowStatusLabel } from '../platform/workflow-status-labels';
 import { BaseModal, ConfirmModal, FormModal, LoadingState } from '../components/common';
 import ActionButton from '../components/studio/ActionButton';
 import GlassPanel from '../components/studio/GlassPanel';
@@ -58,13 +59,6 @@ const initialFormData = {
   likes: '',
   shares: '',
   comments: '',
-};
-
-const statusText: Record<string, string> = {
-  pending: '待发布',
-  published: '已发布',
-  failed: '发布异常',
-  scheduled: '已定时',
 };
 
 const statusTone: Record<string, StatusTone> = {
@@ -391,7 +385,7 @@ export default function Publishing() {
         <ResponsiveTableShell>
           <table className="min-w-[1080px] w-full">
             <thead>
-              <tr className="border-b border-studio-border-soft bg-white/[0.03] text-left text-xs font-semibold uppercase tracking-wide text-studio-text-muted">
+              <tr className="border-b border-studio-border-soft bg-studio-surface-soft text-left text-xs font-semibold uppercase tracking-wide text-studio-text-muted">
                 <th className="px-5 py-4">内容</th>
                 <th className="px-5 py-4">平台</th>
                 <th className="px-5 py-4">发布时间</th>
@@ -403,14 +397,14 @@ export default function Publishing() {
             </thead>
             <tbody>
               {filteredPublishings.map((publishing) => (
-                <tr key={publishing.id} className="group border-b border-studio-border-soft/70 transition hover:bg-white/[0.04]">
+                <tr key={publishing.id} className="group border-b border-studio-border-soft/70 transition hover:bg-studio-surface-soft">
                   <td className="px-5 py-4">
                     <button
                       type="button"
                       onClick={() => navigate(`/publishing/${publishing.id}`)}
                       className="flex min-w-0 items-start gap-3 text-left"
                     >
-                      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-button border border-studio-border-soft bg-white/[0.05] text-studio-cyan">
+                      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-button border border-studio-border-soft bg-studio-surface-soft text-studio-cyan">
                         <FileText className="h-4 w-4" />
                       </span>
                       <span className="min-w-0">
@@ -460,7 +454,7 @@ export default function Publishing() {
                   </td>
                   <td className="px-5 py-4">
                     <StatusPill tone={statusTone[publishing.status] || 'muted'}>
-                      {statusText[publishing.status] || publishing.status}
+                      {getWorkflowStatusLabel('publishing', publishing.status)}
                     </StatusPill>
                   </td>
                   <td className="px-5 py-4 text-sm font-medium text-studio-text-secondary">{getNextAction(publishing.status)}</td>
@@ -470,7 +464,7 @@ export default function Publishing() {
                         <button
                           type="button"
                           onClick={() => openDouyinLink(publishing)}
-                          className={`rounded-button border p-2 transition ${publishing.douyin_work_id ? 'border-studio-cyan/40 bg-studio-cyan/10 text-studio-cyan' : 'border-studio-border-soft bg-white/[0.05] text-studio-text-secondary hover:border-studio-border-active hover:text-studio-text-primary'}`}
+                          className={`rounded-button border p-2 transition ${publishing.douyin_work_id ? 'border-studio-cyan/40 bg-studio-cyan/10 text-studio-cyan' : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary hover:border-studio-border-active hover:text-studio-text-primary'}`}
                           title={publishing.douyin_work_id ? '调整抖音作品关联' : '关联抖音作品'}
                         >
                           <Link2 className="h-4 w-4" />
@@ -479,7 +473,7 @@ export default function Publishing() {
                       <button
                         type="button"
                         onClick={() => handleEdit(publishing)}
-                        className="rounded-button border border-studio-border-soft bg-white/[0.05] p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+                          className="rounded-button border border-studio-border-soft bg-studio-surface-soft p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
                         title="编辑"
                       >
                         <Edit3 className="h-4 w-4" />
@@ -489,7 +483,7 @@ export default function Publishing() {
                           href={publishing.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="rounded-button border border-studio-border-soft bg-white/[0.05] p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+                        className="rounded-button border border-studio-border-soft bg-studio-surface-soft p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
                           title="打开链接"
                         >
                           <ExternalLink className="h-4 w-4" />
@@ -695,7 +689,7 @@ export default function Publishing() {
                 const linkedHere = candidate.linked_publishing_id === linkTarget?.id;
                 const linkedElsewhere = Boolean(candidate.linked_publishing_id && !linkedHere);
                 return (
-                  <div key={candidate.id} className="rounded-button border border-studio-border-soft bg-white/[0.03] p-4">
+                  <div key={candidate.id} className="rounded-button border border-studio-border-soft bg-studio-surface-soft p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <p className="line-clamp-2 font-medium text-studio-text-primary">{candidate.title}</p>

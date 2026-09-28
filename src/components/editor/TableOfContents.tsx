@@ -4,7 +4,6 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Editor } from '@tiptap/react';
-import { useAppStore } from '../../store';
 import { ChevronRight, ChevronDown, List } from 'lucide-react';
 
 interface TocItem {
@@ -20,8 +19,6 @@ interface TableOfContentsProps {
 }
 
 export default function TableOfContents({ editor, className }: TableOfContentsProps) {
-  const appStore = useAppStore();
-  const isDark = appStore.theme === 'dark';
   const [items, setItems] = useState<TocItem[]>([]);
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
   const [panelOpen, setPanelOpen] = useState(true);
@@ -153,18 +150,16 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
       {/* TOC 标题栏 */}
       <button
         onClick={() => setPanelOpen(!panelOpen)}
-        className={`flex items-center gap-2 px-3 py-2 text-sm font-medium w-full text-left transition-colors ${
-          isDark ? 'text-gray-300 hover:bg-gray-700 border-b border-gray-700' : 'text-gray-600 hover:bg-gray-50 border-b border-gray-200'
-        }`}
+        className="flex w-full items-center gap-2 border-b border-studio-border-soft px-3 py-2 text-left text-sm font-medium text-studio-text-secondary transition-colors hover:bg-studio-surface-soft hover:text-studio-text-primary"
       >
         <List className="w-4 h-4" />
         <span>目录</span>
-        <span className={`ml-auto text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{items.length} 项</span>
+        <span className="ml-auto text-xs text-studio-text-muted">{items.length} 项</span>
         {panelOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
       </button>
 
       {panelOpen && (
-        <div className={`overflow-y-auto max-h-[calc(100vh-300px)] py-1 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+        <div className="max-h-[calc(100vh-300px)] overflow-y-auto bg-studio-surface py-1">
           {visibleItems.map((item, idx) => {
             // 检查是否有子标题
             const nextItem = visibleItems[idx + 1];
@@ -177,7 +172,7 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
                 {hasChildren && item.level < 4 && (
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleCollapse(item.level); }}
-                    className={`mr-1 p-0.5 rounded transition-colors ${isDark ? 'hover:bg-gray-600' : 'hover:bg-gray-200'}`}
+                    className="mr-1 rounded p-0.5 text-studio-text-muted transition-colors hover:bg-studio-surface-elevated hover:text-studio-text-primary"
                   >
                     {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   </button>
@@ -186,8 +181,8 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
                   onClick={() => scrollToHeading(item.pos, item.id)}
                   className={`flex-1 text-left py-1.5 px-2 rounded text-sm truncate transition-all ${levelFontSize(item.level)} ${
                     isActive
-                      ? isDark ? 'bg-blue-600/20 text-blue-400 border-l-2 border-blue-400' : 'bg-blue-50 text-blue-600 border-l-2 border-blue-500'
-                      : isDark ? 'text-gray-300 hover:bg-gray-700 hover:text-white' : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                      ? 'border-l-2 border-studio-primary bg-studio-primary/12 text-studio-primary-contrast'
+                      : 'text-studio-text-secondary hover:bg-studio-surface-soft hover:text-studio-text-primary'
                   }`}
                   title={item.text}
                 >

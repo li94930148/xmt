@@ -185,7 +185,7 @@ export function notifyDesktop(options: DesktopNotificationOptions): void {
   });
 
   // 根据用户偏好决定是否播放提示音
-  if (isNotifySoundEnabled()) {
+  if (isNotifySoundEnabled() && !options.silent) {
     playNotificationSound();
   }
 

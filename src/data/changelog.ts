@@ -11,6 +11,419 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '3.3.43',
+    date: '2026-09-28',
+    title: '桌面消息聚合与业务直达',
+    impactScope: ['桌面消息通知', '选题关联跳转'],
+    changes: [
+      { type: 'improvement', description: '同一选题的同类桌面提醒在五分钟内合并更新并避免重复提示音；点击通知可安全直达站内关联页面。消息记录和未读状态仍逐条保留。' },
+    ],
+  },
+  {
+    version: '3.3.42',
+    date: '2026-09-28',
+    title: '移动消息错误恢复与账号安全反馈',
+    impactScope: ['移动消息', '移动账号安全'],
+    changes: [
+      { type: 'fix', description: '消息读取失败且无缓存时显示错误与重试，不再误报暂无消息；未读标记失败时保留在消息页。移动端改密码增加长度校验和重复提交保护。' },
+    ],
+  },
+  {
+    version: '3.3.41',
+    date: '2026-09-27',
+    title: '移动本机内容按账号隔离',
+    impactScope: ['移动消息', '选题与稿件草稿', '移动日报'],
+    changes: [
+      { type: 'security', description: '同一设备切换账号后，移动消息缓存和本机草稿只按当前账号恢复；旧版无法确认归属的缓存不再自动显示，原数据仍留在设备上。' },
+    ],
+  },
+  {
+    version: '3.3.40',
+    date: '2026-09-27',
+    title: '移动工作流状态兜底中文化',
+    impactScope: ['移动首页/列表/详情', '拍摄/发布列表与详情', '历史状态显示'],
+    changes: [
+      { type: 'fix', description: '移动首页、选题/创作列表和选题/拍摄/发布详情对未知状态显示状态待确认；未知选题状态采用中性样式，拍摄 pending 显示为计划中。权限和服务端流程规则不变。' },
+    ],
+  },
+  {
+    version: '3.3.39',
+    date: '2026-09-27',
+    title: '移动日报状态和审核意见',
+    impactScope: ['移动日报', '状态提示', '审核反馈'],
+    changes: [
+      { type: 'improvement', description: '移动日报显示中文审核状态和对应操作说明；被退回时可直接查看审核意见，已通过或已归档的日报明确为只读。' },
+    ],
+  },
+  {
+    version: '3.3.38',
+    date: '2026-09-27',
+    title: '移动岗位名称中文化',
+    impactScope: ['移动我的账号页', '文案/后期/摄像角色'],
+    changes: [
+      { type: 'improvement', description: '补全文案、后期和摄像岗位的中文角色显示；角色权限保持不变，Android 工程版本已对齐。' },
+    ],
+  },
+  {
+    version: '3.3.37',
+    date: '2026-09-27',
+    title: '移动选题编辑与失败恢复',
+    impactScope: ['移动选题提报', '移动选题详情', '角色权限反馈'],
+    changes: [
+      { type: 'fix', description: '修复权限状态变化触发的选题详情重复加载，恢复授权负责人的稳定编辑；创建和审核失败保留服务端说明及页面输入，支持重试。' },
+    ],
+  },
+  {
+    version: '3.3.36',
+    date: '2026-09-27',
+    title: '移动创作角色与稿件范围对齐',
+    impactScope: ['移动工作中心', '创作详情', '角色权限反馈'],
+    changes: [
+      { type: 'fix', description: '移动创作详情依据服务端稿件可编辑范围决定是否开放编辑；无编辑范围时可继续只读查看，不再显示必然被拒绝的保存入口。' },
+    ],
+  },
+  {
+    version: '3.3.35',
+    date: '2026-09-27',
+    title: '移动日报部分成功后安全重试',
+    impactScope: ['移动工作中心', '日报', '失败恢复'],
+    changes: [
+      { type: 'fix', description: '日报草稿已保存但提交失败时保留服务端新版本号，恢复后重试不再因旧版本号冲突。' },
+    ],
+  },
+  {
+    version: '3.3.34',
+    date: '2026-09-27',
+    title: '移动日历失败恢复与权限核验',
+    impactScope: ['移动工作中心', '排期日历', '日历事件权限'],
+    changes: [
+      { type: 'fix', description: '日历读取失败提供错误说明和重试，刷新失败时不再保留旧月份汇总；创建失败保留输入并可安全重试。' },
+      { type: 'improvement', description: '校验日历响应数据结构，并补充日历事件创建者权限和关联选题访问范围回归。' },
+    ],
+  },
+  {
+    version: '3.3.33',
+    date: '2026-09-27',
+    title: '移动日历与灵感关联选题闭环',
+    impactScope: ['移动工作中心', '排期日历', '灵感池', '选题详情'],
+    changes: [
+      { type: 'improvement', description: '从首页或工作中心进入移动子页后返回原入口；日历排期和已转化灵感可直接打开关联选题，并回到来源页面。' },
+      { type: 'fix', description: '修复日历与灵感关联选题只有文字、没有可达入口，以及子页返回固定回工作中心的问题。' },
+    ],
+  },
+  {
+    version: '3.3.32',
+    date: '2026-09-27',
+    title: '移动灵感与看板布局优化',
+    impactScope: ['移动工作中心', '灵感池', '看板', '日历'],
+    changes: [
+      { type: 'improvement', description: '手机上的灵感和看板操作布局更清晰；触屏设备可直接看到删除入口，按钮文案不再被挤成竖排。' },
+      { type: 'fix', description: '修复窄屏看板筛选标签逐字换行的问题，并验证日历、灵感、看板与返回工作入口。' },
+    ],
+  },
+  {
+    version: '3.3.31',
+    date: '2026-09-27',
+    title: '看板流程详情正确关联',
+    impactScope: ['移动工作中心', '看板', '拍摄详情', '发布详情'],
+    changes: [
+      { type: 'fix', description: '从看板进入拍摄或发布环节时，先按选题找到对应流程记录再打开详情；缺少记录或加载失败时明确提示并回到选题。' },
+    ],
+  },
+  {
+    version: '3.3.30',
+    date: '2026-09-27',
+    title: '移动编辑器轻工具栏与 Android 版本对齐',
+    impactScope: ['移动创作', '拍摄详情', '发布详情', 'Android 安装包'],
+    changes: [
+      { type: 'improvement', description: '手机端编辑器改用精简的常用写作工具，窄屏下发布编辑操作分行显示；桌面端完整工具栏保持不变。' },
+      { type: 'fix', description: 'Android 应用版本名称和版本码跟随 XMT 当前版本，避免手机端包版本落后。' },
+    ],
+  },
+  {
+    version: '3.3.29',
+    date: '2026-09-27',
+    title: '移动工作流详情窄屏适配',
+    impactScope: ['拍摄详情', '发布详情', '移动选题详情'],
+    changes: [
+      { type: 'improvement', description: '拍摄和发布详情在手机上更易阅读和操作，发布流程改为两列展示。选题协作动态用中文呈现审核结果。' },
+      { type: 'fix', description: '选题详情遇到失权或记录不存在时不再展示本机旧数据，审核状态、历史意见、通知和实时广播增加一致性验证。' },
+    ],
+  },
+  {
+    version: '3.3.28',
+    date: '2026-09-27',
+    title: '移动工作流权限与消息状态保护',
+    impactScope: ['移动选题', '移动日报', '移动消息'],
+    changes: [
+      { type: 'fix', description: '移动端选题新建、编辑和审核以及日报提交均按服务端权限区分；日报读取失败可重试且禁止空数据覆盖。批量已读仅同步成功项，部分失败保留未读状态。' },
+    ],
+  },
+  {
+    version: '3.3.27',
+    date: '2026-09-27',
+    title: '移动创作权限与通知加载保护',
+    impactScope: ['移动创作', '移动通知偏好'],
+    changes: [
+      { type: 'fix', description: '移动端创作列表按查看权限显示，编辑器按查看/修改能力切换只读与可提交操作；只读状态不读取或写回本机草稿。移动通知的偏好、渠道和事件必须全部成功加载后才开放保存，失败时可重试。。' },
+    ],
+  },
+  {
+    version: '3.3.26',
+    date: '2026-09-27',
+    title: '手机浏览器移动办公入口',
+    impactScope: ['手机浏览器', '移动工作中心', '移动导航'],
+    changes: [
+      { type: 'improvement', description: '手机浏览器打开应用时使用移动导航和已有移动页面；布局在本次打开期间保持稳定，避免旋转时中断编辑。' },
+      { type: 'fix', description: '工作子页正确高亮工作导航并提供返回入口；移动壳层可显示保存等操作反馈。' },
+    ],
+  },
+  {
+    version: '3.3.25',
+    date: '2026-09-27',
+    title: '个人设置与系统管理分组',
+    impactScope: ['设置中心', '品牌信息', '数据与备份'],
+    changes: [
+      { type: 'improvement', description: '设置中心按个人、系统管理、产品信息分组；关于系统展示已保存的品牌信息。' },
+      { type: 'fix', description: '系统配置读取失败时提供重试并阻止默认值误保存；备份读取失败不再显示为暂无记录。' },
+    ],
+  },
+  {
+    version: '3.3.24',
+    date: '2026-09-27',
+    title: '通知偏好与品牌 Logo 保存反馈',
+    impactScope: ['通知偏好', '品牌设置'],
+    changes: [
+      { type: 'fix', description: '通知配置必须完整加载后才可保存，避免读取失败时以空列表覆盖已有偏好；Logo 选择、图片读取失败和保存应用状态反馈更准确。' },
+    ],
+  },
+  {
+    version: '3.3.23',
+    date: '2026-09-27',
+    title: '实时通知单链路呈现',
+    impactScope: ['选题实时更新', '灵感实时更新', '系统桌面通知'],
+    changes: [
+      { type: 'fix', description: '房间事件只显示应用内 toast，桌面提醒由持久化个人消息触发，避免同一业务事件重复弹系统通知。' },
+    ],
+  },
+  {
+    version: '3.3.22',
+    date: '2026-09-27',
+    title: '日报、番茄钟与已读状态反馈',
+    impactScope: ['日报与月/年报', '番茄钟统计', '消息中心'],
+    changes: [
+      { type: 'fix', description: '加载错误保留为可见错误并可重试；提交结果明确反馈；批量已读局部成功状态准确同步。' },
+    ],
+  },
+  {
+    version: '3.3.21',
+    date: '2026-09-27',
+    title: '业务数据失败和竞态保护',
+    impactScope: ['成就系统', '资料搜索', '资料列表'],
+    changes: [
+      { type: 'fix', description: '成就关键接口失败显示重试；资料搜索和列表仅接受最新请求结果。' },
+    ],
+  },
+  {
+    version: '3.3.20',
+    date: '2026-09-27',
+    title: '周报加载失败可重试',
+    impactScope: ['报告中心周报'],
+    changes: [
+      { type: 'fix', description: '周报接口失败显示明确错误及重试，不再伪装为暂无数据。' },
+    ],
+  },
+  {
+    version: '3.3.19',
+    date: '2026-09-27',
+    title: '知识库过期请求保护',
+    impactScope: ['知识库搜索', '分类切换'],
+    changes: [
+      { type: 'fix', description: '仅提交最新分类/搜索请求的结果，避免迟到响应覆盖当前资料或加载/错误状态。' },
+    ],
+  },
+  {
+    version: '3.3.18',
+    date: '2026-09-27',
+    title: '全局崩溃回退双主题修复',
+    impactScope: ['全局错误恢复', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '错误回退改用双主题表面、文字与统一按钮样式；重载、返回首页及复制诊断保持不变。' },
+    ],
+  },
+  {
+    version: '3.3.17',
+    date: '2026-09-27',
+    title: '共用空状态图标底色',
+    impactScope: ['空状态', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '图标面板改用不透明 Studio 表面令牌，修复背景透明；空状态文案和可选操作不变。' },
+    ],
+  },
+  {
+    version: '3.3.16',
+    date: '2026-09-27',
+    title: '403 权限提示主题底色',
+    impactScope: ['共用权限提示', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '权限提示头部及锁图标面板改用双主题语义柔和底色和中性边框，权限判断与导航不变。' },
+    ],
+  },
+  {
+    version: '3.3.15',
+    date: '2026-09-27',
+    title: '确认弹窗主题底色',
+    impactScope: ['共用确认弹窗', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '危险、警告及默认类型图标面板改用双主题语义底色、中性边框和 Studio 对比文字。' },
+    ],
+  },
+  {
+    version: '3.3.14',
+    date: '2026-09-27',
+    title: '共用错误状态主题底色',
+    impactScope: ['共用错误提示', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '失败、警告和未找到状态图标面板改用双主题可见底色和中性边框，提示及重试行为不变。' },
+    ],
+  },
+  {
+    version: '3.3.13',
+    date: '2026-09-27',
+    title: '组织权限徽标主题底色',
+    impactScope: ['组织权限', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '角色和账户启用状态徽标改用可见的双主题语义柔和底色及中性边框。' },
+    ],
+  },
+  {
+    version: '3.3.12',
+    date: '2026-09-27',
+    title: '全局通知主题底色',
+    impactScope: ['全局通知', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '成功、失败、警告和提示通知改用双主题可见的语义柔和底色与中性边框。' },
+    ],
+  },
+  {
+    version: '3.3.11',
+    date: '2026-09-27',
+    title: '成就稀有度标签主题底色',
+    impactScope: ['成就系统', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '四档成就稀有度标签改用可见的双主题语义底色和中性边框，筛选与成就逻辑不变。' },
+    ],
+  },
+  {
+    version: '3.3.10',
+    date: '2026-09-27',
+    title: '移动端选题状态标签主题底色',
+    impactScope: ['移动选题列表', '移动选题详情', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '移动端选题列表与详情按待审、通过、驳回、创作、拍摄和发布阶段显示语义底色与中性边框。' },
+    ],
+  },
+  {
+    version: '3.3.9',
+    date: '2026-09-27',
+    title: '复盘状态标签主题底色',
+    impactScope: ['复盘列表', '复盘行动项', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '复盘及行动项状态标签改用双主题语义柔和底色，状态与操作逻辑不变。' },
+    ],
+  },
+  {
+    version: '3.3.8',
+    date: '2026-09-27',
+    title: '灵感标签主题底色',
+    impactScope: ['灵感库', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '灵感类别和已转选题标签改用双主题语义柔和底色，转化和评论逻辑不变。' },
+    ],
+  },
+  {
+    version: '3.3.7',
+    date: '2026-09-27',
+    title: '发布详情状态标签主题底色',
+    impactScope: ['发布详情', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '发布状态标签改用双主题语义柔和底色与中性边框，发布状态及流转不变。' },
+    ],
+  },
+  {
+    version: '3.3.6',
+    date: '2026-09-27',
+    title: '成片制作标签主题底色',
+    impactScope: ['成片制作详情', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '成片制作阶段、完成和本地编辑提示改用可见的双主题柔和底色令牌。' },
+    ],
+  },
+  {
+    version: '3.3.5',
+    date: '2026-09-27',
+    title: '选题阶段标签主题底色',
+    impactScope: ['选题详情', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '选题详情阶段状态标签改用可见的主题语义柔和底色，状态流转逻辑不变。' },
+    ],
+  },
+  {
+    version: '3.3.4',
+    date: '2026-09-24',
+    title: '创作状态标签主题底色',
+    impactScope: ['创作列表', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '选题和稿件状态标签改用明确的语义柔和底色令牌，确保背景在明暗主题下可见。' },
+    ],
+  },
+  {
+    version: '3.3.3',
+    date: '2026-09-24',
+    title: '灵感新评论提示对比度',
+    impactScope: ['灵感库', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '灵感库“有新评论”标签改用可见主题表面与高对比文字，评论事件逻辑保持不变。' },
+    ],
+  },
+  {
+    version: '3.3.2',
+    date: '2026-09-24',
+    title: '趋势周期主题对比度',
+    impactScope: ['数据趋势中心', '明暗主题'],
+    changes: [
+      { type: 'fix', description: '趋势周期选中态改用主题柔和表面和 cyan 对比文字，增强当前周期的可见性与可读性。' },
+      { type: 'improvement', description: '重新验收编辑器浅色/暗色主题下的批注添加和编辑路径。' },
+    ],
+  },
+  {
+    version: '3.3.1',
+    date: '2026-09-24',
+    title: '浅色主题批注输入修正',
+    impactScope: ['富文本编辑器', '浅色主题'],
+    changes: [
+      { type: 'fix', description: '编辑器浅色主题下的批注输入框改用统一表面与占位文字颜色，保持输入体验跟随当前主题。' },
+    ],
+  },
+  {
+    version: '3.3.0',
+    date: '2026-09-24',
+    title: '选题草稿、窄屏列表与编辑器写作辅助',
+    impactScope: ['选题提报', '选题列表', '富文本编辑器'],
+    changes: [
+      { type: 'feature', description: '选题可先存本机草稿，下次继续编辑；提报成功后直达选题详情。' },
+      { type: 'fix', description: '存草稿不再误建待审选题，编辑器页面切换时不再偶发报错。' },
+      { type: 'improvement', description: '大纲使用统一编辑器，选题列表在窄屏仍可查看操作按钮。' },
+      { type: 'feature', description: '编辑器可查找高亮并逐个或全部替换；只读时仅可查找，替换可撤销。' },
+      { type: 'feature', description: '编辑器显示当前字数、目标进度与预计阅读时长；目标只保存在当前设备。' },
+      { type: 'feature', description: '当前稿件可进入专注写作，暂时隐藏导航、资料和版本区，退出后原样恢复。' },
+      { type: 'feature', description: '当前稿件可按选题大纲补入缺失小节，重复点击不复制，插入可撤销。' },
+      { type: 'fix', description: '修复通知更新触发创作详情重载、覆盖刚插入正文的问题。' },
+      { type: 'feature', description: '创作资料可连同来源链接引用到正式正文，搜索结果按当前稿件显示已用或待用。' },
+      { type: 'feature', description: '选中资料草稿中的原文片段可选择来源引用到正文，来源不匹配时不会插入。' },
+    ],
+  },
+  {
     version: '3.2.0',
     date: '2026-09-23',
     title: '产品工作流全面改造',

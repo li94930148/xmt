@@ -58,7 +58,7 @@ function getPlatformTone(platform?: string): PlatformTone {
   return {
     label: platform || '其他平台',
     icon: Share2,
-    className: 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary',
+    className: 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary',
   };
 }
 

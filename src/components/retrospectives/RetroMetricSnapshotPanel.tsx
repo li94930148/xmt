@@ -101,7 +101,7 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
                   const periodStart = typeof source?.periodStart === 'string' ? source.periodStart : null;
                   const periodEnd = typeof source?.periodEnd === 'string' ? source.periodEnd : null;
                   return (
-                    <article key={snapshot.id} className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4">
+                    <article key={snapshot.id} className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-studio-text-primary">{copy?.label || snapshot.metricName}</p>

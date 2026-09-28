@@ -16,6 +16,7 @@ import { Typography } from '@tiptap/extension-typography';
 import { TextAlign } from '@tiptap/extension-text-align';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
+import FindAndReplace from '@tiptap/extension-find-and-replace';
 import { CommentExtension } from './CommentExtension';
 
 const ParagraphWithIndent = Paragraph.extend({
@@ -75,6 +76,7 @@ export function createEditorExtensions(placeholder = '开始编写...'): Extensi
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     TextStyle,
     Color,
+    FindAndReplace.configure({ injectCSS: false, searchDebounceMs: 0 }),
     CommentExtension,
   ];
 }

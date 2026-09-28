@@ -9,6 +9,30 @@ import { formatBeijingDate } from '../lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { celebrateMilestone } from '../utils/confetti';
+import { clearSafeDraft, readSafeDraftValue, writeSafeDraft } from '../platform/safe-draft';
+
+const emptyFormData = {
+  title: '',
+  platform: '',
+  deadline: '',
+  assignee_id: '',
+  projectBackground: '',
+  targetAudience: '',
+  expectedGoal: '',
+  budget: '',
+  outline: '',
+};
+
+type TopicDraft = typeof emptyFormData;
+
+function readTopicDraft(key: string | null): TopicDraft | null {
+  if (!key) return null;
+  const draft = readSafeDraftValue<unknown>(key);
+  if (!draft || typeof draft !== 'object') return null;
+  const values = draft as Record<string, unknown>;
+  if (!Object.keys(emptyFormData).every((field) => typeof values[field] === 'string')) return null;
+  return draft as TopicDraft;
+}
 
 export default function AddTopic() {
   const navigate = useNavigate();
@@ -16,21 +40,19 @@ export default function AddTopic() {
   const authStore = useAuthStore();
   const styles = useThemeStyles();
   
-  const [formData, setFormData] = useState({
-    title: '',
-    platform: '',
-    deadline: '',
-    assignee_id: '',
-    projectBackground: '',
-    targetAudience: '',
-    expectedGoal: '',
-    budget: '',
-    outline: '',
-  });
+  const draftKey = authStore.user?.id ? `topic:new:desktop:${authStore.user.id}` : null;
+  const [formData, setFormData] = useState<TopicDraft>(() => readTopicDraft(draftKey) ?? emptyFormData);
+  const [hasLocalDraft, setHasLocalDraft] = useState(() => Boolean(readTopicDraft(draftKey)));
   
   const [users, setUsers] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+
+  useEffect(() => {
+    const draft = readTopicDraft(draftKey);
+    setFormData(draft ?? emptyFormData);
+    setHasLocalDraft(Boolean(draft));
+  }, [draftKey]);
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -67,8 +89,10 @@ export default function AddTopic() {
       });
 
       appStore.addNotification({ title: '提报成功', message: '选题已成功提交审核', type: 'success' });
+      if (draftKey) clearSafeDraft(draftKey);
+      setHasLocalDraft(false);
       celebrateMilestone();
-      navigate('/topics');
+      navigate(`/topics/${result.topicId}`);
     } catch (error) {
       appStore.addNotification({ title: '提报失败', message: (error as Error).message, type: 'error' });
     } finally {
@@ -76,45 +100,40 @@ export default function AddTopic() {
     }
   };
 
-  const handleSaveDraft = async () => {
-    try {
-      const parts: string[] = [];
-      if (formData.projectBackground) parts.push(`【项目背景】\n${formData.projectBackground}`);
-      if (formData.targetAudience) parts.push(`【目标受众】\n${formData.targetAudience}`);
-
-      const result = await createTopic({
-        title: formData.title || '未命名选题',
-        description: parts.join('\n\n'),
-        outline: formData.outline || undefined,
-        platform: formData.platform,
-        deadline: formData.deadline,
-        assignee_id: formData.assignee_id ? parseInt(formData.assignee_id) : null,
-      });
-
-      appStore.addNotification({ title: '保存成功', message: '草稿已保存', type: 'success' });
-      navigate('/topics');
-    } catch (error) {
-      appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+  const handleSaveDraft = () => {
+    if (!draftKey) {
+      appStore.addNotification({ title: '保存失败', message: '请重新登录后保存草稿', type: 'error' });
+      return;
     }
+    if (!Object.values(formData).some((value) => value.trim())) {
+      appStore.addNotification({ title: '保存失败', message: '请先填写选题内容', type: 'warning' });
+      return;
+    }
+    if (!writeSafeDraft(draftKey, formData)) {
+      appStore.addNotification({ title: '保存失败', message: '本机无法保存草稿，请检查浏览器存储空间', type: 'error' });
+      return;
+    }
+    setHasLocalDraft(true);
+    appStore.addNotification({ title: '已存本机草稿', message: '下次在这台设备打开提报页可继续编辑；尚未提交审核', type: 'success' });
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <button
             onClick={() => navigate('/topics')}
-            className={`flex items-center gap-2 text-studio-text-muted ${styles.textSecondary} transition-colors`}
+            className={`flex items-center gap-2 whitespace-nowrap text-studio-text-muted ${styles.textSecondary} transition-colors`}
           >
             <ChevronLeft className="w-5 h-5" />
             返回选题列表
           </button>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setShowPreview(!showPreview)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            className={`flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-lg transition-colors ${
               showPreview 
                 ? 'bg-studio-primary text-white' 
                 : `${styles.buttonSecondary}`
@@ -125,21 +144,28 @@ export default function AddTopic() {
           </button>
           <button
             onClick={handleSaveDraft}
-            className={`flex items-center gap-2 px-4 py-2 ${styles.buttonSecondary} rounded-lg transition-colors`}
+            disabled={submitting}
+            className={`flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 ${styles.buttonSecondary} rounded-lg transition-colors`}
           >
             <Save className="w-4 h-4" />
-            保存草稿
+            存本机草稿
           </button>
           <button
             onClick={handleSubmit}
             disabled={submitting}
-            className="flex items-center gap-2 px-6 py-2 bg-studio-primary hover:bg-studio-primary disabled:bg-studio-surface-soft text-white rounded-lg transition-colors"
+            className="flex shrink-0 items-center gap-2 whitespace-nowrap px-6 py-2 bg-studio-primary hover:bg-studio-primary disabled:bg-studio-surface-soft text-white rounded-lg transition-colors"
           >
             <Send className="w-4 h-4" />
             {submitting ? '提交中...' : '提报选题'}
           </button>
         </div>
       </div>
+
+      {hasLocalDraft && (
+        <p role="status" className="rounded-panel border border-studio-border-soft bg-studio-surface-soft px-4 py-3 text-sm text-studio-text-secondary">
+          当前设备和账号有一份选题草稿；修改后需再次点击“存本机草稿”。提报后才会创建选题。
+        </p>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -244,10 +270,11 @@ export default function AddTopic() {
                 <div className={`editor-content-preview ${styles.bgTertiary} rounded-lg p-6 min-h-[400px] ${styles.textPrimary}`} dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(formData.outline)) }}></div>
               ) : (
                 <ContentEditor
+                  writingGoalKey="topic:new"
                   value={formData.outline}
                   onChange={(value) => setFormData({ ...formData, outline: value })}
                   placeholder="请填写大纲内容..."
-                  mode="legacy"
+                  mode="rich"
                 />
               )}
             </div>
@@ -282,7 +309,7 @@ export default function AddTopic() {
               </div>
               <div className={`pt-4 border-t ${styles.border}`}>
                 <p className={`text-xs text-studio-text-muted mb-1`}>状态</p>
-                <span className="inline-flex items-center gap-1 px-2 py-1 bg-studio-amber/20 text-studio-amber rounded-full text-xs">
+                <span className="inline-flex items-center gap-1 px-2 py-1 bg-studio-amber/20 text-studio-amber-contrast rounded-full text-xs">
                   待审核
                 </span>
               </div>

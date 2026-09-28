@@ -32,8 +32,10 @@ export interface ContentEditorProps {
   minHeight?: string | number;
   className?: string;
   collaborationKey?: string;
+  writingGoalKey?: string;
   collaborationEnabled?: boolean;
   immersive?: boolean;
+  focusMode?: boolean;
   pageScroll?: boolean;
   persistenceStatus?: EditorState;
   adapter?: ContentEditorAdapter;
@@ -54,8 +56,10 @@ export default function ContentEditor({
   minHeight,
   className = '',
   collaborationKey,
+  writingGoalKey,
   collaborationEnabled = Boolean(collaborationKey),
   immersive = false,
+  focusMode = false,
   pageScroll = false,
   persistenceStatus = 'synced',
   adapter,
@@ -67,6 +71,10 @@ export default function ContentEditor({
   const wrapperStyle = minHeight === undefined ? undefined : { minHeight };
   const socket = useSocket();
   const user = useAuthStore((state) => state.user);
+  const goalDocumentId = writingGoalKey || collaborationKey || (adapter ? adapter.documentId : undefined);
+  const writingGoalStorageKey = user?.id != null && goalDocumentId
+    ? `xmt:writing-goal:v1:${user.id}:${goalDocumentId}`
+    : undefined;
   const editStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousValueRef = useRef(value);
   const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
@@ -275,8 +283,10 @@ export default function ContentEditor({
             placeholder={placeholder}
             collaboration={editorCollaboration}
             immersive={runtime.capabilities.immersive}
+            focusMode={focusMode}
             pageScroll={runtime.capabilities.pageScroll}
             stateDocId={collaborationKey}
+            writingGoalStorageKey={writingGoalStorageKey}
             onCommandHandleChange={onEditorCommandHandleChange}
             toolbarVariant={toolbarVariant}
           />

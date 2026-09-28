@@ -37,7 +37,7 @@ export default function CreatorTrends() {
     : 0;
 
   return <div className="mx-auto max-w-[1500px] space-y-6 pb-12">
-    <PageHeader title="数据趋势中心" description="账号关键指标变化" actions={<div className="flex rounded-lg border border-studio-border bg-studio-card p-1">{(['7d', '30d', '90d'] as Period[]).map(item => <button type="button" key={item} onClick={() => setPeriod(item)} className={`rounded-md px-4 py-1.5 text-sm ${period === item ? 'bg-studio-cyan text-white' : 'text-studio-text-muted'}`}>{item.replace('d', ' 天')}</button>)}</div>} />
+    <PageHeader title="数据趋势中心" description="账号关键指标变化" actions={<div className="flex rounded-lg border border-studio-border bg-studio-card p-1">{(['7d', '30d', '90d'] as Period[]).map(item => <button type="button" key={item} onClick={() => setPeriod(item)} className={`rounded-md border px-4 py-1.5 text-sm ${period === item ? 'border-studio-cyan bg-studio-surface-soft text-studio-cyan-contrast' : 'border-transparent text-studio-text-muted'}`}>{item.replace('d', ' 天')}</button>)}</div>} />
     {loading ? <div className="text-sm text-studio-text-muted">正在加载…</div> : null}
     <section className="grid gap-6 lg:grid-cols-2">{definitions.map(({ label, icon: Icon, color, values, percent, available, cumulative }) => {
       if (!available) return <Panel key={label} title={label} description="暂无粉丝数据"><div className="flex h-52 items-center justify-center text-sm text-studio-text-muted">暂无数据</div></Panel>;

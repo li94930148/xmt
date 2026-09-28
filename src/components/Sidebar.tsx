@@ -98,7 +98,7 @@ export default function Sidebar({
   const renderMenu = (isMobile: boolean) => (
     <div className="flex h-full flex-col overflow-hidden">
       <div className={`flex min-h-20 items-center border-b border-studio-border-soft py-3 ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-4'}`}>
-        <div className="studio-sheen relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-studio-border-soft bg-white/[0.05] shadow-glow-primary">
+        <div className="studio-sheen relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-studio-border-soft bg-studio-surface-soft shadow-glow-primary">
           <img src={systemSettings.branding.logo || '/logo.png'} alt="XMT" className="relative z-[1] h-8 w-8 object-contain" />
         </div>
 
@@ -115,7 +115,7 @@ export default function Sidebar({
           <button
             type="button"
             onClick={onMobileClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-button text-studio-text-secondary transition hover:bg-white/[0.06] hover:text-studio-text-primary"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-button text-studio-text-secondary transition hover:bg-studio-surface-soft hover:text-studio-text-primary"
             aria-label="关闭导航菜单"
           >
             <X className="h-4 w-4" />
@@ -131,7 +131,7 @@ export default function Sidebar({
             onMobileClose?.();
           }}
           title="搜索命令 / 内容"
-          className={`flex w-full items-center rounded-button border border-studio-border-soft bg-white/[0.04] p-2.5 text-sm text-studio-text-muted transition-all duration-200 hover:border-studio-border-active hover:bg-white/[0.07] hover:text-studio-text-primary ${isMobile ? 'gap-3' : 'justify-center'}`}
+          className={`flex w-full items-center rounded-button border border-studio-border-soft bg-studio-surface-soft p-2.5 text-sm text-studio-text-muted transition-all duration-200 hover:border-studio-border-active hover:bg-studio-surface-elevated hover:text-studio-text-primary ${isMobile ? 'gap-3' : 'justify-center'}`}
         >
           <Search className="h-[18px] w-[18px] shrink-0" />
           {isMobile && <span className="font-medium">搜索命令 / 内容</span>}
@@ -147,7 +147,7 @@ export default function Sidebar({
 
           if (isDirectEntry) {
             const item = section.items[0];
-            return <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}><button type="button" onClick={() => handleNavigate(item.path)} title={section.label} className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-3'} ${hasActiveItem ? 'bg-studio-primary/12 text-studio-text-primary' : 'text-studio-text-muted hover:bg-white/[0.04] hover:text-studio-text-secondary'}`} style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}><SectionIcon className="shrink-0" style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />{(!collapsed || isMobile) && <span className="font-semibold">{section.label}</span>}</button></div>;
+            return <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}><button type="button" onClick={() => handleNavigate(item.path)} title={section.label} className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-3'} ${hasActiveItem ? 'bg-studio-primary/12 text-studio-text-primary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary'}`} style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}><SectionIcon className="shrink-0" style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />{(!collapsed || isMobile) && <span className="font-semibold">{section.label}</span>}</button></div>;
           }
 
           return (
@@ -160,7 +160,7 @@ export default function Sidebar({
                 persistExpandedGroup(nextGroup, location.pathname);
               }}
               title={section.label}
-              className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-2 px-3'} ${hasActiveItem ? 'text-studio-text-secondary' : 'text-studio-text-muted hover:bg-white/[0.04] hover:text-studio-text-secondary'}`}
+              className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-2 px-3'} ${hasActiveItem ? 'text-studio-text-secondary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary'}`}
               style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}
               aria-expanded={expanded}
             >
@@ -188,13 +188,13 @@ export default function Sidebar({
                       } ${collapsed && !isMobile ? 'px-2' : 'px-3'} ${
                         isActive
                           ? 'border border-studio-border-active bg-studio-primary/14 text-studio-text-primary shadow-glow-primary'
-                          : 'border border-transparent text-studio-text-secondary hover:border-studio-border-soft hover:bg-white/[0.055] hover:text-studio-text-primary'
+                          : 'border border-transparent text-studio-text-secondary hover:border-studio-border-soft hover:bg-studio-surface-soft hover:text-studio-text-primary'
                       }`}
                       style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-subnav-font-size)' }}
                     >
                       {isActive ? <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-studio-cyan" /> : null}
 
-                      <span className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-[12px] ${isActive ? 'bg-white/[0.08] text-studio-cyan' : 'text-studio-text-muted group-hover:text-studio-cyan'}`}>
+                      <span className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-[12px] ${isActive ? 'bg-studio-surface-elevated text-studio-cyan' : 'text-studio-text-muted group-hover:text-studio-cyan'}`}>
                         <Icon style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />
                         {isMessages ? <NotificationBadge count={messageStore.unreadCount} /> : null}
                       </span>

@@ -1,5 +1,6 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+﻿import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '../store';
+import { ErrorState } from '../components/common';
 import {
   getAchievements, getMyAchievements, getAchievementProgress,
   getAchievementStats, getLeaderboard, getRecentAchievements,
@@ -27,6 +28,7 @@ export default function Achievements() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [recentAchievements, setRecentAchievements] = useState<RecentAchievement[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [checking, setChecking] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>('all');
@@ -38,16 +40,17 @@ export default function Achievements() {
   const { hasPermission } = usePermission();
   const canManageAchievements = hasPermission('system:achievement');
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const [allRes, myRes, progressRes, statsRes, leaderboardRes, recentRes] = await Promise.all([
-        getAchievements().catch(() => []),
-        getMyAchievements().catch(() => []),
-        getAchievementProgress().catch(() => ({})),
-        getAchievementStats().catch(() => null),
-        getLeaderboard().catch(() => []),
-        getRecentAchievements(10).catch(() => []),
+        getAchievements(),
+        getMyAchievements(),
+        getAchievementProgress(),
+        getAchievementStats(),
+        getLeaderboard(),
+        getRecentAchievements(10),
       ]);
       setAllAchievements(Array.isArray(allRes) ? allRes : []);
       setMyAchievements(Array.isArray(myRes) ? myRes : []);
@@ -55,14 +58,14 @@ export default function Achievements() {
       setStats(statsRes);
       setLeaderboard(Array.isArray(leaderboardRes) ? leaderboardRes : []);
       setRecentAchievements(Array.isArray(recentRes) ? recentRes : []);
-    } catch (error) {
-      appStore.addNotification({ title: '获取成就数据失败', message: (error as Error).message, type: 'error' });
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { void fetchData(); }, [fetchData]);
 
   // 已获得的 ID 集合
   const earnedIds = useMemo(() => new Set(myAchievements.filter(a => a.earned).map(a => a.id)), [myAchievements]);
@@ -132,6 +135,17 @@ export default function Achievements() {
       <div className="flex items-center justify-center h-64">
         <div className={`w-8 h-8 border-4 ${styles.spinner} border-t-transparent rounded-full animate-spin`}></div>
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ErrorState
+        title="成就数据加载失败"
+        description="暂时无法获取完整成就信息，请检查网络后重试。"
+        actionText="重试加载"
+        onRetry={() => void fetchData()}
+      />
     );
   }
 
@@ -521,7 +535,7 @@ export default function Achievements() {
                   return (
                     <div key={rarity.value} className={`flex items-center justify-between p-3 rounded-lg ${styles.bgTertiary}`}>
                       <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${rarity.bg.replace('/10', '')}`} />
+                        <span className={`w-2 h-2 rounded-full ${rarity.dot}`} />
                         <span className={`text-xs font-medium ${rarity.color}`}>{rarity.label}</span>
                       </div>
                       <span className={`text-xs ${styles.textMuted}`}>{rStats?.earned || 0}/{rStats?.total || 0}</span>

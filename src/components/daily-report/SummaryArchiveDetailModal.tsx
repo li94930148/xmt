@@ -31,14 +31,14 @@ export default function SummaryArchiveDetailModal({ kind, record, onClose }: { k
   const author = record?.user_name || record?.username || '成员';
 
   return <BaseModal open={Boolean(record)} onClose={onClose} title={monthly ? '月报详情' : '年报详情'} description={`${author} · ${period}`} size="xl">
-    <dl className="grid gap-3 rounded-card border border-studio-border-soft bg-white/[0.025] p-4 text-sm sm:grid-cols-2">
+    <dl className="grid gap-3 rounded-card border border-studio-border-soft bg-studio-surface-soft p-4 text-sm sm:grid-cols-2">
       <div><dt className="text-studio-text-muted">提交人</dt><dd className="mt-1 font-medium text-studio-text-primary">{author}</dd></div>
       <div><dt className="text-studio-text-muted">所属期间</dt><dd className="mt-1 font-medium text-studio-text-primary">{period}</dd></div>
       <div><dt className="text-studio-text-muted">提交时间</dt><dd className="mt-1 text-studio-text-secondary">{displayDate(record?.created_at)}</dd></div>
       <div><dt className="text-studio-text-muted">最后更新时间</dt><dd className="mt-1 text-studio-text-secondary">{displayDate(record?.updated_at)}</dd></div>
     </dl>
     <div className="mt-5 space-y-4">
-      {fields.map(([label, value]) => <section key={label} className="rounded-card border border-studio-border-soft bg-white/[0.035] p-4"><h3 className="text-sm font-semibold text-studio-text-primary">{label}</h3><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-7 text-studio-text-secondary">{valueOrEmpty(value)}</p></section>)}
+      {fields.map(([label, value]) => <section key={label} className="rounded-card border border-studio-border-soft bg-studio-surface-soft p-4"><h3 className="text-sm font-semibold text-studio-text-primary">{label}</h3><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-7 text-studio-text-secondary">{valueOrEmpty(value)}</p></section>)}
     </div>
   </BaseModal>;
 }

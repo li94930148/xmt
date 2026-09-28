@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { notifyDesktop } from '../utils/notification';
 
 interface ToastItem {
   id: string;
@@ -16,14 +15,6 @@ let toastListener: ((item: ToastItem) => void) | null = null;
 export function showRealtimeToast(item: Omit<ToastItem, 'id'>) {
   const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   toastListener?.({ ...item, id });
-
-  // 同时触发桌面通知
-  const textContent = typeof item.message === 'string' ? item.message : '';
-  notifyDesktop({
-    title: typeof item.title === 'string' ? item.title : '新通知',
-    body: textContent,
-    tag: id,
-  });
 }
 
 export default function RealtimeToast() {

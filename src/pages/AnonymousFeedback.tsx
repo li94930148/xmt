@@ -74,7 +74,7 @@ export default function AnonymousFeedbackPage() {
             {items.map((item) => (
               <GlassPanel key={item.id} className="p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="rounded-full border border-studio-border-soft bg-white/[0.04] px-3 py-1 text-xs font-semibold text-studio-text-secondary">{typeLabels[item.type]}</span>
+                  <span className="rounded-full border border-studio-border-soft bg-studio-surface-soft px-3 py-1 text-xs font-semibold text-studio-text-secondary">{typeLabels[item.type]}</span>
                   <StatusPill tone={statusTones[item.status]}>{statusLabels[item.status]}</StatusPill>
                 </div>
                 <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-studio-text-primary">{item.content}</p>

@@ -10,7 +10,7 @@ function formatTime(value: string) {
 }
 
 function ReadinessCheck({ check }: { check: Check }) {
-  return <div className="flex items-start gap-3 rounded-button border border-studio-border-soft bg-white/[0.035] p-4">
+  return <div className="flex items-start gap-3 rounded-button border border-studio-border-soft bg-studio-surface-soft p-4">
     {check.ready ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-studio-success" /> : <CircleDashed className="mt-0.5 h-5 w-5 shrink-0 text-studio-amber" />}
     <div><p className="text-sm font-semibold text-studio-text-primary">{check.label}</p><p className="mt-1 text-xs leading-5 text-studio-text-secondary">{check.description}</p></div>
   </div>;

@@ -117,7 +117,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
     closeAll();
   };
 
-  const menuBg = isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft';
+  const menuBg = isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft';
 
   return (
     <TiptapFloatingMenu

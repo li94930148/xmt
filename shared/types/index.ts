@@ -104,6 +104,7 @@ export interface Production {
   operator_name?: string;
   topic_title?: string;
   topic_status?: string;
+  can_edit?: boolean;
   created_at: string;
   updated_at: string;
 }

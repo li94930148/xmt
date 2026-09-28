@@ -3,8 +3,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createTopic } from '@/api';
 import { useNetworkState } from '@/platform/network';
-import { clearSafeDraft, readSafeDraftValue, writeSafeDraft } from '@/platform/safe-draft';
+import { clearSafeDraft, readSafeDraftValue, userSafeDraftKey, writeSafeDraft } from '@/platform/safe-draft';
+import { useAuthStore } from '@/store';
 import { celebrateMilestone } from '@/utils/confetti';
+import { usePermission } from '@/hooks/usePermission';
+import AccessDeniedState from '@/components/AccessDeniedState';
 
 type TopicForm = {
   title: string;
@@ -15,7 +18,6 @@ type TopicForm = {
   outline: string;
 };
 
-const draftKey = 'topic:new';
 const emptyForm: TopicForm = { title: '', platform: '', deadline: '', projectBackground: '', targetAudience: '', outline: '' };
 
 function hasContent(form: TopicForm) {
@@ -24,22 +26,35 @@ function hasContent(form: TopicForm) {
 
 export default function MobileAddTopic() {
   const navigate = useNavigate();
+  const userId = useAuthStore((state) => state.user?.id);
+  const draftKey = userSafeDraftKey(userId, 'topic:new');
   const networkState = useNetworkState();
-  const [form, setForm] = useState<TopicForm>(() => readSafeDraftValue<TopicForm>(draftKey) ?? emptyForm);
+  const { hasPermission, loading: permissionsLoading } = usePermission();
+  const canCreate = !permissionsLoading && hasPermission('topic:create');
+  const [form, setForm] = useState<TopicForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  const [restoredKey, setRestoredKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (hasContent(form)) writeSafeDraft(draftKey, form);
-  }, [form]);
+    if (!canCreate || !draftKey || restoredKey === draftKey) return;
+    setForm(readSafeDraftValue<TopicForm>(draftKey) ?? emptyForm);
+    setRestoredKey(draftKey);
+  }, [canCreate, draftKey, restoredKey]);
+
+  useEffect(() => {
+    if (canCreate && draftKey && restoredKey === draftKey && hasContent(form)) writeSafeDraft(draftKey, form);
+  }, [canCreate, draftKey, form, restoredKey]);
 
   const change = (key: keyof TopicForm, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const saveLocalDraft = () => {
+    if (!canCreate || !draftKey) { setNotice('当前账号没有提报选题的权限。'); return; }
     if (!hasContent(form)) { setNotice('填写内容后才能保存本地草稿'); return; }
     writeSafeDraft(draftKey, form);
     setNotice('已保存到本机草稿，不会创建服务端选题');
   };
   const submit = async () => {
+    if (!canCreate || !draftKey) { setNotice('当前账号没有提报选题的权限。'); return; }
     if (!form.title.trim()) { setNotice('请输入选题标题'); return; }
     if (networkState !== 'online') { setNotice('当前网络未恢复，内容已保存在本地草稿，暂未提交。'); return; }
     setSaving(true);
@@ -60,8 +75,11 @@ export default function MobileAddTopic() {
     }
   };
 
+  if (!permissionsLoading && !canCreate) return <AccessDeniedState title="暂时无法提报选题" description="请联系管理员分配选题创建权限。" />;
+
   return <div className="space-y-4 pb-2">
     <button type="button" onClick={() => navigate('/topics')} className="inline-flex min-h-11 items-center gap-2 text-sm text-studio-cyan"><ArrowLeft className="h-4 w-4" />返回选题</button>
+    {permissionsLoading ? <p role="status" className="text-sm text-studio-text-muted">正在确认操作权限…</p> : null}
     <section className="space-y-4 rounded-2xl border border-studio-border-soft bg-studio-surface p-4">
       <div><h1 className="text-lg font-semibold">提报选题</h1><p className="mt-1 text-sm text-studio-text-muted">本地草稿只保存在此设备；提交后才会创建选题。</p></div>
       <label className="block"><span className="mb-2 block text-sm font-semibold">选题标题 <span className="text-studio-coral">*</span></span><input value={form.title} onChange={(event) => change('title', event.target.value)} className="min-h-11 w-full rounded-xl border border-studio-border-soft bg-studio-bg px-3 text-sm outline-none focus:border-studio-cyan" placeholder="输入清晰、可执行的选题标题" /></label>

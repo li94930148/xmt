@@ -448,7 +448,7 @@ router.get('/production/:id', authenticate, async (req, res) => {
     if (!production) return res.status(404).json({ message: '创作记录不存在' });
     const topic = await getTopicScopeByProductionId(req.params.id);
     if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该创作记录' });
-    res.json(production);
+    res.json({ ...production, can_edit: canEditProduction(req.user, topic) });
   } catch {
     res.status(500).json({ message: '获取创作详情失败' });
   }

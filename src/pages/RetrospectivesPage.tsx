@@ -171,13 +171,13 @@ export default function RetrospectivesPage() {
             type="date"
             value={start}
             onChange={(event) => setStart(event.target.value)}
-            className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           />
           <input
             type="date"
             value={end}
             onChange={(event) => setEnd(event.target.value)}
-            className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           />
           <ActionButton onClick={loadList} disabled={loading}>应用筛选</ActionButton>
         </div>

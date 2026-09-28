@@ -36,6 +36,12 @@ export default {
           'coral-contrast': 'var(--xmt-coral-contrast)',
           'amber-contrast': 'var(--xmt-amber-contrast)',
           'success-contrast': 'var(--xmt-success-contrast)',
+          'primary-soft': 'var(--xmt-primary-soft)',
+          'cyan-soft': 'var(--xmt-cyan-soft)',
+          'violet-soft': 'var(--xmt-violet-soft)',
+          'coral-soft': 'var(--xmt-coral-soft)',
+          'amber-soft': 'var(--xmt-amber-soft)',
+          'success-soft': 'var(--xmt-success-soft)',
         },
         // 品牌色（固定值，不随主题变化）
         brand: {
@@ -73,7 +79,7 @@ export default {
         'theme-text-muted': 'var(--color-text-muted)',
         'theme-border': 'var(--color-border)',
         'theme-border-light': 'var(--color-border-light)',
-        'theme-hover': 'rgba(255, 255, 255, 0.06)',
+        'theme-hover': 'var(--color-bg-elevated)',
         'theme-accent': 'var(--color-accent)',
         'theme-accent-hover': 'var(--color-accent-hover)',
         'theme-success': 'var(--color-success)',

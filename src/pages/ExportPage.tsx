@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart3, Download, FileBarChart, FileClock, Loader2, CalendarRange, Sparkles } from 'lucide-react';
 import { exportAnalytics, exportTopics, getWeeklyReport } from '../api';
+import { ErrorState } from '../components/common';
 import { useAppStore } from '../store';
 import { getCurrentBeijingDateString } from '../lib/utils';
 import { ActionButton, EmptyState, GlassPanel, PageHeader, PageShell, StatusPill } from '../components/studio';
@@ -24,13 +25,18 @@ export default function ExportPage() {
   const [loading, setLoading] = useState<string | null>(null);
   const [weeklyReport, setWeeklyReport] = useState<WeeklyReport | null>(null);
   const [reportLoading, setReportLoading] = useState(true);
+  const [reportError, setReportError] = useState(false);
 
-  useEffect(() => {
-    getWeeklyReport()
+  const loadWeeklyReport = useCallback(() => {
+    setReportLoading(true);
+    setReportError(false);
+    void getWeeklyReport()
       .then((report) => setWeeklyReport(report as WeeklyReport))
-      .catch(() => {})
+      .catch(() => setReportError(true))
       .finally(() => setReportLoading(false));
   }, []);
+
+  useEffect(() => { loadWeeklyReport(); }, [loadWeeklyReport]);
 
   const handleExport = async (type: 'topics' | 'analytics') => {
     setLoading(type);
@@ -78,7 +84,7 @@ export default function ExportPage() {
                 className={`flex min-h-11 items-center justify-center gap-2 rounded-button px-4 py-3 text-sm font-semibold leading-snug transition-all duration-200 ${
                   isActive
                     ? 'bg-studio-primary text-white shadow-glow-primary'
-                    : 'text-studio-text-secondary hover:bg-white/[0.06] hover:text-studio-text-primary'
+                    : 'text-studio-text-secondary hover:bg-studio-surface-soft hover:text-studio-text-primary'
                 }`}
               >
                 <Icon className="h-4 w-4" />
@@ -104,7 +110,7 @@ export default function ExportPage() {
               { label: '查看团队日报', path: '/daily-report/team' },
               { label: '打开总结归档', path: '/daily-report/summary' },
             ].map((item) => (
-              <Link key={item.path} to={item.path} className="rounded-card border border-studio-border-soft bg-white/[0.04] px-4 py-4 text-sm font-medium text-studio-text-primary transition hover:border-studio-border-active hover:bg-white/[0.08]">
+              <Link key={item.path} to={item.path} className="rounded-card border border-studio-border-soft bg-studio-surface-soft px-4 py-4 text-sm font-medium text-studio-text-primary transition hover:border-studio-border-active hover:bg-studio-surface-elevated">
                 {item.label}
               </Link>
             ))}
@@ -127,6 +133,14 @@ export default function ExportPage() {
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-studio-text-muted" />
             </div>
+          ) : reportError ? (
+            <ErrorState
+              title="周报加载失败"
+              description="暂时无法获取本周报告，请检查网络后重试。"
+              actionText="重试加载"
+              onRetry={loadWeeklyReport}
+              className="py-2"
+            />
           ) : weeklyReport ? (
             <div className="grid gap-3 sm:grid-cols-4">
               {[
@@ -135,7 +149,7 @@ export default function ExportPage() {
                 { label: '新增选题', value: weeklyReport.summary?.newTopics || 0, tone: 'text-studio-amber' },
                 { label: '总播放量', value: (weeklyReport.summary?.totalViews || 0).toLocaleString(), tone: 'text-studio-violet' },
               ].map((item) => (
-                <div key={item.label} className="rounded-card border border-studio-border-soft bg-white/[0.04] p-4 text-center">
+                <div key={item.label} className="rounded-card border border-studio-border-soft bg-studio-surface-soft p-4 text-center">
                   <p className={`break-words text-2xl font-bold leading-tight ${item.tone}`}>{item.value}</p>
                   <p className="mt-1 text-xs text-studio-text-muted">{item.label}</p>
                 </div>

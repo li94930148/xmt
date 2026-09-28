@@ -21,7 +21,7 @@ export default function DailyReportTeamBoard({ date, reports, loading, error, on
           <p className="mt-1 text-sm text-studio-text-muted">查看成员公开的日报内容。</p>
         </div>
         <div className="flex gap-2">
-          <input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none" />
+          <input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none" />
           <ActionButton onClick={onRefresh} disabled={loading}>刷新</ActionButton>
         </div>
       </div>

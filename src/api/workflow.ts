@@ -102,7 +102,7 @@ export async function updateProductionMaterialDraft(productionId: number, input:
 }
 
 export async function getProductionResourceInsertions(productionId: number, resourceIds: number[]): Promise<{
-  data: Array<{ resource_id: number; content_html: string }>;
+  data: Array<{ resource_id: number; title: string; content_html: string }>;
   empty_resource_ids: number[];
   message?: string;
 }> {

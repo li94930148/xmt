@@ -87,17 +87,17 @@ export default function RetroActionTable({
       </div>
 
       {canCreate ? (
-        <div className="mt-5 grid gap-3 rounded-panel border border-studio-border-soft bg-white/[0.04] p-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)_180px_160px_auto]">
+        <div className="mt-5 grid gap-3 rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)_180px_160px_auto]">
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
             placeholder="行动项标题"
           />
           <input
             value={descriptionMd}
             onChange={(event) => setDescriptionMd(event.target.value)}
-            className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
             placeholder="说明，可选"
           />
           <select
@@ -112,7 +112,7 @@ export default function RetroActionTable({
             type="date"
             value={dueDate}
             onChange={(event) => setDueDate(event.target.value)}
-            className="rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none"
+            className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           />
           <ActionButton variant="primary" onClick={handleCreate} disabled={loading || !title.trim()}>
             <Plus className="h-4 w-4" />
@@ -177,7 +177,7 @@ export default function RetroActionTable({
                           ...current,
                           [action.id]: { ...draft, resultMd: event.target.value },
                         }))}
-                        className="min-h-20 w-full min-w-[220px] rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none"
+                        className="min-h-20 w-full min-w-[220px] rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
                         placeholder="处理结果"
                       />
                     ) : (

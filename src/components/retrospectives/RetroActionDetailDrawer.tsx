@@ -89,7 +89,7 @@ export default function RetroActionDetailDrawer({
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             disabled={!canManageActions}
-            className="w-full rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
+            className="w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
           />
         </label>
 
@@ -113,7 +113,7 @@ export default function RetroActionDetailDrawer({
             value={dueDate}
             onChange={(event) => setDueDate(event.target.value)}
             disabled={!canManageActions}
-            className="w-full rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
+            className="w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
           />
         </label>
 
@@ -129,7 +129,7 @@ export default function RetroActionDetailDrawer({
           </select>
         </label>
 
-        <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-3 text-xs leading-6 text-studio-text-muted">
+        <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-3 text-xs leading-6 text-studio-text-muted">
           <p>创建人：{action.creatorName || '-'}</p>
           <p>创建时间：{formatDateTime(action.createdAt)}</p>
           <p>更新时间：{formatDateTime(action.updatedAt)}</p>
@@ -142,7 +142,7 @@ export default function RetroActionDetailDrawer({
             value={descriptionMd}
             onChange={(event) => setDescriptionMd(event.target.value)}
             disabled={!canManageActions}
-            className="min-h-28 w-full rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
+            className="min-h-28 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
           />
         </label>
 
@@ -152,7 +152,7 @@ export default function RetroActionDetailDrawer({
             value={resultMd}
             onChange={(event) => setResultMd(event.target.value)}
             disabled={!canUpdateResult}
-            className="min-h-32 w-full rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
+            className="min-h-32 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
             placeholder="填写进展、结论或关闭说明"
           />
         </label>

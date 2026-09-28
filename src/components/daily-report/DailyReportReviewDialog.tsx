@@ -25,7 +25,7 @@ export default function DailyReportReviewDialog({ report, loading, onClose, onRe
             {report.userName || report.username || `用户 ${report.userId}`} · {report.reportDate}
           </p>
         </div>
-        <div className="mb-4 max-h-72 overflow-y-auto rounded-card border border-studio-border-soft bg-white/[0.04] p-4">
+        <div className="mb-4 max-h-72 overflow-y-auto rounded-card border border-studio-border-soft bg-studio-surface-soft p-4">
           <p className="whitespace-pre-wrap text-sm leading-6 text-studio-text-primary">
             {report.manualSummaryMd || report.items.map((item) => item.contentMd).filter(Boolean).join('\n\n') || '暂无内容'}
           </p>
@@ -34,7 +34,7 @@ export default function DailyReportReviewDialog({ report, loading, onClose, onRe
           value={comment}
           onChange={(event) => setComment(event.target.value)}
           rows={4}
-          className="w-full rounded-card border border-studio-border-soft bg-white/[0.04] px-4 py-3 text-sm text-studio-text-primary outline-none focus:border-studio-border-active"
+          className="w-full rounded-card border border-studio-border-soft bg-studio-surface px-4 py-3 text-sm text-studio-text-primary outline-none focus:border-studio-border-active"
           placeholder="填写审核意见，可留空"
         />
         <div className="mt-5 flex flex-wrap justify-end gap-2">

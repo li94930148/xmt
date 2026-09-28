@@ -37,11 +37,11 @@ export default function RetroSummaryEditor({ value, status, canEdit, saving, onC
         <textarea
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="mt-4 min-h-[220px] w-full resize-y rounded-panel border border-studio-border-soft bg-white/[0.04] px-4 py-3 text-sm leading-6 text-studio-text-primary outline-none transition focus:border-studio-border-active"
+          className="mt-4 min-h-[220px] w-full resize-y rounded-panel border border-studio-border-soft bg-studio-surface px-4 py-3 text-sm leading-6 text-studio-text-primary outline-none transition focus:border-studio-border-active"
           placeholder="记录本周期发生了什么、为什么发生、下一轮怎么调整..."
         />
       ) : (
-        <div className="mt-4 min-h-[160px] whitespace-pre-wrap rounded-panel border border-studio-border-soft bg-white/[0.04] px-4 py-3 text-sm leading-6 text-studio-text-secondary">
+        <div className="mt-4 min-h-[160px] whitespace-pre-wrap rounded-panel border border-studio-border-soft bg-studio-surface-soft px-4 py-3 text-sm leading-6 text-studio-text-secondary">
           {value.trim() || '暂未填写复盘结论'}
         </div>
       )}

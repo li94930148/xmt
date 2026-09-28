@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore, useMessageStore } from '../store';
 import { notifyDesktop } from '../utils/notification';
+import { buildMessageDesktopNotification, type MessageNotificationGroup } from '../utils/message-notification';
 import { SocketCoordinator, createRuntimeTokenProvider, readSocketCoordinatorEnabled, SocketTabCoordinator } from '../auth/socket';
 import { SocketClientLifecycleDiagnostics } from '../observability/socket-client-lifecycle';
 import { getSocketBaseUrl, isNative } from '@/platform/runtime';
@@ -12,6 +13,7 @@ let globalToken: string | null = null;
 let globalCoordinator: SocketCoordinator | null = null;
 let globalTabs: SocketTabCoordinator | null = null;
 let globalLifecycleDiagnostics: SocketClientLifecycleDiagnostics | null = null;
+let desktopMessageGroups = new Map<string, MessageNotificationGroup>();
 
 export function useSocket() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -42,6 +44,7 @@ export function useSocket() {
       globalSocket.disconnect();
       globalSocket = null;
     }
+    desktopMessageGroups = new Map();
 
     const coordinatorEnabled = readSocketCoordinatorEnabled(import.meta.env);
     const runtime = window.__xmtAuthRuntime;
@@ -126,12 +129,7 @@ export function useSocket() {
 
     nextSocket.on('new_message', (message) => {
       addMessage(message);
-      notifyDesktop({
-        title: message.title || '新消息',
-        body: message.content || '你有一条新消息',
-        tag: `xmt-msg-${message.id}`,
-        url: '/messages',
-      });
+      notifyDesktop(buildMessageDesktopNotification(message, desktopMessageGroups));
     });
 
     nextSocket.on('unread_count', () => {
@@ -154,6 +152,7 @@ export function useSocket() {
       globalLifecycleDiagnostics = null;
       globalSocket.disconnect();
       globalSocket = null;
+      desktopMessageGroups = new Map();
       globalCoordinator?.destroy();
       globalCoordinator = null;
       globalTabs?.notify('logout');

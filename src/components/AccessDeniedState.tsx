@@ -19,9 +19,9 @@ export default function AccessDeniedState({
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4 py-10">
       <div className={`w-full max-w-2xl overflow-hidden rounded-[28px] ${styles.card}`}>
-        <div className="bg-gradient-to-r from-studio-amber/10 via-studio-amber/10 to-studio-coral/10 px-8 py-6">
+        <div className="border-b border-studio-border-soft bg-studio-amber-soft px-8 py-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-studio-amber/15 text-studio-amber-contrast">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-studio-border-soft bg-studio-amber-soft text-studio-amber-contrast">
               <LockKeyhole className="h-6 w-6" />
             </div>
             <div>

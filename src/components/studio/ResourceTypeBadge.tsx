@@ -31,7 +31,7 @@ function getResourceTone(type?: string): ResourceTone {
     return { label: '文档', icon: FileText, className: 'border-studio-primary/35 bg-studio-primary/12 text-studio-primary-contrast' };
   }
 
-  return { label: type || '其他', icon: Package, className: 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary' };
+  return { label: type || '其他', icon: Package, className: 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary' };
 }
 
 export default function ResourceTypeBadge({ type, className = '' }: { type?: string; className?: string }) {

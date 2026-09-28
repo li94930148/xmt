@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import ErrorState from '../components/common/ErrorState';
 import { Archive, FileClock, RefreshCw, Users } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
-import { useAuthStore } from '../store';
+import { useAuthStore, useAppStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
 import { getMyDailyReport, getTeamDailyReports, saveDailyReportDraft, submitDailyReport, type DailyReport, type DailyReportItem } from '../api/dailyReports';
 import { ActionButton, GlassPanel, PageHeader, PageShell } from '../components/studio';
@@ -26,6 +27,7 @@ function hasContent(items: DailyReportItem[]) { return items.some((item) => item
 export default function DailyReportPage() {
   const location = useLocation();
   const user = useAuthStore((state) => state.user);
+  const addNotification = useAppStore((state) => state.addNotification);
   const { hasPermission } = usePermission();
   const canViewTeam = user?.role === 'admin' || user?.role === 'director' || hasPermission('report:daily:view_team');
   const canViewArchive = user?.role === 'admin' || user?.role === 'director';
@@ -34,6 +36,7 @@ export default function DailyReportPage() {
   const [report, setReport] = useState<DailyReport | null>(null);
   const [items, setItems] = useState<DailyReportItem[]>(normalizeItems(null));
   const [loading, setLoading] = useState(true);
+  const [mineError, setMineError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [teamDate, setTeamDate] = useState(today());
   const [teamReports, setTeamReports] = useState<DailyReport[]>([]);
@@ -43,9 +46,9 @@ export default function DailyReportPage() {
   const reportDate = today();
 
   const loadMine = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setMineError('');
     try { const result = await getMyDailyReport(reportDate); setReport(result.report); setItems(normalizeItems(result.report)); }
-    catch (error) { setTeamError(error instanceof Error ? error.message : '加载日报失败'); }
+    catch (error) { setMineError(error instanceof Error ? error.message : '加载日报失败'); }
     finally { setLoading(false); }
   }, [reportDate]);
   const loadTeam = useCallback(async () => {
@@ -60,9 +63,13 @@ export default function DailyReportPage() {
   useEffect(() => { if (tab === 'team') void loadTeam(); }, [loadTeam, tab]);
 
   const submit = async () => {
-    if (!hasContent(items)) return;
+    if (!hasContent(items)) {
+      addNotification({ title: '日报尚未填写', message: '请至少填写一项日报内容后再提交。', type: 'warning' });
+      return;
+    }
     setSubmitting(true);
-    try { const saved = await saveDailyReportDraft({ reportDate, version: report?.version, manualSummaryMd: '', riskLevel: 'normal', items }); const submitted = await submitDailyReport(saved.id); setReport(submitted); setItems(normalizeItems(submitted)); }
+    try { const saved = await saveDailyReportDraft({ reportDate, version: report?.version, manualSummaryMd: '', riskLevel: 'normal', items }); const submitted = await submitDailyReport(saved.id); setReport(submitted); setItems(normalizeItems(submitted)); addNotification({ title: '提交成功', message: '今日日报已提交。', type: 'success' }); }
+    catch (error) { addNotification({ title: '提交日报失败', message: error instanceof Error ? error.message : '日报未提交，请重试。', type: 'error' }); }
     finally { setSubmitting(false); }
   };
 
@@ -70,8 +77,8 @@ export default function DailyReportPage() {
 
   return <ReactBitsPageScene page="dailyReport"><PageShell>
     <PageHeader title={<ReactBitsHeadingSlot>日报</ReactBitsHeadingSlot>} description="记录每天的工作、计划和需要协调的事项。" actions={<ActionButton onClick={() => tab === 'mine' ? void loadMine() : tab === 'team' ? void loadTeam() : undefined}><RefreshCw className="h-4 w-4" />刷新</ActionButton>} />
-    <ReactBitsNavigationSlot semantic="page-tabs"><GlassPanel className="p-2"><div className="flex flex-wrap gap-2">{tabs.filter((item) => item.visible).map((item) => { const Icon = item.icon; return <button key={item.key} type="button" onClick={() => setTab(item.key)} className={`inline-flex items-center gap-2 rounded-button px-4 py-2.5 text-sm font-semibold ${tab === item.key ? 'bg-studio-primary text-white' : 'text-studio-text-secondary hover:bg-white/[0.06]'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></GlassPanel></ReactBitsNavigationSlot>
-    {tab === 'mine' ? <ReactBitsRevealSlot className="block"><ReactBitsCardSlot semantic="report-card" className="space-y-5"><GlassPanel className="flex flex-wrap items-center gap-4 p-5"><label className="block"><span className="mb-2 block text-sm text-studio-text-muted">记录类型</span><select value={entryType} onChange={(event) => setEntryType(event.target.value as EntryType)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary"><option value="daily">日报</option><option value="monthly">月报</option><option value="yearly">年报</option></select></label>{entryType === 'daily' ? <span className="text-sm text-studio-text-muted">{loading ? '加载中...' : report ? '今日日报' : '今天还没有日报'}</span> : <span className="text-sm text-studio-text-muted">填写并提交个人{entryType === 'monthly' ? '月报' : '年报'}</span>}</GlassPanel>{entryType === 'daily' ? <DailyReportComposer status={report?.status || 'draft'} items={items} submitting={submitting} onItemsChange={setItems} onSubmit={() => void submit()} /> : <DailyReportSummaryForm kind={entryType} />}</ReactBitsCardSlot></ReactBitsRevealSlot> : null}
+    <ReactBitsNavigationSlot semantic="page-tabs"><GlassPanel className="p-2"><div className="flex flex-wrap gap-2">{tabs.filter((item) => item.visible).map((item) => { const Icon = item.icon; return <button key={item.key} type="button" onClick={() => setTab(item.key)} className={`inline-flex items-center gap-2 rounded-button px-4 py-2.5 text-sm font-semibold ${tab === item.key ? 'bg-studio-primary text-white' : 'text-studio-text-secondary hover:bg-studio-surface-soft'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></GlassPanel></ReactBitsNavigationSlot>
+    {tab === 'mine' ? <ReactBitsRevealSlot className="block"><ReactBitsCardSlot semantic="report-card" className="space-y-5"><GlassPanel className="flex flex-wrap items-center gap-4 p-5"><label className="block"><span className="mb-2 block text-sm text-studio-text-muted">记录类型</span><select value={entryType} onChange={(event) => setEntryType(event.target.value as EntryType)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary"><option value="daily">日报</option><option value="monthly">月报</option><option value="yearly">年报</option></select></label>{entryType === 'daily' ? <span className="text-sm text-studio-text-muted">{loading ? '加载中...' : report ? '今日日报' : '今天还没有日报'}</span> : <span className="text-sm text-studio-text-muted">填写并提交个人{entryType === 'monthly' ? '月报' : '年报'}</span>}</GlassPanel>{entryType === 'daily' ? mineError ? <ErrorState title="日报加载失败" description={mineError} onRetry={() => void loadMine()} /> : loading ? <GlassPanel className="p-6 text-center text-sm text-studio-text-muted">正在加载今日日报…</GlassPanel> : <DailyReportComposer status={report?.status || 'draft'} items={items} submitting={submitting} onItemsChange={setItems} onSubmit={() => void submit()} /> : <DailyReportSummaryForm kind={entryType} />}</ReactBitsCardSlot></ReactBitsRevealSlot> : null}
     {tab === 'team' ? <DailyReportTeamBoard date={teamDate} reports={teamReports} loading={teamLoading} error={teamError} onDateChange={setTeamDate} onRefresh={loadTeam} onView={setDetail} /> : null}
     {tab === 'summary' ? <DailyReportSummaryArchive canViewArchive={canViewArchive} onView={setDetail} /> : null}
     <DailyReportDetailDrawer report={detail} onClose={() => setDetail(null)} />

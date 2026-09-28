@@ -66,7 +66,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
   const btnClass = (active?: boolean) =>
     `p-1.5 rounded transition-colors ${
       active
-        ? isDark ? 'bg-studio-primary text-white' : 'bg-studio-primary text-studio-primary'
+      ? 'bg-studio-primary text-white'
         : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
     }`;
 
@@ -119,8 +119,8 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
       }}
       className={`flex items-center gap-0.5 px-2 py-1.5 rounded-lg shadow-xl border backdrop-blur-sm ${
         isDark
-          ? 'bg-studio-surface-soft/95 border-studio-border-soft text-studio-text-secondary'
-          : 'bg-white/95 border-studio-border-soft text-studio-text-muted'
+          ? 'bg-studio-surface-soft border-studio-border-soft text-studio-text-secondary'
+          : 'bg-studio-surface-glass border-studio-border-soft text-studio-text-muted'
       }`}
       style={{ minWidth: 'fit-content' }}
     >
@@ -147,7 +147,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
         {showTextColor && (
-          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'}`} style={{ minWidth: '176px' }}>
+          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`} style={{ minWidth: '176px' }}>
             <div className="text-xs font-medium mb-2 opacity-60">文字颜色</div>
             <div className="grid grid-cols-4 gap-2.5">
               {TEXT_COLORS.map((c) => (
@@ -169,7 +169,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
         {showHighlight && (
-          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'}`} style={{ minWidth: '176px' }}>
+          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`} style={{ minWidth: '176px' }}>
             <div className="text-xs font-medium mb-2 opacity-60">高亮颜色</div>
             <div className="grid grid-cols-4 gap-2.5 mb-1">
               {HIGHLIGHT_COLORS.map((c) => (

@@ -114,6 +114,7 @@ try {
   assert.equal(insertions.status, 200);
   const insertionPayload = await insertions.json();
   assert.deepEqual(insertionPayload.data.map((item: { resource_id: number }) => item.resource_id), [secondResourceId, resourceId]);
+  assert.deepEqual(insertionPayload.data.map((item: { title: string }) => item.title), ['来源二', '来源一']);
   assert.deepEqual(insertionPayload.empty_resource_ids, [emptyResourceId]);
   assert.match(insertionPayload.data[0].content_html, /第三段/);
   assert.match(insertionPayload.data[1].content_html, /第一段/);

@@ -9,6 +9,8 @@ import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { PageShell } from '../components/studio';
+import { useCompactEditorToolbar } from '../hooks/useCompactEditorToolbar';
+import { getWorkflowStatusLabel, isKnownWorkflowStatus } from '../platform/workflow-status-labels';
 
 interface PublishingDetailData {
   id: number;
@@ -59,18 +61,11 @@ const WORKFLOW_STEPS = [
   { key: 'publishing', label: '发布管理', icon: Send },
 ];
 
-const SHOOTING_STATUS_TEXT: Record<string, string> = {
-  planned: '计划中',
-  in_progress: '制作中',
-  completed: '已完成',
-  cancelled: '已取消',
-};
-
-const PUBLISHING_STATUS_TEXT: Record<string, string> = {
-  pending: '待发布',
-  published: '已发布',
-  failed: '发布失败',
-  scheduled: '已预定',
+const PUBLISHING_STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-studio-amber-soft text-studio-amber-contrast border-studio-border-soft',
+  published: 'bg-studio-success-soft text-studio-success-contrast border-studio-border-soft',
+  failed: 'bg-studio-coral-soft text-studio-coral-contrast border-studio-border-soft',
+  scheduled: 'bg-studio-primary-soft text-studio-primary-contrast border-studio-border-soft',
 };
 
 export default function PublishingDetail() {
@@ -78,6 +73,7 @@ export default function PublishingDetail() {
   const navigate = useNavigate();
   const appStore = useAppStore();
   const styles = useThemeStyles();
+  const compactEditorToolbar = useCompactEditorToolbar();
 
   const [data, setData] = useState<PublishingDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -163,7 +159,7 @@ export default function PublishingDetail() {
   return (
     <PageShell className="space-y-6">
       {/* 顶部导航 */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           onClick={() => navigate('/publishing')}
           className={`flex items-center gap-2 ${styles.textSecondary} hover:text-studio-primary transition-colors`}
@@ -171,14 +167,13 @@ export default function PublishingDetail() {
           <ChevronLeft className="w-5 h-5" />
           返回发布管理
         </button>
-        <div className="flex items-center gap-3">
-          <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs border ${
-            data.status === 'published' ? 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30' :
-            data.status === 'failed' ? 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30' :
-            data.status === 'scheduled' ? 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30' :
-            'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30'
+        <div className="flex items-center gap-3 self-start sm:self-auto">
+          <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs ${
+            PUBLISHING_STATUS_COLORS[data.status] || (isKnownWorkflowStatus('publishing', data.status)
+              ? PUBLISHING_STATUS_COLORS.pending
+              : 'bg-studio-surface-soft text-studio-text-secondary border-studio-border-soft')
           }`}>
-            {PUBLISHING_STATUS_TEXT[data.status] || data.status}
+            {getWorkflowStatusLabel('publishing', data.status)}
           </span>
         </div>
       </div>
@@ -195,25 +190,25 @@ export default function PublishingDetail() {
       {/* 流程进度条 */}
       <div className={`${styles.card} p-6`}>
         <h2 className={`text-lg font-semibold ${styles.textPrimary} mb-4`}>选题流转进度</h2>
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2">
           {WORKFLOW_STEPS.map((step, index) => {
             const status = getStepStatus(step.key);
             const Icon = step.icon;
             return (
-              <div key={step.key} className="flex items-center flex-1">
-                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg flex-1 ${
+              <div key={step.key} className="flex min-w-0 items-center sm:flex-1">
+                <div className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 sm:px-3 ${
                   status === 'completed' ? 'bg-studio-success/10 border border-studio-success/30' :
                   status === 'current' ? 'bg-studio-primary/10 border border-studio-primary/30 ring-2 ring-studio-primary/20' :
                   `${styles.bgTertiary} border ${styles.border}`
                 }`}>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                  <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
                     status === 'completed' ? 'bg-studio-success text-white' :
                     status === 'current' ? 'bg-studio-primary text-white' :
                     'bg-studio-surface-soft text-studio-text-muted'
                   }`}>
                     {status === 'completed' ? <CheckCircle className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
                   </div>
-                  <span className={`text-xs font-medium ${
+                  <span className={`min-w-0 break-words text-xs font-medium leading-4 ${
                     status === 'current' ? 'text-studio-primary' :
                     status === 'completed' ? styles.textPrimary :
                     styles.textMuted
@@ -222,7 +217,7 @@ export default function PublishingDetail() {
                   </span>
                 </div>
                 {index < WORKFLOW_STEPS.length - 1 && (
-                  <ArrowRight className={`w-4 h-4 mx-1 flex-shrink-0 ${
+                  <ArrowRight className={`mx-1 hidden h-4 w-4 flex-shrink-0 sm:block ${
                     getStepStatus(WORKFLOW_STEPS[index + 1].key) !== 'pending' ? 'text-studio-success' : styles.textMuted
                   }`} />
                 )}
@@ -298,7 +293,7 @@ export default function PublishingDetail() {
             <div className="space-y-3">
               <div className="flex items-start gap-3">
                 <span className={`text-xs ${styles.textMuted} w-16 shrink-0 pt-0.5`}>状态</span>
-                <span className={`text-sm ${styles.textPrimary}`}>{SHOOTING_STATUS_TEXT[data.shooting.status] || data.shooting.status}</span>
+                <span className={`text-sm ${styles.textPrimary}`}>{getWorkflowStatusLabel('shooting', data.shooting.status)}</span>
               </div>
               <div className="flex items-start gap-3">
                 <span className={`text-xs ${styles.textMuted} w-16 shrink-0 pt-0.5`}>计划日期</span>
@@ -352,27 +347,27 @@ export default function PublishingDetail() {
 
       {/* 剧本内容区域 */}
       <div className={`${styles.card} overflow-hidden`}>
-        <div className={`flex items-center justify-between px-6 py-4 border-b ${styles.border}`}>
-          <h2 className={`text-lg font-semibold ${styles.textPrimary} flex items-center gap-2`}>
+        <div className={`flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 ${styles.border}`}>
+          <h2 className={`flex min-w-0 items-center gap-2 text-base font-semibold sm:text-lg ${styles.textPrimary}`}>
             <FileText className="w-5 h-5 text-studio-primary" />
             剧本内容
             {hasLocalEdit && (
-              <span className="text-xs px-2 py-0.5 bg-studio-primary/20 text-studio-primary rounded-full">本地编辑版</span>
+              <span className="rounded-full bg-studio-primary-soft px-2 py-0.5 text-xs text-studio-primary-contrast">本地编辑版</span>
             )}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
             {editMode ? (
               <>
                 <button
                   onClick={handleCancelEdit}
-                  className={`px-4 py-2 text-sm rounded-lg ${styles.buttonSecondary} transition-colors`}
+                  className={`min-h-10 px-3 py-2 text-sm rounded-lg sm:px-4 ${styles.buttonSecondary} transition-colors`}
                 >
                   取消
                 </button>
                 <button
                   onClick={handleSaveScript}
                   disabled={saving}
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-studio-primary hover:bg-studio-primary text-white transition-colors disabled:opacity-50"
+                  className="flex min-h-10 items-center gap-1.5 rounded-lg bg-studio-primary px-3 py-2 text-sm text-white transition-colors hover:bg-studio-primary disabled:opacity-50 sm:px-4"
                 >
                   <Save className="w-4 h-4" />
                   {saving ? '保存中...' : '保存'}
@@ -381,7 +376,7 @@ export default function PublishingDetail() {
             ) : (
               <button
                 onClick={() => setEditMode(true)}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-studio-primary hover:bg-studio-primary text-white transition-colors"
+                className="flex min-h-10 items-center gap-1.5 rounded-lg bg-studio-primary px-3 py-2 text-sm text-white transition-colors hover:bg-studio-primary sm:px-4"
               >
                 <FileText className="w-4 h-4" />
                 编辑剧本
@@ -394,11 +389,13 @@ export default function PublishingDetail() {
           {editMode ? (
             <div className="min-h-[calc(100vh-22rem)] overflow-hidden bg-[var(--editor-bg)]">
               <ContentEditor
+                writingGoalKey={`publishing:${id}`}
                 value={scriptContent}
                 onChange={setScriptContent}
                 onSave={handleSaveScript}
                 mode="rich"
                 immersive
+                toolbarVariant={compactEditorToolbar ? 'basic' : 'full'}
               />
             </div>
           ) : (
@@ -419,7 +416,7 @@ export default function PublishingDetail() {
         </div>
 
         {/* 提示信息 */}
-        <div className={`px-6 py-3 border-t ${styles.border} ${styles.bgTertiary}`}>
+        <div className={`border-t px-4 py-3 sm:px-6 ${styles.border} ${styles.bgTertiary}`}>
           <p className={`text-xs ${styles.textMuted}`}>
             💡 此处编辑的剧本内容仅在发布管理及后续资源库存档的成片批注中生效，不会同步到创作管理模块。
           </p>

@@ -177,13 +177,13 @@ export default function Production() {
   };
 
   const topicStatusColors: Record<string, string> = {
-    pending: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
-    approved: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
-    rejected: 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30',
-    production: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
-    shooting: 'bg-studio-violet/15 text-studio-violet-contrast border-studio-violet/30',
-    publishing: 'bg-studio-cyan/15 text-studio-cyan-contrast border-studio-cyan/30',
-    completed: 'bg-studio-surface-soft/20 text-studio-text-muted border-studio-border-soft/30',
+    pending: 'bg-studio-amber-soft text-studio-amber-contrast border-studio-border-soft',
+    approved: 'bg-studio-success-soft text-studio-success-contrast border-studio-border-soft',
+    rejected: 'bg-studio-coral-soft text-studio-coral-contrast border-studio-border-soft',
+    production: 'bg-studio-primary-soft text-studio-primary-contrast border-studio-border-soft',
+    shooting: 'bg-studio-violet-soft text-studio-violet-contrast border-studio-border-soft',
+    publishing: 'bg-studio-cyan-soft text-studio-cyan-contrast border-studio-border-soft',
+    completed: 'bg-studio-surface-soft text-studio-text-muted border-studio-border-soft',
   };
 
   const topicStatusText: Record<string, string> = {
@@ -197,10 +197,10 @@ export default function Production() {
   };
 
   const productionStatusColors: Record<string, string> = {
-    draft: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
-    review: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
-    approved: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
-    rejected: 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30',
+    draft: 'bg-studio-amber-soft text-studio-amber-contrast border-studio-border-soft',
+    review: 'bg-studio-primary-soft text-studio-primary-contrast border-studio-border-soft',
+    approved: 'bg-studio-success-soft text-studio-success-contrast border-studio-border-soft',
+    rejected: 'bg-studio-coral-soft text-studio-coral-contrast border-studio-border-soft',
   };
 
   const productionStatusText: Record<string, string> = {

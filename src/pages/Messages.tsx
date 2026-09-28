@@ -112,17 +112,17 @@ export default function Messages() {
   };
 
   const handleMarkAllAsRead = async () => {
-    try {
-      const unreadMessages = messages.filter((message) => !message.read);
-      for (const message of unreadMessages) {
-        await markMessageAsRead(message.id);
-      }
-      setMessages((current) => current.map((message) => ({ ...message, read: true })));
-      setUnreadCount(0);
-      addNotification({ title: '操作成功', message: '所有消息已标记为已读', type: 'success' });
-    } catch (error) {
-      addNotification({ title: '操作失败', message: (error as Error).message, type: 'error' });
+    const unreadMessages = messages.filter((message) => !message.read);
+    const settled = await Promise.allSettled(unreadMessages.map((message) => markMessageAsRead(message.id)));
+    const succeededIds = new Set(unreadMessages.filter((_, index) => settled[index].status === 'fulfilled').map((message) => message.id));
+    const failed = settled.filter((result) => result.status === 'rejected').length;
+    if (succeededIds.size) {
+      setMessages((current) => current.map((message) => succeededIds.has(message.id) ? { ...message, read: true } : message));
+      for (const id of succeededIds) markStoreMessageAsRead(id);
+      setUnreadCount(Math.max(0, unreadCount - succeededIds.size));
     }
+    if (failed) addNotification({ title: succeededIds.size ? '部分消息未标记' : '操作失败', message: `${succeededIds.size} 条已标记为已读，${failed} 条仍未读，可重试。`, type: 'error' });
+    else addNotification({ title: '操作成功', message: '所有消息已标记为已读', type: 'success' });
   };
 
   const handleClearAll = async () => {
@@ -178,7 +178,7 @@ export default function Messages() {
                   className={`min-h-10 rounded-button border px-3 py-2 text-sm font-semibold leading-snug transition ${
                     activeFilter === filter.key
                       ? 'border-studio-border-active bg-studio-primary/14 text-studio-text-primary'
-                      : 'border-studio-border-soft bg-white/[0.04] text-studio-text-secondary hover:border-studio-border-active hover:text-studio-text-primary'
+                      : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary hover:border-studio-border-active hover:text-studio-text-primary'
                   }`}
                 >
                   {filter.label}
@@ -210,12 +210,12 @@ export default function Messages() {
                     key={message.id}
                     type="button"
                     onClick={() => handleMessageClick(message)}
-                    className={`group w-full px-5 py-4 text-left transition hover:bg-white/[0.045] ${
+                    className={`group w-full px-5 py-4 text-left transition hover:bg-studio-surface-soft ${
                       !message.read ? 'bg-studio-primary/[0.055] shadow-[inset_3px_0_0_rgba(34,211,238,0.65)]' : ''
                     } ${message.link ? 'cursor-pointer' : 'cursor-default'}`}
                   >
                     <div className="flex items-start gap-4">
-                      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border bg-white/[0.05] ${
+                      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border bg-studio-surface-soft ${
                         meta.tone === 'success'
                           ? 'border-studio-success/35 text-studio-success'
                           : meta.tone === 'coral'

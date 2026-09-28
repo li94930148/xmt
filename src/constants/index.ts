@@ -5,12 +5,12 @@
 
 // === 选题状态颜色 ===
 export const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string; border: string }> = {
-  pending:    { bg: 'bg-studio-amber/10',   text: 'text-studio-amber-contrast',   dot: 'bg-studio-amber',   border: 'border-studio-amber/30' },
-  approved:   { bg: 'bg-studio-success/10', text: 'text-studio-success-contrast', dot: 'bg-studio-success', border: 'border-studio-success/30' },
-  rejected:   { bg: 'bg-studio-coral/10',   text: 'text-studio-coral-contrast',   dot: 'bg-studio-coral',   border: 'border-studio-coral/30' },
-  production: { bg: 'bg-studio-primary/10', text: 'text-studio-primary-contrast', dot: 'bg-studio-primary', border: 'border-studio-primary/30' },
-  shooting:   { bg: 'bg-studio-violet/10',  text: 'text-studio-violet-contrast',  dot: 'bg-studio-violet',  border: 'border-studio-violet/30' },
-  publishing: { bg: 'bg-studio-cyan/10',    text: 'text-studio-cyan-contrast',    dot: 'bg-studio-cyan',    border: 'border-studio-cyan/30' },
+  pending:    { bg: 'bg-studio-amber-soft',   text: 'text-studio-amber-contrast',   dot: 'bg-studio-amber',   border: 'border-studio-border-soft' },
+  approved:   { bg: 'bg-studio-success-soft', text: 'text-studio-success-contrast', dot: 'bg-studio-success', border: 'border-studio-border-soft' },
+  rejected:   { bg: 'bg-studio-coral-soft',   text: 'text-studio-coral-contrast',   dot: 'bg-studio-coral',   border: 'border-studio-border-soft' },
+  production: { bg: 'bg-studio-primary-soft', text: 'text-studio-primary-contrast', dot: 'bg-studio-primary', border: 'border-studio-border-soft' },
+  shooting:   { bg: 'bg-studio-violet-soft',  text: 'text-studio-violet-contrast',  dot: 'bg-studio-violet',  border: 'border-studio-border-soft' },
+  publishing: { bg: 'bg-studio-cyan-soft',    text: 'text-studio-cyan-contrast',    dot: 'bg-studio-cyan',    border: 'border-studio-border-soft' },
   completed:  { bg: 'bg-studio-surface-soft', text: 'text-studio-text-secondary', dot: 'bg-studio-text-muted', border: 'border-studio-border-soft' },
 };
 
@@ -63,10 +63,10 @@ export const ACHIEVEMENT_CATEGORIES = [
 ];
 
 export const ACHIEVEMENT_RARITIES = [
-  { value: 'common',    label: '普通', color: 'text-studio-text-secondary', bg: 'bg-studio-surface-soft', border: 'border-studio-border-soft' },
-  { value: 'rare',      label: '稀有', color: 'text-studio-primary-contrast', bg: 'bg-studio-primary/10', border: 'border-studio-primary/30' },
-  { value: 'epic',      label: '史诗', color: 'text-studio-violet-contrast',  bg: 'bg-studio-violet/10',  border: 'border-studio-violet/30' },
-  { value: 'legendary', label: '传说', color: 'text-studio-amber-contrast',   bg: 'bg-studio-amber/10',   border: 'border-studio-amber/30' },
+  { value: 'common',    label: '普通', color: 'text-studio-text-secondary', bg: 'bg-studio-surface-soft', dot: 'bg-studio-text-muted', border: 'border-studio-border-soft' },
+  { value: 'rare',      label: '稀有', color: 'text-studio-primary-contrast', bg: 'bg-studio-primary-soft', dot: 'bg-studio-primary', border: 'border-studio-border-soft' },
+  { value: 'epic',      label: '史诗', color: 'text-studio-violet-contrast',  bg: 'bg-studio-violet-soft',  dot: 'bg-studio-violet',  border: 'border-studio-border-soft' },
+  { value: 'legendary', label: '传说', color: 'text-studio-amber-contrast',   bg: 'bg-studio-amber-soft',   dot: 'bg-studio-amber',   border: 'border-studio-border-soft' },
 ];
 
 // === 成就等级阈值 ===
@@ -85,6 +85,9 @@ export const ROLE_MAP: Record<string, string> = {
   admin:    '管理员',
   director: '编导',
   editor:   '编辑',
+  copywriter: '文案',
+  post_production: '后期',
+  camera: '摄像',
   member:   '成员',
 };
 

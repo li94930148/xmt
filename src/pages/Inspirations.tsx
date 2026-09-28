@@ -18,6 +18,7 @@ import { useSocket } from '../hooks/useSocket';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { showRealtimeToast } from '../components/RealtimeToast';
 import { formatBeijingTime } from '../lib/utils';
+import ActionButton from '../components/studio/ActionButton';
 import {
   Plus,
   Search,
@@ -316,23 +317,23 @@ export default function Inspirations() {
   };
 
   const categoryColors: Record<string, string> = {
-    口播: 'bg-studio-primary/15 text-studio-primary',
-    带货: 'bg-studio-amber/15 text-studio-amber',
-    科普: 'bg-studio-success/15 text-studio-success',
-    故事: 'bg-studio-violet/15 text-studio-violet',
-    其他: 'bg-studio-surface-soft/15 text-studio-text-muted',
+    口播: 'bg-studio-primary-soft text-studio-primary-contrast',
+    带货: 'bg-studio-amber-soft text-studio-amber-contrast',
+    科普: 'bg-studio-success-soft text-studio-success-contrast',
+    故事: 'bg-studio-violet-soft text-studio-violet-contrast',
+    其他: 'bg-studio-surface-soft text-studio-text-muted',
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center sm:gap-4">
         <div>
           <h1 className={styles.pageTitle}>灵感池</h1>
           <p className={`${styles.subtitle} mt-1`}>收集团队灵感，快速互动，再在详情里集中讨论</p>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className={`flex items-center gap-2 px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]`}
+          className={`flex shrink-0 items-center gap-2 whitespace-nowrap px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]`}
         >
           <Plus className="w-4 h-4" />
           <span className="font-medium text-sm">提交灵感</span>
@@ -423,18 +424,18 @@ export default function Inspirations() {
                     </span>
                   )}
                   {isPromoted && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-studio-success/15 text-studio-success font-medium">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-studio-success-soft text-studio-success-contrast font-medium">
                       已转选题
                     </span>
                   )}
                   {recentCommentIds.has(inspiration.id) && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-studio-cyan/15 text-studio-cyan font-medium">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-studio-surface-soft text-studio-cyan-contrast font-medium">
                       有新评论
                     </span>
                   )}
                 </div>
 
-                <div className={`flex items-center justify-between pt-3 border-t ${styles.borderLight}`}>
+                <div className={`flex flex-col gap-2 pt-3 border-t ${styles.borderLight} sm:flex-row sm:items-center sm:justify-between`}>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -464,8 +465,8 @@ export default function Inspirations() {
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[10px] ${styles.textMuted}`}>
+                  <div className="flex min-w-0 items-center justify-between gap-2 sm:justify-end">
+                    <span className={`max-w-28 truncate whitespace-nowrap text-[10px] ${styles.textMuted}`}>
                       {inspiration.creator_name || '匿名'}
                     </span>
                     {!isPromoted && canPromoteInspiration && (
@@ -476,7 +477,7 @@ export default function Inspirations() {
                           void handlePromote(inspiration.id);
                         }}
                         disabled={promotingId === inspiration.id}
-                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-success/10 hover:text-studio-success transition-all disabled:opacity-50`}
+                        className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-success/10 hover:text-studio-success transition-all disabled:opacity-50`}
                       >
                         {promotingId === inspiration.id ? (
                           <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -486,14 +487,16 @@ export default function Inspirations() {
                         转为选题
                       </button>
                     )}
+                    {isPromoted && inspiration.topic_id ? <ActionButton type="button" variant="ghost" className="min-h-11 shrink-0 whitespace-nowrap" onClick={(event) => { event.stopPropagation(); navigate(`/topics/${inspiration.topic_id}`, { state: { mobileReturnTo: '/inspirations' } }); }}>查看关联选题</ActionButton> : null}
                     {(canDeleteAnyInspiration || authStore.user?.id === inspiration.creator_id) && (
                       <button
                         type="button"
+                        aria-label={`删除灵感：${inspiration.title}`}
                         onClick={(event) => {
                           event.stopPropagation();
                           void handleDelete(inspiration.id);
                         }}
-                        className={`p-1.5 ${styles.buttonDanger} rounded-lg opacity-0 group-hover:opacity-100 transition-opacity`}
+                        className={`p-1.5 ${styles.buttonDanger} rounded-lg opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -619,6 +622,7 @@ export default function Inspirations() {
                     <div className={`text-sm leading-7 whitespace-pre-wrap ${styles.textPrimary}`}>
                       {detailData.inspiration.description?.trim() || '这条灵感还没有补充详细描述。'}
                     </div>
+                    {detailData.inspiration.topic_id ? <ActionButton type="button" variant="ghost" className="mt-4 min-h-11" onClick={() => navigate(`/topics/${detailData.inspiration.topic_id}`, { state: { mobileReturnTo: '/inspirations' } })}>查看关联选题</ActionButton> : null}
                   </div>
 
                   <div className={`px-6 py-4 border-b ${styles.border}`}>

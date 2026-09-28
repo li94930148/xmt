@@ -2,7 +2,7 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useNavigate } from 'react-router-dom';
 import PomodoroTimer from '../components/PomodoroTimer';
 import { ChevronLeft, Trophy, Timer } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getPomodoroRanking } from '../api';
 import type { PomodoroRanking } from '../types';
 
@@ -10,12 +10,16 @@ export default function PomodoroPage() {
   const styles = useThemeStyles();
   const navigate = useNavigate();
   const [ranking, setRanking] = useState<PomodoroRanking[]>([]);
+  const [rankingError, setRankingError] = useState('');
+  const [rankingLoading, setRankingLoading] = useState(true);
 
-  useEffect(() => {
-    getPomodoroRanking()
-      .then(setRanking)
-      .catch(() => {});
+  const loadRanking = useCallback(async () => {
+    setRankingLoading(true); setRankingError('');
+    try { setRanking(await getPomodoroRanking()); }
+    catch (error) { setRankingError(error instanceof Error ? error.message : '获取番茄钟排行榜失败'); }
+    finally { setRankingLoading(false); }
   }, []);
+  useEffect(() => { void loadRanking(); }, [loadRanking]);
 
   return (
     <div className="space-y-6">
@@ -49,7 +53,9 @@ export default function PomodoroPage() {
             <h3 className="text-base font-semibold text-theme-text">专注排行榜</h3>
           </div>
 
-          {ranking.length > 0 ? (
+          {rankingError ? (
+            <div className="space-y-3 py-6 text-center"><p className="text-sm text-theme-text-muted">排行榜加载失败：{rankingError}</p><button type="button" onClick={() => void loadRanking()} disabled={rankingLoading} className={`rounded-lg px-3 py-2 text-sm ${styles.buttonSecondary}`}>{rankingLoading ? '正在重试…' : '重试'}</button></div>
+          ) : rankingLoading ? <div className="py-8 text-center text-sm text-theme-text-muted">排行榜加载中…</div> : ranking.length > 0 ? (
             <div className="space-y-2">
               {ranking.map((item, index) => (
                 <div

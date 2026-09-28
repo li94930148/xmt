@@ -17,7 +17,9 @@ import { useAppStore, useAuthStore } from '../store';
 import { deleteProduction, getProductionById, getProductionHistory, updateProduction } from '../api';
 import type { Production as ProductionType, ProductionHistory, Topic } from '../types';
 import { getTopic } from '../api';
-import ContentEditor from '../components/ContentEditor';
+import ContentEditor, { type EditorCommandHandle } from '../components/ContentEditor';
+import { useWritingFocus } from '../components/layout/WritingFocusContext';
+import { buildMissingOutlineSkeleton, extractOutlineHeadings } from '../components/editor/outlineSkeleton';
 import EditorLeaveFailureDialog from '../components/editor/EditorLeaveFailureDialog';
 import { ConfirmModal } from '../components/common';
 import { ActionButton, EmptyState, GlassPanel, PageShell, StatusPill, StudioSkeletonCard } from '../components/studio';
@@ -35,6 +37,8 @@ import { editorStateLabel, useEditorEventState } from '../editor/state/editorSta
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
 import ProductionResourcesPanel from '../components/production/ProductionResourcesPanel';
+import type { ResourceReference } from '../components/production/resourceReference';
+import { buildResourceReferenceHtml } from '../components/production/resourceReference';
 import { celebrateMilestone } from '../utils/confetti';
 import { useSocket } from '../hooks/useSocket';
 import { COLLABORATION_EVENTS, type VersionSupersededPayload } from '../collaboration/core/events';
@@ -120,11 +124,13 @@ function syncTone(syncStatus: string): 'cyan' | 'success' | 'coral' | 'muted' {
 export default function ProductionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
+  const theme = useAppStore((state) => state.theme);
   const authUser = useAuthStore((state) => state.user);
-  const isDark = appStore.theme === 'dark';
+  const isDark = theme === 'dark';
   const { hasPermission } = usePermission();
   const socket = useSocket();
+  const { focused: writingFocused, setFocused: setWritingFocused } = useWritingFocus();
 
   const [production, setProduction] = useState<ProductionType | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null);
@@ -135,6 +141,7 @@ export default function ProductionDetail() {
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [outlineEditorReady, setOutlineEditorReady] = useState(false);
   const [editData, setEditData] = useState({
     content: '',
     status: 'draft',
@@ -156,6 +163,7 @@ export default function ProductionDetail() {
   const activeDocId = production ? getProductionVersionRoomId(production.id, production.version) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
   const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
+  const outlineEditorHandleRef = useRef<EditorCommandHandle | null>(null);
   const persistedContentRef = useRef('');
   const {
     requestLeave,
@@ -167,6 +175,10 @@ export default function ProductionDetail() {
 
   const handleRuntimeHandleChange = useCallback((handle: ContentEditorRuntimeHandle | null) => {
     runtimeHandleRef.current = handle;
+  }, []);
+  const handleOutlineEditorChange = useCallback((handle: EditorCommandHandle | null) => {
+    outlineEditorHandleRef.current = handle;
+    setOutlineEditorReady(Boolean(handle));
   }, []);
 
   useEffect(() => {
@@ -196,7 +208,7 @@ export default function ProductionDetail() {
     });
 
     if (leaveResult.decision === 'waiting_confirmation') {
-      appStore.addNotification({
+      addNotification({
         title: '最后修改尚未保存',
         message: '已阻止离开当前页面，请留在此页后重试保存。',
         type: 'warning',
@@ -205,13 +217,13 @@ export default function ProductionDetail() {
     }
 
     if (leaveResult.warning === 'collaboration_unconfirmed') {
-      appStore.addNotification({
+      addNotification({
         title: '内容已保存',
         message: '协作交接尚未确认，已按安全保存结果继续导航。',
         type: 'warning',
       });
     }
-  }, [appStore, navigate, requestLeave]);
+  }, [addNotification, navigate, requestLeave]);
 
   const fetchData = useCallback(async () => {
     if (!id) return;
@@ -243,7 +255,7 @@ export default function ProductionDetail() {
       setSelectedVersionId('current');
       setSuperseded(null);
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '获取创作详情失败',
         message: (error as Error).message,
         type: 'error',
@@ -251,7 +263,7 @@ export default function ProductionDetail() {
     } finally {
       setLoading(false);
     }
-  }, [appStore, id]);
+  }, [addNotification, id]);
 
   const loadMoreHistory = useCallback(async () => {
     if (!id || historyLoading || history.length >= historyTotal) return;
@@ -262,9 +274,9 @@ export default function ProductionDetail() {
       setHistoryPage(next.page);
       setHistoryTotal(next.total);
     } catch {
-      appStore.addNotification({ title: '加载历史版本失败', message: '请稍后重试', type: 'error' });
+      addNotification({ title: '加载历史版本失败', message: '请稍后重试', type: 'error' });
     } finally { setHistoryLoading(false); }
-  }, [appStore, history.length, historyLoading, historyPage, historyTotal, id]);
+  }, [addNotification, history.length, historyLoading, historyPage, historyTotal, id]);
 
   useEffect(() => {
     void fetchData();
@@ -308,6 +320,12 @@ export default function ProductionDetail() {
   }, [history, production]);
 
   const selectedVersion = versionEntries.find((entry) => entry.id === selectedVersionId) || versionEntries[0] || null;
+  const canFocusWrite = Boolean(selectedVersion?.isCurrent && canEditProduction && !superseded);
+  const outlineHeadings = useMemo(() => extractOutlineHeadings(topic?.outline || ''), [topic?.outline]);
+
+  useEffect(() => {
+    if (writingFocused && !canFocusWrite) setWritingFocused(false);
+  }, [canFocusWrite, setWritingFocused, writingFocused]);
 
   const timelineView = useMemo(() => {
     if (!production) return getTimelineView('production:unknown');
@@ -368,6 +386,20 @@ export default function ProductionDetail() {
     });
   };
 
+  const continueFromOutline = () => {
+    if (!canFocusWrite || outlineHeadings.length === 0) return;
+    const skeleton = buildMissingOutlineSkeleton(outlineHeadings, editData.content);
+    if (skeleton.count === 0) {
+      addNotification({ title: '大纲小节已在正文中', message: '没有需要补入的新标题', type: 'info' });
+      return;
+    }
+    if (!outlineEditorHandleRef.current?.appendHtml(skeleton.html)) {
+      addNotification({ title: '插入失败', message: '编辑器尚未准备好，请稍后重试', type: 'error' });
+      return;
+    }
+    addNotification({ title: '已按大纲补入小节', message: `新增 ${skeleton.count} 个小节，可在正文中继续写`, type: 'success' });
+  };
+
   const productionEditorAdapter = useMemo(() => {
     if (!production) return undefined;
     const room = getProductionVersionRoomId(production.id, production.version);
@@ -393,13 +425,13 @@ export default function ProductionDetail() {
             version_action: 'none',
           });
         } catch (error) {
-          appStore.addNotification({ title: '本次修改尚未保存', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '本次修改尚未保存', message: (error as Error).message, type: 'error' });
           throw error;
         }
         persistedContentRef.current = content;
       },
     });
-  }, [appStore, canEditProduction, editData.content, editData.status, production, selectedVersionId, superseded]);
+  }, [addNotification, canEditProduction, editData.content, editData.status, production, selectedVersionId, superseded]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
     if (!production || !canEditProduction || superseded) return;
@@ -415,7 +447,7 @@ export default function ProductionDetail() {
         version_action: versionAction,
       });
 
-      appStore.addNotification({
+      addNotification({
         title: versionAction === 'major' ? '已另开新版' : '小修已保存',
         message: `当前版本已更新为 ${result.version || production.version}`,
         type: 'success',
@@ -423,7 +455,7 @@ export default function ProductionDetail() {
 
       await fetchData();
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '保存失败',
         message: (error as Error).message,
         type: 'error',
@@ -444,7 +476,7 @@ export default function ProductionDetail() {
         version_action: 'none',
       });
 
-      appStore.addNotification({
+      addNotification({
         title: '提交成功',
         message: '创作内容已提交审核',
         type: 'success',
@@ -452,7 +484,7 @@ export default function ProductionDetail() {
 
       await fetchData();
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '提交失败',
         message: (error as Error).message,
         type: 'error',
@@ -473,7 +505,7 @@ export default function ProductionDetail() {
         version_action: 'none',
       });
 
-      appStore.addNotification({
+      addNotification({
         title: '状态更新成功',
         message: '创作状态已同步',
         type: 'success',
@@ -483,7 +515,7 @@ export default function ProductionDetail() {
 
       await fetchData();
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '更新失败',
         message: (error as Error).message,
         type: 'error',
@@ -496,14 +528,14 @@ export default function ProductionDetail() {
 
     try {
       await deleteProduction(production.id);
-      appStore.addNotification({
+      addNotification({
         title: '删除成功',
         message: '创作记录已删除',
         type: 'success',
       });
       navigate('/production');
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '删除失败',
         message: (error as Error).message,
         type: 'error',
@@ -542,8 +574,14 @@ export default function ProductionDetail() {
     && hasPermission('production:update')
     && hasPermission('resource:view');
 
+  const insertResourceReference = (resource: ResourceReference, excerpt?: string): boolean => {
+    if (!canManageProductionResources || !selectedVersion?.isCurrent || !outlineEditorHandleRef.current) return false;
+    const html = buildResourceReferenceHtml(resource, excerpt);
+    return Boolean(html && outlineEditorHandleRef.current.appendHtml(html));
+  };
+
   return (
-    <PageShell>
+    <PageShell className={writingFocused ? 'space-y-3' : ''}>
       <style>{`
         .production-preview mark {
           border-radius: 2px;
@@ -563,7 +601,7 @@ export default function ProductionDetail() {
         .production-preview p[style*="text-indent"] { text-indent: 2em; }
       `}</style>
 
-      <GlassPanel className="overflow-hidden">
+      <GlassPanel className={writingFocused ? 'hidden' : 'overflow-hidden'}>
         <div className="flex flex-col gap-4 border-b border-studio-border-soft bg-[var(--xmt-overlay-tint)] px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <button
@@ -608,6 +646,16 @@ export default function ProductionDetail() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {canFocusWrite && (
+              <ActionButton onClick={continueFromOutline} disabled={outlineHeadings.length === 0 || !outlineEditorReady} className="px-3 py-2" title={outlineHeadings.length === 0 ? '请先在选题大纲中设置标题' : `补入 ${outlineHeadings.length} 个大纲标题中尚未写入正文的小节`}>
+                按大纲续写
+              </ActionButton>
+            )}
+            {canFocusWrite && (
+              <ActionButton onClick={() => setWritingFocused(true)} className="px-3 py-2">
+                专注写作
+              </ActionButton>
+            )}
             <ActionButton onClick={() => setShowSidebar((prev) => !prev)} className="px-3 py-2" title={showSidebar ? '收起版本历史' : '展开版本历史'}>
               {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
               版本历史
@@ -659,11 +707,41 @@ export default function ProductionDetail() {
         </div>
       </GlassPanel>
 
-      <ProductionResourcesPanel productionId={production.id} canManage={canManageProductionResources} />
+      <div className={writingFocused ? 'hidden' : ''}>
+        <ProductionResourcesPanel
+          productionId={production.id}
+          canManage={canManageProductionResources}
+          manuscriptHtml={editData.content}
+          referenceReady={outlineEditorReady}
+          onInsertReference={insertResourceReference}
+        />
+      </div>
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className={`grid items-start gap-6 ${writingFocused ? 'grid-cols-1' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}>
         <GlassPanel className="min-w-0 overflow-visible">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft bg-[var(--xmt-overlay-tint)] px-5 py-3">
+          {superseded && canEditProduction ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-coral/30 bg-studio-coral/10 px-4 py-3" role="status" aria-live="polite">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-studio-coral-contrast">这份稿件已有更新版本</p>
+                <p className="mt-1 text-sm text-studio-text-secondary">
+                  {superseded.createdBy.name} 已创建 {superseded.toVersion}。当前 {superseded.fromVersion} 已转为只读，进入最新版本后可继续协作。
+                </p>
+              </div>
+              <ActionButton onClick={() => void fetchData()} variant="primary" className="shrink-0">
+                进入最新版本
+              </ActionButton>
+            </div>
+          ) : null}
+          {writingFocused && (
+            <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2 border-b border-studio-border-soft bg-[var(--editor-panel)] px-4 py-2">
+              <div className="flex min-w-0 items-center gap-2 text-xs text-studio-text-secondary">
+                <span className="truncate font-semibold text-studio-text-primary">{production.topic_title || '当前稿件'}</span>
+                <StatusPill tone={syncTone(syncStatus)}>{syncLabel}</StatusPill>
+              </div>
+              <ActionButton onClick={() => setWritingFocused(false)} className="px-3 py-1.5 text-xs">退出专注</ActionButton>
+            </div>
+          )}
+          <div className={`flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft bg-[var(--xmt-overlay-tint)] px-5 py-3 ${writingFocused ? 'hidden' : ''}`}>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-studio-text-primary">{selectedVersion?.version || production.version}</span>
               <StatusPill tone={selectedVersion?.changeType === 'major' ? 'violet' : selectedVersion?.changeType === 'minor' ? 'primary' : 'success'}>
@@ -687,9 +765,11 @@ export default function ProductionDetail() {
                 collaborationKey={getProductionVersionRoomId(production.id, production.version)}
                 persistenceStatus={syncStatus}
                 immersive
+                focusMode={writingFocused}
                 pageScroll
                 adapter={productionEditorAdapter}
                 onRuntimeHandleChange={handleRuntimeHandleChange}
+                onEditorCommandHandleChange={handleOutlineEditorChange}
               />
             </div>
           ) : (
@@ -714,7 +794,7 @@ export default function ProductionDetail() {
           )}
         </GlassPanel>
 
-        <GlassPanel className="flex flex-col self-start overflow-visible">
+        <GlassPanel className={`flex flex-col self-start overflow-visible ${writingFocused ? 'hidden' : ''}`}>
           <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4">
             <div>
               <p className="text-xs font-semibold text-studio-text-muted">版本历史</p>
@@ -791,17 +871,6 @@ export default function ProductionDetail() {
           </div>
         </GlassPanel>
       </div>
-
-      {superseded && canEditProduction ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-studio-app-bg/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="production-version-superseded-title">
-          <GlassPanel className="w-full max-w-lg border-studio-coral/45 p-6 shadow-glow-primary">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-studio-coral">版本同步提醒</p>
-            <h2 id="production-version-superseded-title" className="mt-3 text-xl font-bold text-studio-text-primary">检测到新的大版本已创建</h2>
-            <p className="mt-3 leading-7 text-studio-text-secondary">{superseded.createdBy.name} 已创建新大版本 {superseded.toVersion}。你当前所在的 {superseded.fromVersion} 已转为历史版本，不能继续编辑。请进入最新版本继续协作。</p>
-            <ActionButton onClick={() => void fetchData()} variant="primary" className="mt-6 w-full">进入最新版本</ActionButton>
-          </GlassPanel>
-        </div>
-      ) : null}
 
       <ConfirmModal
         open={showDeleteModal}

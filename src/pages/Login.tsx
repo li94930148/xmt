@@ -796,7 +796,7 @@ export default function Login() {
                       <button
                         type="button"
                         onClick={() => setShowPassword((prev) => !prev)}
-                        className="absolute bottom-3 right-0 text-studio-text-muted transition-colors hover:text-white/50"
+                        className="absolute bottom-3 right-0 text-studio-text-muted transition-colors hover:text-white"
                         aria-label="切换密码可见状态"
                       >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -806,7 +806,7 @@ export default function Login() {
                   </div>
 
                   <div className="flex items-center gap-2 pt-1">
-                    <label className="flex cursor-pointer items-center gap-2 text-xs tracking-wider text-studio-text-secondary transition-colors hover:text-white/50">
+                    <label className="flex cursor-pointer items-center gap-2 text-xs tracking-wider text-studio-text-secondary transition-colors hover:text-white">
                       <input
                         type="checkbox"
                         id="remember"
@@ -852,7 +852,7 @@ export default function Login() {
                     ].map((item) => (
                       <button key={item.name} className="flex-1 group/other" type="button">
                         <div className="flex flex-col items-center gap-2 border border-white/5 py-3 transition-all duration-300 group-hover/other:border-white/15 group-hover/other:bg-white/[0.02]">
-                          <span className="text-sm font-light text-studio-text-secondary transition-colors group-hover/other:text-white/50">{item.char}</span>
+                          <span className="text-sm font-light text-studio-text-secondary transition-colors group-hover/other:text-white">{item.char}</span>
                           <span className="text-[10px] tracking-wider text-studio-text-muted">{item.name}</span>
                         </div>
                       </button>

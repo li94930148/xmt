@@ -21,17 +21,17 @@ interface ConfirmModalProps {
 const variantConfig: Record<ConfirmVariant, { icon: typeof Trash2; iconClass: string; buttonClass: string }> = {
   danger: {
     icon: Trash2,
-    iconClass: 'bg-studio-coral/15 text-studio-coral-contrast',
+    iconClass: 'border border-studio-border-soft bg-studio-coral-soft text-studio-coral-contrast',
     buttonClass: 'bg-studio-coral hover:bg-studio-coral text-white',
   },
   warning: {
     icon: AlertTriangle,
-    iconClass: 'bg-studio-amber/15 text-studio-amber-contrast',
+    iconClass: 'border border-studio-border-soft bg-studio-amber-soft text-studio-amber-contrast',
     buttonClass: 'bg-studio-amber hover:bg-studio-amber text-black',
   },
   default: {
     icon: ShieldAlert,
-    iconClass: 'bg-brand-500/15 text-brand-500',
+    iconClass: 'border border-studio-border-soft bg-studio-primary-soft text-studio-primary-contrast',
     buttonClass: 'bg-brand-500 hover:bg-brand-400 text-white',
   },
 };

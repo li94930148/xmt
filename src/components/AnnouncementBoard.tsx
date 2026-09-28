@@ -64,6 +64,7 @@ const typeConfig: Record<string, { label: string; icon: typeof Pin; color: strin
 
 export default function AnnouncementBoard() {
   const appStore = useAppStore();
+  const isDark = appStore.theme === 'dark';
   const [items, setItems] = useState<Announcement[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [newContent, setNewContent] = useState('');
@@ -138,7 +139,7 @@ export default function AnnouncementBoard() {
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-button border border-studio-border-soft bg-white/[0.04] text-studio-text-muted transition-colors hover:border-studio-border-active hover:text-studio-text-primary"
+          className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-button border border-studio-border-soft bg-studio-surface-soft text-studio-text-muted transition-colors hover:border-studio-border-active hover:bg-studio-surface-elevated hover:text-studio-text-primary"
           title="添加公告"
         >
           {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
@@ -146,13 +147,13 @@ export default function AnnouncementBoard() {
       </div>
 
       {showForm && (
-        <div className="mb-4 rounded-card border border-studio-border-soft bg-white/[0.04] p-4">
+        <div className="mb-4 rounded-card border border-studio-border-soft bg-studio-surface-soft p-4">
           <textarea
             value={newContent}
             onChange={(e) => setNewContent(e.target.value)}
             placeholder="输入公告内容..."
             rows={2}
-            className="mb-3 min-h-20 w-full resize-y rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm leading-6 text-studio-text-primary outline-none transition focus:border-studio-border-active"
+            className="mb-3 min-h-20 w-full resize-y rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm leading-6 text-studio-text-primary outline-none transition focus:border-studio-border-active"
           />
           <div className="flex items-center gap-2 flex-wrap">
             {(['note', 'announcement', 'important'] as const).map((t) => {
@@ -164,8 +165,8 @@ export default function AnnouncementBoard() {
                   onClick={() => setNewType(t)}
                   className={`inline-flex min-h-8 items-center gap-1.5 rounded-button border px-3 py-1.5 text-xs font-medium transition-colors ${
                     newType === t
-                      ? `${cfg.bgDark} ${cfg.border}`
-                      : 'border-studio-border-soft bg-white/[0.04] text-studio-text-muted hover:text-studio-text-primary'
+                      ? `${isDark ? cfg.bgDark : cfg.bgLight} ${cfg.border}`
+                      : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-muted hover:bg-studio-surface-elevated hover:text-studio-text-primary'
                   }`}
                   style={newType === t ? { color: cfg.color } : undefined}
                 >
@@ -179,7 +180,7 @@ export default function AnnouncementBoard() {
               className={`inline-flex min-h-8 items-center gap-1 rounded-button border px-3 py-1.5 text-xs font-medium transition-colors ${
                 newPinned
                   ? `bg-studio-amber/10 border-studio-amber/30 text-studio-amber`
-                  : 'border-studio-border-soft bg-white/[0.04] text-studio-text-muted hover:text-studio-text-primary'
+                  : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-muted hover:bg-studio-surface-elevated hover:text-studio-text-primary'
               }`}
             >
               <Pin className="w-3 h-3" />
@@ -201,9 +202,9 @@ export default function AnnouncementBoard() {
         {loading ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="animate-pulse rounded-card border border-studio-border-soft bg-white/[0.04] p-3">
-                <div className="mb-2 h-3 w-3/4 rounded bg-white/[0.08]" />
-                <div className="h-2 w-1/2 rounded bg-white/[0.08]" />
+              <div key={i} className="animate-pulse rounded-card border border-studio-border-soft bg-studio-surface-soft p-3">
+                <div className="mb-2 h-3 w-3/4 rounded bg-studio-surface-elevated" />
+                <div className="h-2 w-1/2 rounded bg-studio-surface-elevated" />
               </div>
             ))}
           </div>
@@ -216,7 +217,7 @@ export default function AnnouncementBoard() {
             return (
               <div
                 key={item.id}
-                className={`group rounded-card border p-3 transition-all duration-200 hover:border-studio-border-active hover:bg-white/[0.07] ${cfg.bgDark} ${cfg.border}`}
+                className={`group rounded-card border p-3 transition-all duration-200 hover:border-studio-border-active hover:bg-studio-surface-elevated ${isDark ? cfg.bgDark : cfg.bgLight} ${cfg.border}`}
               >
                 <div className="flex items-start gap-2.5">
                   <Icon className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: cfg.color }} />

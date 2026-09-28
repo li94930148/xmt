@@ -17,6 +17,8 @@ import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEdit
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
 import { parseStoredBjt } from '@shared/time';
 import { celebrateMilestone } from '../utils/confetti';
+import { useCompactEditorToolbar } from '../hooks/useCompactEditorToolbar';
+import { getWorkflowStatusLabel } from '../platform/workflow-status-labels';
 
 interface ShootingDetailData extends ShootingType {
   production: {
@@ -42,6 +44,7 @@ export default function ShootingDetail() {
   const navigate = useNavigate();
   const appStore = useAppStore();
   const styles = useThemeStyles();
+  const compactEditorToolbar = useCompactEditorToolbar();
 
   const [shooting, setShooting] = useState<ShootingDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -157,17 +160,11 @@ export default function ShootingDetail() {
   };
 
   const statusColors: Record<string, string> = {
-    planned: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
-    in_progress: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
-    completed: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
-    cancelled: 'bg-studio-surface-soft/20 text-studio-text-muted border-studio-border-soft/30',
-  };
-
-  const statusText: Record<string, string> = {
-    planned: '计划中',
-    in_progress: '制作中',
-    completed: '已完成',
-    cancelled: '已取消',
+    planned: 'bg-studio-amber-soft text-studio-amber-contrast border-studio-border-soft',
+    pending: 'bg-studio-amber-soft text-studio-amber-contrast border-studio-border-soft',
+    in_progress: 'bg-studio-primary-soft text-studio-primary-contrast border-studio-border-soft',
+    completed: 'bg-studio-success-soft text-studio-success-contrast border-studio-border-soft',
+    cancelled: 'bg-studio-surface-soft text-studio-text-muted border-studio-border-soft',
   };
 
   const getStepStatus = (stepKey: string) => {
@@ -236,7 +233,7 @@ export default function ShootingDetail() {
   return (
     <div className="flex flex-col gap-3">
       <div className={`shrink-0 border-b ${styles.border} px-3 py-2`}>
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => void handleGuardedNavigate('/shooting')}
@@ -253,11 +250,11 @@ export default function ShootingDetail() {
               )}
               <span className={`text-xs ${styles.textMuted}`}>{formatBeijingDate(shooting.plan_date)}</span>
               <span className={`text-xs ${styles.textMuted}`}>{formatBeijingTime(shooting.updated_at || shooting.created_at)}</span>
-              <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs ${statusColors[shooting.status]}`}>
-                {statusText[shooting.status]}
+              <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs ${statusColors[shooting.status] || 'bg-studio-surface-soft text-studio-text-secondary border-studio-border-soft'}`}>
+                {getWorkflowStatusLabel('shooting', shooting.status)}
               </span>
               {hasLocalScriptEdit && (
-                <span className="rounded-full bg-studio-primary/15 px-2 py-0.5 text-xs text-studio-primary">本地编辑版</span>
+                <span className="rounded-full bg-studio-primary-soft px-2 py-0.5 text-xs text-studio-primary-contrast">本地编辑版</span>
               )}
               <span className={`text-xs ${syncStatus === 'conflicted' ? 'text-studio-coral' : syncStatus === 'saving' ? 'text-studio-primary' : styles.textMuted}`}>
                 {editorStateLabel(syncStatus)}
@@ -266,7 +263,7 @@ export default function ShootingDetail() {
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
             <button
               onClick={() => setShowSidebar((prev) => !prev)}
               className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
@@ -309,7 +306,7 @@ export default function ShootingDetail() {
             )}
 
             {shooting.status === 'completed' && (
-              <span className="flex items-center gap-1.5 rounded-lg bg-studio-success/20 px-3 py-1.5 text-xs text-studio-success">
+              <span className="flex items-center gap-1.5 rounded-lg border border-studio-border-soft bg-studio-success-soft px-3 py-1.5 text-xs text-studio-success-contrast">
                 <CheckCircle className="w-4 h-4" />
                 已完成
               </span>
@@ -327,6 +324,7 @@ export default function ShootingDetail() {
             collaborationKey={getCollaborationRoomId('shooting', shooting.id)}
             persistenceStatus={syncStatus}
             immersive
+            toolbarVariant={compactEditorToolbar ? 'basic' : 'full'}
             className="h-full"
             adapter={shootingEditorAdapter}
             onRuntimeHandleChange={handleRuntimeHandleChange}

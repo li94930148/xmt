@@ -16,7 +16,9 @@ export async function getCalendarEvents(params: { year: number; month: number })
     headers: getAuthHeader()
   });
   if (!response.ok) throw new Error('获取日历事件失败');
-  return response.json();
+  const result = await response.json();
+  if (!result || !Array.isArray(result.data)) throw new Error('日历数据格式不正确');
+  return result;
 }
 
 export async function createCalendarEvent(data: { title: string; description?: string; event_date: string; event_type?: string; topic_id?: number }): Promise<{ message: string; id: number }> {

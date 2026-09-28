@@ -24,18 +24,14 @@ async function dismissSystemUpdateDialog(page: Page) {
   // UpdateNotification is not yet exposed with role="dialog". Identify this
   // specific dialog by its unique, user-visible update content and then use its
   // own labelled acknowledgement control; do not close arbitrary dialogs.
-  const updateDialog = page.locator('div.fixed.inset-0').filter({
-    has: page.getByText('系统更新', { exact: true }),
-  }).filter({
-    has: page.getByRole('button', { name: '我知道了', exact: true }),
-  }).filter({
-    has: page.getByRole('button', { name: '查看完整更新日志', exact: true }),
-  });
-
-  const acknowledgement = updateDialog.first().getByRole('button', { name: '我知道了', exact: true });
-  if (!await acknowledgement.isVisible().catch(() => false)) {
-    await acknowledgement.waitFor({ state: 'visible', timeout: 1_000 }).catch(() => undefined);
+  const closeUpdateNotice = page.getByRole('button', { name: '关闭更新提示', exact: true });
+  if (!await closeUpdateNotice.isVisible().catch(() => false)) {
+    await closeUpdateNotice.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => undefined);
   }
+  if (!await closeUpdateNotice.isVisible().catch(() => false)) return;
+
+  const updateDialog = page.locator('div.xmt-overlay').filter({ has: closeUpdateNotice });
+  const acknowledgement = updateDialog.getByRole('button', { name: '我知道了', exact: true });
   if (!await acknowledgement.isVisible().catch(() => false)) return;
 
   await acknowledgement.click();
@@ -52,10 +48,10 @@ async function waitForAuthenticatedHome(page: Page) {
 
   await dismissSystemUpdateDialog(page);
 
-  const heading = page.getByText('内容生产驾驶舱', { exact: false }).first();
+  const heading = page.getByRole('heading', { name: '工作台', exact: true }).first();
   await heading.waitFor({ state: 'visible', timeout: 15_000 });
 
-  const enterTopics = page.getByRole('button', { name: /进入选题池/ }).first();
+  const enterTopics = page.getByRole('button', { name: /进入内容生产/ }).first();
   await enterTopics.waitFor({ state: 'visible', timeout: 15_000 });
   assert(await enterTopics.isEnabled(), 'Home enter-topics action is disabled');
   assert(isAuthenticatedHomeUrl(page.url()), `Unexpected authenticated-home URL: ${page.url()}`);
@@ -116,7 +112,24 @@ async function assertNoOverflow(page: Page, width: number, height: number) {
   assert(result.scrollWidth <= result.clientWidth, `${width}x${height} has horizontal overflow`);
 }
 
+async function assertHomeTheme(page: Page, theme: 'dark' | 'light') {
+  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await waitForAuthenticatedHome(page);
+  const expectedPrimary = theme === 'light' ? '#3d5afe' : '#6b8cff';
+  const actualTheme = await page.evaluate(() => ({
+    theme: document.documentElement.dataset.theme,
+    primary: getComputedStyle(document.documentElement).getPropertyValue('--xmt-primary').trim().toLowerCase(),
+  }));
+  assert(actualTheme.theme === theme, `Home theme did not apply: expected ${theme}, received ${actualTheme.theme}`);
+  assert(actualTheme.primary === expectedPrimary, `Home primary token did not apply for ${theme}: ${actualTheme.primary}`);
+  await assertNoOverflow(page, 1440, 900);
+  await assertNoOverflow(page, 390, 844);
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+
 function parseCssColor(value: string) {
+  const srgb = value.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/i);
+  if (srgb) return { r: Number(srgb[1]) * 255, g: Number(srgb[2]) * 255, b: Number(srgb[3]) * 255, a: srgb[4] === undefined ? 1 : Number(srgb[4]) };
   const channels = value.match(/[\d.]+/g)?.map(Number) || [];
   return channels.length >= 3 ? { r: channels[0], g: channels[1], b: channels[2], a: channels[3] ?? 1 } : null;
 }
@@ -158,7 +171,7 @@ async function assertButtonPresentation(page: Page) {
       for (let current: HTMLElement | null = element; current; current = current.parentElement) backgroundColors.push(getComputedStyle(current).backgroundColor);
       const variant = element.dataset.reactbitsButton || 'unknown';
       const name = element.getAttribute('aria-label') || element.innerText.trim();
-      return { variant, name, disabled: element.disabled, visible: style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0, icon: variant === 'icon', hasNestedButton: Boolean(element.querySelector('button')), foregroundColor: style.color, backgroundColors };
+      return { variant, name, disabled: element.disabled, visible: style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0, icon: variant === 'icon', hasNestedButton: Boolean(element.querySelector('button')), foregroundColor: style.color, backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage, backgroundColors };
     });
     const label = `variant=${inspection.variant} name=${inspection.name || 'unnamed'}`;
     assert(box && box.width > 0 && box.height >= 32 && box.width < 500 && box.height < 500, `invalid React Bits button: ${label}`);
@@ -168,7 +181,16 @@ async function assertButtonPresentation(page: Page) {
     const background = getEffectiveBackground(inspection.backgroundColors);
     if (inspection.icon) assert(Boolean(inspection.name) && Boolean(foreground && foreground.a > 0), `invalid icon button: ${label}`);
     else {
-      const contrast = foreground && background ? contrastRatio(foreground, background) : 0;
+      const gradientStops = inspection.backgroundImage.match(/(?:color\(srgb\s+[^)]+\)|rgba?\([^)]*\)|#[\da-f]{3,8})/gi) ?? [];
+      const gradientBackgrounds = gradientStops.map((stop) => {
+        const color = parseCssColor(stop);
+        if (!color || color.a === 1 || !background) return color;
+        const alpha = color.a + background.a * (1 - color.a);
+        return { r: (color.r * color.a + background.r * background.a * (1 - color.a)) / alpha, g: (color.g * color.a + background.g * background.a * (1 - color.a)) / alpha, b: (color.b * color.a + background.b * background.a * (1 - color.a)) / alpha, a: alpha };
+      }).filter((color): color is NonNullable<typeof foreground> => Boolean(color));
+      const contrast = foreground && gradientBackgrounds.length
+        ? Math.min(...gradientBackgrounds.map((color) => contrastRatio(foreground, color)))
+        : foreground && background ? contrastRatio(foreground, background) : 0;
       assert(contrast >= 4.5, `unreadable React Bits button: ${label} contrast=${contrast.toFixed(2)}`);
     }
   }
@@ -322,7 +344,7 @@ async function run() {
   page.on('pageerror', (error) => errors.push(error.message));
   try {
     await login(page);
-    const heroButton = page.getByRole('button', { name: /进入选题池/ }).first();
+    const heroButton = page.getByRole('button', { name: /进入内容生产/ }).first();
     await heroButton.waitFor({ timeout: 15_000 });
     const heroBox = await heroButton.boundingBox();
     assert(heroBox && heroBox.width > 0 && heroBox.height >= 32, 'Home Hero button is clipped or unavailable');
@@ -330,7 +352,7 @@ async function run() {
     await page.waitForFunction(() => new URL(window.location.href).pathname === '/topics', undefined, { timeout: 10_000 });
     await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
     await waitForAuthenticatedHome(page);
-    const headings = page.getByRole('heading', { name: /内容生产驾驶舱/ });
+    const headings = page.getByRole('heading', { name: '工作台', exact: true });
     assert(await headings.count() === 1, `expected one Home main heading, received ${await headings.count()}`);
     const heading = headings.first();
     assert(await heading.locator('h1, h2, h3, h4, h5, h6').count() === 0, 'Home main heading contains a nested heading');
@@ -348,12 +370,28 @@ async function run() {
     await advancedSettings.locator('summary').click();
     assert(await page.getByRole('combobox', { name: '动效强度', exact: true }).count() === 1, 'Motion combobox is not accessible');
 
-    for (const themeButton of ['深色模式', '浅色模式']) {
-      const theme = page.getByRole('button', { name: themeButton, exact: true });
-      if (await theme.count()) await theme.click();
-      await page.getByText(themeButton === '深色模式' ? '深色真实预览' : '浅色真实预览', { exact: true }).waitFor();
+    for (const [theme, label] of [['dark', '深色真实预览'], ['light', '浅色真实预览']] as const) {
+      await themeControl.selectOption(theme);
+      assert(await themeControl.inputValue() === theme, `Appearance theme draft was not applied: ${theme}`);
+      await page.getByText(label, { exact: true }).waitFor();
       await assertButtonPresentation(page);
     }
+
+    await page.getByRole('button', { name: '保存个人偏好', exact: true }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'light', undefined, { timeout: 5_000 });
+    await assertHomeTheme(page, 'light');
+    await page.goto(`${baseUrl}/notification-settings`, { waitUntil: 'domcontentloaded' });
+    await dismissSystemUpdateDialog(page);
+    await page.getByRole('button', { name: '外观与动效', exact: true }).click();
+    const darkThemeControl = page.getByRole('combobox', { name: '主题', exact: true });
+    await darkThemeControl.selectOption('dark');
+    await page.getByRole('button', { name: '保存个人偏好', exact: true }).click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark', undefined, { timeout: 5_000 });
+    await assertHomeTheme(page, 'dark');
+    await page.goto(`${baseUrl}/notification-settings`, { waitUntil: 'domcontentloaded' });
+    await dismissSystemUpdateDialog(page);
+    await page.getByRole('button', { name: '外观与动效', exact: true }).click();
+    await page.getByText('React Bits 原生动效外观中心', { exact: true }).waitFor();
 
     const presetRegion = page.getByRole('region', { name: '视觉方案预设', exact: true });
     assert(await presetRegion.count() === 1, 'React Bits preset region is not uniquely available');

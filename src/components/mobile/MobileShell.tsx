@@ -1,11 +1,12 @@
 import { useEffect, useMemo } from 'react';
 import { App } from '@capacitor/app';
-import { Bell, FileText, Home, LogOut, Settings, BriefcaseBusiness } from 'lucide-react';
+import { ArrowLeft, Bell, FileText, Home, LogOut, Settings, BriefcaseBusiness } from 'lucide-react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import type { User } from '@/types';
 import { handleBackButton, isAndroid } from '@/platform/runtime';
 import { useNetworkState } from '@/platform/network';
 import { resolveMobileDeepLink } from '@/platform/deep-link';
+import { mobileNavigationPath } from '@/platform/mobile-layout';
 
 const tabs = [
   { path: '/', label: '首页', icon: Home },
@@ -18,7 +19,12 @@ const tabs = [
 export function MobileShell({ user, unreadCount, onLogout }: { user: User | null; unreadCount: number; onLogout: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const current = useMemo(() => tabs.find((tab) => tab.path === '/' ? location.pathname === '/' : location.pathname.startsWith(tab.path)), [location.pathname]);
+  const current = useMemo(() => tabs.find((tab) => tab.path === mobileNavigationPath(location.pathname)), [location.pathname]);
+  const mobileReturnTo = (location.state as { mobileReturnTo?: unknown } | null)?.mobileReturnTo;
+  const returnPath = typeof mobileReturnTo === 'string' && tabs.some((tab) => tab.path === mobileReturnTo)
+    ? mobileReturnTo
+    : current?.path ?? '/';
+  const isRoot = tabs.some((tab) => tab.path === location.pathname) || ['/home', '/dashboard'].includes(location.pathname);
   const networkState = useNetworkState();
 
   useEffect(() => {
@@ -48,7 +54,10 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
 
   return <div className="min-h-dvh bg-studio-bg text-theme-text" style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
     <header className="sticky top-0 z-30 flex min-h-14 items-center justify-between border-b border-studio-border-soft bg-studio-surface/95 px-4 backdrop-blur">
-      <div><p className="text-xs text-studio-text-muted">XMT 移动办公</p><h1 className="text-base font-semibold">{current?.label ?? '工作台'}</h1></div>
+      <div className="flex min-w-0 items-center gap-2">
+        {!isRoot && <button type="button" aria-label={`返回${tabs.find((tab) => tab.path === returnPath)?.label ?? '首页'}`} onClick={() => navigate(returnPath)} className="xmt-btn xmt-btn-ghost h-11 w-11 shrink-0 p-2"><ArrowLeft className="h-5 w-5" /></button>}
+        <div><p className="text-xs text-studio-text-muted">XMT 移动办公</p><h1 className="text-base font-semibold">{current?.label ?? '工作台'}</h1></div>
+      </div>
       <button onClick={onLogout} aria-label="退出登录" className="flex h-11 w-11 items-center justify-center rounded-xl text-studio-text-secondary"><LogOut className="h-5 w-5" /></button>
     </header>
     {networkState !== 'online' ? <div role="status" className="border-b border-studio-amber/30 bg-studio-amber/10 px-4 py-2 text-center text-xs text-studio-amber">{networkState === 'offline' ? '网络不可用，正在使用本地内容与草稿。' : networkState === 'poor_network' ? '网络较弱，草稿会保存在本机；请确认后再提交。' : '网络已恢复，正在重新连接。'}</div> : null}
@@ -58,7 +67,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
     <nav aria-label="移动主导航" className="fixed inset-x-0 bottom-0 z-40 flex border-t border-studio-border-soft bg-studio-surface/95 px-2 pt-2 backdrop-blur" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 8px)', paddingLeft: 'max(env(safe-area-inset-left), 8px)', paddingRight: 'max(env(safe-area-inset-right), 8px)' }}>
       {tabs.map((tab) => {
         const Icon = tab.icon; const active = current?.path === tab.path;
-        return <button key={tab.path} onClick={() => navigate(tab.path)} className={`relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-xs ${active ? 'text-studio-cyan' : 'text-studio-text-muted'}`}>
+        return <button key={tab.path} type="button" aria-current={active ? 'page' : undefined} onClick={() => navigate(tab.path)} className={`relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-xs ${active ? 'text-studio-cyan' : 'text-studio-text-muted'}`}>
           <Icon className="h-5 w-5" />{tab.label}
           {tab.path === '/messages' && unreadCount > 0 ? <span className="absolute ml-5 -mt-6 rounded-full bg-studio-coral px-1 text-[10px] text-white">{unreadCount > 9 ? '9+' : unreadCount}</span> : null}
         </button>;

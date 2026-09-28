@@ -80,8 +80,9 @@ export default function EditorContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || editor.isDestroyed) return;
     const handleContextMenu = (e: MouseEvent) => {
+      if (editor.isDestroyed) return;
       const editorEl = editor.view.dom;
       if (!editorEl.contains(e.target as Node)) return;
       e.preventDefault();
@@ -124,20 +125,20 @@ export default function EditorContextMenu({
     };
   }, [visible]);
 
-  if (!visible || !editor) return null;
+  if (!visible || !editor || editor.isDestroyed) return null;
 
   const comment = findCommentInSelection(editor);
   const hasSelection = !editor.state.selection.empty;
 
   const itemClass = `flex items-center gap-2.5 w-full px-3 py-2 text-sm transition-colors ${
-    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary'
+    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary/10 hover:text-studio-primary'
   }`;
   const disabledClass = `flex items-center gap-2.5 w-full px-3 py-2 text-sm ${
     isDark ? 'text-studio-text-muted cursor-not-allowed' : 'text-studio-text-secondary cursor-not-allowed'
   }`;
   const divider = <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />;
   const subMenuClass = `flex items-center justify-between w-full px-3 py-2 text-sm transition-colors ${
-    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary'
+    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary/10 hover:text-studio-primary'
   }`;
   const close = () => setVisible(false);
   const act = (fn: () => void) => { fn(); close(); };
@@ -145,9 +146,7 @@ export default function EditorContextMenu({
   return (
     <>
       <div data-testid="editor-context-menu-backdrop" className="fixed inset-0 z-[200]" onClick={close} />
-      <div data-testid="editor-context-menu" data-anchor-x={anchor.x} data-anchor-y={anchor.y} ref={menuRef} className={`fixed z-[201] min-w-[200px] rounded-xl shadow-2xl border py-1.5 backdrop-blur-sm ${
-        isDark ? 'bg-studio-surface-soft/95 border-studio-border-soft' : 'bg-white/95 border-studio-border-soft'
-      }`} style={{ left: position.x, top: position.y, visibility: measured ? 'visible' : 'hidden' }}>
+      <div data-testid="editor-context-menu" data-anchor-x={anchor.x} data-anchor-y={anchor.y} ref={menuRef} className="fixed z-[201] min-w-[200px] rounded-xl border border-studio-border-soft bg-studio-surface-glass py-1.5 shadow-2xl backdrop-blur-sm" style={{ left: position.x, top: position.y, visibility: measured ? 'visible' : 'hidden' }}>
 
         {/* 剪贴板 */}
         <button onClick={() => act(() => document.execCommand('copy'))} className={hasSelection ? itemClass : disabledClass} disabled={!hasSelection}>
@@ -184,7 +183,7 @@ export default function EditorContextMenu({
             <span className="flex items-center gap-2.5"><Type className="w-4 h-4" /> 文字颜色</span>
             <ChevronRight className="w-3 h-3" />
           </div>
-          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'}`}>
+          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {TEXT_COLORS.map((c) => (
                 <button key={c.value || 'default'}
@@ -207,7 +206,7 @@ export default function EditorContextMenu({
             <span className="flex items-center gap-2.5"><Highlighter className="w-4 h-4" /> 高亮颜色</span>
             <ChevronRight className="w-3 h-3" />
           </div>
-          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-white border-studio-border-soft'}`}>
+          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {HIGHLIGHT_COLORS.map((c) => (
                 <button key={c.value}

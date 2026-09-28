@@ -112,7 +112,7 @@ router.post('/:id/material-draft/resources', authenticate, requireAllPermissions
     return res.status(400).json({ message: `资料 ID 无效或一次超过 ${MAX_LIBRARY_MATERIALS_PER_REQUEST} 条` });
   }
 
-  const data: Array<{ resource_id: number; content_html: string }> = [];
+  const data: Array<{ resource_id: number; title: string; content_html: string }> = [];
   const emptyResourceIds: number[] = [];
   for (const resourceId of resourceIds as number[]) {
     const resource = await getScopedResource(resourceId, req.user);
@@ -124,7 +124,7 @@ router.post('/:id/material-draft/resources', authenticate, requireAllPermissions
       emptyResourceIds.push(resourceId);
       continue;
     }
-    data.push({ resource_id: resourceId, content_html: plainTextToSafeHtml(body) });
+    data.push({ resource_id: resourceId, title: String(resource.title || resource.name || `资料 ${resourceId}`), content_html: plainTextToSafeHtml(body) });
   }
 
   return res.json({

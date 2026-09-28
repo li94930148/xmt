@@ -24,6 +24,7 @@ import {
   GlassPanel,
   PageHeader,
   PageShell,
+  ResponsiveTableShell,
   SearchBar,
   StageProgress,
   StatusPill,
@@ -39,7 +40,6 @@ import { useAppStore } from '../store';
 import { createListFetchController, listErrorKey } from '../utils/listFetchNotify';
 import { Topic } from '../types';
 import Pagination from '../components/Pagination';
-import XMTCard from '../design-system/components/XMTCard';
 import TopicSpotlightCard from '../components/xmt-ui/TopicSpotlightCard';
 import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
 import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
@@ -461,7 +461,7 @@ export default function Topics() {
                 setStatusFilter(event.target.value);
                 setPage(1);
               }}
-              className="min-h-10 w-full appearance-none rounded-button border border-studio-border-soft bg-white/[0.05] py-2 pl-9 pr-3 text-sm leading-snug text-studio-text-primary outline-none transition focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
+              className="min-h-10 w-full appearance-none rounded-button border border-studio-border-soft bg-studio-surface-soft py-2 pl-9 pr-3 text-sm leading-snug text-studio-text-primary outline-none transition focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             >
               {statusOptions.map((option) => (
                 <option key={option.value || 'all'} value={option.value} className="bg-studio-surface text-studio-text-primary">
@@ -473,13 +473,12 @@ export default function Topics() {
         </div>
       </GlassPanel>
 
-      <XMTCard className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px]">
+      <ResponsiveTableShell footer={<Pagination page={page} total={total} limit={limit} onChange={setPage} />}>
+          <table className="w-full min-w-max">
             <thead>
-              <tr className="border-b border-studio-border-soft bg-white/[0.035] text-left text-xs font-semibold uppercase text-studio-text-muted">
+              <tr className="border-b border-studio-border-soft bg-studio-surface-soft text-left text-xs font-semibold uppercase text-studio-text-muted">
                 <th className="w-12 px-4 py-3">
-                  <button type="button" onClick={toggleSelectAll} className="rounded-lg p-1.5 hover:bg-white/[0.06]">
+                  <button type="button" onClick={toggleSelectAll} className="rounded-lg p-1.5 hover:bg-studio-surface-soft">
                     {allSelected ? <CheckSquare className="h-4 w-4 text-studio-cyan" /> : <Square className="h-4 w-4" />}
                   </button>
                 </th>
@@ -507,7 +506,7 @@ export default function Topics() {
                   </button>
                 </th>
                 <th className="px-4 py-3">下一步</th>
-                <th className="px-4 py-3">操作</th>
+                <th className="sticky right-0 z-10 bg-studio-surface px-4 py-3">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-studio-border-soft">
@@ -563,12 +562,12 @@ export default function Topics() {
                   return (
                     <tr
                       key={topic.id}
-                      className={`group transition hover:bg-white/[0.045] ${
+                      className={`group transition hover:bg-studio-surface-soft ${
                         selectedRow ? 'bg-studio-primary/[0.055]' : ''
                       } ${newTopicIds.has(topic.id) ? 'animate-new-item new-item-highlight' : ''}`}
                     >
                       <td className="px-4 py-4">
-                        <button type="button" onClick={() => toggleSelect(topic.id)} className="rounded-lg p-1.5 hover:bg-white/[0.06]">
+                        <button type="button" onClick={() => toggleSelect(topic.id)} className="rounded-lg p-1.5 hover:bg-studio-surface-soft">
                           {selectedRow ? <CheckSquare className="h-4 w-4 text-studio-cyan" /> : <Square className="h-4 w-4 text-studio-text-muted" />}
                         </button>
                       </td>
@@ -601,18 +600,18 @@ export default function Topics() {
                         <button
                           type="button"
                           onClick={() => navigate(nextAction.path)}
-                          className="inline-flex min-h-8 items-center gap-1.5 rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-1.5 text-xs font-semibold leading-snug text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+                          className="inline-flex min-h-8 items-center gap-1.5 rounded-button border border-studio-border-soft bg-studio-surface-soft px-3 py-1.5 text-xs font-semibold leading-snug text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
                         >
                           {nextAction.label}
                           <ArrowRight className="h-3.5 w-3.5" />
                         </button>
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="sticky right-0 z-10 bg-studio-surface px-4 py-4">
                         <div className="flex items-center gap-1 opacity-70 transition group-hover:opacity-100">
                           <button
                             type="button"
                             onClick={() => navigate(`/topics/${topic.id}`)}
-                            className="rounded-lg p-2 text-studio-text-muted transition hover:bg-white/[0.06] hover:text-studio-cyan"
+                            className="rounded-lg p-2 text-studio-text-muted transition hover:bg-studio-surface-soft hover:text-studio-cyan"
                             title="查看"
                           >
                             <Eye className="h-4 w-4" />
@@ -633,12 +632,7 @@ export default function Topics() {
               )}
             </tbody>
           </table>
-        </div>
-
-        <div className="border-t border-studio-border-soft bg-white/[0.025]">
-          <Pagination page={page} total={total} limit={limit} onChange={setPage} />
-        </div>
-      </XMTCard>
+      </ResponsiveTableShell>
 
       {selected.size > 0 ? (
         <GlassPanel className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center gap-3 px-4 py-3">

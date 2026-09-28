@@ -15,10 +15,13 @@ const userId = await database.executeInsert("INSERT INTO users(username,password
 await database.execute("INSERT INTO user_roles(user_id,role_id) SELECT ?,id FROM roles WHERE code='editor'", [userId]);
 const secondUserId = await database.executeInsert("INSERT INTO users(username,password,role,name,enabled) VALUES('collaboration_editor_two','unused','editor','协作同事',1)");
 await database.execute("INSERT INTO user_roles(user_id,role_id) SELECT ?,id FROM roles WHERE code='editor'", [secondUserId]);
+const directorId = await database.executeInsert("INSERT INTO users(username,password,role,name,enabled) VALUES('collaboration_director','unused','director','负责人只读测试',1)");
+await database.execute("INSERT INTO user_roles(user_id,role_id) SELECT ?,id FROM roles WHERE code='director'", [directorId]);
 const topicId = await database.executeInsert("INSERT INTO topics(title,status,creator_id,assignee_id) VALUES('协同保存测试','production',?,?)", [userId, userId]);
 const productionId = await database.executeInsert("INSERT INTO production(topic_id,version,content,status,operator_id) VALUES(?,'v1.0','原稿','draft',?)", [topicId, userId]);
 const token = signToken({ userId, username: 'collaboration_editor', role: 'editor' });
 const secondToken = signToken({ userId: secondUserId, username: 'collaboration_editor_two', role: 'editor' });
+const directorToken = signToken({ userId: directorId, username: 'collaboration_director', role: 'director' });
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
 const address = server.address();
@@ -29,10 +32,19 @@ const save = (body: Record<string, unknown>, actorToken = token) => fetch(url, {
   headers: { Authorization: `Bearer ${actorToken}`, 'Content-Type': 'application/json' },
   body: JSON.stringify({ topic_id: topicId, version: 'v1.0', status: 'draft', ...body }),
 });
+const read = (actorToken: string) => fetch(url, { headers: { Authorization: `Bearer ${actorToken}` } });
 const current = () => database.queryOne<{ version: string; content: string }>('SELECT version,content FROM production WHERE id=?', [productionId]);
 const historyCount = async () => Number((await database.queryOne<{ total: number }>('SELECT COUNT(*) AS total FROM production_history WHERE production_id=?', [productionId]))?.total || 0);
 
 try {
+  const editorDetail = await read(token);
+  assert.equal(editorDetail.status, 200);
+  assert.equal((await editorDetail.json() as { can_edit: boolean }).can_edit, true, 'content editor scope is reflected in the detail capability');
+  const directorDetail = await read(directorToken);
+  assert.equal(directorDetail.status, 200, 'director can view all content under the current access model');
+  assert.equal((await directorDetail.json() as { can_edit: boolean }).can_edit, false, 'view access and update permission do not override production ownership scope');
+  assert.equal((await save({ content: '越权编辑', expected_content: '原稿' }, directorToken)).status, 403, 'server still rejects an out-of-scope director write');
+
   assert.equal((await save({ content: '普通粘贴后的正文', expected_content: '原稿' })).status, 200);
   assert.deepEqual(await current(), { version: 'v1.0', content: '普通粘贴后的正文' });
   assert.equal(await historyCount(), 0, 'ordinary update must not create a version');

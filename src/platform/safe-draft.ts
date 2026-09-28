@@ -1,6 +1,11 @@
 /** Local recovery for non-sensitive editor content. Never use this for tokens or credentials. */
 const prefix = 'xmt:safe-draft:v1:';
 
+/** Keep recoverable mobile data private to the signed-in account on shared devices. */
+export function userSafeDraftKey(userId: number | null | undefined, key: string): string | null {
+  return Number.isSafeInteger(userId) && Number(userId) > 0 ? `user:${userId}:${key}` : null;
+}
+
 export function readSafeDraft<T>(key: string): T | null {
   try { const raw = localStorage.getItem(`${prefix}${key}`); return raw ? JSON.parse(raw) as T : null; } catch { return null; }
 }

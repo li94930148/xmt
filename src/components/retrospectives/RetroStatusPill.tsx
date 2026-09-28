@@ -7,15 +7,15 @@ type Props = {
 };
 
 const retroClasses: Record<RetrospectiveStatus, string> = {
-  draft: 'border-studio-amber/30 bg-studio-amber/10 text-studio-amber-contrast',
-  published: 'border-studio-success/30 bg-studio-success/10 text-studio-success-contrast',
+  draft: 'border-studio-border-soft bg-studio-amber-soft text-studio-amber-contrast',
+  published: 'border-studio-border-soft bg-studio-success-soft text-studio-success-contrast',
   archived: 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary',
 };
 
 const actionClasses: Record<RetroActionStatus, string> = {
   todo: 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary',
-  doing: 'border-studio-cyan/30 bg-studio-cyan/10 text-studio-cyan-contrast',
-  done: 'border-studio-success/30 bg-studio-success/10 text-studio-success-contrast',
+  doing: 'border-studio-border-soft bg-studio-cyan-soft text-studio-cyan-contrast',
+  done: 'border-studio-border-soft bg-studio-success-soft text-studio-success-contrast',
   cancelled: 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary',
 };
 

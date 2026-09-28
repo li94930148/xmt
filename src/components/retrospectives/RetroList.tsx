@@ -17,7 +17,7 @@ export default function RetroList({ retrospectives, loading, canCreate, onCreate
   if (!loading && retrospectives.length === 0) {
     return (
       <GlassPanel className="flex min-h-[320px] flex-col items-center justify-center p-8 text-center">
-        <div className="rounded-full border border-studio-border-soft bg-white/[0.05] p-4">
+        <div className="rounded-full border border-studio-border-soft bg-studio-surface-soft p-4">
           <RefreshCw className="h-7 w-7 text-studio-text-muted" />
         </div>
         <h2 className="mt-5 text-lg font-bold text-studio-text-primary">暂无复盘</h2>
@@ -70,7 +70,7 @@ export default function RetroList({ retrospectives, loading, canCreate, onCreate
                 </td>
               </tr>
             ) : retrospectives.map((retro) => (
-              <tr key={retro.id} className="transition hover:bg-white/[0.04]">
+              <tr key={retro.id} className="transition hover:bg-studio-surface-soft">
                 <td className="max-w-[260px] px-5 py-4">
                   <button
                     type="button"

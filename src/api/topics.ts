@@ -3,6 +3,13 @@ import type { Topic } from '../types';
 
 const BASE_URL = '/api';
 
+export class TopicApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'TopicApiError';
+  }
+}
+
 function getAuthHeader(): Record<string, string> {
   const token = useAuthStore.getState().token;
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -70,7 +77,7 @@ export async function getTopic(id: number): Promise<Topic> {
   const response = await fetch(`${BASE_URL}/topics/${id}`, {
     headers: getAuthHeader()
   });
-  if (!response.ok) throw new Error('获取选题详情失败');
+  if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '获取选题详情失败'), response.status);
   const result = await response.json();
   return result.data;
 }
@@ -81,7 +88,7 @@ export async function createTopic(data: { title: string; description: string; ou
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error('创建选题失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '创建选题失败'));
   const result = await response.json();
   return { message: result.message, topicId: result.data.topicId };
 }
@@ -111,7 +118,7 @@ export async function auditTopic(id: number, data: { status: 'approved' | 'rejec
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error('审核选题失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '审核选题失败'));
   return response.json();
 }
 

@@ -8,7 +8,7 @@ export default function NotFound() {
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4 py-12">
-      <div className="w-full max-w-xl rounded-[28px] border border-white/10 bg-white/[0.04] p-8 text-center shadow-[0_24px_80px_rgba(15,23,42,0.16)] backdrop-blur-xl dark:bg-white/[0.04]">
+      <div className="w-full max-w-xl rounded-[28px] border border-studio-border-soft bg-studio-surface-glass p-8 text-center shadow-floating backdrop-blur-xl">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-studio-primary">404</p>
         <h1 className="mt-4 text-3xl font-semibold text-theme-text">页面不存在</h1>
         <p className="mt-3 text-sm leading-7 text-theme-text-secondary">
@@ -18,7 +18,7 @@ export default function NotFound() {
         <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
           <button
             onClick={() => navigate(-1)}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-theme-border px-5 py-3 text-sm font-medium text-theme-text transition hover:bg-theme-hover"
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-studio-border-soft px-5 py-3 text-sm font-medium text-studio-text-primary transition hover:bg-studio-surface-soft"
           >
             <ArrowLeft className="h-4 w-4" />
             返回上一页

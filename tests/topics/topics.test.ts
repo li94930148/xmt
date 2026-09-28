@@ -27,6 +27,7 @@ const testUserId = await executeInsert(
    VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ['topic-test-user', 'unused', 'topic-test@example.invalid', 'admin', 'Topic Test', 1, 0],
 );
+await execute('INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE code = ?', [testUserId, 'admin']);
 
 async function repositoryTests() {
   const topicId = await repository.withTransaction((tx) => tx.createTopic({
@@ -158,16 +159,18 @@ async function serviceTests() {
 }
 
 async function apiTests() {
-  await execute(
+  const topicId = await executeInsert(
     `INSERT INTO topics (title, description, platform, creator_id, status)
      VALUES (?, ?, ?, ?, ?)`,
     ['API 契约', 'legacy/v1', 'douyin', testUserId, 'pending'],
   );
+  const notifications: Array<{ userId: number; title: string; content: string; link: string }> = [];
+  const broadcasts: Array<{ room: string; event: string; data: unknown }> = [];
   const service = new TopicService({
     repository,
     policy: currentTopicPolicy,
-    notify: () => undefined,
-    broadcast: () => undefined,
+    notify: (message) => notifications.push(message),
+    broadcast: (room, event, data) => broadcasts.push({ room, event, data }),
   });
   const controller = new TopicController(service);
   const app = express();
@@ -196,6 +199,26 @@ async function apiTests() {
     assert.deepEqual(v1.data, legacy.data);
     assert.deepEqual(v1.meta, { ...legacy.pagination as object, requestId: (v1.meta as { requestId: string }).requestId });
     assert.equal(typeof (v1.meta as { requestId: string }).requestId, 'string');
+
+    const auditResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics/${topicId}/audit`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected', comment: '请补充拍摄依据' }),
+    });
+    assert.equal(auditResponse.status, 200);
+    const topicAfterAudit = await queryOne<{ status: string }>('SELECT status FROM topics WHERE id = ?', [topicId]);
+    const history = await queryOne<{ action: string; comment: string }>(
+      'SELECT action, comment FROM topic_history WHERE topic_id = ? ORDER BY id DESC LIMIT 1',
+      [topicId],
+    );
+    assert.equal(topicAfterAudit?.status, 'rejected');
+    assert.deepEqual(history, { action: 'rejected', comment: '请补充拍摄依据' });
+    assert.equal(notifications.length, 1);
+    assert.match(notifications[0].title, /驳回/);
+    assert.match(notifications[0].content, /请补充拍摄依据/);
+    assert.equal(notifications[0].link, `/topics/${topicId}`);
+    assert.equal(broadcasts.at(-1)?.event, 'topic:audited');
+    assert.equal((broadcasts.at(-1)?.data as { status: string }).status, 'rejected');
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

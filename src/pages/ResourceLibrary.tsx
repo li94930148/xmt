@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, FolderTree, Plus } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { deleteResourceCenterResource, getResourceCategories, getResourceCenterResources, type LibraryType, type ResourceCategory, type ResourceListItem } from '@/api/resourceCenter';
 import { ConfirmModal, ErrorState, LoadingState } from '@/components/common';
@@ -23,18 +23,34 @@ export default function ResourceLibrary({ fixedLibraryType }: { fixedLibraryType
   const [error, setError] = useState(false);
   const [deleting, setDeleting] = useState<ResourceListItem | null>(null);
   const [creating, setCreating] = useState(false);
+  const latestRequest = useRef(0);
   const navigate = useNavigate();
   const page = Math.max(1, Number(params.get('page') || 1));
   const categoryId = Number(params.get('category_id') || 0) || undefined;
   const { hasPermission } = usePermission();
 
-  const load = () => {
-    setLoading(true); setError(false);
-    void Promise.all([getResourceCenterResources({ library_type: type, category_id: categoryId, keyword: debouncedKeyword || undefined, page, page_size: 20 }), getResourceCategories(type)])
-      .then(([resources, categoryResponse]) => { setItems(resources.data); setTotal(resources.pagination.total); setCategories(categoryResponse.data); })
-      .catch(() => setError(true)).finally(() => setLoading(false));
-  };
-  useEffect(load, [type, categoryId, debouncedKeyword, page]);
+  const load = useCallback(() => {
+    const requestId = ++latestRequest.current;
+    setLoading(true);
+    setError(false);
+    void Promise.all([
+      getResourceCenterResources({ library_type: type, category_id: categoryId, keyword: debouncedKeyword || undefined, page, page_size: 20 }),
+      getResourceCategories(type),
+    ]).then(([resources, categoryResponse]) => {
+      if (requestId !== latestRequest.current) return;
+      setItems(resources.data);
+      setTotal(resources.pagination.total);
+      setCategories(categoryResponse.data);
+    }).catch(() => {
+      if (requestId === latestRequest.current) setError(true);
+    }).finally(() => {
+      if (requestId === latestRequest.current) setLoading(false);
+    });
+  }, [type, categoryId, debouncedKeyword, page]);
+  useEffect(() => {
+    load();
+    return () => { latestRequest.current += 1; };
+  }, [load]);
   const updateParam = (key: string, value?: string) => { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); if (key !== 'page') next.delete('page'); setParams(next); };
   const pages = Math.max(1, Math.ceil(total / 20));
 

@@ -138,6 +138,62 @@ async function testGetTopicsReadsErrorField() {
   }
 }
 
+async function testGetTopicPreservesForbiddenStatusAndMessage() {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    ok: false,
+    status: 403,
+    json: async () => ({ message: '无权限查看该选题' }),
+  } as Response)) as typeof fetch;
+
+  try {
+    const { getTopic, TopicApiError } = await import('../../src/api/topics.js');
+    await assert.rejects(
+      () => getTopic(17),
+      (error: Error) => {
+        assert.ok(error instanceof TopicApiError);
+        assert.equal((error as InstanceType<typeof TopicApiError>).status, 403);
+        assert.equal(error.message, '无权限查看该选题');
+        return true;
+      },
+      '详情接口应保留 HTTP 状态，供页面拒绝展示失效缓存',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+async function testTopicMutationsPreserveServerErrors() {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requests.push(String(input));
+    const message = String(input).endsWith('/audit') ? '审核服务暂不可用，请稍后重试' : '选题标题与现有记录重复';
+    return {
+      ok: false,
+      status: 503,
+      json: async () => ({ message }),
+    } as Response;
+  }) as typeof fetch;
+
+  try {
+    const { createTopic, auditTopic } = await import('../../src/api/topics.js');
+    await assert.rejects(
+      () => createTopic({ title: '失败恢复测试', description: '', platform: '', deadline: '' }),
+      (error: Error) => error.message === '选题标题与现有记录重复',
+      '创建失败应保留服务端可操作的错误说明',
+    );
+    await assert.rejects(
+      () => auditTopic(17, { status: 'rejected', comment: '补充拍摄依据' }),
+      (error: Error) => error.message === '审核服务暂不可用，请稍后重试',
+      '审核失败应保留服务端可操作的错误说明',
+    );
+    assert.equal(requests.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 async function testTopicQuerySchemaAcceptsEmptyStrings() {
   const { topicQuerySchema } = await import('../../shared/schema/topics.schema.js');
   const parsed = topicQuerySchema.parse({ status: '', search: '', page: '1', limit: '15' });
@@ -155,6 +211,8 @@ await testStoreDedupsConsecutiveIdenticalNotifications();
 await testGetTopicsUsesServerErrorMessage();
 await testGetTopicsOmitsEmptyFilters();
 await testGetTopicsReadsErrorField();
+await testGetTopicPreservesForbiddenStatusAndMessage();
+await testTopicMutationsPreserveServerErrors();
 await testTopicQuerySchemaAcceptsEmptyStrings();
 
 console.log('list-fetch-notify tests passed');

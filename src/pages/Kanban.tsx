@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
-import { getTopics, updateTopicStatus, getUsers } from '../api';
+import { getTopics, updateTopicStatus, getUsers, getShooting, getPublishing } from '../api';
 import { Topic, User } from '../types';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { STATUS_COLORS, STATUS_TEXT } from '../constants';
 import { formatBeijingDate } from '../lib/utils';
 import { celebrateMilestone } from '../utils/confetti';
+import { getKanbanTopicDestination } from '../platform/kanban-navigation';
 import {
   Clock, CheckCircle, XCircle, FileText, Camera, Send,
   ChevronLeft, ChevronRight, Filter, User as UserIcon, ExternalLink
@@ -94,18 +95,22 @@ export default function Kanban() {
     return flow[current] || [];
   };
 
-  const handleTopicClick = (topic: Topic) => {
-    const pathMap: Record<string, string> = {
-      pending: `/topics/${topic.id}`,
-      approved: `/topics/${topic.id}`,
-      rejected: `/topics/${topic.id}`,
-      production: `/production/${topic.id}`,
-      shooting: `/shooting/${topic.id}`,
-      publishing: `/publishing`,
-      completed: `/topics/${topic.id}`,
-    };
-    const path = pathMap[topic.status] || `/topics/${topic.id}`;
-    navigate(path);
+  const handleTopicClick = async (topic: Topic) => {
+    try {
+      const path = await getKanbanTopicDestination(topic, {
+        getShooting: (topicId) => getShooting({ topic_id: topicId, page: 1, limit: 1 }),
+        getPublishing: (topicId) => getPublishing({ topic_id: topicId, page: 1, limit: 1 }),
+      });
+      if (!path) {
+        appStore.addNotification({ title: '暂时无法打开流程详情', message: '该选题还没有对应的流程记录，请从选题详情查看状态。', type: 'warning' });
+        navigate(`/topics/${topic.id}`);
+        return;
+      }
+      navigate(path);
+    } catch (error) {
+      appStore.addNotification({ title: '流程详情加载失败', message: (error as Error).message, type: 'error' });
+      navigate(`/topics/${topic.id}`);
+    }
   };
 
   if (loading) {
@@ -126,24 +131,24 @@ export default function Kanban() {
       {/* 筛选器 */}
       <div className={`${styles.card} p-4`}>
         <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <Filter className={`w-4 h-4 ${styles.textMuted}`} />
-            <span className={`text-sm ${styles.textSecondary}`}>平台</span>
+            <span className={`shrink-0 whitespace-nowrap text-sm ${styles.textSecondary}`}>平台</span>
             <select
               value={platformFilter}
               onChange={e => setPlatformFilter(e.target.value)}
-              className={`px-3 py-1.5 ${styles.input} text-sm`}
+              className={`min-w-0 flex-1 px-3 py-1.5 text-sm sm:flex-initial ${styles.input}`}
             >
               {platformOptions.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <UserIcon className={`w-4 h-4 ${styles.textMuted}`} />
-            <span className={`text-sm ${styles.textSecondary}`}>负责人：</span>
+            <span className={`shrink-0 whitespace-nowrap text-sm ${styles.textSecondary}`}>负责人：</span>
             <select
               value={assigneeFilter}
               onChange={e => setAssigneeFilter(e.target.value ? Number(e.target.value) : '')}
-              className={`px-3 py-1.5 ${styles.input} text-sm`}
+              className={`min-w-0 flex-1 px-3 py-1.5 text-sm sm:flex-initial ${styles.input}`}
             >
               <option value="">全部</option>
               {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -201,7 +206,7 @@ export default function Kanban() {
                             )}
                           </div>
                           {nextStatuses.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 pt-2 border-t ${styles.borderLight}">
+                            <div className={`flex flex-wrap gap-1.5 pt-2 border-t ${styles.borderLight}`}>
                               {nextStatuses.map(ns => (
                                 <button
                                   key={ns.status}

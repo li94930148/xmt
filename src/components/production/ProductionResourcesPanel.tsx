@@ -17,6 +17,7 @@ import {
   DEFAULT_MATERIAL_WORKSPACE_HEIGHT,
   materialWorkspaceStorageKey,
 } from './materialWorkspace';
+import { MAX_REFERENCE_EXCERPT_CHARS, referencedResourceIds, resourceIncludesExcerpt, type ResourceReference } from './resourceReference';
 
 const libraryNames: Record<LibraryType, string> = {
   project: '项目资料库',
@@ -35,7 +36,13 @@ type SearchResult = {
 };
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'failed';
 
-export default function ProductionResourcesPanel({ productionId, canManage }: { productionId: number; canManage: boolean }) {
+export default function ProductionResourcesPanel({ productionId, canManage, manuscriptHtml, referenceReady, onInsertReference }: {
+  productionId: number;
+  canManage: boolean;
+  manuscriptHtml: string;
+  referenceReady: boolean;
+  onInsertReference: (resource: ResourceReference, excerpt?: string) => boolean;
+}) {
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -43,6 +50,7 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
   const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [selectedExcerpt, setSelectedExcerpt] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
@@ -62,6 +70,7 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
   const workspaceHeightRef = useRef(DEFAULT_MATERIAL_WORKSPACE_HEIGHT);
   const storageKey = useMemo(() => materialWorkspaceStorageKey(userId), [userId]);
   const [workspaceHeight, setWorkspaceHeight] = useState(DEFAULT_MATERIAL_WORKSPACE_HEIGHT);
+  const usedResourceIds = useMemo(() => pickerOpen ? referencedResourceIds(manuscriptHtml) : new Set<number>(), [manuscriptHtml, pickerOpen]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,6 +134,7 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
 
   const scheduleSave = useCallback((nextContent: string) => {
     if (!canPersistMaterialDraft(canManage)) return;
+    if (!contentRef.current.trim() && nextContent === '<p></p>') return;
     contentRef.current = nextContent;
     generationRef.current += 1;
     hasUnsavedRef.current = true;
@@ -181,24 +191,59 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
     }
   };
 
-  const addSelected = async () => {
-    if (selectedIds.length === 0) return;
+  const openPicker = (excerpt: string | null) => {
+    setSelectedExcerpt(excerpt);
+    setSelectedIds([]);
+    setPickerOpen(true);
+  };
+
+  const quoteSelectedExcerpt = () => {
+    const excerpt = editorHandleRef.current?.getSelectedText();
+    if (!excerpt) {
+      addNotification({ title: '请先选中文字', message: '在创作资料中选中要引用的片段，再选择来源资料', type: 'info' });
+      return;
+    }
+    if (excerpt.length > MAX_REFERENCE_EXCERPT_CHARS) {
+      addNotification({ title: '选中内容过长', message: `一次最多引用 ${MAX_REFERENCE_EXCERPT_CHARS} 字，请缩小选区`, type: 'info' });
+      return;
+    }
+    openPicker(excerpt);
+  };
+
+  const addSelected = async (destination: 'draft' | 'manuscript' | 'excerpt') => {
+    if (selectedIds.length === 0 || (destination !== 'draft' && selectedIds.length !== 1)) return;
     setAdding(true);
     try {
       const response = await getProductionResourceInsertions(productionId, selectedIds);
-      const insertion = buildMaterialInsertionHtml(response.data.map((item) => item.content_html));
-      if (insertion) {
-        const inserted = editorHandleRef.current?.insertHtmlAtSelectionOrEnd(insertion) ?? false;
-        if (!inserted) scheduleSave(`${contentRef.current}${insertion}`);
+      if (destination !== 'draft') {
+        const resource = response.data[0];
+        if (!resource) {
+          addNotification({ title: '资料正文为空', message: '该资料暂无可引用的正文内容', type: 'info' });
+          return;
+        }
+        if (destination === 'excerpt' && (!selectedExcerpt || !resourceIncludesExcerpt(resource, selectedExcerpt))) {
+          addNotification({ title: '片段与来源不一致', message: '选中文字未在所选资料原文中找到，请换一条来源或重新选取原文', type: 'error' });
+          return;
+        }
+        if (!onInsertReference(resource, destination === 'excerpt' ? selectedExcerpt || undefined : undefined)) {
+          addNotification({ title: '引用失败', message: '当前稿件不可编辑，请稍后重试', type: 'error' });
+          return;
+        }
+        addNotification({ title: '已引用到正文', message: `正文已加入“${resource.title}”${destination === 'excerpt' ? '的选中片段' : '的全文'}及来源链接`, type: 'success' });
+      } else {
+        const insertion = buildMaterialInsertionHtml(response.data.map((item) => item.content_html));
+        if (insertion) {
+          const inserted = editorHandleRef.current?.insertHtmlAtSelectionOrEnd(insertion) ?? false;
+          if (!inserted) scheduleSave(`${contentRef.current}${insertion}`);
+          addNotification({ title: '资料正文已插入', message: `已插入 ${response.data.length} 条资料正文`, type: 'success' });
+        }
       }
       if (response.empty_resource_ids.length > 0) {
         addNotification({ title: '部分资料未插入', message: '该资料暂无可插入的正文内容。', type: 'info' });
       }
-      if (insertion) {
-        addNotification({ title: '资料正文已插入', message: `已插入 ${response.data.length} 条资料正文`, type: 'success' });
-      }
       setPickerOpen(false);
       setSelectedIds([]);
+      setSelectedExcerpt(null);
     } catch (error) {
       addNotification({ title: '插入失败', message: (error as Error).message, type: 'error' });
     } finally {
@@ -242,7 +287,10 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
           <span className={`text-xs ${saveState === 'failed' ? 'text-studio-coral-contrast' : 'text-studio-text-muted'}`}>{saveLabel}</span>
           {canManage && saveState === 'failed' ? <button type="button" onClick={() => void saveLatest()} className="text-xs text-studio-cyan">重试</button> : null}
         </div>
-        {canManage ? <button type="button" onClick={() => setPickerOpen(true)} className="inline-flex items-center gap-2 rounded-button bg-studio-primary px-3 py-2 text-sm text-white"><Link2 className="h-4 w-4" />添加资料</button> : null}
+        {canManage ? <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={quoteSelectedExcerpt} disabled={!referenceReady || loading} className="xmt-btn xmt-btn-ghost">引用选中片段</button>
+          <button type="button" onClick={() => openPicker(null)} className="inline-flex items-center gap-2 rounded-button bg-studio-primary px-3 py-2 text-sm text-white"><Link2 className="h-4 w-4" />添加资料</button>
+        </div> : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--editor-bg)] pb-5">
@@ -287,7 +335,8 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
       ><GripHorizontal className="h-4 w-4" /></div>
     </GlassPanel>
 
-    <BaseModal open={pickerOpen} onClose={() => setPickerOpen(false)} title="添加资料" size="lg">
+    <BaseModal open={pickerOpen} onClose={() => { setPickerOpen(false); setSelectedExcerpt(null); }} title={selectedExcerpt ? '选择片段来源' : '添加资料'} size="lg">
+      {selectedExcerpt ? <p className="mb-3 rounded-card border border-studio-border-soft bg-studio-surface-soft/50 px-3 py-2 text-xs text-studio-text-secondary">已选中 {selectedExcerpt.length} 字，请选择原文所在的资料。只有能在资料原文中找到的片段才能引用。</p> : null}
       <form onSubmit={search} className="flex gap-3">
         <SearchBar value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索资料标题或正文" className="flex-1" />
         <button type="submit" className="rounded-button bg-studio-primary px-4 text-sm text-white"><Search className="mr-2 inline h-4 w-4" />搜索</button>
@@ -303,7 +352,12 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
           >
             <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${selected ? 'border-studio-cyan bg-studio-cyan text-white' : 'border-studio-border-active'}`}>{selected ? <Check className="h-3.5 w-3.5" /> : null}</span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-studio-text-primary">{result.title}</span>
+              <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-studio-text-primary">
+                <span className="min-w-0 truncate">{result.title}</span>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${usedResourceIds.has(result.resource_id) ? 'bg-studio-success/12 text-studio-success-contrast' : 'bg-studio-surface-soft text-studio-text-muted'}`}>
+                  {usedResourceIds.has(result.resource_id) ? '已用' : '待用'}
+                </span>
+              </span>
               <span className="mt-1 block text-xs text-studio-text-muted">{libraryNames[result.library_type]} · {result.category?.name || '未分类'}</span>
               <span className="mt-2 line-clamp-2 block break-words text-xs leading-5 text-studio-text-secondary">{result.snippet.replace(/<\/?mark>/g, '') || result.summary || '暂无摘要'}</span>
             </span>
@@ -311,8 +365,9 @@ export default function ProductionResourcesPanel({ productionId, canManage }: { 
         }) : keyword ? <EmptyState title="暂无资料" /> : null}
       </div>
       <div className="mt-4 flex justify-end gap-2 border-t border-studio-border-soft pt-4">
-        <button type="button" onClick={() => setPickerOpen(false)} className="rounded-button border border-studio-border-soft px-4 py-2 text-sm text-studio-text-secondary">取消</button>
-        <button type="button" disabled={adding || selectedIds.length === 0} onClick={() => void addSelected()} className="rounded-button bg-studio-primary px-4 py-2 text-sm text-white disabled:opacity-50">{adding ? '插入中…' : `插入所选（${selectedIds.length}）`}</button>
+        <button type="button" onClick={() => { setPickerOpen(false); setSelectedExcerpt(null); }} className="rounded-button border border-studio-border-soft px-4 py-2 text-sm text-studio-text-secondary">取消</button>
+        <button type="button" disabled={adding || selectedIds.length === 0} onClick={() => void addSelected('draft')} className="xmt-btn xmt-btn-ghost">{adding ? '插入中…' : `加入资料草稿（${selectedIds.length}）`}</button>
+        <button type="button" disabled={adding || selectedIds.length !== 1 || !referenceReady} onClick={() => void addSelected(selectedExcerpt ? 'excerpt' : 'manuscript')} className="xmt-btn xmt-btn-primary">{selectedExcerpt ? '引用选中片段' : '引用到正文'}</button>
       </div>
     </BaseModal>
   </>;

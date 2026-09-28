@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { Send } from 'lucide-react';
 import { getMonthlyRecord, getYearlyRecord, saveMonthlyRecord, saveYearlyRecord, type MonthlyRecord, type YearlyRecord } from '../../api/dailyReports';
 import { ActionButton, GlassPanel } from '../studio';
+import ErrorState from '../common/ErrorState';
+import { useAppStore } from '../../store';
 
 type Props = { kind: 'monthly' | 'yearly' };
 
 function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {
-  return <label className="block"><span className="mb-2 block text-sm font-semibold text-studio-text-primary">{label}</span><textarea value={value} onChange={(event) => onChange(event.target.value)} rows={5} placeholder={placeholder} className="w-full resize-y rounded-card border border-studio-border-soft bg-white/[0.04] px-4 py-3 text-sm leading-6 text-studio-text-primary outline-none placeholder:text-studio-text-muted focus:border-studio-border-active" /></label>;
+  return <label className="block"><span className="mb-2 block text-sm font-semibold text-studio-text-primary">{label}</span><textarea value={value} onChange={(event) => onChange(event.target.value)} rows={5} placeholder={placeholder} className="w-full resize-y rounded-card border border-studio-border-soft bg-studio-surface px-4 py-3 text-sm leading-6 text-studio-text-primary outline-none placeholder:text-studio-text-muted focus:border-studio-border-active" /></label>;
 }
 
 export default function DailyReportSummaryForm({ kind }: Props) {
@@ -17,31 +19,39 @@ export default function DailyReportSummaryForm({ kind }: Props) {
   const [yearly, setYearly] = useState<YearlyRecord>({ year, annual_summary_md: '', achievements_md: '', shortcomings_md: '', next_year_plan_md: '', display_content_md: '' });
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [retryKey, setRetryKey] = useState(0);
+  const addNotification = useAppStore((state) => state.addNotification);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setLoadError('');
     const request = kind === 'monthly' ? getMonthlyRecord(year, month) : getYearlyRecord(year);
     void request.then((record) => {
       if (!active) return;
       if (kind === 'monthly') setMonthly((current) => ({ ...current, ...record, year, month }));
       else setYearly((current) => ({ ...current, ...record, year }));
-    }).finally(() => { if (active) setLoading(false); });
+    }).catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : '加载总结失败'); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [kind, month, year]);
+  }, [kind, month, retryKey, year]);
 
   const submit = async () => {
     setSubmitting(true);
     try {
       if (kind === 'monthly') setMonthly(await saveMonthlyRecord(year, month, monthly));
       else setYearly(await saveYearlyRecord(year, yearly));
+      addNotification({ title: '提交成功', message: kind === 'monthly' ? '月报已提交。' : '年报已提交。', type: 'success' });
+    } catch (error) {
+      addNotification({ title: kind === 'monthly' ? '提交月报失败' : '提交年报失败', message: error instanceof Error ? error.message : '内容未提交，请重试。', type: 'error' });
     } finally { setSubmitting(false); }
   };
 
+  if (loadError) return <ErrorState title="总结加载失败" description={loadError} onRetry={() => setRetryKey((value) => value + 1)} />;
   return <GlassPanel className="space-y-4 p-5">
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div className="flex flex-wrap gap-3">
-        <label className="block"><span className="mb-2 block text-sm text-studio-text-muted">年份</span><input type="number" value={year} onChange={(event) => setYear(Number(event.target.value))} className="w-28 rounded-button border border-studio-border-soft bg-white/[0.04] px-3 py-2 text-sm text-studio-text-primary" /></label>
+        <label className="block"><span className="mb-2 block text-sm text-studio-text-muted">年份</span><input type="number" value={year} onChange={(event) => setYear(Number(event.target.value))} className="w-28 rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary" /></label>
         {kind === 'monthly' ? <label className="block"><span className="mb-2 block text-sm text-studio-text-muted">月份</span><select value={month} onChange={(event) => setMonth(Number(event.target.value))} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary">{Array.from({ length: 12 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} 月</option>)}</select></label> : null}
       </div>
       <ActionButton onClick={() => void submit()} variant="primary" disabled={loading || submitting}><Send className="h-4 w-4" />{submitting ? '提交中' : kind === 'monthly' ? '提交月报' : '提交年报'}</ActionButton>

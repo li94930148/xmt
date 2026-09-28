@@ -26,13 +26,13 @@ interface UserFormData {
 }
 
 const roleColors: Record<string, string> = {
-  admin: 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30',
-  director: 'bg-studio-primary/15 text-studio-primary-contrast border-studio-primary/30',
-  editor: 'bg-studio-violet/15 text-studio-violet-contrast border-studio-violet/30',
-  copywriter: 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30',
-  post_production: 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30',
-  camera: 'bg-studio-cyan/15 text-studio-cyan-contrast border-studio-cyan/30',
-  member: 'bg-studio-surface-soft/20 text-studio-text-muted border-studio-border-soft/30',
+  admin: 'bg-studio-coral-soft text-studio-coral-contrast border-studio-border-soft',
+  director: 'bg-studio-primary-soft text-studio-primary-contrast border-studio-border-soft',
+  editor: 'bg-studio-violet-soft text-studio-violet-contrast border-studio-border-soft',
+  copywriter: 'bg-studio-success-soft text-studio-success-contrast border-studio-border-soft',
+  post_production: 'bg-studio-amber-soft text-studio-amber-contrast border-studio-border-soft',
+  camera: 'bg-studio-cyan-soft text-studio-cyan-contrast border-studio-border-soft',
+  member: 'bg-studio-surface-soft text-studio-text-secondary border-studio-border-soft',
 };
 
 function buildDefaultForm(roleCode = 'member'): UserFormData {
@@ -378,13 +378,13 @@ export default function Users() {
                           {canUpdateUser ? (
                             <button
                               onClick={() => void handleToggleEnable(user)}
-                              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs transition-colors ${user.enabled ? 'border border-studio-success/30 bg-studio-success/15 text-studio-success-contrast hover:bg-studio-success/25' : 'border border-studio-coral/30 bg-studio-coral/15 text-studio-coral-contrast hover:bg-studio-coral/25'}`}
+                              className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition-opacity hover:opacity-85 ${user.enabled ? 'border-studio-border-soft bg-studio-success-soft text-studio-success-contrast' : 'border-studio-border-soft bg-studio-coral-soft text-studio-coral-contrast'}`}
                             >
                               {user.enabled ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
                               {user.enabled ? '启用' : '禁用'}
                             </button>
                           ) : (
-                            <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs ${user.enabled ? 'border border-studio-success/30 bg-studio-success/15 text-studio-success-contrast' : 'border border-studio-coral/30 bg-studio-coral/15 text-studio-coral-contrast'}`}>
+                            <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs ${user.enabled ? 'border-studio-border-soft bg-studio-success-soft text-studio-success-contrast' : 'border-studio-border-soft bg-studio-coral-soft text-studio-coral-contrast'}`}>
                               {user.enabled ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
                               {user.enabled ? '启用' : '禁用'}
                             </span>

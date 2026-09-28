@@ -34,11 +34,11 @@ export default function MyRetroActionsPanel({ actions, loading, onRefresh, onOpe
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
         {loading ? (
-          <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4 text-sm text-studio-text-muted">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
             正在加载行动项...
           </div>
         ) : actions.length === 0 ? (
-          <div className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4 text-sm text-studio-text-muted">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
             当前没有需要你跟进的复盘行动项。
           </div>
         ) : actions.slice(0, 6).map((action) => (
@@ -46,7 +46,7 @@ export default function MyRetroActionsPanel({ actions, loading, onRefresh, onOpe
             key={action.id}
             type="button"
             onClick={() => onOpen(action.retroId)}
-            className="rounded-panel border border-studio-border-soft bg-white/[0.04] p-4 text-left transition hover:border-studio-cyan/60 hover:bg-white/[0.07]"
+            className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-left transition hover:border-studio-cyan/60 hover:bg-studio-surface-elevated"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">

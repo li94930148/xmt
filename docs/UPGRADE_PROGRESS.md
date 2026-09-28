@@ -1,5 +1,416 @@
 # XMT 升级阶段记录
 
+## v3.3.43 桌面消息聚合与业务直达（2026-09-28）
+
+- 完成内容：桌面消息只对明确的 `/topics/:id` 且已知消息类型做五分钟分组；同组通知复用系统 tag，后续更新静音。通知点击只允许本站相对路径，选题通知直达关联页；无关联链接或不安全链接回到消息中心。消息数据库行、未读数及收件箱明细不做合并或改写。消息中心已有“待处理”筛选和列表级关联跳转，本阶段补上系统桌面通知的直达。
+- 修改范围：`src/utils/message-notification.ts`、`src/hooks/useSocket.ts`、`src/utils/notification.ts`、通知契约测试和版本文档。无 API、权限、数据库或持久化行为变化。
+- 验证：`npm run test:message-notification`、`npm run test:notification-routing`、`npm run test:notification-settings-load`、`npm run test:mobile-safe-draft`、`npm run test:mobile-work-center-browser`、Android runtime/endpoint/build-endpoint 契约、`npm run check`、`npm run version:check`、`git diff --check` 通过。定向 ESLint 0 错误，保留 `notification.ts` 既有 `any` 警告。`npm run mobile:sync:production` 内的生产构建及 Capacitor Android 同步通过，manifest 为 `3.3.43 / 30343`；构建有既有 Silk/Tiptap 大分包提示。隔离 Playwright 在 320px/390px 覆盖工作中心/工作流路径和 v3.3.42 消息/密码错误恢复，截图保存于 `/tmp/xmt-mobile-message-load-error-390.png`、`/tmp/xmt-mobile-password-retry-390.png`、`/tmp/xmt-mobile-password-success-390.png`。通知本身用契约测试验证，没有模拟真实操作系统通知权限。
+- 风险说明：桌面通知仍需 HTTPS/localhost、安全上下文和用户授权；尚未做真实浏览器系统通知授权、多标签聚合或真实账号验收。认证态 ReactBits 主题浏览器测试本次因其配置的 `127.0.0.1:5175` 应用服务未运行而连接拒绝；浅色对比度浏览器测试未运行。两项会对认证账号保存偏好，无隔离后端时未对现有账号执行写入测试。`npm run mobile:doctor` 显示 Java、adb 和 Android SDK 不可用，因此 APK/真机无法在此环境完成。
+- 下一阶段：继续核对 B8 尚未覆盖的 mutation 成功/失败反馈；B10 Android APK/真机及真实账号验收仍需要 JDK/Android SDK 和受控测试环境。
+
+## v3.3.42 移动消息错误状态与密码操作保护（2026-09-28）
+
+- 完成内容：移动消息无可用缓存且读取请求失败时显示错误和重试入口，只有成功读取的空结果才显示“暂无消息”；有缓存时继续展示缓存并说明数据可能较旧。未读标记失败或离线时留在消息页保留反馈和重试机会，成功标记后再打开关联内容。移动“我的”页修改密码增加当前密码必填、新密码至少 6 位校验，请求期间禁用输入、折叠和重复提交；成功后保留展开状态，让成功提示可见。
+- 修改范围：`src/pages/mobile/MobileMessages.tsx`、`src/pages/mobile/MobileMe.tsx`、版本与改造清单文档。无 API、服务端密码规则、权限或数据库变化。
+- 验证：`npm run test:mobile-work-center-browser`、`npm run test:mobile-safe-draft`、`npm run check`、`npm run version:check`、改动文件定向 ESLint、`npm run build` 和 `git diff --check` 通过。浏览器夹具覆盖无缓存加载 503→明确错误→重试空列表、未读标记 503 后留页并重试成功才跳转、改密码必填/长度校验、请求中双击只发一次及成功提示可见；既有移动工作流与共享设备隔离回归在 320px/390px 通过。生产构建仍提示 Silk 与 Tiptap 分包超过 500 kB。
+- 风险说明：未验证真实账号、生产接口和 Android APK/真机。本轮不涉及数据迁移或业务写入。
+- 下一阶段：继续核对 B8 桌面通知聚合和待处理消息直达边界；B10 的 APK/真机与真实账号验收仍需具备 JDK/Android SDK 和受控测试环境。
+
+## v3.3.41 移动本机内容账号隔离（2026-09-27）
+
+- 完成内容：移动消息最近缓存、选题提报/修改草稿、创作稿草稿及日报草稿改用当前账号专属本机键。共享设备切换账号后，页面不会恢复其他账号或旧版无归属内容。账号未确认时不读取或写入这些本机数据；旧数据不自动删除或迁移，以免误判归属。
+- 修改范围：`src/platform/safe-draft.ts`、五个移动页面、共享设备浏览器回归、版本与改造清单文档。无数据库迁移、API 或服务端权限变化。
+- 验证：`npm run test:mobile-safe-draft`、`npm run test:mobile-work-center-browser`、`npm run check`、`npm run version:check`、三个 Android runtime/endpoint 契约测试、改动文件定向 ESLint、`npm run mobile:sync:production` 与 `git diff --check` 通过；生产构建仅有既有大分包提示。浏览器覆盖 320px/390px 既有路径及第二个账号无法看见首个账号消息、选题和日报本机内容，第二账号日报截图 `/tmp/xmt-mobile-work-center-responsive-390-shared-device-account-isolation.png`。Android 同步资源 manifest 为 `3.3.41`，API/Socket 地址仍为 `https://lanyaomedia.com/api` / `https://lanyaomedia.com`。
+- 风险说明：旧版无归属数据仍保存在本机，但无法安全自动分配给账号；如需找回，须在可信设备上由原账号持有人确认后手动处理。`npm run mobile:doctor` 仍显示缺 Java、adb 和 Android SDK；APK、真机、真实账号及生产服务未验收。本阶段未提交、未部署。
+- 下一阶段：继续 B10 Android APK/JDK/真机和真实账号验收，并继续核对其他移动本机状态与权限边界。
+
+## v3.3.40 移动工作流状态中文兜底（2026-09-27）
+
+- 完成内容：移动首页、选题列表/详情、创作列表及拍摄/发布列表和详情对未知状态显示“状态待确认”；拍摄 `pending` 明确为“计划中”，避免列表泄漏英文状态码或详情留空。未知选题状态采用中性设计令牌样式，发布详情中的失败/定时文案与列表统一。Android 工程版本与 production endpoint manifest 同步至 `3.3.40 / 30340`。
+- 文案核查：移动消息使用中文业务分类；页面不直接显示内部 `type`/severity 枚举，无需改消息分类或数据契约。
+- 修改范围：`src/platform/workflow-status-labels.ts`、移动首页/选题/创作列表与选题详情、拍摄/发布列表与详情、状态映射测试、移动工作中心浏览器回归及版本文档。
+- 数据库变化：无迁移、无业务数据写入；未更改权限、API、服务端状态机或写入规则。
+- 验证：`npm run test:workflow-status-labels`、`npm run test:mobile-work-center-browser`、`npm run check`、`npm run version:check`、定向 ESLint、`npm run mobile:sync:production`、三个 Android runtime/endpoint 契约测试及 `git diff --check` 通过。Playwright 在 320px/390px 进入拍摄与发布详情，并在 320px 验证首页/选题/创作列表及选题详情未知状态、页面身份、无横向溢出且无页面/控制台错误；截图 `/tmp/xmt-mobile-work-center-responsive-320-home-unknown-status.png`、`/tmp/xmt-mobile-work-center-responsive-320-topics-unknown-status-list.png`、`/tmp/xmt-mobile-work-center-responsive-320-topic-unknown-status-detail.png`、`/tmp/xmt-mobile-work-center-responsive-320-production-unknown-status-list.png`、`/tmp/xmt-mobile-work-center-responsive-320-shooting-status-detail.png`、`/tmp/xmt-mobile-publishing-status-detail-320.png`。
+- 风险说明：APK 未构建——`npm run mobile:doctor` 确认 Java、adb、Android SDK 均不可用；真机、真实账号和生产服务未验收。浏览器使用本地隔离 API fixture，没有调用生产 API；实时协作显示离线状态不影响本次只读状态展示。未使用独立 Browser 插件，使用仓库 Playwright 回归。
+- 下一阶段：继续 B10 剩余的 Android APK/JDK/真机验收准备，并继续按页面核验移动端实际文案与写入入口。
+
+## v3.3.39 移动日报状态与审核意见提示（2026-09-27）
+
+- 完成内容：移动日报显示“未填写、草稿、审核中、已通过、已退回、已归档”中文状态及对应可操作说明；日报退回时展示服务端审核意见。只读日报始终展示服务端内容，不应用或覆盖本机未提交草稿。服务端契约中的草稿/已提交/已退回可编辑、已通过/已归档只读以纯函数状态映射和浏览器回归覆盖。
+- 修改范围：`src/pages/mobile/MobileDaily.tsx`、`src/platform/mobile-daily-report-status.ts`、移动状态契约测试、移动工作中心浏览器回归、版本展示和 B10 文档。
+- 数据库变化：无迁移、无业务数据写入；没有更改权限规则和服务端状态机。
+- 验证：`npm run test:mobile-daily-report-status`、`npm run test:mobile-safe-draft`、`npm run test:mobile-work-center-browser`、`npm run check`、`npm run version:check`、定向 ESLint、`npm run build`、`git diff --check` 通过。Browser plugin 不可用，浏览器使用本地 Playwright 隔离 API 夹具，在 320px/390px 验收已提交、已退回意见、已通过只读及本机旧草稿不应用/不覆盖；没有调用真实账号或生产 API。
+- 风险说明：移动日报真实账号、生产 API 和 Android 真机仍未验收；APK 构建仍受本机缺 Java Runtime 阻塞，未部署。
+- 下一阶段：继续清单 B10，盘点拍摄/发布详情及消息中的剩余状态/角色文案，并在具备 JDK 的环境补验 APK 与真机流程。
+
+## v3.3.38 移动岗位角色中文映射与 Android 版本同步（2026-09-27）
+
+- 完成内容：移动“我的”账号页补齐 `copywriter`、`post_production`、`camera` 的中文名称（文案、后期、摄像），不再回退成“成员”。七种内置角色有映射回归；隔离浏览器实际打开账号页验证三个内容岗位显示。Android 工程版本同步至 `3.3.38 / 30338`，production endpoint manifest 已生成到前端与 Android 资源目录并通过契约验证。
+- 修改范围：`src/constants/index.ts`、`tests/mobile/mobile-role-labels.test.ts`、移动端浏览器回归、`package.json` 和版本/改造清单文档；无权限规则或数据库变化。
+- 验证：`npm run check`、`npm run test:mobile-role-labels`、`npm run test:mobile-work-center-browser`、`npm run test:android-build-endpoints`、`npm run test:android-runtime`、`npm run test:android-endpoint-contract`、`npm run version:check`、改动文件定向 ESLint、前端构建、`git diff --check` 通过；浏览器在 320px/390px 既有路径及角色场景通过。
+- APK 状态：`npm run mobile:apk:debug:production` 的前端构建与 Capacitor 同步成功，但 Gradle 因系统无 Java Runtime 无法启动。检查 `/Library/Java/JavaVirtualMachines`、Homebrew 常见 JDK 目录均未发现 Java；没有安装系统依赖，也未安装到设备。旧 ignored APK 未覆盖，副本保留在 `/tmp/xmt-app-debug-before-v3.3.38.apk`（SHA-256 `097ec8fd690a74738ecc8d772f8294246536ed1b8abda0cf1fa330fd427b7a56`）。
+- 风险说明：Android production endpoint 已在同步资源 manifest 核实为 `https://lanyaomedia.com/api` 与 `https://lanyaomedia.com`；但 APK、真机及真实账号仍待有 JDK 的环境单独验收。本阶段不安装、不上传、不部署。
+- 下一阶段：继续清单 B10，逐页盘点剩余移动角色/状态文案和写入路径；Android 包构建需在具备 JDK 的环境补验。
+
+## v3.3.37 移动选题权限加载与失败恢复（2026-09-27）
+
+- 完成内容：移动选题详情加载逻辑改用稳定的权限状态作为回调依赖，避免状态更新后重复发起详情请求并反复卸载编辑控件；创建、审核 API 错误解析改为展示服务端消息。既有 `topic:create`、`topic:update`、`topic:audit` 和所有者范围检查不变。
+- 失败恢复：提报失败保留表单并可重试；负责人保存失败后本地草稿可在刷新后恢复，成功重试后清除；仅有审核权限的角色不开放编辑，审核失败保留意见供重试。
+- 修改范围：`src/pages/mobile/MobileTopicDetail.tsx`、`src/api/topics.ts`、`tests/topics/list-fetch-notify.test.ts`、`tests/browser/mobile-work-center-responsive.spec.ts`、版本与改造清单文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 验证：`npm run check`、`npm run test:topics`、`npm run test:topics-list-notify`、`npm run test:mobile-work-center-browser`、`npm run version:check`、`npm run test:android-runtime`、`npm run test:android-endpoint-contract`、改动文件定向 ESLint、`npm run build`、`git diff --check` 均通过。全仓 `npm run lint` 未通过：10 个 error 全部位于既有嵌套 worktree `.worktrees/project-integrity-audit/`，不涉及本阶段文件；未修改这些文件。隔离 Playwright 覆盖上述三个移动选题角色流程和既有 320px/390px 工作中心路径；构建仅保留仓库既有 Silk 背景 chunk 超过 500 kB 提示。
+- 浏览器限制：Browser plugin 不在当前可用列表，使用仓库 Playwright；页面数据由本地隔离 fixture 提供，不连接真实账号或生产 API。失败态截图：`/tmp/xmt-mobile-topic-audit-failure-390.png`。
+- 风险说明：未修改角色授权、服务端所有者 ACL 或数据库；真实账号、生产服务端、Android 真机仍待单独验收，本阶段不提交、不部署。
+- 下一阶段：继续清单 B10，按页面/角色检查剩余移动写入入口及窄屏错误恢复。
+
+## v3.3.36 移动创作权限与稿件范围一致（2026-09-27）
+
+- 完成内容：创作详情接口在完成查看范围校验后，用同一服务端 `canEditProduction` 规则计算并返回 `can_edit`。移动创作编辑页要求 `production:update` 和服务端稿件范围同时允许，才恢复本地编辑草稿、开放编辑器与保存/提交；可查看但不可编辑的角色保留只读内容。没有改变任何角色授权、数据范围或服务端写入门禁。
+- 修改范围：`api/routes/workflow.ts`、`shared/types/index.ts`、`src/pages/mobile/MobileProductionEditor.tsx`、`tests/production/production-collaboration-http.test.ts`、`tests/browser/mobile-work-center-responsive.spec.ts`、`package.json` 和版本/权限说明。
+- 数据库变化：无迁移、无业务数据写入；HTTP 角色测试使用临时 SQLite。
+- 验证：`npm run test:production-access` 通过，确认 editor 明细 `can_edit=true`、director 在有查看和更新权限但不属于稿件范围时仍可查看且 `can_edit=false`，直接写入依旧返回 403。`npm run test:mobile-work-center-browser` 在 320px、390px 通过；另在 390px 验证 director 编辑器为只读、保存/提交按钮不存在，editor 保持可编辑；页面路由正确、标题非空、无框架错误遮罩/控制台错误/横向溢出。`npm run check`、`npm run version:check`、`npm run test:android-runtime`、定向 ESLint、`npm run build` 和 `git diff --check` 通过；定向 lint 0 error、12 条 workflow 路由文件既有 warning，构建有 Silk 背景 chunk 超过 500 kB 提示。
+- 浏览器证据：本地隔离 Playwright，响应式视口 320×844、390×844；director 只读稿件截图 `/tmp/xmt-mobile-production-director-readonly-390.png`。Browser 插件/技能不在当前会话可用列表，使用仓库 Playwright 测试脚本；未连接真实账号或生产 API。
+- 风险说明：该能力仅作为 UI 与服务端授权决策的同步提示，最终安全边界仍是写接口 `production:update` + `canEditProduction`；真实数据库角色配置、在线服务端与 Android 真机尚未验收，未部署。
+- 下一阶段：继续逐角色核验移动选题提报、编辑和审核的授权及失败恢复；只修复有代码与服务端证据的落差，不推断或自动收紧既有自定义授权。
+
+## v3.3.35 移动日报部分成功后安全重试（2026-09-27）
+
+- 完成内容：移动日报先保存草稿再提交时，保存接口成功后立即将服务端返回的日报及版本写回页面状态。若随后的提交失败，已持久化草稿不再与客户端旧版本脱节；用户重试时携带新版本号，避免触发乐观并发冲突。
+- 修改范围：`src/pages/mobile/MobileDaily.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts`、版本与改造清单文档。
+- 数据库变化：无迁移、无真实数据写入。权限契约使用临时 SQLite，浏览器 API 使用本地隔离夹具。
+- 验证：`npm run test:mobile-work-center-browser` 在 320px、390px 通过；模拟首次提交 503，确认草稿使用版本 5 保存，重试使用服务端返回的版本 6 并提交成功，同时工作中心、日历、灵感、看板、日报均无横向溢出。`npm run test:daily-report-permissions`、`npm run check`、`npm run version:check`、`npm run test:android-runtime`、定向 ESLint、`npm run build` 和 `git diff --check` 均通过。构建保留 Silk 背景 chunk 超过 500 kB 的既有提示。
+- 浏览器证据：本地隔离 Playwright，视口 320×844、390×844；日报恢复场景截图 `/tmp/xmt-mobile-daily-partial-success-320.png`。Browser 插件工具在本轮不可用，按前端测试规范使用仓库 Playwright 脚本；未连接真实账号或生产 API。
+- 风险说明：仅验证客户端部分成功与重试合同，真实角色配置、在线服务端及 Android 真机尚未验收；未部署。
+- 下一阶段：继续清单 B10，逐角色核对移动端各写入入口的实际权限和错误恢复，完成其余外场工作流验收。
+
+## v3.3.34 移动日历失败恢复与权限核验（2026-09-27）
+
+- 完成内容：日历加载失败改为明确错误页和重试入口；请求失败或切换月份加载期间隐藏旧月份统计，避免把过期汇总误当当前值。创建失败后保留表单并解锁重试，增加请求进行中保护。API 校验日历响应数据必须为数组。核验服务端日历需要认证、事件修改/删除遵循创建者/管理员边界，关联选题创建遵循现有选题访问权限；当前日历页面没有事件编辑/删除入口，本轮不新增未规划的管理交互。
+- 修改范围：`src/api/calendar.ts`、`src/pages/Calendar.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts`、`tests/calendar/calendar-permissions.test.ts`、`package.json`、版本与改造清单文档。
+- 数据库变化：无迁移、无真实数据写入；权限测试使用临时 SQLite 数据库。
+- 验证：`npm run test:mobile-work-center-browser` 在 320px、390px 通过；覆盖日历读取 503→错误态→重试恢复、创建 503→保留表单→重试成功且仅产生一次业务记录，并断言失败时不残留旧月份汇总。`npm run test:calendar-permissions` 通过，覆盖未登录拒绝、个人未关联事件创建、关联选题所有权、跨用户关联拒绝、个人事件更新/删除、越权拒绝和管理员管理，以及异常响应结构拒绝。更完整的类型、lint、版本和构建结果见本阶段最终记录。
+- 浏览器证据：隔离 Playwright fixture；错误页 `/tmp/xmt-calendar-load-error-320.png`，创建失败后表单可重试 `/tmp/xmt-calendar-create-retry-320.png`。Browser plugin 未提供，使用仓库 Playwright 脚本；无真实认证/生产 API。
+- 风险说明：创建失败回退与所有权规则已用本地夹具/临时库覆盖；真实角色配置、在线服务端状态、Android 真机未验收。事件编辑/删除 API 有保护，但移动日历页面尚无编辑/删除入口；未提交、未部署。
+- 下一阶段：继续清单 B10 核实移动工作流的实际角色权限和 API 失败反馈，并优先确定是否需要规划日历事件编辑/删除的产品操作；测试账号与生产环境仍需单独验收。
+
+## v3.3.33 移动日历与灵感关联选题闭环（2026-09-27）
+
+- 完成内容：首页快捷入口进入日历后返回首页；工作中心进入子页后返回工作中心。日历排期和已转化灵感可打开关联选题；选题详情的返回操作回到来源日历或灵感页，普通选题入口仍返回选题列表。
+- 修改范围：`src/components/mobile/MobileShell.tsx`、`src/pages/mobile/MobileHome.tsx`、`src/pages/mobile/MobileWorkHub.tsx`、`src/pages/mobile/MobileTopicDetail.tsx`、`src/pages/Calendar.tsx`、`src/pages/Inspirations.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts`、版本与改造清单文档。
+- 数据库变化：无迁移、无业务写入。
+- 验证：`npm run test:mobile-work-center-browser` 使用本地隔离 API 夹具通过 320px、390px；覆盖工作中心→日历→关联选题→返回日历、首页→日历→返回首页、灵感关联选题→返回灵感，以及此前的日历切换月份、灵感提交取消、看板筛选与返回。页面文档/主体无横向溢出，浏览器 console、page error、HTTP 错误均为空。
+- 风险说明：仅本地浏览器夹具验证，真实账号/服务端/Android 真机尚未验收；无业务写入，未部署。本轮浏览器插件不可用，按前端测试规范运行 Playwright。
+- 下一阶段：继续清单 B10 的移动端日历创建/编辑权限及事件失败恢复核对，并复验关联选题的真实账号权限与 API 错误路径。
+
+## v3.3.32 移动工作中心灵感与看板易用性（2026-09-27）
+
+- 完成内容：修复灵感提交按钮与卡片操作区在窄屏下逐字换行；操作区手机改为纵向分组，创作者名称截断，触屏上删除按钮常驻并补充可访问名称。看板平台/负责人筛选标签在窄屏保持单行。
+- 修改范围：`src/pages/Inspirations.tsx`、`src/pages/Kanban.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts`、版本与改造清单文档。
+- 数据库变化：无迁移、无业务写入。
+- 验证：`npm run test:mobile-work-center-browser` 以本地隔离 API 夹具在 320px、390px 完成工作中心→日历→切换月份→返回，工作中心→灵感→打开/取消提交→返回，以及工作中心→看板→返回。四个页面文档、主体均无横向溢出，关键控件可见，浏览器控制台无错误。截图：`/tmp/xmt-mobile-work-center-responsive-320-{hub,calendar,inspirations,kanban}.png`、`/tmp/xmt-mobile-work-center-responsive-390-{hub,calendar,inspirations,kanban}.png`。真实账号/后端未接入。
+- 风险说明：Browser plugin 未提供，按技能采用本地 Playwright；数据全部来自测试夹具，没有真实业务写入。Android 版本同步为 3.3.32 / 30332，APK 和真机未验收。
+- 下一阶段：继续处理移动端详情返回和日历/灵感关联选题入口，检查流程路由使用的记录 ID 与 320px 操作可见性。
+
+## v3.3.31 看板流程详情关联修正（2026-09-27）
+
+- 完成内容：工作中心看板点击“拍摄中 / 发布中”选题，按 `topic_id` 查询对应流程记录并使用真实流程记录 ID 打开详情；缺少记录或查询失败时明确提示并安全回到选题详情。另修复看板操作区边框样式变量未插值。
+- 修改范围：`src/platform/kanban-navigation.ts`、`src/pages/Kanban.tsx`、`tests/mobile/kanban-navigation.test.ts`、版本更新说明。
+- 数据库变化：无迁移、无数据写入。
+- 验证：`npm run test:kanban-navigation`、`npm run test:integrity:workflow`、`npm run test:mobile-layout`、`npm run check`、`npm run build`、`npm run version:check`、`npm run test:android-runtime`、`git diff --check` 通过；定向 ESLint 0 error、6 条该文件既有 warning。构建有仓库既有 Silk 背景 chunk >500 kB 提示。尚未用真实账号/浏览器连后端验证看板点击；Android 版本名称/版本码同步到 3.3.31 / 30331，未构建 APK。
+- 下一阶段：继续核对手机工作中心的灵感、日历和返回路径，并对相关入口做窄屏浏览器验收。
+
+## v3.3.30 移动编辑器轻工具栏与 Android 版本对齐（2026-09-27）
+
+- 完成内容：手机宽度下拍摄、发布与移动创作编辑器统一使用基础富文本工具栏，保留撤销/重做、常用文字样式、列表和链接；桌面宽度继续使用完整工具栏。发布剧本栏标题与保存/取消操作在窄屏上下排布。Android `versionName` 与 Web `package.json` 同步为 3.3.30，`versionCode` 按 `major*10000+minor*100+patch` 递增为 30330，Android 版本契约测试改为从项目版本自动计算。
+- 修改范围：`src/hooks/useCompactEditorToolbar.ts`、拍摄/发布详情、移动创作编辑器、`android/app/build.gradle`、Android 版本契约测试及版本说明。
+- 数据库变化：无 schema 迁移、无业务数据写入。
+- 验证：Playwright 使用本地隔离 API 响应实测发布详情编辑按钮交互与拍摄操作可见；320px、390px、1440px 下文档宽度均与视口一致，320/390 窄屏取消/保存按钮完整可见，移动端基础工具栏出现且桌面端隐藏。截图：`/tmp/xmt-mobile-v330-publishing.png`、`/tmp/xmt-mobile-v330-shooting.png`。`npm run check`、`npm run version:check`、`npm run test:android-runtime`、`npm run test:android-endpoint-contract`、`npm run test:mobile-layout`、`npm run test:topics`、`npm run test:topics-list-notify`、定向 ESLint 和 `npm run build` 通过；ESLint 0 error、5 条既有 warning，构建有 Silk 背景 chunk >500 kB 警告，`git diff --check` 通过。Android APK 未构建。
+- 风险说明：本机后端未运行，Playwright 的 Socket.IO 请求返回 500，页面显示实时协作离线提示；普通编辑仍可用。浏览器验证使用本地 API 夹具，不代表真实账号、实时协作或生产验证。此次不改权限、数据接口、编辑器保存合同。
+- 下一阶段：继续检查移动工作中心的其他工作流入口（看板、灵感、日历与详情返回路径），并在可用环境补全真实认证/Android 真机验收。
+
+## v3.3.29 移动工作流详情窄屏适配（2026-09-27）
+
+- 完成内容：拍摄详情顶部标题/阶段操作在手机宽度下改为纵向堆叠并允许操作换行；发布详情顶部状态区堆叠，四阶段进度在窄屏改为两列展示、宽屏保留横向流程。移动选题协作动态把审核动作显示为中文；选题详情遇到 401/403/404 时清除编辑草稿并清空详情，不回退展示可能已失权的本机旧数据。审核服务成功后在测试数据库确认状态、历史意见、通知内容和实时广播保持一致。
+- 修改范围：`src/pages/ShootingDetail.tsx`、`src/pages/PublishingDetail.tsx`、`src/pages/mobile/MobileTopicDetail.tsx`、`src/api/topics.ts`、`src/api/index.ts`、选题 API/服务测试及版本说明。
+- 数据库变化：无 schema 迁移；审核一致性验证仅在临时 SQLite 测试库内执行。
+- 验证：`npm run test:topics`、`npm run test:topics-list-notify`、`npm run check`、`npm run version:check`、`git diff --check`、定向 ESLint 和 `npm run build` 通过。定向 ESLint 0 error、5 条 warning（PublishingDetail 既有未使用导入及 effect 依赖提示，ShootingDetail 既有 effect 依赖提示）；构建有仓库既有 Silk 背景 chunk >500 kB 提示。审核服务使用临时 SQLite 并确认数据库状态、审核历史、通知回调及广播 payload 一致。
+- 浏览器限制：Browser plugin 不可用，按前端测试技能尝试 Playwright MCP。登录态/API 夹具先因权限响应形状触发 `permissions.includes is not a function`，调整后仍被宿主认证恢复至登录页；没有取得可信的目标详情截图和交互证据，因此不宣称窄屏浏览器验收通过。本机 Vite 可加载登录页，后端未运行。
+- 风险说明：未用真实账号、生产 API 或真机验证拍摄/发布详情；测试中的服务端响应和选题审核均为本机/临时数据，无业务写入，未部署。
+- 下一阶段：检查移动端拍摄、发布子页的其余编辑区域和横向溢出，并继续清单 B10 的剩余入口。
+
+## v3.3.28 移动工作流权限与消息部分成功反馈（2026-09-27）
+
+- 完成内容：移动选题提报要求 `topic:create`；选题详情编辑要求 `topic:update` 且遵循管理角色/创建者/负责人的访问边界。待审核选题增加独立的 `topic:audit` 通过/驳回与意见提交，不混用编辑权限；只有桌面已有同等规则支持的拍摄/发布阶段允许移动端推进。移动日报要求 `report:daily:submit`，权限确认前不读写本地草稿。
+- 错误恢复：日报读取失败显示重试并禁用表单及保存，避免初始空表单覆盖已存在日报。移动消息“全部已读”逐条请求，仅成功项更新本地缓存/未读数，失败项保持未读并显示可重试数量；单条已读增加处理中保护。
+- 修改范围：`MobileAddTopic.tsx`、`MobileTopicDetail.tsx`、`MobileDaily.tsx`、`MobileMessages.tsx`、`mobile-message-read.ts` 与契约测试、版本文档；无数据库变化。
+- 验证：`npm run check`、定向 ESLint、`npm run test:mobile-layout`、`npm run test:mobile-message-category`、新增 `npm run test:mobile-message-read`、`npm run test:daily-report-permissions`、`npm run test:topics`、`npm run version:check`、`npm run build` 与 `git diff --check` 通过。构建只有仓库已有的大 chunk 提示。
+- 浏览器限制：本地 Vite 登录页可加载；后端未运行导致公开系统配置/Socket 请求失败。临时隔离组件挂载夹具出现 Router/权限状态错配，未获得可信的目标页交互证据，因此不宣称本轮浏览器 UI 验收通过。
+- 限制：未用真实账号或生产 API 验证角色权限、日报失败重试和多条消息部分失败；测试为服务/API 契约及构建检查，无业务写入，未部署。
+- 下一步：继续核对移动日历、拍摄和发布详情入口在窄屏上的可用性，以及独立审核后的通知/历史状态一致性。
+
+## v3.3.27 移动创作权限与通知加载保护（2026-09-27）
+
+- 完成内容：移动创作列表按 `production:view` 或 `production:update` 决定是否显示；查看权只读打开稿件，不提供新建、修改、提交，也不读取/写入本地编辑草稿；新建和编辑要求 `production:update`。工作中心的创作入口对仅查看角色仍可用，且仅有修改权的成员可以直接开始写稿。
+- 通知：移动通知页改用共享通知配置加载器，一并读取偏好、渠道、事件并校验 HTTP 与数组结构；完整成功后才开放保存，失败时展示服务端错误和重试。Android 的 `apiUrl` 来源保持正确，保存沿用已完整读取的全部渠道偏好。
+- 修改范围：`src/pages/mobile/MobileWorkHub.tsx`、`MobileProduction.tsx`、`MobileProductionEditor.tsx`、`MobileNotificationSettings.tsx`、`src/api/notificationSettings.ts` 与版本文档；无数据库变化。
+- 验证：隔离 Playwright 实测通知事件接口 503 时保存禁用，重试三项成功后能保存，原有偏好条目仍包含在 payload。创作只读角色可查看稿件、无“新建/保存草稿”；无查看权限显示拒绝状态；无修改权限直达 `/production/content/new` 被拒绝；修改权限显示新建。访问拒绝期间无额外列表请求，页面无框架遮罩、未触发业务写入。`npm run check`、移动布局/通知加载/Android 契约测试、版本检查、定向 ESLint、生产构建和 `git diff --check` 均通过；构建仅报告既有的大型 chunk 提示。
+- 限制：测试使用响应夹具，未登录真实 Android 账号或调用生产 API；浏览器 MCP 的历史输出包含本地 Vite HMR WebSocket 被运行环境阻拦及早期错误夹具造成的 React 错误，修正夹具后交互通过且 DOM 无错误遮罩。
+- 下一步：继续清单 B10，检查移动端其他带写入操作的流程（选题提报/审核、日历创建、日报提交）是否与对应权限一致，逐页将失败反馈和加载门禁补齐。
+
+## v3.3.26 手机浏览器移动办公入口（2026-09-27）
+
+- 完成内容：清单 B10 中手机浏览器仅显示桌面缩小版的问题，改为 App 首次挂载时依据小于 768px 的视口选择现有移动壳层和移动首页、选题、创作、消息、日报页面；Android 继续默认使用移动界面。选择结果通过 props 交给 Layout，窗口旋转或缩放期间不重新挂载编辑器；重新打开/刷新时按当前宽度选择。手机浏览器设置仍使用完整设置页，保留管理员配置能力。
+- 导航与反馈：日历、看板、灵感、拍摄、发布、日报和创作子路由归属“工作”；子页有明确返回所属主导航入口，首页别名和设置页高亮正确；移动壳层保留全局通知呈现和写作上下文。
+- 修改范围：`src/App.tsx`、`src/components/Layout.tsx`、`src/components/mobile/MobileShell.tsx`、`src/platform/mobile-layout.ts`、`tests/mobile/mobile-layout.test.ts` 及版本文档。原生身份判断、会话恢复、API 地址和原生插件门禁未改，无数据库迁移。
+- 验证：TypeScript 检查、`test:mobile-layout`、`test:android-runtime`、`test:entrypoints`、版本检查、定向 ESLint、生产构建通过；定向 ESLint 有 Calendar 既有 effect 依赖 warning，无错误，构建保留既有大分包提示。Playwright MCP 在 `http://127.0.0.1:5174/__mobile-qa` 隔离挂载真实 MobileShell、MobileWorkHub、Calendar；390×844 下工作中心进入日历、切换月份、点选日期打开创建表单并返回成功，工作导航保持选中。Calendar 原先固定 820px 导致只露出 3 列，此次改为手机完整 7 列，七列合计 348px、单日宽约 50px，页面宽 382px、视口 390px；无写入请求或框架错误遮罩。截图 `/tmp/xmt-mobile-calendar-v3326.png`。Browser plugin not available，使用 Playwright MCP；隔离挂载期间测试夹具曾加载第二份 Router 模块而出现上下文报错，已通过使用应用同一模块实例修正，最终交互完成。
+- 剩余范围：日历、看板、灵感和拍摄复用现有响应式页面；本轮未新建独立移动页面，也未完成全量页面、真实认证、真机编辑和 Android 打包验收。下一步优先检查移动创作的新建/查看权限、移动通知读取失败后的保存门禁，并验证移动布局下的真实表单交互。
+
+## v3.3.25 个人设置与系统管理分组（2026-09-27）
+
+- 完成内容：清单 B9 设置中心按“我的设置 / 系统管理 / 产品信息”分组，系统配置和备份仍分别受现有权限控制；当前分类失去权限后回到通知偏好。采用 PageShell、PageHeader 和 GlassPanel，窄屏导航两列排列。关于系统读取全局已保存品牌，避免普通成员看到默认品牌或管理者把草稿误认为已应用；移除未经检测的“运行正常 / 模块已启用”和固定每日备份承诺。
+- 失败恢复：系统配置读取失败时显示重试，读取成功前不显示可提交的默认配置；备份列表失败显示错误，数量标为待确认；重试成功后才区分真实空列表。
+- 修改范围：`src/pages/NotificationSettings.tsx`、版本文档及 `src/data/changelog.ts`。未更改权限规则、路由、API 或数据库结构。
+- 验证：`npm run check`、`npm run version:check`、`npm run test:notification-settings-load`、定向 ESLint 和 `npm run build` 通过；ESLint 保留 2 条既有加载 effect 依赖 warning，构建保留大分包提示。Browser plugin not available，使用 Playwright MCP，在本地 `http://127.0.0.1:5174/__settings-qa` 隔离挂载真实组件并提供 API 夹具：普通成员无管理入口、管理员配置失败无保存入口及重试恢复、仅备份权限视图、未保存品牌不影响关于页、备份失败不作空记录、失去权限时自动回退全部通过；1366×900 和 390×844，窄屏无横向溢出；页面非空、无框架错误遮罩，组件阶段 0 console error，1 条减少动态效果的开发提示。
+- 证据：桌面浅色 `/tmp/xmt-settings-member-v3325.png`，窄屏暗色 `/tmp/xmt-settings-backup-mobile-v3325.png`。所有 API 响应为测试夹具，写入请求为 0；未验证真实认证、备份创建/下载/删除或生产运行。
+- 下一阶段：继续清单 B10，核实移动工作台跳转到桌面页的实际入口，优先完成手机浏览器轻操作的路由和布局闭环。AuthRolloutStatus 已有运维明细折叠，本轮保持现有管理员页面。
+
+## v3.3.24 通知偏好与品牌 Logo 保存反馈（2026-09-27）
+
+- 完成内容：通知偏好、通知渠道、事件类型三项数据必须全部成功读取且为数组，页面才允许编辑后保存；任一请求失败均显示错误与重试，并禁用保存，避免服务端先删后写接口收到空列表而清除原有偏好。Logo 文件选择后先检查类型、大小并实际解码，成功只更新当前页预览；选择/读取失败和服务端保存失败分别反馈，重复选择同一文件可再次触发。
+- 修改范围：`src/api/notificationSettings.ts`、`src/pages/NotificationSettings.tsx`、`tests/notifications/notification-settings-load.test.ts` 与版本文档。
+- 数据库变化：无迁移；没有执行真实账号偏好或品牌设置写入。
+- 测试结果：`npm run test:notification-settings-load`、`npm run version:check`、`npm run check`、`npm run build`、定向 ESLint、`git diff --check` 通过。定向 ESLint 有 3 条 NotificationSettings 既有 effect 依赖 warning（通知加载、系统设置和备份加载函数），无 error；构建有仓库既有 Silk chunk >500 kB 提示。
+- 风险说明：Playwright 仅打开本地登录页确认应用可渲染；没有登录测试账号，也未验证通知设置页中的真实交互或服务端写入。浏览器显示 1 条错误，本机后端 API 未运行导致登录页系统设置请求失败，不代表本次设置组件错误；未部署。
+- 下一阶段：继续改造清单下一未完成项，先沿当前调用链核实服务端持久化和错误反馈边界。
+
+## v3.3.23 实时通知去重与审核反馈核实（2026-09-27）
+
+- 完成内容：确认选题创建时服务端会发房间广播 `topic:created`，并为创建者/审核人创建持久化个人消息；原前端两路都会触发桌面通知，导致同一操作重复弹系统通知。现 `RealtimeToast` 仅负责页面内提示，桌面通知由 `new_message` 个人消息事件统一触发。选题审核成功 toast 在 `TopicDetail` 已存在，清单所述“审核成功无反馈”在当前代码已不成立，未重复改造。
+- 修改范围：`src/components/RealtimeToast.tsx`、`tests/notifications/realtime-toast-routing.test.ts`、通知路由测试脚本及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：`npm run test:notification-routing`、`npm run version:check`、`npm run check`、定向 ESLint、`npm run build` 与 `git diff --check` 通过；定向 ESLint 有 1 条既有 `react-refresh/only-export-components` warning（RealtimeToast 既有同时导出组件和触发函数的结构），无 error。Playwright MCP 在 `http://127.0.0.1:5174/login` 隔离挂载真实 `RealtimeToast` 并模拟房间事件：页面 toast 可见，Notification spy 调用数为 0；截图 `.playwright-mcp/xmt-realtime-toast-v32323-live.png`。页面标题/身份正常，宿主登录页 API `/api/system-settings/public` 因本机后端 3001 未运行而拒绝连接，浏览器控制台还保留之前 HMR WS 拒连记录；这些不是本次组件交互错误，故不宣称整页零错误。
+- 风险说明：实时房间事件仍显示页面内 toast；数据库个人消息仍保留桌面通知及用户偏好。未进行多账号真实 Socket 浏览器验收，生产未验收。
+- 下一阶段：继续沿清单核对通知偏好保存、审核反馈和 Logo 选择/上传文案，按服务端实际持久化行为区分“保存成功”和本地预览。
+
+## v3.3.22 日报、番茄钟与批量已读错误反馈（2026-09-27）
+
+- 完成内容：个人日报加载失败独立显示错误与重试，不再把失败误作空表单；日报提交成功/失败都有明确反馈。月/年报及日报归档读取失败均显示错误与重试；月/年报提交结果有反馈。番茄钟统计和排行榜失败有可见错误与重试。批量消息已读并发处理后只将服务端成功项更新为已读，失败项保留未读并显示部分完成数量。
+- 修改范围：`src/pages/DailyReportPage.tsx`、`src/components/daily-report/DailyReportSummaryForm.tsx`、`src/components/daily-report/DailyReportSummaryArchive.tsx`、`src/components/PomodoroTimer.tsx`、`src/pages/PomodoroPage.tsx`、`src/pages/Messages.tsx` 及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：`npm run version:check`、`npm run check`、本次修改文件的定向 ESLint、`npm run build`、`git diff --check`、`npm run test:entrypoints`、`npm run test:daily-report-permissions`、`npm run test:report-summaries`、`npm run test:message-localization` 及 `npx tsx tests/integrity/resource-pomodoro.test.ts` 通过。构建保留既有 Silk 分包 >500 kB 提示。当前 Playwright MCP 仅连接到本地登录页；未使用测试账号进行认证或提交真实业务数据，因此未完成已认证页面交互回归。
+- 风险说明：消息批量已读仍是逐条服务端请求，网络失败时可能部分成功；现在会呈现真实部分状态并可重试剩余未读。未连接生产数据，未部署。
+- 下一阶段：继续审计改造清单中的审核成功反馈、通知双发和高频操作结果契约，按调用链逐项确认后成组修复。
+
+## v3.3.21 业务加载失败与搜索竞态收口（2026-09-27）
+
+- 完成内容：成就页不再将六个关键接口的失败各自吞成空数据；整组加载失败时显示明确错误与重试。资料搜索和资料列表均以请求序号隔离迟到响应，旧成功、旧失败和旧 `finally` 不得覆盖当前查询；空搜索会使先前搜索失效并清空旧结果。
+- 修改范围：`src/pages/Achievements.tsx`、`src/pages/ResourceSearch.tsx`、`src/pages/ResourceLibrary.tsx` 及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Playwright MCP 的本地组件回归覆盖：成就六接口首轮失败显示错误且不展示“暂无成就”，点击重试后成功进入页面；资料搜索和资料列表先发 alpha（延迟）后发 beta（即时），再释放 alpha，界面仍保留 beta；页面身份分别为“成就系统”“资料搜索”“项目资料库”。`npm run version:check`、`npm run check`、定向 ESLint、`npm run test:topics-list-notify`、资源引用契约测试 5 项、`npm run build` 与 `git diff --check` 通过；定向 ESLint 0 error，Achievements 有 4 条未使用变量 warning；构建保留既有 Silk chunk >500 kB 提示。浏览器宿主页系统设置接口返回 500，另有 Vite HMR WebSocket 拒连和早期测试挂载错误，未将整页控制台声明为零错误；被测组件 API 使用隔离 mock，不连真实数据库。
+- 风险说明：成就采用保守整页错误策略，只要关键数据组任一接口失败即提供整体重试；资料查询仍不主动中止网络请求，仅忽略已过期响应；生产未验收。
+- 下一阶段：继续清查静默失败的可选数据与关键操作反馈，优先核对日报、通知已读、番茄钟统计和周报剩余入口，保留核心错误不被成功空态掩盖。
+
+## v3.3.20 报告中心周报失败恢复（2026-09-27）
+
+- 完成内容：周报接口错误与成功空数据分开呈现；失败显示明确说明和“重试加载”操作，重试过程继续显示加载态。
+- 修改范围：`src/pages/ExportPage.tsx` 及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Playwright MCP 在本地 Vite 组件夹具中加载真实 `ExportPage`，周报 API 首次返回 503 后页面显示“周报加载失败”和“重试加载”，没有伪显示暂无数据；点击重试后第二次 API 成功，报告数值与周期出现，错误提示消失。另以成功返回空值验证原“暂无周报数据”状态仍保留。`npm run version:check`、`npm run check`、定向 ESLint、`npm run build` 和 `git diff --check` 通过；构建仍有既有 Silk chunk >500 kB 提示。测试用 API 响应为浏览器 mock，未连接真实数据库。宿主登录页 `system-settings/public` 返回 500，且 Playwright 进程有 HMR WebSocket 拒连日志，这些属于测试宿主页/工具连接，不是本次被测错误卡片。
+- 风险说明：不改变周报 API、统计口径或成功数据展示；生产未验收。
+- 下一阶段：继续沿清单检查其他业务页面失败反馈与重复请求恢复。
+
+## v3.3.19 知识库过期请求保护（2026-09-27）
+
+- 完成内容：分类或搜索词切换触发新查询后，忽略先前查询迟到的成功、失败和 finally 状态提交；分类首次展开使用函数式状态更新，避免闭包里的旧展开状态覆盖用户当前选择。
+- 修改范围：`src/pages/KnowledgeLibrary.tsx` 及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Playwright MCP 从 Vite 实际加载并挂载知识库组件，以受控 API 响应复现竞态：`alpha` 查询保持 pending，随后 `beta` 返回“BETA CURRENT RESULT”，再释放迟到的 alpha 成功响应；最终仍显示 beta，旧结果未覆盖。卸载测试组件并恢复 fetch。`npm run version:check`、`npm run check`、定向 ESLint、知识库引用关联回归 5 项、`npm run build` 与 `git diff --check` 通过；构建保留既有 Silk chunk >500 kB 提示。浏览器验证使用 API 夹具而非真实数据库；宿主登录页公共系统设置请求返回 500，故不把宿主控制台描述为零错误。
+- 风险说明：保留原 API、查询条件、错误重试和空结果显示；生产未验收。
+- 下一阶段：继续核验业务页面加载/空态/失败恢复路径，优先补充真实页面的慢响应与失败重试浏览器回归。
+
+## v3.3.18 全局崩溃回退双主题修复（2026-09-27）
+
+- 完成内容：全局 `ErrorBoundary` 回退移除硬编码白字、`coral/20` 透明面板和重复写死按钮颜色，改用双主题文本/错误令牌、边框和 `.xmt-btn` 组件；重载、返回首页、复制诊断及错误详情脱敏逻辑不变。
+- 修改范围：`src/components/ErrorBoundary.tsx` 及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Playwright MCP 加载本地页面及本次 Vite 生成样式，分别在暗/浅主题挂载错误回退所用类名读取实际计算样式：错误图标底分别为 coral-soft `rgba(255, 122, 147, 0.14)` / `rgba(159, 18, 57, 0.08)`，错误标题/正文分别为 `rgb(242, 245, 250)` / `rgb(15, 23, 42)` 与 `rgb(163, 175, 196)` / `rgb(71, 85, 105)`；按钮类生成并使用统一 secondary/primary 样式。`npm run version:check`、`npm run check`、定向 ESLint、`npm run build`、`git diff --check` 与 `tests/mobile/android-runtime-contract.test.ts` 通过；构建保留既有 Silk chunk >500 kB 提示。测试页公共设置接口返回 500，未登录真实业务页面触发 ErrorBoundary，因此不声称恢复按钮的真实错误现场已端到端验收。
+- 风险说明：仅改全局错误回退呈现，不改变崩溃捕获和恢复动作；生产未验收。
+- 下一阶段：继续检查业务页面的加载、空态与失败恢复路径，并以 Playwright MCP/Chrome DevTools MCP 对实页关键流程取证。
+
+## v3.3.17 共用空状态图标底色（2026-09-27）
+
+- 完成内容：共用空状态图标面板移除未生成 CSS 的 `studio-surface-soft/70` 透明度变体，改用现有不透明 `studio-surface-soft`；其他视觉和操作不变。
+- 修改范围：`src/components/studio/EmptyState.tsx` 及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Playwright MCP 在真实资料库列表空结果 `/asset-center/resources?library_type=project` 验证；修复前暗色图标背景计算值为透明 `rgba(0, 0, 0, 0)` 且相应透明度 CSS 规则不存在。修复后暗/浅主题分别为 surface-soft `rgb(23, 30, 46)` / `rgb(238, 242, 248)`。390×844 无横向溢出；搜索无匹配关键词后 URL 更新且空态稳定保留。页面身份和内容正常，控制台错误 0。`npm run version:check`、`npm run check`、定向 ESLint、构建及 `git diff --check` 通过；构建仍有既有 Silk chunk >500 kB 提示。截图见 `.playwright-mcp/xmt-empty-state-*-390.png`。
+- 风险说明：只调整共用图标面板背景，不改空态内容和页面数据；生产未验收。
+- 下一阶段：继续检查共用错误提示和各业务页面的加载、空态、失败恢复路径。
+
+## v3.3.16 共用 403 权限提示主题底色（2026-09-27）
+
+- 完成内容：权限提示头部与锁图标面板移除依赖 CSS 变量透明度的渐变/透明底，改用 `studio-amber-soft` 和中性边框；403 文案、权限判断与导航行为不变。
+- 修改范围：`src/components/AccessDeniedState.tsx` 及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Google Chrome 扩展连接中打开真实 `/admin/auth-rollout` 403 路由；暗/浅主题头部底色分别为 amber-soft `rgba(245, 200, 107, 0.14)` / `rgba(120, 53, 15, 0.08)`，文字对比正确。另用 Playwright 在 390×844 下复验，两主题 `scrollWidth` 均为 390；返回首页和进入设置中心均到达正确路由，页面错误与控制台错误为 0。`npm run version:check`、`npm run check`、`npm run build`、定向 ESLint 及 `git diff --check` 通过；构建有既有 Silk chunk >500 kB 非阻断提示。
+- 风险说明：为触发角色受限路由，仅在临时隔离数据库副本中将测试账号角色设为 editor；原始数据库未改写，测试服务和副本随后清理。仅验收共用展示路由，不代表生产权限策略验证。
+- 下一阶段：继续检查共用权限提示、空状态与错误状态的主题及交互覆盖。
+
+## v3.3.15 确认弹窗主题底色（2026-09-27）
+
+- 完成内容：共用确认弹窗 danger/warning/default 三种类型的图标面板采用双主题可见的语义柔和底色、中性边框和对比文字；按钮和操作逻辑不变。
+- 修改范围：`src/components/common/ConfirmModal.tsx` 及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Playwright 在本机 Vite 登录页挂载真实 `ConfirmModal` React 组件，danger/warning/default 三种图标面板在暗色主题背景分别为 `rgba(255, 122, 147, 0.14)`、`rgba(245, 200, 107, 0.14)`、`rgba(107, 140, 255, 0.14)`；浅色分别为 `rgba(159, 18, 57, 0.08)`、`rgba(120, 53, 15, 0.08)`、`rgba(61, 90, 254, 0.08)`；各面板文字与中性边框正确。三种“继续”按钮各触发确认回调一次，“取消”按钮触发取消回调一次。390×844 下无横向溢出，页面/控制台错误 0。`npm run check`、`npm run version:check`、构建、定向 ESLint 与 `git diff --check` 通过；构建有已知 Silk chunk >500 kB 提示。
+- 风险说明：通过真实组件挂载并触发回调验证，但未在业务页面触发真实删除/警告操作；生产未验收。
+- 下一阶段：继续检查共用权限提示和确认/错误表面。
+
+## v3.3.14 共用错误状态主题底色（2026-09-27）
+
+- 完成内容：共享错误状态组件的失败、警告及未找到图标面板改为可见的双主题柔和底色与中性边框；状态含义、错误文案和重试入口不变。
+- 修改范围：`src/components/common/ErrorState.tsx` 及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Playwright 在 `http://127.0.0.1:5174/login` 确认页面标题正确、登录表单可见；从 Vite 实际导入并挂载 `ErrorState` React 组件，渲染失败、警告、未找到三种状态并读取 production CSS 计算样式。暗色失败/警告/未找到面板背景为 coral soft `rgba(255, 122, 147, 0.14)`、amber soft `rgba(245, 200, 107, 0.14)`、surface soft `rgb(23, 30, 46)`；浅色为 `rgba(159, 18, 57, 0.08)`、`rgba(120, 53, 15, 0.08)`、`rgb(238, 242, 248)`，文字和中性边框均正确。实际 React “重试”按钮点击触发回调一次；390×844 无横向溢出，浏览器错误 0。`npm run check`、`npm run version:check`、`npm run build`、定向 ESLint 和 `git diff --check` 通过；构建存在既有 Silk chunk >500 kB 提示。
+- 风险说明：验收渲染的是实际组件，但以登录页为容器挂载，不是某个业务页面的真实失败 API 状态；生产未验收。
+- 下一阶段：继续检查剩余主题表面与业务状态提示。
+
+## v3.3.13 组织权限徽标主题底色（2026-09-27）
+
+- 完成内容：组织权限页七种角色标签和启用/禁用状态标签采用双主题语义柔和底色、中性边框和对比文字；启停按钮和角色含义不变。
+- 修改范围：`Users.tsx` 角色色映射、启用状态可操作/只读徽标及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Playwright 在 `http://127.0.0.1:5174/login` 确认页面标题正确、登录表单可见；七类角色徽标和启用/禁用徽标在真实 production CSS 下暗/浅主题计算背景、文字和边框均匹配对应令牌；轻色截图显示所有标签清晰。测试夹具切换启用按钮后标签由“启用”变为“禁用”，源代码检查确认其仍调用原 `handleToggleEnable`。浏览器错误 0。`npm run check`、`npm run version:check`、`npm run build`、定向 ESLint 和 `git diff --check` 通过；构建存在既有 Silk chunk >500 kB 提示。
+- 风险说明：未登录组织权限页，也未通过服务端接口实际修改账户状态；切换交互在 DOM 测试夹具中验证，生产未验收。
+- 下一阶段：继续检查未覆盖的业务页面状态徽标和主题表面。
+
+## v3.3.12 全局通知主题底色（2026-09-27）
+
+- 完成内容：全局成功、失败、警告和提示通知卡片与图标改用对应语义柔和底色、中性边框和对比文字；内容、图标、关闭按钮及 5 秒自动关闭逻辑不变。
+- 修改范围：`Layout.tsx` 全局通知类型样式及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：Playwright 在 `http://127.0.0.1:5174/login` 确认页面标题正确、登录表单非空；以 v3.3.12 production CSS 检查四种通知类型的双主题计算样式。暗色成功/失败/警告/提示背景分别为 `rgba(61, 219, 160, 0.14)`、`rgba(255, 122, 147, 0.14)`、`rgba(245, 200, 107, 0.14)`、`rgba(107, 140, 255, 0.14)`；浅色分别为 `rgba(6, 95, 70, 0.08)`、`rgba(159, 18, 57, 0.08)`、`rgba(120, 53, 15, 0.08)`、`rgba(61, 90, 254, 0.08)`；四类文字、图标表面和中性边框均有正确计算样式。测试夹具点关闭后卡片由 4 张减为 3 张，源代码合同确认实际通知保留 5 秒超时和移除回调。浏览器错误 0。`npm run check`、`npm run version:check`、`npm run build`、定向 ESLint（0 error，既有警告）和 `git diff --check` 通过；构建存在既有 Silk chunk >500 kB 警告。
+- 风险说明：页面集成只检查到登录页；通知本身由 Playwright DOM 夹具展示并测算 production CSS，关闭交互在夹具中验证且源代码回调合同未变，未从已认证业务页触发真实全局通知。测试使用隔离数据库副本，生产未验收。
+- 下一阶段：继续排查剩余状态提示与全站主题表面。
+
+## v3.3.11 成就稀有度标签主题底色（2026-09-27）
+
+- 完成内容：普通、稀有、史诗、传说四档标签采用双主题可见的柔和底色和中性边框；分布卡片圆点继续使用各稀有度强调色；解锁、筛选、积分及统计逻辑不变。
+- 修改范围：成就稀有度映射、成就徽标与稀有度分布显示，以及版本文档。
+- 数据库变化：无迁移、无业务数据写入。
+- 测试结果：React SSR 渲染四档真实 `RarityBadge`，Playwright 加载本次 production build CSS 并读取暗/浅主题计算样式：稀有/史诗/传说暗色背景分别为 `rgba(107, 140, 255, 0.14)`、`rgba(167, 139, 250, 0.14)`、`rgba(245, 200, 107, 0.14)`；浅色分别为 `rgba(61, 90, 254, 0.08)`、`rgba(91, 33, 182, 0.08)`、`rgba(120, 53, 15, 0.08)`；四档文字和边框均有实际样式。成就页测试账号登录 API 记录成功，但单页应用仍返回 `/login`，故筛选交互和真实成就页控制台状态未能验收。`npm run check`、`npm run version:check`、`npm run build`、定向 ESLint（0 error、5 warnings）和 `git diff --check` 通过；构建存在既有 Silk chunk >500 kB 警告。
+- 风险说明：仅完成徽标组件渲染与真实 build CSS 的计算样式矩阵，不代表成就页整体 UI 和筛选已通过浏览器验收。Playwright 截图为组件级明暗主题预览；本地隔离账号认证后的路由仍跳回登录页；生产未验收。
+- 下一阶段：继续排查其他状态/提示组件及全站主题表面。
+
+## v3.3.10 移动端选题状态标签主题底色（2026-09-27）
+
+- 完成内容：移动端选题列表与详情接入共享状态色映射；待审核、已通过、已驳回、创作中、拍摄中、发布中按语义显示不同的双主题柔和底色和中性边框；状态文案与流转不变。
+- 修改范围：选题共享状态色常量、移动端选题列表/详情标签及版本、更新说明和索引。
+- 数据库变化：无迁移，无业务数据写入。
+- 测试结果：Playwright 在 390×844 本地页面载入 Vite 样式后，从真实 `STATUS_COLORS` 与 `STATUS_TEXT` 生成六类状态徽标并逐一读取计算样式。暗色底色分别为 amber `rgba(245, 200, 107, 0.14)`、success `rgba(61, 219, 160, 0.14)`、coral `rgba(255, 122, 147, 0.14)`、primary `rgba(107, 140, 255, 0.14)`、violet `rgba(167, 139, 250, 0.14)`、cyan `rgba(92, 225, 230, 0.14)`；浅色对应为 `rgba(120, 53, 15, 0.08)`、`rgba(6, 95, 70, 0.08)`、`rgba(159, 18, 57, 0.08)`、`rgba(61, 90, 254, 0.08)`、`rgba(91, 33, 182, 0.08)`、`rgba(21, 94, 117, 0.08)`。React SSR 逐项断言列表七种状态输出正确文案和颜色类。类型、版本、定向 ESLint、构建和 diff 检查通过；构建有既有 Silk 背景 chunk >500 kB 非阻断提示。
+- 风险说明：尝试以 Android Development Runtime 进行 Playwright 页面验收时，本地服务的 `/v1/auth/mobile/login` 返回 404，未能进入真实移动列表/详情；本次仅完成状态徽标的组件 SSR 与实际 Tailwind 主题样式矩阵验证，移动端真实交互和生产仍未验收。
+- 下一阶段：继续排查其他状态/提示组件以及全站主题表面。
+
+## v3.3.9 复盘状态标签主题底色（2026-09-27）
+
+- 完成内容：复盘的草稿/已发布状态及行动项的进行中/已完成状态改用双主题柔和底色和中性边框；状态与操作逻辑不变。
+- 修改范围：复盘共用状态标签及版本、更新说明和索引。
+- 数据库变化：无迁移，无业务数据写入。
+- 测试结果：Playwright 本机隔离数据库副本打开 `/retrospectives/1`，1366×768 页面身份正确、正文非空。已发布标签暗色背景为 `rgba(61, 219, 160, 0.14)`、浅色为 `rgba(6, 95, 70, 0.08)`，两主题文字均为高对比 success 字色；390×844 下标签仍可见，控制台/页面错误为 0。服务端渲染逐项断言 draft/published/archived/todo/doing/done/cancelled 七种状态都使用预期的语义底色或中性表面与中性边框。`npm run check`、`npm run build`、`npm run version:check`、定向 ESLint 和 `git diff --check` 通过；构建有既有 Silk 背景 chunk >500 kB 非阻断提示。
+- 风险说明：管理员详情页中行动项处于可编辑模式，未通过真实 UI 展示只读行动项状态徽标；七种行动/复盘状态映射另由 React SSR 合同断言覆盖。隔离副本复盘列表默认只查近 30 天；已存在记录的复盘周期为 2026-06-30 至 2026-07-06，超出默认时间范围，因此列表空态符合筛选条件。生产未验收。
+- 下一阶段：继续排查其他共享状态标签和全站主题表面。
+
+## v3.3.8 灵感标签主题底色（2026-09-27）
+
+- 完成内容：灵感类别和“已转选题”标记改用双主题语义柔和底色；灵感转化、评论通知和数据均不变。
+- 修改范围：灵感库标签样式及版本、更新说明和索引。
+- 数据库变化：无迁移，无业务数据写入。
+- 测试结果：Playwright 本机隔离数据库副本 `http://127.0.0.1:5174/inspirations`，1366×768：登录后收起更新提示、展开“内容生产”并点击“灵感库”，页面标题正确、正文非空；类别标签可见，已转选题标签存在。暗色状态标签背景为 `rgba(61, 219, 160, 0.14)`、文字为 `rgb(185, 245, 220)`；浅色背景为 `rgba(6, 95, 70, 0.08)`、文字为 `rgb(6, 95, 70)`。口播类别暗色背景为 `rgba(107, 140, 255, 0.14)`。页面错误与控制台错误均为 0。`npm run check`、`npm run build`、`npm run version:check`、定向 ESLint 和 `git diff --check` 均通过；构建有既有 Silk 背景 chunk >500 kB 的非阻断提示。
+- 风险说明：使用隔离数据库进行页面验收，生产未验收。
+- 下一阶段：继续按历史改造页面排查并修复仍使用 CSS 变量透明度工具类的状态标签。
+
+## v3.3.7 发布详情状态标签主题底色（2026-09-27）
+
+- 完成内容：发布详情的已发布、发布失败、已预定和待发布标签改用双主题语义柔和底色、高对比文字和中性边框；状态与流程不变。
+- 修改范围：发布详情状态标签及版本、更新说明和索引。
+- 数据库变化：无迁移，无业务数据写入。
+- 测试结果：Google Chrome 扩展浏览器在 1200×720 本机隔离数据库副本中从发布列表打开“已发布”详情 `/publishing/30` 和“待发布”详情 `/publishing/34`；两条路由均正常渲染。已发布标签修复前无可见底色，修复后暗色、浅色均有 success 柔和底色；待发布标签浅色主题呈现 amber 柔和底色。明暗主题切换与返回列表交互正常，未修改状态或业务记录。`npm run check`、`npm run build`、`npm run version:check` 和 `git diff --check` 通过；定向 ESLint 0 错误、4 条警告（3 个未使用导入、1 个 Hook 依赖提示）；构建有已知 Silk 背景 chunk >500 kB 非阻断警告。
+- 风险说明：使用隔离数据库副本，生产未验收。
+- 下一阶段：继续按页面回归其余历史主题标签与表面，优先检查仍使用 CSS 变量色透明度工具类的状态标签。
+
+## v3.3.6 成片制作详情标签主题底色（2026-09-27）
+
+- 完成内容：计划中/制作中/已完成/已取消阶段标签、本地编辑版本提示和制作完成提示改用现有双主题语义柔和底色与高对比文字；状态与流程逻辑不变。
+- 修改范围：成片制作详情样式及版本、更新说明和索引。
+- 数据库变化：无迁移，无业务数据写入。
+- 测试结果：Browser 插件不可用，改用 Playwright 在隔离数据库副本验收。成片详情 `/shooting/42` 的“计划中”暗色背景为 `rgba(245, 200, 107, 0.14)`、浅色为 `rgba(120, 53, 15, 0.08)`；“本地编辑版”暗色为 `rgba(107, 140, 255, 0.14)`、浅色为 `rgba(61, 90, 254, 0.08)`。此前改造的创作列表“草稿”和选题详情“已通过”仍有非透明底色；灵感库正常加载；浏览器页面错误 0。`npm run check`、`npm run build`、版本检查和 `git diff --check` 通过；定向 ESLint 0 错误、1 条既有 Hook 依赖警告；构建有已知 Silk 背景 chunk >500 kB 提示。
+- 风险说明：测试使用隔离数据库副本，未写入原始业务数据；完成提示未用会推进状态的操作触发，生产未验收。
+- 下一阶段：继续回归其余历史改造页面与主题标签。
+
+## v3.3.5 选题详情阶段标签主题底色（2026-09-27）
+
+- 完成内容：选题详情状态标签复用 v3.3.4 的 primary/cyan/violet/coral/amber/success 双主题语义柔和底色和中性边框；业务状态与流转不变。
+- 修改范围：选题详情状态样式及版本、更新说明和索引。
+- 数据库变化：无迁移，无业务数据写入。
+- 测试结果：Browser 插件不可用，使用 Playwright 在 1440×900 隔离数据库页面从选题列表打开详情；浅色 `已通过` 背景 `rgba(6, 95, 70, 0.08)`，暗色背景 `rgba(61, 219, 160, 0.14)`，控制台错误为 0。`npm run check`、版本检查、构建和 diff 检查通过；定向 ESLint 零错误、6 条既有警告；构建有已知 Silk chunk >500 kB 非阻断提示。
+- 风险说明：测试仅覆盖桌面选题详情，移动端使用独立页面未纳入；使用隔离数据库副本，未写入业务数据；生产未验收。
+- 下一阶段：继续核验其他页面对 CSS 变量色透明度工具类的使用情况。
+
+## v3.3.4 创作列表状态标签主题底色（2026-09-24）
+
+- 完成内容：创作列表的选题状态和稿件状态标签改用显式双主题语义柔和底色与中性边框；新增 primary/cyan/violet/coral/amber/success 六种柔和底色令牌。
+- 修改范围：Studio 主题令牌、Tailwind 令牌映射、创作列表状态标签及版本文档。
+- 数据库变化：无迁移，无业务数据写入。
+- 测试结果：Browser 插件当前不可用，改用 Playwright 在 `http://127.0.0.1:5174/production` 的 1440×900 页面验证 20 条创作记录及状态标签；暗色 `草稿` 背景 `rgba(245, 200, 107, 0.14)`，浅色 `rgba(120, 53, 15, 0.08)`，两主题均非透明，控制台错误为 0。`npm run check`、定向 ESLint、版本检查、构建和 diff 检查通过；构建有已知 Silk chunk >500 kB 非阻断提示。
+- 风险说明：浏览器使用隔离数据库副本；截图仅包含标签，保存于 `/tmp/xmt-production-status-light.png` 和 `/tmp/xmt-production-status-dark.png`。移动端使用独立页面，未纳入本轮；生产未验收。
+- 下一阶段：继续核验其他页面对 CSS 变量色透明度工具类的使用情况。
+
+## v3.3.3 灵感新评论提示对比度（2026-09-24）
+
+- 完成内容：灵感库“有新评论”标签由未生效的 cyan 半透明底和普通 cyan 字色改为主题柔和表面及高对比文字令牌；不改评论事件、通知逻辑或展示时长。
+- 修改范围：灵感标签样式及版本、更新说明。
+- 数据库变化：无迁移；真实业务记录不变。
+- 测试结果：隔离数据库副本双会话 Playwright 由另一成员发表评论，接收页面真实收到 Socket 事件并显示标签；浅/暗主题计算样式均使用柔和表面，控制台错误为 0。`npm run version:check`、`npm run check`、定向 ESLint、`npm run build`、`git diff --check` 通过；构建有已知 Silk 背景 chunk >500 kB 非阻断警告。
+- 风险说明：浏览器验收使用隔离副本及临时账号/灵感/评论，副本和测试服务已清理；生产未验收。
+- 下一阶段：继续盘点全站剩余主题语义色和表面。
+
+## v3.3.2 趋势周期主题对比度（2026-09-24）
+
+- 当前版本：v3.3.2；Creator Agent 版本保持不变。
+- 完成内容：数据趋势中心周期按钮移除低对比白字/cyan 实色及未生效的半透明底，改用可见主题柔和表面、cyan 对比字和强调边框。
+- 修改范围：趋势中心组件及版本、更新说明和验证文档。
+- 数据库变化：无迁移；趋势 API 用 Playwright 临时响应验证，不改真实趋势数据。
+- 测试结果：浅/暗色 1440×900 浏览器均可切换至 7 天并发出对应请求，控制台错误为 0；选中文字对背景对比度 6.47:1 / 13.87:1。另在隔离数据库副本复测暗色批注添加、编辑和取消成功。`npm run check`、版本检查、定向 ESLint、构建和 diff 检查通过。
+- 风险说明：Creator Trends 使用临时 API 响应验证周期交互；真实账号趋势权限与数据含义未在本轮重新验收。生产未验收。
+- 下一阶段：继续盘点语义色低对比标签（含灵感“有新评论”状态）和全站剩余主题表面。
+
+## v3.3.1 编辑器浅色主题批注输入修正（2026-09-24）
+
+- 当前版本：v3.3.1；Creator Agent 版本保持不变。
+- 完成内容：编辑器浅色模式下的批注输入框不再使用硬编码白底和灰色占位色，改用 Studio 表面与文本令牌。
+- 修改范围：`src/components/editor/Editor.tsx` 及版本、更新说明和验证记录。
+- 数据库变化：无迁移，无正式数据写入。
+- 测试结果：`npm run version:check`、`npm run check`、定向 ESLint、`git diff --check`、`npm run build` 通过；隔离数据库副本上 1440×900 Playwright 打开并取消批注输入框，浅色表面、文字和占位色正确，控制台错误为 0。构建有已知 Silk 背景 chunk >500 kB 非阻断警告。
+- 风险说明：仅验收浅色桌面添加批注入口；暗色主题及已有批注编辑状态未在本轮复测，生产未验收。
+- 下一阶段：继续审查全站尚未检查的主题表面和关键表单控件；完成后再进入状态/正文真源改造。
+
+## v3.3.0 选题草稿、窄屏列表与编辑器写作辅助（2026-09-24）
+
+- 当前版本：v3.3.0；Creator Agent 版本保持不变。
+- 完成内容：新增选题本机草稿可续写且不会创建服务端选题；提报成功直达详情；大纲迁出旧编辑器；选题表格与工具栏适配窄屏；编辑器销毁态访问增加保护；统一编辑器支持查找替换、目标字数、进度和预计阅读时长；创作详情支持专注写作、按大纲补入缺失小节、资料全文或经原文校验的选中片段引用，以及当前稿件“已用/待用”标记；选题详情不再向待审核项显示服务端禁止的通用推进动作；创作版本被替代时改用编辑器内提示并保持只读；手机创作页允许编辑器工具栏浮层溢出；本轮另统一侧栏、全局顶部栏、命令面板、选题表格、资料中心、日报、复盘、公告/匿名意见、编辑器菜单、导航外观及外观预览部分组件的浅色主题表面令牌，修正企业登录悬停文字对比和深色主按钮对比度，令双主题预览矩阵在各自令牌作用域内渲染，并收敛旧主题 hook 到应用 store。
+- 修改范围：新增选题页、选题列表、响应式表格壳、应用布局、创作详情、编辑器生命周期与写作辅助及版本文档。
+- 数据库变化：无迁移；不自动删除旧版“保存草稿”已生成的选题。
+- 测试结果：见 `releases/v3.3.0-topic-drafts-responsive.md`。
+- 风险说明：本机草稿仅在当前设备和账号可读，需手动点击保存；真实账号下旧 HTML 的格式保真仍需验收。
+- 当前验证补充：认证网关单测、`npm run test:reactbits-theme`、`npm run check` 与 `npm run build` 通过；生产构建有 Silk 背景 chunk >500 kB 的非阻断提示。浏览器登录 500 已定位为测试 Vite 使用 5175，而本地 CORS 白名单只允许默认 5174；改用默认端口后认证和首页工作台可用。同步修正旧浏览器脚本的更新弹窗容器/首页文案定位，并检查深浅主题按钮矩阵渐变端点对比度及首页 1440px/390px 横向溢出。验证写入仅发生在隔离数据库副本，该副本与本地服务均已清理；原数据库只读完整性检查为 `ok`。
+- 下一阶段：当前实际首页为“工作台”，已在明暗主题、1440px/390px 视口完成首屏与内容生产入口检查；旧 `DashboardBento` 未挂载到首页，需在后续清单项中确认是否重新接入，不能将该组件单独视为首页验收。之后逐项确认深色品牌区域、编辑器其余控件和全站剩余页面，再推进流程状态兼容改造；资料片段自动识别来源须先设计 provenance 契约，当前仅支持手动选源并校验原文。
+
+继续修正选题预览“待审核”及灵感分类/“已转选题”的浅色语义文字，改用现有高对比 `*-contrast` token。Playwright 在 1440×900 浅色主题中确认目标标签可见且前景为高对比 token 颜色，控制台错误为 0；`npm run test:light-theme-contrast` 使用本地允许的 5174 地址通过。`npm run check`、`git diff --check` 通过；定向 ESLint 无错误但有 3 条警告。只使用隔离数据库副本，生产未验收。
+
+本轮续做：编辑器颜色/高亮子菜单浅色表面与右键悬停前景已按主题令牌修正；查找替换、写作指标、大纲辅助专项测试和类型检查通过。独立真实浏览器交互验收仍待完成。
+
+继续检查编辑器工具栏、块操作与批注控件：修正浅色首行缩进/标题菜单已启用态的同色叠字、白底硬编码及删除批注悬停同色问题。已用 测试账号 在隔离数据库副本通过 390×844 Playwright 登录浏览器检查首行缩进启用态、菜单表面与零控制台错误；生产验收不在本次范围内。
+
+全站浅色主题继续发现当前富文本浮动格式栏的激活按钮同色叠字；已改为主色底白字。隔离数据库副本认证浏览器中实际选择文本并启用加粗，390×844 可见正确激活态且控制台错误为 0。
+
 ## v3.2.0 产品工作流全面改造（2026-09-23）
 
 - 当前版本：v3.2.0；Creator Agent 版本保持不变。

@@ -2,16 +2,20 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { bindCreatorAgent, createCreatorAgentBindingCode, getCreatorCenterData, heartbeatCreatorAgent, registerCreatorAgent } from '../services/creatorAgent.js';
 import { getUnifiedCreatorCenterData } from '../services/creatorDataCenter.js';
-import { acceptCreatorDataSync } from '../services/creatorSyncV291.js';
+import { acceptCreatorDataSync, CreatorSyncAlreadyRunningError } from '../services/creatorSyncV291.js';
 import { creatorInsightService, getCreatorInsights } from '../services/creatorInsights.js';
 import { canManageCreatorAccount, grantCreatorAccountAccess } from '../services/creatorAccess.js';
 import { canManageCreatorData, resolveManageScope, resolveViewScope } from '../services/creatorDataVisibility.js';
-import { requirePermission } from '../middleware/permissions.js';
+import { requirePermission, userHasPermission } from '../middleware/permissions.js';
 import { creatorAnalyticsService, type ReportType } from '../services/creatorAnalytics.js';
 import { getDouyinDashboard, getDouyinManagedCover, getDouyinSyncLogs, getDouyinTrends, getDouyinWorkDetail, getDouyinWorkReview, getDouyinWorks } from '../services/douyinDataCenter.js';
+import { attachCreatorTopicSuggestionFeedback, saveCreatorTopicSuggestionFeedback } from '../services/creatorTopicSuggestionFeedback.js';
 import { queryAll } from '../database/utils.js';
 const router=express.Router();
 const creatorError = (res: express.Response, error: unknown, fallback: string, defaultStatus = 500) => {
+  if (error instanceof CreatorSyncAlreadyRunningError) {
+    return res.set('Retry-After', '5').status(503).json({ success: false, code: 'CREATOR_SYNC_BUSY', message: error.message });
+  }
   const candidate = Number((error as { statusCode?: unknown })?.statusCode ?? defaultStatus);
   const status = Number.isInteger(candidate) && candidate >= 400 && candidate < 500 ? candidate : 500;
   return res.status(status).json({ success: false, message: status < 500 && error instanceof Error ? error.message : fallback });
@@ -20,7 +24,26 @@ const requestedPlatformUid = (value: unknown) => typeof value === 'string' && va
 const resolveCreatorViewScope = (role: string, platformUid?: string) => resolveViewScope(role,'douyin',platformUid);
 const resolveCreatorManageScope = (role: string, platformUid?: string) => resolveManageScope(role,'douyin',platformUid);
 router.get('/status',authenticate,requirePermission('creator:data:view'),async(_req,res)=>{try{const agents=await queryAll<Record<string,unknown>>(`SELECT id,device_id,device_name,os,agent_version,protocol_version,browser_login_status,browser_type,browser_version,browser_engine,browser_runtime,browser_session_mode,browser_compatibility,status,last_heartbeat_at,last_success_sync_at,last_attempt_sync_at,account_id,CASE WHEN last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) >= datetime('now','+8 hours','-2 minutes') THEN 1 ELSE 0 END AS online FROM creator_agents WHERE platform='douyin' ORDER BY COALESCE(last_heartbeat_at,last_active_at) DESC`);res.json({agents:agents.map(agent=>({...agent,device_id:String(agent.device_id||'').slice(0,8)})),protocol_version:1});}catch(error){creatorError(res,error,'Agent 状态加载失败');}});
-router.get('/douyin/dashboard',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});const data=await getDouyinDashboard(scope.id);if(!data)return res.status(404).json({message:'该账号尚未完成标准化同步'});res.json({...data,access_level:scope.access_level});}catch(error){creatorError(res,error,'抖音驾驶舱加载失败');}});
+router.get('/douyin/dashboard',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});const data=await getDouyinDashboard(scope.id);if(!data)return res.status(404).json({message:'该账号尚未完成标准化同步'});const suggestions=data.topic_suggestions?{...data.topic_suggestions,items:await attachCreatorTopicSuggestionFeedback(scope.id,req.user!.id,data.topic_suggestions.items)}:undefined;res.json({...data,topic_suggestions:suggestions,access_level:scope.access_level});}catch(error){creatorError(res,error,'抖音驾驶舱加载失败');}});
+router.post('/douyin/suggestions/:suggestionId/feedback',authenticate,requirePermission('creator:data:view'),async(req,res)=>{
+  try{
+    const suggestionId=String(req.params.suggestionId||'');
+    const evidenceId=String(req.body?.evidence_id||'');
+    const outcome=req.body?.outcome;
+    const accountUid=requestedPlatformUid(req.body?.account_id);
+    if(!/^[a-f0-9]{20}$/.test(suggestionId)||!/^[a-f0-9]{32}$/.test(evidenceId))return res.status(400).json({message:'创作建议标识无效'});
+    if(outcome!=='adopted'&&outcome!=='not_adopted')return res.status(400).json({message:'反馈选项无效'});
+    if(outcome==='adopted'&&!await userHasPermission(req.user!.id,'topic:create'))return res.status(403).json({message:'需有提报选题权限才能记录已采纳'});
+    if(!accountUid)return res.status(400).json({message:'缺少创作者账号范围'});
+    const scope=await resolveCreatorViewScope(req.user!.role,accountUid);
+    if(!scope)return res.status(404).json({message:'未找到可查看的抖音账号'});
+    const dashboard=await getDouyinDashboard(scope.id);
+    const item=dashboard?.topic_suggestions?.items.find(candidate=>candidate.id===suggestionId&&candidate.evidence_id===evidenceId);
+    if(!item)return res.status(409).json({message:'该建议的样本已更新，请刷新后重新反馈'});
+    const feedback=await saveCreatorTopicSuggestionFeedback({creatorAccountId:scope.id,userId:req.user!.id,item,outcome});
+    return res.json({feedback});
+  }catch(error){return creatorError(res,error,'创作建议反馈保存失败');}
+});
 router.get('/douyin/works',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});res.json(await getDouyinWorks(scope.id,String(req.query.sort||'latest'),Number(req.query.limit)||20,requestedPlatformUid(req.query.cursor)));}catch(error){creatorError(res,error,'抖音作品库加载失败');}});
 router.get('/douyin/works/:id/review',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});const data=await getDouyinWorkReview(scope.id,Number(req.params.id));if(!data)return res.status(404).json({message:'作品不存在或不在查看范围内'});res.json(data);}catch(error){creatorError(res,error,'作品复盘加载失败');}});
 router.get('/douyin/works/:id',authenticate,requirePermission('creator:data:view'),async(req,res)=>{try{const scope=await resolveCreatorViewScope(req.user!.role,requestedPlatformUid(req.query.account_id));if(!scope)return res.status(404).json({message:'未找到已同步抖音账号'});const data=await getDouyinWorkDetail(scope.id,Number(req.params.id));if(!data)return res.status(404).json({message:'作品不存在或不在查看范围内'});res.json(data);}catch(error){creatorError(res,error,'作品复盘加载失败');}});

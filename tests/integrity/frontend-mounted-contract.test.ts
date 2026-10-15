@@ -14,5 +14,7 @@ assert.doesNotMatch(apiSource, /\/api\/social-review|\/latest-snapshot/);
 assert.doesNotMatch(apiSource, /scrapeDouyin|getDouyinSnapshots|getDouyinTrend\b/);
 assert.match(app, /path="\/analytics\/creator-center"/);
 assert.match(app, /path="\/templates"/);
+assert.match(app, /RoleGuard permissions=\{\['analytics:retro:view'\]\}\s*\/>\}>[\s\S]{0,100}<Route path="\/retrospectives"/);
+assert.match(navigation, /id: 'retrospectives'[\s\S]{0,180}path: '\/retrospectives', permissions: \['analytics:retro:view'\]/);
 
 console.log('Frontend mounted API contract tests passed');

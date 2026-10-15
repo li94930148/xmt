@@ -1,6 +1,9 @@
-import crypto from 'crypto';
 import rateLimit, { ipKeyGenerator, type RateLimitRequestHandler } from 'express-rate-limit';
 import type { NextFunction, Request, Response } from 'express';
+import type { Logger } from 'pino';
+import { apiLogger } from '../observability/logger.js';
+
+type RateLimitLogger = Pick<Logger, 'debug' | 'info' | 'warn'>;
 
 type LimiterDimension = 'api' | 'login_ip' | 'login_account' | 'password_change';
 
@@ -54,54 +57,62 @@ function requestId(req: Request) {
   return req.get('x-request-id')?.slice(0, 128);
 }
 
-function logRateLimitEvent(req: Request, dimension: LimiterDimension, retryAfter: number) {
-  const username = normalizeLoginUsername(req.body?.username);
-  console.warn('[rate-limit]', {
-    timestamp: new Date().toISOString(), limiter: dimension, ip: req.ip, method: req.method, originalUrl: req.originalUrl,
-    usernameHash: username === 'anonymous' ? undefined : crypto.createHash('sha256').update(username).digest('hex').slice(0, 12),
-    retryAfterSeconds: retryAfter, userAgent: req.get('user-agent')?.slice(0, 200), requestId: requestId(req),
-  });
+function logRateLimitEvent(req: Request, dimension: LimiterDimension, retryAfter: number, logger: RateLimitLogger) {
+  logger.warn({
+    requestId: requestId(req),
+    module: dimension.startsWith('login') ? 'auth' : 'api',
+    operation: 'rate_limit.triggered',
+    limiter: dimension,
+    method: req.method,
+    retryAfterSeconds: retryAfter,
+    error: { code: 'RATE_LIMITED' },
+  }, 'api.request.rate_limited');
 }
 
-export function logFailedLogin(req: Request, res: Response, next: NextFunction) {
-  res.once('finish', () => {
-    if (res.statusCode < 400 || res.statusCode === 429) return;
-    const username = normalizeLoginUsername(req.body?.username);
-    console.warn('[auth-login-failed]', {
-      timestamp: new Date().toISOString(), ip: req.ip, method: req.method, originalUrl: req.originalUrl,
-      usernameHash: username === 'anonymous' ? undefined : crypto.createHash('sha256').update(username).digest('hex').slice(0, 12),
-      statusCode: res.statusCode, userAgent: req.get('user-agent')?.slice(0, 200), requestId: requestId(req),
+export function createLogFailedLogin(logger: RateLimitLogger = apiLogger) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    res.once('finish', () => {
+      if (res.statusCode < 400 || res.statusCode === 429) return;
+      logger.warn({
+        requestId: requestId(req),
+        module: 'auth',
+        operation: 'login.failed',
+        method: req.method,
+        statusCode: res.statusCode,
+      }, 'api.authentication.failed');
     });
-  });
-  next();
+    next();
+  };
 }
 
-function createHandler(dimension: LimiterDimension, windowMs: number) {
+export const logFailedLogin = createLogFailedLogin();
+
+function createHandler(dimension: LimiterDimension, windowMs: number, logger: RateLimitLogger) {
   return (req: Request, res: Response) => {
     const retryAfter = retryAfterSeconds(req, windowMs);
     res.setHeader('Retry-After', String(retryAfter));
-    logRateLimitEvent(req, dimension, retryAfter);
+    logRateLimitEvent(req, dimension, retryAfter, logger);
     res.status(429).json({ success: false, code: 'RATE_LIMITED', message: '请求过于频繁，请稍后再试', dimension, retryAfterSeconds: retryAfter, requestId: requestId(req) });
   };
 }
 
-function makeLimiter(dimension: LimiterDimension, options: { enabled: boolean; windowMs: number; max: number; keyGenerator?: (req: Request) => string; skipSuccessfulRequests?: boolean }): RateLimitRequestHandler {
+function makeLimiter(dimension: LimiterDimension, options: { enabled: boolean; windowMs: number; max: number; keyGenerator?: (req: Request) => string; skipSuccessfulRequests?: boolean }, logger: RateLimitLogger): RateLimitRequestHandler {
   return rateLimit({
     windowMs: options.windowMs, max: options.max, keyGenerator: options.keyGenerator, skip: () => !options.enabled,
-    skipSuccessfulRequests: options.skipSuccessfulRequests, handler: createHandler(dimension, options.windowMs),
+    skipSuccessfulRequests: options.skipSuccessfulRequests, handler: createHandler(dimension, options.windowMs, logger),
     standardHeaders: 'draft-7', legacyHeaders: false,
   });
 }
 
-export function createRateLimiters(config = getRateLimitConfig()) {
+export function createRateLimiters(config = getRateLimitConfig(), logger: RateLimitLogger = apiLogger) {
   if (config.diagnostics) {
-    console.info('[rate-limit] diagnostics enabled', { api: config.api, loginIp: config.loginIp, loginAccount: config.loginAccount });
+    logger.debug({ api: config.api, loginIp: config.loginIp, loginAccount: config.loginAccount }, 'api.rate_limit.diagnostics');
   }
   return {
-    apiLimiter: makeLimiter('api', config.api),
-    loginIpLimiter: makeLimiter('login_ip', { ...config.loginIp, keyGenerator: (req) => ipKeyGenerator(req.ip || '') }),
-    loginAccountLimiter: makeLimiter('login_account', { ...config.loginAccount, keyGenerator: (req) => normalizeLoginUsername(req.body?.username), skipSuccessfulRequests: true }),
-    passwordChangeLimiter: makeLimiter('password_change', { enabled: true, windowMs: 60 * 60_000, max: 3 }),
+    apiLimiter: makeLimiter('api', config.api, logger),
+    loginIpLimiter: makeLimiter('login_ip', { ...config.loginIp, keyGenerator: (req) => ipKeyGenerator(req.ip || '') }, logger),
+    loginAccountLimiter: makeLimiter('login_account', { ...config.loginAccount, keyGenerator: (req) => normalizeLoginUsername(req.body?.username), skipSuccessfulRequests: true }, logger),
+    passwordChangeLimiter: makeLimiter('password_change', { enabled: true, windowMs: 60 * 60_000, max: 3 }, logger),
   };
 }
 

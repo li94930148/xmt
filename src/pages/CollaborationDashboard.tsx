@@ -24,11 +24,11 @@ function formatTime(timestamp?: number | null) {
 
 function eventColor(type: UnifiedTimelineEvent['type']) {
   const colors: Record<UnifiedTimelineEvent['type'], string> = {
-    edit: 'bg-studio-primary/15 text-studio-primary',
-    save: 'bg-studio-success/15 text-studio-success',
-    version: 'bg-studio-violet/15 text-studio-violet',
-    snapshot: 'bg-studio-violet/15 text-studio-violet',
-    conflict: 'bg-studio-coral/15 text-studio-coral',
+    edit: 'bg-studio-primary/15 text-studio-primary-contrast',
+    save: 'bg-studio-success/15 text-studio-success-contrast',
+    version: 'bg-studio-violet/15 text-studio-violet-contrast',
+    snapshot: 'bg-studio-violet/15 text-studio-violet-contrast',
+    conflict: 'bg-studio-coral/15 text-studio-coral-contrast',
   };
   return colors[type];
 }
@@ -105,7 +105,7 @@ export default function CollaborationDashboard() {
             />
             <button
               onClick={() => loadData(docId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary-button disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4" />
               刷新
@@ -204,7 +204,7 @@ export default function CollaborationDashboard() {
                         {formatTime(event.timestamp)}
                       </span>
                     </div>
-                    {event.type === 'snapshot' && <p className="mt-2 truncate text-xs text-studio-violet">{event.id}</p>}
+                    {event.type === 'snapshot' && <p className="mt-2 truncate text-xs text-studio-violet-contrast">{event.id}</p>}
                     {event.payload && (
                       <p className={`mt-3 rounded-lg p-3 text-xs ${styles.bgSecondary} ${styles.textSecondary}`}>
                         {diffSummary(event.payload)}
@@ -236,7 +236,7 @@ export default function CollaborationDashboard() {
                   {conflicts.length ? (
                     <div className="flex flex-wrap gap-2">
                       {conflicts.map((event) => (
-                        <span key={event.id} className="rounded-full bg-studio-coral/10 px-3 py-1 text-xs text-studio-coral">
+                        <span key={event.id} className="rounded-full bg-studio-coral/10 px-3 py-1 text-xs text-studio-coral-contrast">
                           {event.payload?.label ? String(event.payload.label) : event.id}
                         </span>
                       ))}
@@ -308,8 +308,8 @@ export default function CollaborationDashboard() {
                 <div className="space-y-2">
                   {conflicts.map((event) => (
                     <div key={event.id} className="rounded-lg border border-studio-coral/20 bg-studio-coral/10 p-3">
-                      <p className="text-sm font-medium text-studio-coral">{event.userId}</p>
-                      <p className="mt-1 text-xs text-studio-coral/80">{formatTime(event.timestamp)}</p>
+                      <p className="text-sm font-medium text-studio-coral-contrast">{event.userId}</p>
+                      <p className="mt-1 text-xs text-studio-coral-contrast">{formatTime(event.timestamp)}</p>
                     </div>
                   ))}
                 </div>

@@ -10,6 +10,20 @@ export function calculateContextMenuPosition(pointer: Point, menu: Size, viewpor
   };
 }
 
+export function getContextMenuSubmenuSide(
+  menuPosition: Point,
+  menu: Size,
+  submenu: Size,
+  viewport: Size,
+  margin = 8,
+): 'left' | 'right' {
+  const availableRight = viewport.width - (menuPosition.x + menu.width) - margin;
+  const availableLeft = menuPosition.x - margin;
+  if (availableRight >= submenu.width) return 'right';
+  if (availableLeft >= submenu.width) return 'left';
+  return availableLeft >= availableRight ? 'left' : 'right';
+}
+
 export function shouldShowEditorBubbleMenu(input: { contextMenuOpen: boolean; codeBlock: boolean; from: number; to: number }) {
   return !input.contextMenuOpen && !input.codeBlock && input.from !== input.to;
 }

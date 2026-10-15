@@ -6,6 +6,7 @@ import { formatDate, retroActionStatusLabels } from './retroLabels';
 type Props = {
   actions: RetroAction[];
   loading: boolean;
+  error: string | null;
   onRefresh: () => void;
   onOpen: (retroId: number) => void;
 };
@@ -18,9 +19,9 @@ function isOverdue(action: RetroAction) {
   return Boolean(action.dueDate && action.dueDate < today() && action.status !== 'done' && action.status !== 'cancelled');
 }
 
-export default function MyRetroActionsPanel({ actions, loading, onRefresh, onOpen }: Props) {
+export default function MyRetroActionsPanel({ actions, loading, error, onRefresh, onOpen }: Props) {
   return (
-    <GlassPanel className="p-5">
+    <GlassPanel data-testid="my-retro-actions-panel" className="p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-bold text-studio-text-primary">我的复盘行动项</h2>
@@ -32,12 +33,19 @@ export default function MyRetroActionsPanel({ actions, loading, onRefresh, onOpe
         </ActionButton>
       </div>
 
+      {error ? (
+        <div role="alert" className="mt-4 flex flex-col gap-3 rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-primary sm:flex-row sm:items-center sm:justify-between">
+          <p>{actions.length > 0 ? `行动项刷新失败，仍显示最近一次成功读取的内容：${error}` : `个人行动项暂不可用：${error}`}</p>
+          <ActionButton variant="ghost" onClick={onRefresh} disabled={loading}>重新加载行动项</ActionButton>
+        </div>
+      ) : null}
+
       <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
         {loading ? (
           <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
             正在加载行动项...
           </div>
-        ) : actions.length === 0 ? (
+        ) : error && actions.length === 0 ? null : actions.length === 0 ? (
           <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
             当前没有需要你跟进的复盘行动项。
           </div>
@@ -60,7 +68,7 @@ export default function MyRetroActionsPanel({ actions, loading, onRefresh, onOpe
                 {retroActionStatusLabels[action.status]}
               </span>
               <span className="text-studio-text-muted">截止 {formatDate(action.dueDate)}</span>
-              {isOverdue(action) ? <span className="rounded-full bg-studio-coral/10 px-2 py-0.5 text-studio-coral">已逾期</span> : null}
+              {isOverdue(action) ? <span className="rounded-full bg-studio-coral/10 px-2 py-0.5 text-studio-coral-contrast">已逾期</span> : null}
             </div>
           </button>
         ))}

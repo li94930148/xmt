@@ -1,58 +1,47 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
 import { createTopic, getUsers } from '../api';
 import ContentEditor from '../components/ContentEditor';
-import { ChevronLeft, FileText, List, Calendar, User as UserIcon, Send, Save, Eye, EyeOff } from 'lucide-react';
+import { ChevronLeft, FileText, List, Send, Save, Eye, EyeOff } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingDate } from '../lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { celebrateMilestone } from '../utils/confetti';
-import { clearSafeDraft, readSafeDraftValue, writeSafeDraft } from '../platform/safe-draft';
-
-const emptyFormData = {
-  title: '',
-  platform: '',
-  deadline: '',
-  assignee_id: '',
-  projectBackground: '',
-  targetAudience: '',
-  expectedGoal: '',
-  budget: '',
-  outline: '',
-};
-
-type TopicDraft = typeof emptyFormData;
-
-function readTopicDraft(key: string | null): TopicDraft | null {
-  if (!key) return null;
-  const draft = readSafeDraftValue<unknown>(key);
-  if (!draft || typeof draft !== 'object') return null;
-  const values = draft as Record<string, unknown>;
-  if (!Object.keys(emptyFormData).every((field) => typeof values[field] === 'string')) return null;
-  return draft as TopicDraft;
-}
+import SimilarTopicReview from '../components/topics/SimilarTopicReview';
+import CreatorTopicSuggestionReference from '../components/topics/CreatorTopicSuggestionReference';
+import TopicDraftPicker from '../components/topics/TopicDraftPicker';
+import { findSimilarTopicsByTitle, normalizeTopicTitle, type SimilarTopic } from '../utils/topic-title-similarity';
+import { creatorTopicSuggestionSourceFromDraft } from '../utils/creatorTopicSuggestionSource';
+import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
+import { hasTopicDraftContent } from '../utils/topicDraft';
+import { useTopicDraftCollection } from '../hooks/useTopicDraftCollection';
+import type { User } from '../types';
 
 export default function AddTopic() {
   const navigate = useNavigate();
+  const location = useLocation();
   const appStore = useAppStore();
   const authStore = useAuthStore();
   const styles = useThemeStyles();
+  const userId = authStore.user?.id;
+  const draftState = useTopicDraftCollection(userId, Boolean(userId));
+  const formData = draftState.form;
+  const setFormData = draftState.setForm;
+  const hasLocalDraft = draftState.drafts.some((entry) => entry.id === draftState.activeDraftId);
+  const draftStorageUnavailable = draftState.storageUnavailable;
   
-  const draftKey = authStore.user?.id ? `topic:new:desktop:${authStore.user.id}` : null;
-  const [formData, setFormData] = useState<TopicDraft>(() => readTopicDraft(draftKey) ?? emptyFormData);
-  const [hasLocalDraft, setHasLocalDraft] = useState(() => Boolean(readTopicDraft(draftKey)));
-  
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-
-  useEffect(() => {
-    const draft = readTopicDraft(draftKey);
-    setFormData(draft ?? emptyFormData);
-    setHasLocalDraft(Boolean(draft));
-  }, [draftKey]);
+  const [similarTopicReview, setSimilarTopicReview] = useState<{
+    title: string;
+    topics: SimilarTopic[];
+    checkFailed: boolean;
+  } | null>(null);
+  const reviewedTitle = useRef<string | null>(null);
+  const submitInFlight = useRef(false);
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -60,65 +49,98 @@ export default function AddTopic() {
         const userList = await getUsers();
         setUsers(userList.data);
       } catch (error) {
-        console.error('获取用户列表失败:', error);
+        emitClientLog({ event: 'topics.user_list_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
       }
     };
     fetchUsers();
   }, []);
 
-  const handleSubmit = async () => {
-    if (!formData.title.trim()) {
+  const handleSubmit = async (confirmedTitle?: string) => {
+    if (submitInFlight.current) return;
+    const title = (confirmedTitle ?? formData.title).trim();
+    if (!title) {
       appStore.addNotification({ title: '提示', message: '请输入选题标题', type: 'warning' });
       return;
     }
 
+    submitInFlight.current = true;
     setSubmitting(true);
+    let draftSaved = false;
     try {
+      draftSaved = hasTopicDraftContent(formData) && draftState.saveCurrentDraft().saved;
+      const normalizedTitle = normalizeTopicTitle(title);
+      if (reviewedTitle.current !== normalizedTitle) {
+        try {
+          const topics = await findSimilarTopicsByTitle(title);
+          if (topics.length > 0) {
+            setSimilarTopicReview({ title, topics, checkFailed: false });
+            return;
+          }
+        } catch {
+          setSimilarTopicReview({ title, topics: [], checkFailed: true });
+          return;
+        }
+        reviewedTitle.current = normalizedTitle;
+      }
+
       // description 只存项目背景和目标受众
       const parts: string[] = [];
       if (formData.projectBackground) parts.push(`【项目背景】\n${formData.projectBackground}`);
       if (formData.targetAudience) parts.push(`【目标受众】\n${formData.targetAudience}`);
 
       const result = await createTopic({
-        title: formData.title,
+        title,
         description: parts.join('\n\n'),
         outline: formData.outline || undefined,
         platform: formData.platform,
         deadline: formData.deadline,
         assignee_id: formData.assignee_id ? parseInt(formData.assignee_id) : null,
+        creator_suggestion_source: creatorTopicSuggestionSourceFromDraft(location.search, formData.projectBackground),
       });
 
       appStore.addNotification({ title: '提报成功', message: '选题已成功提交审核', type: 'success' });
-      if (draftKey) clearSafeDraft(draftKey);
-      setHasLocalDraft(false);
+      if (!draftState.removeSubmittedDraft()) {
+        appStore.addNotification({ title: '草稿清理失败', message: '选题已提交成功，但本机草稿未能清理；请勿重复提报。', type: 'warning' });
+      }
       celebrateMilestone();
       navigate(`/topics/${result.topicId}`);
     } catch (error) {
-      appStore.addNotification({ title: '提报失败', message: (error as Error).message, type: 'error' });
+      const storageWarning = userId && !draftSaved ? '本机草稿未能保存，请勿关闭此页；当前输入仍保留在页面中。' : '';
+      appStore.addNotification({ title: '提报失败', message: [ (error as Error).message, storageWarning ].filter(Boolean).join('；'), type: 'error' });
     } finally {
+      submitInFlight.current = false;
       setSubmitting(false);
     }
   };
 
+  const continueAfterSimilarityReview = () => {
+    if (!similarTopicReview) return;
+    reviewedTitle.current = normalizeTopicTitle(similarTopicReview.title);
+    const title = similarTopicReview.title;
+    setSimilarTopicReview(null);
+    void handleSubmit(title);
+  };
+
   const handleSaveDraft = () => {
-    if (!draftKey) {
+    if (!userId) {
       appStore.addNotification({ title: '保存失败', message: '请重新登录后保存草稿', type: 'error' });
       return;
     }
-    if (!Object.values(formData).some((value) => value.trim())) {
+    if (!hasTopicDraftContent(formData)) {
       appStore.addNotification({ title: '保存失败', message: '请先填写选题内容', type: 'warning' });
       return;
     }
-    if (!writeSafeDraft(draftKey, formData)) {
+    if (!draftState.saveCurrentDraft().saved) {
       appStore.addNotification({ title: '保存失败', message: '本机无法保存草稿，请检查浏览器存储空间', type: 'error' });
       return;
     }
-    setHasLocalDraft(true);
     appStore.addNotification({ title: '已存本机草稿', message: '下次在这台设备打开提报页可继续编辑；尚未提交审核', type: 'success' });
   };
 
+  const draftOperationFailed = () => appStore.addNotification({ title: '草稿未能保存', message: '本机存储暂不可用，请检查浏览器存储空间后重试。', type: 'error' });
+
   return (
-    <div className="space-y-6">
+    <fieldset disabled={submitting} aria-busy={submitting} className="min-w-0 space-y-6 border-0 p-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <button
@@ -135,7 +157,7 @@ export default function AddTopic() {
             onClick={() => setShowPreview(!showPreview)}
             className={`flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 rounded-lg transition-colors ${
               showPreview 
-                ? 'bg-studio-primary text-white' 
+                ? 'bg-studio-primary-button text-white'
                 : `${styles.buttonSecondary}`
             }`}
           >
@@ -151,9 +173,9 @@ export default function AddTopic() {
             存本机草稿
           </button>
           <button
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
             disabled={submitting}
-            className="flex shrink-0 items-center gap-2 whitespace-nowrap px-6 py-2 bg-studio-primary hover:bg-studio-primary disabled:bg-studio-surface-soft text-white rounded-lg transition-colors"
+            className="flex shrink-0 items-center gap-2 whitespace-nowrap px-6 py-2 bg-studio-primary-button hover:bg-studio-primary-button disabled:bg-studio-surface-soft text-white rounded-lg transition-colors"
           >
             <Send className="w-4 h-4" />
             {submitting ? '提交中...' : '提报选题'}
@@ -161,11 +183,28 @@ export default function AddTopic() {
         </div>
       </div>
 
-      {hasLocalDraft && (
-        <p role="status" className="rounded-panel border border-studio-border-soft bg-studio-surface-soft px-4 py-3 text-sm text-studio-text-secondary">
-          当前设备和账号有一份选题草稿；修改后需再次点击“存本机草稿”。提报后才会创建选题。
+      {draftStorageUnavailable && (
+        <p role="status" className="rounded-panel border border-studio-coral/30 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral-contrast">
+          本机存储不可用，最新内容未能保存；请检查浏览器存储空间。当前页面仍保留输入。
         </p>
       )}
+
+      {hasLocalDraft && (
+        <p role="status" className="rounded-panel border border-studio-border-soft bg-studio-surface-soft px-4 py-3 text-sm text-studio-text-secondary">
+          当前账号的提报内容会自动保存在本机；提交审核成功后才会创建选题。
+        </p>
+      )}
+
+      <TopicDraftPicker
+        drafts={draftState.drafts}
+        activeDraftId={draftState.activeDraftId}
+        onSelect={draftState.selectDraft}
+        onCreate={draftState.startNewDraft}
+        onDelete={draftState.deleteDraft}
+        onFailure={draftOperationFailed}
+      />
+
+      <CreatorTopicSuggestionReference background={formData.projectBackground} disabled={submitting} onApply={(reference) => setFormData(current => ({ ...current, projectBackground: [current.projectBackground, reference].filter(Boolean).join('\n\n') }))} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -275,6 +314,7 @@ export default function AddTopic() {
                   onChange={(value) => setFormData({ ...formData, outline: value })}
                   placeholder="请填写大纲内容..."
                   mode="rich"
+                  readOnly={submitting}
                 />
               )}
             </div>
@@ -329,7 +369,7 @@ export default function AddTopic() {
                 <div>
                   <div className={`flex justify-between text-xs mb-1`}>
                     <span className={`${styles.textSecondary}`}>基本信息</span>
-                    <span className={`${formData.title ? 'text-studio-success' : 'text-studio-text-muted'}`}>
+                    <span className={`${formData.title ? 'text-studio-success-contrast' : 'text-studio-text-muted'}`}>
                       {formData.title ? '已填写' : '未填写'}
                     </span>
                   </div>
@@ -343,7 +383,7 @@ export default function AddTopic() {
                 <div>
                   <div className={`flex justify-between text-xs mb-1`}>
                     <span className={`${styles.textSecondary}`}>项目资料</span>
-                    <span className={`${formData.projectBackground || formData.targetAudience || formData.expectedGoal || formData.budget ? 'text-studio-success' : 'text-studio-text-muted'}`}>
+                    <span className={`${formData.projectBackground || formData.targetAudience || formData.expectedGoal || formData.budget ? 'text-studio-success-contrast' : 'text-studio-text-muted'}`}>
                       {formData.projectBackground || formData.targetAudience || formData.expectedGoal || formData.budget ? '已填写' : '未填写'}
                     </span>
                   </div>
@@ -357,7 +397,7 @@ export default function AddTopic() {
                 <div>
                   <div className={`flex justify-between text-xs mb-1`}>
                     <span className={`${styles.textSecondary}`}>大纲结构</span>
-                    <span className={`${formData.outline.includes('请输入') ? 'text-studio-text-muted' : 'text-studio-success'}`}>
+                    <span className={`${formData.outline.includes('请输入') ? 'text-studio-text-muted' : 'text-studio-success-contrast'}`}>
                       {formData.outline.includes('请输入') ? '未填写' : '已填写'}
                     </span>
                   </div>
@@ -373,6 +413,15 @@ export default function AddTopic() {
           </div>
         </div>
       </div>
-    </div>
+      <SimilarTopicReview
+        open={similarTopicReview !== null}
+        title={similarTopicReview?.title ?? ''}
+        topics={similarTopicReview?.topics ?? []}
+        checkFailed={similarTopicReview?.checkFailed}
+        continueLabel="仍然提报"
+        onCancel={() => setSimilarTopicReview(null)}
+        onContinue={continueAfterSimilarityReview}
+      />
+    </fieldset>
   );
 }

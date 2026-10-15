@@ -16,7 +16,6 @@ const { default: workflowRoutes } = await import('../../api/routes/workflow.js')
 const {
   chooseAutomaticPublishingDouyinMatch,
   normalizePublishingTitle,
-  reconcilePublishingDouyinLinks,
   scorePublishingDouyinTitle,
 } = await import('../../api/services/publishingDouyinLink.js');
 
@@ -33,6 +32,7 @@ const adminId = await executeInsert(
   `INSERT INTO users(username,password,email,role,name,enabled,force_change_password) VALUES(?,?,?,?,?,1,0)`,
   ['publishing-link-admin', 'unused', 'publishing-link@example.invalid', 'admin', 'Publishing Link Admin'],
 );
+await execute('INSERT INTO user_roles(user_id,role_id) SELECT ?,id FROM roles WHERE code=?', [adminId, 'admin']);
 const restrictedUserId = await executeInsert(
   `INSERT INTO users(username,password,email,role,name,enabled,force_change_password) VALUES(?,?,?,?,?,1,0)`,
   ['publishing-link-restricted', 'unused', 'publishing-link-restricted@example.invalid', 'member', 'Restricted User'],
@@ -57,13 +57,6 @@ const workId = await executeInsert(
   [accountId],
 );
 
-const reconciliation = await reconcilePublishingDouyinLinks({ createdBy: adminId });
-assert.equal(reconciliation.linked, 1);
-assert.deepEqual(
-  await queryOne('SELECT publishing_id,douyin_work_id,match_method FROM publishing_douyin_links WHERE publishing_id=?', [publishingId]),
-  { publishing_id: publishingId, douyin_work_id: workId, match_method: 'exact' },
-);
-
 const app = express();
 app.use(express.json());
 app.use('/api/workflow', workflowRoutes);
@@ -76,6 +69,22 @@ const headers = { Authorization: `Bearer ${signToken({ userId: adminId })}`, 'Co
 const restrictedHeaders = { Authorization: `Bearer ${signToken({ userId: restrictedUserId })}`, 'Content-Type': 'application/json' };
 
 try {
+  const reconciliationResponse = await fetch(`${base}/publishing/douyin/reconcile`, { method: 'POST', headers });
+  assert.equal(reconciliationResponse.status, 200);
+  assert.equal((await reconciliationResponse.json()).linked, 1);
+  assert.deepEqual(
+    await queryOne('SELECT publishing_id,douyin_work_id,match_method FROM publishing_douyin_links WHERE publishing_id=?', [publishingId]),
+    { publishing_id: publishingId, douyin_work_id: workId, match_method: 'exact' },
+  );
+  assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id=?', [topicId]))?.status, 'completed',
+    'a Douyin work linked during reconciliation counts as a published platform for topic completion');
+  const linkedArchive = await queryOne<{ content: string }>('SELECT content FROM resources WHERE file_path=?', [`archive/topic-${topicId}`]);
+  assert(linkedArchive, 'link reconciliation should archive the effective publication');
+  const linkedArchivePayload = JSON.parse(linkedArchive.content) as { published_records?: Array<{ publishing_id: number; platform: string }> };
+  assert.deepEqual(linkedArchivePayload.published_records?.map(({ publishing_id, platform }) => ({ publishing_id, platform })), [
+    { publishing_id: publishingId, platform: 'douyin' },
+  ]);
+
   const listResponse = await fetch(`${base}/publishing`, { headers });
   assert.equal(listResponse.status, 200);
   const listPayload = await listResponse.json();
@@ -87,6 +96,7 @@ try {
   assert.equal(linked.status, 'published');
   assert.equal(linked.publish_time, '2026-09-10T02:00:00.000Z');
   assert.deepEqual([linked.views, linked.likes, linked.comments, linked.shares], [1200, 88, 19, 7]);
+  assert.deepEqual([linked.views_source, linked.likes_source, linked.comments_source, linked.shares_source], Array(4).fill('douyin_legacy_current'));
 
   await execute('UPDATE douyin_works SET play_count=1500,like_count=99 WHERE id=?', [workId]);
   const refreshed = (await (await fetch(`${base}/publishing`, { headers })).json()).data[0];
@@ -122,9 +132,12 @@ try {
   assert.equal(partialMetricResponse.status, 200);
   assert.deepEqual(
     await queryOne('SELECT views,likes,shares,comments FROM analytics WHERE topic_id=? AND data_date=? ORDER BY id DESC LIMIT 1', [topicId, '2026-01-01']),
-    { views: 7, likes: 2, shares: 1, comments: 4 },
-    'partial metric updates must preserve unspecified metrics',
+    { views: 3, likes: 2, shares: 1, comments: 4 },
+    'editing a publication must not mutate its legacy topic-grain source row',
   );
+  const manualSupplement = (await (await fetch(`${base}/publishing`, { headers })).json()).data.find((row: { id: number }) => row.id === publishingId);
+  assert.deepEqual([manualSupplement.views, manualSupplement.likes, manualSupplement.shares, manualSupplement.comments], [7, 2, 1, 4]);
+  assert.deepEqual([manualSupplement.views_source, manualSupplement.likes_source, manualSupplement.shares_source, manualSupplement.comments_source], ['manual', 'legacy_analytics', 'legacy_analytics', 'legacy_analytics']);
   assert.equal(
     (await queryOne<{ views: number }>('SELECT views FROM analytics WHERE topic_id=? AND data_date=?', [topicId, '2025-12-31']))?.views,
     999,

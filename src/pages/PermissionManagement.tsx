@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
 import { useAppStore, useAuthStore } from '../store';
+import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
 import {
-  Shield, Users, Settings, Plus, Trash2, Edit2, Check, X, ChevronDown, ChevronRight
+  Shield, Users, Settings, Plus, Trash2, Edit2, X, ChevronDown, ChevronRight
 } from 'lucide-react';
+import ConfirmModal from '../components/common/ConfirmModal';
 
 interface Role {
   id: number;
@@ -24,57 +26,86 @@ interface Permission {
   module: string;
 }
 
-interface PermissionGroup {
-  module: string;
-  permissions: Permission[];
+async function getResponseMessage(response: Response, fallback: string) {
+  try {
+    const data = await response.json();
+    return typeof data?.message === 'string' && data.message.trim() ? data.message : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export default function PermissionManagement() {
   const styles = useThemeStyles();
-  const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
   const { hasPermission } = usePermission();
   const token = useAuthStore((state) => state.token);
 
   const [roles, setRoles] = useState<Role[]>([]);
-  const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
   const [groupedPermissions, setGroupedPermissions] = useState<Record<string, Permission[]>>({});
   const [loading, setLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [confirmedWriteNotice, setConfirmedWriteNotice] = useState<string | null>(null);
+  const [mutationBusy, setMutationBusy] = useState(false);
+  const [deletingRole, setDeletingRole] = useState<Role | null>(null);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   const [formData, setFormData] = useState({ code: '', name: '', description: '', permission_ids: [] as number[] });
+  const loadLockRef = useRef(false);
+  const mutationLockRef = useRef(false);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    if (loadLockRef.current) return false;
+    loadLockRef.current = true;
+    setLoading(true);
     try {
       const [rolesRes, permsRes] = await Promise.all([
         fetch('/api/roles', { headers: { Authorization: `Bearer ${token}` } }),
         fetch('/api/permissions', { headers: { Authorization: `Bearer ${token}` } })
       ]);
 
-      if (rolesRes.ok) {
-        const rolesData = await rolesRes.json();
-        setRoles(rolesData);
-      }
+      if (!rolesRes.ok) throw new Error(await getResponseMessage(rolesRes, '角色列表加载失败，请重试。'));
+      if (!permsRes.ok) throw new Error(await getResponseMessage(permsRes, '权限清单加载失败，请重试。'));
 
-      if (permsRes.ok) {
-        const permsData = await permsRes.json();
-        setAllPermissions(permsData.permissions);
-        setGroupedPermissions(permsData.grouped);
-        // 默认展开所有模块
-        setExpandedModules(new Set(Object.keys(permsData.grouped)));
+      const [rolesData, permsData] = await Promise.all([rolesRes.json(), permsRes.json()]);
+      if (!Array.isArray(rolesData) || !Array.isArray(permsData?.permissions) || !permsData?.grouped || typeof permsData.grouped !== 'object') {
+        throw new Error('角色或权限清单格式异常，请重新加载。');
       }
+      setRoles(rolesData);
+      setGroupedPermissions(permsData.grouped);
+      // 默认展开所有模块
+      setExpandedModules(new Set(Object.keys(permsData.grouped)));
+      setHasLoadedOnce(true);
+      setLoadError(null);
+      setConfirmedWriteNotice(null);
+      return true;
     } catch (error) {
-      console.error('获取数据失败:', error);
+      emitClientLog({ event: 'permissions.management_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
+      const message = error instanceof TypeError
+        ? '暂时无法连接，角色与权限列表未加载；请检查网络后重试。'
+        : error instanceof SyntaxError
+          ? '角色与权限数据暂时无法读取，请重新加载。'
+          : error instanceof Error
+            ? error.message
+            : '角色权限信息加载失败，请重试。';
+      setLoadError(message);
+      return false;
     } finally {
+      loadLockRef.current = false;
       setLoading(false);
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
 
   const handleCreateRole = async () => {
+    if (mutationLockRef.current || loadError || confirmedWriteNotice) return;
+    mutationLockRef.current = true;
+    setMutationBusy(true);
     try {
       const response = await fetch('/api/roles', {
         method: 'POST',
@@ -82,22 +113,28 @@ export default function PermissionManagement() {
         body: JSON.stringify(formData)
       });
 
-      if (response.ok) {
-        appStore.addNotification({ title: '创建成功', message: '角色已创建', type: 'success' });
-        setShowCreateForm(false);
-        setFormData({ code: '', name: '', description: '', permission_ids: [] });
-        fetchData();
-      } else {
-        const data = await response.json();
-        appStore.addNotification({ title: '创建失败', message: data.message, type: 'error' });
+      if (!response.ok) {
+        addNotification({ title: '创建失败', message: await getResponseMessage(response, '角色创建失败，请重试。'), type: 'error' });
+        return;
       }
+
+      addNotification({ title: '创建成功', message: '服务器已确认角色创建', type: 'success' });
+      setShowCreateForm(false);
+      setFormData({ code: '', name: '', description: '', permission_ids: [] });
+      const refreshed = await fetchData();
+      if (!refreshed) setConfirmedWriteNotice('服务器已确认角色创建，但列表刷新失败；请重新加载确认，不要重复创建。');
     } catch {
-      appStore.addNotification({ title: '创建失败', message: '网络错误', type: 'error' });
+      addNotification({ title: '创建失败', message: '网络连接异常，角色未确认创建，请检查后重试。', type: 'error' });
+    } finally {
+      mutationLockRef.current = false;
+      setMutationBusy(false);
     }
   };
 
   const handleUpdateRole = async () => {
-    if (!editingRole) return;
+    if (!editingRole || mutationLockRef.current || loadError || confirmedWriteNotice) return;
+    mutationLockRef.current = true;
+    setMutationBusy(true);
 
     try {
       const response = await fetch(`/api/roles/${editingRole.id}`, {
@@ -110,38 +147,49 @@ export default function PermissionManagement() {
         })
       });
 
-      if (response.ok) {
-        appStore.addNotification({ title: '更新成功', message: '角色已更新', type: 'success' });
-        setEditingRole(null);
-        setFormData({ code: '', name: '', description: '', permission_ids: [] });
-        fetchData();
-      } else {
-        const data = await response.json();
-        appStore.addNotification({ title: '更新失败', message: data.message, type: 'error' });
+      if (!response.ok) {
+        addNotification({ title: '更新失败', message: await getResponseMessage(response, '角色更新失败，请重试。'), type: 'error' });
+        return;
       }
+
+      addNotification({ title: '更新成功', message: '服务器已确认角色更新', type: 'success' });
+      setEditingRole(null);
+      setFormData({ code: '', name: '', description: '', permission_ids: [] });
+      const refreshed = await fetchData();
+      if (!refreshed) setConfirmedWriteNotice('服务器已确认角色更新，但列表刷新失败；请重新加载确认，不要重复保存。');
     } catch {
-      appStore.addNotification({ title: '更新失败', message: '网络错误', type: 'error' });
+      addNotification({ title: '更新失败', message: '网络连接异常，角色未确认更新，请检查后重试。', type: 'error' });
+    } finally {
+      mutationLockRef.current = false;
+      setMutationBusy(false);
     }
   };
 
-  const handleDeleteRole = async (roleId: number) => {
-    if (!confirm('确定删除此角色？')) return;
+  const handleDeleteRole = async () => {
+    const role = deletingRole;
+    if (!role || mutationLockRef.current || loadError || confirmedWriteNotice) return;
+    mutationLockRef.current = true;
+    setMutationBusy(true);
 
     try {
-      const response = await fetch(`/api/roles/${roleId}`, {
+      const response = await fetch(`/api/roles/${role.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      if (response.ok) {
-        appStore.addNotification({ title: '删除成功', message: '角色已删除', type: 'success' });
-        fetchData();
-      } else {
-        const data = await response.json();
-        appStore.addNotification({ title: '删除失败', message: data.message, type: 'error' });
+      if (!response.ok) {
+        addNotification({ title: '删除失败', message: await getResponseMessage(response, '角色删除失败，请重试。'), type: 'error' });
+        return;
       }
+
+      setRoles((current) => current.filter((item) => item.id !== role.id));
+      addNotification({ title: '删除成功', message: `角色“${role.name}”已删除`, type: 'success' });
+      setDeletingRole(null);
     } catch {
-      appStore.addNotification({ title: '删除失败', message: '网络错误', type: 'error' });
+      addNotification({ title: '删除失败', message: '网络连接异常，角色未确认删除，请检查后重试。', type: 'error' });
+    } finally {
+      mutationLockRef.current = false;
+      setMutationBusy(false);
     }
   };
 
@@ -201,7 +249,7 @@ export default function PermissionManagement() {
     return labels[module] || module;
   };
 
-  if (loading) {
+  if (loading && !hasLoadedOnce) {
     return (
       <div className={`flex items-center justify-center h-64 ${styles.textMuted}`}>
         <div className={`animate-spin rounded-8 h-8 w-8 border-2 ${styles.spinner} border-t-transparent`} />
@@ -220,6 +268,7 @@ export default function PermissionManagement() {
         {hasPermission('system:role') && (
           <button
             onClick={() => { setShowCreateForm(true); setFormData({ code: '', name: '', description: '', permission_ids: [] }); }}
+            disabled={loading || mutationBusy || !!loadError || !!confirmedWriteNotice}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl ${styles.buttonPrimary}`}
           >
             <Plus className="w-4 h-4" />
@@ -228,27 +277,47 @@ export default function PermissionManagement() {
         )}
       </div>
 
+      {(loadError || confirmedWriteNotice) && (
+        <div role="alert" className={`flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between ${styles.border} ${styles.card}`}>
+          <p className={styles.textSecondary}>{confirmedWriteNotice || loadError}</p>
+          <button
+            type="button"
+            onClick={() => { void fetchData(); }}
+            disabled={loading}
+            className={`shrink-0 rounded-xl px-4 py-2 ${styles.buttonSecondary}`}
+          >
+            {loading ? '正在重新加载…' : '重新加载角色列表'}
+          </button>
+        </div>
+      )}
+
+      {hasLoadedOnce && !loading && roles.length === 0 && !loadError && (
+        <div className={`rounded-2xl p-8 text-center ${styles.card} ${styles.textMuted}`}>
+          暂无角色
+        </div>
+      )}
+
       {/* 角色列表 */}
       <div className="grid gap-4">
         {roles.map(role => (
           <div key={role.id} className={`p-4 rounded-2xl ${styles.card}`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                  role.code === 'admin' ? 'bg-brand-500/10 text-brand-500' :
-                  role.code === 'director' ? 'bg-studio-success/10 text-studio-success' :
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3 sm:items-center">
+                <div data-testid={`role-icon-${role.code}`} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                  role.code === 'admin' ? 'bg-studio-primary-soft text-studio-primary-contrast' :
+                  role.code === 'director' ? 'bg-studio-success/10 text-studio-success-contrast' :
                   'bg-theme-tertiary text-theme-text-secondary'
                 }`}>
                   <Shield className="w-5 h-5" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className={`font-medium ${styles.textPrimary}`}>{role.name}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span data-testid="role-name" className={`font-medium ${styles.textPrimary}`}>{role.name}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${styles.bgTertiary} ${styles.textMuted}`}>
                       {role.code}
                     </span>
                     {role.is_system && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-500">
+                      <span data-testid="system-role-badge" className="text-xs px-2 py-0.5 rounded-full bg-studio-primary-soft text-studio-primary-contrast">
                         系统内置
                       </span>
                     )}
@@ -256,8 +325,8 @@ export default function PermissionManagement() {
                   <p className={`text-sm ${styles.textMuted}`}>{role.description}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-4 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+                <div className="flex flex-wrap items-center gap-3 text-sm sm:gap-4">
                   <span className={styles.textMuted}>
                     <Users className="w-4 h-4 inline mr-1" />
                     {role.user_count} 用户
@@ -271,16 +340,20 @@ export default function PermissionManagement() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => startEdit(role)}
+                      disabled={loading || mutationBusy || !!loadError || !!confirmedWriteNotice}
                       className={`p-2 rounded-lg ${styles.hoverBg} ${styles.textMuted}`}
                       title="编辑"
+                      aria-label={`编辑角色 ${role.name}`}
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
                     {!role.is_system && (
                       <button
-                        onClick={() => handleDeleteRole(role.id)}
-                        className={`p-2 rounded-lg hover:bg-studio-coral/10 text-studio-coral`}
+                        onClick={() => setDeletingRole(role)}
+                        disabled={loading || mutationBusy || !!loadError || !!confirmedWriteNotice}
+                        className="p-2 rounded-lg text-studio-coral-contrast hover:bg-studio-coral-soft"
                         title="删除"
+                        aria-label={`删除角色 ${role.name}`}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -311,15 +384,17 @@ export default function PermissionManagement() {
 
       {/* 创建/编辑弹窗 */}
       {(showCreateForm || editingRole) && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-modal">
           <div className={`w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-2xl ${styles.modal} p-6`}>
             <div className="flex items-center justify-between mb-6">
               <h2 className={`text-xl font-bold ${styles.textPrimary}`}>
                 {editingRole ? '编辑角色' : '新建角色'}
               </h2>
               <button
-                onClick={() => { setShowCreateForm(false); setEditingRole(null); }}
+                onClick={() => { if (!mutationBusy) { setShowCreateForm(false); setEditingRole(null); } }}
+                disabled={mutationBusy}
                 className={`p-2 rounded-lg ${styles.hoverBg} ${styles.textMuted}`}
+                aria-label="关闭角色编辑"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -334,7 +409,7 @@ export default function PermissionManagement() {
                     type="text"
                     value={formData.code}
                     onChange={(e) => setFormData(prev => ({ ...prev, code: e.target.value }))}
-                    disabled={!!editingRole}
+                    disabled={!!editingRole || mutationBusy}
                     className={`w-full px-4 py-2 rounded-xl ${styles.input}`}
                     placeholder="如 editor"
                   />
@@ -345,6 +420,7 @@ export default function PermissionManagement() {
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    disabled={mutationBusy}
                     className={`w-full px-4 py-2 rounded-xl ${styles.input}`}
                     placeholder="如 编辑"
                   />
@@ -356,6 +432,7 @@ export default function PermissionManagement() {
                   type="text"
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  disabled={mutationBusy}
                   className={`w-full px-4 py-2 rounded-xl ${styles.input}`}
                   placeholder="角色描述"
                 />
@@ -384,6 +461,7 @@ export default function PermissionManagement() {
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); selectAllModule(module); }}
+                          disabled={mutationBusy}
                           className={`text-xs px-2 py-1 rounded ${styles.hoverBg} ${styles.textMuted}`}
                         >
                           {perms.every(p => formData.permission_ids.includes(p.id)) ? '取消全选' : '全选'}
@@ -400,6 +478,7 @@ export default function PermissionManagement() {
                                 type="checkbox"
                                 checked={formData.permission_ids.includes(perm.id)}
                                 onChange={() => togglePermission(perm.id)}
+                                disabled={mutationBusy}
                                 className="rounded border-studio-border-soft"
                               />
                               <span className={`text-sm ${styles.textPrimary}`}>{perm.name}</span>
@@ -416,22 +495,36 @@ export default function PermissionManagement() {
               {/* 操作按钮 */}
               <div className="flex justify-end gap-3 pt-4">
                 <button
-                  onClick={() => { setShowCreateForm(false); setEditingRole(null); }}
+                  onClick={() => { if (!mutationBusy) { setShowCreateForm(false); setEditingRole(null); } }}
+                  disabled={mutationBusy}
                   className={`px-4 py-2 rounded-xl ${styles.buttonSecondary}`}
                 >
                   取消
                 </button>
                 <button
                   onClick={editingRole ? handleUpdateRole : handleCreateRole}
+                  disabled={mutationBusy || !!loadError || !!confirmedWriteNotice}
                   className={`px-4 py-2 rounded-xl ${styles.buttonPrimary}`}
                 >
-                  {editingRole ? '保存' : '创建'}
+                  {mutationBusy ? '处理中…' : editingRole ? '保存' : '创建'}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={!!deletingRole}
+        title="确认删除角色"
+        description={deletingRole ? `将删除角色“${deletingRole.name}”。此操作不可撤销。` : undefined}
+        confirmText="删除角色"
+        cancelText="取消"
+        variant="danger"
+        loading={mutationBusy}
+        onCancel={() => { if (!mutationBusy) setDeletingRole(null); }}
+        onConfirm={handleDeleteRole}
+      />
     </div>
   );
 }

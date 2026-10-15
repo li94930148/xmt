@@ -25,15 +25,7 @@ interface BorderGlowProps {
   buttonSurface?: boolean;
 }
 
-function parseHSL(hslStr: string): { h: number; s: number; l: number } {
-  const match = hslStr.match(/([\d.]+)\s*([\d.]+)%?\s*([\d.]+)%?/);
-  if (!match) return { h: 40, s: 80, l: 80 };
-  return { h: parseFloat(match[1]), s: parseFloat(match[2]), l: parseFloat(match[3]) };
-}
-
 function buildBoxShadow(glowColor: string, intensity: number): string {
-  const { h, s, l } = parseHSL(glowColor);
-  const base = `${h}deg ${s}% ${l}%`;
   const layers: [number, number, number, number, number, boolean][] = [
     [0, 0, 0, 1, 100, true], [0, 0, 1, 0, 60, true], [0, 0, 3, 0, 50, true],
     [0, 0, 6, 0, 40, true], [0, 0, 15, 0, 30, true], [0, 0, 25, 2, 20, true],
@@ -43,7 +35,7 @@ function buildBoxShadow(glowColor: string, intensity: number): string {
   ];
   return layers.map(([x, y, blur, spread, alpha, inset]) => {
     const a = Math.min(alpha * intensity, 100);
-    return `${inset ? 'inset ' : ''}${x}px ${y}px ${blur}px ${spread}px hsl(${base} / ${a}%)`;
+    return `${inset ? 'inset ' : ''}${x}px ${y}px ${blur}px ${spread}px color-mix(in srgb, ${glowColor} ${a}%, transparent)`;
   }).join(', ');
 }
 
@@ -84,14 +76,14 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
   children,
   className = '',
   edgeSensitivity = 30,
-  glowColor = '40 80 80',
-  backgroundColor = '#120F17',
+  glowColor = 'var(--xmt-primary)',
+  backgroundColor = 'var(--xmt-surface)',
   borderRadius = 28,
   glowRadius = 40,
   glowIntensity = 1.0,
   coneSpread = 25,
   animated = false,
-  colors = ['#c084fc', '#f472b6', '#38bdf8'],
+  colors = ['var(--xmt-primary)', 'var(--xmt-cyan)', 'var(--xmt-violet)'],
   fillOpacity = 0.5,
   buttonSurface = false,
 }) => {
@@ -178,12 +170,12 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
       onPointerMove={handlePointerMove}
       onPointerEnter={() => setIsHovered(true)}
       onPointerLeave={() => setIsHovered(false)}
-      className={`relative grid isolate ${buttonSurface ? 'border-0' : 'border border-white/15'} ${className}`}
+      className={`relative grid isolate ${buttonSurface ? 'border-0' : 'border border-studio-border-soft'} ${className}`}
       style={{
         background: buttonSurface ? 'transparent' : backgroundColor,
         borderRadius: `${borderRadius}px`,
         transform: 'translate3d(0, 0, 0.01px)',
-        boxShadow: buttonSurface ? 'none' : 'rgba(0,0,0,0.1) 0 1px 2px, rgba(0,0,0,0.1) 0 2px 4px, rgba(0,0,0,0.1) 0 4px 8px, rgba(0,0,0,0.1) 0 8px 16px, rgba(0,0,0,0.1) 0 16px 32px, rgba(0,0,0,0.1) 0 32px 64px',
+        boxShadow: buttonSurface ? 'none' : 'var(--xmt-card-shadow)',
       }}
     >
       {/* mesh gradient border */}

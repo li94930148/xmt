@@ -2,6 +2,7 @@ import { Archive, Eye } from 'lucide-react';
 import type { DailyReport } from '../../api/dailyReports';
 import type { User } from '../../types';
 import { ActionButton, EmptyState, GlassPanel } from '../studio';
+import { dailyReportStatusLabel } from './dailyReportStatusLabel';
 
 type Props = {
   start: string;
@@ -30,7 +31,7 @@ export default function DailyReportArchiveList({ start, end, reports, loading, c
           <ActionButton onClick={onSearch} disabled={loading}>查询</ActionButton>
         </div>
       </div>
-      {reports.length === 0 ? <div className="p-5"><EmptyState icon={Archive} title={loading ? '加载中' : '暂无日报归档'} description="当前范围内没有日报记录。" /></div> : <div className="divide-y divide-studio-border-soft">{reports.map((report) => <div key={report.id} className="grid gap-3 px-5 py-4 md:grid-cols-[160px_140px_minmax(0,1fr)_90px] md:items-center"><div><div className="font-semibold text-studio-text-primary">{report.userName || report.username || `成员 ${report.userId}`}</div><div className="mt-1 text-xs text-studio-text-muted">{report.reportDate}</div></div><span className="text-sm text-studio-text-muted">{report.status === 'submitted' || report.status === 'approved' || report.status === 'archived' ? '已提交' : '草稿'}</span><p className="line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{report.manualSummaryMd || report.items.map((item) => item.contentMd).filter(Boolean).join('\n') || '未填写内容'}</p><ActionButton onClick={() => onView(report)} className="px-3 py-2"><Eye className="h-4 w-4" />查看</ActionButton></div>)}</div>}
+      {reports.length === 0 ? <div className="p-5"><EmptyState icon={Archive} title={loading ? '加载中' : '暂无日报归档'} description="当前范围内没有日报记录。" /></div> : <div className="divide-y divide-studio-border-soft">{reports.map((report) => <div key={report.id} className="grid gap-3 px-5 py-4 md:grid-cols-[160px_140px_minmax(0,1fr)_90px] md:items-center"><div><div className="font-semibold text-studio-text-primary">{report.userName || report.username || `成员 ${report.userId}`}</div><div className="mt-1 text-xs text-studio-text-muted">{report.reportDate}</div></div><span className="text-sm text-studio-text-muted">{dailyReportStatusLabel(report.status)}</span><p className="line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{report.manualSummaryMd || report.items.map((item) => item.contentMd).filter(Boolean).join('\n') || '未填写内容'}</p><ActionButton onClick={() => onView(report)} className="px-3 py-2"><Eye className="h-4 w-4" />查看</ActionButton></div>)}</div>}
     </GlassPanel>
   );
 }

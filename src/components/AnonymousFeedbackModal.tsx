@@ -91,7 +91,7 @@ export default function AnonymousFeedbackModal({
                     <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-studio-text-primary">{item.content}</p>
                     {item.reply_content ? (
                       <div className="mt-3 rounded-button border border-studio-primary/20 bg-studio-primary/8 p-3">
-                        <p className="text-xs font-semibold text-studio-cyan">管理员回复</p>
+                        <p className="text-xs font-semibold text-studio-cyan-contrast">管理员回复</p>
                         <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{item.reply_content}</p>
                       </div>
                     ) : null}
@@ -112,14 +112,14 @@ export default function AnonymousFeedbackModal({
           <h3 className="mb-4 text-sm font-semibold text-studio-text-primary">提出新意见</h3>
           <div className="space-y-4">
             <label className="block text-sm font-medium text-studio-text-secondary">
-              意见类型 <span className="text-studio-coral">*</span>
+              意见类型 <span className="text-studio-coral-contrast">*</span>
               <select value={type} onChange={(event) => setType(event.target.value as AnonymousFeedbackType)} className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-studio-text-primary outline-none transition focus:border-studio-border-active">
                 <option value="">请选择意见类型</option>
                 {types.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
             <label className="block text-sm font-medium text-studio-text-secondary">
-              意见内容 <span className="text-studio-coral">*</span>
+              意见内容 <span className="text-studio-coral-contrast">*</span>
               <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={4} placeholder="请输入你的想法..." className="mt-2 w-full resize-y rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-studio-text-primary outline-none transition placeholder:text-studio-text-muted focus:border-studio-border-active" />
               <span className="mt-1 block text-right text-xs text-studio-text-muted">{content.length}/2000</span>
             </label>

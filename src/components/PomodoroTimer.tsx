@@ -3,6 +3,7 @@ import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useAppStore } from '../store';
 import { Play, Pause, RotateCcw, Timer, CheckCircle, Link } from 'lucide-react';
 import { cancelPomodoro, completePomodoro, getPomodoroStats, startPomodoro } from '../api/pomodoro';
+import { isDesktopNotifyEnabled, isNotificationSupported, notifyDesktop } from '../utils/notification';
 
 interface PomodoroTimerProps {
   topicId?: number;
@@ -50,15 +51,17 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           .then(() => {
             setSessionId(null);
             void refreshStats();
-            appStore.addNotification({
-              title: '🍅 番茄钟完成！',
-              message: topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成，休息一下吧！',
-              type: 'success',
-            });
-            if (Notification.permission === 'granted') {
-              new Notification('🍅 番茄钟完成！', {
-                body: topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成',
-              });
+            const title = '🍅 番茄钟完成！';
+            const message = topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成，休息一下吧！';
+            const useDesktopNotification = document.visibilityState !== 'visible'
+              && isNotificationSupported()
+              && isDesktopNotifyEnabled()
+              && Notification.permission === 'granted';
+
+            if (useDesktopNotification) {
+              notifyDesktop({ title, body: message });
+            } else {
+              appStore.addNotification({ title, message, type: 'success' });
             }
           })
           .catch(() => appStore.addNotification({ title: '番茄钟保存失败', message: '本次专注未计入统计，请刷新后重试。', type: 'error' }));
@@ -72,8 +75,8 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
       return;
     }
     // Request notification permission
-    if (Notification.permission === 'default') {
-      Notification.requestPermission();
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      void Notification.requestPermission();
     }
     try {
       if (sessionId) {

@@ -105,6 +105,8 @@ app.use('/api', (request, response) => {
     return topic ? response.json({ data: topic }) : response.status(404).json({ message: '选题不存在' });
   }
   if (/^\/topics\/\d+\/resources$/.test(request.path)) return response.json({ data: [] });
+  if (/^\/topics\/\d+\/versions$/.test(request.path)) return response.json({ data: [] });
+  if (/^\/topics\/\d+\/asset-dimensions$/.test(request.path)) return response.json({ data: [] });
 
   return response.status(404).json({ message: `No fixture for ${request.method} ${request.path}` });
 });
@@ -192,8 +194,8 @@ try {
   await page.getByRole('button', { name: '编辑选题', exact: true }).click();
   await page.locator('input[type="text"]').first().fill('已提交保存但刷新失败的主题');
   await page.getByRole('button', { name: '保存', exact: true }).click();
-  await page.getByText('保存已提交', { exact: true }).waitFor();
-  await page.getByText('选题修改已成功提交，但详情暂时未能刷新；本次修改已保留，请稍后刷新确认最新信息。', { exact: true }).waitFor();
+  await page.getByText('选题信息已保存', { exact: true }).waitFor();
+  await page.getByText('服务端已确认保存，但页面刷新失败；当前内容已保留，请稍后重新加载确认，不要重复保存。', { exact: true }).waitFor();
   await page.getByRole('heading', { name: '已提交保存但刷新失败的主题', exact: true }).waitFor();
   await page.screenshot({ path: `${screenshotDir}-edit-saved-refresh-failed.png`, fullPage: false });
 

@@ -37,3 +37,16 @@ export function referencedResourceIds(manuscriptHtml: string): Set<number> {
   }
   return ids;
 }
+
+export function getResourceUsageLabel(
+  resourceId: number,
+  materialDraftIds: ReadonlySet<number>,
+  manuscriptIds: ReadonlySet<number>,
+): string {
+  const inMaterialDraft = materialDraftIds.has(resourceId);
+  const inManuscript = manuscriptIds.has(resourceId);
+  if (inMaterialDraft && inManuscript) return '资料草稿与正文均有';
+  if (inManuscript) return '已引用到正文';
+  if (inMaterialDraft) return '已加入资料草稿';
+  return '待用';
+}

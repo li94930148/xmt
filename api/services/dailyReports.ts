@@ -8,8 +8,9 @@ import type {
   ReviewDailyReportInput,
   SaveDailyReportDraftInput,
 } from '../types/dailyReports.js';
-import { beijingToday, execute, queryAll, queryOne, runInTransaction } from '../database/utils.js';
+import { beijingToday, queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { createMessage } from '../utils/messageHelper.js';
+import { apiLogger } from '../observability/logger.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // 已提交日报允许本人重新编辑并再次提交，保留审核/归档记录不被覆盖。
@@ -228,7 +229,11 @@ async function notifyDailyReportSubmitted(author: User, reportDate: string) {
       );
     }
   } catch (error) {
-    console.warn('[DailyReports] notify submit failed:', error);
+    apiLogger.warn({
+      module: 'daily_reports',
+      operation: 'notification.submit_failed',
+      error: { code: 'NOTIFICATION_FAILED', name: error instanceof Error ? error.name : 'UnknownError' },
+    }, 'api.daily_reports.notification_failed');
   }
 }
 
@@ -331,7 +336,12 @@ async function formatReport(row: DailyReportRow | null, includeItems = true) {
   };
 }
 
+type DailyReportAuditWriter = {
+  execute(sql: string, params?: unknown[]): Promise<number>;
+};
+
 async function recordAudit(
+  tx: DailyReportAuditWriter,
   reportId: number,
   userId: number,
   action: string,
@@ -340,7 +350,7 @@ async function recordAudit(
   comment?: string,
   payload?: Record<string, unknown>
 ) {
-  await execute(
+  await tx.execute(
     `INSERT INTO daily_report_audit_logs (report_id, user_id, action, from_status, to_status, comment, payload_json, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))`,
     [reportId, userId, action, fromStatus || null, toStatus || null, comment || null, stringifyJson(payload)]
@@ -364,7 +374,7 @@ export async function getMyDailyReport(user: User | undefined, dateValue?: strin
     reportDate,
     template,
     report: await formatReport(row),
-    canCreate: true,
+    canCreate: await hasPermissionCode(user, 'report:daily:submit'),
   };
 }
 
@@ -452,11 +462,10 @@ export async function saveDailyReportDraft(user: User | undefined, input: SaveDa
       );
     }
 
-    await tx.execute(
-      `INSERT INTO daily_report_audit_logs (report_id, user_id, action, from_status, to_status, payload_json, created_at)
-       VALUES (?, ?, 'save_draft', ?, 'draft', ?, datetime('now', '+8 hours'))`,
-      [currentReportId, user.id, fromStatus || null, stringifyJson({ itemCount: items.length, version: nextVersion })]
-    );
+    await recordAudit(tx, currentReportId, user.id, 'save_draft', fromStatus, 'draft', undefined, {
+      itemCount: items.length,
+      version: nextVersion,
+    });
 
     return currentReportId;
   });
@@ -529,14 +538,19 @@ export async function submitDailyReport(user: User | undefined, reportId: number
     throw new DailyReportServiceError(400, 'EMPTY_REPORT', '提交前需要填写总结或至少一条日报内容');
   }
 
-  await execute(
-    `UPDATE daily_reports
-     SET status = 'submitted', submitted_at = datetime('now', '+8 hours'), version = version + 1,
-         updated_at = datetime('now', '+8 hours')
-     WHERE id = ?`,
-    [reportId]
-  );
-  await recordAudit(reportId, user.id, 'submit', String(row.status), 'submitted');
+  await runInTransaction(async (tx) => {
+    const changed = await tx.execute(
+      `UPDATE daily_reports
+       SET status = 'submitted', submitted_at = datetime('now', '+8 hours'), version = version + 1,
+           updated_at = datetime('now', '+8 hours')
+       WHERE id = ? AND status = ?`,
+      [reportId, String(row.status)]
+    );
+    if (changed !== 1) {
+      throw new DailyReportServiceError(409, 'REPORT_CHANGED', '日报状态已变化，请刷新后重试');
+    }
+    await recordAudit(tx, reportId, user.id, 'submit', String(row.status), 'submitted');
+  });
 
   const updated = await queryOne<DailyReportRow>(
     `SELECT r.*, u.name AS user_name, u.username, reviewer.name AS reviewer_name, reviewer.username AS reviewer_username
@@ -620,14 +634,19 @@ export async function reviewDailyReport(
 
   const nextStatus = action === 'approve' ? 'approved' : 'rejected';
   const comment = String(input.comment || '').trim();
-  await execute(
-    `UPDATE daily_reports
-     SET status = ?, reviewed_at = datetime('now', '+8 hours'), reviewed_by = ?, review_comment = ?,
-         version = version + 1, updated_at = datetime('now', '+8 hours')
-     WHERE id = ?`,
-    [nextStatus, user.id, comment, reportId]
-  );
-  await recordAudit(reportId, user.id, `review_${action}`, 'submitted', nextStatus, comment);
+  await runInTransaction(async (tx) => {
+    const changed = await tx.execute(
+      `UPDATE daily_reports
+       SET status = ?, reviewed_at = datetime('now', '+8 hours'), reviewed_by = ?, review_comment = ?,
+           version = version + 1, updated_at = datetime('now', '+8 hours')
+       WHERE id = ? AND status = 'submitted'`,
+      [nextStatus, user.id, comment, reportId]
+    );
+    if (changed !== 1) {
+      throw new DailyReportServiceError(409, 'REPORT_NOT_SUBMITTED', '只有已提交日报可以审核');
+    }
+    await recordAudit(tx, reportId, user.id, `review_${action}`, 'submitted', nextStatus, comment);
+  });
 
   const updated = await queryOne<DailyReportRow>(
     `SELECT r.*, u.name AS user_name, u.username, reviewer.name AS reviewer_name, reviewer.username AS reviewer_username
@@ -679,6 +698,31 @@ export async function listDailyReportArchive(user: User | undefined, filters: Da
   }
 
   return { start, end, userId: requestedUserId, reports };
+}
+
+export async function searchDailyReports(user: User | undefined, keywordValue: string) {
+  assertAuthenticated(user);
+  const keyword = String(keywordValue || '').trim();
+  if (Array.from(keyword).length < 2 || Array.from(keyword).length > 100) {
+    throw new DailyReportServiceError(400, 'INVALID_SEARCH', '搜索词需为 2–100 个字符');
+  }
+  const canViewArchive = isManager(user) || await hasPermissionCode(user, 'report:daily:archive');
+  const pattern = `%${keyword.replace(/[\\%_]/g, '\\$&')}%`;
+  const rows = await queryAll<{ id: number; user_id: number; report_date: string; status: string; user_name: string; summary: string; updated_at: string }>(
+    `SELECT r.id, r.user_id, r.report_date, r.status, u.name AS user_name, r.updated_at,
+            COALESCE(NULLIF(r.summary, ''), NULLIF(r.manual_summary_md, ''), NULLIF(r.tomorrow_plan, ''), NULLIF(r.content, ''),
+              (SELECT COALESCE(NULLIF(i.title, ''), i.content_md) FROM daily_report_items i WHERE i.report_id = r.id AND
+                (i.title LIKE ? ESCAPE '\\' OR i.content_md LIKE ? ESCAPE '\\') ORDER BY i.sort_order, i.id LIMIT 1), '') AS summary
+     FROM daily_reports r JOIN users u ON u.id = r.user_id
+     WHERE (? = 1 OR r.user_id = ?) AND (
+       r.summary LIKE ? ESCAPE '\\' OR r.manual_summary_md LIKE ? ESCAPE '\\' OR r.tomorrow_plan LIKE ? ESCAPE '\\'
+       OR r.content LIKE ? ESCAPE '\\' OR r.auto_summary_json LIKE ? ESCAPE '\\'
+       OR EXISTS (SELECT 1 FROM daily_report_items i WHERE i.report_id = r.id AND (i.title LIKE ? ESCAPE '\\' OR i.content_md LIKE ? ESCAPE '\\'))
+     )
+     ORDER BY r.report_date DESC, r.updated_at DESC, r.id DESC LIMIT 8`,
+    [pattern, pattern, canViewArchive ? 1 : 0, user.id, pattern, pattern, pattern, pattern, pattern, pattern, pattern],
+  );
+  return { reports: rows.map(row => ({ id: Number(row.id), userId: Number(row.user_id), reportDate: String(row.report_date), status: String(row.status), userName: String(row.user_name || ''), summary: String(row.summary || '').slice(0, 180), updatedAt: String(row.updated_at || '') })) };
 }
 
 export async function getDailyWorkReference(user: User | undefined, dateValue?: string) {
@@ -804,14 +848,18 @@ export async function generateDailyReportDraft(user: User | undefined, dateValue
   );
 
   if (existing && EDITABLE_STATUSES.includes(String(existing.status) as DailyReportStatus)) {
-    await execute(
-      `UPDATE daily_reports
-       SET auto_summary_json = ?, updated_at = datetime('now', '+8 hours')
-       WHERE id = ?`,
-      [stringifyJson(autoSummary), Number(existing.id)]
-    );
-    await recordAudit(Number(existing.id), user.id, 'generate_draft', String(existing.status), String(existing.status), undefined, {
-      sourceCount: suggestions.length,
+    await runInTransaction(async (tx) => {
+      const changed = await tx.execute(
+        `UPDATE daily_reports
+         SET auto_summary_json = ?, updated_at = datetime('now', '+8 hours')
+         WHERE id = ? AND status = ?`,
+        [stringifyJson(autoSummary), Number(existing.id), String(existing.status)]
+      );
+      if (changed === 1) {
+        await recordAudit(tx, Number(existing.id), user.id, 'generate_draft', String(existing.status), String(existing.status), undefined, {
+          sourceCount: suggestions.length,
+        });
+      }
     });
   }
 

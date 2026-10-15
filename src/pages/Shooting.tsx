@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, CheckCircle, Clock3, FileText, MapPin, Plus, Trash2, UserRound, Video } from 'lucide-react';
 import { createShooting, getShooting, getTopics, updateShooting } from '../api';
@@ -77,24 +77,25 @@ export default function Shooting() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [formData, setFormData] = useState(initialFormData);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const mutationLockRef = useRef(false);
+  const [mutationLoading, setMutationLoading] = useState(false);
   // 页大小以服务端返回为准，避免前端写死与后端默认值脱节
   const [pageSize, setPageSize] = useState(50);
 
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
 
-  useEffect(() => {
-    void fetchData();
-  }, []);
-
-  const fetchData = async (requestedPage = page) => {
+  const fetchData = useCallback(async (requestedPage: number): Promise<boolean> => {
     setLoading(true);
+    setLoadError(null);
     try {
       let result = await getShooting({ page: requestedPage });
       // 删除末页最后一条后当前页会越界变空，回退到上一页避免出现空白列表
@@ -104,7 +105,7 @@ export default function Shooting() {
       setShootings(result.data);
       setPage(result.page);
       setTotal(result.total);
-      setPageSize(result.limit || pageSize);
+      setPageSize((current) => result.limit || current);
 
       const topicList = await getTopics();
       setTopics(
@@ -115,18 +116,30 @@ export default function Shooting() {
             topic.status === 'shooting',
         ),
       );
+      setRefreshNotice(null);
+      return true;
     } catch (error) {
-      addNotification({
-        title: '获取数据失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
+      setLoadError((error as Error).message || '暂时无法读取制作计划');
+      return false;
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    void fetchData(1);
+  }, [fetchData]);
+
+  const refreshAfterConfirmedMutation = async (action: string, requestedPage: number) => {
+    const refreshed = await fetchData(requestedPage);
+    if (!refreshed) {
+      setRefreshNotice(`服务端已确认${action}，但列表读取失败；当前页面保留已确认状态，请重新加载列表确认，不要重复操作。`);
+    }
+    return refreshed;
   };
 
   const handleCreate = async () => {
+    if (mutationLockRef.current) return;
     if (!formData.topic_id) {
       addNotification({
         title: '创建失败',
@@ -136,6 +149,8 @@ export default function Shooting() {
       return;
     }
 
+    mutationLockRef.current = true;
+    setMutationLoading(true);
     try {
       await createShooting({
         topic_id: Number.parseInt(formData.topic_id, 10),
@@ -153,17 +168,23 @@ export default function Shooting() {
       setFormData(initialFormData);
 
       // 新记录排在最前，回到第 1 页才能让用户看到刚创建的内容
-      await fetchData(1);
+      await refreshAfterConfirmedMutation('制作计划创建', 1);
     } catch (error) {
       addNotification({
         title: '创建失败',
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      mutationLockRef.current = false;
+      setMutationLoading(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: number): Promise<boolean> => {
+    if (mutationLockRef.current) return false;
+    mutationLockRef.current = true;
+    setMutationLoading(true);
     try {
       const token = useAuthStore.getState().token;
       const response = await fetch(`/api/workflow/shooting/${id}`, {
@@ -180,21 +201,33 @@ export default function Shooting() {
 
       addNotification({
         title: '删除成功',
-        message: '制作计划已删除',
+        message: '服务端已确认制作计划删除',
         type: 'success',
       });
 
-      await fetchData(page);
+      const remaining = shootings.length === 1 && page > 1 ? page - 1 : page;
+      setShootings((current) => current.filter((shooting) => shooting.id !== id));
+      setTotal((current) => Math.max(0, current - 1));
+      if (remaining !== page) setPage(remaining);
+      await refreshAfterConfirmedMutation('制作计划删除', remaining);
+      return true;
     } catch (error) {
       addNotification({
         title: '删除失败',
         message: (error as Error).message,
         type: 'error',
       });
+      return false;
+    } finally {
+      mutationLockRef.current = false;
+      setMutationLoading(false);
     }
   };
 
-  const handleComplete = async (shooting: ShootingType) => {
+  const handleComplete = async (shooting: ShootingType): Promise<boolean> => {
+    if (mutationLockRef.current) return false;
+    mutationLockRef.current = true;
+    setMutationLoading(true);
     try {
       await updateShooting(shooting.id, {
         topic_id: shooting.topic_id,
@@ -202,18 +235,24 @@ export default function Shooting() {
       });
       addNotification({
         title: '完成成功',
-        message: '成片制作已完成，已流转到发布管理环节',
+        message: '服务端已确认成片制作完成，已流转到发布管理环节',
         type: 'success',
       });
+      setShootings((current) => current.map((item) => item.id === shooting.id ? { ...item, status: 'completed' } : item));
       celebrateMilestone();
 
-      await fetchData(page);
+      await refreshAfterConfirmedMutation('成片制作完成', page);
+      return true;
     } catch (error) {
       addNotification({
         title: '操作失败',
         message: (error as Error).message,
         type: 'error',
       });
+      return false;
+    } finally {
+      mutationLockRef.current = false;
+      setMutationLoading(false);
     }
   };
 
@@ -224,12 +263,10 @@ export default function Shooting() {
 
     setConfirmLoading(true);
     try {
-      if (confirmAction.type === 'delete') {
-        await handleDelete(confirmAction.shootingId);
-      } else {
-        await handleComplete(confirmAction.shooting);
-      }
-      setConfirmAction(null);
+      const succeeded = confirmAction.type === 'delete'
+        ? await handleDelete(confirmAction.shootingId)
+        : await handleComplete(confirmAction.shooting);
+      if (succeeded) setConfirmAction(null);
     } finally {
       setConfirmLoading(false);
     }
@@ -270,12 +307,21 @@ export default function Shooting() {
       <PageHeader
         title="成片制作"
         actions={
-          <ActionButton type="button" variant="primary" onClick={() => setShowCreateModal(true)}>
+          <ActionButton type="button" variant="primary" disabled={loading || Boolean(loadError) || mutationLoading} onClick={() => setShowCreateModal(true)}>
             <Plus className="h-4 w-4" />
             添加制作计划
           </ActionButton>
         }
       />
+
+      {refreshNotice || loadError ? (
+        <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-primary sm:flex-row sm:items-center sm:justify-between">
+          <p className="min-w-0">{refreshNotice || `制作计划列表暂不可用：${loadError}`}</p>
+          <ActionButton type="button" variant="secondary" className="self-start sm:self-auto" disabled={loading || mutationLoading} onClick={() => void fetchData(page)}>
+            {loading ? '正在重新加载' : '重新加载列表'}
+          </ActionButton>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="今日待拍" value={metrics.today} icon={Calendar} tone="cyan" />
@@ -295,7 +341,7 @@ export default function Shooting() {
 
       {loading ? (
         <LoadingState type="section" text="正在加载制作计划..." />
-      ) : filteredShootings.length === 0 ? (
+      ) : loadError && shootings.length === 0 ? null : filteredShootings.length === 0 ? (
         <StudioEmptyState
           icon={FileText}
           title="暂无制作计划"
@@ -338,12 +384,13 @@ export default function Shooting() {
                     查看
                   </ActionButton>
                   {shooting.status !== 'completed' ? (
-                    <ActionButton type="button" variant="secondary" onClick={() => setConfirmAction({ type: 'complete', shooting })}>
+                    <ActionButton type="button" variant="secondary" disabled={mutationLoading} onClick={() => setConfirmAction({ type: 'complete', shooting })}>
                       完成
                     </ActionButton>
                   ) : null}
                   <button
                     type="button"
+                    disabled={mutationLoading}
                     onClick={() =>
                       setConfirmAction({
                         type: 'delete',
@@ -362,7 +409,7 @@ export default function Shooting() {
                 <span className="text-studio-text-muted">设备：</span>
                 {shooting.equipment || '暂未填写设备清单'}
               </div>
-              <div className="mt-2 text-studio-cyan">{getNextAction(shooting.status)}</div>
+              <div className="mt-2 text-studio-cyan-contrast">{getNextAction(shooting.status)}</div>
             </TaskFlowCard>
           ))}
         </div>
@@ -380,11 +427,12 @@ export default function Shooting() {
 
       <FormModal
         open={showCreateModal}
-        onCancel={() => setShowCreateModal(false)}
+        onCancel={() => { if (!mutationLockRef.current) setShowCreateModal(false); }}
         onSubmit={handleCreate}
         title="添加制作计划"
         submitText="保存"
         cancelText="取消"
+        loading={mutationLoading}
         size="lg"
       >
         <div className="space-y-4">
@@ -454,7 +502,7 @@ export default function Shooting() {
 
       <ConfirmModal
         open={Boolean(confirmAction)}
-        onCancel={() => setConfirmAction(null)}
+        onCancel={() => { if (!mutationLockRef.current) setConfirmAction(null); }}
         onConfirm={handleConfirm}
         loading={confirmLoading}
         variant={confirmAction?.type === 'delete' ? 'danger' : 'warning'}

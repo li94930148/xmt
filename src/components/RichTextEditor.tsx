@@ -6,6 +6,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../store';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
+import { emitClientLog } from '../observability/client-logger';
 import { 
   Bold, Italic, Underline, Strikethrough, 
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
@@ -634,7 +635,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
       
       appStore.addNotification({ title: '成功', message: '批注已添加', type: 'success' });
     } catch {
-      console.error('Error adding annotation');
+      emitClientLog({ event: 'editor.annotation_create_failed', level: 'error' });
       appStore.addNotification({ title: '错误', message: '添加批注失败，请尝试选择较短的文本', type: 'error' });
     }
   };
@@ -1160,9 +1161,9 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
             : 'bg-white border-studio-border-soft'
         }`}>
           <div className={`flex items-center justify-between px-4 py-3 border-b ${
-            isDark ? 'border-studio-border-soft bg-studio-amber/10' : 'border-studio-border-soft bg-studio-amber'
+            isDark ? 'border-studio-border-soft bg-studio-amber/10' : 'border-studio-border-soft bg-studio-amber-soft'
           }`}>
-            <h3 className={`font-semibold flex items-center gap-2 ${isDark ? 'text-studio-amber' : 'text-studio-amber'}`}>
+            <h3 className="font-semibold flex items-center gap-2 text-studio-amber-contrast">
               <MessageSquare className="w-4 h-4" />
               批注 ({annotations.length})
             </h3>
@@ -1181,11 +1182,11 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                 onClick={() => handleAnnotationClick(annotation.id)}
                 className={`p-4 border-b cursor-pointer transition-colors ${
                   isDark ? 'border-studio-border-soft hover:bg-studio-surface-soft/50' : 'border-studio-border-soft hover:bg-studio-surface-soft'
-                } ${activeAnnotationId === annotation.id ? (isDark ? 'bg-studio-amber/10' : 'bg-studio-amber') : ''}`}
+                } ${activeAnnotationId === annotation.id ? 'bg-studio-amber-soft' : ''}`}
               >
                 <div className="flex items-start justify-between mb-2">
                   <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                    isDark ? 'bg-studio-amber/20 text-studio-amber' : 'bg-studio-amber text-studio-amber'
+                    'bg-studio-amber/12 text-studio-amber-contrast'
                   }`}>
                     批注
                   </span>
@@ -1194,10 +1195,10 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                       e.stopPropagation();
                       handleDeleteAnnotation(annotation.id);
                     }}
-                    className={`p-1 rounded hover:${isDark ? 'bg-studio-coral/20' : 'bg-studio-coral'} transition-colors`}
+                    className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-studio-coral/20' : 'hover:bg-studio-coral/10'}`}
                     title="删除批注"
                   >
-                    <Trash2 className={`w-3 h-3 ${isDark ? 'text-studio-coral' : 'text-studio-coral'}`} />
+                    <Trash2 className="w-3 h-3 text-studio-coral-contrast" />
                   </button>
                 </div>
                 <p className={`text-sm mb-2 text-studio-text-secondary`}>"{annotation.text}"</p>
@@ -1219,20 +1220,20 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
           } transition-colors`}
           title="显示批注面板"
         >
-          <MessageSquare className={`w-5 h-5 ${isDark ? 'text-studio-amber' : 'text-studio-amber'}`} />
-          <span className={`absolute -top-1 -right-1 w-5 h-5 rounded-full text-xs flex items-center justify-center ${isDark ? 'bg-studio-amber text-white' : 'bg-studio-amber text-white'}`}>{annotations.length}</span>
+          <MessageSquare className="w-5 h-5 text-studio-amber-contrast" />
+          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-studio-amber/12 text-xs text-studio-amber-contrast">{annotations.length}</span>
         </button>
       )}
 
       {showAnnotationModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-modal">
           <div className={`${isDark ? 'bg-studio-surface-soft' : 'bg-white'} rounded-xl p-6 w-full max-w-md mx-4 ${isDark ? 'border border-studio-border-soft' : 'border border-studio-border-soft'}`}>
             <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-studio-text-primary'} mb-2 flex items-center gap-2`}>
-              <MessageSquare className="w-5 h-5 text-studio-amber" />
+              <MessageSquare className="w-5 h-5 text-studio-amber-contrast" />
               添加批注
             </h3>
             <p className={`text-sm mb-4 text-studio-text-muted`}>
-              选中文本: <span className={`font-medium ${isDark ? 'text-studio-amber' : 'text-studio-amber'}`}>"{selectedText}"</span>
+              选中文本: <span className="font-medium text-studio-amber-contrast">"{selectedText}"</span>
             </p>
             <textarea
               value={annotationComment}
@@ -1250,14 +1251,14 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                   setSelectedText('');
                   setSelectedRange(null);
                 }}
-                className={`flex-1 px-4 py-2 ${isDark ? 'bg-studio-surface-soft hover:bg-studio-surface-soft text-white' : 'bg-studio-surface-soft hover:bg-studio-surface-soft text-studio-text-muted'} rounded-lg transition-colors`}
+                className="xmt-btn xmt-btn-secondary flex-1"
               >
                 取消
               </button>
               <button
                 onClick={handleSaveAnnotation}
                 disabled={!annotationComment.trim()}
-                className="flex-1 px-4 py-2 bg-studio-amber hover:bg-studio-amber disabled:bg-studio-amber disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                className="xmt-btn xmt-btn-primary flex-1 disabled:cursor-not-allowed"
               >
                 确认
               </button>

@@ -53,9 +53,15 @@ export interface Topic {
   creator_name?: string;
   assignee_name?: string;
   submitted_at?: string;
+  stage_entered_at?: string | null;
   created_at: string;
   updated_at: string;
   history?: TopicHistory[];
+  stage_record_presence?: {
+    production: boolean;
+    shooting: boolean;
+    publishing: boolean;
+  };
 }
 
 export interface TopicHistory {
@@ -105,6 +111,10 @@ export interface Production {
   topic_title?: string;
   topic_status?: string;
   can_edit?: boolean;
+  origin_source_type?: 'topic_outline' | null;
+  origin_source_content_snapshot?: string | null;
+  origin_source_outline_version?: string | null;
+  origin_captured_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -125,6 +135,7 @@ export interface ProductionHistory {
   version_state?: 'historical' | 'superseded';
   superseded_by_version?: string;
   superseded_at?: string;
+  material_draft_snapshot_html?: string | null;
 }
 
 export interface Comment {
@@ -144,6 +155,16 @@ export interface Shooting {
   location: string;
   equipment: string;
   script_content?: string | null;
+  script_source_production_id?: number | null;
+  script_source_version?: string | null;
+  script_source_production?: {
+    id: number;
+    version: string;
+    status: string;
+    created_at?: string;
+    version_timestamp?: string;
+    operator_name?: string | null;
+  } | null;
   status: string;
   operator_id: number;
   operator_name?: string;
@@ -155,6 +176,8 @@ export interface Shooting {
     content: string;
     content_markdown?: string;
     status: string;
+    created_at?: string;
+    version_timestamp?: string;
     operator_name?: string;
   } | null;
   created_at: string;
@@ -167,6 +190,14 @@ export interface Publishing {
   platform: string;
   url: string;
   script_content?: string | null;
+  script_source_production_id?: number | null;
+  script_source_version?: string | null;
+  script_source_production?: {
+    id: number;
+    version: string;
+    status: string;
+    operator_name?: string | null;
+  } | null;
   status: string;
   publish_time: string;
   operator_id: number;
@@ -176,6 +207,17 @@ export interface Publishing {
   likes?: number;
   shares?: number;
   comments?: number;
+  manual_views?: number | null;
+  manual_likes?: number | null;
+  manual_shares?: number | null;
+  manual_comments?: number | null;
+  manual_metrics_updated_at?: string | null;
+  views_source?: PublishingMetricSource;
+  likes_source?: PublishingMetricSource;
+  shares_source?: PublishingMetricSource;
+  comments_source?: PublishingMetricSource;
+  official_metrics_observed_at?: string | null;
+  official_source_file_sha256?: string | null;
   publishing_platform?: string;
   publishing_status?: string;
   publishing_publish_time?: string;
@@ -199,7 +241,21 @@ export interface Analytics {
   comments: number;
   data_date: string;
   created_at: string;
+  views_source?: PublishingMetricSource;
+  likes_source?: PublishingMetricSource;
+  shares_source?: PublishingMetricSource;
+  comments_source?: PublishingMetricSource;
+  record_type?: 'publishing' | 'legacy_analytics';
+  publication_match_count?: number;
 }
+
+export type PublishingMetricSource =
+  | 'douyin_official_export'
+  | 'manual'
+  | 'douyin_creator_collection'
+  | 'douyin_legacy_current'
+  | 'legacy_analytics'
+  | 'unavailable';
 
 export interface TeamStats {
   month: number;
@@ -220,6 +276,10 @@ export interface MonthlyStats {
   total_shares: number;
   total_comments: number;
   topic_count: number;
+  publication_count?: number;
+  metric_source_counts?: Partial<Record<PublishingMetricSource, number>>;
+  legacy_unlinked_count?: number;
+  legacy_ambiguous_count?: number;
 }
 
 export interface UserStats {

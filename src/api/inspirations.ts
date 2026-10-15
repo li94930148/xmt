@@ -33,7 +33,7 @@ export async function createInspirition(data: {
   title: string;
   description?: string;
   category?: string;
-}): Promise<{ message: string; id: number }> {
+}): Promise<{ message: string; id: number; inspiration: Inspiration }> {
   const response = await fetch(`${BASE_URL}/inspirations`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },

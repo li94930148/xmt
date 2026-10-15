@@ -1,8 +1,10 @@
 import { queryAll, queryOne, runInTransaction } from '../database/utils.js';
+import { advancePublishingTopicIfResolved } from '../modules/topics/publishing-completion.js';
 
 export type PublishingTitle = {
   id: number;
   title: string;
+  topic_id?: number;
 };
 
 export type DouyinWorkCandidate = {
@@ -99,7 +101,7 @@ export function chooseAutomaticPublishingDouyinMatch(publishingTitle: unknown, w
 
 export async function reconcilePublishingDouyinLinks(options: { accountId?: number; createdBy?: number } = {}) {
   const publishingRows = await queryAll<PublishingTitle>(`
-    SELECT p.id,t.title
+    SELECT p.id,p.topic_id,t.title
     FROM publishing p
     JOIN topics t ON t.id=p.topic_id
     LEFT JOIN publishing_douyin_links link ON link.publishing_id=p.id
@@ -132,22 +134,29 @@ export async function reconcilePublishingDouyinLinks(options: { accountId?: numb
     return ordered[0].match.match_score - ordered[1].match.match_score >= AUTO_MATCH_MARGIN ? [ordered[0]] : [];
   });
 
-  const linked = accepted.length > 0
+  const linkResult = accepted.length > 0
     ? await runInTransaction(async (tx) => {
       let inserted = 0;
+      const linkedTopicIds = new Set<number>();
       for (const { publishing, match } of accepted) {
-        inserted += await tx.execute(`
+        const changes = await tx.execute(`
           INSERT OR IGNORE INTO publishing_douyin_links(
             publishing_id,douyin_work_id,match_method,match_score,created_by,created_at,updated_at
           ) VALUES(?,?,?,?,?,datetime('now','+8 hours'),datetime('now','+8 hours'))
         `, [publishing.id, match.id, match.match_method, match.match_score, options.createdBy ?? null]);
+        inserted += changes;
+        if (changes > 0 && publishing.topic_id != null) linkedTopicIds.add(Number(publishing.topic_id));
       }
-      return inserted;
+      for (const topicId of linkedTopicIds) {
+        await advancePublishingTopicIfResolved(tx, topicId, options.createdBy);
+      }
+      return { inserted, topicIds: [...linkedTopicIds] };
     })
-    : 0;
+    : { inserted: 0, topicIds: [] as number[] };
 
   return {
-    linked,
+    linked: linkResult.inserted,
+    topicIds: linkResult.topicIds,
     reviewed: publishingRows.length,
     ambiguous: proposals.length - accepted.length,
     unmatched: publishingRows.length - proposals.length,
@@ -184,7 +193,7 @@ export async function setPublishingDouyinLink(
     });
     return { linked: false };
   }
-  const publishing = await queryOne<{ id: number }>('SELECT id FROM publishing WHERE id=?', [publishingId]);
+  const publishing = await queryOne<{ id: number; topic_id: number }>('SELECT id,topic_id FROM publishing WHERE id=?', [publishingId]);
   const work = await queryOne<{ id: number }>('SELECT id FROM douyin_works WHERE id=?', [douyinWorkId]);
   if (!publishing || !work) return null;
   const conflict = await queryOne<{ publishing_id: number }>(
@@ -192,7 +201,7 @@ export async function setPublishingDouyinLink(
     [douyinWorkId, publishingId],
   );
   if (conflict) return { conflictPublishingId: Number(conflict.publishing_id) };
-  await runInTransaction(async (tx) => {
+  const completionOutcome = await runInTransaction(async (tx) => {
     await tx.execute(`
       INSERT INTO publishing_douyin_links(
         publishing_id,douyin_work_id,match_method,match_score,created_by,created_at,updated_at
@@ -204,6 +213,7 @@ export async function setPublishingDouyinLink(
         created_by=excluded.created_by,
         updated_at=excluded.updated_at
     `, [publishingId, douyinWorkId, createdBy ?? null]);
+    return advancePublishingTopicIfResolved(tx, publishing.topic_id, createdBy);
   });
-  return { linked: true, douyinWorkId };
+  return { linked: true, douyinWorkId, topicId: publishing.topic_id, completionOutcome };
 }

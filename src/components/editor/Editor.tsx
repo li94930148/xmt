@@ -3,11 +3,14 @@
  * 集成：Toolbar, BubbleMenu, FloatingMenu, ContextMenu, TableOfContents,
  * CommentExtension, 多色高亮, 自动保存, 全屏, 打印, 导出
  */
-import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
-import { getSchema } from '@tiptap/core';
+import { useEffect, useLayoutEffect, useCallback, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { getSchema, type Editor as TiptapEditor } from '@tiptap/core';
 import { generateJSON } from '@tiptap/html';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { useAppStore } from '../../store';
+import BaseModal from '../common/BaseModal';
+import ActionButton from '../studio/ActionButton';
 import { markdownToHtml } from '../../utils/markdown';
 import { syncToYjs } from '../../collaboration/core/writeConsistency';
 import { TiptapCollaboration } from '../../collaboration/yjs/tiptapCollaboration';
@@ -27,6 +30,7 @@ import { createEditorExtensions } from './extensions/editorExtensions';
 import type { FormatPainterMode } from './formatPainter';
 import { resolveEditorInsertionSelection } from './editorInsertion';
 import { isLocalEditorChange } from './editorChangeOrigin';
+import { calculateContextMenuPosition, type Point } from './menuBehavior';
 
 interface EditorProps {
   value: string;
@@ -52,6 +56,75 @@ export interface EditorCommandHandle {
   insertHtmlAtSelectionOrEnd(html: string): boolean;
   appendHtml(html: string): boolean;
   getSelectedText(): string | null;
+  getReviewAnchor(): EditorReviewAnchor | null;
+  selectReviewAnchor(anchor: EditorReviewAnchor): boolean;
+  applyReviewSuggestion(anchor: EditorReviewAnchor, proposedText: string): 'applied' | 'already_applied' | 'missing';
+}
+
+export interface EditorReviewAnchor {
+  quote: string;
+  context: string;
+  from: number;
+  to: number;
+}
+
+function parseReviewContext(context: string): { before: string; after: string } {
+  try {
+    const value: unknown = JSON.parse(context);
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return {
+        before: typeof record.before === 'string' ? record.before : '',
+        after: typeof record.after === 'string' ? record.after : '',
+      };
+    }
+  } catch {
+    // Older or malformed anchors can still use the exact saved positions.
+  }
+  return { before: '', after: '' };
+}
+
+function findReviewAnchorRange(editor: TiptapEditor, anchor: EditorReviewAnchor, expectedQuote = anchor.quote) {
+  const docSize = editor.state.doc.content.size;
+  if (anchor.from >= 0 && anchor.to <= docSize && anchor.to > anchor.from) {
+    const current = editor.state.doc.textBetween(anchor.from, anchor.to, '\n', '\n');
+    if (current === expectedQuote) return { from: anchor.from, to: anchor.to };
+  }
+
+  if (!expectedQuote) return null;
+  const { before, after } = parseReviewContext(anchor.context);
+  const matches: Array<{ from: number; to: number; score: number }> = [];
+  editor.state.doc.descendants((node, position) => {
+    if (!node.isTextblock) return;
+    const text = node.textContent;
+    let offset = text.indexOf(expectedQuote);
+    while (offset >= 0) {
+      const beforeMatch = text.slice(0, offset);
+      const afterMatch = text.slice(offset + expectedQuote.length);
+      let beforeScore = 0;
+      for (let length = Math.min(before.length, beforeMatch.length); length > 0; length -= 1) {
+        if (beforeMatch.endsWith(before.slice(-length))) { beforeScore = length; break; }
+      }
+      let afterScore = 0;
+      for (let length = Math.min(after.length, afterMatch.length); length > 0; length -= 1) {
+        if (afterMatch.startsWith(after.slice(0, length))) { afterScore = length; break; }
+      }
+      const exactBefore = before ? beforeMatch.endsWith(before) : false;
+      const exactAfter = after ? afterMatch.startsWith(after) : false;
+      matches.push({
+        from: position + 1 + offset,
+        to: position + 1 + offset + expectedQuote.length,
+        score: (exactBefore ? 1000 : 0) + (exactAfter ? 1000 : 0) + beforeScore + afterScore,
+      });
+      offset = text.indexOf(expectedQuote, offset + 1);
+    }
+  });
+  if (matches.length === 1) return { from: matches[0].from, to: matches[0].to };
+  if (matches.length > 1) {
+    const ranked = [...matches].sort((a, b) => b.score - a.score);
+    if (ranked[0].score > ranked[1].score) return { from: ranked[0].from, to: ranked[0].to };
+  }
+  return null;
 }
 
 export default function Editor({
@@ -90,6 +163,8 @@ export default function Editor({
     x: number;
     y: number;
   } | null>(null);
+  const commentMenuRef = useRef<HTMLDivElement>(null);
+  const [commentMenuPosition, setCommentMenuPosition] = useState<Point>({ x: 8, y: 8 });
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -234,6 +309,29 @@ export default function Editor({
   }, [readOnly, collaboration?.provider, baseExtensions]);
 
   useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    let frame = 0;
+    const updateMenuPositions = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        if (editor.isDestroyed) return;
+        editor.view.dispatch(editor.state.tr
+          .setMeta('bubbleMenu', 'updatePosition')
+          .setMeta('floatingMenu', 'updatePosition'));
+      });
+    };
+    // Body-mounted menus must follow scrolls in any editor or page ancestor.
+    document.addEventListener('scroll', updateMenuPositions, true);
+    window.visualViewport?.addEventListener('resize', updateMenuPositions);
+    return () => {
+      document.removeEventListener('scroll', updateMenuPositions, true);
+      window.visualViewport?.removeEventListener('resize', updateMenuPositions);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [editor]);
+
+  useEffect(() => {
     if (!editor || editor.isDestroyed || !onCommandHandleChange) return;
     const handle: EditorCommandHandle = {
       insertHtmlAtSelectionOrEnd(html) {
@@ -250,6 +348,36 @@ export default function Editor({
         if (editor.isDestroyed || editor.state.selection.empty) return null;
         const { from, to } = editor.state.selection;
         return editor.state.doc.textBetween(from, to, '\n', '\n').trim() || null;
+      },
+      getReviewAnchor() {
+        if (editor.isDestroyed) return null;
+        const selection = editor.state.selection.empty ? lastFocusedSelectionRef.current : editor.state.selection;
+        if (!selection || selection.from === selection.to) return null;
+        const { from, to } = selection;
+        const quote = editor.state.doc.textBetween(from, to, '\n', '\n');
+        if (!quote.trim() || Array.from(quote).length > 2000) return null;
+        const before = editor.state.doc.textBetween(Math.max(0, from - 100), from, '\n', '\n').slice(-100);
+        const after = editor.state.doc.textBetween(to, Math.min(editor.state.doc.content.size, to + 100), '\n', '\n').slice(0, 100);
+        return { quote, context: JSON.stringify({ before, after }), from, to };
+      },
+      selectReviewAnchor(anchor) {
+        if (editor.isDestroyed) return false;
+        const range = findReviewAnchorRange(editor, anchor);
+        if (!range) return false;
+        return editor.chain().focus().setTextSelection(range).run();
+      },
+      applyReviewSuggestion(anchor, proposedText) {
+        if (editor.isDestroyed || readOnly) return 'missing';
+        const originalRange = findReviewAnchorRange(editor, anchor);
+        if (originalRange) {
+          const transaction = proposedText
+            ? editor.state.tr.insertText(proposedText, originalRange.from, originalRange.to)
+            : editor.state.tr.delete(originalRange.from, originalRange.to);
+          editor.view.dispatch(transaction);
+          return 'applied';
+        }
+        if (findReviewAnchorRange(editor, anchor, proposedText)) return 'already_applied';
+        return 'missing';
       },
     };
     onCommandHandleChange(handle);
@@ -356,13 +484,41 @@ export default function Editor({
 
   // 选区变化非常高频，保持浏览器原生选区，避免拖选文字时写 React state 或触发协同同步重算。
 
-  // 点击空白处关闭批注气泡
+  useLayoutEffect(() => {
+    if (!clickedComment || !commentMenuRef.current) return;
+    const bounds = commentMenuRef.current.getBoundingClientRect();
+    setCommentMenuPosition(calculateContextMenuPosition(
+      { x: clickedComment.x, y: clickedComment.y + 10 },
+      { width: bounds.width, height: bounds.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    ));
+  }, [clickedComment, focusMode]);
+
+  // Close click-anchored actions when their viewport anchor becomes stale.
   useEffect(() => {
     if (!clickedComment) return;
     const handler = () => setClickedComment(null);
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && commentMenuRef.current?.contains(event.target)) return;
+      handler();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') handler();
+    };
     // 延迟注册，避免当前点击立即触发关闭
     const timer = setTimeout(() => document.addEventListener('click', handler), 0);
-    return () => { clearTimeout(timer); document.removeEventListener('click', handler); };
+    document.addEventListener('scroll', onScroll, true);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', handler);
+    window.visualViewport?.addEventListener('resize', handler);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handler);
+      document.removeEventListener('scroll', onScroll, true);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', handler);
+      window.visualViewport?.removeEventListener('resize', handler);
+    };
   }, [clickedComment]);
 
   // 只读模式切换
@@ -422,18 +578,18 @@ export default function Editor({
     setCommentText('');
   };
 
-  const cancelComment = () => {
+  const cancelComment = useCallback(() => {
     setCommentState({ show: false, mode: 'add', selectedText: '' });
     setCommentText('');
-  };
+  }, []);
 
   // ======== 保存状态指示器 ========
   const statusIndicator = () => {
     const statusConfig = {
       idle: null,
-      saving: { icon: '⟳', color: 'text-studio-primary', label: '保存中...', animate: true },
-      synced: { icon: '✓', color: 'text-studio-success', label: editorStateLabel('synced'), animate: false },
-      conflicted: { icon: '⚠', color: 'text-studio-coral', label: editorStateLabel('conflicted'), animate: false },
+      saving: { icon: '⟳', color: 'text-studio-primary-contrast', label: '保存中...', animate: true },
+      synced: { icon: '✓', color: 'text-studio-success-contrast', label: editorStateLabel('synced'), animate: false },
+      conflicted: { icon: '⚠', color: 'text-studio-coral-contrast', label: editorStateLabel('conflicted'), animate: false },
     };
     const status = stateDocId ? eventSaveStatus : saveStatus;
     const config = statusConfig[status as keyof typeof statusConfig];
@@ -454,7 +610,7 @@ export default function Editor({
   };
 
   const containerClass = isFullscreen
-    ? 'fixed inset-0 z-[100] flex flex-col rounded-none h-screen min-h-0'
+    ? 'fixed inset-0 z-page-overlay flex flex-col rounded-none h-screen min-h-0'
     : immersive
       ? 'flex flex-col min-w-0'
       : 'rounded-xl border flex flex-col min-w-0';
@@ -479,7 +635,7 @@ export default function Editor({
       {/* 工具栏 - overflow-visible 确保下拉菜单不被裁剪 */}
       <div
         aria-hidden={focusMode}
-        className={`flex flex-wrap sm:flex-nowrap items-center justify-between shrink-0 relative z-30 sticky top-0 ${
+        className={`flex flex-wrap sm:flex-nowrap items-center justify-between shrink-0 relative z-sticky sticky top-0 ${
           isDark ? 'bg-[var(--editor-panel)]' : 'bg-[var(--editor-panel)]'
         } ${focusMode ? 'hidden' : ''}`}
       >
@@ -606,12 +762,15 @@ export default function Editor({
       )}
 
       {/* 批注点击气泡：点击带批注文字后显示编辑/删除 */}
-      {clickedComment && !focusMode && (
+      {clickedComment && !focusMode && createPortal(
         <div
-          className="fixed z-[400] rounded-lg shadow-xl border py-1 min-w-[120px]"
+          ref={commentMenuRef}
+          role="group"
+          aria-label="批注操作"
+          className="fixed z-editor-menu w-60 max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] overflow-y-auto break-words rounded-lg shadow-xl border py-1"
           style={{
-            left: Math.min(clickedComment.x, window.innerWidth - 160),
-            top: clickedComment.y + 10,
+            left: commentMenuPosition.x,
+            top: commentMenuPosition.y,
             background: 'var(--editor-panel)',
             borderColor: 'var(--editor-border)',
           }}
@@ -638,33 +797,28 @@ export default function Editor({
           >
             删除批注
           </button>
-        </div>
+        </div>, document.body,
       )}
 
       {/* 批注输入弹窗 */}
-      {commentState.show && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/30">
-          <div
-            className={`rounded-lg shadow-xl p-4 w-80 ${
-              isDark ? 'bg-studio-surface-soft border border-studio-border-soft' : 'bg-studio-surface-glass border border-studio-border-soft'
-            }`}
-          >
-            <div className="mb-2">
-              <span className={`text-sm font-medium ${isDark ? 'text-studio-text-secondary' : 'text-studio-text-muted'}`}>
-                {commentState.mode === 'add'
-                  ? `为「${commentState.selectedText.slice(0, 20)}${commentState.selectedText.length > 20 ? '...' : ''}」添加批注`
-                  : '编辑批注'}
-              </span>
-            </div>
+      <BaseModal
+        open={commentState.show}
+        onClose={cancelComment}
+        title={commentState.mode === 'add'
+          ? `为「${commentState.selectedText.slice(0, 20)}${commentState.selectedText.length > 20 ? '...' : ''}」添加批注`
+          : '编辑批注'}
+        size="sm"
+        closeOnEscape
+        closeOnOverlayClick={false}
+      >
+        <div className="space-y-4">
+          <label className="block text-sm text-studio-text-secondary">
+            批注内容
             <textarea
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
               placeholder="输入批注内容..."
-              className={`w-full p-2 border rounded text-sm resize-none ${
-                isDark
-                  ? 'bg-studio-surface-soft border-studio-border-soft text-white placeholder-gray-400'
-                  : 'bg-studio-surface border-studio-border-soft text-studio-text-primary placeholder:text-studio-text-muted'
-              }`}
+              className="xmt-field mt-2 min-h-24 resize-y text-sm"
               rows={3}
               autoFocus
               onKeyDown={(e) => {
@@ -672,32 +826,19 @@ export default function Editor({
                   e.preventDefault();
                   confirmComment();
                 }
-                if (e.key === 'Escape') {
-                  e.stopPropagation();
-                  cancelComment();
-                }
               }}
             />
-            <div className="flex justify-end gap-2 mt-3">
-              <button
-                onClick={cancelComment}
-                className={`px-3 py-1.5 text-sm rounded transition-colors ${
-                  isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
-                }`}
-              >
-                取消
-              </button>
-              <button
-                onClick={confirmComment}
-                disabled={!commentText.trim()}
-                className="px-3 py-1.5 text-sm rounded bg-studio-primary text-white hover:bg-studio-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {commentState.mode === 'add' ? '确认' : '保存'}
-              </button>
-            </div>
+          </label>
+          <div className="flex justify-end gap-2">
+            <ActionButton onClick={cancelComment} variant="ghost" className="px-3 py-2">
+              取消
+            </ActionButton>
+            <ActionButton onClick={confirmComment} variant="primary" disabled={!commentText.trim()} className="px-3 py-2">
+              {commentState.mode === 'add' ? '确认' : '保存'}
+            </ActionButton>
           </div>
         </div>
-      )}
+      </BaseModal>
 
       <style>{`
         .tiptap p.is-editor-empty:first-child::before {
@@ -961,7 +1102,7 @@ export default function Editor({
         }
         .xmt-collaboration-cursor-label {
           position: fixed;
-          z-index: 40;
+          z-index: var(--xmt-z-page-overlay);
           border-radius: 5px;
           color: #fff;
           font-size: 11px;
@@ -982,7 +1123,7 @@ export default function Editor({
         }
         .xmt-collaboration-cursor-overflow {
           position: fixed;
-          z-index: 39;
+          z-index: calc(var(--xmt-z-page-overlay) - 1);
           display: flex;
           align-items: center;
           justify-content: flex-end;

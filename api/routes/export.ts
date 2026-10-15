@@ -3,16 +3,14 @@ import { beijingNow, beijingToday, queryOne, queryAll } from '../database/utils'
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { sendSafeServerError } from '../utils/response';
+import { getLegacyAnalyticsInventory, getPublishingMetricFacts, sumPublishingMetricFacts } from '../services/publishingMetrics';
 
 const router = express.Router();
 
-function queryDateDaysAgo(days: number): string {
-  const date = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
-  date.setDate(date.getDate() - days);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function dateDaysAgo(baseDate: string, days: number): string {
+  const date = new Date(`${baseDate}T08:00:00+08:00`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
 }
 
 router.get('/topics', authenticate, requirePermission('export:data'), async (req, res) => {
@@ -138,41 +136,44 @@ router.get('/analytics', authenticate, requirePermission('export:data'), async (
 
 router.get('/weekly-report', authenticate, requirePermission('export:data'), async (req, res) => {
   try {
+    const reportEnd = beijingToday();
+    const daysSinceSunday = new Date(`${reportEnd}T08:00:00+08:00`).getUTCDay();
+    const reportStart = dateDaysAgo(reportEnd, daysSinceSunday);
     const completedTopics = await queryAll(`
       SELECT t.*, u.name as creator_name
       FROM topics t
       LEFT JOIN users u ON t.creator_id = u.id
       WHERE t.status = 'completed'
-        AND t.updated_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
+        AND date(t.updated_at) BETWEEN date(?) AND date(?)
       ORDER BY t.updated_at DESC
-    `);
+    `, [reportStart, reportEnd]);
 
     const publishedVideos = await queryAll(`
-      SELECT p.*, t.title as topic_title
+      SELECT p.id, t.title as topic_title,
+             CASE WHEN dw.id IS NOT NULL THEN 'douyin' ELSE p.platform END AS platform,
+             COALESCE(dw.publish_time,p.publish_time) AS publish_time
       FROM publishing p
       LEFT JOIN topics t ON p.topic_id = t.id
-      WHERE p.status = 'published'
-        AND p.publish_time >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
-      ORDER BY p.publish_time DESC
-    `);
+      LEFT JOIN publishing_douyin_links link ON link.publishing_id=p.id
+      LEFT JOIN douyin_works dw ON dw.id=link.douyin_work_id
+      WHERE (dw.id IS NOT NULL OR p.status = 'published')
+        AND date(COALESCE(dw.publish_time,p.publish_time)) BETWEEN date(?) AND date(?)
+      ORDER BY COALESCE(dw.publish_time,p.publish_time) DESC,p.id DESC
+    `, [reportStart, reportEnd]);
 
     const newTopics = await queryAll(`
       SELECT t.*, u.name as creator_name
       FROM topics t
       LEFT JOIN users u ON t.creator_id = u.id
-      WHERE t.created_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
+      WHERE date(t.created_at) BETWEEN date(?) AND date(?)
       ORDER BY t.created_at DESC
-    `);
+    `, [reportStart, reportEnd]);
 
-    const analyticsResult = await queryOne(`
-      SELECT
-        COALESCE(SUM(views), 0) as total_views,
-        COALESCE(SUM(likes), 0) as total_likes,
-        COALESCE(SUM(shares), 0) as total_shares,
-        COALESCE(SUM(comments), 0) as total_comments
-      FROM analytics
-      WHERE data_date >= date('now', '+8 hours', 'weekday 0', '-7 days')
-    `);
+    const [metricFacts, legacyMetricInventory] = await Promise.all([
+      getPublishingMetricFacts({ startDate: reportStart, endDate: reportEnd, publishedOnly: true }),
+      getLegacyAnalyticsInventory(reportStart, reportEnd),
+    ]);
+    const analyticsResult = sumPublishingMetricFacts(metricFacts);
 
     const pomodoroStats = await queryOne(`
       SELECT
@@ -180,31 +181,33 @@ router.get('/weekly-report', authenticate, requirePermission('export:data'), asy
         COALESCE(SUM(duration), 0) as total_minutes
       FROM pomodoro_sessions
       WHERE completed = 1
-        AND ended_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
-    `);
+        AND date(ended_at) BETWEEN date(?) AND date(?)
+    `, [reportStart, reportEnd]);
 
     const newInspirations = await queryAll(`
       SELECT i.*, u.name as creator_name
       FROM inspirations i
       LEFT JOIN users u ON i.creator_id = u.id
-      WHERE i.created_at >= datetime('now', '+8 hours', 'weekday 0', '-7 days')
+      WHERE date(i.created_at) BETWEEN date(?) AND date(?)
       ORDER BY i.votes DESC
       LIMIT 5
-    `);
+    `, [reportStart, reportEnd]);
 
     res.json({
       period: {
-        start: queryDateDaysAgo(7),
-        end: beijingToday(),
+        start: reportStart,
+        end: reportEnd,
       },
       summary: {
         completedTopics: completedTopics.length,
         publishedVideos: publishedVideos.length,
         newTopics: newTopics.length,
-        totalViews: analyticsResult?.total_views || 0,
-        totalLikes: analyticsResult?.total_likes || 0,
-        totalShares: analyticsResult?.total_shares || 0,
-        totalComments: analyticsResult?.total_comments || 0,
+        totalViews: analyticsResult.total_views,
+        totalLikes: analyticsResult.total_likes,
+        totalShares: analyticsResult.total_shares,
+        totalComments: analyticsResult.total_comments,
+        metricSourceCounts: analyticsResult.sourceCounts,
+        excludedLegacyAnalyticsCount: Number(legacyMetricInventory?.unlinked_count || 0) + Number(legacyMetricInventory?.ambiguous_count || 0),
         pomodoroSessions: pomodoroStats?.total_sessions || 0,
         focusMinutes: pomodoroStats?.total_minutes || 0,
       },

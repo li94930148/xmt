@@ -12,6 +12,7 @@ type TopicScopeRecord = {
 
 type WorkflowNodeRecord = {
   id: number;
+  name: string;
   template_id?: number | null;
   approver_type: string | null;
   approver_value: string | null;
@@ -189,7 +190,7 @@ export async function resolveCommentTopicScope(targetType: unknown, targetId: un
 
 export async function getWorkflowNodeById(nodeId: number | string) {
   const node = await queryOne<WorkflowNodeRecord>(
-    `SELECT id, template_id, approver_type, approver_value, status_from, status_to FROM workflow_nodes WHERE id = ?`,
+    `SELECT id, name, template_id, approver_type, approver_value, status_from, status_to FROM workflow_nodes WHERE id = ?`,
     [nodeId],
   );
 

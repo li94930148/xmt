@@ -1,6 +1,7 @@
 import type { User } from '../types/index.js';
-import { beijingNow, execute, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils.js';
+import { beijingNow, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { createMessage } from '../utils/messageHelper.js';
+import { getPublishingMetricFacts, PUBLISHING_METRIC_FIELDS, sumPublishingMetricFacts } from './publishingMetrics.js';
 import type {
   CreateRetroActionInput,
   CreateRetrospectiveInput,
@@ -99,6 +100,18 @@ function assertAuthenticated(user?: User): asserts user is User {
 
 function isManager(user: User) {
   return user.role === 'admin' || user.role === 'director';
+}
+
+async function retrospectiveVisibilityScope(user: User) {
+  if (isManager(user) || await hasPermissionCode(user, 'analytics:retro:view')) {
+    return { condition: null as string | null, params: [] as unknown[] };
+  }
+  return {
+    condition: `(r.status = 'published' OR r.owner_id = ? OR r.created_by = ? OR EXISTS (
+      SELECT 1 FROM retro_actions va WHERE va.retro_id = r.id AND va.owner_id = ?
+    ))`,
+    params: [user.id, user.id, user.id],
+  };
 }
 
 async function hasPermissionCode(user: User, code: string) {
@@ -563,7 +576,12 @@ ${blocks}
 </html>`;
 }
 
+type RetrospectiveAuditWriter = {
+  execute(sql: string, params?: unknown[]): Promise<number>;
+};
+
 async function recordAudit(
+  tx: RetrospectiveAuditWriter,
   retroId: number,
   actorId: number,
   action: string,
@@ -571,7 +589,7 @@ async function recordAudit(
   afterStatus?: string,
   comment?: string,
 ) {
-  await execute(
+  await tx.execute(
     `INSERT INTO retro_audit_logs (retro_id, actor_id, action, before_status, after_status, comment, created_at)
      VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'))`,
     [retroId, actorId, action, beforeStatus || null, afterStatus || null, comment || null],
@@ -625,13 +643,10 @@ export async function listRetrospectives(user: User | undefined, filters: Retros
   const category = parseCategory(filters.category);
   const params: unknown[] = [];
   const where: string[] = [];
-  const canViewAll = isManager(user) || await hasPermissionCode(user, 'analytics:retro:view');
-
-  if (!canViewAll) {
-    where.push(`(r.status = 'published' OR r.owner_id = ? OR r.created_by = ? OR EXISTS (
-      SELECT 1 FROM retro_actions va WHERE va.retro_id = r.id AND va.owner_id = ?
-    ))`);
-    params.push(user.id, user.id, user.id);
+  const visibility = await retrospectiveVisibilityScope(user);
+  if (visibility.condition) {
+    where.push(visibility.condition);
+    params.push(...visibility.params);
   }
   if (status) {
     where.push('r.status = ?');
@@ -655,6 +670,16 @@ export async function listRetrospectives(user: User | undefined, filters: Retros
     where.push('r.owner_id = ?');
     params.push(parseId(filters.ownerId, 'ownerId'));
   }
+  const keyword = String(filters.keyword || '').trim();
+  if (keyword) {
+    if (Array.from(keyword).length < 2 || Array.from(keyword).length > 100) throw new RetrospectiveServiceError(400, 'INVALID_SEARCH', '搜索词需为 2–100 个字符');
+    const pattern = `%${keyword.replace(/[\\%_]/g, '\\$&')}%`;
+    where.push(`(r.title LIKE ? ESCAPE '\\' OR r.summary_md LIKE ? ESCAPE '\\' OR EXISTS (
+      SELECT 1 FROM retro_actions sa WHERE sa.retro_id = r.id AND
+        (sa.title LIKE ? ESCAPE '\\' OR sa.description_md LIKE ? ESCAPE '\\' OR sa.result_md LIKE ? ESCAPE '\\')
+    ) OR EXISTS (SELECT 1 FROM retro_metric_snapshots sm WHERE sm.retro_id = r.id AND (sm.metric_name LIKE ? ESCAPE '\\' OR sm.value_text LIKE ? ESCAPE '\\')))`);
+    params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
+  }
 
   const rows = await queryAll<Row>(
     `SELECT r.*, t.name AS template_name, t.category AS template_category,
@@ -667,11 +692,44 @@ export async function listRetrospectives(user: User | undefined, filters: Retros
      LEFT JOIN users owner ON owner.id = r.owner_id
      LEFT JOIN users creator ON creator.id = r.created_by
      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-     ORDER BY r.period_start DESC, r.updated_at DESC, r.id DESC`,
-    params,
+     ORDER BY r.period_start DESC, r.updated_at DESC, r.id DESC${keyword ? ' LIMIT ?' : ''}`,
+    keyword ? [...params, Math.max(1, Math.min(12, Math.floor(filters.limit ?? 8)))] : params,
   );
 
   return { retrospectives: rows.map((row) => formatRetrospective(row)) };
+}
+
+export async function getHomeRetrospectiveSummary(user: User | undefined) {
+  assertAuthenticated(user);
+  const visibility = await retrospectiveVisibilityScope(user);
+  const where = visibility.condition ? `WHERE ${visibility.condition}` : '';
+  const [count, rows] = await Promise.all([
+    queryOne<{ total: number }>(
+      `SELECT COUNT(*) AS total FROM retrospectives r ${where}`,
+      visibility.params,
+    ),
+    queryAll<Row>(
+      `SELECT r.id, r.title, r.period_start, r.period_end, r.status, r.updated_at
+       FROM retrospectives r
+       ${where}
+       ORDER BY r.period_start DESC, r.updated_at DESC, r.id DESC
+       LIMIT 3`,
+      visibility.params,
+    ),
+  ]);
+
+  return {
+    available: true,
+    total: Number(count?.total || 0),
+    tasks: rows.map((row) => ({
+      id: Number(row.id),
+      title: String(row.title || ''),
+      period_start: String(row.period_start || ''),
+      period_end: String(row.period_end || ''),
+      status: String(row.status || 'draft'),
+      updated_at: String(row.updated_at || ''),
+    })),
+  };
 }
 
 export async function listMyRetroActions(user: User | undefined, statusValue?: string) {
@@ -771,13 +829,16 @@ export async function createRetrospective(user: User | undefined, input: CreateR
     }
   }
 
-  const retroId = await executeInsert(
-    `INSERT INTO retrospectives
-       (template_id, title, scope_type, scope_id, period_start, period_end, status, summary_md, owner_id, created_by, created_at, updated_at, version)
-     VALUES (?, ?, ?, ?, ?, ?, 'draft', '', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'), 1)`,
-    [templateId, title, scopeType, scopeId, periodStart, periodEnd, ownerId, user.id],
-  );
-  await recordAudit(retroId, user.id, 'create', undefined, 'draft');
+  const retroId = await runInTransaction(async (tx) => {
+    const createdId = await tx.executeInsert(
+      `INSERT INTO retrospectives
+         (template_id, title, scope_type, scope_id, period_start, period_end, status, summary_md, owner_id, created_by, created_at, updated_at, version)
+       VALUES (?, ?, ?, ?, ?, ?, 'draft', '', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'), 1)`,
+      [templateId, title, scopeType, scopeId, periodStart, periodEnd, ownerId, user.id],
+    );
+    await recordAudit(tx, createdId, user.id, 'create', undefined, 'draft');
+    return createdId;
+  });
   return getRetrospectiveDetail(user, retroId);
 }
 
@@ -844,13 +905,18 @@ export async function updateRetrospective(user: User | undefined, retroIdValue: 
     throw new RetrospectiveServiceError(400, 'INVALID_TITLE', '请填写复盘标题');
   }
 
-  await execute(
-    `UPDATE retrospectives
-     SET title = ?, summary_md = ?, version = version + 1, updated_at = datetime('now', '+8 hours')
-     WHERE id = ?`,
-    [title, input.summaryMd === undefined ? row.summary_md || '' : String(input.summaryMd || ''), retroId],
-  );
-  await recordAudit(retroId, user.id, 'update', String(row.status), String(row.status));
+  await runInTransaction(async (tx) => {
+    const changed = await tx.execute(
+      `UPDATE retrospectives
+       SET title = ?, summary_md = ?, version = version + 1, updated_at = datetime('now', '+8 hours')
+       WHERE id = ? AND version = ?`,
+      [title, input.summaryMd === undefined ? row.summary_md || '' : String(input.summaryMd || ''), retroId, Number(row.version || 1)],
+    );
+    if (changed !== 1) {
+      throw new RetrospectiveServiceError(409, 'VERSION_CONFLICT', '复盘已被更新，请刷新后重试');
+    }
+    await recordAudit(tx, retroId, user.id, 'update', String(row.status), String(row.status));
+  });
   return getRetrospectiveDetail(user, retroId);
 }
 
@@ -863,6 +929,16 @@ async function buildMetricSnapshots(retro: RetrospectiveRow) {
   const start = String(retro.period_start);
   const end = String(retro.period_end);
   const sourceBase = { periodStart: start, periodEnd: end, capturedAt: beijingNow() };
+  const publishingFacts = await getPublishingMetricFacts({ startDate: start, endDate: end, publishedOnly: true });
+  const publishingTotals = sumPublishingMetricFacts(publishingFacts);
+  const publishingMetricSourceCounts = Object.fromEntries(PUBLISHING_METRIC_FIELDS.map((field) => [
+    field,
+    publishingFacts.reduce<Record<string, number>>((counts, fact) => {
+      const source = fact[`${field}_source`];
+      counts[source] = (counts[source] || 0) + 1;
+      return counts;
+    }, {}),
+  ]));
   const metrics = [
     {
       metricKey: 'topics_count',
@@ -882,6 +958,23 @@ async function buildMetricSnapshots(retro: RetrospectiveRow) {
       valueNum: await countOne(`SELECT COUNT(*) AS count FROM publishing WHERE date(created_at) BETWEEN ? AND ?`, [start, end]),
       source: { ...sourceBase, table: 'publishing', field: 'created_at' },
     },
+    ...([
+      { field: 'views', metricKey: 'published_views', metricName: '发布播放量', value: publishingTotals.total_views },
+      { field: 'likes', metricKey: 'published_likes', metricName: '发布点赞量', value: publishingTotals.total_likes },
+      { field: 'shares', metricKey: 'published_shares', metricName: '发布分享量', value: publishingTotals.total_shares },
+      { field: 'comments', metricKey: 'published_comments', metricName: '发布评论量', value: publishingTotals.total_comments },
+    ] as const).map((item) => ({
+      metricKey: item.metricKey,
+      metricName: item.metricName,
+      valueNum: item.value,
+      source: {
+        ...sourceBase,
+        table: 'publishing_metric_facts',
+        field: item.field,
+        publicationCount: publishingFacts.length,
+        metricSources: publishingMetricSourceCounts[item.field],
+      },
+    })),
     {
       metricKey: 'daily_reports_submitted_count',
       metricName: '日报提交数',
@@ -983,8 +1076,8 @@ export async function generateRetrospectiveSnapshot(user: User | undefined, retr
         ],
       );
     }
+    await recordAudit(tx, retroId, user.id, 'snapshot_replace', String(row.status), String(row.status), `metrics=${snapshots.length}`);
   });
-  await recordAudit(retroId, user.id, 'snapshot_replace', String(row.status), String(row.status), `metrics=${snapshots.length}`);
   return getRetrospectiveDetail(user, retroId);
 }
 
@@ -1005,13 +1098,18 @@ export async function publishRetrospective(user: User | undefined, retroIdValue:
     throw new RetrospectiveServiceError(400, 'EMPTY_RETRO', '发布前请先填写结论、生成快照或创建行动项');
   }
 
-  await execute(
-    `UPDATE retrospectives
-     SET status = 'published', published_at = datetime('now', '+8 hours'), version = version + 1, updated_at = datetime('now', '+8 hours')
-     WHERE id = ?`,
-    [retroId],
-  );
-  await recordAudit(retroId, user.id, 'publish', String(row.status), 'published');
+  await runInTransaction(async (tx) => {
+    const changed = await tx.execute(
+      `UPDATE retrospectives
+       SET status = 'published', published_at = datetime('now', '+8 hours'), version = version + 1, updated_at = datetime('now', '+8 hours')
+       WHERE id = ? AND status = ? AND version = ?`,
+      [retroId, String(row.status), Number(row.version || 1)],
+    );
+    if (changed !== 1) {
+      throw new RetrospectiveServiceError(409, 'RETRO_CHANGED', '复盘状态已变化，请刷新后重试');
+    }
+    await recordAudit(tx, retroId, user.id, 'publish', String(row.status), 'published');
+  });
   void notifyRetrospectivePublished(row, user.id);
   return getRetrospectiveDetail(user, retroId);
 }
@@ -1027,13 +1125,18 @@ export async function archiveRetrospective(user: User | undefined, retroIdValue:
     throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号不能归档该复盘');
   }
 
-  await execute(
-    `UPDATE retrospectives
-     SET status = 'archived', archived_at = datetime('now', '+8 hours'), version = version + 1, updated_at = datetime('now', '+8 hours')
-     WHERE id = ?`,
-    [retroId],
-  );
-  await recordAudit(retroId, user.id, 'archive', String(row.status), 'archived');
+  await runInTransaction(async (tx) => {
+    const changed = await tx.execute(
+      `UPDATE retrospectives
+       SET status = 'archived', archived_at = datetime('now', '+8 hours'), version = version + 1, updated_at = datetime('now', '+8 hours')
+       WHERE id = ? AND status = ? AND version = ?`,
+      [retroId, String(row.status), Number(row.version || 1)],
+    );
+    if (changed !== 1) {
+      throw new RetrospectiveServiceError(409, 'RETRO_CHANGED', '复盘状态已变化，请刷新后重试');
+    }
+    await recordAudit(tx, retroId, user.id, 'archive', String(row.status), 'archived');
+  });
   void notifyRetrospectiveArchived(row, user.id);
   return getRetrospectiveDetail(user, retroId);
 }
@@ -1058,13 +1161,15 @@ export async function createRetroAction(user: User | undefined, retroIdValue: nu
   }
   const dueDate = input.dueDate ? parseDate(input.dueDate, 'dueDate') : null;
   const ownerId = input.ownerId ? parseId(input.ownerId, 'ownerId') : user.id;
-  const actionId = await executeInsert(
-    `INSERT INTO retro_actions
-       (retro_id, title, description_md, owner_id, due_date, status, result_md, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'todo', '', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
-    [retroId, title, String(input.descriptionMd || ''), ownerId, dueDate, user.id],
-  );
-  await recordAudit(retroId, user.id, 'action_create', String(row.status), String(row.status), `action=${actionId}`);
+  await runInTransaction(async (tx) => {
+    const createdId = await tx.executeInsert(
+      `INSERT INTO retro_actions
+         (retro_id, title, description_md, owner_id, due_date, status, result_md, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'todo', '', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
+      [retroId, title, String(input.descriptionMd || ''), ownerId, dueDate, user.id],
+    );
+    await recordAudit(tx, retroId, user.id, 'action_create', String(row.status), String(row.status), `action=${createdId}`);
+  });
   notifyActionAssigned(row, title, ownerId, user.id);
   return getRetrospectiveDetail(user, retroId);
 }
@@ -1105,23 +1210,29 @@ export async function updateRetroAction(user: User | undefined, actionIdValue: n
     ? wasDone && action.closed_at ? String(action.closed_at) : beijingNow()
     : null;
 
-  await execute(
-    `UPDATE retro_actions
-     SET title = ?, description_md = ?, owner_id = ?, due_date = ?, status = ?, result_md = ?, closed_at = ?, updated_at = datetime('now', '+8 hours')
-     WHERE id = ?`,
-    [
-      title,
-      input.descriptionMd === undefined || !canManage ? String(action.description_md || '') : String(input.descriptionMd || ''),
-      ownerId,
-      dueDate,
-      nextStatus,
-      input.resultMd === undefined ? String(action.result_md || '') : String(input.resultMd || ''),
-      closedAt,
-      actionId,
-    ],
-  );
   const retroId = Number(action.parent_retro_id);
-  await recordAudit(retroId, user.id, 'action_update', String(action.retro_status || ''), String(action.retro_status || ''), `action=${actionId}`);
+  await runInTransaction(async (tx) => {
+    const changed = await tx.execute(
+      `UPDATE retro_actions
+       SET title = ?, description_md = ?, owner_id = ?, due_date = ?, status = ?, result_md = ?, closed_at = ?, updated_at = datetime('now', '+8 hours')
+       WHERE id = ? AND status = ?`,
+      [
+        title,
+        input.descriptionMd === undefined || !canManage ? String(action.description_md || '') : String(input.descriptionMd || ''),
+        ownerId,
+        dueDate,
+        nextStatus,
+        input.resultMd === undefined ? String(action.result_md || '') : String(input.resultMd || ''),
+        closedAt,
+        actionId,
+        String(action.status || 'todo'),
+      ],
+    );
+    if (changed !== 1) {
+      throw new RetrospectiveServiceError(409, 'ACTION_CHANGED', '行动项状态已变化，请刷新后重试');
+    }
+    await recordAudit(tx, retroId, user.id, 'action_update', String(action.retro_status || ''), String(action.retro_status || ''), `action=${actionId}`);
+  });
   void notifyActionUpdated(retroId, action, user.id, String(action.status || ''), nextStatus);
   return getRetrospectiveDetail(user, retroId);
 }

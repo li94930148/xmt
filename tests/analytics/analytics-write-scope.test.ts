@@ -38,6 +38,14 @@ const contributorTopicId = await executeInsert(
   `INSERT INTO topics(title,creator_id,assignee_id,status) VALUES(?,?,?,'publishing')`,
   ['可录入选题', contributorId, contributorId],
 );
+const ownerPublishingId = await executeInsert(
+  `INSERT INTO publishing(topic_id,status,publish_time,operator_id) VALUES(?,'published','2026-09-15',?)`,
+  [ownerTopicId, ownerId],
+);
+const contributorPublishingId = await executeInsert(
+  `INSERT INTO publishing(topic_id,status,publish_time,operator_id) VALUES(?,'published','2026-09-15',?)`,
+  [contributorTopicId, contributorId],
+);
 
 const app = express();
 app.use(express.json());
@@ -51,32 +59,39 @@ const headers = {
   Authorization: `Bearer ${signToken({ userId: contributorId })}`,
   'Content-Type': 'application/json',
 };
-const payload = { views: 10, likes: 2, shares: 1, comments: 3, data_date: '2026-09-15' };
+const payload = { views: 10, likes: 2, shares: 1, comments: 3 };
 
 try {
   const forbidden = await fetch(base, {
-    method: 'POST', headers, body: JSON.stringify({ ...payload, topic_id: ownerTopicId }),
+    method: 'POST', headers, body: JSON.stringify({ ...payload, publishing_id: ownerPublishingId }),
   });
-  assert.equal(forbidden.status, 403, 'analytics:create must not bypass topic data scope');
+  assert.equal(forbidden.status, 403, 'analytics:create must not bypass publication topic scope');
 
   const invalidMetric = await fetch(base, {
-    method: 'POST', headers, body: JSON.stringify({ ...payload, topic_id: contributorTopicId, views: -1 }),
+    method: 'POST', headers, body: JSON.stringify({ ...payload, publishing_id: contributorPublishingId, views: -1 }),
   });
   assert.equal(invalidMetric.status, 400);
 
+  const oldTopicGrainWrite = await fetch(base, {
+    method: 'POST', headers, body: JSON.stringify({ ...payload, topic_id: contributorTopicId, data_date: '2026-09-15' }),
+  });
+  assert.equal(oldTopicGrainWrite.status, 400, 'legacy topic/date writes must not create another metric source');
+
   const created = await fetch(base, {
-    method: 'POST', headers, body: JSON.stringify({ ...payload, topic_id: contributorTopicId }),
+    method: 'POST', headers, body: JSON.stringify({ ...payload, publishing_id: contributorPublishingId }),
   });
   assert.equal(created.status, 200);
   const updated = await fetch(base, {
-    method: 'POST', headers, body: JSON.stringify({ ...payload, topic_id: contributorTopicId, views: 25 }),
+    method: 'POST', headers, body: JSON.stringify({ publishing_id: contributorPublishingId, views: 25 }),
   });
   assert.equal(updated.status, 200);
   assert.deepEqual(
-    await queryOne('SELECT COUNT(*) count,MAX(views) views FROM analytics WHERE topic_id=? AND data_date=?', [contributorTopicId, payload.data_date]),
-    { count: 1, views: 25 },
-    'same-day writes must update one canonical row',
+    await queryOne('SELECT manual_views,manual_likes,manual_shares,manual_comments,manual_metrics_updated_by FROM publishing WHERE id=?', [contributorPublishingId]),
+    { manual_views: 25, manual_likes: 2, manual_shares: 1, manual_comments: 3, manual_metrics_updated_by: contributorId },
+    'publication-grain partial writes must preserve unspecified metric fields and attribution',
   );
+  assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) count FROM analytics WHERE topic_id=?', [contributorTopicId]))?.count, 0,
+    'new manual entries must not create topic-grain analytics rows');
   console.log('analytics write scope and validation tests passed');
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

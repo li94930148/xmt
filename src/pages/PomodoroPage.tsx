@@ -63,9 +63,9 @@ export default function PomodoroPage() {
                   className="flex items-center gap-3 p-3 rounded-xl bg-theme-tertiary/50 hover:bg-theme-tertiary transition-colors"
                 >
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                    index === 0 ? 'bg-studio-amber/20 text-studio-amber' :
+                    index === 0 ? 'bg-studio-amber/20 text-studio-amber-contrast' :
                     index === 1 ? 'bg-studio-surface-soft/20 text-studio-text-secondary' :
-                    index === 2 ? 'bg-studio-amber/20 text-studio-amber' :
+                    index === 2 ? 'bg-studio-amber/20 text-studio-amber-contrast' :
                     'bg-theme-tertiary text-theme-text-muted'
                   }`}>
                     {index + 1}

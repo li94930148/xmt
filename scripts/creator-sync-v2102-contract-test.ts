@@ -88,6 +88,25 @@ const currentCount = await queryOne<{ count: number }>('SELECT COUNT(*) count FR
 assert.equal(Number(currentCount?.count), 12, '12 works must remain 12 after ten identical snapshots');
 const snapshotLogCount = await queryOne<{ count: number }>('SELECT COUNT(*) count FROM douyin_sync_logs WHERE account_id=? AND snapshot_id=?', [douyinAccount.id, 'snapshot-12-works']);
 assert.equal(Number(snapshotLogCount?.count), 1, 'snapshot_id must be idempotent');
+assert.deepEqual(
+  await queryOne<{source_type:string;has_play_count:number;has_like_count:number;has_comment_count:number;has_share_count:number}>(
+    `SELECT source_type,has_play_count,has_like_count,has_comment_count,has_share_count
+     FROM douyin_work_snapshots WHERE work_id=(SELECT id FROM douyin_works WHERE aweme_id=?) ORDER BY id DESC LIMIT 1`,
+    [works[0].aweme_id],
+  ),
+  { source_type:'douyin_creator_collection',has_play_count:1,has_like_count:1,has_comment_count:1,has_share_count:1 },
+  'creator-center collection records per-field observed provenance',
+);
+await sync({ ...currentPayload, snapshot_id:'snapshot-missing-field-provenance', contents:[{ ...works[0], aweme_id:'83900000000000000999', metrics:{ play_count:0 } }] });
+assert.deepEqual(
+  await queryOne<{play_count:number;source_type:string;has_play_count:number;has_like_count:number;has_comment_count:number;has_share_count:number}>(
+    `SELECT snapshot.play_count,snapshot.source_type,snapshot.has_play_count,snapshot.has_like_count,snapshot.has_comment_count,snapshot.has_share_count
+     FROM douyin_work_snapshots snapshot JOIN douyin_works work ON work.id=snapshot.work_id
+     WHERE work.aweme_id='83900000000000000999' ORDER BY snapshot.id DESC LIMIT 1`,
+  ),
+  { play_count:0,source_type:'douyin_creator_collection',has_play_count:1,has_like_count:0,has_comment_count:0,has_share_count:0 },
+  'collection presence flags distinguish an observed zero from metrics omitted by the source',
+);
 const storedCover = await queryOne<{ size_bytes: number; bytes: Uint8Array }>(`SELECT size_bytes,bytes FROM creator_cover_assets WHERE platform_item_id=?`, [works[0].aweme_id]);
 assert.equal(Number(storedCover?.size_bytes), managedCover.byteLength);
 assert.deepEqual(Buffer.from(storedCover?.bytes || []), managedCover, 'validated cover bytes must persist idempotently');

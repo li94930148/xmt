@@ -20,12 +20,12 @@ export default function BatchActions({
 
   return (
     <div
-      className={`fixed bottom-6 left-1/2 z-[90] flex -translate-x-1/2 items-center gap-4 px-5 py-3 shadow-2xl animate-in slide-in-from-bottom-4 duration-200 ${styles.modal}`}
+      className={`fixed bottom-6 left-1/2 z-page-overlay flex -translate-x-1/2 items-center gap-4 px-5 py-3 shadow-2xl animate-in slide-in-from-bottom-4 duration-200 ${styles.modal}`}
     >
       <div className="flex items-center gap-2">
         <CheckCircle className="w-4 h-4 text-studio-primary" />
         <span className={`text-sm font-medium ${styles.textPrimary}`}>
-          已选择 <span className="text-studio-primary">{selectedCount}</span> 项
+          已选择 <span className="text-studio-primary-contrast">{selectedCount}</span> 项
         </span>
       </div>
 
@@ -53,7 +53,7 @@ export default function BatchActions({
       {onBatchDelete ? (
         <button
           onClick={onBatchDelete}
-          className="flex items-center gap-1.5 rounded-lg bg-studio-coral/10 px-3 py-1.5 text-xs font-medium text-studio-coral transition-colors hover:bg-studio-coral/20"
+          className="flex items-center gap-1.5 rounded-lg bg-studio-coral/10 px-3 py-1.5 text-xs font-medium text-studio-coral-contrast transition-colors hover:bg-studio-coral/20"
         >
           <Trash2 className="w-3.5 h-3.5" />
           删除

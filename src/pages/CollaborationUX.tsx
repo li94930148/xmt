@@ -86,7 +86,7 @@ export default function CollaborationUX() {
             />
             <button
               onClick={() => loadData(docId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary-button disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4" />
               生成
@@ -166,7 +166,7 @@ export default function CollaborationUX() {
             {conflictHotspots.length ? (
               <div className="mt-4 space-y-2">
                 {conflictHotspots.map((hotspot) => (
-                  <div key={hotspot} className="rounded-lg border border-studio-coral/20 bg-studio-coral/10 px-3 py-2 text-sm text-studio-coral">
+                  <div key={hotspot} className="rounded-lg border border-studio-coral/20 bg-studio-coral/10 px-3 py-2 text-sm text-studio-coral-contrast">
                     {hotspot}
                   </div>
                 ))}

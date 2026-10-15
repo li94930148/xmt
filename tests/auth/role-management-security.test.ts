@@ -41,5 +41,31 @@ try {
   assert.equal(update.status, 403); assert.deepEqual(await queryAll<{ permission_id: number }>('SELECT permission_id FROM role_permissions WHERE role_id=?', [managerRoleId]), permissionsBefore);
   const adminUpdate = await fetch(`${base}/${managerRoleId}`, { method: 'PUT', headers: headers(adminId), body: JSON.stringify({ permission_ids: [systemRole.id, systemPermission.id] }) });
   assert.equal(adminUpdate.status, 200);
+
+  const deleteRoleId = await executeInsert(
+    'INSERT INTO roles(code,name,description,is_system) VALUES(?,?,?,0)',
+    ['security-role-delete-atomic', 'Delete atomicity', 'fixture'],
+  );
+  await execute('INSERT INTO role_permissions(role_id,permission_id) VALUES(?,?)', [deleteRoleId, systemRole.id]);
+  await execute('INSERT INTO user_roles(user_id,role_id) VALUES(?,?)', [targetId, deleteRoleId]);
+  const assignedDelete = await fetch(`${base}/${deleteRoleId}`, { method: 'DELETE', headers: headers(adminId) });
+  assert.equal(assignedDelete.status, 400, 'roles assigned to users remain protected');
+  assert.ok(await queryOne('SELECT id FROM roles WHERE id=?', [deleteRoleId]));
+  assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM role_permissions WHERE role_id=?', [deleteRoleId]))?.count, 1);
+  await execute('DELETE FROM user_roles WHERE user_id=? AND role_id=?', [targetId, deleteRoleId]);
+
+  await execute(`CREATE TRIGGER fail_role_delete
+    BEFORE DELETE ON roles WHEN OLD.id = ${deleteRoleId}
+    BEGIN SELECT RAISE(ABORT, 'injected role delete failure'); END`);
+  const failedDelete = await fetch(`${base}/${deleteRoleId}`, { method: 'DELETE', headers: headers(adminId) });
+  assert.equal(failedDelete.status, 500);
+  assert.ok(await queryOne('SELECT id FROM roles WHERE id=?', [deleteRoleId]), 'the role remains after the injected failure');
+  assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM role_permissions WHERE role_id=?', [deleteRoleId]))?.count, 1, 'its permissions roll back with the role');
+  await execute('DROP TRIGGER fail_role_delete');
+
+  const deletedRole = await fetch(`${base}/${deleteRoleId}`, { method: 'DELETE', headers: headers(adminId) });
+  assert.equal(deletedRole.status, 200);
+  assert.equal(await queryOne('SELECT id FROM roles WHERE id=?', [deleteRoleId]), null);
+  assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM role_permissions WHERE role_id=?', [deleteRoleId]))?.count, 0);
 } finally { await new Promise<void>((resolve) => server.close(() => resolve())); await closeDatabase(); }
 console.log('Role management security tests passed');

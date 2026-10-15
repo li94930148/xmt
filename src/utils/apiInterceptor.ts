@@ -3,6 +3,7 @@ import { refreshNativeSession } from '@/auth/native/native-auth-runtime';
 import { webAuthRuntime } from '@/auth/web/web-auth-runtime';
 import { getApiBaseUrl, isNative } from '@/platform/runtime';
 import { useAuthStore } from '@/store';
+import { emitClientLog } from '@/observability/client-logger';
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -95,5 +96,5 @@ export function createApiFetchInterceptor(originalFetch: typeof fetch, dependenc
 
 const originalFetch = window.fetch.bind(window);
 window.fetch = createApiFetchInterceptor(originalFetch);
-window.addEventListener('xmt-auth-expired', ((event: CustomEvent) => console.warn('[API]', event.detail.message)) as EventListener);
-window.addEventListener('xmt-network-error', ((event: CustomEvent) => console.warn('[API]', event.detail.message)) as EventListener);
+window.addEventListener('xmt-auth-expired', (() => emitClientLog({ event: 'api.auth_expired', level: 'warn' })) as EventListener);
+window.addEventListener('xmt-network-error', (() => emitClientLog({ event: 'api.network_error', level: 'warn' })) as EventListener);

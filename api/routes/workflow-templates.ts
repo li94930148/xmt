@@ -1,11 +1,95 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
-import { execute, queryOne, queryAll, runInTransaction } from '../database/utils';
+import { beijingNow, execute, queryOne, queryAll, runInTransaction } from '../database/utils';
 import { canAccessTopic, canApproveWorkflowNode, getTopicScopeById, getWorkflowNodeById, isPrivilegedUser } from '../utils/access';
 import { WORKFLOW_ENGINE_MODE, getExplainability, runApprovalCheck } from '@shared/workflow/workflow_runtime';
+import type { TopicStatus } from '@shared/types';
+import { getTransitionText, STATUS_TEXT } from '../utils/workflow';
+import { apiLogger } from '../observability/logger.js';
+import { advancePublishingTopicIfResolved } from '../modules/topics/publishing-completion';
+import { insertTopicOutlineOriginSnapshot } from '../modules/topics/production-origin-snapshot';
 
 const router = Router();
+
+type ApprovalTransaction = {
+  queryOne<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | null>;
+  queryAll<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
+  execute(sql: string, params?: unknown[]): Promise<number>;
+  executeInsert(sql: string, params?: unknown[]): Promise<number>;
+};
+
+type ApprovalTopic = {
+  id: number;
+  status: string;
+  title: string;
+  outline?: string | null;
+  outline_markdown?: string | null;
+  outline_json?: string | null;
+};
+
+async function ensureApprovalStageRecord(
+  tx: ApprovalTransaction,
+  topic: ApprovalTopic,
+  status: string,
+  operatorId: number | undefined,
+) {
+  if (status === 'approved' || status === 'production') {
+    const production = await tx.queryOne<{ id: number }>('SELECT id FROM production WHERE topic_id=? LIMIT 1', [topic.id]);
+    if (!production) {
+      const content = String(topic.outline || '');
+      const productionId = await tx.executeInsert(
+        `INSERT INTO production(topic_id,version,content,content_markdown,content_json,status,operator_id)
+         VALUES(?,?,?,?,?,?,?)`,
+        [topic.id, 'v1.0', content, String(topic.outline_markdown || content), String(topic.outline_json || content), 'draft', operatorId],
+      );
+      await insertTopicOutlineOriginSnapshot(tx, productionId, topic.id, content);
+    }
+  }
+
+  if (status === 'shooting') {
+    const shooting = await tx.queryOne<{ id: number }>('SELECT id FROM shooting WHERE topic_id=? LIMIT 1', [topic.id]);
+    if (!shooting) {
+      await tx.executeInsert(
+        'INSERT INTO shooting(topic_id,status,operator_id) VALUES(?,?,?)',
+        [topic.id, 'planned', operatorId],
+      );
+    }
+  }
+
+  if (status === 'publishing') {
+    const publishing = await tx.queryOne<{ id: number }>('SELECT id FROM publishing WHERE topic_id=? LIMIT 1', [topic.id]);
+    if (!publishing) {
+      await tx.executeInsert(
+        'INSERT INTO publishing(topic_id,platform,url,status,publish_time,operator_id) VALUES(?,?,?,?,?,?)',
+        [topic.id, '', '', 'pending', null, operatorId],
+      );
+    }
+  }
+}
+
+async function recordApprovalStageTransition(
+  tx: ApprovalTransaction,
+  topic: ApprovalTopic,
+  toStatus: string,
+  nodeName: string,
+  operatorId: number | undefined,
+  recordedAt = beijingNow(),
+) {
+  const fromLabel = STATUS_TEXT[topic.status as TopicStatus] || topic.status;
+  const toLabel = STATUS_TEXT[toStatus as TopicStatus] || toStatus;
+  const reason = getTransitionText(topic.status as TopicStatus, toStatus as TopicStatus);
+  const comment = `审批流节点「${nodeName}」通过：${reason}，选题由「${fromLabel}」流转为「${toLabel}」`;
+  const action = toStatus === 'approved' || toStatus === 'rejected' ? toStatus : `status_${toStatus}`;
+  await tx.execute(
+    'INSERT INTO topic_history(topic_id,action,comment,operator_id,created_at) VALUES(?,?,?,?,?)',
+    [topic.id, action, comment, operatorId ?? null, recordedAt],
+  );
+  await tx.execute(
+    'INSERT INTO activity_log(user_id,action,target,detail,created_at) VALUES(?,?,?,?,?)',
+    [operatorId ?? null, 'status_change', 'topic', `选题「${topic.title}」${comment}`, recordedAt],
+  );
+}
 
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -212,6 +296,18 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
       return res.status(400).json({ message: '当前选题状态与审批节点不匹配' });
     }
 
+    const recentShadowLogs = await queryAll<{
+      node_id: number | null;
+      from_state: string | null;
+      to_state: string | null;
+      action: string | null;
+      reason: string | null;
+    }>(
+      `SELECT node_id, from_state, to_state, action, reason
+       FROM workflow_shadow_logs
+       ORDER BY created_at DESC
+       LIMIT 500`,
+    );
     const initialRuntimeApproval = runApprovalCheck({
       from: String(topic.status || ''),
       to: String(node.status_to || ''),
@@ -219,9 +315,10 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
       source: 'runtime',
       topic,
       node,
+      logs: recentShadowLogs,
     });
 
-    const shadowReason = [
+    const shadowReason = initialRuntimeApproval.allowed ? null : [
       initialRuntimeApproval.transition.reason,
       initialRuntimeApproval.approve.reason,
     ].filter(Boolean).join(' | ');
@@ -240,30 +337,14 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
         ],
       );
     } catch (shadowError) {
-      console.warn('[workflow-shadow] failed to persist shadow log:', shadowError);
+      apiLogger.warn({
+        module: 'workflow',
+        operation: 'shadow_log.persist_failed',
+        error: { code: 'SHADOW_LOG_FAILED', name: shadowError instanceof Error ? shadowError.name : 'UnknownError' },
+      }, 'api.workflow.shadow_log_failed');
     }
 
-    const recentShadowLogs = await queryAll<{
-      node_id: number | null;
-      from_state: string | null;
-      to_state: string | null;
-      action: string | null;
-      reason: string | null;
-    }>(
-      `SELECT node_id, from_state, to_state, action, reason
-       FROM workflow_shadow_logs
-       ORDER BY created_at DESC
-       LIMIT 500`,
-    );
-    const runtimeApproval = runApprovalCheck({
-      from: String(topic.status || ''),
-      to: String(node.status_to || ''),
-      user: req.user,
-      source: 'runtime',
-      topic,
-      node,
-      logs: recentShadowLogs,
-    });
+    const runtimeApproval = initialRuntimeApproval;
     const explainability = getExplainability({
       from: String(topic.status || ''),
       to: String(node.status_to || ''),
@@ -275,12 +356,12 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
     });
 
     if (!runtimeApproval.decision.allowed) {
-      console.warn('[workflow-decision]', {
+      apiLogger.warn({
+        module: 'workflow',
+        operation: 'decision.denied',
         mode: WORKFLOW_ENGINE_MODE,
-        topicId,
-        nodeId: node_id,
-        decision: runtimeApproval.decision,
-      });
+        decision: { allowed: false },
+      }, 'api.workflow.decision_denied');
     }
 
     if (WORKFLOW_ENGINE_MODE === 'v2_strict' && runtimeApproval.strictBlocked) {
@@ -300,7 +381,11 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
           ],
         );
       } catch (shadowError) {
-        console.warn('[workflow-shadow] failed to persist strict decision log:', shadowError);
+        apiLogger.warn({
+          module: 'workflow',
+          operation: 'strict_shadow_log.persist_failed',
+          error: { code: 'SHADOW_LOG_FAILED', name: shadowError instanceof Error ? shadowError.name : 'UnknownError' },
+        }, 'api.workflow.shadow_log_failed');
       }
 
       return res.status(400).json({
@@ -317,20 +402,50 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
       });
     }
 
-    await runInTransaction(async (tx) => {
+    const transition = await runInTransaction(async (tx) => {
+      const targetStatus = String(node.status_to || '');
+      const currentTopic = await tx.queryOne<ApprovalTopic>(
+        'SELECT id,status,title,outline,outline_markdown,outline_json FROM topics WHERE id=?',
+        [topicId],
+      );
+      if (!currentTopic || currentTopic.status !== topic.status
+        || (node.status_from && node.status_from !== currentTopic.status)) {
+        return { ok: false as const, reason: 'stale-stage' as const };
+      }
+
+      if (status === 'approved' && targetStatus === 'completed') {
+        const completed = await advancePublishingTopicIfResolved(tx, topicId, approverId);
+        if (!completed) return { ok: false as const, reason: 'publishing-unresolved' as const };
+      } else if (status === 'approved') {
+        if (currentTopic.status !== targetStatus) {
+          const recordedAt = beijingNow();
+          const changed = await tx.execute(
+            `UPDATE topics SET status = ?, stage_entered_at = ?, updated_at = ? WHERE id = ? AND status = ?`,
+            [targetStatus, recordedAt, recordedAt, topicId, currentTopic.status],
+          );
+          if (changed === 0) return { ok: false as const, reason: 'stale-stage' as const };
+          await recordApprovalStageTransition(tx, currentTopic, targetStatus, node.name || String(node_id), approverId, recordedAt);
+        }
+        await ensureApprovalStageRecord(tx, currentTopic, targetStatus, approverId);
+        if (targetStatus === 'publishing') {
+          await advancePublishingTopicIfResolved(tx, topicId, approverId);
+        }
+      }
+
       await tx.execute(
         `INSERT INTO approval_records (topic_id, node_id, approver_id, status, comment) VALUES (?, ?, ?, ?, ?)`,
         [topicId, node_id, approverId, status, comment || '']
       );
-
-      if (status === 'approved') {
-        const nodeRecord = node as Record<string, unknown>;
-        await tx.execute(
-          `UPDATE topics SET status = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-          [nodeRecord.status_to, topicId]
-        );
-      }
+      return { ok: true as const };
     });
+
+    if (!transition.ok) {
+      return res.status(409).json({
+        message: transition.reason === 'stale-stage'
+          ? '选题阶段已发生变化，请刷新后重新审批'
+          : '仍有发布任务待处理，暂不能完成选题',
+      });
+    }
 
     res.json({
       message: '审批操作成功',

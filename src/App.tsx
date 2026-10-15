@@ -8,9 +8,11 @@ import RoleGuard from '@/components/RoleGuard';
 import NotFound from '@/pages/NotFound';
 import { isAndroid } from '@/platform/runtime';
 import { shouldUseMobileLayout } from '@/platform/mobile-layout';
-import { useAuthStore } from '@/store';
+import { useAppStore, useAuthStore } from '@/store';
 import { installNativeAuthRuntime, refreshNativeSession } from '@/auth/native/native-auth-runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
+import { getPublicSystemSettings } from '@/api/systemSettings';
+import { resolveInitialTheme } from '@/lib/systemSettings';
 
 function applyTheme(theme: 'light' | 'dark') {
   const root = document.documentElement;
@@ -77,20 +79,17 @@ const ShootingDetail = lazyWithRetry(() => import('@/pages/ShootingDetail'), 'Sh
 const Publishing = lazyWithRetry(() => import('@/pages/Publishing'), 'Publishing');
 const PublishingDetail = lazyWithRetry(() => import('@/pages/PublishingDetail'), 'PublishingDetail');
 const Analytics = lazyWithRetry(() => import('@/pages/Analytics'), 'Analytics');
-const CollaborationDashboard = lazyWithRetry(() => import('@/pages/CollaborationDashboard'), 'CollaborationDashboard');
-const CollaborationUX = lazyWithRetry(() => import('@/pages/CollaborationUX'), 'CollaborationUX');
 const ContentTimelineView = lazyWithRetry(() => import('@/pages/ContentTimelineView'), 'ContentTimelineView');
-const ContentIntelligenceDashboard = lazyWithRetry(() => import('@/pages/ContentIntelligenceDashboard'), 'ContentIntelligenceDashboard');
-const ContentGenerationDashboard = lazyWithRetry(() => import('@/pages/ContentGenerationDashboard'), 'ContentGenerationDashboard');
-const ContentOSDashboard = lazyWithRetry(() => import('@/pages/ContentOSDashboard'), 'ContentOSDashboard');
+const ContentLab = lazyWithRetry(() => import('@/pages/ContentLab'), 'ContentLab');
 const Users = lazyWithRetry(() => import('@/pages/Users'), 'Users');
 const AssetCenter = lazyWithRetry(() => import('@/pages/AssetCenter'), 'AssetCenter');
+const ContentTopicAssets = lazyWithRetry(() => import('@/pages/ContentTopicAssets'), 'ContentTopicAssets');
 const ResourceLibrary = lazyWithRetry(() => import('@/pages/ResourceLibrary'), 'ResourceLibrary');
 const KnowledgeLibrary = lazyWithRetry(() => import('@/pages/KnowledgeLibrary'), 'KnowledgeLibrary');
 const ResourceDetail = lazyWithRetry(() => import('@/pages/ResourceDetail'), 'ResourceDetail');
 const ResourceSearch = lazyWithRetry(() => import('@/pages/ResourceSearch'), 'ResourceSearch');
+const PublishedArchives = lazyWithRetry(() => import('@/pages/Resources'), 'PublishedArchives');
 const Messages = lazyWithRetry(() => import('@/pages/Messages'), 'Messages');
-const Kanban = lazyWithRetry(() => import('@/pages/Kanban'), 'Kanban');
 const CalendarPage = lazyWithRetry(() => import('@/pages/Calendar'), 'CalendarPage');
 const Inspirations = lazyWithRetry(() => import('@/pages/Inspirations'), 'Inspirations');
 const Achievements = lazyWithRetry(() => import('@/pages/Achievements'), 'Achievements');
@@ -163,10 +162,32 @@ function NativeSessionBootstrap({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const [mobileLayout] = useState(() => shouldUseMobileLayout(isAndroid(), window.innerWidth));
+  const setTheme = useAppStore((state) => state.setTheme);
   useEffect(() => {
-    const savedTheme = (localStorage.getItem('xmt_theme') as 'light' | 'dark') || 'dark';
-    applyTheme(savedTheme);
-  }, []);
+    const applySystemDefault = async () => {
+      try {
+        const settings = await getPublicSystemSettings();
+        const preference = localStorage.getItem('xmt_theme');
+        setTheme(resolveInitialTheme(preference, settings.system.defaultTheme), false);
+      } catch {
+        // Keep the existing local/default theme if the public settings endpoint is unavailable.
+      }
+    };
+
+    try {
+      const preference = localStorage.getItem('xmt_theme');
+      if (preference === 'light' || preference === 'dark') {
+        applyTheme(preference);
+      } else {
+        void applySystemDefault();
+      }
+    } catch {
+      void applySystemDefault();
+    }
+
+    window.addEventListener('xmt-settings-changed', applySystemDefault);
+    return () => window.removeEventListener('xmt-settings-changed', applySystemDefault);
+  }, [setTheme]);
 
   return (
     <ErrorBoundary>
@@ -195,6 +216,8 @@ export default function App() {
                 <Route path="/publishing/:id" element={<PublishingDetail />} />
                 <Route path="/resources" element={<Navigate replace to="/asset-center" />} />
                 <Route path="/asset-center" element={<AssetCenter />} />
+                <Route path="/asset-center/published-archives" element={<PublishedArchives />} />
+                <Route path="/asset-center/content-topics" element={<ContentTopicAssets />} />
                 <Route path="/asset-center/resources" element={<ResourceLibrary />} />
                 <Route path="/asset-center/resources/:id" element={<ResourceDetail />} />
                 <Route path="/asset-center/knowledge" element={<KnowledgeLibrary />} />
@@ -202,7 +225,7 @@ export default function App() {
                 <Route path="/asset-center/projects" element={<ResourceLibrary fixedLibraryType="project" />} />
                 <Route path="/asset-center/media" element={<ResourceLibrary fixedLibraryType="media" />} />
                 <Route path="/messages" element={mobileLayout ? <MobileMessages /> : <Messages />} />
-                <Route path="/kanban" element={<Kanban />} />
+                <Route path="/kanban" element={<Navigate replace to="/topics?view=board" state={{ mobileReturnTo: '/production' }} />} />
                 <Route path="/calendar" element={<CalendarPage />} />
                 <Route path="/inspirations" element={<Inspirations />} />
                 <Route path="/achievements" element={<Achievements />} />
@@ -240,22 +263,13 @@ export default function App() {
                   <Route path="/retrospectives/:id" element={<RetrospectiveDetailPage />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['analytics:view']} />}>
-                  <Route path="/collaboration-dashboard" element={<CollaborationDashboard />} />
-                </Route>
-                <Route element={<RoleGuard permissions={['analytics:view']} />}>
-                  <Route path="/collaboration-ux" element={<CollaborationUX />} />
-                </Route>
-                <Route element={<RoleGuard permissions={['analytics:view']} />}>
                   <Route path="/content-timeline" element={<ContentTimelineView />} />
-                </Route>
-                <Route element={<RoleGuard permissions={['analytics:view']} />}>
-                  <Route path="/content-intelligence" element={<ContentIntelligenceDashboard />} />
-                </Route>
-                <Route element={<RoleGuard permissions={['analytics:view']} />}>
-                  <Route path="/content-generation" element={<ContentGenerationDashboard />} />
-                </Route>
-                <Route element={<RoleGuard permissions={['analytics:view']} />}>
-                  <Route path="/content-os" element={<ContentOSDashboard />} />
+                  <Route path="/content-lab" element={<ContentLab />} />
+                  <Route path="/collaboration-dashboard" element={<Navigate replace to="/content-lab?tab=collaboration-timeline" />} />
+                  <Route path="/collaboration-ux" element={<Navigate replace to="/content-lab?tab=collaboration-experience" />} />
+                  <Route path="/content-intelligence" element={<Navigate replace to="/content-lab?tab=insights" />} />
+                  <Route path="/content-generation" element={<Navigate replace to="/content-lab?tab=generation" />} />
+                  <Route path="/content-os" element={<Navigate replace to="/content-lab?tab=overview" />} />
                 </Route>
                 <Route element={<RoleGuard permissions={['user:logs']} />}>
                   <Route path="/activity" element={<ActivityLog />} />

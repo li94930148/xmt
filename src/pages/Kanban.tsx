@@ -200,7 +200,7 @@ export default function Kanban() {
                               {topic.assignee_name || '未分配'}
                             </span>
                             {topic.deadline && (
-                              <span className={new Date(topic.deadline) < new Date() ? 'text-studio-coral' : styles.textMuted}>
+                              <span className={new Date(topic.deadline) < new Date() ? 'text-studio-coral-contrast' : styles.textMuted}>
                                 {formatBeijingDate(topic.deadline)}
                               </span>
                             )}
@@ -214,9 +214,9 @@ export default function Kanban() {
                                   className={`text-[10px] px-2.5 py-1 rounded-lg font-medium transition-colors ${
                                     ns.status === 'rejected' || ns.status === 'completed'
                                       ? ns.status === 'rejected'
-                                        ? 'bg-studio-coral/10 text-studio-coral hover:bg-studio-coral/20'
-                                        : 'bg-studio-success/10 text-studio-success hover:bg-studio-success/20'
-                                      : 'bg-studio-primary/10 text-studio-primary hover:bg-studio-primary/20'
+                                        ? 'bg-studio-coral/10 text-studio-coral-contrast hover:bg-studio-coral/20'
+                                        : 'bg-studio-success/10 text-studio-success-contrast hover:bg-studio-success/20'
+                                      : 'bg-studio-primary/10 text-studio-primary-contrast hover:bg-studio-primary/20'
                                   }`}
                                 >
                                   {ns.label}

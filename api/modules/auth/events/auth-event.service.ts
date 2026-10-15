@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { apiLogger } from '../../../observability/logger.js';
 import { classifyAuthEvent, mapAuthEventToMetrics } from './auth-event.mapper.js';
 import type { AuthMetricsExporter } from './auth-metrics.exporter.js';
 import type { AuthEvent, AuthEventInput } from './auth-event.types.js';
@@ -10,7 +11,18 @@ export class AuthEventService {
 
   constructor(
     private readonly exporters: readonly AuthMetricsExporter[] = [],
-    private readonly sink: AuthEventSink = (event) => console.info(event),
+    private readonly sink: AuthEventSink = (event) => {
+      apiLogger.info({
+        requestId: event.requestId ?? undefined,
+        userId: event.userId ?? undefined,
+        module: 'auth',
+        operation: event.eventType,
+        mode: event.mode,
+        clientType: event.clientType,
+        success: event.success,
+        eventClass: event.eventClass,
+      }, 'api.auth.event');
+    },
     private readonly eventIdGenerator: () => string = randomUUID,
   ) {}
 

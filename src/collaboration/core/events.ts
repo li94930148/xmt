@@ -49,6 +49,10 @@ export interface CollaborationUpdatePayload {
   update: number[];
 }
 
+export type CollaborationUpdateAcknowledgement =
+  | { ok: true; version: number }
+  | { ok: false; code: string; reason: string };
+
 export interface CollaborationTypingPayload {
   roomId: string;
   userId: number;

@@ -6,13 +6,14 @@ import { Plus, Trash2, Edit2, ArrowRight } from 'lucide-react';
 import EmptyState from '../components/EmptyState';
 import { ConfirmModal, FormModal, LoadingState, PageHeader } from '../components/common';
 import { buildWorkflowRuntimeContext, getExplainability, runTransitionCheck } from '@shared/workflow/workflow_runtime';
-import { mapDecisionToUI, mapExplainToUI } from '../components/workflow/WorkflowUIBridge';
+import { getWorkflowRiskLabel, getWorkflowRuleLabel, localizeWorkflowMessage, mapDecisionToUI, mapExplainToUI } from '../components/workflow/WorkflowUIBridge';
 import XMTCard from '../design-system/components/XMTCard';
 import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
 import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
 import { ReactBitsMetricSlot } from '../features/reactbits-appearance/slots/ReactBitsMetricSlot';
 import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCardSlot';
 import { ReactBitsButtonSlot } from '../features/reactbits-appearance/ReactBitsButtonSlot';
+import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
 
 interface WorkflowTemplate {
   id: number;
@@ -99,7 +100,7 @@ export default function WorkflowDesigner() {
         setTemplates(data);
       }
     } catch (error) {
-      console.error('获取审批流模板失败:', error);
+      emitClientLog({ event: 'workflow.templates_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
     } finally {
       setLoading(false);
     }
@@ -116,7 +117,7 @@ export default function WorkflowDesigner() {
         return data;
       }
     } catch (error) {
-      console.error('获取模板详情失败:', error);
+      emitClientLog({ event: 'workflow.template_detail_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
     }
     return null;
   };
@@ -132,7 +133,7 @@ export default function WorkflowDesigner() {
         setShadowLogs(data);
       }
     } catch (error) {
-      console.error('获取 Workflow Shadow 日志失败:', error);
+      emitClientLog({ event: 'workflow.shadow_logs_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
     }
   };
 
@@ -199,7 +200,7 @@ export default function WorkflowDesigner() {
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: number): Promise<boolean> => {
     try {
       const response = await fetch(`/api/workflow-templates/${id}`, {
         method: 'DELETE',
@@ -209,12 +210,15 @@ export default function WorkflowDesigner() {
       if (response.ok) {
         appStore.addNotification({ title: '删除成功', message: '审批流模板已删除', type: 'success' });
         void fetchTemplates();
+        return true;
       } else {
         const data = await response.json();
         appStore.addNotification({ title: '删除失败', message: data.message, type: 'error' });
+        return false;
       }
     } catch {
       appStore.addNotification({ title: '删除失败', message: '网络错误', type: 'error' });
+      return false;
     }
   };
 
@@ -223,8 +227,8 @@ export default function WorkflowDesigner() {
 
     setDeleteLoading(true);
     try {
-      await handleDelete(deleteTarget.id);
-      setDeleteTarget(null);
+      const deleted = await handleDelete(deleteTarget.id);
+      if (deleted) setDeleteTarget(null);
     } finally {
       setDeleteLoading(false);
     }
@@ -297,7 +301,7 @@ export default function WorkflowDesigner() {
       if (policyResult && !policyResult.allowed) {
         return {
           index,
-          reason: `节点 ${index + 1}: ${getNodeExplainability(node).blockExplain.blockedReason}`,
+          reason: `节点 ${index + 1}：${localizeWorkflowMessage(getNodeExplainability(node).blockExplain.blockedReason)}`,
         };
       }
     }
@@ -327,23 +331,25 @@ export default function WorkflowDesigner() {
 
   const getNodeShadowSummary = (node: WorkflowNode) => {
     const runtimeContext = getNodeRuntimeContext(node);
+    const policyResult = getNodePolicyResult(node);
     const explainability = getNodeExplainability(node);
     const explainUI = mapExplainToUI(explainability.explain);
 
     return [
       explainUI.tooltip,
-      `Shadow logs: ${runtimeContext.shadowCount || 0}`,
-      `Risk score: ${runtimeContext.risk}`,
-      `Blocked reason: ${explainability.blockExplain.blockedReason}`,
-      `Failed rule: ${explainability.blockExplain.failedRule}`,
-      `Suggestion: ${explainability.blockExplain.suggestion}`,
+      `历史参考记录：${runtimeContext.shadowCount || 0} 条`,
+      `风险提示：${getWorkflowRiskLabel(policyResult.risk)}`,
+      `需处理原因：${localizeWorkflowMessage(explainability.blockExplain.blockedReason)}`,
+      `规则类别：${getWorkflowRuleLabel(explainability.blockExplain.failedRule)}`,
+      `处理建议：${localizeWorkflowMessage(explainability.blockExplain.suggestion)}`,
+      '历史提示仅供参考；流程变更由你确认并保存。',
     ].join('\n');
   };
 
   const getRiskBadgeClass = (level: string) => {
-    if (level === 'high') return 'bg-studio-coral/15 text-studio-coral border-studio-coral/30';
-    if (level === 'medium') return 'bg-studio-amber/15 text-studio-amber border-studio-amber/30';
-    return 'bg-studio-success/15 text-studio-success border-studio-success/30';
+    if (level === 'high') return 'bg-studio-coral/15 text-studio-coral-contrast border-studio-coral/30';
+    if (level === 'medium') return 'bg-studio-amber/15 text-studio-amber-contrast border-studio-amber/30';
+    return 'bg-studio-success/15 text-studio-success-contrast border-studio-success/30';
   };
 
   const getNodeCardClass = (node: WorkflowNode) => {
@@ -405,9 +411,10 @@ export default function WorkflowDesigner() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div
+                    data-testid={template.is_default ? 'workflow-default-icon' : undefined}
                     className={`flex h-10 w-10 items-center justify-center rounded-xl ${
                       template.is_default
-                        ? 'bg-brand-500/10 text-brand-500'
+                        ? 'bg-studio-primary-soft text-studio-primary-contrast'
                         : 'bg-theme-tertiary text-theme-text-secondary'
                     }`}
                   >
@@ -417,7 +424,7 @@ export default function WorkflowDesigner() {
                     <div className="flex items-center gap-2">
                       <span className={`font-medium ${styles.textPrimary}`}>{template.name}</span>
                       {template.is_default ? (
-                        <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-xs text-brand-500">
+                        <span data-testid="workflow-default-badge" className="rounded-full bg-studio-primary-soft px-2 py-0.5 text-xs text-studio-primary-contrast">
                           默认
                         </span>
                       ) : null}
@@ -519,19 +526,19 @@ export default function WorkflowDesigner() {
                         const runtimeContext = getNodeRuntimeContext(node);
                         const explainability = getNodeExplainability(node);
                         const explainUI = mapExplainToUI(explainability.explain);
-                        const uiState = mapDecisionToUI(runtimeContext);
+                        const uiState = mapDecisionToUI(policyResult);
                         if (uiState.status === 'normal' && policyResult.allowed) return null;
 
                         return (
                           <>
                             <span className={`rounded-full border px-2 py-0.5 text-[11px] ${getRiskBadgeClass(uiState.risk)}`}>
-                              {uiState.risk} 路 {Math.round(runtimeContext.confidence * 100)}%
+                              {getWorkflowRiskLabel(uiState.risk)}
                             </span>
                             {uiState.status === 'warning' ? (
-                              <span className={`text-[11px] ${uiState.risk === 'high' ? 'text-studio-coral' : 'text-studio-amber'}`}>建议复核</span>
+                              <span className={`text-[11px] ${uiState.risk === 'high' ? 'text-studio-coral-contrast' : 'text-studio-amber-contrast'}`}>建议复核</span>
                             ) : null}
                             {!policyResult.allowed || uiState.status === 'blocked' ? (
-                              <span className="text-[11px] text-studio-coral">必须修复：{explainability.blockExplain.blockedReason}</span>
+                              <span className="text-[11px] text-studio-coral-contrast">需处理：{localizeWorkflowMessage(explainability.blockExplain.blockedReason)}</span>
                             ) : null}
                             {runtimeContext.suggestedTransition ? (
                               <button

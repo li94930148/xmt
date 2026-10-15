@@ -57,7 +57,7 @@ export default function CreatorProfileCard({
         behindGlowSize="58%"
       />
       <div className="min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-studio-cyan">Creator profile</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-studio-cyan-contrast">Creator profile</p>
         <h2 className="mt-2 truncate text-2xl font-semibold text-studio-text">{name}</h2>
         <p className="mt-2 text-sm text-studio-text-muted">抖音 UID：{uid || '—'}</p>
         <div className="mt-6 grid gap-3 sm:grid-cols-3">

@@ -22,17 +22,17 @@ const variantConfig: Record<ConfirmVariant, { icon: typeof Trash2; iconClass: st
   danger: {
     icon: Trash2,
     iconClass: 'border border-studio-border-soft bg-studio-coral-soft text-studio-coral-contrast',
-    buttonClass: 'bg-studio-coral hover:bg-studio-coral text-white',
+    buttonClass: 'xmt-btn xmt-btn-danger',
   },
   warning: {
     icon: AlertTriangle,
     iconClass: 'border border-studio-border-soft bg-studio-amber-soft text-studio-amber-contrast',
-    buttonClass: 'bg-studio-amber hover:bg-studio-amber text-black',
+    buttonClass: 'xmt-btn xmt-btn-warning',
   },
   default: {
     icon: ShieldAlert,
     iconClass: 'border border-studio-border-soft bg-studio-primary-soft text-studio-primary-contrast',
-    buttonClass: 'bg-brand-500 hover:bg-brand-400 text-white',
+    buttonClass: 'xmt-btn xmt-btn-primary',
   },
 };
 
@@ -51,20 +51,26 @@ export default function ConfirmModal({
   const styles = useThemeStyles();
   const config = variantConfig[variant];
   const Icon = config.icon;
+  const handleCancel = () => {
+    if (!loading) onCancel();
+  };
 
   return (
     <BaseModal
       open={open}
-      onClose={onCancel}
+      onClose={handleCancel}
       title={title}
       size="sm"
       className={className}
+      closeOnOverlayClick={!loading}
+      showCloseButton={!loading}
       footer={
         <div className="flex gap-3">
           <button
             type="button"
-            onClick={onCancel}
-            className={`flex-1 rounded-xl px-4 py-2.5 text-sm ${styles.buttonSecondary}`}
+            onClick={handleCancel}
+            disabled={loading}
+            className={`flex-1 rounded-xl px-4 py-2.5 text-sm disabled:opacity-60 ${styles.buttonSecondary}`}
           >
             {cancelText}
           </button>

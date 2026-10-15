@@ -17,7 +17,9 @@ import { useDebounce } from '../hooks/useDebounce';
 import { useSocket } from '../hooks/useSocket';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { showRealtimeToast } from '../components/RealtimeToast';
+import SimilarTopicReview from '../components/topics/SimilarTopicReview';
 import { formatBeijingTime } from '../lib/utils';
+import { findSimilarTopicsByTitle, normalizeTopicTitle, type SimilarTopic } from '../utils/topic-title-similarity';
 import ActionButton from '../components/studio/ActionButton';
 import {
   Plus,
@@ -52,17 +54,26 @@ export default function Inspirations() {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [creatingInspiration, setCreatingInspiration] = useState(false);
   const [formData, setFormData] = useState({ title: '', description: '', category: '其他' });
   const [promotingId, setPromotingId] = useState<number | null>(null);
   const [newItemIds, setNewItemIds] = useState<Set<number>>(new Set());
   const [voteAnimatingIds, setVoteAnimatingIds] = useState<Set<number>>(new Set());
+  const [votePendingIds, setVotePendingIds] = useState<Set<number>>(new Set());
+  const voteInFlightRef = useRef(new Set<number>());
   const [recentCommentIds, setRecentCommentIds] = useState<Set<number>>(new Set());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState<DetailState>(null);
   const [commentText, setCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
-  const appStore = useAppStore();
+  const [similarTopicReview, setSimilarTopicReview] = useState<{
+    inspirationId: number;
+    title: string;
+    topics: SimilarTopic[];
+    checkFailed: boolean;
+  } | null>(null);
+  const addNotification = useAppStore((state) => state.addNotification);
   const navigate = useNavigate();
   const authStore = useAuthStore();
   const styles = useThemeStyles();
@@ -72,6 +83,8 @@ export default function Inspirations() {
   const debouncedSearch = useDebounce(searchTerm, 400);
   const socket = useSocket();
   const newItemIdsRef = useRef(new Set<number>());
+  const createInFlightRef = useRef(false);
+  const reviewedPromotionTitles = useRef(new Set<string>());
 
   const fetchInspirations = useCallback(async () => {
     setLoading(true);
@@ -82,7 +95,7 @@ export default function Inspirations() {
       });
       setInspirations(result.data || []);
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '获取灵感列表失败',
         message: (error as Error).message,
         type: 'error',
@@ -90,7 +103,7 @@ export default function Inspirations() {
     } finally {
       setLoading(false);
     }
-  }, [appStore, debouncedSearch, categoryFilter]);
+  }, [addNotification, debouncedSearch, categoryFilter]);
 
   useEffect(() => {
     void fetchInspirations();
@@ -187,7 +200,7 @@ export default function Inspirations() {
         setDetailData(result);
         syncInspirationPatch(id, { comment_count: result.comments.length });
       } catch (error) {
-        appStore.addNotification({
+        addNotification({
           title: '获取灵感详情失败',
           message: (error as Error).message,
           type: 'error',
@@ -197,7 +210,7 @@ export default function Inspirations() {
         setDetailLoading(false);
       }
     },
-    [appStore, syncInspirationPatch]
+    [addNotification, syncInspirationPatch]
   );
 
   const closeDetail = () => {
@@ -207,28 +220,44 @@ export default function Inspirations() {
   };
 
   const handleCreate = async () => {
+    if (createInFlightRef.current) return;
     if (!formData.title.trim()) {
-      appStore.addNotification({ title: '创建失败', message: '请输入灵感标题', type: 'error' });
+      addNotification({ title: '创建失败', message: '请输入灵感标题', type: 'error' });
       return;
     }
 
+    createInFlightRef.current = true;
+    setCreatingInspiration(true);
     try {
-      await createInspirition(formData);
+      const result = await createInspirition(formData);
+      const created = result.inspiration;
+      const matchesCurrentFilter =
+        (!categoryFilter || created.category === categoryFilter) &&
+        (!debouncedSearch || `${created.title} ${created.description || ''}`.toLocaleLowerCase().includes(debouncedSearch.toLocaleLowerCase()));
+      if (matchesCurrentFilter) {
+        setInspirations((previous) => previous.some((item) => item.id === created.id) ? previous : [created, ...previous]);
+      }
       setShowCreateModal(false);
       setFormData({ title: '', description: '', category: '其他' });
+      addNotification({ title: '提交成功', message: `「${created.title}」已添加到灵感池`, type: 'success' });
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '创建失败',
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      createInFlightRef.current = false;
+      setCreatingInspiration(false);
     }
   };
 
   const handleVote = async (id: number) => {
     const previous = inspirations.find((item) => item.id === id);
-    if (!previous) return;
+    if (!previous || voteInFlightRef.current.has(id)) return;
 
+    voteInFlightRef.current.add(id);
+    setVotePendingIds((current) => new Set(current).add(id));
     const nextVoted = !previous.voted;
     const delta = nextVoted ? 1 : -1;
 
@@ -246,6 +275,14 @@ export default function Inspirations() {
       await voteInspiration(id);
     } catch {
       syncInspirationPatch(id, { voted: previous.voted, votes: previous.votes });
+      addNotification({ title: '投票失败', message: '投票未保存，点赞状态已恢复，请稍后重试。', type: 'error' });
+    } finally {
+      voteInFlightRef.current.delete(id);
+      setVotePendingIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -254,11 +291,11 @@ export default function Inspirations() {
 
     try {
       await deleteInspiration(id);
-      appStore.addNotification({ title: '删除成功', message: '灵感已删除', type: 'success' });
+      addNotification({ title: '删除成功', message: '灵感已删除', type: 'success' });
       setInspirations((prev) => prev.filter((item) => item.id !== id));
       if (selectedId === id) closeDetail();
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '删除失败',
         message: (error as Error).message,
         type: 'error',
@@ -267,19 +304,36 @@ export default function Inspirations() {
   };
 
   const handlePromote = async (id: number) => {
+    const inspiration = inspirations.find((item) => item.id === id);
+    if (!inspiration) return;
+    const reviewKey = `${id}:${normalizeTopicTitle(inspiration.title)}`;
     setPromotingId(id);
     try {
+      if (!reviewedPromotionTitles.current.has(reviewKey)) {
+        try {
+          const topics = await findSimilarTopicsByTitle(inspiration.title);
+          if (topics.length > 0) {
+            setSimilarTopicReview({ inspirationId: id, title: inspiration.title, topics, checkFailed: false });
+            return;
+          }
+        } catch {
+          setSimilarTopicReview({ inspirationId: id, title: inspiration.title, topics: [], checkFailed: true });
+          return;
+        }
+        reviewedPromotionTitles.current.add(reviewKey);
+      }
+
       const result = await promoteInspiration(id);
-      appStore.addNotification({
+      addNotification({
         title: '转为选题成功',
         message: `已创建选题 #${result.topicId}`,
         type: 'success',
       });
       syncInspirationPatch(id, { status: 'promoted', topic_id: result.topicId });
       closeDetail();
-      navigate(`/topics/${result.topicId}`);
+      navigate(`/topics/${result.topicId}`, { state: { mobileReturnTo: '/inspirations' } });
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '转为选题失败',
         message: (error as Error).message,
         type: 'error',
@@ -287,6 +341,14 @@ export default function Inspirations() {
     } finally {
       setPromotingId(null);
     }
+  };
+
+  const continueAfterSimilarityReview = () => {
+    if (!similarTopicReview) return;
+    const { inspirationId, title } = similarTopicReview;
+    reviewedPromotionTitles.current.add(`${inspirationId}:${normalizeTopicTitle(title)}`);
+    setSimilarTopicReview(null);
+    void handlePromote(inspirationId);
   };
 
   const handleCommentSubmit = async () => {
@@ -306,7 +368,7 @@ export default function Inspirations() {
         };
       });
     } catch (error) {
-      appStore.addNotification({
+      addNotification({
         title: '发表评论失败',
         message: (error as Error).message,
         type: 'error',
@@ -345,7 +407,10 @@ export default function Inspirations() {
           <div className="relative flex-1">
             <Search className={`absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 ${styles.textMuted}`} />
             <input
+              id="inspiration-search"
+              name="search"
               type="text"
+              aria-label="搜索灵感"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
               placeholder="搜索灵感..."
@@ -355,6 +420,9 @@ export default function Inspirations() {
           <div className="flex items-center gap-2">
             <Filter className={`w-4 h-4 ${styles.textMuted}`} />
             <select
+              id="inspiration-category-filter"
+              name="categoryFilter"
+              aria-label="按分类筛选灵感"
               value={categoryFilter}
               onChange={(event) => setCategoryFilter(event.target.value)}
               className={`px-4 py-2.5 ${styles.input} text-sm`}
@@ -429,7 +497,7 @@ export default function Inspirations() {
                     </span>
                   )}
                   {recentCommentIds.has(inspiration.id) && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-studio-surface-soft text-studio-cyan-contrast font-medium">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-studio-cyan-soft text-studio-cyan-contrast font-medium">
                       有新评论
                     </span>
                   )}
@@ -439,15 +507,17 @@ export default function Inspirations() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
+                      aria-pressed={Boolean(inspiration.voted)}
+                      disabled={votePendingIds.has(inspiration.id)}
                       onClick={(event) => {
                         event.stopPropagation();
                         void handleVote(inspiration.id);
                       }}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                         inspiration.voted
-                          ? 'bg-studio-primary/15 text-studio-primary'
-                          : `${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-primary/10 hover:text-studio-primary`
-                      } ${voteAnimatingIds.has(inspiration.id) ? 'animate-pulse-vote' : ''}`}
+                          ? 'bg-studio-primary/15 text-studio-primary-contrast'
+                          : `${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-primary/10 hover:text-studio-primary-contrast`
+                      } ${voteAnimatingIds.has(inspiration.id) ? 'animate-pulse-vote' : ''} disabled:opacity-50`}
                     >
                       <ThumbsUp className="w-3.5 h-3.5" />
                       {inspiration.votes}
@@ -458,7 +528,7 @@ export default function Inspirations() {
                         event.stopPropagation();
                         void openDetail(inspiration.id);
                       }}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-primary/10 hover:text-studio-primary transition-all`}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-primary/10 hover:text-studio-primary-contrast transition-all`}
                     >
                       <MessageCircle className="w-3.5 h-3.5" />
                       {inspiration.comment_count || 0}
@@ -477,7 +547,7 @@ export default function Inspirations() {
                           void handlePromote(inspiration.id);
                         }}
                         disabled={promotingId === inspiration.id}
-                        className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-success/10 hover:text-studio-success transition-all disabled:opacity-50`}
+                        className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 rounded-lg text-xs font-medium ${styles.bgTertiary} ${styles.textSecondary} hover:bg-studio-success/10 hover:text-studio-success-contrast transition-all disabled:opacity-50`}
                       >
                         {promotingId === inspiration.id ? (
                           <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -510,7 +580,7 @@ export default function Inspirations() {
       )}
 
       {showCreateModal && (
-        <div className={`fixed inset-0 ${styles.overlay} flex items-center justify-center z-50`}>
+        <div className={`fixed inset-0 ${styles.overlay} flex items-center justify-center z-modal`}>
           <div className={`${styles.modal} p-6 w-full max-w-md mx-4`}>
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
@@ -524,8 +594,10 @@ export default function Inspirations() {
 
             <div className="space-y-4">
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-1.5`}>标题 *</label>
+                <label htmlFor="inspiration-title" className={`block ${styles.textSecondary} text-sm font-medium mb-1.5`}>标题 *</label>
                 <input
+                  id="inspiration-title"
+                  name="title"
                   type="text"
                   value={formData.title}
                   onChange={(event) => setFormData({ ...formData, title: event.target.value })}
@@ -534,8 +606,10 @@ export default function Inspirations() {
                 />
               </div>
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-1.5`}>描述</label>
+                <label htmlFor="inspiration-description" className={`block ${styles.textSecondary} text-sm font-medium mb-1.5`}>描述</label>
                 <textarea
+                  id="inspiration-description"
+                  name="description"
                   value={formData.description}
                   onChange={(event) => setFormData({ ...formData, description: event.target.value })}
                   className={`w-full px-4 py-2.5 ${styles.input} text-sm resize-none`}
@@ -544,8 +618,10 @@ export default function Inspirations() {
                 />
               </div>
               <div>
-                <label className={`block ${styles.textSecondary} text-sm font-medium mb-1.5`}>分类</label>
+                <label htmlFor="inspiration-category" className={`block ${styles.textSecondary} text-sm font-medium mb-1.5`}>分类</label>
                 <select
+                  id="inspiration-category"
+                  name="category"
                   value={formData.category}
                   onChange={(event) => setFormData({ ...formData, category: event.target.value })}
                   className={`w-full px-4 py-2.5 ${styles.input} text-sm`}
@@ -569,9 +645,11 @@ export default function Inspirations() {
                 </button>
                 <button
                   onClick={() => void handleCreate()}
+                  disabled={creatingInspiration}
+                  aria-busy={creatingInspiration}
                   className={`flex-1 px-4 py-2.5 ${styles.buttonPrimary} rounded-xl text-sm`}
                 >
-                  提交
+                  {creatingInspiration ? '提交中…' : '提交'}
                 </button>
               </div>
             </div>
@@ -580,7 +658,7 @@ export default function Inspirations() {
       )}
 
       {selectedId !== null && (
-        <div className={`fixed inset-0 ${styles.overlay} flex items-center justify-center z-50 p-4`}>
+        <div className={`fixed inset-0 ${styles.overlay} flex items-center justify-center z-modal p-4`}>
           <div className={`${styles.modal} w-full max-w-4xl h-[82vh] flex flex-col overflow-hidden`}>
             <div className={`px-6 py-4 border-b ${styles.border} flex items-center justify-between gap-4 shrink-0`}>
               <div className="min-w-0">
@@ -685,6 +763,15 @@ export default function Inspirations() {
           </div>
         </div>
       )}
+      <SimilarTopicReview
+        open={similarTopicReview !== null}
+        title={similarTopicReview?.title ?? ''}
+        topics={similarTopicReview?.topics ?? []}
+        checkFailed={similarTopicReview?.checkFailed}
+        continueLabel="仍然转为选题"
+        onCancel={() => setSimilarTopicReview(null)}
+        onContinue={continueAfterSimilarityReview}
+      />
     </div>
   );
 }

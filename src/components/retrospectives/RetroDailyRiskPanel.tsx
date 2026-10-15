@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Plus } from 'lucide-react';
+import { AlertTriangle, Plus, RefreshCw } from 'lucide-react';
 import type { CreateRetroActionPayload, RetroDailyRiskItem, RetrospectiveStatus } from '../../api/retrospectives';
 import type { User } from '../../types';
 import { ActionButton, GlassPanel } from '../studio';
@@ -11,7 +11,9 @@ type Props = {
   status: RetrospectiveStatus;
   canManageActions: boolean;
   loading: boolean;
-  onCreateAction: (payload: CreateRetroActionPayload) => void;
+  error: string | null;
+  onRefresh: () => void;
+  onCreateAction: (payload: CreateRetroActionPayload) => Promise<boolean> | boolean;
 };
 
 function excerpt(text: string) {
@@ -41,6 +43,8 @@ export default function RetroDailyRiskPanel({
   status,
   canManageActions,
   loading,
+  error,
+  onRefresh,
   onCreateAction,
 }: Props) {
   const [selectedId, setSelectedId] = useState('');
@@ -53,7 +57,7 @@ export default function RetroDailyRiskPanel({
     [risks, selectedId],
   );
 
-  const canCreate = canManageActions && status !== 'archived';
+  const canCreate = canManageActions && status !== 'archived' && !error && !loading;
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
@@ -64,7 +68,7 @@ export default function RetroDailyRiskPanel({
     }
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!selected || !title.trim()) return;
     const sourceDescription = [
       `来源日报：${selected.reportDate}`,
@@ -76,34 +80,52 @@ export default function RetroDailyRiskPanel({
       selected.contentMd,
     ].join('\n');
 
-    onCreateAction({
+    const created = await onCreateAction({
       title: title.trim(),
       descriptionMd: sourceDescription,
       ownerId: ownerId ? Number(ownerId) : selected.userId,
       dueDate: dueDate || undefined,
     });
+    if (!created) return;
+    setSelectedId('');
+    setOwnerId('');
+    setDueDate('');
+    setTitle('');
   };
 
   return (
-    <GlassPanel className="p-5">
-      <div className="flex items-start gap-3">
-        <div className="rounded-full border border-studio-amber/30 bg-studio-amber/10 p-2 text-studio-amber">
-          <AlertTriangle className="h-4 w-4" />
+    <GlassPanel data-testid="retro-daily-risk-panel" className="p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="rounded-full border border-studio-amber/30 bg-studio-amber/10 p-2 text-studio-amber">
+            <AlertTriangle className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-studio-text-primary">日报风险联动</h2>
+            <p className="mt-1 text-sm text-studio-text-muted">
+              读取当前复盘周期内的日报风险分段，可确认后转为复盘行动项。
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-lg font-bold text-studio-text-primary">日报风险联动</h2>
-          <p className="mt-1 text-sm text-studio-text-muted">
-            读取当前复盘周期内的日报风险分段，可确认后转为复盘行动项。
-          </p>
-        </div>
+        <ActionButton variant="ghost" onClick={onRefresh} disabled={loading}>
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          刷新日报风险
+        </ActionButton>
       </div>
+
+      {error ? (
+        <div role="alert" className="mt-4 flex flex-col gap-3 rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-primary sm:flex-row sm:items-center sm:justify-between">
+          <p>{risks.length > 0 ? `日报风险刷新失败，仍显示最近一次成功读取的内容：${error}` : `日报风险暂不可用：${error}`}</p>
+          <ActionButton variant="ghost" onClick={onRefresh} disabled={loading}>重新加载日报风险</ActionButton>
+        </div>
+      ) : null}
 
       <div className="mt-4 space-y-3">
         {loading ? (
           <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
             正在加载日报风险...
           </div>
-        ) : risks.length === 0 ? (
+        ) : error && risks.length === 0 ? null : risks.length === 0 ? (
           <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
             当前复盘周期内没有可联动的日报风险分段。
           </div>
@@ -154,7 +176,7 @@ export default function RetroDailyRiskPanel({
                 disabled={!canCreate}
                 className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
               />
-              <ActionButton variant="primary" onClick={handleCreate} disabled={!canCreate || loading || !title.trim()}>
+              <ActionButton variant="primary" onClick={() => void handleCreate()} disabled={!canCreate || !title.trim()}>
                 <Plus className="h-4 w-4" />
                 生成行动项
               </ActionButton>

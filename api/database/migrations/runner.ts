@@ -1,5 +1,6 @@
 import type { Client } from '@libsql/client';
 import { databaseMigrations } from './index';
+import { apiLogger } from '../../observability/logger.js';
 
 const CREATE_MIGRATION_TABLE = `
   CREATE TABLE IF NOT EXISTS database_migrations (
@@ -67,7 +68,12 @@ export async function runDatabaseMigrations(client: Client) {
         args: [migration.version],
       });
       await transaction.commit();
-      console.log(`[DB] migration ${migration.version} ${migration.name} applied`);
+      apiLogger.info({
+        module: 'database',
+        operation: 'migration.applied',
+        migrationVersion: migration.version,
+        migrationName: migration.name,
+      }, 'api.database.migration_applied');
     } catch (error) {
       await transaction.rollback();
       await client.execute({

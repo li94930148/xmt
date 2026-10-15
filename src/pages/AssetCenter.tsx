@@ -1,4 +1,4 @@
-import { ArrowUpRight, BookOpen, FileText, FolderKanban, Images, Search } from 'lucide-react';
+import { ArrowUpRight, BookOpen, FileText, FolderKanban, Images, Layers3, Search, Send } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getResourceCenterResources, type LibraryType } from '@/api/resourceCenter';
@@ -35,6 +35,26 @@ export default function AssetCenter() {
             const Icon = library.icon;
             return <Link key={library.type} to={library.path} className="group"><GlassPanel className="flex items-center gap-4 p-5 transition-colors group-hover:border-studio-border-active"><span className="flex h-12 w-12 items-center justify-center rounded-xl bg-studio-primary/12 text-studio-cyan"><Icon className="h-5 w-5" /></span><span className="min-w-0 flex-1"><span className="block font-semibold text-studio-text-primary">{library.title}</span><span className="mt-1 block text-2xl font-bold text-studio-text-primary">{(counts[library.type] || 0).toLocaleString('zh-CN')}</span></span><ArrowUpRight className="h-5 w-5 text-studio-text-muted group-hover:text-studio-cyan" /></GlassPanel></Link>;
           })}
+          <Link to="/asset-center/published-archives" className="group">
+            <GlassPanel className="flex items-center gap-4 p-5 transition-colors group-hover:border-studio-border-active">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-studio-cyan/12 text-studio-cyan"><Send className="h-5 w-5" /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold text-studio-text-primary">发布归档</span>
+                <span className="mt-1 block text-sm text-studio-text-secondary">按选题查看各平台发布快照与独立数据</span>
+              </span>
+              <ArrowUpRight className="h-5 w-5 text-studio-text-muted group-hover:text-studio-cyan" />
+            </GlassPanel>
+          </Link>
+          <Link to="/asset-center/content-topics" className="group">
+            <GlassPanel className="flex items-center gap-4 p-5 transition-colors group-hover:border-studio-border-active">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-studio-cyan/12 text-studio-cyan"><Layers3 className="h-5 w-5" /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold text-studio-text-primary">主题内容资产</span>
+                <span className="mt-1 block text-sm text-studio-text-secondary">按选题串联稿件、资料与发布数据</span>
+              </span>
+              <ArrowUpRight className="h-5 w-5 text-studio-text-muted group-hover:text-studio-cyan" />
+            </GlassPanel>
+          </Link>
         </div>
       )}
     </PageShell>

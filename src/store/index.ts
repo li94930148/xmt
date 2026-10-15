@@ -128,6 +128,7 @@ interface AppState {
   addNotification: (notification: { title: string; message: string; type: 'success' | 'error' | 'warning' | 'info' }) => void;
   removeNotification: (id: number) => void;
   theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark', savePreference?: boolean) => void;
   toggleTheme: () => void;
   fontSize: number;
   setFontSize: (size: number) => void;
@@ -137,8 +138,8 @@ interface AppState {
 
 const loadTheme = (): 'light' | 'dark' => {
   try {
-    const theme = localStorage.getItem('xmt_theme') as 'light' | 'dark';
-    return theme || 'dark';
+    const theme = localStorage.getItem('xmt_theme');
+    return theme === 'light' || theme === 'dark' ? theme : 'dark';
   } catch {
     return 'dark';
   }
@@ -200,6 +201,11 @@ export const useAppStore = create<AppState>((set) => ({
     notifications: state.notifications.filter(n => n.id !== id)
   })),
   theme: loadTheme(),
+  setTheme: (theme, savePreference = true) => {
+    if (savePreference) localStorage.setItem('xmt_theme', theme);
+    applyTheme(theme);
+    set({ theme });
+  },
   toggleTheme: () => set((state) => {
     const newTheme = state.theme === 'dark' ? 'light' : 'dark';
     localStorage.setItem('xmt_theme', newTheme);

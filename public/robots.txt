@@ -1,0 +1,3 @@
+# XMT is a private, authenticated collaboration workspace, not a public website.
+User-agent: *
+Disallow: /

@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import type { ApiErrorCode } from '@shared/schema/error.schema';
 import type { Pagination } from '@shared/schema/pagination.schema';
+import { apiLogger } from '../observability/logger.js';
 
 // 统一 API 响应格式
 export interface ApiResponse<T = unknown> {
@@ -76,7 +77,13 @@ export function sendSafeServerError(
   error?: unknown,
 ) {
   const errorName = error instanceof Error ? error.name : typeof error;
-  console.error(`[${context}] internal request error`, { errorName });
+  const requestId = res.getHeader('X-Request-ID');
+  apiLogger.error({
+    requestId: typeof requestId === 'string' ? requestId : undefined,
+    module: 'api',
+    operation: context,
+    error: { code: 'INTERNAL_ERROR', name: errorName },
+  }, 'api.error.internal');
   return res.status(500).json({ success: false, code: 'INTERNAL_ERROR', message });
 }
 
@@ -92,7 +99,12 @@ export function sanitizeServerErrorPayload(payload: unknown, requestId?: string)
 
   const { error, ...safePayload } = payload as Record<string, unknown>;
   const errorName = error instanceof Error ? error.name : typeof error;
-  console.error('[API] internal request error', { requestId, errorName });
+  apiLogger.error({
+    requestId,
+    module: 'api',
+    operation: 'response.sanitized',
+    error: { code: 'INTERNAL_ERROR', name: errorName },
+  }, 'api.error.internal');
   return { ...safePayload, success: false, code: 'INTERNAL_ERROR' };
 }
 

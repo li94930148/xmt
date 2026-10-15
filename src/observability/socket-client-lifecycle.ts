@@ -1,3 +1,5 @@
+import { emitClientLog, normalizeSocketDisconnectReason } from './client-logger';
+
 export type SocketClientLifecycleEvent = {
   event: 'created' | 'connected' | 'disconnected' | 'reconnect_attempt' | 'destroyed';
   instanceId: string;
@@ -23,14 +25,14 @@ export class SocketClientLifecycleDiagnostics {
   created(): void { this.record('created'); }
   connected(): void { this.record('connected'); }
   disconnected(reason: unknown): void {
-    this.record('disconnected', { disconnectReason: typeof reason === 'string' ? reason.slice(0, 80) : 'unknown' });
+    this.record('disconnected', { disconnectReason: normalizeSocketDisconnectReason(reason) });
   }
   reconnectAttempt(attempt: unknown): void {
     const normalized = Number.isInteger(attempt) && Number(attempt) > 0 && Number(attempt) <= 100 ? Number(attempt) : 0;
     this.record('reconnect_attempt', { reconnectAttempt: normalized });
   }
   destroyed(reason: unknown): void {
-    this.record('destroyed', { disconnectReason: typeof reason === 'string' ? reason.slice(0, 80) : 'unknown' });
+    this.record('destroyed', { disconnectReason: normalizeSocketDisconnectReason(reason) });
   }
   snapshot(): SocketClientLifecycleEvent[] { return [...this.events]; }
 
@@ -45,6 +47,14 @@ export class SocketClientLifecycleDiagnostics {
     };
     this.events.push(entry);
     if (this.events.length > 50) this.events.shift();
-    console.debug('[Socket][client lifecycle]', entry);
+    emitClientLog({
+      event: 'socket.lifecycle',
+      level: 'debug',
+      fields: {
+        lifecycleEvent: event,
+        reason: entry.disconnectReason,
+        reconnectAttempt: entry.reconnectAttempt,
+      },
+    });
   }
 }

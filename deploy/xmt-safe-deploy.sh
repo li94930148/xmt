@@ -230,4 +230,8 @@ if ! XMT_EXPECTED_RUNTIME_SOURCE="$RUNTIME_ENV_SOURCE" npm run ops:runtime-env-r
 log "Checking public internal route exposure"
 if ! npm run ops:internal-exposure-check; then rollback_code 1; fi
 
+log "Removing development-only dependencies after all build and runtime checks"
+if ! npm prune --omit=dev; then rollback_code 1; fi
+if ! npm ls --omit=dev --depth=0 >/dev/null; then rollback_code 1; fi
+
 log "Deploy completed successfully"

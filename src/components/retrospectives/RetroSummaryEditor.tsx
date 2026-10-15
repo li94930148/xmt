@@ -7,11 +7,12 @@ type Props = {
   status: RetrospectiveStatus;
   canEdit: boolean;
   saving: boolean;
+  locked: boolean;
   onChange: (value: string) => void;
   onSave: () => void;
 };
 
-export default function RetroSummaryEditor({ value, status, canEdit, saving, onChange, onSave }: Props) {
+export default function RetroSummaryEditor({ value, status, canEdit, saving, locked, onChange, onSave }: Props) {
   const editable = status === 'draft' && canEdit;
 
   return (
@@ -24,7 +25,7 @@ export default function RetroSummaryEditor({ value, status, canEdit, saving, onC
           </p>
         </div>
         {editable ? (
-          <ActionButton onClick={onSave} disabled={saving}>
+          <ActionButton onClick={onSave} disabled={saving || locked}>
             <Save className="h-4 w-4" />
             {saving ? '保存中...' : '保存结论'}
           </ActionButton>
@@ -37,6 +38,7 @@ export default function RetroSummaryEditor({ value, status, canEdit, saving, onC
         <textarea
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          disabled={saving || locked}
           className="mt-4 min-h-[220px] w-full resize-y rounded-panel border border-studio-border-soft bg-studio-surface px-4 py-3 text-sm leading-6 text-studio-text-primary outline-none transition focus:border-studio-border-active"
           placeholder="记录本周期发生了什么、为什么发生、下一轮怎么调整..."
         />

@@ -22,8 +22,11 @@ export type AssignableRole = {
   name: string;
 };
 
-export async function getUsers(params?: { page?: number; limit?: number }): Promise<{ data: User[]; total: number; page: number; limit: number }> {
-  const query = new URLSearchParams(params as Record<string, string>);
+export async function getUsers(params?: { page?: number; limit?: number; search?: string }): Promise<{ data: User[]; total: number; page: number; limit: number }> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined && value !== '') query.set(key, String(value));
+  }
   const response = await fetch(`${BASE_URL}/users?${query}`, {
     headers: getAuthHeader()
   });
@@ -88,4 +91,3 @@ export async function getActivityLogs(params?: { page?: number; limit?: number; 
   if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to load activity logs'));
   return response.json();
 }
-

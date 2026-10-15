@@ -10,6 +10,52 @@ import { CREATOR_SYNC_MAX_PAYLOAD_BYTES, CREATOR_SYNC_MAX_PAYLOAD_MB } from '../
 
 type JsonRecord = Record<string, unknown>;
 type AgentRow = { id: number; user_id: number; platform: string; account_id: string; token_hash: string };
+export class CreatorSyncAlreadyRunningError extends Error {
+  statusCode = 503;
+
+  constructor() {
+    super('该账号正在同步或同步服务暂忙，请稍后重试。');
+    this.name = 'CreatorSyncAlreadyRunningError';
+  }
+}
+
+const CREATOR_SYNC_CLAIM_LEASE_MS = 30 * 60 * 1000;
+const DATABASE_NOW_MS = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
+
+export async function claimCreatorSyncTask(agentId: number, taskId: string, platform: string, account: string, startedAt: string) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const inserted = await runInTransaction(async (tx) => {
+        await tx.execute(`UPDATE creator_sync_tasks SET status='failed',end_time=CURRENT_TIMESTAMP,
+          error_message=COALESCE(error_message,'同步租约过期，已释放占用'),claimed_at_ms=0
+          WHERE platform=? AND account=? AND status='running'
+          AND claimed_at_ms <= ${DATABASE_NOW_MS} - ?`, [platform, account, CREATOR_SYNC_CLAIM_LEASE_MS]);
+        return tx.execute(`INSERT INTO creator_sync_tasks(agent_id,task_id,start_time,platform,account,status,claimed_at_ms)
+          VALUES(?,?,?,?,?,'running',${DATABASE_NOW_MS}) ON CONFLICT(agent_id,task_id) DO UPDATE SET
+          status='running',start_time=excluded.start_time,end_time=NULL,error_message=NULL,claimed_at_ms=excluded.claimed_at_ms
+          WHERE creator_sync_tasks.status <> 'running'`, [agentId, taskId, startedAt, platform, account]);
+      });
+      if (inserted !== 1) throw new CreatorSyncAlreadyRunningError();
+      return;
+    } catch (error) {
+      const messages: string[] = [];
+      const seen = new Set<Error>();
+      let cause: unknown = error;
+      while (cause instanceof Error && !seen.has(cause)) {
+        seen.add(cause);
+        messages.push(cause.message);
+        cause = (cause as Error & { cause?: unknown }).cause;
+      }
+      if (messages.some(message => /UNIQUE constraint failed: creator_sync_tasks\.platform, creator_sync_tasks\.account/i.test(message))) {
+        throw new CreatorSyncAlreadyRunningError();
+      }
+      if (!messages.some(message => /SQLITE_(BUSY|LOCKED)|database (?:is )?(?:locked|busy)/i.test(message))) throw error;
+      if (attempt === 4) throw new CreatorSyncAlreadyRunningError();
+      await new Promise(resolve => setTimeout(resolve, 25 * 2 ** attempt));
+    }
+  }
+}
+
 const text = (value: unknown, fallback = '') => value == null ? fallback : String(value);
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const json = (value: unknown) => JSON.stringify(value ?? {});
@@ -40,7 +86,15 @@ async function openEnvelope(body: JsonRecord, authorization?: string) {
   const expected = crypto.createHmac('sha256', token).update(canonical(body)).digest('hex'); const supplied = text(body.signature);
   if (supplied.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(supplied))) throw Object.assign(new Error('上传签名验证失败'), { statusCode: 401 });
   try { await execute('INSERT INTO creator_agent_nonces(agent_id,nonce,request_time) VALUES(?,?,?)', [agent.id, nonce, new Date(timestamp).toISOString()]); }
-  catch { throw Object.assign(new Error('检测到重复的 Agent 请求'), { statusCode: 409 }); }
+  catch (error) {
+    // A busy database is retryable; only the nonce's unique constraint is replay.
+    const message = error instanceof Error ? error.message : '';
+    if (/UNIQUE constraint failed: creator_agent_nonces\.agent_id, creator_agent_nonces\.nonce/i.test(message)) {
+      throw Object.assign(new Error('检测到重复的 Agent 请求'), { statusCode: 409 });
+    }
+    if (/SQLITE_(BUSY|LOCKED)|database (?:is )?(?:locked|busy)/i.test(message)) throw new CreatorSyncAlreadyRunningError();
+    throw error;
+  }
   await execute("DELETE FROM creator_agent_nonces WHERE created_at < datetime('now','+8 hours','-1 day')");
   try { const envelope = body.data as {iv:string;tag:string;ciphertext:string}; const decipher = crypto.createDecipheriv('aes-256-gcm', key(token), Buffer.from(envelope.iv,'base64')); decipher.setAuthTag(Buffer.from(envelope.tag,'base64')); return { agent, payload: JSON.parse(decipher.update(envelope.ciphertext,'base64','utf8') + decipher.final('utf8')) as JsonRecord }; }
   catch { throw Object.assign(new Error('上传数据解密失败'), { statusCode: 400 }); }
@@ -156,9 +210,9 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
         const nextPlay=views??candidate.play_count, nextLikes=likes??candidate.like_count, nextComments=comments??candidate.comment_count, nextShares=shares??candidate.share_count, nextCollects=favorites??candidate.collect_count;
         const interactionRate=nextPlay>0?(nextLikes+nextComments+nextShares+nextCollects)/nextPlay:0;
         await tx.execute('UPDATE douyin_works SET play_count=?,like_count=?,comment_count=?,share_count=?,collect_count=?,completion_rate=?,interaction_rate=?,updated_at=CURRENT_TIMESTAMP WHERE id=?', [nextPlay,nextLikes,nextComments,nextShares,nextCollects,completion??candidate.completion_rate,interactionRate,candidate.id]);
-        await tx.execute(`INSERT INTO douyin_work_snapshots(work_id,snapshot_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate,interaction_rate)
-          VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate`,
-        [candidate.id,snapshotTime,nextPlay,nextLikes,nextComments,nextShares,nextCollects,completion??candidate.completion_rate,interactionRate]);
+        await tx.execute(`INSERT INTO douyin_work_snapshots(work_id,snapshot_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate,interaction_rate,source_type,source_file_sha256,has_play_count,has_like_count,has_comment_count,has_share_count)
+          VALUES(?,?,?,?,?,?,?,?,?,'douyin_official_export',?,?,?,?,?) ON CONFLICT(work_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate,source_type=excluded.source_type,source_file_sha256=excluded.source_file_sha256,has_play_count=excluded.has_play_count,has_like_count=excluded.has_like_count,has_comment_count=excluded.has_comment_count,has_share_count=excluded.has_share_count`,
+        [candidate.id,snapshotTime,nextPlay,nextLikes,nextComments,nextShares,nextCollects,completion??candidate.completion_rate,interactionRate,contentSha,Number(views !== null),Number(likes !== null),Number(comments !== null),Number(shares !== null)]);
         reconciledWorkRows++;
       }
     }
@@ -206,7 +260,7 @@ export async function acceptCreatorDataSync(body: JsonRecord, authorization?: st
   const platformUid = text(account.platform_uid || account.uid || agent.account_id); if (platformUid !== agent.account_id) throw Object.assign(new Error('同步账号与 Agent 绑定不匹配'), { statusCode: 403 });
   const snapshotTime = text(body.collected_at, new Date().toISOString()); const syncTask = payload.sync_task && typeof payload.sync_task === 'object' ? payload.sync_task as JsonRecord : {};
   const taskId = text(syncTask.task_id, crypto.randomUUID());
-  await execute(`INSERT INTO creator_sync_tasks(agent_id,task_id,start_time,platform,account,status) VALUES(?,?,?,?,?,'running') ON CONFLICT(agent_id,task_id) DO UPDATE SET status='running',start_time=excluded.start_time,end_time=NULL,error_message=NULL`, [agent.id, taskId, text(syncTask.start_time,snapshotTime), agent.platform, platformUid]);
+  await claimCreatorSyncTask(agent.id, taskId, agent.platform, platformUid, text(syncTask.start_time,snapshotTime));
   if (payload.contract_version === '2.10.2') {
     const modules: Record<string, 'success' | 'failed'> = { douyin_contract: 'failed' };
     const errors: Record<string, string> = {};
@@ -262,4 +316,4 @@ export async function acceptCreatorDataSync(body: JsonRecord, authorization?: st
 
 export const acceptCreatorDataSyncV291 = acceptCreatorDataSync;
 
-async function finishTask(agentId:number,taskId:string,modules:Record<string,'success'|'failed'>,errors:Record<string,string>,snapshotTime:string,accountId:number,counts:JsonRecord={}){const successCount=Object.values(modules).filter(v=>v==='success').length;const failedCount=Object.keys(modules).length-successCount;const status=failedCount===0?'success':successCount===0?'failed':'partial_success';await execute('UPDATE creator_sync_tasks SET end_time=CURRENT_TIMESTAMP,status=?,success_count=?,failed_count=?,error_message=?,module_status_json=? WHERE agent_id=? AND task_id=?',[status,successCount,failedCount,Object.values(errors).join('; ')||null,JSON.stringify(modules),agentId,taskId]);return{success:successCount>0,status,success_count:successCount,failed_count:failedCount,modules,errors,snapshot_time:snapshotTime,account_id:accountId,...counts};}
+async function finishTask(agentId:number,taskId:string,modules:Record<string,'success'|'failed'>,errors:Record<string,string>,snapshotTime:string,accountId:number,counts:JsonRecord={}){const successCount=Object.values(modules).filter(v=>v==='success').length;const failedCount=Object.keys(modules).length-successCount;const status=failedCount===0?'success':successCount===0?'failed':'partial_success';await execute('UPDATE creator_sync_tasks SET end_time=CURRENT_TIMESTAMP,status=?,success_count=?,failed_count=?,error_message=?,module_status_json=?,claimed_at_ms=0 WHERE agent_id=? AND task_id=?',[status,successCount,failedCount,Object.values(errors).join('; ')||null,JSON.stringify(modules),agentId,taskId]);return{success:successCount>0,status,success_count:successCount,failed_count:failedCount,modules,errors,snapshot_time:snapshotTime,account_id:accountId,...counts};}

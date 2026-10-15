@@ -244,12 +244,12 @@ export default function Sidebar({
 
   return (
     <>
-      <aside className={`sticky top-0 z-30 hidden h-screen self-start border-r transition-[width] duration-300 md:block ${desktopAsideClass} ${shellClass}`}>
+      <aside className={`sticky top-0 z-sticky hidden h-screen self-start border-r transition-[width] duration-300 md:block ${desktopAsideClass} ${shellClass}`}>
         {renderMenu(false)}
       </aside>
 
       <div
-        className={`fixed inset-0 z-50 transition-all duration-300 md:hidden ${
+        className={`fixed inset-0 z-page-overlay transition-all duration-300 md:hidden ${
           mobileOpen ? 'pointer-events-auto bg-black/60 opacity-100' : 'pointer-events-none bg-black/0 opacity-0'
         }`}
         onClick={onMobileClose}

@@ -180,7 +180,7 @@ export default function EditorLeaveFailureDialog({
               type="button"
               onClick={() => runAction('retry', onRetry)}
               disabled={isBusy}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm text-white transition-colors hover:bg-brand-400 disabled:opacity-60"
+              className="xmt-btn xmt-btn-primary"
             >
               <RefreshCw className="h-4 w-4" />
               {actionSnapshot.winner === 'retry' && isBusy ? '正在重试保存…' : '重试保存'}
@@ -190,7 +190,7 @@ export default function EditorLeaveFailureDialog({
             type="button"
             onClick={() => runAction('discard', onDiscardAndLeave)}
             disabled={isBusy}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+            className="xmt-btn xmt-btn-danger"
           >
             {view.retryAvailable ? <AlertTriangle className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
             {actionSnapshot.winner === 'discard' && isBusy ? '正在离开…' : '放弃离开'}
@@ -198,9 +198,9 @@ export default function EditorLeaveFailureDialog({
         </div>
       }
     >
-      {actionError ? <p className="mb-3 text-sm text-red-500">{actionError}</p> : null}
+      {actionError ? <p className="mb-3 text-sm text-studio-coral-contrast">{actionError}</p> : null}
       <p className={`text-sm leading-6 ${styles.textSecondary}`}>
-        放弃离开会停止当前编辑器的保存协调，未确认的最后修改可能无法恢复。
+        放弃离开会停止本次保存。最后一处尚未确认的修改可能无法恢复。
       </p>
     </BaseModal>
   );

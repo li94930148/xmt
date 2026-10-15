@@ -1,9 +1,22 @@
 import type { TopicStatus } from '@shared/types';
 import type { TopicPage, TopicPersistencePatch, TopicRecord } from './topics.types';
+import type { PublishingCompletionOutcome } from './publishing-completion';
+import type { RecordWorkflowDocumentVersionResult, WorkflowDocumentVersionAction } from '../../services/workflowDocumentVersions';
 
 export interface TopicTransaction {
   createTopic(input: CreateTopicRecord): Promise<number>;
+  linkCreatorTopicSuggestion(topicId: number, input: CreatorTopicSuggestionLinkRecord): Promise<void>;
+  findDetailById(id: number | string): Promise<TopicRecord | null>;
+  findHistory(id: number | string): Promise<Record<string, unknown>[]>;
   updateTopic(id: number | string, patch: TopicPersistencePatch): Promise<void>;
+  recordTopicOutlineVersion(input: {
+    id: number | string;
+    nextContent: string | null;
+    expectedContent: string;
+    action: WorkflowDocumentVersionAction;
+    operatorId: number;
+  }): Promise<RecordWorkflowDocumentVersionResult>;
+  updateTopicIfStatus(id: number | string, expectedStatus: TopicStatus, patch: TopicPersistencePatch): Promise<boolean>;
   addHistory(input: TopicHistoryWrite): Promise<void>;
   addActivity(input: TopicActivityWrite): Promise<void>;
   productionExists(topicId: number | string): Promise<boolean>;
@@ -11,8 +24,22 @@ export interface TopicTransaction {
   shootingExists(topicId: number | string): Promise<boolean>;
   createInitialShooting(input: InitialShootingRecord): Promise<void>;
   publishingExists(topicId: number | string): Promise<boolean>;
+  publishingStatuses(topicId: number | string): Promise<string[]>;
+  advancePublishingTopic(topicId: number | string, operatorId: number): Promise<PublishingCompletionOutcome | null>;
   createInitialPublishing(input: InitialPublishingRecord): Promise<void>;
+  getTopicForStageRecordRepair(id: number | string): Promise<TopicRecord | null>;
 }
+export type CreatorTopicSuggestionLinkRecord = {
+  creatorAccountId: number;
+  userId: number;
+  suggestionId: string;
+  evidenceId: string;
+  sampleCount: number;
+  baselineCount: number;
+  medianPlays: number;
+  baselineMedianPlays: number;
+  playRatio: number;
+};
 export type TopicListFilter = {
   status?: unknown;
   search?: unknown;
@@ -53,6 +80,7 @@ export type InitialProductionRecord = {
   content: string;
   contentMarkdown: string;
   contentJson: string;
+  originOutlineSnapshot: string;
   operatorId: number;
 };
 

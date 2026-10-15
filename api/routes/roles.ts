@@ -1,7 +1,7 @@
 ﻿import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { clearPermissionCache, requirePermission } from '../middleware/permissions';
-import { queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
+import { queryOne, queryAll, runInTransaction } from '../database/utils';
 import { assertAssignableRoles, assertPermissionsWithinActorCeiling, getRolesByIds } from '../services/role-assignment.service.js';
 
 const router = Router();
@@ -200,20 +200,23 @@ router.delete('/:id', authenticate, requirePermission('system:role'), async (req
   try {
     const roleId = req.params.id;
 
-    const role = await queryOne(`SELECT * FROM roles WHERE id = ?`, [roleId]);
-    if (!role) return res.status(404).json({ message: '角色不存在' });
+    const result = await runInTransaction(async (tx) => {
+      const role = await tx.queryOne<{ is_system: number }>(`SELECT is_system FROM roles WHERE id = ?`, [roleId]);
+      if (!role) return { status: 'not_found' as const };
+      if (Number(role.is_system) === 1) return { status: 'system' as const };
 
-    if (role.is_system) {
-      return res.status(400).json({ message: '系统内置角色不可删除' });
-    }
+      const userCount = await tx.queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM user_roles WHERE role_id = ?`, [roleId]);
+      if (Number(userCount?.count || 0) > 0) return { status: 'assigned' as const, count: Number(userCount?.count) };
 
-    const userCount = await queryOne(`SELECT COUNT(*) as count FROM user_roles WHERE role_id = ?`, [roleId]);
-    if (userCount && Number(userCount.count) > 0) {
-      return res.status(400).json({ message: `该角色下还有 ${userCount.count} 个用户，请先移除` });
-    }
+      await tx.execute(`DELETE FROM role_permissions WHERE role_id = ?`, [roleId]);
+      const deleted = await tx.execute(`DELETE FROM roles WHERE id = ?`, [roleId]);
+      if (deleted !== 1) throw new Error('ROLE_DELETE_TARGET_CHANGED');
+      return { status: 'deleted' as const };
+    });
 
-    await execute(`DELETE FROM role_permissions WHERE role_id = ?`, [roleId]);
-    await execute(`DELETE FROM roles WHERE id = ?`, [roleId]);
+    if (result.status === 'not_found') return res.status(404).json({ message: '角色不存在' });
+    if (result.status === 'system') return res.status(400).json({ message: '系统内置角色不可删除' });
+    if (result.status === 'assigned') return res.status(400).json({ message: `该角色下还有 ${result.count} 个用户，请先移除` });
 
     clearPermissionCache();
     res.json({ message: '角色删除成功' });

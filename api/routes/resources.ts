@@ -85,8 +85,14 @@ router.get('/archives', authenticate, async (req, res) => {
         const parsed = JSON.parse(String(a.content || '{}'));
         summary = {
           platform: parsed.topic?.platform || '',
+          publishedPlatforms: Array.isArray(parsed.published_records)
+            ? [...new Set(parsed.published_records.map((record: Record<string, unknown>) => String(record.platform || '')).filter(Boolean))]
+            : parsed.publishing?.platform ? [String(parsed.publishing.platform)] : [],
           scriptVersion: parsed.script?.version || '',
           shootingCommentCount: parsed.shooting?.comments?.length || 0,
+          publishedRecordCount: Array.isArray(parsed.published_records)
+            ? parsed.published_records.length
+            : parsed.publishing ? 1 : 0,
           publishedAt: parsed.publishing?.publish_time || '',
           views: parsed.analytics?.views || 0,
           likes: parsed.analytics?.likes || 0,

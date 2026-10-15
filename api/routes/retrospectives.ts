@@ -26,6 +26,7 @@ import type {
   UpdateRetroActionInput,
   UpdateRetrospectiveInput,
 } from '../types/retrospectives.js';
+import { apiLogger } from '../observability/logger.js';
 
 const router = express.Router();
 
@@ -66,7 +67,11 @@ function handleError(error: unknown, res: Response) {
     });
   }
 
-  console.error('[Retrospectives] unexpected error:', error);
+  apiLogger.error({
+    module: 'retrospectives',
+    operation: 'request.failed',
+    error: { code: 'INTERNAL_ERROR', name: error instanceof Error ? error.name : 'UnknownError' },
+  }, 'api.retrospectives.request_failed');
   return res.status(500).json({
     success: false,
     code: 'INTERNAL_ERROR',
@@ -99,6 +104,8 @@ router.get('/', async (req, res) => {
       start: getQueryString(req, 'start'),
       end: getQueryString(req, 'end'),
       ownerId: getQueryNumber(req, 'ownerId'),
+      keyword: getQueryString(req, 'keyword'),
+      limit: getQueryNumber(req, 'limit'),
     };
     sendData(res, await listRetrospectives(req.user, filters));
   } catch (error) {

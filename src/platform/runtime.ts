@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { getNativeEndpointConfigurationErrorFor } from './native-endpoint-contract';
+import { emitClientLog } from '../observability/client-logger';
 
 export type RuntimeEnvironment = 'web-development' | 'web-production' | 'android-development' | 'android-production';
 export type BackButtonAction = 'navigate-back' | 'warn-exit' | 'exit-app';
@@ -67,7 +68,7 @@ export function getNativeEndpointConfigurationError(): string | null {
  */
 export function assertNativeEndpointSecurity() {
   const error = getNativeEndpointConfigurationError();
-  if (error) console.error(`[XMT] ${error}`);
+  if (error) emitClientLog({ event: 'runtime.native_endpoint_invalid', level: 'error' });
 }
 
 /** Decides Android back behavior without binding React navigation to native APIs. */

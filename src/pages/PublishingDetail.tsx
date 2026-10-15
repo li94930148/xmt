@@ -1,16 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
-import { getPublishingById, updatePublishing } from '../api';
+import { getPublishingById, getPublishingScriptVersions, syncPublishingPublishedArchive, updatePublishing } from '../api';
+import type { WorkflowDocumentVersion } from '../api';
 import { ChevronLeft, FileText, Camera, Send, Calendar, User as UserIcon, Clock, Save, CheckCircle, ArrowRight, MapPin, ExternalLink } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
-import { PageShell } from '../components/studio';
+import { ActionButton, PageShell } from '../components/studio';
 import { useCompactEditorToolbar } from '../hooks/useCompactEditorToolbar';
 import { getWorkflowStatusLabel, isKnownWorkflowStatus } from '../platform/workflow-status-labels';
+import { workflowScriptSourceLabel, workflowScriptSourceReference, workflowScriptSourceTimestamp } from '../utils/workflow-script-source';
+import { usePermission } from '../hooks/usePermission';
 
 interface PublishingDetailData {
   id: number;
@@ -25,6 +28,9 @@ interface PublishingDetailData {
   status: string;
   publish_time: string;
   script_content: string | null;
+  script_source_production_id?: number | null;
+  script_source_version?: string | null;
+  script_source_production?: { id: number; version: string; status: string; created_at?: string; version_timestamp?: string; operator_name?: string | null } | null;
   operator_name: string;
   created_at: string;
   updated_at: string;
@@ -35,6 +41,8 @@ interface PublishingDetailData {
     content_markdown: string;
     status: string;
     created_at: string;
+    updated_at?: string;
+    version_timestamp?: string;
     operator_name: string;
   } | null;
   shooting: {
@@ -52,6 +60,8 @@ interface PublishingDetailData {
     created_at: string;
     operator_name: string;
   }>;
+  published_archive_script_sync_pending?: boolean | null;
+  can_sync_published_archive?: boolean;
 }
 
 const WORKFLOW_STEPS = [
@@ -70,43 +80,116 @@ const PUBLISHING_STATUS_COLORS: Record<string, string> = {
 
 export default function PublishingDetail() {
   const { id } = useParams<{ id: string }>();
+  const currentPublishingIdRef = useRef(id);
+  currentPublishingIdRef.current = id;
   const navigate = useNavigate();
   const appStore = useAppStore();
   const styles = useThemeStyles();
   const compactEditorToolbar = useCompactEditorToolbar();
+  const { hasPermission } = usePermission();
 
   const [data, setData] = useState<PublishingDetailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const detailRequestSequenceRef = useRef(0);
   const [editMode, setEditMode] = useState(false);
   const [scriptContent, setScriptContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [scriptVersions, setScriptVersions] = useState<WorkflowDocumentVersion[]>([]);
+  const [archiveSyncPending, setArchiveSyncPending] = useState(false);
+  const [archiveSyncRetrying, setArchiveSyncRetrying] = useState(false);
+  const sourceProductionId = data
+    ? data.script_content !== null ? data.script_source_production_id : data.production?.id
+    : null;
+  const sourceVersion = data
+    ? data.script_content !== null ? data.script_source_version : data.production?.version
+    : null;
+  const sourceProduction = data
+    ? data.script_content !== null ? data.script_source_production : data.production
+    : null;
+  const sourceProductionTimestamp = workflowScriptSourceTimestamp(sourceProduction);
 
   useEffect(() => {
+    const requestId = ++detailRequestSequenceRef.current;
     const fetchData = async () => {
       setLoading(true);
+      setData(null);
+      setScriptVersions([]);
       try {
         const result = await getPublishingById(parseInt(id!));
+        if (requestId !== detailRequestSequenceRef.current || Number(currentPublishingIdRef.current) !== Number(id)) return;
+        const versions = await getPublishingScriptVersions(result.id).catch(() => []);
+        if (requestId !== detailRequestSequenceRef.current || Number(currentPublishingIdRef.current) !== Number(id)) return;
         setData(result);
+        setScriptVersions(versions);
+        setArchiveSyncPending(result.published_archive_script_sync_pending === true);
         // 优先使用本地编辑的剧本，其次使用创作管理的剧本
-        const content = result.script_content || result.production?.content || result.production?.content_markdown || '';
+        const content = result.script_content ?? result.production?.content ?? result.production?.content_markdown ?? '';
         setScriptContent(content);
       } catch (error) {
-        appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+        if (requestId === detailRequestSequenceRef.current && Number(currentPublishingIdRef.current) === Number(id)) {
+          appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+        }
       } finally {
-        setLoading(false);
+        if (requestId === detailRequestSequenceRef.current && Number(currentPublishingIdRef.current) === Number(id)) setLoading(false);
       }
     };
-    fetchData();
+    void fetchData();
+    return () => { detailRequestSequenceRef.current += 1; };
   }, [id]);
 
-  const handleSaveScript = async () => {
+  const handleSaveScript = async (versionAction?: 'minor' | 'major') => {
     if (!data) return;
+    const requestedPublishingId = data.id;
     setSaving(true);
     try {
-      await updatePublishing(data.id, { script_content: scriptContent });
-      setData({ ...data, script_content: scriptContent });
+      const source = workflowScriptSourceReference(
+        data.script_content,
+        { id: data.script_source_production_id, version: data.script_source_version },
+        data.production,
+      );
+      const result = await updatePublishing(requestedPublishingId, {
+        script_content: scriptContent,
+        ...source,
+        ...(versionAction ? {
+          version_action: versionAction,
+          expected_content: data.script_content ?? data.production?.content ?? data.production?.content_markdown ?? '',
+        } : {}),
+      });
+      if (Number(currentPublishingIdRef.current) !== requestedPublishingId) {
+        appStore.addNotification({ title: versionAction ? '版本已保存' : '剧本已保存', message: '服务端已确认保存；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+        return;
+      }
+      setArchiveSyncPending(result.archiveSync === 'pending');
+      setData({
+        ...data,
+        script_content: scriptContent,
+        script_source_production_id: source.script_source_production_id ?? data.script_source_production_id,
+        script_source_version: source.script_source_version ?? data.script_source_version,
+      });
       setEditMode(false);
-      appStore.addNotification({ title: '保存成功', message: '剧本内容已保存（仅在发布管理及资源库存档中生效）', type: 'success' });
+      const refreshedVersions = versionAction ? await getPublishingScriptVersions(requestedPublishingId).catch(() => null) : undefined;
+      if (Number(currentPublishingIdRef.current) !== requestedPublishingId) {
+        appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+        return;
+      }
+      if (refreshedVersions) setScriptVersions(refreshedVersions);
+      if (result.archiveSync === 'pending') {
+        appStore.addNotification({
+          title: '剧本已保存，归档待同步',
+          message: '发布剧本已保存，但发布归档暂未更新；可在页面提示中安全重试归档同步。',
+          type: 'warning',
+        });
+      } else {
+        appStore.addNotification({
+          title: versionAction ? refreshedVersions ? '版本已保存' : '版本已保存，历史列表未刷新' : '保存成功',
+          message: versionAction
+            ? refreshedVersions
+              ? `发布剧本已保存为${versionAction === 'major' ? '大版本' : '小版本'}`
+              : '服务端已确认版本；请重新加载查看历史，不要重复创建。'
+            : '剧本内容已保存（仅在发布管理及资源库存档中生效）',
+          type: versionAction && !refreshedVersions ? 'warning' : 'success',
+        });
+      }
     } catch (error) {
       appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
     } finally {
@@ -114,9 +197,27 @@ export default function PublishingDetail() {
     }
   };
 
+  const handleRetryPublishedArchiveSync = async () => {
+    if (!data || archiveSyncRetrying || saving || editMode) return;
+    setArchiveSyncRetrying(true);
+    try {
+      const result = await syncPublishingPublishedArchive(data.id);
+      setArchiveSyncPending(false);
+      appStore.addNotification({
+        title: result.archiveSync === 'skipped' ? '归档无需更新' : '归档已同步',
+        message: result.message,
+        type: 'success',
+      });
+    } catch (error) {
+      appStore.addNotification({ title: '归档仍待同步', message: (error as Error).message, type: 'warning' });
+    } finally {
+      setArchiveSyncRetrying(false);
+    }
+  };
+
   const handleCancelEdit = () => {
     if (data) {
-      const content = data.script_content || data.production?.content || data.production?.content_markdown || '';
+      const content = data.script_content ?? data.production?.content ?? data.production?.content_markdown ?? '';
       setScriptContent(content);
     }
     setEditMode(false);
@@ -133,7 +234,7 @@ export default function PublishingDetail() {
     return 'pending';
   };
 
-  if (loading) {
+  if (loading || (data && data.id !== Number(id))) {
     return (
       <PageShell>
         <div className="flex h-64 items-center justify-center">
@@ -185,7 +286,37 @@ export default function PublishingDetail() {
           {data.topic_title}
         </h1>
         <p className={`${styles.textSecondary} mt-1`}>发布管理详情 · 关联选题 #{data.topic_id}</p>
+        <p className={`mt-1 text-xs ${styles.textMuted}`}>
+          {workflowScriptSourceLabel(data.script_content, data.script_source_version, data.production?.version)}
+          {sourceProduction && (
+            <span>
+              {sourceProductionTimestamp === null ? ' · 创作版本时间未记录' : ` · 创作版本时间 ${formatBeijingTime(sourceProductionTimestamp, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
+            </span>
+          )}
+        </p>
       </div>
+
+      {archiveSyncPending && (
+        <section
+          role="status"
+          aria-live="polite"
+          className="flex flex-col gap-3 rounded-xl border border-studio-border-soft bg-studio-amber-soft px-4 py-3 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p>发布剧本已保存，但发布归档尚未更新。重试只会同步已保存内容，不会再次写入发布记录。</p>
+          {data.can_sync_published_archive ? (
+            <button
+              type="button"
+              onClick={() => void handleRetryPublishedArchiveSync()}
+              disabled={archiveSyncRetrying || saving || editMode}
+              className="xmt-btn xmt-btn-warning min-h-10 shrink-0 px-3 py-2 text-xs disabled:opacity-50"
+            >
+              {archiveSyncRetrying ? '同步中...' : editMode ? '先保存或取消编辑' : '重试同步归档'}
+            </button>
+          ) : (
+            <p className="text-xs text-studio-text-muted">请联系有发布管理权限的成员重试归档同步。</p>
+          )}
+        </section>
+      )}
 
       {/* 流程进度条 */}
       <div className={`${styles.card} p-6`}>
@@ -202,8 +333,8 @@ export default function PublishingDetail() {
                   `${styles.bgTertiary} border ${styles.border}`
                 }`}>
                   <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                    status === 'completed' ? 'bg-studio-success text-white' :
-                    status === 'current' ? 'bg-studio-primary text-white' :
+                    status === 'completed' ? 'bg-studio-success-soft text-studio-success-contrast' :
+                    status === 'current' ? 'bg-studio-primary-button text-white' :
                     'bg-studio-surface-soft text-studio-text-muted'
                   }`}>
                     {status === 'completed' ? <CheckCircle className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
@@ -322,17 +453,26 @@ export default function PublishingDetail() {
           {data.production ? (
             <div className="space-y-3">
               <div className="flex items-start gap-3">
-                <span className={`text-xs ${styles.textMuted} w-16 shrink-0 pt-0.5`}>版本</span>
+                <span className={`text-xs ${styles.textMuted} w-24 shrink-0 pt-0.5`}>当前创作版本</span>
                 <span className={`text-sm ${styles.textPrimary}`}>{data.production.version || '-'}</span>
               </div>
               <div className="flex items-start gap-3">
                 <span className={`text-xs ${styles.textMuted} w-16 shrink-0 pt-0.5`}>状态</span>
-                <span className="text-sm text-studio-success">已通过</span>
+                <span className="text-sm text-studio-success-contrast">已通过</span>
               </div>
               <div className="flex items-start gap-3">
                 <span className={`text-xs ${styles.textMuted} w-16 shrink-0 pt-0.5`}>操作人</span>
                 <span className={`text-sm ${styles.textPrimary}`}>{data.production.operator_name || '-'}</span>
               </div>
+              {!editMode && sourceProductionId && sourceVersion && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/production/${sourceProductionId}?version=${encodeURIComponent(sourceVersion)}`, { state: { mobileReturnTo: `/publishing/${data.id}` } })}
+                  className="xmt-btn xmt-btn-secondary min-h-10 px-3 py-2 text-xs"
+                >
+                  查看引用创作版本 {sourceVersion}
+                </button>
+              )}
               {hasLocalEdit && (
                 <div className="mt-2 px-3 py-2 bg-studio-primary/10 border border-studio-primary/30 rounded-lg">
                   <p className="text-xs text-studio-primary">📝 已有本地编辑版本（不回写创作管理）</p>
@@ -365,18 +505,24 @@ export default function PublishingDetail() {
                   取消
                 </button>
                 <button
-                  onClick={handleSaveScript}
+                  onClick={() => void handleSaveScript()}
                   disabled={saving}
-                  className="flex min-h-10 items-center gap-1.5 rounded-lg bg-studio-primary px-3 py-2 text-sm text-white transition-colors hover:bg-studio-primary disabled:opacity-50 sm:px-4"
+                  className="xmt-btn xmt-btn-primary min-h-10 px-3 py-2 text-sm disabled:opacity-50 sm:px-4"
                 >
                   <Save className="w-4 h-4" />
                   {saving ? '保存中...' : '保存'}
                 </button>
+                {hasPermission('workflow:publishing') && (
+                  <>
+                    <ActionButton type="button" onClick={() => void handleSaveScript('minor')} disabled={saving} className="min-h-10 px-3 py-2 text-xs">小版本保存</ActionButton>
+                    <ActionButton type="button" variant="primary" onClick={() => void handleSaveScript('major')} disabled={saving} className="min-h-10 px-3 py-2 text-xs">大版本保存</ActionButton>
+                  </>
+                )}
               </>
             ) : (
               <button
                 onClick={() => setEditMode(true)}
-                className="flex min-h-10 items-center gap-1.5 rounded-lg bg-studio-primary px-3 py-2 text-sm text-white transition-colors hover:bg-studio-primary sm:px-4"
+                className="xmt-btn xmt-btn-primary min-h-10 px-3 py-2 text-sm sm:px-4"
               >
                 <FileText className="w-4 h-4" />
                 编辑剧本
@@ -392,7 +538,7 @@ export default function PublishingDetail() {
                 writingGoalKey={`publishing:${id}`}
                 value={scriptContent}
                 onChange={setScriptContent}
-                onSave={handleSaveScript}
+                onSave={() => void handleSaveScript()}
                 mode="rich"
                 immersive
                 toolbarVariant={compactEditorToolbar ? 'basic' : 'full'}
@@ -422,6 +568,39 @@ export default function PublishingDetail() {
           </p>
         </div>
       </div>
+
+      <section aria-label="发布剧本版本历史" className="rounded-2xl border border-studio-border-soft bg-studio-surface-soft/40 p-4 sm:p-6">
+        <div>
+          <h3 className="text-sm font-semibold text-studio-text-primary">版本历史</h3>
+          <p className="mt-1 text-xs text-studio-text-muted">普通保存会更新当前稿；仅小版本和大版本操作会留档。</p>
+        </div>
+        {scriptVersions.length > 0 ? (
+          <ol className="mt-3 grid gap-2 md:grid-cols-2">
+            {scriptVersions.map((version) => (
+              <li key={version.id} className="rounded-xl border border-studio-border-soft bg-studio-surface-soft/60 p-3">
+                <p className="text-sm font-medium text-studio-text-primary">{version.is_baseline ? '历史原稿（时间未记录）' : `${version.version} · ${version.change_type === 'major' ? '大版本' : '小版本'}`}</p>
+                <p className="mt-1 text-xs text-studio-text-muted">{version.is_baseline ? '旧内容未记录操作人和时间' : `${version.operator_name || '系统记录'} · ${version.created_at || '时间未记录'}`}</p>
+                {Number(version.source_production_id) > 0 && version.source_production_version ? (
+                  <button
+                    type="button"
+                    disabled={editMode || saving}
+                    onClick={() => navigate(`/production/${version.source_production_id}?version=${encodeURIComponent(version.source_production_version!)}`, { state: { mobileReturnTo: `/publishing/${data.id}` } })}
+                    className="mt-2 inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-medium text-studio-cyan-contrast hover:bg-studio-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    来源创作稿：{version.source_production_version} · 查看
+                  </button>
+                ) : (
+                  <p className="mt-2 text-xs text-studio-text-muted">该版本的创作来源未记录</p>
+                )}
+                <details className="mt-2">
+                  <summary className="min-h-8 cursor-pointer py-1 text-xs font-medium text-studio-primary-contrast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring">查看此版本正文</summary>
+                  <div className="editor-content-preview tiptap mt-2 max-h-80 overflow-auto rounded-lg border border-studio-border-soft bg-studio-surface-soft p-4 text-sm leading-relaxed text-studio-text-primary" dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(version.content)) }} />
+                </details>
+              </li>
+            ))}
+          </ol>
+        ) : <p className="mt-3 rounded-xl border border-studio-border-soft bg-studio-surface-soft/50 p-3 text-xs text-studio-text-muted">暂无已保存版本</p>}
+      </section>
 
       {/* 流转历史 */}
       {data.topicHistory && data.topicHistory.length > 0 && (

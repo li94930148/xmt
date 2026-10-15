@@ -80,17 +80,6 @@ export const ACHIEVEMENT_LEVELS = [
   { level: 7, name: '传说',    minPoints: 1200, icon: '💎' },
 ];
 
-// === 角色映射 ===
-export const ROLE_MAP: Record<string, string> = {
-  admin:    '管理员',
-  director: '编导',
-  editor:   '编辑',
-  copywriter: '文案',
-  post_production: '后期',
-  camera: '摄像',
-  member:   '成员',
-};
-
 // === 成就条件类型 ===
 export const ACHIEVEMENT_CONDITION_TYPES = [
   { value: 'topic_count',        label: '创建选题数量' },

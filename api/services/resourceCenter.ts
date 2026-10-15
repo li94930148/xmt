@@ -1,4 +1,4 @@
-import { execute, executeInsert, queryAll, queryOne } from '../database/utils';
+import { execute, queryAll, queryOne, runInTransaction } from '../database/utils';
 import type { User } from '../types';
 
 export const RESOURCE_LIBRARY_TYPES = ['project', 'content_archive', 'knowledge', 'media'] as const;
@@ -102,13 +102,18 @@ export async function canModifyResource(resource: Record<string, unknown>, user:
   return [resource.owner_id, resource.created_by, resource.uploader_id].some((value) => Number(value) === user.id);
 }
 
-export async function recordResourceAudit(
+type ResourceAuditTransaction = {
+  execute(sql: string, params?: unknown[]): Promise<number>;
+};
+
+export async function recordResourceAuditInTransaction(
+  tx: ResourceAuditTransaction,
   resourceId: number | null,
   userId: number,
   action: string,
   detail: unknown,
 ) {
-  await execute(
+  await tx.execute(
     `INSERT INTO resource_audit_logs (resource_id, user_id, action, detail_json, created_at)
      VALUES (?, ?, ?, ?, datetime('now', '+8 hours'))`,
     [resourceId, userId, action, JSON.stringify(detail ?? {})],
@@ -150,15 +155,24 @@ export async function attachTag(resourceId: number, tagId: number, userId: numbe
 }
 
 export async function createResourceRecord(fields: Record<string, unknown>, userId: number) {
-  return executeInsert(`
-    INSERT INTO resources (
-      name, title, summary, library_type, category_id, visibility, status,
-      content_text, source_type, source_uri, owner_id, uploader_id, created_by, updated_by,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
-  `, [
-    fields.title, fields.title, fields.summary ?? null, fields.library_type, fields.category_id ?? null,
-    fields.visibility, fields.content_text ?? null, fields.source_type ?? 'manual', fields.source_uri ?? null,
-    userId, userId, userId, userId,
-  ]);
+  return runInTransaction(async (tx) => {
+    const id = await tx.executeInsert(`
+      INSERT INTO resources (
+        name, title, summary, library_type, category_id, visibility, status,
+        content_text, source_type, source_uri, owner_id, uploader_id, created_by, updated_by,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `, [
+      fields.title, fields.title, fields.summary ?? null, fields.library_type, fields.category_id ?? null,
+      fields.visibility, fields.content_text ?? null, fields.source_type ?? 'manual', fields.source_uri ?? null,
+      userId, userId, userId, userId,
+    ]);
+    await recordResourceAuditInTransaction(tx, id, userId, 'create', {
+      title: fields.title,
+      library_type: fields.library_type,
+      category_id: fields.category_id ?? null,
+      visibility: fields.visibility,
+    });
+    return id;
+  });
 }

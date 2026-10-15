@@ -1,3 +1,5 @@
+import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
+
 /**
  * 桌面通知工具
  * 使用 Web Notifications API 实现系统级桌面弹窗
@@ -33,7 +35,7 @@ export function playNotificationSound() {
     // 第二声：更高音，稍后开始
     playTone(ctx, now + 0.12, 1108.73, 0.18, 0.25); // C#6, 0.18秒, 音量0.25
   } catch (e) {
-    console.warn('播放提示音失败:', e);
+    emitClientLog({ event: 'notification.sound_play_failed', level: 'warn', fields: { errorClass: safeClientErrorClass(e) } });
   }
 }
 

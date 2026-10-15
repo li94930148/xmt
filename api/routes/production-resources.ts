@@ -1,5 +1,5 @@
 import express from 'express';
-import { queryOne, runInTransaction } from '../database/utils';
+import { beijingNow, queryOne, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requireAllPermissions, requirePermission } from '../middleware/permissions';
 import { canEditProduction, canViewProduction } from '../utils/access';
@@ -78,6 +78,7 @@ router.put('/:id/material-draft', authenticate, requirePermission('production:up
   const rawHtml = String(req.body.content_html ?? '');
   if (rawHtml.length > MATERIAL_HTML_MAX_LENGTH) return res.status(413).json({ message: '创作资料草稿过长' });
   const contentHtml = sanitizeRichText(rawHtml);
+  const updatedAt = beijingNow();
 
   const outcome = await runInTransaction(async (tx) => {
     const existing = await tx.queryOne<MaterialDraftRow>('SELECT * FROM production_material_drafts WHERE production_id=?', [access.productionId]);
@@ -86,21 +87,35 @@ router.put('/:id/material-draft', authenticate, requirePermission('production:up
       await tx.execute(`
         INSERT INTO production_material_drafts(
           production_id,content_html,revision,created_by,updated_by,created_at,updated_at
-        ) VALUES(?,?,1,?,?,datetime('now','+8 hours'),datetime('now','+8 hours'))
-      `, [access.productionId, contentHtml, req.user!.id, req.user!.id]);
-      return 'saved' as const;
+        ) VALUES(?,?,1,?,?,?,?)
+      `, [access.productionId, contentHtml, req.user!.id, req.user!.id, updatedAt, updatedAt]);
+      return {
+        production_id: access.productionId,
+        content_html: contentHtml,
+        revision: 1,
+        created_by: req.user!.id,
+        updated_by: req.user!.id,
+        created_at: updatedAt,
+        updated_at: updatedAt,
+      } satisfies MaterialDraftRow;
     }
     if (existing.revision !== revision) return 'conflict' as const;
     const affected = await tx.execute(`
       UPDATE production_material_drafts
-      SET content_html=?,updated_by=?,updated_at=datetime('now','+8 hours'),revision=revision+1
+      SET content_html=?,updated_by=?,updated_at=?,revision=revision+1
       WHERE production_id=? AND revision=?
-    `, [contentHtml, req.user!.id, access.productionId, revision]);
-    return affected === 1 ? 'saved' as const : 'conflict' as const;
+    `, [contentHtml, req.user!.id, updatedAt, access.productionId, revision]);
+    if (affected !== 1) return 'conflict' as const;
+    return {
+      ...existing,
+      content_html: contentHtml,
+      revision: revision + 1,
+      updated_by: req.user!.id,
+      updated_at: updatedAt,
+    } satisfies MaterialDraftRow;
   });
   if (outcome === 'conflict') return res.status(409).json({ message: '创作资料草稿已被其他人更新，请刷新后重试' });
-  const updated = await queryOne<MaterialDraftRow>('SELECT * FROM production_material_drafts WHERE production_id=?', [access.productionId]);
-  return res.json({ data: mapDraft(access.productionId, updated) });
+  return res.json({ data: mapDraft(access.productionId, outcome) });
 });
 
 router.post('/:id/material-draft/resources', authenticate, requireAllPermissions('production:update', 'resource:view'), async (req, res) => {

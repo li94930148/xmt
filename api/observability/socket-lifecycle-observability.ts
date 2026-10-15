@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { apiLogger } from './logger.js';
 
 export type SocketTransport = 'polling' | 'websocket' | 'unknown';
 export type SessionIdUnknownCategory =
@@ -75,7 +76,9 @@ export class SocketLifecycleObserver {
 
   constructor(
     private readonly now: () => number = Date.now,
-    private readonly emit: (event: LifecycleEvent) => void = (event) => console.info('[Socket][lifecycle]', event),
+    private readonly emit: (event: LifecycleEvent) => void = (event) => {
+      apiLogger.info({ module: 'socket', operation: `lifecycle.${event.event}`, ...event }, 'api.socket.lifecycle');
+    },
   ) {}
 
   connected(input: { engineSid?: string; transport?: unknown }): string {

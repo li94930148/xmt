@@ -249,14 +249,21 @@ export default function ContentEditor({
           <span className={`rounded-full px-2 py-0.5 ${
             realtimeUnavailable
               ? 'bg-studio-amber/12 text-studio-amber-contrast'
+              : collaboration.syncError
+              ? 'bg-studio-coral/12 text-studio-coral-contrast'
               : editorState === 'conflicted'
               ? 'bg-studio-coral/12 text-studio-coral-contrast'
               : editorState === 'saving' || editorState === 'syncing'
-                ? 'bg-studio-primary/12 text-studio-primary'
+                ? 'bg-studio-primary/12 text-studio-primary-contrast'
                 : 'bg-studio-success/12 text-studio-success-contrast'
           }`}>
-            {realtimeUnavailable ? '实时同步离线' : saveHint}
+            {realtimeUnavailable ? '实时同步离线' : collaboration.syncError ? '协作有异常' : saveHint}
           </span>
+          {collaboration.syncError ? (
+            <span role="alert" className="basis-full text-studio-coral-contrast">
+              {collaboration.syncError}
+            </span>
+          ) : null}
           {editingRegions.length > 0 ? (
             visibleEditingRegions.map((region) => (
               <span key={`${region.userId}-${region.region}`} className="text-studio-text-muted">
@@ -279,7 +286,7 @@ export default function ContentEditor({
             value={value}
             onChange={handleEditorChange}
             onSave={onSave ? () => onSave(value) : undefined}
-            readOnly={runtime.readonly}
+            readOnly={runtime.readonly || collaboration.recoveryBlocked}
             placeholder={placeholder}
             collaboration={editorCollaboration}
             immersive={runtime.capabilities.immersive}

@@ -14,10 +14,10 @@ function extractFunction(name: string, nextName: string) {
 
 function testEditUsesUpdateEndpoint() {
   const updateBlock = extractFunction('handleUpdate', 'topicStatusColors');
-  assert.match(updateBlock, /updateProduction\(editingProduction\.id/);
+  assert.match(updateBlock, /updateProduction\(productionToUpdate\.id/);
   assert.ok(!updateBlock.includes('createProduction('), '编辑保存禁止再次创建创作记录');
   assert.ok(updateBlock.includes("version_action: 'none'"), '普通编辑不得创建新版本');
-  assert.ok(updateBlock.includes('expected_content: editingProduction.content'), '编辑保存必须携带旧内容以拦截陈旧覆盖');
+  assert.ok(updateBlock.includes('expected_content: productionToUpdate.content'), '编辑保存必须携带旧内容以拦截陈旧覆盖');
 }
 
 async function testPaginatedProductionQueryContract() {

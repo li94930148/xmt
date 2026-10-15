@@ -28,7 +28,7 @@ CI 在 GitHub Actions（`CI` workflow）中并行执行 **6 个 Job**。其中�
 |------|------|------|
 | 安装 | `npm ci` | 按 `package-lock.json` 锁定安装 |
 | 入口完整性 | `npm run test:entrypoints` | 校验测试入口脚本存在且可解析 |
-| 依赖审计 | `npm audit --audit-level=high` | 高危及以上漏洞直接失败 |
+| 依赖审计 | `npm audit --omit=dev --audit-level=high` | 生产运行依赖的高危及以上漏洞直接失败；开发工具审计与待修项见依赖安全审计清单 |
 | 版本一致性 | `npm run version:check` | 版本号与发布契约对齐 |
 | 类型检查 | `npm run check` | `tsc --noEmit` |
 | 生产构建 | `npm run build` | `tsc -b && vite build` |

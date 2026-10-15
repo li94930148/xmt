@@ -24,7 +24,7 @@ export default function TopicSpotlightCard({
     >
       <button type="button" onClick={onOpen} className="relative z-[1] flex h-full w-full flex-col text-left">
         <div className="flex items-center justify-between gap-3">
-          <span className="rounded-full bg-studio-cyan/10 px-2.5 py-1 text-xs font-semibold text-studio-cyan">重点选题</span>
+          <span className="rounded-full bg-studio-cyan/10 px-2.5 py-1 text-xs font-semibold text-studio-cyan-contrast">重点选题</span>
           <span className="text-xs text-studio-text-muted">{statusLabel}</span>
         </div>
         <h3 className="mt-5 line-clamp-2 text-base font-semibold leading-6 text-studio-text-primary">{topic.title}</h3>

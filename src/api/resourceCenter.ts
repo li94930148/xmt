@@ -53,6 +53,49 @@ export interface ResourceQuery {
   page_size?: number;
 }
 
+export interface ContentTopicAsset {
+  id: number;
+  title: string;
+  status: string;
+  platform: string | null;
+  created_at: string;
+  updated_at: string;
+  production_count: number;
+  latest_production_id: number | null;
+  latest_production_version: string | null;
+  latest_production_updated_at: string | null;
+  shooting_count: number;
+  publishing_count: number;
+  resource_count: number;
+  dimensions: Array<{ id: number; type: ContentAssetDimensionType; value: string }>;
+  can_manage_dimensions: boolean;
+  latest_analytics: {
+    publishing_id: number;
+    platform: string | null;
+    data_date: string | null;
+    views: number;
+    likes: number;
+    shares: number;
+    comments: number;
+    sources: Record<'views' | 'likes' | 'shares' | 'comments', string>;
+  } | null;
+}
+
+export type ContentAssetDimensionType = 'city' | 'person' | 'project';
+export type ContentTopicDimension = {
+  id: number;
+  type: ContentAssetDimensionType;
+  value: string;
+  created_by?: number;
+  created_at?: string;
+};
+
+export const CONTENT_ASSET_DIMENSION_LABELS: Record<ContentAssetDimensionType, string> = {
+  city: '城市',
+  person: '人物',
+  project: '项目',
+};
+
 function authHeaders(json = false): HeadersInit {
   const token = useAuthStore.getState().token;
   return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(json ? { 'Content-Type': 'application/json' } : {}) };
@@ -61,8 +104,8 @@ function authHeaders(json = false): HeadersInit {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/resource-center${path}`, init);
   if (!response.ok) {
-    const data = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(data?.error || '请求失败');
+    const data = await response.json().catch(() => null) as { message?: string; error?: string } | null;
+    throw new Error(data?.message || data?.error || '请求失败');
   }
   return response.json() as Promise<T>;
 }
@@ -102,8 +145,71 @@ export function getResourceCategories(libraryType?: LibraryType) {
   return request<{ data: ResourceCategory[] }>(`/categories?${queryString({ library_type: libraryType })}`, { headers: authHeaders() });
 }
 
+export function createResourceCategory(input: { library_type: LibraryType; name: string; parent_id?: number | null }) {
+  return request<{ message: string; id: number }>('/categories', {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateResourceCategory(id: number, input: { name: string; parent_id: number | null }) {
+  return request<{ message: string }>(`/categories/${id}`, {
+    method: 'PUT',
+    headers: authHeaders(true),
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteResourceCategory(id: number) {
+  return request<{ message: string }>(`/categories/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+}
+
 export function searchResourceCenter(params: { keyword: string; library_type?: LibraryType; category_id?: number }) {
   return request<{ data: Array<{ resource_id: number; title: string; summary: string | null; snippet: string; library_type: LibraryType; category: ResourceCategory | null }>; total: number }>(`/search?${queryString(params)}`, { headers: authHeaders() });
+}
+
+export function getContentTopicAssets(params: { keyword?: string; page?: number; page_size?: number; dimension_type?: ContentAssetDimensionType; dimension_value?: string } = {}) {
+  return request<{
+    data: ContentTopicAsset[];
+    pagination: { page: number; page_size: number; total: number; total_pages: number };
+    analytics_visible: boolean;
+    available_dimensions: Array<{ dimension_type: ContentAssetDimensionType; value: string }>;
+    dimension_summaries: Array<{ dimension_type: ContentAssetDimensionType; value: string; topic_count: number; production_count: number; resource_count: number; shooting_count: number; publishing_count: number }>;
+  }>(`/content-topics?${queryString(params)}`, { headers: authHeaders() });
+}
+
+async function requestTopicDimension<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`/api/topics${path}`, init);
+  if (!response.ok) {
+    const data = await response.json().catch(() => null) as { message?: string; error?: string } | null;
+    throw new Error(data?.message || data?.error || '请求失败');
+  }
+  return response.json() as Promise<T>;
+}
+
+export function getContentTopicDimensions(topicId: number) {
+  return requestTopicDimension<{ data: ContentTopicDimension[] }>(`/${topicId}/asset-dimensions`, {
+    headers: authHeaders(),
+  });
+}
+
+export function addContentTopicDimension(topicId: number, type: ContentAssetDimensionType, value: string) {
+  return requestTopicDimension<{ message: string; id: number; data?: ContentTopicDimension }>(`/${topicId}/asset-dimensions`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ type, value }),
+  });
+}
+
+export function removeContentTopicDimension(topicId: number, dimensionId: number) {
+  return requestTopicDimension<{ message: string }>(`/${topicId}/asset-dimensions/${dimensionId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
 }
 
 export function deleteResourceCenterResource(id: number) {

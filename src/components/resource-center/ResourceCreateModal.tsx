@@ -7,7 +7,7 @@ interface ResourceCreateModalProps {
   libraryType: LibraryType;
   categories: ResourceCategory[];
   onClose: () => void;
-  onCreated: (id: number) => void;
+  onCreated: (resource: { id: number; title: string }) => void;
 }
 
 const inputClassName = 'w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-sm text-studio-text-primary outline-none focus:border-studio-border-active';
@@ -49,7 +49,7 @@ export default function ResourceCreateModal({ open, libraryType, categories, onC
         category_id: categoryId ? Number(categoryId) : undefined,
         visibility,
       });
-      onCreated(result.id);
+      onCreated({ id: result.id, title: normalizedTitle });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '创建资料失败');
     } finally {
@@ -81,10 +81,10 @@ export default function ResourceCreateModal({ open, libraryType, categories, onC
       <label className="block text-sm text-studio-text-secondary">正文
         <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} className={`mt-2 min-h-40 resize-y ${inputClassName}`} />
       </label>
-      {error ? <p role="alert" className="text-sm text-studio-coral">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-studio-coral-contrast">{error}</p> : null}
       <div className="flex justify-end gap-3 pt-2">
         <button type="button" disabled={submitting} onClick={onClose} className="rounded-button border border-studio-border-soft px-4 py-2.5 text-sm text-studio-text-secondary disabled:opacity-50">取消</button>
-        <button type="submit" disabled={submitting} className="rounded-button bg-studio-primary px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50">{submitting ? '创建中' : '创建'}</button>
+        <button type="submit" disabled={submitting} className="rounded-button bg-studio-primary-button px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50">{submitting ? '创建中' : '创建'}</button>
       </div>
     </form>
   </BaseModal>;

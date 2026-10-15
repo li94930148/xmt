@@ -9,6 +9,7 @@ import { Editor } from '@tiptap/react';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { useAppStore } from '../../store';
 import { htmlToMarkdown } from '../../utils/markdown';
+import { EDITOR_HIGHLIGHT_COLORS as HIGHLIGHT_COLORS, EDITOR_TEXT_COLORS as TEXT_COLORS } from './editorColorPalette';
 import {
   Bold, Italic, Underline, Strikethrough,
   Heading1, Heading2, Heading3, Heading4, Type,
@@ -35,28 +36,6 @@ interface ToolbarProps {
   onFormatPainterModeChange?: (mode: FormatPainterMode) => void;
 }
 
-const HIGHLIGHT_COLORS = [
-  { name: '黄色', value: 'yellow', bg: '#fef08a' },
-  { name: '绿色', value: 'green', bg: '#bbf7d0' },
-  { name: '蓝色', value: 'blue', bg: '#bfdbfe' },
-  { name: '红色', value: 'red', bg: '#fecaca' },
-  { name: '紫色', value: 'purple', bg: '#ddd6fe' },
-  { name: '橙色', value: 'orange', bg: '#fed7aa' },
-  { name: '灰色', value: 'gray', bg: '#e5e7eb' },
-  { name: '青色', value: 'cyan', bg: '#a5f3fc' },
-];
-
-const TEXT_COLORS = [
-  { name: '默认', value: '', bg: '#374151' },
-  { name: '红色', value: '#ef4444', bg: '#ef4444' },
-  { name: '橙色', value: '#f97316', bg: '#f97316' },
-  { name: '黄色', value: '#eab308', bg: '#eab308' },
-  { name: '绿色', value: '#22c55e', bg: '#22c55e' },
-  { name: '蓝色', value: '#3b82f6', bg: '#3b82f6' },
-  { name: '紫色', value: '#a855f7', bg: '#a855f7' },
-  { name: '粉色', value: '#ec4899', bg: '#ec4899' },
-];
-
 const HEADING_OPTIONS = [
   { label: '正文', level: 0, icon: Type },
   { label: '标题 1', level: 1, icon: Heading1 },
@@ -64,6 +43,10 @@ const HEADING_OPTIONS = [
   { label: '标题 3', level: 3, icon: Heading3 },
   { label: '标题 4', level: 4, icon: Heading4 },
 ];
+
+type ToolbarDropdownKey = 'heading' | 'textColor' | 'highlight' | 'file' | 'more';
+type ToolbarDropdownLayout = { placement: 'above' | 'below'; maxHeight: number };
+const DEFAULT_DROPDOWN_LAYOUT: ToolbarDropdownLayout = { placement: 'below', maxHeight: 448 };
 
 export default function Toolbar({
   editor,
@@ -81,6 +64,13 @@ export default function Toolbar({
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [dropdownLayouts, setDropdownLayouts] = useState<Record<ToolbarDropdownKey, ToolbarDropdownLayout>>({
+    heading: DEFAULT_DROPDOWN_LAYOUT,
+    textColor: DEFAULT_DROPDOWN_LAYOUT,
+    highlight: DEFAULT_DROPDOWN_LAYOUT,
+    file: DEFAULT_DROPDOWN_LAYOUT,
+    more: DEFAULT_DROPDOWN_LAYOUT,
+  });
   const headingRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const textColorRef = useRef<HTMLDivElement>(null);
@@ -108,6 +98,40 @@ export default function Toolbar({
     formatSnapshotRef.current = null;
     setPainterMode('idle');
   }, [setPainterMode]);
+
+  const positionDropdown = (key: ToolbarDropdownKey, anchor: HTMLDivElement | null) => {
+    const bounds = anchor?.getBoundingClientRect();
+    if (!bounds) return;
+    const spaceAbove = bounds.top;
+    const spaceBelow = window.innerHeight - bounds.bottom;
+    const zoomScale = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    const preferredHeight = Math.min(window.innerHeight * 0.7, 448) * zoomScale;
+    const placement = spaceBelow >= preferredHeight
+      ? 'below'
+      : spaceAbove >= preferredHeight
+        ? 'above'
+        : spaceAbove > spaceBelow ? 'above' : 'below';
+    const availableSpace = placement === 'above' ? spaceAbove : spaceBelow;
+    setDropdownLayouts((current) => ({
+      ...current,
+      [key]: {
+        placement,
+        maxHeight: Math.max(0, Math.min(448, (availableSpace - 8) / zoomScale)),
+      },
+    }));
+  };
+
+  const dropdownPositionStyle = (key: ToolbarDropdownKey) => {
+    const layout = dropdownLayouts[key];
+    return {
+      top: layout.placement === 'below' ? '100%' : 'auto',
+      bottom: layout.placement === 'above' ? '100%' : 'auto',
+      marginTop: layout.placement === 'below' ? '0.25rem' : 0,
+      marginBottom: layout.placement === 'above' ? '0.25rem' : 0,
+      maxHeight: `${layout.maxHeight}px`,
+      overflowY: 'auto' as const,
+    };
+  };
 
   const startFormatPainter = useCallback((mode: Exclude<FormatPainterMode, 'idle'>) => {
     if (!editor) return;
@@ -201,13 +225,37 @@ export default function Toolbar({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    const anchorIsVisible = (anchor: HTMLDivElement | null) => {
+      if (!anchor) return false;
+      const bounds = anchor.getBoundingClientRect();
+      return bounds.bottom > 0
+        && bounds.top < window.innerHeight
+        && bounds.right > 0
+        && bounds.left < window.innerWidth;
+    };
+    const closeOffscreenDropdowns = () => {
+      if (showHeadingDropdown && !anchorIsVisible(headingRef.current)) setShowHeadingDropdown(false);
+      if (showHighlightPicker && !anchorIsVisible(highlightRef.current)) setShowHighlightPicker(false);
+      if (showTextColorPicker && !anchorIsVisible(textColorRef.current)) setShowTextColorPicker(false);
+      if (showFileMenu && !anchorIsVisible(fileMenuRef.current)) setShowFileMenu(false);
+      if (showMoreMenu && !anchorIsVisible(moreMenuRef.current)) setShowMoreMenu(false);
+    };
+    document.addEventListener('scroll', closeOffscreenDropdowns, true);
+    window.addEventListener('resize', closeOffscreenDropdowns);
+    return () => {
+      document.removeEventListener('scroll', closeOffscreenDropdowns, true);
+      window.removeEventListener('resize', closeOffscreenDropdowns);
+    };
+  }, [showFileMenu, showHeadingDropdown, showHighlightPicker, showMoreMenu, showTextColorPicker]);
+
   if (!editor) return null;
 
   const btnClass = (active?: boolean) =>
     `inline-flex min-h-10 min-w-10 items-center justify-center rounded transition-colors ${
       active
         ? isDark
-          ? 'bg-studio-primary text-white'
+          ? 'bg-studio-primary-button text-white'
           : 'bg-studio-primary/15 text-studio-primary'
         : 'text-studio-text-secondary hover:bg-studio-surface-soft'
     }`;
@@ -378,7 +426,12 @@ export default function Toolbar({
     }).run();
   };
 
-  const dropdownClass = `absolute top-full left-0 mt-1 z-50 rounded-lg shadow-xl border py-1 ${
+  const toggleMoreMenu = () => {
+    if (!showMoreMenu) positionDropdown('more', moreMenuRef.current);
+    setShowMoreMenu((open) => !open);
+  };
+
+  const dropdownClass = `absolute left-0 z-50 rounded-lg shadow-xl border py-1 ${
     isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'
   }`;
 
@@ -452,7 +505,10 @@ export default function Toolbar({
         {groupLabel('标题')}
         <div className="relative" ref={headingRef}>
           <button
-            onClick={() => setShowHeadingDropdown(!showHeadingDropdown)}
+            onClick={() => {
+              if (!showHeadingDropdown) positionDropdown('heading', headingRef.current);
+              setShowHeadingDropdown(!showHeadingDropdown);
+            }}
             className={`${btnClass()} flex items-center gap-1 min-w-[60px]`}
             title="标题层级"
           >
@@ -460,7 +516,7 @@ export default function Toolbar({
             <ChevronDown className="w-3 h-3" />
           </button>
           {showHeadingDropdown && (
-            <div className={`${dropdownClass} w-32`}>
+            <div className={`${dropdownClass} w-32`} style={dropdownPositionStyle('heading')}>
               {HEADING_OPTIONS.map((opt) => (
                 <button
                   key={opt.level}
@@ -475,10 +531,10 @@ export default function Toolbar({
                   className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${
                     opt.level === 0
                       ? !editor.isActive('heading')
-                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-white'
+                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary-button text-white'
                         : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
                       : editor.isActive('heading', { level: opt.level })
-                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-white'
+                        ? isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary-button text-white'
                         : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
                   }`}
                 >
@@ -519,6 +575,7 @@ export default function Toolbar({
         <div className="relative" ref={textColorRef}>
           <button
             onClick={() => {
+              if (!showTextColorPicker) positionDropdown('textColor', textColorRef.current);
               setShowTextColorPicker(!showTextColorPicker);
               setShowHighlightPicker(false);
             }}
@@ -529,7 +586,7 @@ export default function Toolbar({
             <ChevronDown className="w-2.5 h-2.5" />
           </button>
           {showTextColorPicker && (
-            <div className={`${dropdownClass} p-3`} style={{ minWidth: '176px' }}>
+            <div className={`${dropdownClass} p-3`} style={{ ...dropdownPositionStyle('textColor'), minWidth: '176px' }}>
               <div className="text-xs font-medium mb-2 opacity-60">文字颜色</div>
               <div className="grid grid-cols-4 gap-2.5">
                 {TEXT_COLORS.map((c) => (
@@ -557,6 +614,7 @@ export default function Toolbar({
         <div className="relative" ref={highlightRef}>
           <button
             onClick={() => {
+              if (!showHighlightPicker) positionDropdown('highlight', highlightRef.current);
               setShowHighlightPicker(!showHighlightPicker);
               setShowTextColorPicker(false);
             }}
@@ -567,7 +625,7 @@ export default function Toolbar({
             <ChevronDown className="w-2.5 h-2.5" />
           </button>
           {showHighlightPicker && (
-            <div className={`${dropdownClass} p-3`} style={{ minWidth: '176px' }}>
+            <div className={`${dropdownClass} p-3`} style={{ ...dropdownPositionStyle('highlight'), minWidth: '176px' }}>
               <div className="text-xs font-medium mb-2 opacity-60">高亮颜色</div>
               <div className="grid grid-cols-4 gap-2.5 mb-1">
                 {HIGHLIGHT_COLORS.map((c) => (
@@ -677,7 +735,10 @@ export default function Toolbar({
           <Printer className="w-4 h-4" />
         </button>
         <button
-          onClick={() => setShowFileMenu(!showFileMenu)}
+          onClick={() => {
+            if (!showFileMenu) positionDropdown('file', fileMenuRef.current);
+            setShowFileMenu(!showFileMenu);
+          }}
           className={`${btnClass()} flex items-center gap-0.5`}
           title="导出"
         >
@@ -685,7 +746,7 @@ export default function Toolbar({
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
         {showFileMenu && (
-          <div className={`${dropdownClass} w-40`}>
+          <div className={`${dropdownClass} w-40`} style={dropdownPositionStyle('file')}>
             <button onClick={exportMarkdown} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
               <FileText className="w-4 h-4" /> 导出 Markdown
             </button>
@@ -709,14 +770,17 @@ export default function Toolbar({
           <div className="flex-1" />
           <div className="relative" ref={moreMenuRef}>
             <button
-              onClick={() => setShowMoreMenu(!showMoreMenu)}
+              onClick={toggleMoreMenu}
               className={btnClass()}
               title="更多操作"
             >
               <MoreHorizontal className="w-4 h-4" />
             </button>
             {showMoreMenu && (
-              <div className={`${dropdownClass} right-0 w-56`}>
+              <div
+                className={`${dropdownClass} right-0 w-56`}
+                style={dropdownPositionStyle('more')}
+              >
                 {/* 段落 */}
                 <div className={`px-3 py-1 text-xs font-medium text-studio-text-muted`}>段落</div>
                 <button onClick={() => editor.chain().focus().setTextAlign('left').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
@@ -731,7 +795,7 @@ export default function Toolbar({
                 <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <AlignJustify className="w-4 h-4" /> 两端对齐
                 </button>
-                <button onClick={() => { toggleFirstLineIndent(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isTextIndentActive() ? (isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary text-white') : (isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft')}`}>
+                <button onClick={() => { toggleFirstLineIndent(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isTextIndentActive() ? (isDark ? 'bg-studio-primary/20 text-studio-primary' : 'bg-studio-primary-button text-white') : (isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft')}`}>
                   <IndentIncrease className="w-4 h-4" /> 首行缩进
                 </button>
                 <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />

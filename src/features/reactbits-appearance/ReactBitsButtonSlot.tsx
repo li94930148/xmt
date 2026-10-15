@@ -1,6 +1,5 @@
 import { lazy, Suspense, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { twMerge } from 'tailwind-merge';
-import { useAppStore } from '@/store';
 import { useEffectiveReactBitsAppearanceConfig } from './ReactBitsAppearancePreviewContext';
 
 const BorderGlow = lazy(() => import('@/components/reactbits/components/BorderGlow/BorderGlow'));
@@ -11,13 +10,10 @@ const ClickSpark = lazy(() => import('@/components/reactbits/animations/ClickSpa
 const GlareHover = lazy(() => import('@/components/reactbits/animations/GlareHover/GlareHover'));
 
 export type ReactBitsButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'icon' | 'ai';
-type SlotProps = ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode; variant?: ReactBitsButtonVariant; themeOverride?: 'light' | 'dark' };
+type SlotProps = ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode; variant?: ReactBitsButtonVariant };
 
-export function ReactBitsButtonSlot({ children, variant = 'secondary', className, themeOverride, ...props }: SlotProps) {
+export function ReactBitsButtonSlot({ children, variant = 'secondary', className, ...props }: SlotProps) {
   const config = useEffectiveReactBitsAppearanceConfig();
-  const appTheme = useAppStore((state) => state.theme);
-  const theme = themeOverride ?? appTheme;
-  const light = theme === 'light';
   const heavyAllowed = config.motionMode !== 'off' && variant !== 'danger';
   const surface = variant === 'primary' || variant === 'ai' ? config.buttonSurface.component : 'standard';
   const interaction = heavyAllowed ? config.buttonInteraction.component : 'none';
@@ -28,9 +24,7 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
   );
   const variantClasses: Record<ReactBitsButtonVariant, string> = {
     primary: 'xmt-btn-primary border-transparent text-white',
-    ai: light
-      ? 'border-violet-300/50 bg-violet-600 text-white shadow-[0_8px_20px_rgba(124,58,237,0.22)] hover:bg-violet-700'
-      : 'border-violet-300/35 bg-violet-500/90 text-white shadow-[0_8px_20px_rgba(167,139,250,0.22)] hover:bg-violet-400/95',
+    ai: 'border-studio-violet/30 bg-studio-violet/10 text-studio-violet-contrast hover:bg-studio-violet/20',
     secondary: 'xmt-btn-secondary',
     ghost: 'xmt-btn-ghost',
     danger: 'xmt-btn-danger',
@@ -38,7 +32,7 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
   };
   const specularClasses =
     heavyAllowed && surface === 'specular-button'
-      ? "relative overflow-hidden ring-1 ring-inset ring-white/20 before:pointer-events-none before:absolute before:inset-x-[12%] before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-white/80 before:to-transparent before:content-['']"
+      ? "relative overflow-hidden ring-1 ring-inset ring-studio-border-active/40 before:pointer-events-none before:absolute before:inset-x-[12%] before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-studio-primary/80 before:to-transparent before:content-['']"
       : '';
   const base = twMerge(common, variantClasses[variant], specularClasses, className);
   let button: ReactNode = (
@@ -53,8 +47,8 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
         <BorderGlow
           buttonSurface
           className="inline-flex w-fit max-w-full rounded-button"
-          backgroundColor={light ? '#FFFFFF' : '#121826'}
-          glowColor={light ? '107 140 255' : '107 140 255'}
+          backgroundColor="var(--xmt-surface)"
+          glowColor="var(--xmt-primary)"
           borderRadius={12}
         >
           {button}
@@ -67,7 +61,7 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
       <Suspense fallback={button}>
         <ElectricBorder
           className="inline-flex w-fit max-w-full overflow-visible"
-          color={light ? '#3D5AFE' : '#5CE1E6'}
+          color="var(--xmt-primary)"
           borderRadius={12}
         >
           {button}
@@ -91,7 +85,7 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
           form={props.form}
           data-reactbits-button={variant}
           className={base}
-          color={light ? '#93C5FD' : '#A5B4FC'}
+          color="var(--xmt-primary)"
           speed="4s"
         >
           {children}
@@ -112,7 +106,7 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
     button = (
       <span className="relative inline-flex w-fit max-w-full align-middle">
         <Suspense fallback={button}>
-          <ClickSpark sparkColor={light ? '#1E3A8A' : '#C9D6FF'} sparkSize={8} sparkRadius={18} sparkCount={8} duration={400}>
+          <ClickSpark sparkColor="var(--xmt-primary-contrast)" sparkSize={8} sparkRadius={18} sparkCount={8} duration={400}>
             {button}
           </ClickSpark>
         </Suspense>
@@ -129,7 +123,7 @@ export function ReactBitsButtonSlot({ children, variant = 'secondary', className
             background="transparent"
             borderColor="transparent"
             borderRadius="inherit"
-            glareColor={light ? '#3D5AFE' : '#A5B4FC'}
+            glareColor="var(--xmt-primary)"
             glareOpacity={0.32}
             className="inline-flex w-fit max-w-full align-middle"
           >

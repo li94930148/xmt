@@ -15,7 +15,9 @@ import { getRoleDisplayName } from '../lib/roles';
 import { ReactBitsAppearancePanel } from '@/features/reactbits-appearance/ReactBitsAppearancePanel';
 import { useDesktopNotification } from '../hooks/useDesktopNotification';
 import { isSecureContext } from '../utils/notification';
+import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
 import ErrorState from '../components/common/ErrorState';
+import ConfirmModal from '../components/common/ConfirmModal';
 import PageShell from '../components/studio/PageShell';
 import PageHeader from '../components/studio/PageHeader';
 import GlassPanel from '../components/studio/GlassPanel';
@@ -98,11 +100,13 @@ export default function NotificationSettings() {
   const [notifyLoaded, setNotifyLoaded] = useState(false);
   const [notifyLoadError, setNotifyLoadError] = useState('');
   const [notifySaving, setNotifySaving] = useState(false);
+  const notifySaveLockRef = useRef(false);
   const logoReaderRef = useRef<FileReader | null>(null);
 
   const [profileName, setProfileName] = useState(authStore.user?.name || '');
   const [profileEmail, setProfileEmail] = useState(authStore.user?.email || '');
   const [profileSaving, setProfileSaving] = useState(false);
+  const profileSaveLockRef = useRef(false);
 
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -111,6 +115,7 @@ export default function NotificationSettings() {
   const [showNewPwd, setShowNewPwd] = useState(false);
   const [showConfirmPwd, setShowConfirmPwd] = useState(false);
   const [pwdSaving, setPwdSaving] = useState(false);
+  const passwordSaveLockRef = useRef(false);
 
   const [systemSettings, setSystemSettings] = useState<ManagedSystemSettings>(defaultSystemSettings);
   const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
@@ -124,6 +129,10 @@ export default function NotificationSettings() {
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupError, setBackupError] = useState('');
   const [backupCreating, setBackupCreating] = useState(false);
+  const [backupDeleteCandidate, setBackupDeleteCandidate] = useState<string | null>(null);
+  const [backupDeleting, setBackupDeleting] = useState<string | null>(null);
+  const [backupFeedback, setBackupFeedback] = useState('');
+  const backupMutationLockRef = useRef(false);
 
   const tabGroups = useMemo(() => {
     const management: TabKey[] = [];
@@ -189,7 +198,7 @@ export default function NotificationSettings() {
       setEvents(data.events);
       setNotifyLoaded(true);
     } catch (error) {
-      console.error('获取通知设置失败', error);
+      emitClientLog({ event: 'settings.notification_preferences_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
       setNotifyLoadError((error as Error).message || '通知偏好加载失败，请重试。');
     } finally {
       setNotifyLoading(false);
@@ -234,10 +243,11 @@ export default function NotificationSettings() {
   }
 
   async function handleSaveNotifications() {
-    if (!token || !notifyLoaded || notifyLoading || notifyLoadError) {
+    if (!token || !notifyLoaded || notifyLoading || notifyLoadError || notifySaveLockRef.current) {
       return;
     }
 
+    notifySaveLockRef.current = true;
     setNotifySaving(true);
     try {
       const response = await fetch('/api/notifications/preferences', {
@@ -255,15 +265,17 @@ export default function NotificationSettings() {
     } catch (error) {
       appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
     } finally {
+      notifySaveLockRef.current = false;
       setNotifySaving(false);
     }
   }
 
   async function handleSaveProfile() {
-    if (!authStore.user) {
+    if (!authStore.user || profileSaveLockRef.current) {
       return;
     }
 
+    profileSaveLockRef.current = true;
     setProfileSaving(true);
     try {
       const profile = await updateMyProfile({ name: profileName, email: profileEmail });
@@ -272,11 +284,15 @@ export default function NotificationSettings() {
     } catch (error) {
       appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
     } finally {
+      profileSaveLockRef.current = false;
       setProfileSaving(false);
     }
   }
 
   async function handleChangePassword() {
+    if (passwordSaveLockRef.current) {
+      return;
+    }
     if (!oldPassword) {
       appStore.addNotification({ title: '修改失败', message: '请输入当前密码', type: 'error' });
       return;
@@ -290,6 +306,7 @@ export default function NotificationSettings() {
       return;
     }
 
+    passwordSaveLockRef.current = true;
     setPwdSaving(true);
     try {
       await changePassword(oldPassword, newPassword);
@@ -303,6 +320,7 @@ export default function NotificationSettings() {
     } catch (error) {
       appStore.addNotification({ title: '修改失败', message: (error as Error).message, type: 'error' });
     } finally {
+      passwordSaveLockRef.current = false;
       setPwdSaving(false);
     }
   }
@@ -385,27 +403,36 @@ export default function NotificationSettings() {
     });
   }
 
-  async function loadBackupItems() {
+  async function loadBackupItems(): Promise<boolean> {
     setBackupLoading(true);
     setBackupError('');
     try {
       setBackupList(await getBackupList());
+      setBackupFeedback('');
+      return true;
     } catch (error) {
       setBackupError((error as Error).message || '备份列表加载失败，请重试。');
+      return false;
     } finally {
       setBackupLoading(false);
     }
   }
 
   async function handleCreateBackup() {
+    if (backupMutationLockRef.current || backupLoading) return;
+    backupMutationLockRef.current = true;
     setBackupCreating(true);
+    setBackupFeedback('');
     try {
       const result = await createBackup();
       appStore.addNotification({ title: '备份成功', message: `已创建备份：${result.name}`, type: 'success' });
-      await loadBackupItems();
+      if (!(await loadBackupItems())) {
+        setBackupFeedback(`服务端已确认创建备份 ${result.name}，但备份列表刷新失败；请重新加载列表确认，不要重复创建。`);
+      }
     } catch (error) {
       appStore.addNotification({ title: '备份失败', message: (error as Error).message, type: 'error' });
     } finally {
+      backupMutationLockRef.current = false;
       setBackupCreating(false);
     }
   }
@@ -420,12 +447,23 @@ export default function NotificationSettings() {
   }
 
   async function handleDeleteBackup(name: string) {
+    if (backupMutationLockRef.current || backupLoading) return;
+    backupMutationLockRef.current = true;
+    setBackupDeleting(name);
+    setBackupFeedback('');
     try {
       await deleteBackup(name);
+      setBackupDeleteCandidate(null);
+      setBackupList((current) => current.filter((item) => item.name !== name));
       appStore.addNotification({ title: '删除成功', message: '备份文件已删除', type: 'success' });
-      await loadBackupItems();
+      if (!(await loadBackupItems())) {
+        setBackupFeedback(`服务端已确认删除备份 ${name}，但备份列表刷新失败；请重新加载列表确认，不要重复删除。`);
+      }
     } catch (error) {
       appStore.addNotification({ title: '删除失败', message: (error as Error).message, type: 'error' });
+    } finally {
+      backupMutationLockRef.current = false;
+      setBackupDeleting(null);
     }
   }
 
@@ -464,7 +502,7 @@ export default function NotificationSettings() {
           <nav aria-label="设置分类" className="space-y-3">
             {tabGroups.map((group) => (
               <section key={group.label} aria-label={group.label}>
-                <h2 className="px-3 pb-1 pt-2 text-xs font-semibold text-studio-text-muted">{group.label}</h2>
+                <h2 className="px-3 pb-1 pt-2 text-xs font-semibold text-studio-text-secondary">{group.label}</h2>
                 <div className="grid grid-cols-2 gap-1 lg:grid-cols-1">
                   {group.tabs.map((key) => {
                     const meta = tabMeta[key];
@@ -503,15 +541,15 @@ export default function NotificationSettings() {
           )}
           {activeTab === 'notifications' && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>通知偏好</h2>
-                  <p className={`mt-1 text-sm ${styles.textMuted}`}>管理消息提醒方式、桌面通知与测试提醒。</p>
+                  <p className={`mt-1 text-sm ${styles.textSecondary}`}>管理消息提醒方式、桌面通知与测试提醒。</p>
                 </div>
                 <button
                   onClick={handleSaveNotifications}
                   disabled={notifySaving || notifyLoading || !notifyLoaded || Boolean(notifyLoadError)}
-                  className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
+                  className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
                 >
                   {notifySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   {notifySaving ? '保存中...' : '保存设置'}
@@ -519,10 +557,10 @@ export default function NotificationSettings() {
               </div>
 
               <div className={`rounded-2xl ${styles.bgTertiary} p-5`}>
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                   <div>
                     <h3 className={`font-medium ${styles.textPrimary}`}>桌面通知与提示音</h3>
-                    <p className={`mt-1 text-sm ${styles.textMuted}`}>
+                    <p className={`mt-1 text-sm ${styles.textSecondary}`}>
                       当前浏览器环境：
                       {isSecureContext() ? '安全上下文，可申请系统通知权限' : '非安全上下文，桌面通知不可用'}
                     </p>
@@ -530,7 +568,7 @@ export default function NotificationSettings() {
                   {desktopNotify.supported && desktopNotify.permission !== 'granted' && (
                     <button
                       onClick={() => void desktopNotify.requestPermission()}
-                      className={`rounded-lg px-3 py-2 text-sm ${styles.buttonSecondary}`}
+                      className={`shrink-0 self-start whitespace-nowrap rounded-lg px-3 py-2 text-sm ${styles.buttonSecondary}`}
                     >
                       申请权限
                     </button>
@@ -542,14 +580,14 @@ export default function NotificationSettings() {
                     {desktopNotify.enabled ? <BellRing className="h-5 w-5 text-studio-success" /> : <BellOff className="h-5 w-5 text-studio-text-muted" />}
                     <div>
                       <p className={`text-sm font-medium ${styles.textPrimary}`}>桌面通知</p>
-                      <p className={`text-xs ${styles.textMuted}`}>{desktopNotify.enabled ? '已开启' : '已关闭'}</p>
+                      <p className={`text-xs ${styles.textSecondary}`}>{desktopNotify.enabled ? '已开启' : '已关闭'}</p>
                     </div>
                   </button>
                   <button onClick={desktopNotify.toggleSound} className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left ${styles.border} ${styles.hoverBg}`}>
                     {desktopNotify.soundEnabled ? <Volume2 className="h-5 w-5 text-studio-primary" /> : <VolumeX className="h-5 w-5 text-studio-text-muted" />}
                     <div>
                       <p className={`text-sm font-medium ${styles.textPrimary}`}>提示音</p>
-                      <p className={`text-xs ${styles.textMuted}`}>{desktopNotify.soundEnabled ? '已开启' : '已关闭'}</p>
+                      <p className={`text-xs ${styles.textSecondary}`}>{desktopNotify.soundEnabled ? '已开启' : '已关闭'}</p>
                     </div>
                   </button>
                   <button
@@ -562,7 +600,7 @@ export default function NotificationSettings() {
                     <Sparkles className="h-5 w-5 text-studio-amber" />
                     <div>
                       <p className={`text-sm font-medium ${styles.textPrimary}`}>发送测试</p>
-                      <p className={`text-xs ${styles.textMuted}`}>检查声音与桌面通知</p>
+                      <p className={`text-xs ${styles.textSecondary}`}>检查声音与桌面通知</p>
                     </div>
                   </button>
                 </div>
@@ -582,32 +620,32 @@ export default function NotificationSettings() {
                   />
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-white/5">
+                    <table className="min-w-full divide-y divide-studio-border-soft">
                       <thead className={styles.bgTertiary}>
                         <tr>
-                          <th className={`px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>事件</th>
+                          <th className={`px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider ${styles.textSecondary}`}>事件</th>
                           {channels.map((channel) => (
-                            <th key={channel.id} className={`px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider ${styles.textMuted}`}>
+                            <th key={channel.id} className={`px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider ${styles.textSecondary}`}>
                               {channel.name}
                             </th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/5">
+                      <tbody className="divide-y divide-studio-border-soft">
                         {events.map((event) => (
                           <tr key={event.id}>
                             <td className="px-6 py-4">
                               <p className={`font-medium ${styles.textPrimary}`}>{event.name}</p>
-                              <p className={`mt-1 text-xs ${styles.textMuted}`}>{event.description}</p>
+                              <p className={`mt-1 text-xs ${styles.textSecondary}`}>{event.description}</p>
                             </td>
                             {channels.map((channel) => (
                               <td key={`${event.id}-${channel.id}`} className="px-6 py-4">
                                 <button
                                   onClick={() => handleTogglePreference(channel.id, event.id)}
-                                  className={`rounded-full px-3 py-1 text-xs font-medium ${
+                                  className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${
                                     isEnabled(channel.id, event.id)
-                                      ? 'bg-studio-success/10 text-studio-success'
-                                      : `${styles.bgTertiary} ${styles.textMuted}`
+                                      ? 'bg-studio-success/10 text-studio-success-contrast'
+                                      : `${styles.bgTertiary} ${styles.textSecondary}`
                                   }`}
                                 >
                                   {isEnabled(channel.id, event.id) ? '已启用' : '已关闭'}
@@ -760,6 +798,24 @@ export default function NotificationSettings() {
                 {renderInput('页签标题', systemSettings.system.browserTitle, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, browserTitle: value } })))}
               </div>
 
+              <div className="max-w-xl">
+                <label htmlFor="system-default-theme" className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>默认主题</label>
+                <select
+                  id="system-default-theme"
+                  aria-label="默认主题"
+                  value={systemSettings.system.defaultTheme}
+                  onChange={(event) => setSystemSettings((current) => ({
+                    ...current,
+                    system: { ...current.system, defaultTheme: event.target.value as 'light' | 'dark' },
+                  }))}
+                  className={`w-full px-4 py-2.5 ${styles.input}`}
+                >
+                  <option value="dark">暗色</option>
+                  <option value="light">亮色</option>
+                </select>
+                <p className={`mt-2 text-sm ${styles.textMuted}`}>仅在此浏览器尚未保存个人主题时生效；已手动选择的主题不会被覆盖。</p>
+              </div>
+
               <div className="grid gap-6 md:grid-cols-2">
                 {renderInput('系统图标（单字或 Emoji）', systemSettings.system.icon, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, icon: value } })))}
                 {renderInput('系统简介', systemSettings.system.description, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, description: value } })))}
@@ -807,7 +863,7 @@ export default function NotificationSettings() {
                     {systemSettings.branding.logo && (
                       <button
                         onClick={() => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, logo: '' } }))}
-                        className="rounded-lg border border-studio-coral/30 px-4 py-2 text-studio-coral hover:bg-studio-coral/10"
+                        className="rounded-lg border border-studio-coral/30 px-4 py-2 text-studio-coral-contrast hover:bg-studio-coral/10"
                       >
                         移除 Logo
                       </button>
@@ -869,14 +925,20 @@ export default function NotificationSettings() {
                   <p className={`mt-1 text-sm ${styles.textMuted}`}>创建、下载和清理系统备份。</p>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  <button onClick={() => void loadBackupItems()} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonSecondary}`}>
+                  <button onClick={() => void loadBackupItems()} disabled={backupLoading || backupCreating || backupDeleting !== null} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonSecondary} disabled:opacity-60`}>
                     <RefreshCw className={`h-4 w-4 ${backupLoading ? 'animate-spin' : ''}`} /> 刷新列表
                   </button>
-                  <button onClick={() => void handleCreateBackup()} disabled={backupCreating} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>
+                  <button onClick={() => void handleCreateBackup()} disabled={backupCreating || backupLoading || backupDeleting !== null} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>
                     {backupCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDrive className="h-4 w-4" />} 创建备份
                   </button>
                 </div>
               </div>
+
+              {backupFeedback ? (
+                <div role="alert" className="rounded-xl border border-studio-amber/25 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">
+                  {backupFeedback}
+                </div>
+              ) : null}
 
               <div className={`rounded-2xl ${styles.bgTertiary} p-5`}>
                 <div className="grid gap-4 text-sm md:grid-cols-4">
@@ -918,8 +980,14 @@ export default function NotificationSettings() {
                         </div>
                         <div className="flex gap-2">
                           <button onClick={() => void handleDownloadBackup(item.name)} className={`rounded-lg px-3 py-1.5 text-sm ${styles.buttonInfo}`}>下载</button>
-                          <button aria-label={`删除备份 ${item.name}`} onClick={() => void handleDeleteBackup(item.name)} className={`rounded-lg px-3 py-1.5 text-sm ${styles.buttonDanger}`}>
-                            <Trash2 className="h-4 w-4" />
+                          <button
+                            type="button"
+                            aria-label={`删除备份 ${item.name}`}
+                            onClick={() => setBackupDeleteCandidate(item.name)}
+                            disabled={backupLoading || backupCreating || backupDeleting !== null}
+                            className={`rounded-lg px-3 py-1.5 text-sm ${styles.buttonDanger} disabled:opacity-60`}
+                          >
+                            {backupDeleting === item.name ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                           </button>
                         </div>
                       </div>
@@ -930,6 +998,21 @@ export default function NotificationSettings() {
             </div>
           )}
 
+          <ConfirmModal
+            open={backupDeleteCandidate !== null}
+            title="确认删除备份？"
+            description={<>此操作会永久删除备份文件 <span className="font-medium text-studio-text-primary">{backupDeleteCandidate}</span>，且无法恢复。</>}
+            confirmText="删除备份"
+            variant="danger"
+            loading={backupDeleting !== null}
+            onConfirm={() => {
+              if (backupDeleteCandidate) void handleDeleteBackup(backupDeleteCandidate);
+            }}
+            onCancel={() => {
+              if (!backupDeleting) setBackupDeleteCandidate(null);
+            }}
+          />
+
           {activeTab === 'changelog' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
@@ -938,13 +1021,13 @@ export default function NotificationSettings() {
               </div>
               <div className="space-y-5">
                 {changelog.map((entry, index) => (
-                  <div key={entry.version} className={`overflow-hidden rounded-2xl ${styles.card}`}>
+                  <div key={`${entry.version}-${index}`} className={`overflow-hidden rounded-2xl ${styles.card}`}>
                     <div className={`px-6 py-4 ${index === 0 ? 'bg-gradient-to-r from-studio-primary/10 to-studio-primary/10' : styles.bgTertiary}`}>
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="flex items-center gap-2">
                             <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>v{entry.version}</h3>
-                            {index === 0 && <span className="rounded-full bg-studio-primary px-2 py-0.5 text-xs text-white">最新</span>}
+                            {index === 0 && <span className="rounded-full bg-studio-primary-button px-2 py-0.5 text-xs text-white">最新</span>}
                           </div>
                           <p className={`mt-1 text-sm ${styles.textMuted}`}>{entry.title}</p>
                         </div>
@@ -987,7 +1070,7 @@ export default function NotificationSettings() {
               </div>
 
               <div className="flex items-center gap-4">
-                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-studio-primary to-studio-cyan text-3xl text-white">
+                <div data-testid="about-brand-mark" className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-studio-primary-button text-3xl text-white">
                   {savedSettings.branding.logo ? <img src={savedSettings.branding.logo} alt="Logo" className="h-full w-full object-contain" /> : savedSettings.system.icon}
                 </div>
                 <div>

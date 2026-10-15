@@ -1,10 +1,8 @@
 ﻿﻿import express from 'express';
 import bcrypt from 'bcrypt';
-import { queryOne, queryAll, execute, runInTransaction } from '../database/utils';
+import { queryOne, queryAll, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { clearPermissionCache, requirePermission } from '../middleware/permissions';
-import { SqliteSessionRepository } from '../modules/auth/session/session.sqlite-repository.js';
-import { SessionService } from '../modules/auth/session/session.service.js';
 import { assertAssignableRole, getAssignableRoles } from '../services/role-assignment.service.js';
 import { disconnectUserSockets } from '../utils/socket.js';
 import { activityLogCutoffTimestamp, activityLogTimestamp, serializeActivityLog } from '../services/activity-log.js';
@@ -44,12 +42,21 @@ router.get('/assignable-roles', authenticate, requirePermission('user:create', '
 router.get('/', authenticate, requirePermission('user:view'), async (req, res) => {
   try {
     const pagination = parseUsersPagination(req.query.page, req.query.limit, MAX_LIST_LIMIT);
-    
-    const users = await queryAll(`SELECT id, username, name, email, role, enabled, created_at, updated_at 
-                         FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-      [pagination.limit, pagination.offset]);
-    
-    const countResult = await queryOne(`SELECT COUNT(*) as total FROM users`);
+    const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 100) : '';
+    const whereClause = search
+      ? `WHERE INSTR(LOWER(username), LOWER(?)) > 0
+          OR INSTR(LOWER(COALESCE(name, '')), LOWER(?)) > 0
+          OR INSTR(LOWER(COALESCE(email, '')), LOWER(?)) > 0`
+      : '';
+    const searchParams = search ? [search, search, search] : [];
+
+    const users = await queryAll(
+      `SELECT id, username, name, email, role, enabled, created_at, updated_at
+       FROM users ${whereClause} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+      [...searchParams, pagination.limit, pagination.offset],
+    );
+
+    const countResult = await queryOne(`SELECT COUNT(*) as total FROM users ${whereClause}`, searchParams);
     
     res.json({
       data: users,
@@ -173,12 +180,11 @@ router.post('/', authenticate, requirePermission('user:create'), async (req, res
             VALUES (?, ?, ?, ?, ?, ?)`, [username, hashedPassword, email, role, name, 1]);
 
       await tx.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [createdUserId, targetRole.id]);
+      await tx.execute(`INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`, [
+        req.user?.id, 'create', 'user', `创建用户: ${username}`, activityLogTimestamp()
+      ]);
       return createdUserId;
     });
-    
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`, [
-      req.user?.id, 'create', 'user', `创建用户: ${username}`, activityLogTimestamp()
-    ]);
     
     res.json({ message: '用户创建成功', userId });
   } catch {
@@ -233,26 +239,31 @@ router.put('/:id', authenticate, requirePermission('user:update'), async (req, r
     params.push(id);
     
     await runInTransaction(async (tx) => {
-      await tx.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+      const updated = await tx.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+      if (!updated) throw new Error('USER_UPDATE_TARGET_MISSING');
 
       if (role && targetRole) {
         await tx.execute(`DELETE FROM user_roles WHERE user_id = ?`, [id]);
         await tx.execute(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [id, targetRole.id]);
       }
+
+      if (enabled !== undefined && !enabled) {
+        await tx.execute(
+          `UPDATE auth_sessions SET revoked_at = ?, revoke_reason = ? WHERE user_id = ? AND revoked_at IS NULL`,
+          [activityLogTimestamp(), 'user_disabled', id],
+        );
+      }
+
+      await tx.execute(`INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`, [
+        req.user?.id, 'update', 'user', `更新用户: ${user.username}`, activityLogTimestamp()
+      ]);
     });
 
     if (role) {
       clearPermissionCache(Number(id));
     }
 
-    if (enabled !== undefined && !enabled) {
-      await new SessionService({ repository: new SqliteSessionRepository() }).revokeUserSessions(Number(id), 'user_disabled');
-    }
     if (identityChanged) disconnectUserSockets(Number(id));
-    
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`, [
-      req.user?.id, 'update', 'user', `更新用户: ${user.username}`, activityLogTimestamp()
-    ]);
     
     res.json({ message: '用户更新成功' });
   } catch {
@@ -273,14 +284,15 @@ router.delete('/:id', authenticate, requirePermission('user:delete'), async (req
       return res.status(404).json({ message: '用户不存在' });
     }
 
-    await execute(`DELETE FROM user_roles WHERE user_id = ?`, [id]);
-    
-    await execute(`DELETE FROM users WHERE id = ?`, [id]);
+    await runInTransaction(async (tx) => {
+      await tx.execute(`DELETE FROM user_roles WHERE user_id = ?`, [id]);
+      const deleted = await tx.execute(`DELETE FROM users WHERE id = ?`, [id]);
+      if (!deleted) throw new Error('USER_DELETE_TARGET_MISSING');
+      await tx.execute(`INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`, [
+        req.user?.id, 'delete', 'user', `删除用户: ${user.username}`, activityLogTimestamp()
+      ]);
+    });
     clearPermissionCache(Number(id));
-    
-    await execute(`INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`, [
-      req.user?.id, 'delete', 'user', `删除用户: ${user.username}`, activityLogTimestamp()
-    ]);
     
     res.json({ message: '用户删除成功' });
   } catch {

@@ -2,11 +2,19 @@ import assert from 'node:assert/strict';
 import { clearSafeDraft, readSafeDraftValue, userSafeDraftKey, writeSafeDraft } from '../../src/platform/safe-draft.js';
 
 const values = new Map<string, string>();
+let storageWritesAvailable = true;
+let storageDeletesAvailable = true;
 Object.defineProperty(globalThis, 'localStorage', {
   value: {
     getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
-    removeItem: (key: string) => values.delete(key),
+    setItem: (key: string, value: string) => {
+      if (!storageWritesAvailable) throw new Error('storage quota exceeded');
+      values.set(key, value);
+    },
+    removeItem: (key: string) => {
+      if (!storageDeletesAvailable) throw new Error('storage deletion unavailable');
+      values.delete(key);
+    },
   },
   configurable: true,
 });
@@ -20,10 +28,20 @@ assert.equal(userSafeDraftKey(0, 'daily:2026-08-13'), null);
 writeSafeDraft(firstAccount, '第一位账号的日报');
 assert.equal(readSafeDraftValue(secondAccount), null);
 assert.equal(readSafeDraftValue(firstAccount), '第一位账号的日报');
+storageWritesAvailable = false;
+assert.equal(writeSafeDraft(firstAccount, '无法持久化的内容'), false, 'storage failures must be reported to callers');
+assert.equal(readSafeDraftValue(firstAccount), '第一位账号的日报', 'failed writes must not replace the last recoverable draft');
+storageWritesAvailable = true;
 assert.equal(writeSafeDraft('daily:2026-08-13', [{ sectionKey: 'today', contentMd: '完成移动端验证' }]), true);
 assert.equal(readSafeDraftValue(secondAccount), null, 'legacy unscoped drafts must not be assigned to a different account');
 assert.deepEqual(readSafeDraftValue('daily:2026-08-13'), [{ sectionKey: 'today', contentMd: '完成移动端验证' }]);
-clearSafeDraft('daily:2026-08-13');
+storageDeletesAvailable = false;
+assert.equal(clearSafeDraft('daily:2026-08-13'), false, 'deletion failures must be reported without escaping to the caller');
+assert.deepEqual(readSafeDraftValue('daily:2026-08-13'), [{ sectionKey: 'today', contentMd: '完成移动端验证' }], 'a failed deletion preserves the recoverable draft');
+storageDeletesAvailable = true;
+assert.equal(clearSafeDraft('daily:2026-08-13'), true, 'deletion can be retried after storage recovers');
 assert.equal(readSafeDraftValue('daily:2026-08-13'), null);
+assert.equal(clearSafeDraft('daily:2026-08-13'), true, 'deleting an absent draft is successful');
+assert.equal(readSafeDraftValue(firstAccount), '第一位账号的日报', 'clearing one key preserves other recovery drafts');
 
 console.log('Mobile safe draft contract tests passed');

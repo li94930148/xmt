@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
-import { buildResourceReferenceHtml, referencedResourceIds, resourceIncludesExcerpt } from '../../src/components/production/resourceReference';
+import { buildResourceReferenceHtml, getResourceUsageLabel, referencedResourceIds, resourceIncludesExcerpt } from '../../src/components/production/resourceReference';
 import { sanitizeRichText } from '../../api/utils/sanitize-rich-text';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
@@ -21,6 +21,15 @@ test('已用只从正文中的本站资料来源链接判断，删除引用即�
     + '<a href="/asset-center/resources/9">普通链接</a>';
   assert.deepEqual([...referencedResourceIds(html)], [7]);
   assert.deepEqual([...referencedResourceIds('<p>引用已删除</p>')], []);
+});
+
+test('资料选择器区分资料草稿和正式正文中的来源状态', () => {
+  const materialIds = new Set([7, 9]);
+  const manuscriptIds = new Set([8, 9]);
+  assert.equal(getResourceUsageLabel(7, materialIds, manuscriptIds), '已加入资料草稿');
+  assert.equal(getResourceUsageLabel(8, materialIds, manuscriptIds), '已引用到正文');
+  assert.equal(getResourceUsageLabel(9, materialIds, manuscriptIds), '资料草稿与正文均有');
+  assert.equal(getResourceUsageLabel(10, materialIds, manuscriptIds), '待用');
 });
 
 test('无效 ID 或空正文不会生成引用', () => {

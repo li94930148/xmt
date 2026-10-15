@@ -54,6 +54,14 @@ async function saveDraft(userId: number) {
 }
 
 try {
+  const readPersonalReport = (userId: number) => fetch(`${baseUrl}/me?date=2099-01-02`, {
+    headers: { authorization: `Bearer ${signToken({ userId })}` },
+  });
+  const directorRead = await readPersonalReport(directorId);
+  assert.equal(directorRead.status, 200, 'an authenticated user can still read their personal daily report');
+  assert.equal((await directorRead.json()).data.canCreate, false, 'read access must not advertise a submission capability that the write route denies');
+  const memberRead = await readPersonalReport(memberId);
+  assert.equal((await memberRead.json()).data.canCreate, true, 'an assigned submission permission is reflected in personal report capabilities');
   const forbidden = await saveDraft(directorId);
   assert.equal(forbidden.status, 403, '没有提交日报权限的角色不得直接保存草稿');
 

@@ -12,6 +12,7 @@ process.env.JWT_SECRET = 'auth-freeze-test-secret';
 const { initDatabase, closeDatabase } = await import('../../api/database/db.js');
 const { execute, executeInsert, queryOne } = await import('../../api/database/utils.js');
 const { authenticate } = await import('../../api/middleware/auth.js');
+const { passwordChangeLimiter } = await import('../../api/middleware/rateLimit.js');
 const { signToken, verifyToken } = await import('../../api/utils/jwt.js');
 const { default: authRoutes } = await import('../../api/routes/auth.js');
 
@@ -190,6 +191,35 @@ async function changePasswordFreezeTests(token: string) {
   assert.deepEqual(await shortPassword.json(), { message: '新密码至少6位' });
 
   const newPassword = 'new-legacy-password';
+  await execute(`
+    CREATE TRIGGER reject_change_password_audit
+    BEFORE INSERT ON activity_log
+    WHEN NEW.action='change_password' AND NEW.target='auth'
+    BEGIN SELECT RAISE(ABORT, 'simulated password audit failure'); END
+  `);
+  const failedAudit = await fetch(`${baseUrl}/api/auth/change-password`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ oldPassword: password, newPassword }),
+  });
+  assert.equal(failedAudit.status, 500);
+  assert.deepEqual(await failedAudit.json(), { message: '修改密码失败' }, 'database error details are not exposed');
+  const unchangedAfterAuditFailure = await queryOne<Record<string, unknown>>(
+    'SELECT password, force_change_password, auth_version FROM users WHERE id = ?',
+    [enabledUserId],
+  );
+  assert(unchangedAfterAuditFailure);
+  assert.equal(String(unchangedAfterAuditFailure.password), passwordHash);
+  assert.equal(Number(unchangedAfterAuditFailure.force_change_password), 1);
+  assert.equal(Number(unchangedAfterAuditFailure.auth_version), 1);
+  assert.equal(Number((await queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM activity_log WHERE user_id=? AND action='change_password'",
+    [enabledUserId],
+  ))?.count || 0), 0);
+  await execute('DROP TRIGGER reject_change_password_audit');
+  passwordChangeLimiter.resetKey('127.0.0.1');
+  passwordChangeLimiter.resetKey('::ffff:127.0.0.1');
+
   const success = await fetch(`${baseUrl}/api/auth/change-password`, {
     method: 'POST',
     headers,
@@ -232,6 +262,30 @@ async function changePasswordFreezeTests(token: string) {
 }
 
 async function profileFreezeTests(token: string) {
+  await execute(`
+    CREATE TRIGGER reject_profile_audit
+    BEFORE INSERT ON activity_log
+    WHEN NEW.action='update_profile' AND NEW.target='auth'
+    BEGIN SELECT RAISE(ABORT, 'simulated profile audit failure'); END
+  `);
+  const failedAudit = await fetch(`${baseUrl}/api/auth/profile`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '不应保存的资料', email: 'should-not-save@example.invalid' }),
+  });
+  assert.equal(failedAudit.status, 500);
+  assert.deepEqual(await failedAudit.json(), { message: '更新个人资料失败' }, 'database error details are not exposed');
+  assert.deepEqual(
+    await queryOne<{ name: string; email: string }>('SELECT name,email FROM users WHERE id=?', [enabledUserId]),
+    { name: 'Auth Freeze', email: 'auth-freeze@example.invalid' },
+    'profile values roll back when the activity log cannot be recorded',
+  );
+  assert.equal(Number((await queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM activity_log WHERE user_id=? AND action='update_profile'",
+    [enabledUserId],
+  ))?.count || 0), 0);
+  await execute('DROP TRIGGER reject_profile_audit');
+
   const response = await fetch(`${baseUrl}/api/auth/profile`, {
     method: 'PUT',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -240,6 +294,10 @@ async function profileFreezeTests(token: string) {
   assert.equal(response.status, 200);
   const profile = await response.json() as { name: string; email: string };
   assert.deepEqual({ name: profile.name, email: profile.email }, { name: '移动办公成员', email: 'mobile-profile@example.invalid' });
+  assert.equal(Number((await queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM activity_log WHERE user_id=? AND action='update_profile'",
+    [enabledUserId],
+  ))?.count || 0), 1, 'one confirmed profile update has one activity record');
   const invalid = await fetch(`${baseUrl}/api/auth/profile`, {
     method: 'PUT',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },

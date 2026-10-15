@@ -1,6 +1,5 @@
 import { Suspense, useEffect, useState } from 'react';
 import { twMerge } from 'tailwind-merge';
-import { useAppStore } from '@/store';
 import { textRegistry } from './componentRegistry';
 import { useEffectiveReactBitsAppearanceConfig } from './ReactBitsAppearancePreviewContext';
 
@@ -24,10 +23,8 @@ function useNarrowViewport() {
   return narrow;
 }
 
-export function ReactBitsTextSlot({ semantic, children, className = '', value, themeOverride }: { semantic: Semantic; children: string; className?: string; value?: number; themeOverride?: 'light' | 'dark' }) {
+export function ReactBitsTextSlot({ semantic, children, className = '', value }: { semantic: Semantic; children: string; className?: string; value?: number }) {
   const config = useEffectiveReactBitsAppearanceConfig();
-  const appTheme = useAppStore((state) => state.theme);
-  const theme = themeOverride ?? appTheme;
   const narrow = useNarrowViewport();
   const id = semantic === 'metric' ? config.numberText.component : config.headingText.component;
   const safeClassName = twMerge(semanticClasses[semantic], semantic === 'brand-title' && 'overflow-visible leading-[1.08]', className);
@@ -36,17 +33,17 @@ export function ReactBitsTextSlot({ semantic, children, className = '', value, t
   const trueFocusAllowed = id === 'true-focus' && (semantic === 'brand-title' || semantic === 'ai-label') && !narrow;
   if (!canAnimate || (id === 'true-focus' && !trueFocusAllowed)) return fallback;
   const Component = textRegistry[id as keyof typeof textRegistry];
-  const textColor = theme === 'light' ? '#0F172A' : '#E2E8F0';
+  const textColor = 'var(--xmt-text-primary)';
   const props = id === 'count-up'
     ? { to: value ?? (Number(children.replace(/[^0-9.-]/g, '')) || 0), duration: config.motionMode === 'reduced' ? 0.4 : 1.1, className: safeClassName }
     : id === 'gradient-text'
-      ? { children, className: safeClassName, colors: theme === 'light' ? ['#1D4ED8', '#0891B2', '#7C3AED'] : ['#67E8F9', '#A78BFA', '#F0ABFC'] }
+      ? { children, className: safeClassName, colors: ['var(--xmt-primary-contrast)', 'var(--xmt-cyan-contrast)', 'var(--xmt-violet-contrast)'] }
       : id === 'shiny-text'
-        ? { text: children, className: safeClassName, color: textColor, shineColor: theme === 'light' ? '#2563EB' : '#FFFFFF' }
+        ? { text: children, className: safeClassName, color: textColor, shineColor: 'var(--xmt-primary-contrast)' }
         : id === 'rotating-text'
           ? { texts: [children], className: safeClassName, auto: false }
           : id === 'true-focus'
-            ? { sentence: children, manualMode: config.motionMode === 'reduced', borderColor: theme === 'light' ? '#2563EB' : '#67E8F9', glowColor: theme === 'light' ? 'rgba(37,99,235,.45)' : 'rgba(103,232,249,.45)' }
+            ? { sentence: children, manualMode: config.motionMode === 'reduced', borderColor: 'var(--xmt-primary)', glowColor: 'color-mix(in srgb, var(--xmt-primary) 45%, transparent)' }
             : id === 'scroll-reveal'
               ? { children, containerClassName: safeClassName, textClassName: safeClassName }
               : id === 'blur-text'

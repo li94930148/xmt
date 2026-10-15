@@ -23,7 +23,7 @@ import { verifyAccessTokenV1 } from './modules/auth/token.service.js'
 import { ADMIN_SOCKET_ROOM, PUBLIC_SOCKET_ROOMS, setSocketIO } from './utils/socket.js'
 import { apiLimiter } from './middleware/rateLimit.js'
 import { parseTrustProxy } from './utils/trustProxy.js'
-import { HTTP_JSON_BODY_LIMIT, HTTP_JSON_BODY_LIMIT_MB } from './utils/limits.js'
+import { HTTP_JSON_BODY_LIMIT } from './utils/limits.js'
 import { isAllowedRequestOrigin, parseConfiguredOrigins } from './security/origin-policy.js'
 import { requireDirectLoopback } from './security/internal-access.js'
 import { resolveServerBinding } from './config/server-bind.js'
@@ -38,6 +38,8 @@ import { authMetricsPrometheusExporter } from './modules/auth/events/index.js'
 import { createAuthMetricsHttpRouter, readAuthMetricsHttpConfig } from './modules/auth/metrics/index.js'
 import { openApiRouter } from './openapi.js'
 import { requestId } from './middleware/request-id.js'
+import { requestObservability } from './middleware/request-observability.js'
+import { apiLogger } from './observability/logger.js'
 import { authRolloutRuntimeReadiness } from './config/auth-rollout-runtime.js'
 import { sanitizeServerErrorPayload, sendV1Error } from './utils/response.js'
 import usersRoutes from './routes/users.js'
@@ -73,6 +75,7 @@ import collaborationUxRoutes from './routes/collaboration-ux.js'
 import contentIntelligenceRoutes from './routes/content-intelligence.js'
 import contentGenerationRoutes from './routes/content-generation.js'
 import contentOrchestratorRoutes from './routes/content-orchestrator.js'
+import homeDashboardRoutes from './routes/home-dashboard.js'
 import { COLLABORATION_EVENTS } from '../src/collaboration/core/events.js'
 import {
   handleAwarenessUpdate,
@@ -89,6 +92,10 @@ import { autoSnapshot } from './collaboration/recovery/documentSnapshot.js'
 import { cleanupInactiveRooms } from './collaboration/yjs/documentStore.js'
 import { collaborationAccessPolicy } from './collaboration/access/CollaborationAccessPolicy.js'
 import type { User } from './types/index.js'
+import {
+  closeCollaborationSocketAdapter,
+  configureCollaborationSocketAdapter,
+} from './collaboration/coordination/socketAdapter.js'
 import { SessionService } from './modules/auth/session/session.service.js'
 import { SqliteSessionRepository } from './modules/auth/session/session.sqlite-repository.js'
 import {
@@ -120,11 +127,11 @@ if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
     cert: fs.readFileSync(certPath),
   }
   server = https.createServer(sslOptions, app)
-  console.log('[HTTPS] 已加载 SSL 证书，HTTPS 模式启动')
+  apiLogger.info({ module: 'server', operation: 'transport.configured', protocol: 'https' }, 'api.server.transport_configured')
 } else {
   server = http.createServer(app)
-  console.log('[HTTP] 未检测到 certs/ 目录下的证书，HTTP 模式启动')
-  console.log('[HTTP] 桌面通知功能需要 HTTPS，运行 node scripts/generate-cert.mjs 生成证书')
+  apiLogger.info({ module: 'server', operation: 'transport.configured', protocol: 'http' }, 'api.server.transport_configured')
+  apiLogger.warn({ module: 'server', operation: 'desktop_notifications.require_https' }, 'api.server.https_required_for_desktop_notifications')
 }
 
 export { server }
@@ -178,11 +185,19 @@ type SocketHandshakeLike = {
 }
 
 function getSocketOrigin(socket: { handshake?: SocketHandshakeLike }) {
-  return socket.handshake?.headers?.origin || 'unknown'
+  const origin = socket.handshake?.headers?.origin
+  if (!origin) return 'unknown'
+  try {
+    const parsed = new URL(origin)
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.origin : 'unknown'
+  } catch {
+    return 'unknown'
+  }
 }
 
 function getSocketTransport(socket: { conn?: { transport?: { name?: string } } }) {
-  return socket.conn?.transport?.name || 'unknown'
+  const transport = socket.conn?.transport?.name
+  return transport === 'polling' || transport === 'websocket' || transport === 'webtransport' ? transport : 'unknown'
 }
 
 function getEngineConnectionId(socket: Socket): string | undefined {
@@ -192,7 +207,8 @@ function getEngineConnectionId(socket: Socket): string | undefined {
 function getEngineRequestTransport(requestUrl?: string): string {
   if (!requestUrl) return 'unknown'
   try {
-    return new URL(requestUrl, 'http://socket.local').searchParams.get('transport') || 'unknown'
+    const transport = new URL(requestUrl, 'http://socket.local').searchParams.get('transport')
+    return transport === 'polling' || transport === 'websocket' || transport === 'webtransport' ? transport : 'unknown'
   } catch {
     return 'unknown'
   }
@@ -203,14 +219,19 @@ function logSocketAuthFailed(
   socket: { id?: string; handshake?: SocketHandshakeLike & { auth?: unknown }; conn?: { transport?: { name?: string } } },
 ) {
   const auth = socket.handshake?.auth as Record<string, unknown> | undefined
-  console.warn('[Socket][auth failed]', {
-    reason,
-    socketId: socket.id,
+  const safeReason = /^[a-z0-9_:-]{1,64}$/i.test(reason) ? reason : 'unknown'
+  const authMode = auth?.mode === 'legacy' || auth?.mode === 'v1-web' || auth?.mode === 'v1-mobile'
+    ? auth.mode
+    : undefined
+  apiLogger.warn({
+    module: 'socket',
+    operation: 'authentication.failed',
+    reason: safeReason,
     origin: getSocketOrigin(socket),
     transport: getSocketTransport(socket),
     hasToken: typeof auth?.token === 'string' && auth.token.length > 0,
-    authMode: typeof auth?.mode === 'string' ? auth.mode : null,
-  })
+    authMode,
+  }, 'api.socket.authentication_failed')
 }
 
 io.engine.on('connection_error', (error: Error & {
@@ -227,13 +248,14 @@ io.engine.on('connection_error', (error: Error & {
     httpStatus: status,
     proxied: Boolean(error.req?.headers['x-forwarded-proto']),
   })
-  console.warn('[Socket][engine connection_error]', {
-    code: error.code,
-    message: error.message,
+  apiLogger.warn({
+    module: 'socket',
+    operation: 'engine.connection_error',
+    ...(typeof error.code === 'number' ? { error: { code: `ENGINE_${error.code}` } } : {}),
     category,
     transport: getEngineRequestTransport(error.req?.url),
     httpStatus: status,
-  })
+  }, 'api.socket.connection_error')
 })
 
 const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
@@ -247,6 +269,7 @@ const corsOptions: cors.CorsOptionsDelegate<Request> = (req, callback) => {
 }
 
 app.use(requestId)
+app.use('/api', requestObservability())
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -363,6 +386,7 @@ app.use('/api/collaboration/ux', collaborationUxRoutes)
 app.use('/api/content/intelligence', contentIntelligenceRoutes)
 app.use('/api/content/generation', contentGenerationRoutes)
 app.use('/api/content/os', contentOrchestratorRoutes)
+app.use('/api/dashboard', homeDashboardRoutes)
 
 app.use(
   '/api/health',
@@ -404,27 +428,27 @@ app.use((error: Error & { status?: number; statusCode?: number; type?: string },
   if (req.path.startsWith('/api/v1/')) {
     sendV1Error(req, res, {
       code: payloadTooLarge ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR',
-      message: payloadTooLarge ? '请求数据包过大' : '服务器内部错误',
+      message: payloadTooLarge ? '文件或内容过大，请精简后重试' : '暂时无法完成操作，请稍后重试。',
     }, payloadTooLarge ? 413 : 500)
     return
   }
   res.status(payloadTooLarge ? 413 : 500).json({
     success: false,
-    error: payloadTooLarge ? 'Payload too large' : 'Server internal error',
-    message: payloadTooLarge ? `请求体超过 ${HTTP_JSON_BODY_LIMIT_MB}MB 限制` : undefined,
+    error: payloadTooLarge ? '内容过大' : '操作暂未完成',
+    message: payloadTooLarge ? '文件或内容过大，请精简后重试' : '请稍后重试。',
   })
 })
 
 // 404 处理：API 路由返回 JSON，其他返回前端 index.html
 app.use((req: Request, res: Response) => {
   if (req.path.startsWith('/api/v1/')) {
-    sendV1Error(req, res, { code: 'RESOURCE_NOT_FOUND', message: 'API 不存在' }, 404)
+    sendV1Error(req, res, { code: 'RESOURCE_NOT_FOUND', message: '暂时找不到此功能，请刷新页面后重试' }, 404)
     return
   }
   if (req.path.startsWith('/api/')) {
     res.status(404).json({
       success: false,
-      error: 'API not found',
+      error: '暂时找不到此功能，请刷新页面后重试',
     })
   } else if (req.path.match(/\.(js|mjs|css|wasm|png|jpg|svg|ico|woff2?)$/)) {
     // 资源文件请求但未找到，返回 404 而不是 SPA fallback
@@ -491,7 +515,7 @@ io.on('connection', (socket) => {
 
   socket.on(COLLABORATION_EVENTS.LEAVE, (payload) => {
     const roomId = typeof payload === 'string' ? payload : String(payload?.roomId || '')
-    leaveCollaborationRoom(io, socket, roomId)
+    void leaveCollaborationRoom(io, socket, roomId)
   })
 
   socket.on(COLLABORATION_EVENTS.HEARTBEAT, (payload) => {
@@ -499,9 +523,17 @@ io.on('connection', (socket) => {
     heartbeat(io, socket, roomId)
   })
 
-  socket.on(COLLABORATION_EVENTS.UPDATE, (payload) => {
-    void handleDocumentUpdate(io, socket, payload).catch(() => {
-      socket.emit(COLLABORATION_EVENTS.CONFLICT_DETECTED, { reason: 'Invalid collaboration update', timestamp: Date.now() })
+  socket.on(COLLABORATION_EVENTS.UPDATE, (payload, acknowledge) => {
+    const acknowledgeUpdate = typeof acknowledge === 'function' ? acknowledge : undefined
+    void handleDocumentUpdate(io, socket, payload, acknowledgeUpdate).catch((error) => {
+      apiLogger.error({
+        module: 'collaboration',
+        operation: 'update_handler.failed',
+        error: { code: 'UPDATE_FAILED', name: error instanceof Error ? error.name : 'UnknownError' },
+      }, 'api.collaboration.update_handler_failed')
+      const reason = 'Collaboration update could not be confirmed'
+      socket.emit(COLLABORATION_EVENTS.CONFLICT_DETECTED, { roomId: payload?.roomId, code: 'UPDATE_FAILED', reason, timestamp: Date.now() })
+      acknowledgeUpdate?.({ ok: false, code: 'UPDATE_FAILED', reason })
     })
   })
 
@@ -533,7 +565,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', (reason) => {
     socketLifecycleObserver.disconnected({ engineSid: getEngineConnectionId(socket), reason })
-    leaveAllRooms(io, socket)
+    void leaveAllRooms(io, socket)
   })
 
   socket.on('socket:lifecycle:reconnect', (payload: unknown) => {
@@ -544,35 +576,50 @@ io.on('connection', (socket) => {
 
 export async function startServer() {
   await initDatabase()
+  const coordination = await configureCollaborationSocketAdapter(io)
+  apiLogger.info({
+    module: 'collaboration',
+    operation: 'coordination.configured',
+    mode: coordination.mode,
+    instanceCount: coordination.instanceCount,
+  }, 'api.collaboration.coordination_configured')
 
-  const { port: PORT, host: HOST } = resolveServerBinding()
+  try {
+    const { port: PORT, host: HOST } = resolveServerBinding()
 
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => {
-      reject(error)
-    }
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        reject(error)
+      }
 
-    server.once('error', onError)
-    server.listen(PORT, HOST, () => {
-      server.off('error', onError)
-      const protocol = server instanceof https.Server ? 'https' : 'http'
-      console.log(`Server ready on ${protocol}://${HOST}:${PORT}`)
-      resolve()
+      server.once('error', onError)
+      server.listen(PORT, HOST, () => {
+        server.off('error', onError)
+        const protocol = server instanceof https.Server ? 'https' : 'http'
+        apiLogger.info({ module: 'server', operation: 'listener.ready', protocol, port: PORT }, 'api.server.listener_ready')
+        resolve()
+      })
     })
-  })
-
-  if (Number(process.env.XMT_WEB_INSTANCE_COUNT || '1') > 1) {
-    console.warn('[Ops] XMT Web/Socket runtime is single-instance only; disable duplicate job scheduling before scaling out')
+  } catch (error) {
+    closeCollaborationSocketAdapter()
+    throw error
   }
 
-  autoSnapshot(30000, (snapshot) => {
-    io.to(snapshot.docId).emit(COLLABORATION_EVENTS.SNAPSHOT_CREATED, {
-      docId: snapshot.docId,
-      snapshotId: snapshot.id,
-      version: snapshot.version,
-      createdAt: snapshot.createdAt,
+  if (coordination.mode === 'single' || coordination.instanceCount === 1) {
+    autoSnapshot(30000, (snapshot) => {
+      io.to(snapshot.docId).emit(COLLABORATION_EVENTS.SNAPSHOT_CREATED, {
+        docId: snapshot.docId,
+        snapshotId: snapshot.id,
+        version: snapshot.version,
+        createdAt: snapshot.createdAt,
+      })
     })
-  })
+  } else {
+    // These snapshots only live in process memory. The persisted SQLite
+    // checkpoint is authoritative in multi-instance mode, so independent
+    // workers must not announce divergent ephemeral snapshots.
+    apiLogger.info({ module: 'collaboration', operation: 'ephemeral_snapshots.disabled' }, 'api.collaboration.ephemeral_snapshots_disabled')
+  }
 
   setInterval(() => {
     cleanupInactiveRooms()
@@ -585,13 +632,15 @@ export async function startServer() {
 
 // 优雅关闭：进程退出前保存数据库
 process.on('SIGINT', () => {
-  console.log('[Server] 收到 SIGINT，正在保存数据库...')
+  apiLogger.info({ module: 'server', operation: 'shutdown.requested', signal: 'SIGINT' }, 'api.server.shutdown_requested')
+  closeCollaborationSocketAdapter()
   closeDatabase()
   process.exit(0)
 })
 
 process.on('SIGTERM', () => {
-  console.log('[Server] 收到 SIGTERM，正在保存数据库...')
+  apiLogger.info({ module: 'server', operation: 'shutdown.requested', signal: 'SIGTERM' }, 'api.server.shutdown_requested')
+  closeCollaborationSocketAdapter()
   closeDatabase()
   process.exit(0)
 })

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { resolveTopicDetailEditorBranch } from './topicDetailEditorBranch';
+import { canSaveTopicDetailDraft, resolveTopicDetailEditorBranch } from './topicDetailEditorBranch';
 import type { TopicEditorModePolicy } from '../editor/topic/topicEditorModePolicy';
 
 function caseDefaultPolicyKeepsRuntimeRenderer() {
@@ -40,11 +40,25 @@ function caseCapturedBranchDoesNotHotSwitchWhenPolicyChangesElsewhere() {
   assert.equal(Object.isFrozen(capturedBranch), true);
 }
 
+function caseManualSaveWaitsOnlyWhenTheOutlineRuntimeIsNeeded() {
+  const runtimeBranch = resolveTopicDetailEditorBranch(115, false);
+  const legacyBranch = resolveTopicDetailEditorBranch(115, false, {
+    defaultMode: 'runtime',
+    legacyTopicIds: [115],
+  });
+
+  assert.equal(canSaveTopicDetailDraft(runtimeBranch, true, false), false, 'outline save waits until the runtime handle is ready');
+  assert.equal(canSaveTopicDetailDraft(runtimeBranch, true, true), true, 'outline save is enabled after the runtime handle is ready');
+  assert.equal(canSaveTopicDetailDraft(runtimeBranch, false, false), true, 'non-outline topic edits do not require a mounted editor runtime');
+  assert.equal(canSaveTopicDetailDraft(legacyBranch, true, false), true, 'legacy content does not require a runtime manual-save handle');
+}
+
 function main() {
   caseDefaultPolicyKeepsRuntimeRenderer();
   caseMockLegacyTopicUsesOnlyLegacyRenderer();
   caseReadonlyIsIdenticalForBothRenderers();
   caseCapturedBranchDoesNotHotSwitchWhenPolicyChangesElsewhere();
+  caseManualSaveWaitsOnlyWhenTheOutlineRuntimeIsNeeded();
   console.log('TopicDetail renderer branch tests passed');
 }
 

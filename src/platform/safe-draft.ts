@@ -20,5 +20,5 @@ export function readSafeDraftValue<T>(key: string): T | null {
 }
 
 export function clearSafeDraft(key: string) {
-  try { localStorage.removeItem(`${prefix}${key}`); } catch { /* Storage is best-effort only. */ }
+  try { localStorage.removeItem(`${prefix}${key}`); return true; } catch { return false; }
 }

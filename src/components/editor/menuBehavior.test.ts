@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateContextMenuPosition, shouldShowEditorBubbleMenu } from './menuBehavior';
+import { calculateContextMenuPosition, getContextMenuSubmenuSide, shouldShowEditorBubbleMenu } from './menuBehavior';
 
 const menu = { width: 236, height: 384 };
 const viewport = { width: 1280, height: 720 };
@@ -30,4 +30,18 @@ test('远端光标移动不会改变已打开右键菜单的位置', () => {
   const remoteCursorPosition = { x: 1100, y: 96 };
   assert.notDeepEqual(remoteCursorPosition, pointer);
   assert.deepEqual(calculateContextMenuPosition(pointer, menu, viewport), before);
+});
+
+test('右键菜单靠近右边缘时子菜单向左展开', () => {
+  assert.equal(
+    getContextMenuSubmenuSide({ x: 174, y: 420 }, { width: 200, height: 384 }, { width: 160, height: 120 }, { width: 390, height: 844 }),
+    'left',
+  );
+});
+
+test('右键菜单靠近左边缘时子菜单保持向右展开', () => {
+  assert.equal(
+    getContextMenuSubmenuSide({ x: 8, y: 120 }, { width: 200, height: 384 }, { width: 160, height: 120 }, { width: 1280, height: 720 }),
+    'right',
+  );
 });

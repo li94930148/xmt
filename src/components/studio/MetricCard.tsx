@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import XMTCard from '../../design-system/components/XMTCard';
 import { AnimatedNumber } from '../../design-system';
+import { useAppStore } from '../../store';
 
 export default function MetricCard({
   title,
@@ -18,7 +19,8 @@ export default function MetricCard({
   tone?: 'primary' | 'cyan' | 'violet' | 'coral' | 'amber' | 'success';
   trend?: { label: string; up?: boolean };
 }) {
-  const toneMap = {
+  const isDark = useAppStore((state) => state.theme === 'dark');
+  const darkToneMap = {
     primary: 'from-studio-primary/95 to-studio-violet/85 shadow-studio-primary/25',
     cyan: 'from-studio-cyan/95 to-studio-primary/85 shadow-studio-cyan/20',
     violet: 'from-studio-violet/95 to-studio-primary/85 shadow-studio-violet/20',
@@ -26,6 +28,15 @@ export default function MetricCard({
     amber: 'from-studio-amber/95 to-studio-coral/80 shadow-studio-amber/20',
     success: 'from-studio-success/95 to-studio-cyan/85 shadow-studio-success/20',
   };
+  const lightToneMap = {
+    primary: 'from-studio-primary-contrast to-studio-violet-contrast shadow-studio-primary/25',
+    cyan: 'from-studio-cyan-contrast to-studio-primary-contrast shadow-studio-cyan/20',
+    violet: 'from-studio-violet-contrast to-studio-primary-contrast shadow-studio-violet/20',
+    coral: 'from-studio-coral-contrast to-studio-violet-contrast shadow-studio-coral/20',
+    amber: 'from-studio-amber-contrast to-studio-coral-contrast shadow-studio-amber/20',
+    success: 'from-studio-success-contrast to-studio-cyan-contrast shadow-studio-success/20',
+  };
+  const toneClass = (isDark ? darkToneMap : lightToneMap)[tone];
 
   return (
     <XMTCard className="p-5">
@@ -50,9 +61,10 @@ export default function MetricCard({
           ) : null}
         </div>
         <div
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-gradient-to-br ${toneMap[tone]} shadow-lg ring-1 ring-inset ring-white/15`}
+          data-testid="metric-card-icon"
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-gradient-to-br ${toneClass} shadow-lg ring-1 ring-inset ring-white/15`}
         >
-          <Icon className="h-5 w-5 text-white" />
+          <Icon className={`h-5 w-5 ${isDark ? 'text-studio-app-bg' : 'text-white'}`} />
         </div>
       </div>
     </XMTCard>

@@ -20,7 +20,7 @@ import {
 import { TopicService } from './topics.service';
 import { TopicServiceError, type TopicActor } from './topics.types';
 
-type TopicAction = 'get' | 'create' | 'update' | 'delete' | 'audit' | 'transition';
+type TopicAction = 'get' | 'create' | 'update' | 'delete' | 'audit' | 'transition' | 'repair';
 
 const SERVER_ERROR_MESSAGES: Record<TopicAction, string> = {
   get: '获取选题详情失败',
@@ -29,6 +29,7 @@ const SERVER_ERROR_MESSAGES: Record<TopicAction, string> = {
   delete: '删除选题失败',
   audit: '审核选题失败',
   transition: '更新状态失败',
+  repair: '补齐阶段记录失败',
 };
 
 function actor(req: Request): TopicActor {
@@ -40,6 +41,10 @@ function legacyError(res: Response, error: unknown, action: TopicAction) {
   if (error instanceof TopicServiceError) {
     if (error.code === 'TOPIC_NOT_FOUND') return sendNotFound(res, error.message);
     if (error.code === 'TOPIC_FORBIDDEN') return sendError(res, error.message, 403);
+    if (error.code === 'TOPIC_SUGGESTION_STALE' || error.code === 'TOPIC_STAGE_CONFLICT' || error.code === 'TOPIC_STAGE_NOT_REPAIRABLE') {
+      return sendError(res, error.message, 409);
+    }
+    if (error.code === 'TOPIC_VERSION_CONFLICT') return sendError(res, error.message, 409);
     return sendError(res, error.message);
   }
   return sendServerError(res, SERVER_ERROR_MESSAGES[action]);
@@ -71,6 +76,20 @@ function v1Error(req: Request, res: Response, error: unknown) {
     if (error.code === 'TOPIC_INVALID_TRANSITION') {
       return sendV1Error(req, res, {
         code: 'INVALID_STATUS',
+        message: error.message,
+        details: { domainCode: error.code },
+      }, 409);
+    }
+    if (error.code === 'TOPIC_VERSION_CONFLICT') {
+      return sendV1Error(req, res, {
+        code: 'CONFLICT',
+        message: error.message,
+        details: { domainCode: error.code },
+      }, 409);
+    }
+    if (error.code === 'TOPIC_SUGGESTION_STALE' || error.code === 'TOPIC_STAGE_CONFLICT' || error.code === 'TOPIC_STAGE_NOT_REPAIRABLE') {
+      return sendV1Error(req, res, {
+        code: 'CONFLICT',
         message: error.message,
         details: { domainCode: error.code },
       }, 409);
@@ -111,6 +130,11 @@ export class TopicController {
     } catch (error) {
       return legacyError(res, error, 'get');
     }
+  };
+
+  legacyOutlineVersions = async (req: Request, res: Response) => {
+    try { return sendSuccess(res, await this.service.getOutlineVersions(actor(req), parse(idSchema, req.params.id))); }
+    catch (error) { return legacyError(res, error, 'get'); }
   };
 
   legacyCreate = async (req: Request, res: Response) => {
@@ -171,6 +195,15 @@ export class TopicController {
     }
   };
 
+  legacyRepairCurrentStageRecord = async (req: Request, res: Response) => {
+    try {
+      const result = await this.service.repairCurrentStageRecord(actor(req), parse(idSchema, req.params.id));
+      return sendSuccess(res, result, result.created ? '阶段记录已补齐' : '阶段记录已存在');
+    } catch (error) {
+      return legacyError(res, error, 'repair');
+    }
+  };
+
   v1List = async (req: Request, res: Response) => {
     try {
       const query = parse(topicQuerySchema, req.query);
@@ -189,6 +222,11 @@ export class TopicController {
 
   v1Get = async (req: Request, res: Response) => {
     try { return sendV1Success(req, res, await this.service.getTopic(actor(req), parse(idSchema, req.params.id))); }
+    catch (error) { return v1Error(req, res, error); }
+  };
+
+  v1OutlineVersions = async (req: Request, res: Response) => {
+    try { return sendV1Success(req, res, await this.service.getOutlineVersions(actor(req), parse(idSchema, req.params.id))); }
     catch (error) { return v1Error(req, res, error); }
   };
 
@@ -246,6 +284,13 @@ export class TopicController {
         parse(transitionTopicInputSchema, req.body),
       );
       return sendV1Success(req, res, null);
+    } catch (error) { return v1Error(req, res, error); }
+  };
+
+  v1RepairCurrentStageRecord = async (req: Request, res: Response) => {
+    try {
+      const result = await this.service.repairCurrentStageRecord(actor(req), parse(idSchema, req.params.id));
+      return sendV1Success(req, res, result);
     } catch (error) { return v1Error(req, res, error); }
   };
 }

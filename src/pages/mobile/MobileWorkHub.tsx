@@ -6,7 +6,7 @@ const actions = [
   { label: '我的创作', description: '查看稿件与协作状态', icon: FilePenLine, path: '/production/content', permission: 'production:view' },
   { label: '写日报', description: '记录今天的工作进展', icon: PenLine, path: '/daily-report', permission: 'report:daily:submit' },
   { label: '日历', description: '查看排期与重要节点', icon: CalendarDays, path: '/calendar' },
-  { label: '看板', description: '跟进流程与待办状态', icon: ListTodo, path: '/kanban' },
+  { label: '看板', description: '跟进选题流程与待办状态', icon: ListTodo, path: '/topics?view=board' },
   { label: '灵感', description: '快速记录新的内容想法', icon: Lightbulb, path: '/inspirations' },
   { label: '拍摄', description: '查看拍摄执行任务', icon: Clapperboard, path: '/shooting', permission: 'workflow:shooting' },
 ];
@@ -21,7 +21,7 @@ export default function MobileWorkHub() {
     <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-5">
       <p className="text-sm text-studio-text-muted">移动工作中心</p>
       <h2 className="mt-1 text-xl font-semibold">从一件正在推进的工作开始</h2>
-      {canViewProduction ? <button type="button" onClick={() => navigate(canCreateProduction ? '/production/content/new' : '/production/content')} className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-studio-primary text-sm font-semibold text-white"><FilePenLine className="h-4 w-4" />{canCreateProduction ? '开始写稿' : '查看我的创作'}</button> : null}
+      {canViewProduction ? <button type="button" onClick={() => navigate(canCreateProduction ? '/production/content/new' : '/production/content')} className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white"><FilePenLine className="h-4 w-4" />{canCreateProduction ? '开始写稿' : '查看我的创作'}</button> : null}
     </section>
     <section>
       <h2 className="mb-3 text-base font-semibold">常用工作</h2>

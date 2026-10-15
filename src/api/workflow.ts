@@ -3,6 +3,30 @@ import type { Production, ProductionHistory, Shooting, Publishing, Comment } fro
 
 const BASE_URL = '/api';
 
+export type PublishedArchiveSyncState = 'synced' | 'pending' | 'skipped' | 'not_required';
+
+export interface WorkflowDocumentVersion {
+  id: number;
+  document_type: 'topic_outline' | 'shooting_script' | 'publishing_script';
+  document_id: string;
+  version: string;
+  content: string;
+  change_type: 'baseline' | 'minor' | 'major';
+  is_baseline: number;
+  operator_id: number | null;
+  operator_name: string | null;
+  source_production_id: number | null;
+  source_production_version: string | null;
+  created_at: string | null;
+}
+
+async function getWorkflowDocumentVersions(path: string): Promise<WorkflowDocumentVersion[]> {
+  const response = await fetch(`${BASE_URL}${path}`, { headers: getAuthHeader() });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '获取剧本版本历史失败'));
+  const payload = await response.json() as { data?: WorkflowDocumentVersion[] };
+  return Array.isArray(payload.data) ? payload.data : [];
+}
+
 function getAuthHeader(): Record<string, string> {
   const token = useAuthStore.getState().token;
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -32,13 +56,13 @@ export async function getProduction(params?: { topic_id?: number; page?: number;
   return response.json();
 }
 
-export async function createProduction(data: { topic_id: number; version?: string; content?: string; contentMarkdown?: string; contentJson?: string; status?: string }): Promise<{ message: string; productionId: number }> {
+export async function createProduction(data: { topic_id: number; version?: string; content?: string; contentMarkdown?: string; contentJson?: string; status?: string; origin_type?: 'topic_outline' }): Promise<{ message: string; productionId: number }> {
   const response = await fetch(`${BASE_URL}/workflow/production`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error('添加创作记录失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '添加创作记录失败'));
   return response.json();
 }
 
@@ -69,11 +93,100 @@ export async function deleteProduction(id: number): Promise<{ message: string }>
   return response.json();
 }
 
-export async function getProductionHistory(productionId: number, page = 1, limit = 20, includeContent = true): Promise<{ data: ProductionHistory[]; total: number; page: number; limit: number }> {
-  const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/history?page=${page}&limit=${limit}&include_content=${includeContent ? '1' : '0'}`, {
+export async function getProductionHistory(productionId: number, page = 1, limit = 20, includeContent = true, version?: string): Promise<{ data: ProductionHistory[]; total: number; page: number; limit: number }> {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit), include_content: includeContent ? '1' : '0' });
+  if (version) params.set('version', version);
+  const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/history?${params}`, {
     headers: getAuthHeader()
   });
   if (!response.ok) throw new Error('获取版本历史失败');
+  return response.json();
+}
+
+export interface ProductionReviewAnchor {
+  quote: string;
+  context: string;
+  from: number;
+  to: number;
+}
+
+export interface ProductionReviewReply {
+  id: number;
+  thread_id: number;
+  content: string;
+  author_id: number;
+  author_name: string | null;
+  created_at: string;
+}
+
+export interface ProductionReviewThread {
+  id: number;
+  production_id: number;
+  version: string;
+  kind: 'comment' | 'suggestion';
+  anchor_quote: string;
+  anchor_context: string;
+  anchor_from: number;
+  anchor_to: number;
+  summary: string;
+  proposed_text: string | null;
+  status: 'open' | 'resolved' | 'accepted' | 'rejected';
+  author_id: number;
+  author_name: string | null;
+  reviewed_by: number | null;
+  reviewer_name: string | null;
+  created_at: string;
+  updated_at: string;
+  replies: ProductionReviewReply[];
+}
+
+export async function getProductionReviewThreads(productionId: number, version: string): Promise<ProductionReviewThread[]> {
+  const query = new URLSearchParams({ version });
+  const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/review-threads?${query}`, {
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '获取批注与建议失败'));
+  const payload = await response.json() as { data?: ProductionReviewThread[] };
+  return Array.isArray(payload.data) ? payload.data : [];
+}
+
+export async function createProductionReviewThread(productionId: number, input: {
+  version: string;
+  kind: 'comment' | 'suggestion';
+  anchor: ProductionReviewAnchor;
+  summary: string;
+  proposed_text?: string;
+}): Promise<{ id: number }> {
+  const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/review-threads`, {
+    method: 'POST',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '添加批注或建议失败'));
+  return response.json();
+}
+
+export async function replyToProductionReviewThread(productionId: number, threadId: number, content: string): Promise<{ id: number }> {
+  const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/review-threads/${threadId}/replies`, {
+    method: 'POST',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '添加回复失败'));
+  return response.json();
+}
+
+export async function updateProductionReviewThreadStatus(
+  productionId: number,
+  threadId: number,
+  status: 'resolved' | 'accepted' | 'rejected',
+): Promise<{ message: string }> {
+  const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/review-threads/${threadId}/status`, {
+    method: 'PATCH',
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '更新批注或建议状态失败'));
   return response.json();
 }
 
@@ -164,13 +277,26 @@ export async function getShootingById(id: number): Promise<any> {
   return response.json();
 }
 
-export async function updateShooting(id: number, data: { topic_id?: number; plan_date?: string; location?: string; equipment?: string; status?: string; script_content?: string }): Promise<{ message: string }> {
+export async function updateShooting(id: number, data: { topic_id?: number; plan_date?: string; location?: string; equipment?: string; status?: string; script_content?: string; script_source_production_id?: number; script_source_version?: string; version_action?: 'minor' | 'major' | 'none'; expected_content?: string }): Promise<{ message: string; archiveSync?: PublishedArchiveSyncState }> {
   const response = await fetch(`${BASE_URL}/workflow/shooting/${id}`, {
     method: 'PUT',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error('更新成片制作记录失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '更新成片制作记录失败'));
+  return response.json();
+}
+
+export async function getShootingScriptVersions(id: number) {
+  return getWorkflowDocumentVersions(`/workflow/shooting/${id}/versions`);
+}
+
+export async function syncShootingPublishedArchive(id: number): Promise<{ message: string; archiveSync: Exclude<PublishedArchiveSyncState, 'pending' | 'not_required'> }> {
+  const response = await fetch(`${BASE_URL}/workflow/shooting/${id}/archive-sync`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '同步发布归档失败'));
   return response.json();
 }
 
@@ -180,7 +306,7 @@ export async function createShooting(data: { topic_id: number; plan_date?: strin
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error('添加拍摄计划失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '添加拍摄计划失败'));
   return response.json();
 }
 
@@ -210,17 +336,17 @@ export async function createPublishing(data: {
   url?: string; 
   status?: string; 
   publish_time?: string;
-  views?: number;
-  likes?: number;
-  shares?: number;
-  comments?: number;
+  views?: number | null;
+  likes?: number | null;
+  shares?: number | null;
+  comments?: number | null;
 }): Promise<{ message: string; publishingId: number }> {
   const response = await fetch(`${BASE_URL}/workflow/publishing`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error('添加发布记录失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '添加发布记录失败'));
   return response.json();
 }
 
@@ -229,18 +355,35 @@ export async function updatePublishing(id: number, data: {
   url?: string; 
   status?: string; 
   publish_time?: string;
-  views?: number;
-  likes?: number;
-  shares?: number;
-  comments?: number;
+  views?: number | null;
+  likes?: number | null;
+  shares?: number | null;
+  comments?: number | null;
   script_content?: string;
-}): Promise<{ message: string }> {
+  script_source_production_id?: number;
+  script_source_version?: string;
+  version_action?: 'minor' | 'major' | 'none';
+  expected_content?: string;
+}): Promise<{ message: string; archiveSync?: PublishedArchiveSyncState }> {
   const response = await fetch(`${BASE_URL}/workflow/publishing/${id}`, {
     method: 'PUT',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error('更新发布记录失败');
+  if (!response.ok) throw new Error(await getErrorMessage(response, '更新发布记录失败'));
+  return response.json();
+}
+
+export async function getPublishingScriptVersions(id: number) {
+  return getWorkflowDocumentVersions(`/workflow/publishing/${id}/versions`);
+}
+
+export async function syncPublishingPublishedArchive(id: number): Promise<{ message: string; archiveSync: Exclude<PublishedArchiveSyncState, 'pending' | 'not_required'> }> {
+  const response = await fetch(`${BASE_URL}/workflow/publishing/${id}/archive-sync`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '同步发布归档失败'));
   return response.json();
 }
 

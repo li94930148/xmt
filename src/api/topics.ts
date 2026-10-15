@@ -1,5 +1,6 @@
 import { useAuthStore } from '../store';
 import type { Topic } from '../types';
+import type { CreatorTopicSuggestionSource } from '../utils/creatorTopicSuggestionSource';
 
 const BASE_URL = '/api';
 
@@ -82,7 +83,17 @@ export async function getTopic(id: number): Promise<Topic> {
   return result.data;
 }
 
-export async function createTopic(data: { title: string; description: string; outline?: string; platform: string; deadline: string; assignee_id?: number | null }): Promise<{ message: string; topicId: number }> {
+export async function repairCurrentTopicStageRecord(id: number): Promise<{ stage: 'production' | 'shooting' | 'publishing'; created: boolean }> {
+  const response = await fetch(`${BASE_URL}/topics/${id}/repair-stage-record`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '补齐阶段记录失败'), response.status);
+  const result = await response.json();
+  return result.data;
+}
+
+export async function createTopic(data: { title: string; description: string; outline?: string; platform: string; deadline: string; assignee_id?: number | null; creator_suggestion_source?: CreatorTopicSuggestionSource }): Promise<{ message: string; topicId: number }> {
   const response = await fetch(`${BASE_URL}/topics`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -93,7 +104,7 @@ export async function createTopic(data: { title: string; description: string; ou
   return { message: result.message, topicId: result.data.topicId };
 }
 
-export async function updateTopic(id: number, data: Partial<Topic>): Promise<{ message: string }> {
+export async function updateTopic(id: number, data: Partial<Topic> & { version_action?: 'minor' | 'major' | 'none'; expected_content?: string }): Promise<{ message: string }> {
   const response = await fetch(`${BASE_URL}/topics/${id}`, {
     method: 'PUT',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -101,6 +112,13 @@ export async function updateTopic(id: number, data: Partial<Topic>): Promise<{ m
   });
   if (!response.ok) throw new Error(await getErrorMessage(response, '更新选题失败'));
   return response.json();
+}
+
+export async function getTopicOutlineVersions(id: number): Promise<import('./workflow').WorkflowDocumentVersion[]> {
+  const response = await fetch(`${BASE_URL}/topics/${id}/versions`, { headers: getAuthHeader() });
+  if (!response.ok) throw new Error(await getErrorMessage(response, '获取选题版本历史失败'));
+  const result = await response.json() as { data?: import('./workflow').WorkflowDocumentVersion[] };
+  return Array.isArray(result.data) ? result.data : [];
 }
 
 export async function deleteTopic(id: number): Promise<{ message: string }> {

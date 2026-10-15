@@ -1,4 +1,5 @@
 import { Server } from 'socket.io';
+import { apiLogger } from '../observability/logger.js';
 
 let ioInstance: Server | null = null;
 
@@ -34,7 +35,11 @@ export function notifyUser(userId: number, event: string, data: unknown) {
   try {
     ioInstance.to(`user_${userId}`).emit(event, data);
   } catch (err) {
-    console.warn('[Socket] 推送失败:', err);
+    apiLogger.warn({
+      module: 'socket',
+      operation: 'user_notification.emit_failed',
+      error: { code: 'NOTIFICATION_EMIT_FAILED', name: err instanceof Error ? err.name : 'UnknownError' },
+    }, 'api.socket.notification_emit_failed');
   }
 }
 
@@ -58,18 +63,22 @@ export function pushMessage(userId: number, message: { id: number; title: string
  */
 export function broadcastToRoom(room: string, event: string, data: unknown, excludeSocketId?: string) {
   if (!ioInstance) {
-    console.warn('[Socket] broadcastToRoom: ioInstance is null');
+    apiLogger.debug({ module: 'socket', operation: 'room_broadcast.skipped', reason: 'io_unavailable' }, 'api.socket.broadcast_skipped');
     return;
   }
   try {
     const roomSize = ioInstance.sockets.adapter.rooms.get(room)?.size ?? 0;
-    console.log(`[Socket] broadcastToRoom: room=${room}, event=${event}, roomSize=${roomSize}, exclude=${excludeSocketId ?? 'none'}`);
+    apiLogger.debug({ module: 'socket', operation: 'room_broadcast.sent', roomSize }, 'api.socket.broadcast_sent');
     if (excludeSocketId) {
       ioInstance.to(room).except(excludeSocketId).emit(event, data);
     } else {
       ioInstance.to(room).emit(event, data);
     }
   } catch (err) {
-    console.warn('[Socket] 广播失败:', err);
+    apiLogger.warn({
+      module: 'socket',
+      operation: 'room_broadcast.failed',
+      error: { code: 'ROOM_BROADCAST_FAILED', name: err instanceof Error ? err.name : 'UnknownError' },
+    }, 'api.socket.broadcast_failed');
   }
 }

@@ -3,16 +3,18 @@
  * 参考腾讯文档风格，支持格式化、批注、链接、标题转换、dark mode
  */
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Editor } from '@tiptap/react';
 import { useAppStore } from '../../store';
-import { calculateContextMenuPosition } from './menuBehavior';
+import { calculateContextMenuPosition, getContextMenuSubmenuSide } from './menuBehavior';
+import { EDITOR_HIGHLIGHT_COLORS as HIGHLIGHT_COLORS, EDITOR_TEXT_COLORS as TEXT_COLORS } from './editorColorPalette';
 import {
   Copy, Scissors, Clipboard,
   Bold, Italic, Underline, Strikethrough,
   Highlighter, Type, Link as LinkIcon, Unlink,
   MessageSquare, MessageSquarePlus, MessageSquareX,
   Heading1, Heading2, Heading3,
-  Trash2, ChevronRight, X,
+  Trash2, ChevronLeft, ChevronRight, X,
 } from 'lucide-react';
 
 interface EditorContextMenuProps {
@@ -26,28 +28,6 @@ interface EditorContextMenuProps {
 interface MenuPosition { x: number; y: number; }
 
 interface CommentInfo { commentId: string; commentText: string; }
-
-const HIGHLIGHT_COLORS = [
-  { name: '黄色', value: 'yellow', bg: '#fef08a' },
-  { name: '绿色', value: 'green', bg: '#bbf7d0' },
-  { name: '蓝色', value: 'blue', bg: '#bfdbfe' },
-  { name: '红色', value: 'red', bg: '#fecaca' },
-  { name: '紫色', value: 'purple', bg: '#ddd6fe' },
-  { name: '橙色', value: 'orange', bg: '#fed7aa' },
-  { name: '灰色', value: 'gray', bg: '#e5e7eb' },
-  { name: '青色', value: 'cyan', bg: '#a5f3fc' },
-];
-
-const TEXT_COLORS = [
-  { name: '默认', value: '', bg: '#374151' },
-  { name: '红色', value: '#ef4444', bg: '#ef4444' },
-  { name: '橙色', value: '#f97316', bg: '#f97316' },
-  { name: '黄色', value: '#eab308', bg: '#eab308' },
-  { name: '绿色', value: '#22c55e', bg: '#22c55e' },
-  { name: '蓝色', value: '#3b82f6', bg: '#3b82f6' },
-  { name: '紫色', value: '#a855f7', bg: '#a855f7' },
-  { name: '粉色', value: '#ec4899', bg: '#ec4899' },
-];
 
 /** 从选区提取批注信息 */
 function findCommentInSelection(editor: Editor): CommentInfo | null {
@@ -75,11 +55,12 @@ export default function EditorContextMenu({
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const [visible, setVisible] = useState(false);
   const [position, setPosition] = useState<MenuPosition>({ x: 0, y: 0 });
+  const [submenuSide, setSubmenuSide] = useState<'left' | 'right'>('right');
   const [anchor, setAnchor] = useState<MenuPosition>({ x: 0, y: 0 });
   const [measured, setMeasured] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!editor || editor.isDestroyed) return;
     const handleContextMenu = (e: MouseEvent) => {
       if (editor.isDestroyed) return;
@@ -103,9 +84,16 @@ export default function EditorContextMenu({
   useLayoutEffect(() => {
     if (!visible || !menuRef.current) return;
     const menu = menuRef.current;
-    setPosition(calculateContextMenuPosition(
+    const menuPosition = calculateContextMenuPosition(
       anchor,
       { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setPosition(menuPosition);
+    setSubmenuSide(getContextMenuSubmenuSide(
+      menuPosition,
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: 160, height: 120 },
       { width: window.innerWidth, height: window.innerHeight },
     ));
     setMeasured(true);
@@ -131,22 +119,22 @@ export default function EditorContextMenu({
   const hasSelection = !editor.state.selection.empty;
 
   const itemClass = `flex items-center gap-2.5 w-full px-3 py-2 text-sm transition-colors ${
-    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary/10 hover:text-studio-primary'
+    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary/10 hover:text-studio-primary-contrast'
   }`;
   const disabledClass = `flex items-center gap-2.5 w-full px-3 py-2 text-sm ${
     isDark ? 'text-studio-text-muted cursor-not-allowed' : 'text-studio-text-secondary cursor-not-allowed'
   }`;
   const divider = <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />;
   const subMenuClass = `flex items-center justify-between w-full px-3 py-2 text-sm transition-colors ${
-    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary/10 hover:text-studio-primary'
+    isDark ? 'text-studio-text-secondary hover:bg-studio-primary/20' : 'text-studio-text-muted hover:bg-studio-primary/10 hover:text-studio-primary-contrast'
   }`;
   const close = () => setVisible(false);
   const act = (fn: () => void) => { fn(); close(); };
 
-  return (
+  return createPortal((
     <>
-      <div data-testid="editor-context-menu-backdrop" className="fixed inset-0 z-[200]" onClick={close} />
-      <div data-testid="editor-context-menu" data-anchor-x={anchor.x} data-anchor-y={anchor.y} ref={menuRef} className="fixed z-[201] min-w-[200px] rounded-xl border border-studio-border-soft bg-studio-surface-glass py-1.5 shadow-2xl backdrop-blur-sm" style={{ left: position.x, top: position.y, visibility: measured ? 'visible' : 'hidden' }}>
+      <div data-testid="editor-context-menu-backdrop" className="fixed inset-0 z-editor-backdrop" onClick={close} />
+      <div data-testid="editor-context-menu" data-anchor-x={anchor.x} data-anchor-y={anchor.y} ref={menuRef} className="fixed z-editor-menu min-w-[200px] rounded-xl border border-studio-border-soft bg-studio-surface-glass py-1.5 shadow-2xl backdrop-blur-sm" style={{ left: position.x, top: position.y, visibility: measured ? 'visible' : 'hidden' }}>
 
         {/* 剪贴板 */}
         <button onClick={() => act(() => document.execCommand('copy'))} className={hasSelection ? itemClass : disabledClass} disabled={!hasSelection}>
@@ -181,9 +169,9 @@ export default function EditorContextMenu({
         <div className="relative group">
           <div className={subMenuClass}>
             <span className="flex items-center gap-2.5"><Type className="w-4 h-4" /> 文字颜色</span>
-            <ChevronRight className="w-3 h-3" />
+            {submenuSide === 'left' ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </div>
-          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
+          <div data-testid="editor-context-color-submenu" data-side={submenuSide} className={`absolute ${submenuSide === 'left' ? 'right-full mr-0.5' : 'left-full ml-0.5'} top-0 w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {TEXT_COLORS.map((c) => (
                 <button key={c.value || 'default'}
@@ -204,9 +192,9 @@ export default function EditorContextMenu({
         <div className="relative group">
           <div className={subMenuClass}>
             <span className="flex items-center gap-2.5"><Highlighter className="w-4 h-4" /> 高亮颜色</span>
-            <ChevronRight className="w-3 h-3" />
+            {submenuSide === 'left' ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </div>
-          <div className={`absolute left-full top-0 ml-0.5 min-w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
+          <div data-testid="editor-context-highlight-submenu" data-side={submenuSide} className={`absolute ${submenuSide === 'left' ? 'right-full mr-0.5' : 'left-full ml-0.5'} top-0 w-[160px] rounded-lg shadow-xl border py-1.5 hidden group-hover:block ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {HIGHLIGHT_COLORS.map((c) => (
                 <button key={c.value}
@@ -235,7 +223,7 @@ export default function EditorContextMenu({
             <button onClick={() => { const c = comment; act(() => onEditComment?.(c.commentId, c.commentText)); }} className={itemClass}>
               <MessageSquarePlus className="w-4 h-4" /> 编辑批注
             </button>
-            <button onClick={() => { const c = comment; act(() => onDeleteComment?.(c.commentId)); }} className={`${itemClass} text-studio-coral`}>
+            <button onClick={() => { const c = comment; act(() => onDeleteComment?.(c.commentId)); }} className={`${itemClass} text-studio-coral-contrast`}>
               <MessageSquareX className="w-4 h-4" /> 删除批注
             </button>
           </>
@@ -274,10 +262,10 @@ export default function EditorContextMenu({
 
         {/* 删除选中 */}
         <button onClick={() => act(() => editor.chain().focus().deleteSelection().run())}
-          className={hasSelection ? `${itemClass} text-studio-coral` : disabledClass} disabled={!hasSelection}>
+          className={hasSelection ? `${itemClass} text-studio-coral-contrast` : disabledClass} disabled={!hasSelection}>
           <Trash2 className="w-4 h-4" /> 删除选中
         </button>
       </div>
     </>
-  );
+  ), document.body);
 }

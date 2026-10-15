@@ -27,7 +27,7 @@ export default function DouyinCreatorDataCenter() {
     <div className="mx-auto max-w-[1500px] space-y-6 pb-12">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="mb-2 text-sm font-medium text-studio-cyan">Creator Data Center</p>
+          <p className="mb-2 text-sm font-medium text-studio-cyan-contrast">Creator Data Center</p>
           <h1 className="text-3xl font-semibold tracking-tight text-studio-text">创作者数据中心</h1>
           <p className="mt-2 text-sm text-studio-text-muted">自有数据链路 · 最近同步 {formatDate(data?.account?.snapshot_time)}</p>
         </div>
@@ -64,13 +64,13 @@ export default function DouyinCreatorDataCenter() {
 
 function AccountHeader({ account }: { account: JsonRecord }) {
   return <section className="flex items-center gap-4 rounded-2xl border border-studio-border bg-gradient-to-r from-studio-card to-studio-surface p-5">
-    {account.avatar ? <img src={String(account.avatar)} alt="账号头像" className="h-14 w-14 rounded-full object-cover ring-2 ring-studio-cyan/30" /> : <div className="grid h-14 w-14 place-items-center rounded-full bg-studio-cyan/10 text-studio-cyan"><Sparkles className="h-6 w-6" /></div>}
+    {account.avatar ? <img src={String(account.avatar)} alt="账号头像" className="h-14 w-14 rounded-full object-cover ring-2 ring-studio-cyan/30" /> : <div className="grid h-14 w-14 place-items-center rounded-full bg-studio-cyan/10 text-studio-cyan-contrast"><Sparkles className="h-6 w-6" /></div>}
     <div className="min-w-0"><h2 className="truncate text-lg font-semibold">{String(account.nickname || account.account_name || '抖音账号')}</h2><p className="mt-1 text-sm text-studio-text-muted">抖音号 {String(account.account_id || account.platform_uid || '—')}</p></div>
-    <span className="ml-auto rounded-full bg-studio-success/10 px-3 py-1 text-xs font-medium text-studio-success">数据已入仓</span>
+    <span className="ml-auto rounded-full bg-studio-success/10 px-3 py-1 text-xs font-medium text-studio-success-contrast">数据已入仓</span>
   </section>;
 }
 
-const accents = { cyan: 'bg-studio-cyan/10 text-studio-cyan', blue: 'bg-studio-primary/10 text-studio-primary', rose: 'bg-studio-coral/10 text-studio-coral', violet: 'bg-studio-violet/10 text-studio-violet' };
+const accents = { cyan: 'bg-studio-cyan/10 text-studio-cyan-contrast', blue: 'bg-studio-primary/10 text-studio-primary-contrast', rose: 'bg-studio-coral/10 text-studio-coral-contrast', violet: 'bg-studio-violet/10 text-studio-violet-contrast' };
 function MetricCard({ label, value, icon: Icon, accent }: { label: string; value: unknown; icon: typeof Users; accent: keyof typeof accents }) {
   return <article className="rounded-2xl border border-studio-border bg-studio-card p-5"><div className="flex items-center justify-between"><span className="text-sm text-studio-text-muted">{label}</span><span className={`grid h-9 w-9 place-items-center rounded-xl ${accents[accent]}`}><Icon className="h-4 w-4" /></span></div><p className="mt-5 text-3xl font-semibold tracking-tight">{typeof value === 'string' ? value : formatNumber(value)}</p></article>;
 }

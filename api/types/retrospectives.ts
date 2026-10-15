@@ -18,6 +18,8 @@ export type RetrospectiveListFilters = {
   start?: string;
   end?: string;
   ownerId?: number;
+  keyword?: string;
+  limit?: number;
 };
 
 export type CreateRetrospectiveInput = {

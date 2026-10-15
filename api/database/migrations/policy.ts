@@ -21,4 +21,5 @@ export const migrationPolicies: Readonly<Record<string, MigrationPolicy>> = {
   '028': 'SAFE_EXPAND',
   '029': 'SAFE_EXPAND',
   '030': 'SAFE_EXPAND',
+  '031': 'SAFE_EXPAND',
 };

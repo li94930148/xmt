@@ -11,6 +11,17 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.1.20',
+    date: '2026-10-15',
+    title: '协作与同步异常恢复',
+    impactScope: ['Creator Agent 同步', '实时协作', '创作建议', '分布式任务'],
+    changes: [
+      { type: 'fix', description: 'Creator Agent 账号同步使用数据库时钟租约，失去运行进程后过期占用可自动结束并恢复重试。' },
+      { type: 'fix', description: 'Yjs 对暂时性协调不可用/写入冲突保留并退避重试；未带时区的数据库时间按北京时间解析。' },
+      { type: 'fix', description: '分布式任务在等待当前续租结果后再报告完成或租约失效。' },
+    ],
+  },
+  {
     version: '9.1.19',
     date: '2026-10-15',
     title: '详情读取结果归属保护',

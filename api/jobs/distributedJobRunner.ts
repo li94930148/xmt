@@ -164,6 +164,23 @@ export async function runWithDistributedJobLease<T>(
   const lease = await acquireDistributedJobLease(jobName, { leaseDurationMs });
   if (!lease) return { status: 'busy' };
 
+  return runWithAcquiredDistributedJobLease(jobName, lease, handler, { renewIntervalMs });
+}
+
+/** Run a handler under a lease already acquired by the caller. */
+export async function runWithAcquiredDistributedJobLease<T>(
+  jobName: string,
+  lease: DistributedJobLease,
+  handler: (context: DistributedJobContext) => Promise<T>,
+  options: Pick<DistributedJobRunnerOptions, 'renewIntervalMs'> = {},
+): Promise<Exclude<DistributedJobRunResult<T>, { status: 'busy' }>> {
+  validateJobName(jobName);
+  if (lease.jobName !== jobName) throw new Error(`Distributed job lease name mismatch: ${jobName}`);
+  const { renewIntervalMs } = resolveLeaseOptions({
+    leaseDurationMs: lease.leaseDurationMs,
+    renewIntervalMs: options.renewIntervalMs,
+  });
+
   const controller = new AbortController();
   let lostReason: 'expired' | 'coordination_error' | null = null;
   let stopped = false;
@@ -204,21 +221,30 @@ export async function runWithDistributedJobLease<T>(
     }, renewIntervalMs);
   };
 
-  scheduleRenewal();
-  try {
-    let value: T;
-    try {
-      value = await handler({ signal: controller.signal, fencingToken: lease.fencingToken, assertCurrent });
-    } catch (error) {
-      if (!lostReason) throw error;
-      return { status: 'lease_lost', fencingToken: lease.fencingToken, reason: lostReason };
-    }
-    if (lostReason) return { status: 'lease_lost', fencingToken: lease.fencingToken, reason: lostReason };
-    return { status: 'completed', fencingToken: lease.fencingToken, value };
-  } finally {
+  const stopRenewals = async () => {
     stopped = true;
     if (timer) clearTimeout(timer);
-    if (renewalInFlight) await renewalInFlight;
+    const activeRenewal = renewalInFlight;
+    if (activeRenewal) await activeRenewal;
+  };
+
+  scheduleRenewal();
+  try {
+    let handlerResult: { status: 'fulfilled'; value: T } | { status: 'rejected'; error: unknown };
+    try {
+      handlerResult = {
+        status: 'fulfilled',
+        value: await handler({ signal: controller.signal, fencingToken: lease.fencingToken, assertCurrent }),
+      };
+    } catch (error) {
+      handlerResult = { status: 'rejected', error };
+    }
+    await stopRenewals();
+    if (lostReason) return { status: 'lease_lost', fencingToken: lease.fencingToken, reason: lostReason };
+    if (handlerResult.status === 'rejected') throw handlerResult.error;
+    return { status: 'completed', fencingToken: lease.fencingToken, value: handlerResult.value };
+  } finally {
+    await stopRenewals();
     await lease.release();
   }
 }

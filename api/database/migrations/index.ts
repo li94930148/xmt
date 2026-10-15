@@ -29,6 +29,7 @@ import { productionOutlineOriginSnapshotMigration } from './027_production_outli
 import { productionMaterialHistorySnapshotMigration } from './028_production_material_history_snapshot';
 import { workflowDocumentVersionsMigration } from './029_workflow_document_versions';
 import { productionOutlineSourceVersionMigration } from './030_production_outline_source_version';
+import { creatorSyncClaimLeaseMigration } from './031_creator_sync_claim_lease';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -61,4 +62,5 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   productionMaterialHistorySnapshotMigration,
   workflowDocumentVersionsMigration,
   productionOutlineSourceVersionMigration,
+  creatorSyncClaimLeaseMigration,
 ];

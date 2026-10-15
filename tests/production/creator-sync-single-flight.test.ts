@@ -105,12 +105,21 @@ try {
 
     const winner = await queryOne<{ agent_id: number; task_id: string }>(`SELECT agent_id,task_id FROM creator_sync_tasks WHERE account=? AND status='running'`, [account]);
     assert(winner);
-    await execute(`UPDATE creator_sync_tasks SET status = 'failed', end_time = CURRENT_TIMESTAMP
-      WHERE platform = 'douyin' AND account = ? AND status = 'running'`, [account]);
-    await claimCreatorSyncTask(winner.agent_id, winner.task_id, 'douyin', account, new Date().toISOString());
-    await assert.rejects(() => claimCreatorSyncTask(winner.agent_id, winner.task_id, 'douyin', account, new Date().toISOString()),
-      (error: unknown) => (error as { statusCode?: number }).statusCode === 503, 'the same running task cannot re-enter');
-    await execute("UPDATE creator_sync_tasks SET status='success' WHERE account=?", [account]);
+    await execute(`UPDATE creator_sync_tasks SET claimed_at_ms=0
+      WHERE platform='douyin' AND account=? AND status='running'`, [account]);
+    await claimCreatorSyncTask(agentIds[1]!, 'task-after-expiry', 'douyin', account, new Date().toISOString());
+    const abandoned = await queryOne<{ status: string; error_message: string | null; claimed_at_ms: number }>(
+      `SELECT status,error_message,claimed_at_ms FROM creator_sync_tasks WHERE agent_id=? AND task_id=?`,
+      [winner.agent_id, winner.task_id],
+    );
+    assert.equal(abandoned?.status, 'failed', 'an abandoned running row should be finalized during lease takeover');
+    assert.match(abandoned?.error_message || '', /租约过期/);
+    assert.equal(abandoned?.claimed_at_ms, 0);
+    const activeClaim = await queryOne<{ agent_id: number; task_id: string }>(`SELECT agent_id,task_id FROM creator_sync_tasks WHERE account=? AND status='running'`, [account]);
+    assert.deepEqual(activeClaim, { agent_id: agentIds[1], task_id: 'task-after-expiry' });
+    await assert.rejects(() => claimCreatorSyncTask(agentIds[0]!, 'competing-task', 'douyin', account, new Date().toISOString()),
+      (error: unknown) => (error as { statusCode?: number }).statusCode === 503, 'an unexpired running task must still block another claim');
+    await execute("UPDATE creator_sync_tasks SET status='success',claimed_at_ms=0 WHERE account=?", [account]);
     await claimCreatorSyncTask(agentIds[0]!, 'task-after-completion', 'douyin', account, new Date().toISOString());
     await claimCreatorSyncTask(agentIds[1]!, 'independent-account', 'douyin', 'another-account', new Date().toISOString());
     const lockingClient = createClient({ url: `file:${databasePath}` });

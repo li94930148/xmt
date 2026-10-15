@@ -1,5 +1,19 @@
 # Changelog
 
+## v9.1.20 - 2026-10-15
+
+### 修复
+
+- Creator Agent 单账号同步增加基于数据库时钟的 30 分钟 claim 租约；过期的 running 任务会被标记失败后再接管，正常运行任务仍互斥。
+- Yjs 对 `COORDINATION_UNAVAILABLE` 与 `COORDINATION_CONFLICT` 保留并退避重试同一批次，恢复后继续发送排队更新。
+- 创作建议把无时区数据库日期按北京时间解析，显式 `Z`/offset 的 ISO 时间仍按绝对时刻解析。
+- 分布式任务等待正在执行的续租完成后，再返回完成或租约失效结果。
+
+### 验证
+
+- Creator 同步单飞、Yjs ACK 重试、创作建议时间范围和分布式任务租约专项回归通过；`npm run check`、`npm run build`、全仓 ESLint（0 errors/299 warnings）、版本/迁移/部署门禁与测试入口检查通过。
+- 数据库 SAFE_EXPAND 迁移 031；Android 仅同步版本元数据至 90120，未构建 APK；本地尚未部署，新 PR head 的 CI 待运行。
+
 ## v9.1.19 - 2026-10-15
 
 ### 修复

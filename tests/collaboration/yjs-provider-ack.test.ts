@@ -115,6 +115,42 @@ assert.equal((await outbox.list(7, roomId)).length, 0, 'successful ACK should re
 
 provider.destroy();
 
+const transientSocket = new FakeSocket();
+const transientOutbox = new MemoryOutbox();
+const transientCodes: string[] = [];
+const transientProvider = new SocketYjsProvider({
+  socket: transientSocket as unknown as Socket,
+  roomId: 'production:coordination-retry@v1.0',
+  user: { id: 7, name: 'QA', color: '#2563eb' },
+  outbox: transientOutbox,
+  onConflict: ({ code }) => { if (code) transientCodes.push(code); },
+});
+transientSocket.receive(COLLABORATION_EVENTS.SYNC, { roomId: 'production:coordination-retry@v1.0', update: [0, 0] });
+await wait(0);
+transientProvider.doc.getText('coordination-retry').insert(0, 'coordination transient');
+await wait(80);
+assert.equal(transientSocket.updates.length, 1, 'the coordination fixture should send its first batch');
+const transientBatch = transientSocket.updates[0]!.payload.update;
+transientProvider.doc.getText('coordination-retry').insert(21, 'queued');
+await wait(80);
+transientSocket.updates[0]!.acknowledge({ ok: false, code: 'COORDINATION_UNAVAILABLE', reason: 'Redis temporarily unavailable' });
+await wait(1100);
+assert.equal(transientSocket.updates.length, 2, 'an unavailable coordinator should retry the retained batch');
+assert.deepEqual(transientSocket.updates[1]!.payload.update, transientBatch, 'retry must resend the same in-flight batch');
+transientSocket.updates[1]!.acknowledge({ ok: false, code: 'COORDINATION_CONFLICT', reason: 'SQLite writer conflict' });
+await wait(2100);
+assert.equal(transientSocket.updates.length, 3, 'a transient coordination conflict should also retry');
+assert.deepEqual(transientSocket.updates[2]!.payload.update, transientBatch, 'the queued update must not replace the rejected in-flight batch');
+transientSocket.updates[2]!.acknowledge({ ok: true, version: 1 });
+await wait(100);
+assert.equal(transientSocket.updates.length, 4, 'queued edits should flush after coordination recovers');
+transientSocket.updates[3]!.acknowledge({ ok: true, version: 2 });
+await wait(0);
+assert.equal((await transientOutbox.list(7, 'production:coordination-retry@v1.0')).length, 0,
+  'both transient and queued updates should be cleared only after successful acknowledgement');
+assert.deepEqual(transientCodes, ['COORDINATION_UNAVAILABLE', 'COORDINATION_CONFLICT']);
+transientProvider.destroy();
+
 const recoveryOutbox = new MemoryOutbox();
 const abandonedSocket = new FakeSocket();
 const abandonedProvider = new SocketYjsProvider({

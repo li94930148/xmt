@@ -10,10 +10,13 @@ const median = (values: number[]) => {
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
-// SQLite CURRENT_TIMESTAMP is UTC; published values normally arrive as ISO instants.
+// Stored legacy database datetimes use Beijing wall time; offset-qualified ISO
+// values remain absolute instants and must not receive a second timezone.
 const timestamp = (value: unknown) => {
   if (typeof value !== 'string') return NaN;
-  return Date.parse(/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?:\.\d+)?$/.test(value) ? `${value.replace(' ', 'T')}Z` : value);
+  const normalized = value.replace(' ', 'T');
+  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d+)?)?$/.test(normalized)) return Date.parse(value);
+  return Date.parse(`${normalized}+08:00`);
 };
 
 function features(title: string) {

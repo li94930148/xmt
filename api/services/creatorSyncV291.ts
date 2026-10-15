@@ -19,13 +19,22 @@ export class CreatorSyncAlreadyRunningError extends Error {
   }
 }
 
+const CREATOR_SYNC_CLAIM_LEASE_MS = 30 * 60 * 1000;
+const DATABASE_NOW_MS = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
+
 export async function claimCreatorSyncTask(agentId: number, taskId: string, platform: string, account: string, startedAt: string) {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const inserted = await execute(`INSERT INTO creator_sync_tasks(agent_id,task_id,start_time,platform,account,status)
-        VALUES(?,?,?,?,?,'running') ON CONFLICT(agent_id,task_id) DO UPDATE SET
-        status='running',start_time=excluded.start_time,end_time=NULL,error_message=NULL
-        WHERE creator_sync_tasks.status <> 'running'`, [agentId, taskId, startedAt, platform, account]);
+      const inserted = await runInTransaction(async (tx) => {
+        await tx.execute(`UPDATE creator_sync_tasks SET status='failed',end_time=CURRENT_TIMESTAMP,
+          error_message=COALESCE(error_message,'同步租约过期，已释放占用'),claimed_at_ms=0
+          WHERE platform=? AND account=? AND status='running'
+          AND claimed_at_ms <= ${DATABASE_NOW_MS} - ?`, [platform, account, CREATOR_SYNC_CLAIM_LEASE_MS]);
+        return tx.execute(`INSERT INTO creator_sync_tasks(agent_id,task_id,start_time,platform,account,status,claimed_at_ms)
+          VALUES(?,?,?,?,?,'running',${DATABASE_NOW_MS}) ON CONFLICT(agent_id,task_id) DO UPDATE SET
+          status='running',start_time=excluded.start_time,end_time=NULL,error_message=NULL,claimed_at_ms=excluded.claimed_at_ms
+          WHERE creator_sync_tasks.status <> 'running'`, [agentId, taskId, startedAt, platform, account]);
+      });
       if (inserted !== 1) throw new CreatorSyncAlreadyRunningError();
       return;
     } catch (error) {
@@ -307,4 +316,4 @@ export async function acceptCreatorDataSync(body: JsonRecord, authorization?: st
 
 export const acceptCreatorDataSyncV291 = acceptCreatorDataSync;
 
-async function finishTask(agentId:number,taskId:string,modules:Record<string,'success'|'failed'>,errors:Record<string,string>,snapshotTime:string,accountId:number,counts:JsonRecord={}){const successCount=Object.values(modules).filter(v=>v==='success').length;const failedCount=Object.keys(modules).length-successCount;const status=failedCount===0?'success':successCount===0?'failed':'partial_success';await execute('UPDATE creator_sync_tasks SET end_time=CURRENT_TIMESTAMP,status=?,success_count=?,failed_count=?,error_message=?,module_status_json=? WHERE agent_id=? AND task_id=?',[status,successCount,failedCount,Object.values(errors).join('; ')||null,JSON.stringify(modules),agentId,taskId]);return{success:successCount>0,status,success_count:successCount,failed_count:failedCount,modules,errors,snapshot_time:snapshotTime,account_id:accountId,...counts};}
+async function finishTask(agentId:number,taskId:string,modules:Record<string,'success'|'failed'>,errors:Record<string,string>,snapshotTime:string,accountId:number,counts:JsonRecord={}){const successCount=Object.values(modules).filter(v=>v==='success').length;const failedCount=Object.keys(modules).length-successCount;const status=failedCount===0?'success':successCount===0?'failed':'partial_success';await execute('UPDATE creator_sync_tasks SET end_time=CURRENT_TIMESTAMP,status=?,success_count=?,failed_count=?,error_message=?,module_status_json=?,claimed_at_ms=0 WHERE agent_id=? AND task_id=?',[status,successCount,failedCount,Object.values(errors).join('; ')||null,JSON.stringify(modules),agentId,taskId]);return{success:successCount>0,status,success_count:successCount,failed_count:failedCount,modules,errors,snapshot_time:snapshotTime,account_id:accountId,...counts};}

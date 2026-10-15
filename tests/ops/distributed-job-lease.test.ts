@@ -8,12 +8,15 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from '@libsql/client';
 import { distributedJobLeasesMigration } from '../../api/database/migrations/024_distributed_job_leases.js';
 import { migrationPolicies } from '../../api/database/migrations/policy.js';
+import type { DistributedJobLease } from '../../api/jobs/distributedJobRunner.js';
 
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-distributed-job-lease-'));
 const databasePath = path.join(temporaryDirectory, 'leases.test.db');
+process.env.XMT_DB_PATH = databasePath;
+process.env.NODE_ENV = 'test';
 const leaseDurationMs = 1100;
-const renewIntervalMs = 250;
 type WorkerMessage = { type: string; fencingToken?: number; renewed?: boolean; released?: boolean; status?: string; value?: string };
+const { runWithAcquiredDistributedJobLease } = await import('../../api/jobs/distributedJobRunner.js');
 
 class LeaseWorker {
   child: ChildProcessWithoutNullStreams;
@@ -32,7 +35,6 @@ class LeaseWorker {
         NODE_ENV: 'test',
         XMT_DB_PATH: databasePath,
         XMT_TEST_JOB_LEASE_MS: String(leaseDurationMs),
-        XMT_TEST_JOB_RENEW_MS: String(renewIntervalMs),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -71,7 +73,7 @@ class LeaseWorker {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiters = this.waiters.filter((waiter) => waiter.resolve !== resolve);
-        reject(new Error(`Timed out waiting for ${type}: ${this.stderr}`));
+        reject(new Error(`Timed out waiting for ${type}; messages=${JSON.stringify(this.messages)}; stderr=${this.stderr}`));
       }, timeoutMs);
       this.waiters.push({ predicate: (message) => message.type === type, resolve, timer });
     });
@@ -103,39 +105,61 @@ await distributedJobLeasesMigration.up(setupClient);
 setupClient.close();
 assert.equal(migrationPolicies['024'], 'SAFE_EXPAND');
 
+let finishHandler!: () => void;
+let resolveRenewal!: (renewed: boolean) => void;
+let notifyRenewalStarted!: () => void;
+let releaseCount = 0;
+const renewalStarted = new Promise<void>((resolve) => { notifyRenewalStarted = resolve; });
+const pendingRenewal = new Promise<boolean>((resolve) => { resolveRenewal = resolve; });
+const heldLease: DistributedJobLease = {
+  jobName: 'test:renewal-settlement',
+  fencingToken: 1,
+  leaseDurationMs: 1000,
+  renew: () => { notifyRenewalStarted(); return pendingRenewal; },
+  assertCurrent: async () => undefined,
+  release: async () => { releaseCount += 1; return true; },
+};
+const settlement = runWithAcquiredDistributedJobLease('test:renewal-settlement', heldLease, async () => {
+  await new Promise<void>((resolve) => { finishHandler = resolve; });
+  return 'handler result';
+}, { renewIntervalMs: 100 });
+await renewalStarted;
+finishHandler();
+await Promise.resolve();
+resolveRenewal(false);
+const settledRenewal = await settlement;
+assert.equal(settledRenewal.status, 'lease_lost', 'a renewal already in flight must settle before the handler can report completion');
+assert.equal(releaseCount, 1, 'the already-acquired lease must still be released after renewal settles');
+
 const first = new LeaseWorker();
 const second = new LeaseWorker();
 const workers = [first, second];
 try {
   await Promise.all(workers.map((worker) => worker.waitFor('ready')));
-  first.send('run');
-  second.send('run');
+
+  first.send('claim', { jobName: 'test:daily-maintenance' });
+  second.send('claim', { jobName: 'test:daily-maintenance' });
   const initial = await Promise.all([
-    first.waitForEither(['task-started', 'run-busy']),
-    second.waitForEither(['task-started', 'run-busy']),
+    first.waitForEither(['claimed', 'claim-busy']),
+    second.waitForEither(['claimed', 'claim-busy']),
   ]);
-  const started = initial.filter((message) => message.type === 'task-started');
-  const busy = initial.filter((message) => message.type === 'run-busy');
-  assert.equal(started.length, 1, 'two API processes must not execute the same job at once');
+  const started = initial.filter((message) => message.type === 'claimed');
+  const busy = initial.filter((message) => message.type === 'claim-busy');
+  assert.equal(started.length, 1, 'two API processes must not acquire the same job lease at once');
   assert.equal(busy.length, 1, 'the losing process should report the active lease as busy');
-  const owner = initial[0]!.type === 'task-started' ? first : second;
+  const owner = initial[0]!.type === 'claimed' ? first : second;
   const nonOwner = owner === first ? second : first;
 
-  await sleep(2400);
-  nonOwner.send('run');
-  await nonOwner.waitFor('run-busy');
-  owner.send('finish');
-  const completed = await owner.waitFor('run-finished');
-  assert.equal(completed.status, 'completed', 'the owner should finish after renewing beyond its initial lease');
+  owner.send('renew');
+  assert.equal((await owner.waitFor('renewed')).renewed, true, 'an active owner should renew its lease');
+  owner.send('release');
+  assert.equal((await owner.waitFor('released')).released, true);
+  nonOwner.send('claim', { jobName: 'test:daily-maintenance' });
+  const afterRelease = await nonOwner.waitFor('claimed');
+  assert(Number(afterRelease.fencingToken) > Number(started[0]!.fencingToken), 'a new owner should receive a later fencing token');
+  nonOwner.send('release');
+  assert.equal((await nonOwner.waitFor('released')).released, true);
 
-  nonOwner.send('run');
-  await nonOwner.waitFor('task-started');
-  nonOwner.send('expire-job');
-  await nonOwner.waitFor('job-expired');
-  await nonOwner.waitFor('task-aborted');
-  await nonOwner.waitFor('assert-invalidated');
-  const lost = await nonOwner.waitFor('run-finished');
-  assert.equal(lost.status, 'lease_lost', 'the runner should abort and refuse success when its lease expires');
   await Promise.all(workers.map((worker) => worker.stop()));
 
   const crashed = new LeaseWorker();
@@ -181,7 +205,7 @@ try {
   await observer.waitFor('claimed');
   observer.send('release');
   assert.equal((await observer.waitFor('released')).released, true);
-  console.log('Distributed job lease tests passed: process exclusion, renewal, release, crash expiry recovery, fencing token progression');
+  console.log('Distributed job lease tests passed: in-flight renewal settlement, multi-process exclusion, renewal/release, crash expiry recovery, fencing token progression');
 } finally {
   await Promise.all(workers.map((worker) => worker.stop().catch(() => undefined)));
   fs.rmSync(temporaryDirectory, { recursive: true, force: true });

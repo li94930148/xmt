@@ -283,7 +283,8 @@ export class SocketYjsProvider {
         }
         const code = acknowledgement?.code || 'ACK_TIMEOUT';
         this.onConflict?.({ code, reason: acknowledgement?.reason });
-        if (code === 'PERSISTENCE_FAILED' || code === 'ACK_TIMEOUT' || code === 'UPDATE_FAILED') {
+        if (code === 'PERSISTENCE_FAILED' || code === 'ACK_TIMEOUT' || code === 'UPDATE_FAILED'
+          || code === 'COORDINATION_UNAVAILABLE' || code === 'COORDINATION_CONFLICT') {
           scheduleRetry(batch);
         }
       });

@@ -20,6 +20,12 @@ assert.equal(ready.items[0].baseline_median_plays, 1000);
 assert.equal(ready.items[0].play_ratio, 3);
 assert.equal(ready.items[0].sample_count, 3);
 assert.equal(ready.items[0].baseline_samples.length, 3);
+assert.equal(build(works.map(work => ({ ...work, updated_at: '2026-09-28 16:00:00' }))).eligible_count, 6,
+  'offset-less database datetimes are Beijing wall time, not UTC');
+assert.equal(build(works.map(work => ({ ...work, updated_at: '2026-09-28T19:00:00+08:00' }))).eligible_count, 0,
+  'an explicit ISO offset remains an instant and must not receive another Beijing offset');
+assert.equal(build(works.map(work => ({ ...work, updated_at: '2026-09-28T20:00:00Z' }))).eligible_count, 0,
+  'a UTC-qualified ISO timestamp stays UTC');
 assert.notEqual(
   build([...works, { ...works[3], id: 99, aweme_id: 'extra-lower-baseline', play_count: 900 }]).items[0].evidence_id,
   ready.items[0].evidence_id,

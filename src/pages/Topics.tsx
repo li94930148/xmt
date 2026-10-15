@@ -38,6 +38,7 @@ import { useSocket } from '../hooks/useSocket';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 import { useAppStore } from '../store';
 import { createListFetchController, listErrorKey } from '../utils/listFetchNotify';
+import { createBatchMutationNotice } from '../utils/batch-mutation-feedback';
 import { Topic } from '../types';
 import Pagination from '../components/Pagination';
 import TopicSpotlightCard from '../components/xmt-ui/TopicSpotlightCard';

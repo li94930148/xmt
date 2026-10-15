@@ -44,6 +44,12 @@ export default function AddTopic() {
   const submitInFlight = useRef(false);
 
   useEffect(() => {
+    const draft = readTopicDraft(draftKey);
+    setFormData(draft ?? emptyFormData);
+    setHasLocalDraft(Boolean(draft));
+  }, [draftKey]);
+
+  useEffect(() => {
     const fetchUsers = async () => {
       try {
         const userList = await getUsers();

@@ -25,6 +25,8 @@ export default function ExportPage() {
   ].filter((item) => !permissionsLoading && item.visible);
   const displayedTab = activeTab === 'daily' && dailyLinks.length === 0 ? 'weekly' : activeTab;
 
+  useEffect(() => { loadWeeklyReport(); }, [loadWeeklyReport]);
+
   const handleExport = async (type: 'topics' | 'analytics') => {
     if (exportInFlightRef.current) return;
     exportInFlightRef.current = true;

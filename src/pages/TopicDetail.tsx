@@ -38,8 +38,11 @@ import { ActionButton } from '../components/studio';
 
 export default function TopicDetail() {
   const { id } = useParams<{ id: string }>();
+  const currentTopicIdRef = useRef(id);
+  currentTopicIdRef.current = id;
   const topicEditorModePolicy = useMemo(() => getCurrentTopicEditorModePolicy(), []);
   const [topic, setTopic] = useState<Topic | null>(null);
+  const detailRequestSequenceRef = useRef(0);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAuditModal, setShowAuditModal] = useState(false);
@@ -107,16 +110,21 @@ export default function TopicDetail() {
   }, []);
 
   useEffect(() => {
+    const requestId = ++detailRequestSequenceRef.current;
     const fetchData = async () => {
       setLoading(true);
       setOutlineVersionsLoadState('loading');
       try {
         const topicData = await getTopic(parseInt(id!));
+        if (requestId !== detailRequestSequenceRef.current || Number(currentTopicIdRef.current) !== Number(id)) return;
         setTopic(topicData);
         try {
-          setOutlineVersions(await getTopicOutlineVersions(topicData.id));
+          const versions = await getTopicOutlineVersions(topicData.id);
+          if (requestId !== detailRequestSequenceRef.current || Number(currentTopicIdRef.current) !== Number(id)) return;
+          setOutlineVersions(versions);
           setOutlineVersionsLoadState('ready');
         } catch {
+          if (requestId !== detailRequestSequenceRef.current || Number(currentTopicIdRef.current) !== Number(id)) return;
           setOutlineVersions([]);
           setOutlineVersionsLoadState('error');
         }
@@ -147,6 +155,7 @@ export default function TopicDetail() {
         });
 
         const usersData = await getUsers();
+        if (requestId !== detailRequestSequenceRef.current || Number(currentTopicIdRef.current) !== Number(id)) return;
         setUsers(usersData.data);
 
         // 大纲内容从 topic 取
@@ -161,22 +170,30 @@ export default function TopicDetail() {
         setScriptContent(draft.outline);
         setIsTopicDirty(false);
       } catch (error) {
-        appStore.addNotification({ title: '获取选题详情失败', message: (error as Error).message, type: 'error' });
+        if (requestId === detailRequestSequenceRef.current && Number(currentTopicIdRef.current) === Number(id)) {
+          appStore.addNotification({ title: '获取选题详情失败', message: (error as Error).message, type: 'error' });
+        }
       } finally {
-        setLoading(false);
+        if (requestId === detailRequestSequenceRef.current && Number(currentTopicIdRef.current) === Number(id)) setLoading(false);
       }
     };
     
-    fetchData();
+    void fetchData();
+    return () => { detailRequestSequenceRef.current += 1; };
   }, [id]);
 
   const reloadOutlineVersions = async () => {
     if (!topic || outlineVersionsLoadState === 'loading') return;
+    const requestedTopicId = topic.id;
+    const requestId = detailRequestSequenceRef.current;
     setOutlineVersionsLoadState('loading');
     try {
-      setOutlineVersions(await getTopicOutlineVersions(topic.id));
+      const versions = await getTopicOutlineVersions(requestedTopicId);
+      if (requestId !== detailRequestSequenceRef.current || Number(currentTopicIdRef.current) !== requestedTopicId) return;
+      setOutlineVersions(versions);
       setOutlineVersionsLoadState('ready');
     } catch {
+      if (requestId !== detailRequestSequenceRef.current || Number(currentTopicIdRef.current) !== requestedTopicId) return;
       setOutlineVersionsLoadState('error');
     }
   };
@@ -246,30 +263,33 @@ export default function TopicDetail() {
   };
 
   const handleAudit = async () => {
+    const requestedTopicId = Number(id);
     try {
-      await auditTopic(parseInt(id!), auditData);
+      await auditTopic(requestedTopicId, auditData);
     } catch (error) {
       appStore.addNotification({ title: '审核失败', message: (error as Error).message, type: 'error' });
       return;
     }
 
-    setShowAuditModal(false);
+    if (Number(currentTopicIdRef.current) === requestedTopicId) setShowAuditModal(false);
     try {
-      setTopic(await getTopic(parseInt(id!)));
+      const refreshed = await getTopic(requestedTopicId);
+      if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
       appStore.addNotification({
         title: '审核成功',
         message: auditData.status === 'approved' ? '选题已通过审核' : '选题已驳回',
         type: 'success',
       });
     } catch {
-      setTopic((current) => current ? { ...current, status: auditData.status } : current);
+      setTopic((current) => current?.id === requestedTopicId ? { ...current, status: auditData.status } : current);
       appStore.addNotification({ title: '审核已提交', message: '审核操作已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
     }
   };
 
   const handleUpdateStatus = async (status: string) => {
+    const requestedTopicId = Number(id);
     try {
-      await updateTopicStatus(parseInt(id!), status);
+      await updateTopicStatus(requestedTopicId, status);
     } catch (error) {
       appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
       return;
@@ -277,10 +297,11 @@ export default function TopicDetail() {
 
     if (status === 'shooting' || status === 'completed') celebrateMilestone();
     try {
-      setTopic(await getTopic(parseInt(id!)));
+      const refreshed = await getTopic(requestedTopicId);
+      if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
       appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
     } catch {
-      setTopic((current) => current ? { ...current, status: status as Topic['status'] } : current);
+      setTopic((current) => current?.id === requestedTopicId ? { ...current, status: status as Topic['status'] } : current);
       appStore.addNotification({ title: '状态已更新', message: '状态更新已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
     }
   };
@@ -316,10 +337,11 @@ export default function TopicDetail() {
 
   const handleRepairStageRecord = async () => {
     if (!topic || !canEditTopic || repairingStageRecord) return;
+    const requestedTopicId = topic.id;
     setRepairingStageRecord(true);
     let result: Awaited<ReturnType<typeof repairCurrentTopicStageRecord>>;
     try {
-      result = await repairCurrentTopicStageRecord(topic.id);
+      result = await repairCurrentTopicStageRecord(requestedTopicId);
     } catch (error) {
       appStore.addNotification({ title: '补齐阶段记录失败', message: (error as Error).message, type: 'error' });
       setRepairingStageRecord(false);
@@ -327,7 +349,8 @@ export default function TopicDetail() {
     }
 
     try {
-      setTopic(await getTopic(topic.id));
+      const refreshed = await getTopic(requestedTopicId);
+      if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
       appStore.addNotification({
         title: result.created ? '阶段记录已补齐' : '阶段记录已存在',
         message: result.created ? '选题阶段保持不变，操作已记入历史记录。' : '没有重复创建记录，页面已刷新。',
@@ -344,7 +367,9 @@ export default function TopicDetail() {
     }
   };
 
-  const persistTopicAggregate = (saveSnapshot: TopicDetailAggregateDraft, saveRevision: number, versionAction?: 'minor' | 'major') => (
+  const persistTopicAggregate = (saveSnapshot: TopicDetailAggregateDraft, saveRevision: number, versionAction?: 'minor' | 'major') => {
+    const requestedTopicId = Number(id);
+    return (
     aggregateSaveGateRef.current.run(async () => {
       setIsAggregateSaving(true);
       const payload = {
@@ -352,11 +377,17 @@ export default function TopicDetail() {
         ...(versionAction ? { version_action: versionAction, expected_content: topic?.outline ?? '' } : {}),
       };
       try {
-        await updateTopic(parseInt(id!), payload);
+        await updateTopic(requestedTopicId, payload);
       } catch (error) {
         setIsAggregateSaving(false);
         appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
         throw error;
+      }
+
+      if (Number(currentTopicIdRef.current) !== requestedTopicId) {
+        setIsAggregateSaving(false);
+        appStore.addNotification({ title: '选题信息已保存', message: '服务端已确认保存；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+        return;
       }
 
       const confirmedDraft = cloneTopicDetailDraft(saveSnapshot);
@@ -374,9 +405,20 @@ export default function TopicDetail() {
       }
 
       try {
-        const topicData = await getTopic(parseInt(id!));
+        const topicData = await getTopic(requestedTopicId);
+        if (Number(currentTopicIdRef.current) !== requestedTopicId) {
+          appStore.addNotification({ title: '选题信息已保存', message: '服务端已确认保存；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+          return;
+        }
         setTopic(topicData);
-        if (versionAction) setOutlineVersions(await getTopicOutlineVersions(topicData.id).catch(() => outlineVersions));
+        if (versionAction) {
+          const versions = await getTopicOutlineVersions(topicData.id).catch(() => outlineVersions);
+          if (Number(currentTopicIdRef.current) !== requestedTopicId) {
+            appStore.addNotification({ title: '选题信息已保存', message: '服务端已确认保存；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+            return;
+          }
+          setOutlineVersions(versions);
+        }
         if (aggregateRevisionRef.current === saveRevision) {
           const refreshedDraft = createTopicDetailDraft(topicData);
           baselineDraftRef.current = cloneTopicDetailDraft(refreshedDraft);
@@ -393,12 +435,15 @@ export default function TopicDetail() {
         }
         appStore.addNotification({ title: versionAction ? '版本已保存' : '保存成功', message: versionAction ? `选题大纲已保存为${versionAction === 'major' ? '大版本' : '小版本'}` : '选题信息已更新', type: 'success' });
       } catch {
-        appStore.addNotification({ title: '选题信息已保存', message: '服务端已确认保存，但页面刷新失败；当前内容已保留，请稍后重新加载确认，不要重复保存。', type: 'warning' });
+        appStore.addNotification({ title: '选题信息已保存', message: Number(currentTopicIdRef.current) === requestedTopicId
+          ? '服务端已确认保存，但页面刷新失败；当前内容已保留，请稍后重新加载确认，不要重复保存。'
+          : '服务端已确认保存；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
       } finally {
         setIsAggregateSaving(false);
       }
     })
-  );
+    );
+  };
 
   aggregatePersistCommandRef.current = persistTopicAggregate;
 
@@ -573,7 +618,7 @@ export default function TopicDetail() {
     setEditOutline(true);
   };
 
-  if (loading) {
+  if (loading || (topic && topic.id !== Number(id))) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="w-8 h-8 border-4 border-studio-primary border-t-transparent rounded-full animate-spin"></div>

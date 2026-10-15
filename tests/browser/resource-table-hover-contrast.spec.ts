@@ -40,6 +40,8 @@ const detailResource = {
   versions: [],
   audit_summary: null,
 };
+const raceFirstResource = { ...detailResource, id: 74, title: '旧资料详情回包' };
+const raceSecondResource = { ...detailResource, id: 75, title: '当前资料详情回包' };
 const createdResourceBase = {
   ...listResource,
   id: 73,
@@ -55,7 +57,7 @@ const createdResourceBase = {
   audit_summary: null,
 };
 let createdResource = { ...createdResourceBase };
-const existingResourceIds = new Set([listResource.id, detailResource.id]);
+const existingResourceIds = new Set([listResource.id, detailResource.id, raceFirstResource.id, raceSecondResource.id]);
 let failNextDeleteId: number | null = null;
 let failNextResourceListRead = false;
 let failNextCreatedResourceDetailRead = false;
@@ -65,12 +67,18 @@ let resourceDeleteRequests = 0;
 let successfulResourceDeletes = 0;
 let resourceCreateRequests = 0;
 let createdResourceDetailReads = 0;
+let delayNextRaceDetailRead = false;
+let resolveRaceDetailReadStarted: (() => void) | null = null;
+let resolveRaceDetailReadFinished: (() => void) | null = null;
+const raceDetailReadStarted = new Promise<void>((resolve) => { resolveRaceDetailReadStarted = resolve; });
+const raceDetailReadFinished = new Promise<void>((resolve) => { resolveRaceDetailReadFinished = resolve; });
 const app = express();
 app.use(express.json());
 app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   const route = req.query.view === 'knowledge' ? '/asset-center/knowledge'
     : req.query.view === 'detail' ? `/asset-center/resources/${detailResource.id}`
+      : req.query.view === 'race' ? `/asset-center/resources/${raceFirstResource.id}`
       : '/asset-center/resources?library_type=project';
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','resource-hover-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace(${JSON.stringify(route)});</script>`);
 });
@@ -98,8 +106,18 @@ app.get('/api/resource-center/resources/:id', (req, res) => {
     }
     return res.json(createdResource);
   }
-  if (Number(req.params.id) !== detailResource.id || !existingResourceIds.has(detailResource.id)) return res.status(404).json({ message: '资料不存在' });
-  return res.json(detailResource);
+  const requestedId = Number(req.params.id);
+  const resource = [detailResource, raceFirstResource, raceSecondResource].find((item) => item.id === requestedId);
+  if (!resource || !existingResourceIds.has(requestedId)) return res.status(404).json({ message: '资料不存在' });
+  if (requestedId === raceFirstResource.id && delayNextRaceDetailRead) {
+    delayNextRaceDetailRead = false;
+    resolveRaceDetailReadStarted?.();
+    return void setTimeout(() => {
+      resolveRaceDetailReadFinished?.();
+      res.json(resource);
+    }, 500);
+  }
+  return res.json(resource);
 });
 app.post('/api/resource-center/resources', (req, res) => {
   resourceCreateRequests += 1;
@@ -353,6 +371,22 @@ try {
   assert.equal(resourceCreateRequests, 1, 'retrying the detail read does not repeat the resource create');
   assert.equal(createdResourceDetailReads, 2, 'the recovery path performs one initial and one read-only detail request');
 
+  delayNextRaceDetailRead = true;
+  const racePage = await browser.newPage({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' });
+  racePage.on('pageerror', (error) => errors.push(error.message));
+  await racePage.goto(`${base}/__qa?theme=light&view=race`);
+  await raceDetailReadStarted;
+  await racePage.evaluate((nextPath) => {
+    window.history.pushState({}, '', nextPath);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, `/asset-center/resources/${raceSecondResource.id}`);
+  await racePage.getByRole('heading', { name: raceSecondResource.title, exact: true }).waitFor();
+  await raceDetailReadFinished;
+  await racePage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  assert.equal(racePage.url().endsWith(`/asset-center/resources/${raceSecondResource.id}`), true, 'the route changes to the current resource while the prior read is pending');
+  assert.equal(await racePage.getByRole('heading', { name: raceFirstResource.title, exact: true }).count(), 0, 'a late response from the prior resource cannot replace current detail state');
+  await racePage.close();
+
   failNextDeleteId = detailResource.id;
   await page.goto(`${base}/__qa?theme=dark&view=detail`);
   await page.getByRole('heading', { name: detailResource.title, exact: true }).waitFor();
@@ -402,7 +436,7 @@ try {
 
   assert.deepEqual(errors, [], 'resource table light/dark hover states render without browser errors');
   assert.equal(expectedHttpErrors.length, 4, 'two intentional delete failures, post-delete list failure and post-create detail failure each return one 503 response');
-  console.log('Resource browser test passed: fixed table actions stay visible at 320/390px; resource hover, selected knowledge categories, and list/detail delete success/failure feedback meet their contracts.');
+  console.log('Resource browser test passed: fixed table actions stay visible at 320/390px; resource hover, selected knowledge categories, detail request ownership and list/detail delete success/failure feedback meet their contracts.');
 } finally {
   await browser.close();
   await vite.close();

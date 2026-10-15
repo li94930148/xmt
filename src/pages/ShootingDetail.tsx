@@ -51,6 +51,8 @@ const WORKFLOW_STEPS = [
 
 export default function ShootingDetail() {
   const { id } = useParams();
+  const currentShootingIdRef = useRef(id);
+  currentShootingIdRef.current = id;
   const navigate = useNavigate();
   const appStore = useAppStore();
   const styles = useThemeStyles();
@@ -59,6 +61,7 @@ export default function ShootingDetail() {
 
   const [shooting, setShooting] = useState<ShootingDetailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const detailRequestSequenceRef = useRef(0);
   const hasLocalScript = shooting?.script_content !== null && shooting?.script_content !== undefined;
   const sourceProductionId = shooting
     ? hasLocalScript ? shooting.script_source_production_id : shooting.production?.id
@@ -120,12 +123,18 @@ export default function ShootingDetail() {
   }, [appStore, id, navigate, requestLeave]);
 
   useEffect(() => {
+    const requestId = ++detailRequestSequenceRef.current;
     const fetchData = async () => {
       setLoading(true);
+      setShooting(null);
+      setScriptVersions([]);
       try {
         const result = await getShootingById(parseInt(id!));
+        if (requestId !== detailRequestSequenceRef.current || Number(currentShootingIdRef.current) !== Number(id)) return;
+        const versions = await getShootingScriptVersions(result.id).catch(() => []);
+        if (requestId !== detailRequestSequenceRef.current || Number(currentShootingIdRef.current) !== Number(id)) return;
         setShooting(result);
-        setScriptVersions(await getShootingScriptVersions(result.id).catch(() => []));
+        setScriptVersions(versions);
         setArchiveSyncPending(result.published_archive_script_sync_pending === true);
         setCurrentContentDocument(
           getCollaborationRoomId('shooting', result.id),
@@ -136,13 +145,16 @@ export default function ShootingDetail() {
         const content = result.script_content ?? result.production?.content ?? result.production?.content_markdown ?? '';
         setScriptContent(content);
       } catch (error) {
-        appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+        if (requestId === detailRequestSequenceRef.current && Number(currentShootingIdRef.current) === Number(id)) {
+          appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+        }
       } finally {
-        setLoading(false);
+        if (requestId === detailRequestSequenceRef.current && Number(currentShootingIdRef.current) === Number(id)) setLoading(false);
       }
     };
 
-    fetchData();
+    void fetchData();
+    return () => { detailRequestSequenceRef.current += 1; };
   }, [id]);
 
   const shootingEditorAdapter = useMemo(() => {
@@ -195,6 +207,7 @@ export default function ShootingDetail() {
 
   const handleSaveScriptVersion = async (versionAction: 'minor' | 'major') => {
     if (!shooting || savingScriptVersion) return;
+    const requestedShootingId = shooting.id;
     setSavingScriptVersion(true);
     try {
       const flushResult = await runtimeHandleRef.current?.flush({ timeoutMs: 8000 });
@@ -206,20 +219,28 @@ export default function ShootingDetail() {
         { id: shooting.script_source_production_id, version: shooting.script_source_version },
         shooting.production,
       );
-      const result = await updateShooting(shooting.id, {
+      const result = await updateShooting(requestedShootingId, {
         script_content: scriptContent,
         expected_content: scriptContent,
         version_action: versionAction,
         ...source,
       });
+      if (Number(currentShootingIdRef.current) !== requestedShootingId) {
+        appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+        return;
+      }
       setArchiveSyncPending(result.archiveSync === 'pending');
-      setShooting((current) => current ? {
+      setShooting((current) => current?.id === requestedShootingId ? {
         ...current,
         script_content: scriptContent,
         script_source_production_id: source.script_source_production_id ?? current.script_source_production_id,
         script_source_version: source.script_source_version ?? current.script_source_version,
       } : current);
-      const refreshedVersions = await getShootingScriptVersions(shooting.id).catch(() => null);
+      const refreshedVersions = await getShootingScriptVersions(requestedShootingId).catch(() => null);
+      if (Number(currentShootingIdRef.current) !== requestedShootingId) {
+        appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+        return;
+      }
       if (refreshedVersions) setScriptVersions(refreshedVersions);
       appStore.addNotification({
         title: refreshedVersions ? '版本已保存' : '版本已保存，历史列表未刷新',
@@ -236,9 +257,10 @@ export default function ShootingDetail() {
   };
   const handleStatusChange = async (newStatus: string) => {
     if (!shooting) return;
+    const requestedShootingId = shooting.id;
 
     try {
-      await updateShooting(parseInt(id!), {
+      await updateShooting(requestedShootingId, {
         topic_id: shooting.topic_id,
         plan_date: shooting.plan_date || '',
         location: shooting.location || '',
@@ -250,13 +272,28 @@ export default function ShootingDetail() {
       return;
     }
 
+    if (Number(currentShootingIdRef.current) !== requestedShootingId) {
+      appStore.addNotification({ title: '状态已更新', message: '服务端已确认更新；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+      if (newStatus === 'completed') celebrateMilestone();
+      return;
+    }
+
     // The write is confirmed; keep the accepted status even if the follow-up read fails.
-    setShooting((current) => current ? { ...current, status: newStatus } : current);
+    setShooting((current) => current?.id === requestedShootingId ? { ...current, status: newStatus } : current);
 
     try {
-      const updated = await getShootingById(parseInt(id!));
-      setShooting(updated);
+      const updated = await getShootingById(requestedShootingId);
+      if (Number(currentShootingIdRef.current) !== requestedShootingId) {
+        appStore.addNotification({ title: '状态已更新', message: '服务端已确认更新；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+        if (newStatus === 'completed') celebrateMilestone();
+        return;
+      }
+      setShooting((current) => current?.id === requestedShootingId ? updated : current);
     } catch {
+      if (Number(currentShootingIdRef.current) !== requestedShootingId) {
+        if (newStatus === 'completed') celebrateMilestone();
+        return;
+      }
       const message = '服务端已确认更新，但页面刷新失败。请重新加载确认，不要重复操作。';
       if (newStatus === 'completed') {
         appStore.addNotification({ title: '制作已完成', message: `${message} 成片已自动流转到发布管理。`, type: 'warning' });
@@ -330,7 +367,7 @@ export default function ShootingDetail() {
     });
   }, [shooting, sourceProduction, sourceProductionTimestamp]);
 
-  if (loading) {
+  if (loading || (shooting && shooting.id !== Number(id))) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="w-8 h-8 border-4 border-studio-primary border-t-transparent rounded-full animate-spin"></div>

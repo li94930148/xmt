@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const script = fs.readFileSync(path.resolve('deploy/xmt-safe-deploy.sh'), 'utf8');
+const packageJson = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')) as {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+};
 assert.match(script, /require_command sqlite3/);
 assert.match(script, /sqlite3 "\$DB_PATH" "\.backup/);
 assert.match(script, /PRAGMA quick_check/);
@@ -26,6 +30,11 @@ assert.match(script, /Production requires XMT_RUNTIME_ENV_FILE/);
 assert.ok(script.indexOf('ops:runtime-env-check') < script.lastIndexOf('pm2 restart'), 'runtime env gate before PM2 restart');
 assert.ok(script.indexOf('ops:runtime-env-readback') > script.lastIndexOf('pm2 restart'), 'runtime readback after PM2 restart');
 assert.ok(script.indexOf('ops:internal-exposure-check') > script.lastIndexOf('pm2 restart'), 'public internal gate after PM2 restart');
+assert.ok(packageJson.dependencies?.tsx, 'tsx remains available to run the production start script');
+assert.equal(packageJson.devDependencies?.tsx, undefined, 'tsx is not removed with development dependencies');
+assert.ok(script.indexOf('npm run ops:internal-exposure-check') < script.indexOf('npm prune --omit=dev'), 'remove development dependencies only after runtime checks');
+assert.ok(script.indexOf('npm prune --omit=dev') < script.indexOf('Deploy completed successfully'), 'deployment is not reported complete until development dependencies are removed');
+assert.match(script, /npm ls --omit=dev --depth=0/);
 assert.match(script, /HEALTH_RETRY_ATTEMPTS/);
 assert.match(script, /Health check is not ready/);
 assert.doesNotMatch(script, /cp -p "\$DB_PATH"/);

@@ -11,6 +11,16 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.1.19',
+    date: '2026-10-15',
+    title: '详情读取结果归属保护',
+    impactScope: ['选题/创作/成片/发布详情', '资料详情', '复盘详情'],
+    changes: [
+      { type: 'fix', description: '详情首屏及历史、审计、风险等附属读取绑定当前记录；切换页面后，旧请求不能覆盖新详情。' },
+      { type: 'fix', description: '选题、成片和发布的写后刷新只更新原记录；复盘手动刷新失败时保留最近一次成功的风险内容。' },
+    ],
+  },
+  {
     version: '9.1.18',
     date: '2026-10-15',
     title: '首页准确计数与复盘离页保护',

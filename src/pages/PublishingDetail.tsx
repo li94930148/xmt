@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
 import { getPublishingById, getPublishingScriptVersions, syncPublishingPublishedArchive, updatePublishing } from '../api';
@@ -80,6 +80,8 @@ const PUBLISHING_STATUS_COLORS: Record<string, string> = {
 
 export default function PublishingDetail() {
   const { id } = useParams<{ id: string }>();
+  const currentPublishingIdRef = useRef(id);
+  currentPublishingIdRef.current = id;
   const navigate = useNavigate();
   const appStore = useAppStore();
   const styles = useThemeStyles();
@@ -88,6 +90,7 @@ export default function PublishingDetail() {
 
   const [data, setData] = useState<PublishingDetailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const detailRequestSequenceRef = useRef(0);
   const [editMode, setEditMode] = useState(false);
   const [scriptContent, setScriptContent] = useState('');
   const [saving, setSaving] = useState(false);
@@ -106,27 +109,37 @@ export default function PublishingDetail() {
   const sourceProductionTimestamp = workflowScriptSourceTimestamp(sourceProduction);
 
   useEffect(() => {
+    const requestId = ++detailRequestSequenceRef.current;
     const fetchData = async () => {
       setLoading(true);
+      setData(null);
+      setScriptVersions([]);
       try {
         const result = await getPublishingById(parseInt(id!));
+        if (requestId !== detailRequestSequenceRef.current || Number(currentPublishingIdRef.current) !== Number(id)) return;
+        const versions = await getPublishingScriptVersions(result.id).catch(() => []);
+        if (requestId !== detailRequestSequenceRef.current || Number(currentPublishingIdRef.current) !== Number(id)) return;
         setData(result);
-        setScriptVersions(await getPublishingScriptVersions(result.id).catch(() => []));
+        setScriptVersions(versions);
         setArchiveSyncPending(result.published_archive_script_sync_pending === true);
         // 优先使用本地编辑的剧本，其次使用创作管理的剧本
         const content = result.script_content ?? result.production?.content ?? result.production?.content_markdown ?? '';
         setScriptContent(content);
       } catch (error) {
-        appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+        if (requestId === detailRequestSequenceRef.current && Number(currentPublishingIdRef.current) === Number(id)) {
+          appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+        }
       } finally {
-        setLoading(false);
+        if (requestId === detailRequestSequenceRef.current && Number(currentPublishingIdRef.current) === Number(id)) setLoading(false);
       }
     };
-    fetchData();
+    void fetchData();
+    return () => { detailRequestSequenceRef.current += 1; };
   }, [id]);
 
   const handleSaveScript = async (versionAction?: 'minor' | 'major') => {
     if (!data) return;
+    const requestedPublishingId = data.id;
     setSaving(true);
     try {
       const source = workflowScriptSourceReference(
@@ -134,7 +147,7 @@ export default function PublishingDetail() {
         { id: data.script_source_production_id, version: data.script_source_version },
         data.production,
       );
-      const result = await updatePublishing(data.id, {
+      const result = await updatePublishing(requestedPublishingId, {
         script_content: scriptContent,
         ...source,
         ...(versionAction ? {
@@ -142,6 +155,10 @@ export default function PublishingDetail() {
           expected_content: data.script_content ?? data.production?.content ?? data.production?.content_markdown ?? '',
         } : {}),
       });
+      if (Number(currentPublishingIdRef.current) !== requestedPublishingId) {
+        appStore.addNotification({ title: versionAction ? '版本已保存' : '剧本已保存', message: '服务端已确认保存；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+        return;
+      }
       setArchiveSyncPending(result.archiveSync === 'pending');
       setData({
         ...data,
@@ -150,7 +167,11 @@ export default function PublishingDetail() {
         script_source_version: source.script_source_version ?? data.script_source_version,
       });
       setEditMode(false);
-      const refreshedVersions = versionAction ? await getPublishingScriptVersions(data.id).catch(() => null) : undefined;
+      const refreshedVersions = versionAction ? await getPublishingScriptVersions(requestedPublishingId).catch(() => null) : undefined;
+      if (Number(currentPublishingIdRef.current) !== requestedPublishingId) {
+        appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+        return;
+      }
       if (refreshedVersions) setScriptVersions(refreshedVersions);
       if (result.archiveSync === 'pending') {
         appStore.addNotification({
@@ -213,7 +234,7 @@ export default function PublishingDetail() {
     return 'pending';
   };
 
-  if (loading) {
+  if (loading || (data && data.id !== Number(id))) {
     return (
       <PageShell>
         <div className="flex h-64 items-center justify-center">

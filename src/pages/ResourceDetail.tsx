@@ -11,6 +11,8 @@ import { resourceStatusLabel, resourceVisibilityLabel } from '@/components/resou
 
 export default function ResourceDetail() {
   const id = Number(useParams().id);
+  const currentResourceIdRef = useRef(id);
+  currentResourceIdRef.current = id;
   const navigate = useNavigate();
   const location = useLocation();
   const routeState = location.state as { confirmedCreatedTitle?: unknown } | null;
@@ -22,23 +24,34 @@ export default function ResourceDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const deleteLockRef = useRef(false);
+  const loadSequenceRef = useRef(0);
   const addNotification = useAppStore((store) => store.addNotification);
   const { hasPermission } = usePermission();
   const canAudit = hasPermission('resource:audit');
   const load = useCallback(async () => {
+    const requestId = ++loadSequenceRef.current;
     setState('loading');
     setLoadError(null);
+    setResource(null);
+    setAudit([]);
     try {
       const data = await getResourceCenterResource(id);
+      if (requestId !== loadSequenceRef.current || currentResourceIdRef.current !== id) return;
+      const auditData = canAudit ? (await getResourceAudit(id)).data : [];
+      if (requestId !== loadSequenceRef.current || currentResourceIdRef.current !== id) return;
       setResource(data);
-      if (canAudit) setAudit((await getResourceAudit(id)).data);
+      setAudit(auditData);
       setState('ready');
     } catch (cause) {
+      if (requestId !== loadSequenceRef.current || currentResourceIdRef.current !== id) return;
       setLoadError(cause instanceof Error ? cause.message : '资料详情暂时无法读取');
       setState('error');
     }
   }, [id, canAudit]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadSequenceRef.current += 1; };
+  }, [load]);
   const handleDelete = async () => {
     if (!resource || deleteLockRef.current) return;
     deleteLockRef.current = true;
@@ -55,7 +68,7 @@ export default function ResourceDetail() {
       setDeleting(false);
     }
   };
-  if (state === 'loading') return <LoadingState type="page" />;
+  if (state === 'loading' || (resource && resource.id !== id)) return <LoadingState type="page" />;
   if (state === 'error' || !resource) return <PageShell>
     {confirmedCreatedTitle ? <div role="alert" className="mb-4 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-4 py-3 text-sm text-studio-amber-contrast">服务端已确认资料「{confirmedCreatedTitle}」创建成功，但详情暂时无法读取；请重新加载详情，不要重复创建。</div> : null}
     <ErrorState title="资料详情暂时无法读取" description={`${loadError || '读取请求暂时失败'}。${confirmedCreatedTitle ? '请重新加载详情；资料已创建，不要重复创建。' : '请重新加载详情后重试。'}`} actionText="重新加载详情" onRetry={() => void load()} />

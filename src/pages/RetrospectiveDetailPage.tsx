@@ -54,6 +54,8 @@ export default function RetrospectiveDetailPage() {
   const addNotification = useAppStore((state) => state.addNotification);
   const currentUser = useAuthStore((state) => state.user);
   const retroId = Number(params.id);
+  const currentRetroIdRef = useRef(retroId);
+  currentRetroIdRef.current = retroId;
 
   const [detail, setDetail] = useState<RetrospectiveDetail | null>(null);
   const [summary, setSummary] = useState('');
@@ -68,6 +70,8 @@ export default function RetrospectiveDetailPage() {
   const [loadingRisks, setLoadingRisks] = useState(false);
   const [working, setWorking] = useState(false);
   const mutationInFlightRef = useRef(false);
+  const detailRequestSequenceRef = useRef(0);
+  const risksRequestSequenceRef = useRef(0);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const summaryIsDirty = Boolean(detail && summary !== (detail.retrospective.summaryMd || ''));
@@ -110,15 +114,18 @@ export default function RetrospectiveDetailPage() {
 
   const loadDailyRisks = useCallback(async () => {
     if (!Number.isInteger(retroId) || retroId <= 0) return;
+    const requestId = ++risksRequestSequenceRef.current;
     setLoadingRisks(true);
     setDailyRisksError(null);
     try {
       const result = await getRetroDailyRisks(retroId);
+      if (requestId !== risksRequestSequenceRef.current || currentRetroIdRef.current !== retroId) return;
       setDailyRisks(result.risks);
     } catch (error) {
+      if (requestId !== risksRequestSequenceRef.current || currentRetroIdRef.current !== retroId) return;
       setDailyRisksError(toFriendlyRetroError(error));
     } finally {
-      setLoadingRisks(false);
+      if (requestId === risksRequestSequenceRef.current) setLoadingRisks(false);
     }
   }, [retroId]);
 
@@ -127,22 +134,31 @@ export default function RetrospectiveDetailPage() {
       navigate('/retrospectives');
       return;
     }
+    const requestId = ++detailRequestSequenceRef.current;
     setLoading(true);
     setDetailError(null);
     try {
       const result = await getRetrospectiveDetail(retroId);
+      if (requestId !== detailRequestSequenceRef.current || currentRetroIdRef.current !== retroId) return;
       setDetail(result);
       applySummary(result);
     } catch (error) {
+      if (requestId !== detailRequestSequenceRef.current || currentRetroIdRef.current !== retroId) return;
       setDetailError(toFriendlyRetroError(error));
     } finally {
-      setLoading(false);
+      if (requestId === detailRequestSequenceRef.current && currentRetroIdRef.current === retroId) setLoading(false);
     }
   }, [applySummary, navigate, retroId]);
 
   useEffect(() => {
+    setDailyRisks([]);
+    setDailyRisksError(null);
     void loadDetail();
     void loadDailyRisks();
+    return () => {
+      detailRequestSequenceRef.current += 1;
+      risksRequestSequenceRef.current += 1;
+    };
   }, [loadDetail, loadDailyRisks]);
 
   useEffect(() => {
@@ -152,6 +168,7 @@ export default function RetrospectiveDetailPage() {
   }, [currentUser]);
 
   const applyDetail = (next: RetrospectiveDetail, submittedSummary?: string) => {
+    if (next.retrospective.id !== currentRetroIdRef.current) return;
     setDetail(next);
     applySummary(next, submittedSummary);
     setSelectedAction((current) => {
@@ -286,7 +303,7 @@ export default function RetrospectiveDetailPage() {
     }
   };
 
-  if (loading) {
+  if (loading || (detail && detail.retrospective.id !== retroId)) {
     return (
       <PageShell>
         <GlassPanel className="flex h-72 items-center justify-center p-8 text-studio-text-muted">

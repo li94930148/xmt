@@ -12,7 +12,7 @@
 ### 验证
 
 - Creator 同步单飞、Yjs ACK 重试、创作建议时间范围和分布式任务租约专项回归通过；`npm run check`、`npm run build`、全仓 ESLint（0 errors/299 warnings）、版本/迁移/部署门禁与测试入口检查通过。
-- 数据库 SAFE_EXPAND 迁移 031；Android 仅同步版本元数据至 90120，未构建 APK；本地尚未部署，新 PR head 的 CI 待运行。
+- 数据库 SAFE_EXPAND 迁移 031；Android 仅同步版本元数据至 90120，未发布 APK。GitHub Actions run 38690614588 在提交 d6384756a558b89f27e65d938cf7a3496fd56058 上 6 个任务全部通过；服务器尚未部署。
 
 ## v9.1.19 - 2026-10-15
 

@@ -4,8 +4,8 @@
 
 - 根据 PR #81 自动评审核实并修复四处运行可靠性风险：Creator Agent 单账号同步以数据库时钟记录 claim 租约，30 分钟过期后将 abandoned `running` 行标记为失败再允许接管；Yjs 对 `COORDINATION_UNAVAILABLE` 和 `COORDINATION_CONFLICT` 保留原批次并指数退避；创作建议中的无时区数据库时间按北京时间读取，明确时区 ISO 时间保持绝对时间；分布式任务等待在途续租结束后再判定结果。
 - 新增迁移 031 `creator_sync_claim_lease`，采用 `SAFE_EXPAND`，新增 `claimed_at_ms` 并为迁移时已运行的旧行重新赋予一次宽限期；无业务记录删除或回填。
-- Creator 单飞并发、Yjs provider ACK、Creator topic suggestion、新增分布式续租竞争用例及既有分布式租约专项回归通过；分布式租约回归连续三次通过。`npm run check`、`npm run build`、全仓 ESLint（0 errors/299 warnings）、`version:check`、版本治理、迁移就绪、安全部署静态门禁、测试入口（213 文件）及 `git diff --check` 通过。
-- Patch v9.1.20；Android 仅同步版本元数据至 90120，未构建 APK；服务器尚未部署，PR #81 新 head 的 GitHub CI 待运行。
+- Creator 单飞并发、Yjs provider ACK、Creator topic suggestion、新增分布式续租竞争用例及既有分布式租约专项回归通过；分布式租约回归连续三次通过。`npm run check`、`npm run build`、全仓 ESLint（0 errors/299 warnings）、`version:check`、版本治理、迁移就绪、安全部署静态门禁、测试入口（213 文件）及 `git diff --check` 通过。PR CI 初次暴露防重放测试夹具未写入迁移 031 新增的活跃 claim 时间；夹具已补齐数据库时钟 claim，Creator Agent 防重放及单飞测试复跑通过。
+- Patch v9.1.20；Android 仅同步版本元数据至 90120，未发布 APK；GitHub Actions run 38690614588 在提交 d6384756a558b89f27e65d938cf7a3496fd56058 上 6 个任务全部通过。服务器尚未部署。
 
 ## v9.1.19 改造清单 B8：详情读取与写后回包归属
 

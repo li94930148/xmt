@@ -26,7 +26,7 @@
 ### 测试情况
 
 - Creator 同步单飞、Yjs ACK 重试、创作建议时间范围和分布式任务租约专项回归通过；`npm run check`、`npm run build`、全仓 ESLint（0 errors/299 warnings）、版本/迁移/部署门禁、测试入口与差异格式检查通过。
-- Android 仅同步 90120，未构建 APK；生产尚未部署，新 PR head 的 CI 待运行。
+- Android 仅同步 90120，未发布 APK；GitHub Actions run 38690614588 在提交 d6384756a558b89f27e65d938cf7a3496fd56058 上 6 个任务全部通过；生产尚未部署。
 
 ## v9.1.19 - 2026-10-15
 

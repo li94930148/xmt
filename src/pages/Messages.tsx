@@ -201,8 +201,6 @@ export default function Messages() {
     } finally {
       setMarkingAll(false);
     }
-    if (failed) addNotification({ title: succeededIds.size ? '部分消息未标记' : '操作失败', message: `${succeededIds.size} 条已标记为已读，${failed} 条仍未读，可重试。`, type: 'error' });
-    else addNotification({ title: '操作成功', message: '所有消息已标记为已读', type: 'success' });
   };
 
   const handleClearAll = async () => {

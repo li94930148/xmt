@@ -24,6 +24,8 @@
     "test:topic-stage-timestamp": "tsx tests/database/topic-stage-entered-at-migration.test.ts",
     "test:topic-production-handoff": "tsx --test tests/topics/topic-production-handoff.test.ts",
     "test:batch-action-feedback": "tsx tests/topics/batch-action-feedback.test.ts",
+    "test:batch-mutation-feedback": "tsx --test tests/topics/batch-mutation-feedback.test.ts",
+    "test:topic-mutation-feedback-browser": "tsx tests/browser/topic-mutation-feedback.spec.ts",
     "test:changelog-governance": "tsx tests/ops/changelog-governance.test.ts",
     "test:topics-list-notify": "tsx tests/topics/list-fetch-notify.test.ts",
     "test:editor-selection-style": "tsx tests/editor/selection-style-contract.test.ts",

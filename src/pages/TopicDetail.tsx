@@ -262,7 +262,8 @@ export default function TopicDetail() {
         type: 'success',
       });
     } catch {
-      appStore.addNotification({ title: '审核已提交', message: '审核结果已保存，但页面刷新失败；请重新加载确认当前状态。', type: 'warning' });
+      setTopic((current) => current ? { ...current, status: auditData.status } : current);
+      appStore.addNotification({ title: '审核已提交', message: '审核操作已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
     }
   };
 
@@ -279,7 +280,8 @@ export default function TopicDetail() {
       setTopic(await getTopic(parseInt(id!)));
       appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
     } catch {
-      appStore.addNotification({ title: '状态已更新', message: '状态已保存，但页面刷新失败；请重新加载确认当前状态。', type: 'warning' });
+      setTopic((current) => current ? { ...current, status: status as Topic['status'] } : current);
+      appStore.addNotification({ title: '状态已更新', message: '状态更新已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
     }
   };
 

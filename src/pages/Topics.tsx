@@ -50,7 +50,6 @@ import { parseStoredBjt } from '@shared/time';
 import TopicsBoardView from '../components/topics/TopicsBoardView';
 import { topicStatusLabel } from '../components/topics/topicStatusLabel';
 import { getKanbanTopicDestination } from '../platform/kanban-navigation';
-import { getBatchActionFeedback } from '../utils/batch-action-feedback';
 import { celebrateMilestone } from '../utils/confetti';
 
 type SortField = 'title' | 'created_at' | 'deadline' | 'status' | 'submitted_at';
@@ -363,15 +362,28 @@ export default function Topics() {
     }
   };
 
-  const finishBatchAction = async (action: '删除' | '审核', succeededIds: number[], failedIds: number[], total: number) => {
-    setSelected(new Set(failedIds));
-    addNotification(getBatchActionFeedback(action, total, succeededIds.length));
-    if (succeededIds.length === 0) return;
+  const finishBatchAction = async (
+    action: '删除' | '审核',
+    selectedIds: number[],
+    failedIds: number[],
+    firstError: string,
+    status?: 'approved' | 'rejected',
+  ) => {
+    const notice = createBatchMutationNotice({
+      action: action === '删除' ? 'delete' : 'audit',
+      selectedIds,
+      failedIds,
+      firstError,
+      ...(status ? { status } : {}),
+    });
+    setSelected(new Set(notice.failedIds));
+    addNotification(notice);
+    if (selectedIds.length === failedIds.length) return;
 
     const refreshed = await fetchTopics({ suppressErrorNotify: true });
     if (refreshed === false) {
       const failedSummary = failedIds.length > 0 ? `；失败的 ${failedIds.length} 项仍保留选择，可单独重试` : '';
-      setBatchRefreshNotice(`服务端已确认批量${action}成功 ${succeededIds.length}/${total} 项${failedSummary}。选题列表刷新失败；重新加载列表只会读取数据，不会再次执行已成功的操作。`);
+      setBatchRefreshNotice(`服务端已确认批量${action}成功 ${selectedIds.length - failedIds.length}/${selectedIds.length} 项${failedSummary}。选题列表刷新失败；重新加载列表只会读取数据，不会再次执行已成功的操作。`);
     }
   };
 
@@ -386,13 +398,15 @@ export default function Topics() {
     setBatchRefreshNotice(null);
     const succeededIds: number[] = [];
     const failedIds: number[] = [];
+    let firstError = '';
     try {
       for (const id of ids) {
         try {
           await deleteTopic(id);
           succeededIds.push(id);
-        } catch {
+        } catch (error) {
           failedIds.push(id);
+          if (!firstError) firstError = error instanceof Error ? error.message : '删除失败，请重试';
         }
       }
       const succeeded = new Set(succeededIds);
@@ -400,7 +414,7 @@ export default function Topics() {
         setTopics((current) => current.filter((topic) => !succeeded.has(topic.id)));
         setTotal((current) => Math.max(0, current - succeeded.size));
       }
-      await finishBatchAction('删除', succeededIds, failedIds, ids.length);
+      await finishBatchAction('删除', ids, failedIds, firstError);
     } finally {
       batchActionInFlightRef.current = false;
       setBatchActionLoading(false);
@@ -415,20 +429,22 @@ export default function Topics() {
     setBatchRefreshNotice(null);
     const succeededIds: number[] = [];
     const failedIds: number[] = [];
+    let firstError = '';
     try {
       for (const id of ids) {
         try {
           await auditTopic(id, { status, comment: '批量审核' });
           succeededIds.push(id);
-        } catch {
+        } catch (error) {
           failedIds.push(id);
+          if (!firstError) firstError = error instanceof Error ? error.message : '审核失败，请重试';
         }
       }
       const succeeded = new Set(succeededIds);
       if (succeeded.size > 0) {
         setTopics((current) => current.map((topic) => succeeded.has(topic.id) ? { ...topic, status } : topic));
       }
-      await finishBatchAction('审核', succeededIds, failedIds, ids.length);
+      await finishBatchAction('审核', ids, failedIds, firstError, status);
     } finally {
       batchActionInFlightRef.current = false;
       setBatchActionLoading(false);
@@ -693,7 +709,7 @@ export default function Topics() {
                           type="button"
                           onClick={() => toggleSelect(topic.id)}
                           className="rounded-lg p-1.5 hover:bg-studio-surface-soft"
-                          aria-label={`选择选题 ${topic.title}`}
+                          aria-label={`${selectedRow ? '取消选择' : '选择'}选题：${topic.title}`}
                           aria-pressed={selectedRow}
                         >
                           {selectedRow ? <CheckSquare className="h-4 w-4 text-studio-cyan" /> : <Square className="h-4 w-4 text-studio-text-muted" />}

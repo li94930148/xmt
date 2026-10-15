@@ -123,8 +123,10 @@ app.use('/api/creator-agent', creatorAgentRouter);
 const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const instance = app.listen(0, () => resolve(instance)); });
 const address = server.address();
 assert(address && typeof address !== 'string');
-await execute(`INSERT INTO creator_sync_tasks(agent_id,task_id,start_time,platform,account,status)
-  VALUES(?,?,CURRENT_TIMESTAMP,'douyin',?,'running')`, [agents[0].id, 'already-running-task', agents[0].accountId]);
+await execute(`INSERT INTO creator_sync_tasks(agent_id,task_id,start_time,platform,account,status,claimed_at_ms)
+  VALUES(?,?,CURRENT_TIMESTAMP,'douyin',?,'running',
+    CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))`,
+  [agents[0].id, 'already-running-task', agents[0].accountId]);
 const concurrentSyncResponse = await fetch(`http://127.0.0.1:${address.port}/api/creator-agent/data-sync`, {
   method: 'POST',
   headers: { 'content-type': 'application/json', authorization: `Bearer ${agents[0].token}` },

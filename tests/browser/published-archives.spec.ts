@@ -1,0 +1,532 @@
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import express from 'express';
+import { Server as SocketServer } from 'socket.io';
+import { chromium } from 'playwright';
+import { createServer as createViteServer } from 'vite';
+import { readFileSync } from 'node:fs';
+
+const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+const member = { id: 92, username: 'published-archive-qa', role: 'editor', name: '发布归档验收', enabled: true, force_change_password: false };
+
+function luminance(channel: number) {
+  const normalized = channel / 255;
+  return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+}
+
+async function contrast(locator: import('playwright').Locator) {
+  return locator.evaluate((element) => {
+    const foreground = getComputedStyle(element).color.match(/[\d.]+/g)?.map(Number).slice(0, 3) || [];
+    const appBackground = getComputedStyle(document.documentElement).getPropertyValue('--xmt-app-bg').match(/[\d.]+/g)?.map(Number) || [];
+    let background = appBackground.length >= 3 ? appBackground.slice(0, 3) : [255, 255, 255];
+    const ancestors: Element[] = [];
+    for (let current: Element | null = element; current && current !== document.documentElement; current = current.parentElement) ancestors.push(current);
+    for (const ancestor of ancestors.reverse()) {
+      const color = getComputedStyle(ancestor).backgroundColor.match(/[\d.]+/g)?.map(Number) || [];
+      if (color.length < 3) continue;
+      const alpha = color.length >= 4 ? color[3] : 1;
+      if (alpha <= 0) continue;
+      background = color.slice(0, 3).map((channel, index) => channel * alpha + background[index] * (1 - alpha));
+    }
+    return { foreground, background, backgroundColor: `rgb(${background.map(Math.round).join(', ')})` };
+  }).then(({ foreground, background, backgroundColor }) => {
+    if (foreground.length !== 3 || background.length !== 3) return { ratio: 0, backgroundColor };
+    const weights = [0.2126, 0.7152, 0.0722];
+    const textLum = foreground.reduce((sum, channel, index) => sum + weights[index] * luminance(channel), 0);
+    const backgroundLum = background.reduce((sum, channel, index) => sum + weights[index] * luminance(channel), 0);
+    return { ratio: (Math.max(textLum, backgroundLum) + 0.05) / (Math.min(textLum, backgroundLum) + 0.05), backgroundColor };
+  });
+}
+const archiveList = {
+  data: [
+    {
+      id: 701,
+      name: '多平台早餐主题',
+      file_path: 'archive/topic-71',
+      uploader_name: '发布归档验收',
+      platform: 'douyin',
+      publishedPlatforms: ['douyin', 'weixin'],
+      publishedRecordCount: 2,
+      scriptVersion: 'v3',
+      shootingCommentCount: 1,
+      publishedAt: '2026-09-29 10:00:00',
+      views: 456789,
+      likes: 231,
+      archived_at: '2026-09-29 10:30:00',
+      created_at: '2026-09-29 10:30:00',
+      updated_at: '2026-09-29 10:30:00',
+    },
+    {
+      id: 702,
+      name: '旧版单平台归档',
+      file_path: 'archive/topic-72',
+      uploader_name: '发布归档验收',
+      platform: 'xiaohongshu',
+      publishedPlatforms: ['xiaohongshu'],
+      publishedRecordCount: 1,
+      scriptVersion: '',
+      shootingCommentCount: 0,
+      publishedAt: '2026-09-28 11:00:00',
+      views: 88,
+      likes: 5,
+      archived_at: '2026-09-28 11:30:00',
+      created_at: '2026-09-28 11:30:00',
+      updated_at: '2026-09-28 11:30:00',
+    },
+  ],
+  total: 2,
+  page: 1,
+  limit: 12,
+};
+let archiveItems = [...archiveList.data];
+let archiveListReads = 0;
+let failNextArchiveListRead = false;
+let failedArchiveListReads = 0;
+let archiveDeleteWrites = 0;
+let productionMutationWrites = 0;
+const productionHistoryVersionReads: string[] = [];
+const app = express();
+app.get('/__qa', (req, res) => {
+  const theme = req.query.theme === 'dark' ? 'dark' : 'light';
+  const adminCookie = req.query.admin === '1' ? "document.cookie='xmt_archive_qa_admin=1; path=/';" : '';
+  const noProductionViewCookie = req.query.source_permission === '0' ? "document.cookie='xmt_archive_qa_no_production=1; path=/';" : '';
+  const crossTopicCookie = req.query.source_permission === '0' ? "document.cookie='xmt_archive_qa_cross_topic=1; path=/';" : '';
+  const unavailableSourceCookie = req.query.source_unavailable === '1' ? "document.cookie='xmt_archive_qa_source_unavailable=1; path=/';" : '';
+  return res.type('html').send(`<script>${adminCookie}${noProductionViewCookie}${crossTopicCookie}${unavailableSourceCookie}localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(member))});localStorage.setItem('xmt_token','published-archive-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/asset-center');</script>`);
+});
+app.get('/api/auth/me', (_req, res) => res.json(member));
+app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
+app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
+app.get('/api/permissions/my', (req, res) => {
+  const permissions = req.headers.cookie?.includes('xmt_archive_qa_admin=1') ? ['resource:delete', 'production:view', 'topic:view'] : ['topic:view'];
+  if (!req.headers.cookie?.includes('xmt_archive_qa_no_production=1')) permissions.push('production:view');
+  res.json(permissions);
+});
+app.get('/api/resource-center/resources', (_req, res) => res.json({ data: [], pagination: { page: 1, page_size: 1, total: 0, total_pages: 0 } }));
+app.post('/__qa/fail-next-archive-list-read', (_req, res) => {
+  failNextArchiveListRead = true;
+  res.json({ ok: true });
+});
+app.get('/api/resources/archives', (_req, res) => {
+  archiveListReads += 1;
+  if (failNextArchiveListRead) {
+    failNextArchiveListRead = false;
+    failedArchiveListReads += 1;
+    return res.status(503).json({ message: '模拟归档列表读取失败' });
+  }
+  res.json({ ...archiveList, data: archiveItems, total: archiveItems.length });
+});
+app.delete('/api/resources/archives/:id', (req, res) => {
+  archiveDeleteWrites += 1;
+  const id = Number(req.params.id);
+  archiveItems = archiveItems.filter((item) => item.id !== id);
+  res.json({ message: '归档已删除' });
+});
+app.get('/api/resources/archives/701', (req, res) => res.json({
+  id: 701,
+  name: '多平台早餐主题',
+  file_path: 'archive/topic-71',
+  uploader_name: member.name,
+  created_at: '2026-09-29 10:00:00',
+  updated_at: '2026-09-29 10:30:00',
+  archive: {
+    topic: { id: 71, title: '多平台早餐主题', description: '两个平台分别发布，各自查看数据。', platform: 'douyin', deadline: '2026-09-29', created_at: '2026-09-20 09:00:00' },
+    script: { version: 'v3.0', content: '<p>归档中的正式稿。</p>', history: [] },
+    shooting: { record: { id: 501, script_content: '<p>成片阶段独立稿。</p>' }, comments: [] },
+    publishing: { publishing_id: 402, platform: 'weixin', url: 'https://example.test/weixin/402', status: 'published', publish_time: '2026-09-29 10:00:00' },
+    script_sources: {
+      shooting: { topic_id: 71, production_id: 801, version: 'v2.0', state: 'derived' },
+      publishing: {
+        topic_id: req.headers.cookie?.includes('xmt_archive_qa_cross_topic=1') ? 72 : 71,
+        production_id: 801,
+        version: 'v1.0',
+        state: req.headers.cookie?.includes('xmt_archive_qa_source_unavailable=1') ? 'unavailable' : 'derived',
+      },
+    },
+    script_source_snapshots: [
+      { topic_id: 71, production_id: 801, version: 'v2.0', content: '<p>成片剧本引用的创作历史正文。</p>', content_markdown: '成片剧本引用的创作历史正文。' },
+      { topic_id: 71, production_id: 801, version: 'v1.0', content: '<p>发布剧本引用的 v1.0 创作历史正文。</p>', content_markdown: '发布剧本引用的 v1.0 创作历史正文。' },
+    ],
+    analytics: { data_date: '2026-09-29', views: 1200, likes: 52, shares: 8, comments: 4 },
+    published_records: [
+      { publishing_id: 402, platform: 'weixin', url: 'https://example.test/weixin/402', status: 'published', publish_time: '2026-09-29 10:00:00', analytics: { data_date: '2026-09-29', views: 1200, likes: 52, shares: 8, comments: 4 } },
+      { publishing_id: 401, platform: 'douyin', url: 'https://example.test/douyin/401', status: 'published', publish_time: '2026-09-28 10:00:00', analytics: { data_date: '2026-09-28', views: 456789, likes: 231, shares: 15, comments: 28 } },
+    ],
+    archived_at: '2026-09-29 10:30:00',
+  },
+}));
+app.get('/api/resources/archives/702', (_req, res) => res.json({
+  id: 702,
+  name: '旧版单平台归档',
+  file_path: 'archive/topic-72',
+  uploader_name: member.name,
+  created_at: '2026-09-28 11:00:00',
+  updated_at: '2026-09-28 11:30:00',
+  archive: {
+    topic: { title: '旧版单平台归档', description: '', platform: 'xiaohongshu', deadline: '', created_at: '' },
+    publishing: { platform: 'xiaohongshu', url: '', status: 'published', publish_time: '2026-09-28 11:00:00' },
+    analytics: { views: 88, likes: 5, shares: 1, comments: 0 },
+    archived_at: '2026-09-28 11:30:00',
+  },
+}));
+app.get('/api/workflow/production/801', (_req, res) => res.json({
+  id: 801,
+  topic_id: 71,
+  topic_title: '多平台早餐主题',
+  version: 'v3.0',
+  content: '<p>这是当前最新的 v3.0 创作稿，不应替代归档来源版本。</p>',
+  status: 'draft',
+  file_path: '',
+  operator_id: member.id,
+  operator_name: member.name,
+  created_at: '2026-09-20 09:00:00',
+  updated_at: '2026-09-29 10:00:00',
+}));
+app.get('/api/topics/71', (_req, res) => res.json({ data: {
+  id: 71,
+  title: '多平台早餐主题',
+  description: '两个平台分别发布，各自查看数据。',
+  status: 'production',
+  platform: 'douyin',
+  deadline: '2026-09-29',
+  creator_id: member.id,
+  assignee_id: member.id,
+  created_at: '2026-09-20 09:00:00',
+  updated_at: '2026-09-29 10:00:00',
+} }));
+app.get('/api/workflow/production/801/history', (req, res) => {
+  const versionFilter = String(req.query.version || '');
+  if (versionFilter) productionHistoryVersionReads.push(versionFilter);
+  const v1 = {
+    id: 801,
+    production_id: 801,
+    version: 'v1.0',
+    content: '<p>准确的 v1.0 创作历史正文。</p>',
+    status: 'draft',
+    change_type: 'minor',
+    operator_id: member.id,
+    operator_name: member.name,
+    created_at: '2026-09-22 10:00:00',
+  };
+  const v2 = {
+    id: 802,
+    production_id: 801,
+    version: 'v2.0',
+    content: '<p>准确的 v2.0 创作历史正文。</p>',
+    status: 'draft',
+    change_type: 'major',
+    operator_id: member.id,
+    operator_name: member.name,
+    created_at: '2026-09-25 10:00:00',
+  };
+  const allHistory = [v2, v1];
+  const history = versionFilter ? allHistory.filter((entry) => entry.version === versionFilter) : allHistory;
+  res.json({ data: history, total: history.length, page: Number(req.query.page || 1), limit: Number(req.query.limit || 20) });
+});
+app.all('/api/workflow/production/801', (req, res, next) => {
+  if (req.method === 'GET') return next();
+  productionMutationWrites += 1;
+  res.status(405).json({ message: '隔离验收不允许修改创作数据' });
+});
+app.use('/api', (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 20 }));
+
+const server = http.createServer(app);
+const io = new SocketServer(server);
+const vite = await createViteServer({ root: process.cwd(), server: { middlewareMode: true, hmr: { server } }, appType: 'spa', logLevel: 'error' });
+app.use(vite.middlewares);
+await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+const address = server.address();
+assert(address && typeof address !== 'string');
+const base = `http://127.0.0.1:${address.port}`;
+
+if (process.env.XMT_PUBLISHED_ARCHIVES_QA_SERVE === '1') {
+  console.log(`Isolated published archive QA fixture: ${base}/__qa`);
+  await new Promise(() => {});
+}
+
+const browser = await chromium.launch({ headless: true });
+try {
+  const errors: string[] = [];
+  const expectedHttpErrors: string[] = [];
+  const desktop = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  desktop.on('pageerror', (error) => errors.push(error.message));
+  desktop.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    else errors.push(message.text());
+  });
+  await desktop.goto(`${base}/__qa`);
+  await desktop.getByRole('heading', { name: '资料中心' }).waitFor();
+  const overviewEntry = desktop.locator('a[href="/asset-center/published-archives"]').last();
+  await overviewEntry.waitFor();
+  const archiveReadsBeforeRecovery = archiveListReads;
+  await desktop.evaluate(async () => { await fetch('/__qa/fail-next-archive-list-read', { method: 'POST' }); });
+  await overviewEntry.click();
+  await desktop.getByRole('heading', { name: '发布归档' }).waitFor();
+  await desktop.getByRole('alert').getByText(/归档列表暂时无法读取/).waitFor();
+  assert.equal(await desktop.getByText('暂无资源归档', { exact: true }).count(), 0, 'an initial archive-list failure is not presented as an empty archive collection');
+  assert.equal(await desktop.getByText('共 — 个存档', { exact: true }).count(), 1, 'an initial read failure does not present an unverified zero archive count');
+  assert.deepEqual(await desktop.locator('.xmt-data-number').allTextContents(), ['—', '—', '—', '—'], 'initial summary metrics remain unavailable until the first successful list read');
+  assert.equal(archiveListReads, archiveReadsBeforeRecovery + 1, 'the initial failure performs one archive-list read');
+  assert.equal(archiveDeleteWrites, 0, 'list recovery does not trigger any archive mutation');
+  await desktop.screenshot({ path: '/tmp/xmt-published-archive-list-error-1440.png', fullPage: true });
+  await desktop.getByRole('button', { name: '重新加载归档', exact: true }).click();
+  const multiTopic = desktop.getByRole('button', { name: /多平台早餐主题/ });
+  await multiTopic.waitFor();
+  assert.equal(archiveListReads, archiveReadsBeforeRecovery + 2, 'the recovery control retries only the archive-list GET');
+  assert.equal(archiveDeleteWrites, 0, 'the successful read retry remains read-only');
+  await desktop.evaluate(async () => { await fetch('/__qa/fail-next-archive-list-read', { method: 'POST' }); });
+  const archiveSearch = desktop.getByPlaceholder('搜索资源名称...');
+  await archiveSearch.fill('多平台早餐主题');
+  await desktop.getByRole('alert').getByText(/仍显示最近一次成功读取的内容/).waitFor();
+  await multiTopic.waitFor();
+  assert.equal(await desktop.getByText('暂无资源归档', { exact: true }).count(), 0, 'a refresh failure preserves the last successful archive list instead of showing an empty state');
+  assert.equal(await desktop.getByText('共 2 个存档', { exact: true }).count(), 1, 'a refresh failure retains the last confirmed archive count');
+  assert.equal(archiveListReads, archiveReadsBeforeRecovery + 3, 'refresh failure performs one additional read');
+  await desktop.getByRole('button', { name: '重新加载归档', exact: true }).click();
+  await multiTopic.waitFor();
+  assert.equal(archiveListReads, archiveReadsBeforeRecovery + 4, 'the second recovery action performs one read and no write');
+  assert.equal(archiveDeleteWrites, 0, 'repeated read recovery never deletes an archive');
+  assert.equal(expectedHttpErrors.length, 2, 'the browser logs only the two intentionally injected archive-list 503 responses');
+  await archiveSearch.fill('');
+  await desktop.getByRole('button', { name: /旧版单平台归档/ }).waitFor();
+  await multiTopic.click();
+  const navigationButtons = await desktop.locator('nav.flex-1').first().evaluate((nav) => Array.from(nav.querySelectorAll('button')).map((button) => ({
+    label: button.textContent?.trim() || '',
+    className: button.className,
+  })));
+  const activePublishedArchive = navigationButtons.find((button) => button.label === '发布归档');
+  const activeAssetOverview = navigationButtons.find((button) => button.label === '资料中心概览');
+  assert.match(activePublishedArchive?.className || '', /border-studio-border-active/, 'the nested archive route activates its own navigation item');
+  assert.doesNotMatch(activeAssetOverview?.className || '', /border-studio-border-active/, 'the broader asset overview is not also marked active');
+  await desktop.getByText('抖音', { exact: true }).first().waitFor();
+  await desktop.getByText('微信视频号', { exact: true }).waitFor();
+  await desktop.getByText(/共 2 条发布记录/).waitFor();
+  await desktop.getByText('查看发布记录 #402', { exact: true }).waitFor();
+  await desktop.getByText('查看发布记录 #401', { exact: true }).waitFor();
+  await desktop.getByText('456,789', { exact: true }).waitFor();
+  assert.equal(await desktop.getByRole('button', { name: '删除', exact: true }).count(), 0, 'a member without resource:delete does not see the archive delete action');
+  const sourceTopicLink = desktop.getByRole('link', { name: '查看归档来源选题', exact: true });
+  assert.equal(await sourceTopicLink.getAttribute('href'), '/topics/71', 'the archive links back to its exact source topic');
+  await desktop.getByRole('button', { name: '稿件', exact: true }).click();
+  const sourcePanel = desktop.getByTestId('archive-script-sources');
+  await sourcePanel.getByText('成片剧本', { exact: true }).waitFor();
+  const sourceVersionLink = sourcePanel.getByRole('link', { name: '查看成片剧本来源创作稿 v2.0', exact: true });
+  assert.equal(await sourceVersionLink.getAttribute('href'), '/production/801?version=v2.0', 'archive source links target the exact recorded production history version');
+  await sourceVersionLink.click();
+  await desktop.getByRole('heading', { name: '多平台早餐主题' }).waitFor();
+  await desktop.getByText('准确的 v2.0 创作历史正文。', { exact: true }).waitFor();
+  await desktop.getByText('历史只读预览', { exact: true }).first().waitFor();
+  await desktop.getByRole('button', { name: '回到当前版本', exact: true }).waitFor();
+  assert.equal(await desktop.getByText('这是当前最新的 v3.0 创作稿，不应替代归档来源版本。', { exact: true }).count(), 0, 'following the archive link renders the exact historical body rather than the current manuscript');
+  assert(productionHistoryVersionReads.includes('v2.0'), 'the production detail requests the archive-recorded v2.0 history explicitly');
+  assert.equal(productionMutationWrites, 0, 'opening an archived source version remains read-only');
+  await desktop.goto(`${base}/asset-center/published-archives`);
+  await desktop.getByRole('heading', { name: '发布归档' }).waitFor();
+  await desktop.getByRole('button', { name: /多平台早餐主题/ }).click();
+  await desktop.getByRole('button', { name: '稿件', exact: true }).click();
+  const publishingVersionLink = sourcePanel.getByRole('link', { name: '查看发布剧本来源创作稿 v1.0', exact: true });
+  assert.equal(await publishingVersionLink.getAttribute('href'), '/production/801?version=v1.0', 'publishing archives link to the exact recorded history version independently from the shooting source');
+  await publishingVersionLink.click();
+  await desktop.getByText('准确的 v1.0 创作历史正文。', { exact: true }).waitFor();
+  await desktop.getByText('历史只读预览', { exact: true }).first().waitFor();
+  assert.equal(await desktop.getByText('准确的 v2.0 创作历史正文。', { exact: true }).count(), 0, 'the publishing source opens its own recorded v1.0 rather than the shooting source v2.0');
+  assert(productionHistoryVersionReads.includes('v1.0'), 'the production detail explicitly requests the publishing source version');
+  assert.equal(productionMutationWrites, 0, 'opening both archived source versions remains read-only');
+  await desktop.goto(`${base}/asset-center/published-archives`);
+  await desktop.getByRole('heading', { name: '发布归档' }).waitFor();
+  await desktop.getByRole('button', { name: /多平台早餐主题/ }).click();
+  await desktop.getByRole('button', { name: '稿件', exact: true }).click();
+  await sourcePanel.getByRole('link', { name: '查看发布剧本来源创作稿 v1.0', exact: true }).waitFor();
+  const archivedSourceDisclosures = sourcePanel.getByText('查看归档保存的来源正文', { exact: true });
+  await archivedSourceDisclosures.nth(0).click();
+  await sourcePanel.getByText('成片剧本引用的创作历史正文。', { exact: true }).waitFor();
+  await archivedSourceDisclosures.nth(1).click();
+  await sourcePanel.getByText('发布剧本引用的 v1.0 创作历史正文。', { exact: true }).waitFor();
+  await desktop.screenshot({ path: '/tmp/xmt-published-archives-source-lineage-1440.png', fullPage: true });
+  await desktop.getByRole('button', { name: '发布信息', exact: true }).click();
+  for (const [label, locator] of [
+    ['当前“发布信息”页签', desktop.getByRole('button', { name: '发布信息', exact: true })],
+    ['发布链接', desktop.getByRole('link', { name: '打开发布链接' }).first()],
+    ['发布记录链接', desktop.getByRole('link', { name: '查看发布记录 #402', exact: true })],
+  ] as const) {
+    const result = await contrast(locator);
+    assert.ok(result.ratio >= 4.5, `浅色主题 ${label} 对比度为 ${result.ratio.toFixed(2)}:1 on ${result.backgroundColor}，应不低于 4.5:1`);
+  }
+  for (const viewport of [
+    { width: 1366, height: 768 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ]) {
+    await desktop.setViewportSize(viewport);
+    for (const zoom of [0.8, 0.9, 1, 1.1, 1.25]) {
+      await desktop.evaluate((value) => { document.documentElement.style.zoom = `${value * 100}%`; }, zoom);
+      for (const [label, locator] of [
+        ['返回发布归档', desktop.getByRole('button', { name: '返回发布归档', exact: true })],
+        ['来源选题链接', sourceTopicLink],
+        ['打开发布链接', desktop.getByRole('link', { name: '打开发布链接' }).first()],
+        ['查看发布记录', desktop.getByRole('link', { name: '查看发布记录 #402', exact: true })],
+        ['发布信息页签', desktop.getByRole('button', { name: '发布信息', exact: true })],
+      ] as const) {
+        await locator.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
+        const geometry = await locator.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const clippedBy: string[] = [];
+          for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+            const style = getComputedStyle(ancestor);
+            const ancestorRect = ancestor.getBoundingClientRect();
+            if ((['hidden', 'clip'].includes(style.overflowX) && (rect.left < ancestorRect.left - 1 || rect.right > ancestorRect.right + 1))
+              || (['hidden', 'clip'].includes(style.overflowY) && (rect.top < ancestorRect.top - 1 || rect.bottom > ancestorRect.bottom + 1))) clippedBy.push(`${ancestor.tagName}.${String(ancestor.className)}`);
+          }
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, viewportWidth: innerWidth, viewportHeight: innerHeight, clippedBy, display: getComputedStyle(element).display, visibility: getComputedStyle(element).visibility };
+        });
+        assert.ok(geometry.width > 0 && geometry.height > 0, `${label} has a layout box at ${viewport.width}px / ${zoom * 100}%: ${JSON.stringify(geometry)}`);
+        assert.notEqual(geometry.display, 'none', `${label} is not hidden at ${viewport.width}px / ${zoom * 100}%`);
+        assert.notEqual(geometry.visibility, 'hidden', `${label} is visible at ${viewport.width}px / ${zoom * 100}%`);
+        assert.deepEqual(geometry.clippedBy, [], `${label} is not clipped at ${viewport.width}px / ${zoom * 100}%`);
+        assert.ok(geometry.x >= -1 && geometry.x + geometry.width <= geometry.viewportWidth + 1, `${label} stays horizontally in the viewport at ${viewport.width}px / ${zoom * 100}%: ${JSON.stringify(geometry)}`);
+      }
+    }
+  }
+  await desktop.evaluate(() => { document.documentElement.style.zoom = ''; });
+  await desktop.setViewportSize({ width: 1440, height: 960 });
+  await desktop.screenshot({ path: '/tmp/xmt-published-archives-1440.png', fullPage: true });
+
+  await desktop.getByRole('button', { name: /返回发布归档/ }).click();
+  await desktop.getByRole('button', { name: /旧版单平台归档/ }).click();
+  await desktop.getByText(/共 1 条发布记录/).waitFor();
+  await desktop.getByText('88', { exact: true }).first().waitFor();
+  assert.equal(await desktop.getByRole('link', { name: '查看归档来源选题', exact: true }).count(), 0, 'legacy archive without a topic id does not invent a source-topic link');
+  await desktop.getByRole('button', { name: '稿件', exact: true }).click();
+  await desktop.getByTestId('archive-script-sources').getByText('旧版归档未保存剧本来源信息', { exact: false }).waitFor();
+  assert.equal(await desktop.getByTestId('archive-script-sources').getByRole('link').count(), 0, 'legacy archives without source metadata do not infer a link from current manuscripts');
+  await desktop.getByRole('button', { name: '发布信息', exact: true }).click();
+  await desktop.screenshot({ path: '/tmp/xmt-published-archives-legacy-1440.png', fullPage: true });
+  await desktop.close();
+
+  const unavailableSourcePage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  unavailableSourcePage.on('pageerror', (error) => errors.push(error.message));
+  await unavailableSourcePage.goto(`${base}/__qa?source_unavailable=1`);
+  await unavailableSourcePage.getByRole('heading', { name: '资料中心' }).waitFor();
+  await unavailableSourcePage.locator('a[href="/asset-center/published-archives"]').last().click();
+  await unavailableSourcePage.getByRole('heading', { name: '发布归档' }).waitFor();
+  await unavailableSourcePage.getByRole('button', { name: /多平台早餐主题/ }).click();
+  await unavailableSourcePage.getByRole('button', { name: '稿件', exact: true }).click();
+  const unavailableSourcePanel = unavailableSourcePage.getByTestId('archive-script-sources');
+  await unavailableSourcePanel.getByText('来源版本当前不可用', { exact: true }).waitFor();
+  assert.equal(await unavailableSourcePanel.getByRole('link', { name: '查看发布剧本来源创作稿 v1.0' }).count(), 0, 'an unavailable publishing source is explicit and has no misleading history link');
+  await unavailableSourcePage.close();
+
+  const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  mobile.on('pageerror', (error) => errors.push(error.message));
+  mobile.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await mobile.goto(`${base}/__qa`);
+  await mobile.getByRole('heading', { name: '资料中心' }).waitFor();
+  await mobile.locator('a[href="/asset-center/published-archives"]').last().click();
+  await mobile.getByRole('heading', { name: '发布归档' }).waitFor();
+  await mobile.getByRole('button', { name: /多平台早餐主题/ }).click();
+  await mobile.getByText(/共 2 条发布记录/).waitFor();
+  const mobileTopicLink = mobile.getByRole('link', { name: '查看归档来源选题', exact: true });
+  assert.equal(await mobileTopicLink.getAttribute('href'), '/topics/71', 'mobile archives keep the source-topic relationship');
+  await mobile.getByRole('button', { name: '稿件', exact: true }).click();
+  const mobileSourceLink = mobile.getByTestId('archive-script-sources').getByRole('link', { name: '查看成片剧本来源创作稿 v2.0', exact: true });
+  await mobileSourceLink.waitFor();
+  assert(await mobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the archive detail fits a 390px viewport without horizontal overflow');
+  await mobile.setViewportSize({ width: 320, height: 740 });
+  await mobileSourceLink.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
+  const mobileSourceBounds = await mobileSourceLink.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hitTarget = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, viewportWidth: innerWidth, viewportHeight: innerHeight, hitTargetIsLink: hitTarget === element || element.contains(hitTarget) };
+  });
+  assert(mobileSourceBounds.x >= 0 && mobileSourceBounds.x + mobileSourceBounds.width <= mobileSourceBounds.viewportWidth
+    && mobileSourceBounds.y >= 0 && mobileSourceBounds.y + mobileSourceBounds.height <= mobileSourceBounds.viewportHeight
+    && mobileSourceBounds.hitTargetIsLink, `the archived source link remains visible and unobstructed at 320px: ${JSON.stringify(mobileSourceBounds)}`);
+  assert(await mobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the archive source detail fits a 320px viewport without horizontal overflow');
+  await mobile.screenshot({ path: '/tmp/xmt-published-archives-source-lineage-320.png', fullPage: true });
+  await mobile.setViewportSize({ width: 390, height: 844 });
+  await mobile.getByRole('button', { name: '发布信息', exact: true }).click();
+  await mobile.screenshot({ path: '/tmp/xmt-published-archives-390.png', fullPage: true });
+  assert.deepEqual(errors, [], 'archive pages render without browser or console errors');
+  assert.equal(failedArchiveListReads, 2, 'the fixture injects exactly two intentional archive-list failures');
+  await mobile.close();
+
+  const restrictedPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  restrictedPage.on('pageerror', (error) => errors.push(error.message));
+  await restrictedPage.goto(`${base}/__qa?source_permission=0`);
+  await restrictedPage.getByRole('heading', { name: '资料中心' }).waitFor();
+  await restrictedPage.locator('a[href="/asset-center/published-archives"]').last().click();
+  await restrictedPage.getByRole('heading', { name: '发布归档' }).waitFor();
+  await restrictedPage.getByRole('button', { name: /多平台早餐主题/ }).click();
+  await restrictedPage.getByRole('button', { name: '稿件', exact: true }).click();
+  const restrictedSourcePanel = restrictedPage.getByTestId('archive-script-sources');
+  await restrictedSourcePanel.getByText('可查看归档快照；打开原稿需要创作稿查看权限', { exact: true }).waitFor();
+  await restrictedSourcePanel.getByRole('alert').getByText('来源选题与当前归档不一致，已隐藏来源内容', { exact: true }).waitFor();
+  assert.equal(await restrictedSourcePanel.getByRole('link', { name: /查看成片剧本来源创作稿/ }).count(), 0, 'archives do not offer a route link when the viewer lacks production:view');
+  assert.equal(await restrictedSourcePanel.getByRole('link', { name: /查看发布剧本来源创作稿/ }).count(), 0, 'a cross-topic lineage entry is hidden fail-closed');
+  await restrictedSourcePanel.getByText('查看归档保存的来源正文', { exact: true }).click();
+  await restrictedSourcePanel.getByText('成片剧本引用的创作历史正文。', { exact: true }).waitFor();
+  await restrictedPage.close();
+
+  for (const theme of ['light', 'dark'] as const) {
+    const themedPage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+    await themedPage.goto(`${base}/__qa?theme=${theme}`);
+    await themedPage.getByRole('heading', { name: '资料中心' }).waitFor();
+    await themedPage.locator('a[href="/asset-center/published-archives"]').last().click();
+    await themedPage.getByRole('heading', { name: '发布归档' }).waitFor();
+    await themedPage.getByRole('button', { name: /多平台早餐主题/ }).click();
+    await themedPage.getByRole('button', { name: '稿件', exact: true }).click();
+    const sourceLink = themedPage.getByRole('link', { name: '查看成片剧本来源创作稿 v2.0', exact: true });
+    const sourceTopicLink = themedPage.getByRole('link', { name: '查看归档来源选题', exact: true });
+    const scriptTab = themedPage.getByRole('button', { name: '稿件', exact: true });
+    for (const [label, locator] of [['来源创作稿链接', sourceLink], ['来源选题链接', sourceTopicLink], ['当前“稿件”页签', scriptTab]] as const) {
+      const result = await contrast(locator);
+      assert.ok(result.ratio >= 4.5, `${theme}主题 ${label} 对比度为 ${result.ratio.toFixed(2)}:1 on ${result.backgroundColor}，应不低于 4.5:1`);
+    }
+    await themedPage.getByRole('button', { name: '发布信息', exact: true }).click();
+    const link = themedPage.getByRole('link', { name: '打开发布链接' }).first();
+    const publishingTab = themedPage.getByRole('button', { name: '发布信息', exact: true });
+    for (const [label, locator] of [['发布链接', link], ['当前“发布信息”页签', publishingTab]] as const) {
+      const result = await contrast(locator);
+      assert.ok(result.ratio >= 4.5, `${theme}主题 ${label} 对比度为 ${result.ratio.toFixed(2)}:1 on ${result.backgroundColor}，应不低于 4.5:1`);
+    }
+    await themedPage.close();
+  }
+
+  const adminPage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  await adminPage.goto(`${base}/__qa?admin=1`);
+  await adminPage.getByRole('heading', { name: '资料中心' }).waitFor();
+  await adminPage.locator('a[href="/asset-center/published-archives"]').last().click();
+  await adminPage.getByRole('heading', { name: '发布归档' }).waitFor();
+  await adminPage.getByRole('button', { name: /多平台早餐主题/ }).click();
+  const deleteButton = adminPage.getByRole('button', { name: '删除', exact: true });
+  await deleteButton.waitFor();
+  await deleteButton.click();
+  await adminPage.getByRole('heading', { name: '确认删除' }).waitFor();
+  await adminPage.setViewportSize({ width: 1024, height: 600 });
+  await adminPage.evaluate(() => { document.documentElement.style.zoom = '125%'; });
+  for (const name of ['取消', '确认删除']) {
+    const button = adminPage.getByRole('button', { name, exact: true });
+    const bounds = await button.boundingBox();
+    assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= 1024 && bounds.y + bounds.height <= 600, `archive delete confirmation ${name} remains within 1024x600 at 125% zoom: ${JSON.stringify(bounds)}`);
+  }
+  await adminPage.getByRole('button', { name: '取消', exact: true }).click();
+  await adminPage.getByRole('button', { name: '删除', exact: true }).click();
+  await adminPage.getByRole('heading', { name: '确认删除' }).waitFor();
+  const archiveReadsBeforeDelete = archiveListReads;
+  await adminPage.getByRole('button', { name: '确认删除', exact: true }).click();
+  await adminPage.getByRole('heading', { name: '发布归档', exact: true }).waitFor();
+  await adminPage.getByRole('button', { name: /旧版单平台归档/ }).waitFor();
+  assert.equal(await adminPage.getByRole('button', { name: /多平台早餐主题/ }).count(), 0, 'the confirmed archive deletion is removed from the current list');
+  assert.equal(archiveItems.length, 1, 'the isolated server fixture confirms one archive deletion');
+  assert.equal(archiveDeleteWrites, 1, 'confirming archive deletion sends one write');
+  assert.equal(archiveListReads, archiveReadsBeforeDelete, 'the confirmed archive deletion updates local state without a follow-up list read');
+  assert.deepEqual(errors, [], 'archive pages render without browser or console errors');
+  await adminPage.close();
+  console.log('Published archive browser test passed: source-topic and exact script lineage, archived snapshots, permission boundaries, light/dark contrast, 320/390px mobile, desktop zoom, and legacy data.');
+} finally {
+  await browser.close();
+  await vite.close();
+  await new Promise<void>((resolve) => io.close(() => resolve()));
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}

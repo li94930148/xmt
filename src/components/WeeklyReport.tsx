@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useAppStore } from '../store';
+import ActionButton from './studio/ActionButton';
 import { getWeeklyReport } from '../api/export';
-import { FileText, Video, Eye, Heart, Copy, Loader2, RefreshCw, Lightbulb, Clock } from 'lucide-react';
+import { FileText, Video, Eye, Heart, Copy, Loader2, RefreshCw, Lightbulb } from 'lucide-react';
 import { formatBeijingTime } from '../lib/utils';
 
 interface WeeklyReportData {
@@ -30,25 +31,28 @@ interface WeeklyReportData {
 export default function WeeklyReport() {
   const [data, setData] = useState<WeeklyReportData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const styles = useThemeStyles();
-  const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
 
-  const fetchReport = async () => {
+  const fetchReport = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const report = await getWeeklyReport();
       setData(report);
-    } catch (error) {
-      appStore.addNotification({ title: '获取周报失败', message: (error as Error).message, type: 'error' });
+    } catch {
+      setLoadError('请检查连接后重试。');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchReport();
-  }, []);
+    void fetchReport();
+  }, [fetchReport]);
 
   const formatNumber = (num: number) => {
     if (num >= 10000) return `${(num / 10000).toFixed(1)}万`;
@@ -104,18 +108,34 @@ export default function WeeklyReport() {
 
   const handleCopy = async () => {
     setCopying(true);
+    setCopyError(null);
     try {
       const text = generateReportText();
-      await navigator.clipboard.writeText(text);
-      appStore.addNotification({ title: '复制成功', message: '周报已复制到剪贴板', type: 'success' });
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('aria-hidden', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        let fallbackCopied = false;
+        try {
+          fallbackCopied = document.execCommand('copy');
+        } finally {
+          textarea.remove();
+        }
+        if (!fallbackCopied) throw new Error('Clipboard fallback was rejected');
+      }
+
+      addNotification({ title: '复制成功', message: '周报已复制到剪贴板', type: 'success' });
     } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = generateReportText();
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      appStore.addNotification({ title: '复制成功', message: '周报已复制到剪贴板', type: 'success' });
+      const message = '浏览器未能复制周报，请检查剪贴板权限后重试。';
+      setCopyError(message);
+      addNotification({ title: '复制失败', message, type: 'error' });
     } finally {
       setCopying(false);
     }
@@ -136,7 +156,7 @@ export default function WeeklyReport() {
 
   return (
     <div className={`${styles.card} p-6`}>
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-studio-violet/10">
             <FileText className="w-5 h-5 text-studio-violet" />
@@ -148,25 +168,48 @@ export default function WeeklyReport() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
             onClick={fetchReport}
             disabled={loading}
-            className={`flex items-center gap-2 px-3 py-2 ${styles.buttonSecondary} rounded-lg transition-all duration-200 disabled:opacity-50`}
+            className={`flex !min-h-11 items-center gap-2 whitespace-nowrap px-3 py-2 ${styles.buttonSecondary} rounded-lg transition-all duration-200 disabled:opacity-50`}
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             <span className="text-sm">刷新</span>
           </button>
           <button
             onClick={handleCopy}
-            disabled={copying || !data}
-            className={`flex items-center gap-2 px-4 py-2 ${styles.buttonPrimary} rounded-lg transition-all duration-200 disabled:opacity-50`}
+            disabled={copying || loading || !data || Boolean(loadError)}
+            className={`flex !min-h-11 items-center gap-2 whitespace-nowrap px-4 py-2 ${styles.buttonPrimary} rounded-lg transition-all duration-200 disabled:opacity-50`}
           >
             {copying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
             <span className="text-sm font-medium">一键复制</span>
           </button>
         </div>
       </div>
+
+      {loadError ? (
+        <div role="alert" className="mb-6 flex flex-col gap-3 rounded-xl border border-studio-amber/25 bg-studio-amber/10 px-4 py-3 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            {data
+              ? `周报更新失败，仍显示最近一次成功读取的 ${data.period.start} 至 ${data.period.end} 数据。`
+              : '周报暂时无法读取。'} {loadError}
+          </span>
+          <ActionButton type="button" variant="secondary" disabled={loading} onClick={() => void fetchReport()}>
+            {loading ? '正在重新加载…' : '重试周报'}
+          </ActionButton>
+        </div>
+      ) : loading && data ? (
+        <p role="status" className={`mb-6 text-sm ${styles.textMuted}`}>
+          正在更新周报；当前仍显示 {data.period.start} 至 {data.period.end} 的最近一次成功结果。
+        </p>
+      ) : null}
+
+      {copyError && (
+        <p role="alert" className="mb-6 rounded-xl border border-studio-coral/25 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral-contrast">
+          {copyError}
+        </p>
+      )}
 
       {data && summary && details && (
         <div className="space-y-6">

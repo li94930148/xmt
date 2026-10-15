@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { getDatabasePath, getDatabaseUrl } from './path';
 import { runDatabaseMigrations } from './migrations/runner';
+import { apiLogger } from '../observability/logger.js';
 
 export const dbPath = getDatabasePath();
 const dbDir = path.dirname(dbPath);
@@ -16,12 +17,8 @@ export const db = createClient({
   url: getDatabaseUrl(),
 });
 
-function getDbErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export async function initDatabase() {
-  console.log(`[DB] SQLite path: ${dbPath}`);
+  apiLogger.info({ module: 'database', operation: 'database.initializing', storage: 'libsql' }, 'api.database.initializing');
 
   // 确保 data 目录存在
   if (!fs.existsSync(dbDir)) {
@@ -93,6 +90,7 @@ async function initTables() {
       deadline DATETIME,
       creator_id INTEGER,
       assignee_id INTEGER,
+      stage_entered_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -160,6 +158,8 @@ async function initTables() {
       equipment TEXT,
       status TEXT DEFAULT 'pending',
       operator_id INTEGER,
+      script_source_production_id INTEGER,
+      script_source_version TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -174,6 +174,8 @@ async function initTables() {
       status TEXT DEFAULT 'pending',
       publish_time DATETIME,
       operator_id INTEGER,
+      script_source_production_id INTEGER,
+      script_source_version TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -1670,7 +1672,11 @@ async function runTimeMigrations() {
     await db.execute(`DROP INDEX IF EXISTS idx_calendar_events_user`);
     await db.execute(`DROP INDEX IF EXISTS idx_calendar_events_date`);
   } catch (error) {
-    console.warn('[DB] 清理旧 calendar_events 索引失败:', getDbErrorMessage(error));
+    apiLogger.warn({
+      module: 'database',
+      operation: 'legacy_calendar_indexes.cleanup_failed',
+      error: { code: 'INDEX_CLEANUP_FAILED', name: error instanceof Error ? error.name : 'UnknownError' },
+    }, 'api.database.legacy_index_cleanup_failed');
   }
 
   const tzMigrated = await db.execute({
@@ -2113,7 +2119,7 @@ async function migrateHtmlToMarkdown() {
     const needMigrate = await db.execute(`SELECT COUNT(*) as cnt FROM production WHERE content IS NOT NULL AND content != '' AND (content_markdown IS NULL OR content_markdown = '')`);
     const count = Number(needMigrate.rows[0]?.cnt || 0);
     if (count === 0) return;
-    console.log(`[DB] 迁移 ${count} 条 production 记录的 HTML 到 Markdown...`);
+    apiLogger.info({ module: 'database', operation: 'legacy_markdown_backfill.started', recordCount: count }, 'api.database.markdown_backfill_started');
 
     // 简单 HTML 转 Markdown（服务端用正则，不依赖 DOMParser）
     const htmlToMd = (html: string): string => {
@@ -2182,15 +2188,19 @@ async function migrateHtmlToMarkdown() {
       }
     }
 
-    console.log('[DB] HTML → Markdown 迁移完成');
+    apiLogger.info({ module: 'database', operation: 'legacy_markdown_backfill.completed' }, 'api.database.markdown_backfill_completed');
   } catch (e) {
-    console.error('[DB] 迁移回填出错（非致命）:', e);
+    apiLogger.error({
+      module: 'database',
+      operation: 'legacy_markdown_backfill.failed',
+      error: { code: 'BACKFILL_FAILED', name: e instanceof Error ? e.name : 'UnknownError' },
+    }, 'api.database.markdown_backfill_failed');
   }
 }
 
 // 创建数据库索引，提升查询性能
 async function createIndexes() {
-  console.log('[DB] 创建数据库索引...');
+  apiLogger.info({ module: 'database', operation: 'indexes.create_started' }, 'api.database.indexes_create_started');
 
   const indexes = [
     // topics 表索引
@@ -2320,12 +2330,17 @@ async function createIndexes() {
     try {
       await db.execute(sql);
     } catch (error) {
-      console.warn(`[DB] 索引创建失败: ${sql}`);
-      console.warn(`[DB] 原因: ${getDbErrorMessage(error)}`);
+      const indexName = sql.match(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z0-9_]+)/i)?.[1] ?? 'unknown';
+      apiLogger.warn({
+        module: 'database',
+        operation: 'index.create_failed',
+        indexName,
+        error: { code: 'INDEX_CREATE_FAILED', name: error instanceof Error ? error.name : 'UnknownError' },
+      }, 'api.database.index_create_failed');
     }
   }
 
-  console.log('[DB] 索引创建完成');
+  apiLogger.info({ module: 'database', operation: 'indexes.create_completed' }, 'api.database.indexes_create_completed');
 }
 
 // libsql 直接写文件，不需要手动 save/close
@@ -2335,5 +2350,5 @@ export function saveDatabase() {
 
 export function closeDatabase() {
   // libsql 客户端会自动关闭连接池
-  console.log('[DB] 数据库连接关闭（libsql 自动管理）');
+  apiLogger.info({ module: 'database', operation: 'database.close_requested' }, 'api.database.close_requested');
 }

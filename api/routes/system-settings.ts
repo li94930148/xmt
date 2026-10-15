@@ -8,6 +8,7 @@ import path from 'path';
 const router = Router();
 
 type LoginLayoutMode = 'style1' | 'style2' | 'style3';
+type ThemeMode = 'light' | 'dark';
 
 type ManagedSystemSettings = {
   system: {
@@ -15,6 +16,7 @@ type ManagedSystemSettings = {
     browserTitle: string;
     description: string;
     icon: string;
+    defaultTheme: ThemeMode;
   };
   branding: {
     brandName: string;
@@ -40,6 +42,7 @@ const defaultSettings: ManagedSystemSettings = {
     browserTitle: '新媒体协作管理系统',
     description: '统一管理选题、创作、拍摄、发布与复盘流程。',
     icon: '新',
+    defaultTheme: 'dark',
   },
   branding: {
     brandName: '新媒体协作管理系统',
@@ -76,6 +79,7 @@ function normalizeSettings(input: unknown): ManagedSystemSettings {
       browserTitle: sanitizeString(system.browserTitle, defaultSettings.system.browserTitle),
       description: sanitizeString(system.description, defaultSettings.system.description),
       icon: sanitizeString(system.icon, defaultSettings.system.icon),
+      defaultTheme: system.defaultTheme === 'light' ? 'light' : 'dark',
     },
     branding: {
       brandName: sanitizeString(branding.brandName, defaultSettings.branding.brandName),

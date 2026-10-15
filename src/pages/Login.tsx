@@ -102,10 +102,10 @@ function ChangePasswordModal({
   }
 
   return (
-    <div className="xmt-overlay xmt-overlay-center z-50 px-4">
-      <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-studio-app-bg p-8 text-white shadow-2xl">
+    <div className="xmt-overlay xmt-overlay-center px-4" role="dialog" aria-modal="true" aria-labelledby="first-login-password-title">
+      <div data-testid="first-login-password-panel" className="w-full max-w-md rounded-panel border border-studio-border-soft bg-studio-surface p-8 text-studio-text-primary shadow-modal">
         <p className="text-xs uppercase tracking-[0.28em] text-studio-text-secondary">首次登录</p>
-        <h3 className="mt-3 text-2xl font-semibold">请先修改初始密码</h3>
+        <h3 id="first-login-password-title" className="mt-3 text-2xl font-semibold">请先修改初始密码</h3>
         <p className="mt-3 text-sm leading-6 text-studio-text-secondary">
           为保障账号安全，首次登录后需先设置新密码。
         </p>
@@ -115,21 +115,21 @@ function ChangePasswordModal({
             type="password"
             value={oldPwd}
             onChange={(event) => onOldPwdChange(event.target.value)}
-            className="h-12 w-full rounded-2xl border border-studio-border-soft bg-white/[0.05] px-4 text-white outline-none placeholder:text-studio-text-secondary"
+            className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary outline-none placeholder:text-studio-text-secondary focus:border-studio-border-active"
             placeholder="当前密码"
           />
           <input
             type="password"
             value={newPwd}
             onChange={(event) => onNewPwdChange(event.target.value)}
-            className="h-12 w-full rounded-2xl border border-studio-border-soft bg-white/[0.05] px-4 text-white outline-none placeholder:text-studio-text-secondary"
+            className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary outline-none placeholder:text-studio-text-secondary focus:border-studio-border-active"
             placeholder="新密码（至少 6 位）"
           />
           <input
             type="password"
             value={confirmPwd}
             onChange={(event) => onConfirmPwdChange(event.target.value)}
-            className="h-12 w-full rounded-2xl border border-studio-border-soft bg-white/[0.05] px-4 text-white outline-none placeholder:text-studio-text-secondary"
+            className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary outline-none placeholder:text-studio-text-secondary focus:border-studio-border-active"
             placeholder="确认新密码"
           />
         </div>
@@ -137,14 +137,14 @@ function ChangePasswordModal({
         <div className="mt-6 flex justify-end gap-3">
           <button
             onClick={onCancel}
-            className="rounded-2xl border border-white/10 px-4 py-2 text-sm text-studio-text-secondary transition hover:bg-white/[0.06]"
+            className="xmt-btn xmt-btn-secondary rounded-button border-studio-border-soft px-4 py-2 text-sm text-studio-text-secondary transition hover:bg-studio-surface-soft"
           >
             退出登录
           </button>
           <button
             onClick={onConfirm}
             disabled={loading}
-            className="rounded-2xl bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-white/92 disabled:cursor-not-allowed disabled:opacity-70"
+            className="xmt-btn xmt-btn-primary rounded-button border-transparent px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70"
           >
             {loading ? '保存中...' : '更新密码'}
           </button>
@@ -230,7 +230,7 @@ function LoginForm({
   const linkClass = dark ? 'text-studio-primary-contrast hover:text-studio-primary' : 'text-studio-primary hover:opacity-80';
   const buttonClass = dark
     ? 'xmt-btn-primary text-white'
-    : 'bg-studio-primary text-white hover:opacity-92';
+    : 'bg-studio-primary-button text-white hover:opacity-92';
 
   return (
     <>
@@ -240,8 +240,8 @@ function LoginForm({
       </div>
 
       {errorMessage && (
-        <div className={`mb-5 flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${dark ? 'border-studio-coral/20 bg-studio-coral/[0.06] text-studio-coral/90' : 'border-studio-coral bg-studio-coral text-studio-coral'}`}>
-          <span className="text-studio-coral">!</span>
+        <div className="mb-5 flex items-center gap-3 rounded-xl border border-studio-coral/30 bg-studio-coral-soft px-4 py-3 text-sm text-studio-coral-contrast">
+          <span>!</span>
           {errorMessage}
         </div>
       )}
@@ -333,7 +333,7 @@ function BrandMark({
     );
   }
 
-  return <span className={textClass}>{settings.system.icon || settings.system.name.slice(0, 1)}</span>;
+  return <span data-testid="login-brand-mark" className={textClass}>{settings.system.icon || settings.system.name.slice(0, 1)}</span>;
 }
 
 export default function Login() {
@@ -360,6 +360,7 @@ export default function Login() {
   // during application bootstrap and leaving a blank native screen.
   const [errorMessage, setErrorMessage] = useState(() => getNativeEndpointConfigurationError() || '');
   const loginRequestInFlight = useRef(false);
+  const changePasswordFlowPending = useRef(false);
 
   useEffect(() => {
     setMounted(true);
@@ -420,7 +421,7 @@ export default function Login() {
   }, [setSystemSettings]);
 
   useEffect(() => {
-    if (!authStore.token || showChangePassword) {
+    if (!authStore.token || showChangePassword || changePasswordFlowPending.current) {
       return;
     }
 
@@ -452,6 +453,10 @@ export default function Login() {
     setLoading(true);
     try {
       const result = isAndroid() ? await mobileLogin(username.trim(), password) : await login(username.trim(), password);
+      const mustChangePassword = result.user.force_change_password || result.forceChangePassword;
+      if (mustChangePassword) {
+        changePasswordFlowPending.current = true;
+      }
       if (isAndroid()) {
         await nativeRefreshCredentials.set((result as typeof result & { refreshToken: string }).refreshToken);
         nativeUserProfile.set(result.user);
@@ -462,19 +467,19 @@ export default function Login() {
       } else {
         authStore.login(result.user, result.accessToken, { persist: remember ? 'local' : 'session' });
       }
+      if (mustChangePassword) {
+        setOldPwd(password);
+        setNewPwd('');
+        setConfirmPwd('');
+        setShowChangePassword(true);
+      }
       try {
         await persistRememberedCredentials(remember, username.trim(), password);
       } catch {
         // Remembering credentials is optional and must not invalidate a completed login.
       }
 
-      if (result.user.force_change_password || result.forceChangePassword) {
-        setOldPwd(password);
-        setNewPwd('');
-        setConfirmPwd('');
-        setShowChangePassword(true);
-        return;
-      }
+      if (mustChangePassword) return;
 
       appStore.addNotification({
         title: '登录成功',
@@ -486,6 +491,7 @@ export default function Login() {
         completeWebLoginRedirect(result.user.id);
       }
     } catch (error) {
+      changePasswordFlowPending.current = false;
       const message = resolveLoginErrorMessage(error);
       setErrorMessage(message);
       appStore.addNotification({ title: '登录失败', message, type: 'error' });
@@ -518,6 +524,7 @@ export default function Login() {
     try {
       await changePassword(oldPwd, newPwd);
       await persistRememberedCredentials(remember, username.trim(), newPwd);
+      changePasswordFlowPending.current = false;
       appStore.addNotification({
         title: '修改成功',
         message: '密码已更新，请重新登录',
@@ -541,6 +548,7 @@ export default function Login() {
   const brandName = settings.branding.brandName || settings.system.name;
   const brandDescription = settings.branding.brandDescription || settings.system.description;
   const layout = settings.login.layout || 'style1';
+  const darkTheme = appStore.theme === 'dark';
 
   const commonFormProps = {
     username,
@@ -589,14 +597,14 @@ export default function Login() {
                   </div>
                   <div className="flex items-center justify-center gap-4 mb-5">
                     <div className="h-px w-12 bg-gradient-to-r from-transparent to-studio-primary/50" />
-                    <p className="text-[11px] uppercase tracking-[0.4em] text-studio-cyan font-medium">{brandName}</p>
+                    <p className="text-[11px] uppercase tracking-[0.4em] text-studio-cyan-contrast font-medium">{brandName}</p>
                     <div className="h-px w-12 bg-gradient-to-l from-transparent to-studio-primary/50" />
                   </div>
                   <p className="mx-auto max-w-md text-sm leading-6 text-studio-text-secondary">{brandDescription}</p>
                 </div>
 
                 <div className="studio-sheen relative overflow-hidden rounded-panel border border-studio-border-soft bg-studio-surface-glass p-10 shadow-floating backdrop-blur-3xl">
-                  <LoginForm {...commonFormProps} dark />
+                  <LoginForm {...commonFormProps} dark={darkTheme} />
                 </div>
               </div>
             </div>
@@ -609,13 +617,13 @@ export default function Login() {
     if (layout === 'style3') {
       return (
         <StyleShell>
-          <div className="relative min-h-screen overflow-hidden bg-white pb-20">
+          <div className="xmt-theme-scope relative min-h-screen overflow-hidden bg-studio-app-bg pb-20" data-theme="light">
             <LoginHero />
             <div className="min-h-screen lg:grid lg:grid-cols-2">
               <div className="relative hidden bg-studio-app-bg lg:flex lg:flex-col lg:justify-between overflow-hidden p-12 xl:p-16">
                 <div className={`relative z-10 transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white/[0.06] text-sm font-semibold text-studio-primary-contrast">
+                    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl border border-studio-border-soft bg-studio-surface text-sm font-semibold text-studio-text-primary">
                       <BrandMark settings={settings} roundedClass="rounded-xl" />
                     </div>
                     <span className="text-sm font-medium text-studio-text-secondary">{settings.system.name}</span>
@@ -623,8 +631,8 @@ export default function Login() {
                 </div>
 
                 <div className={`relative z-10 max-w-md transition-all duration-700 delay-200 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-                  <p className="text-xs uppercase tracking-[0.3em] text-studio-cyan font-medium">{brandName}</p>
-                  <h1 className="mt-5 text-[clamp(2.5rem,5vw,4.5rem)] font-bold leading-[1.05] tracking-tight text-white">
+                  <p className="text-xs uppercase tracking-[0.3em] text-studio-cyan-contrast font-medium">{brandName}</p>
+                  <h1 className="mt-5 text-[clamp(2.5rem,5vw,4.5rem)] font-bold leading-[1.05] tracking-tight text-studio-text-primary">
                     {welcomeTitle}
                   </h1>
                   <p className="mt-6 text-base leading-7 text-studio-text-secondary">{brandDescription}</p>
@@ -635,10 +643,10 @@ export default function Login() {
                 </div>
               </div>
 
-              <div className="flex min-h-screen items-center justify-center bg-white px-6 py-12">
+              <div className="flex min-h-screen items-center justify-center bg-studio-surface px-6 py-12">
                 <div className={`w-full max-w-[380px] transition-all duration-700 delay-300 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
                   <div className="mb-10 lg:hidden">
-                    <div className="mb-4 flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-studio-surface text-base font-semibold text-white">
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-studio-surface text-base font-semibold text-studio-text-primary">
                       <BrandMark settings={settings} roundedClass="rounded-2xl" />
                     </div>
                     <h1 className="text-2xl font-bold text-studio-text-primary">{brandName}</h1>
@@ -658,7 +666,7 @@ export default function Login() {
 
     return (
       <StyleShell>
-        <div className="relative min-h-screen overflow-hidden bg-studio-app-bg text-white">
+        <div className="relative min-h-screen overflow-hidden bg-studio-app-bg text-studio-text-primary">
           <LoginHero />
           <div
             className="pointer-events-none fixed inset-0 z-50 opacity-[0.03]"
@@ -749,7 +757,7 @@ export default function Login() {
                 </div>
 
                 {errorMessage && (
-                  <div className="mb-6 rounded border border-studio-coral/20 bg-studio-coral/5 px-4 py-3 text-sm text-studio-coral/90">
+                  <div className="mb-6 rounded border border-studio-coral/20 bg-studio-coral/5 px-4 py-3 text-sm text-studio-coral-contrast">
                     {errorMessage}
                   </div>
                 )}
@@ -796,7 +804,7 @@ export default function Login() {
                       <button
                         type="button"
                         onClick={() => setShowPassword((prev) => !prev)}
-                        className="absolute bottom-3 right-0 text-studio-text-muted transition-colors hover:text-white"
+                        className="absolute bottom-3 right-0 text-studio-text-muted transition-colors hover:text-studio-text-primary"
                         aria-label="切换密码可见状态"
                       >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -806,13 +814,13 @@ export default function Login() {
                   </div>
 
                   <div className="flex items-center gap-2 pt-1">
-                    <label className="flex cursor-pointer items-center gap-2 text-xs tracking-wider text-studio-text-secondary transition-colors hover:text-white">
+                    <label className="flex cursor-pointer items-center gap-2 text-xs tracking-wider text-studio-text-secondary transition-colors hover:text-studio-text-primary">
                       <input
                         type="checkbox"
                         id="remember"
                         checked={remember}
                         onChange={(event) => setRemember(event.target.checked)}
-                        className="h-3.5 w-3.5 cursor-pointer rounded border-white/20 bg-transparent text-studio-primary focus:ring-studio-primary/30 focus:ring-offset-0"
+                        className="h-3.5 w-3.5 cursor-pointer rounded border-studio-border-active bg-transparent text-studio-primary focus:ring-studio-primary/30 focus:ring-offset-0"
                       />
                       记住密码
                     </label>
@@ -838,31 +846,9 @@ export default function Login() {
                   </div>
                 </form>
 
-                <div className={`mt-10 transition-all duration-1000 delay-900 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
-                  <div className="mb-5 flex items-center gap-3">
-                    <div className="h-px flex-1 bg-studio-border-soft" />
-                    <span className="text-xs tracking-wider text-studio-text-muted">其他方式</span>
-                    <div className="h-px flex-1 bg-studio-border-soft" />
-                  </div>
-                  <div className="flex gap-3">
-                    {[
-                      { name: '微信', char: '微' },
-                      { name: '企微', char: '企' },
-                      { name: '邮箱', char: '@' },
-                    ].map((item) => (
-                      <button key={item.name} className="flex-1 group/other" type="button">
-                        <div className="flex flex-col items-center gap-2 border border-white/5 py-3 transition-all duration-300 group-hover/other:border-white/15 group-hover/other:bg-white/[0.02]">
-                          <span className="text-sm font-light text-studio-text-secondary transition-colors group-hover/other:text-white">{item.char}</span>
-                          <span className="text-[10px] tracking-wider text-studio-text-muted">{item.name}</span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 <div className="mt-12 text-center">
-                  <p className="text-[10px] uppercase tracking-widest text-studio-text-muted">
-                    LANYAO MEDIA MANAGEMENT SYSTEM
+                  <p className="text-[10px] tracking-widest text-studio-text-muted">
+                    内容生产协作平台
                   </p>
                 </div>
               </div>
@@ -876,8 +862,8 @@ export default function Login() {
     brandDescription,
     brandName,
     commonFormProps,
+    darkTheme,
     errorMessage,
-    handleForgotPassword,
     handleSubmit,
     layout,
     loading,
@@ -887,7 +873,6 @@ export default function Login() {
     settings,
     showPassword,
     username,
-    welcomeMessage,
     welcomeTitle,
   ]);
 
@@ -904,6 +889,7 @@ export default function Login() {
         onNewPwdChange={setNewPwd}
         onConfirmPwdChange={setConfirmPwd}
         onCancel={() => {
+          changePasswordFlowPending.current = false;
           authStore.logout();
           setShowChangePassword(false);
         }}

@@ -35,7 +35,7 @@ export async function getUserStats(params?: { month?: number; year?: number }): 
   return response.json();
 }
 
-export async function createAnalytics(data: { topic_id: number; views: number; likes: number; shares: number; comments: number; data_date: string }): Promise<{ message: string }> {
+export async function createAnalytics(data: { publishing_id: number; views?: number | null; likes?: number | null; shares?: number | null; comments?: number | null }): Promise<{ message: string }> {
   const response = await fetch(`${BASE_URL}/analytics`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },

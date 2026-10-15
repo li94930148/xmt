@@ -2,11 +2,12 @@
  * BubbleMenu - 选中文字浮动工具栏
  * 选中文字后在选区上方显示，支持格式化、颜色、链接、批注等
  */
-import { useState, useRef, useEffect, type MouseEvent as ReactMouseEvent } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import { Editor } from '@tiptap/react';
 import { BubbleMenu as TiptapBubbleMenu } from '@tiptap/react/menus';
 import { useAppStore } from '../../store';
 import { shouldShowEditorBubbleMenu } from './menuBehavior';
+import { EDITOR_HIGHLIGHT_COLORS as HIGHLIGHT_COLORS, EDITOR_TEXT_COLORS as TEXT_COLORS } from './editorColorPalette';
 import {
   Bold, Italic, Underline, Strikethrough,
   Highlighter, Type, Link as LinkIcon,
@@ -20,27 +21,8 @@ interface BubbleMenuProps {
   contextMenuOpen?: boolean;
 }
 
-const HIGHLIGHT_COLORS = [
-  { name: '黄色', value: 'yellow', bg: '#fef08a' },
-  { name: '绿色', value: 'green', bg: '#bbf7d0' },
-  { name: '蓝色', value: 'blue', bg: '#bfdbfe' },
-  { name: '红色', value: 'red', bg: '#fecaca' },
-  { name: '紫色', value: 'purple', bg: '#ddd6fe' },
-  { name: '橙色', value: 'orange', bg: '#fed7aa' },
-  { name: '灰色', value: 'gray', bg: '#e5e7eb' },
-  { name: '青色', value: 'cyan', bg: '#a5f3fc' },
-];
-
-const TEXT_COLORS = [
-  { name: '默认', value: '', bg: '#374151' },
-  { name: '红色', value: '#ef4444', bg: '#ef4444' },
-  { name: '橙色', value: '#f97316', bg: '#f97316' },
-  { name: '黄色', value: '#eab308', bg: '#eab308' },
-  { name: '绿色', value: '#22c55e', bg: '#22c55e' },
-  { name: '蓝色', value: '#3b82f6', bg: '#3b82f6' },
-  { name: '紫色', value: '#a855f7', bg: '#a855f7' },
-  { name: '粉色', value: '#ec4899', bg: '#ec4899' },
-];
+type PopoverLayout = { placement: 'above' | 'below'; maxHeight: number };
+const DEFAULT_POPOVER_LAYOUT: PopoverLayout = { placement: 'below', maxHeight: 448 };
 
 export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = false }: BubbleMenuProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
@@ -48,6 +30,10 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
   const [showTextColor, setShowTextColor] = useState(false);
   const highlightRef = useRef<HTMLDivElement>(null);
   const textColorRef = useRef<HTMLDivElement>(null);
+  const highlightPopoverRef = useRef<HTMLDivElement>(null);
+  const textColorPopoverRef = useRef<HTMLDivElement>(null);
+  const [highlightLayout, setHighlightLayout] = useState<PopoverLayout>(DEFAULT_POPOVER_LAYOUT);
+  const [textColorLayout, setTextColorLayout] = useState<PopoverLayout>(DEFAULT_POPOVER_LAYOUT);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -58,6 +44,39 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const updatePopoverLayout = useCallback(() => {
+    if (!showHighlight && !showTextColor) return;
+    const trigger = showHighlight ? highlightRef.current : textColorRef.current;
+    const popover = showHighlight ? highlightPopoverRef.current : textColorPopoverRef.current;
+    const setLayout = showHighlight ? setHighlightLayout : setTextColorLayout;
+    if (!trigger || !popover) return;
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const popoverRect = popover.getBoundingClientRect();
+    const availableAbove = Math.max(0, triggerRect.top - 8);
+    const availableBelow = Math.max(0, window.innerHeight - triggerRect.bottom - 8);
+    const placement = popoverRect.height > availableBelow && availableAbove > availableBelow ? 'above' : 'below';
+    const maxHeight = Math.max(0, Math.min(448, placement === 'above' ? availableAbove : availableBelow));
+    setLayout((previous) => previous.placement === placement && previous.maxHeight === maxHeight ? previous : { placement, maxHeight });
+  }, [showHighlight, showTextColor]);
+
+  useLayoutEffect(() => {
+    updatePopoverLayout();
+    window.addEventListener('resize', updatePopoverLayout);
+    window.visualViewport?.addEventListener('resize', updatePopoverLayout);
+    return () => {
+      window.removeEventListener('resize', updatePopoverLayout);
+      window.visualViewport?.removeEventListener('resize', updatePopoverLayout);
+    };
+  }, [updatePopoverLayout]);
+
+  const positioningOptions = useMemo(() => ({
+    strategy: 'fixed' as const,
+    flip: { padding: 8 },
+    shift: { padding: 8, crossAxis: true },
+    onUpdate: updatePopoverLayout,
+  }), [updatePopoverLayout]);
+
   const keepEditorSelection = (event: ReactMouseEvent) => {
     // 阻止工具栏按钮抢焦点，避免编辑器 blur 后 native selection 变为 inactive 浅色
     event.preventDefault();
@@ -66,7 +85,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
   const btnClass = (active?: boolean) =>
     `p-1.5 rounded transition-colors ${
       active
-      ? 'bg-studio-primary text-white'
+      ? 'bg-studio-primary-button text-white'
         : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
     }`;
 
@@ -110,6 +129,8 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
   return (
     <TiptapBubbleMenu
       editor={editor}
+      appendTo={() => document.body}
+      options={positioningOptions}
       shouldShow={({ editor: e, state }) => {
         // 不在代码块内显示
         if (e.isActive('codeBlock')) return false;
@@ -117,7 +138,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
         const { from, to } = state.selection;
         return shouldShowEditorBubbleMenu({ contextMenuOpen, codeBlock: e.isActive('codeBlock'), from, to });
       }}
-      className={`flex items-center gap-0.5 px-2 py-1.5 rounded-lg shadow-xl border backdrop-blur-sm ${
+      className={`z-editor-menu flex items-center gap-0.5 px-2 py-1.5 rounded-lg shadow-xl border backdrop-blur-sm ${
         isDark
           ? 'bg-studio-surface-soft border-studio-border-soft text-studio-text-secondary'
           : 'bg-studio-surface-glass border-studio-border-soft text-studio-text-muted'
@@ -147,8 +168,12 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
         {showTextColor && (
-          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`} style={{ minWidth: '176px' }}>
-            <div className="text-xs font-medium mb-2 opacity-60">文字颜色</div>
+          <div
+            ref={textColorPopoverRef}
+            className={`absolute ${textColorLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} left-1/2 -translate-x-1/2 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
+            style={{ minWidth: '176px', maxHeight: `${textColorLayout.maxHeight}px`, maxWidth: 'calc(100vw - 16px)', overflowY: 'auto' }}
+          >
+            <div className="mb-2 text-xs font-medium text-studio-text-secondary">文字颜色</div>
             <div className="grid grid-cols-4 gap-2.5">
               {TEXT_COLORS.map((c) => (
                 <button key={c.value || 'default'} onClick={() => handleTextColor(c.value)}
@@ -169,8 +194,12 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
         {showHighlight && (
-          <div className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`} style={{ minWidth: '176px' }}>
-            <div className="text-xs font-medium mb-2 opacity-60">高亮颜色</div>
+          <div
+            ref={highlightPopoverRef}
+            className={`absolute ${highlightLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} left-1/2 -translate-x-1/2 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
+            style={{ minWidth: '176px', maxHeight: `${highlightLayout.maxHeight}px`, maxWidth: 'calc(100vw - 16px)', overflowY: 'auto' }}
+          >
+            <div className="mb-2 text-xs font-medium text-studio-text-secondary">高亮颜色</div>
             <div className="grid grid-cols-4 gap-2.5 mb-1">
               {HIGHLIGHT_COLORS.map((c) => (
                 <button key={c.value} onClick={() => handleHighlight(c.value)}

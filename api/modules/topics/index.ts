@@ -5,11 +5,13 @@ import { currentTopicPolicy } from './topics.policy';
 import { createLegacyTopicsRouter, createV1TopicsRouter } from './topics.routes';
 import { TopicService } from './topics.service';
 import { SqliteTopicRepository } from './topics.sqlite-repository';
+import { resolveCreatorTopicSuggestionAttribution } from '../../services/creatorTopicSuggestionAttribution';
 
 export const topicRepository = new SqliteTopicRepository();
 export const topicService = new TopicService({
   repository: topicRepository,
   policy: currentTopicPolicy,
+  resolveCreatorTopicSuggestionSource: resolveCreatorTopicSuggestionAttribution,
   notify(message) {
     createMessage(message.userId, message.title, message.content, message.type, message.link);
   },

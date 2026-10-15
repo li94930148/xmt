@@ -1,4 +1,4 @@
-import { execute, queryOne } from '../../database/utils.js';
+import { execute, queryOne, runInTransaction } from '../../database/utils.js';
 import type { AuthRepository } from './auth.repository.js';
 import type { AuthUserRecord } from './auth.types.js';
 import { activityLogTimestamp } from '../../services/activity-log.js';
@@ -44,27 +44,34 @@ export class SqliteAuthRepository implements AuthRepository {
     };
   }
 
-  async updatePassword(userId: number, passwordHash: string): Promise<void> {
-    await execute("UPDATE users SET password = ?, auth_version = auth_version + 1, updated_at = datetime('now', '+8 hours') WHERE id = ?", [
-      passwordHash,
-      userId,
-    ]);
+  async changePasswordAndAudit(userId: number, passwordHash: string): Promise<void> {
+    await runInTransaction(async (tx) => {
+      const updated = await tx.execute(
+        "UPDATE users SET password = ?, force_change_password = 0, auth_version = auth_version + 1, updated_at = datetime('now', '+8 hours') WHERE id = ?",
+        [passwordHash, userId],
+      );
+      if (!updated) throw new Error('AUTH_PASSWORD_TARGET_MISSING');
+      await tx.execute('INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)', [
+        userId, 'change_password', 'auth', '用户修改了密码', activityLogTimestamp(),
+      ]);
+    });
   }
 
   async revokeLegacyTokens(userId: number): Promise<void> {
     await execute("UPDATE users SET auth_version = auth_version + 1, updated_at = datetime('now', '+8 hours') WHERE id = ?", [userId]);
   }
 
-  async updateProfile(userId: number, profile: { name: string; email: string }): Promise<void> {
-    await execute("UPDATE users SET name = ?, email = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?", [
-      profile.name,
-      profile.email,
-      userId,
-    ]);
-  }
-
-  async clearForceChangePassword(userId: number): Promise<void> {
-    await execute('UPDATE users SET force_change_password = 0 WHERE id = ?', [userId]);
+  async updateProfileAndAudit(userId: number, profile: { name: string; email: string }): Promise<void> {
+    await runInTransaction(async (tx) => {
+      const updated = await tx.execute(
+        "UPDATE users SET name = ?, email = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?",
+        [profile.name, profile.email, userId],
+      );
+      if (!updated) throw new Error('AUTH_PROFILE_TARGET_MISSING');
+      await tx.execute('INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)', [
+        userId, 'update_profile', 'auth', '用户更新了个人资料', activityLogTimestamp(),
+      ]);
+    });
   }
 
   async writeActivityLog(userId: number, action: string, target: string, detail: string): Promise<void> {

@@ -46,7 +46,8 @@ import { UploadQueueScheduler } from "../core/uploader/queueScheduler.js";
 import type { RebindInput } from "./types.js";
 import { rendererAccountIdentity, rendererSettings } from './mainOnlyAccountIdentity.js';
 import { sanitizeRendererState } from './browserSafeRendererContract.js';
-const AGENT_VERSION = '2.14.4-agent';
+import { collectorCheckpointLog, safeErrorClass, serializeAgentRuntimeLog, type AgentRuntimeLogInput } from './runtimeLogger.js';
+const AGENT_VERSION = '2.14.5-agent';
 const SYSTEM_VERSION = '3.1.0';
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
@@ -73,9 +74,6 @@ if (portableMode) {
   fsSync.mkdirSync(portableDataRoot, { recursive: true });
   app.setPath("userData", portableDataRoot);
 }
-console.log(
-  `[XMT Agent]\nMode: ${portableMode ? "Portable" : "Standard"}\nData: ${portableMode ? portableDataRoot : app.getPath("userData")}`,
-);
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let syncing = false;
@@ -165,13 +163,20 @@ async function writeRuntimeProbe(extra:Record<string,unknown>={}) {
   try { previous=JSON.parse(await fs.readFile(runtimeProbe,'utf8')) as Record<string,unknown>; } catch { /* Initial probe write. */ }
   await fs.writeFile(runtimeProbe, JSON.stringify({...previous,runtimeIdentity:(await state()).runtimeIdentity,resourcesPath:process.resourcesPath,rendererUrl:process.env.ELECTRON_RENDERER_URL||null,...extra},null,2),'utf8');
 }
-async function log(message: string) {
+async function logRuntime(input: AgentRuntimeLogInput, echo = false) {
   const p = paths();
-  await fs.mkdir(p.logs, { recursive: true });
-  const config = await readConfig();
-  const sensitive = [config?.accountId, config?.accountName, config?.agentId && String(config.agentId), config?.deviceId].filter((value):value is string => Boolean(value));
-  const safe = sensitive.reduce((line, value) => line.split(value).join('[redacted]'), message).replace(/cookie|password|authorization|token/gi,"[redacted]");
-  await fs.appendFile(p.log, `[${new Date().toISOString()}] ${safe}\n`, "utf8");
+  const line = serializeAgentRuntimeLog(input);
+  try {
+    await fs.mkdir(p.logs, { recursive: true });
+    await fs.appendFile(p.log, `${line}\n`, "utf8");
+  } catch {
+    console.error(serializeAgentRuntimeLog({ event: "logging.write_failed", level: "error" }));
+    return;
+  }
+  if (echo) {
+    const level = input.level === "error" ? "error" : input.level === "warn" ? "warn" : "info";
+    console[level](line);
+  }
 }
 function defaultBrowserConfig() {
   const item = rankBrowsers(discoverBrowsers())[0];
@@ -247,7 +252,7 @@ async function startBrowserSession(config: AgentConfig) {
       await session.start();
       activeSession = session;
       if (item.id !== config.browserConfig.id) {
-        await log(`浏览器回退成功：${item.displayName}`);
+        await logRuntime({ event: "browser.fallback_succeeded", fields: { engine: item.engine } });
         config.browserConfig = {
           ...selection,
           lastSuccessfulId: item.id,
@@ -262,7 +267,7 @@ async function startBrowserSession(config: AgentConfig) {
       await session.stop().catch(() => undefined);
       const reason = error instanceof Error ? error.message : String(error);
       failures.push(`${item.displayName}: ${reason}`);
-      await log(`浏览器启动失败：${item.displayName} ${reason}`);
+      await logRuntime({ event: "browser.start_failed", level: "warn", fields: { engine: item.engine, errorClass: safeErrorClass(error) } });
     }
   }
   throw new Error(
@@ -455,12 +460,10 @@ async function performSync(sample = false): Promise<SyncResult> {
         if (!uploadQueueScheduler) throw new Error("官方导出队列在当前开发运行中不会发送到非本机服务器");
         await uploadQueueScheduler.flush();
       },
-      checkpoint: (name, data) => void log(`${name} ${JSON.stringify(data)}`),
+      checkpoint: (name, data) => void logRuntime(collectorCheckpointLog(name, data)),
     });
     lastSyncAt = result.collectedAt;
-    await log(
-      `Scrapling 同步完成：${result.upload.success ? "success" : "failed"}`,
-    );
+    await logRuntime({ event: "sync.completed", fields: { status: result.upload.success ? "success" : "failed" } });
     return result;
   } catch (error) {
     if (error instanceof CollectorLoginRequiredError) {
@@ -473,7 +476,7 @@ async function performSync(sample = false): Promise<SyncResult> {
       void sendHeartbeat();
     } else if (error instanceof Error && error.message === "SYNC_CAPABILITY_NOT_READY") lastError = "同步前置条件未满足，请根据 Agent 诊断完成认证或检查本地连接。";
     else lastError = '本地同步队列写入失败，数据尚未上传。请查看 Agent 诊断信息后重试。';
-    await log(`同步任务失败：${error instanceof Error && error.message.startsWith('UPLOAD_QUEUE_') ? error.message : 'LOCAL_UPLOAD_QUEUE_WRITE_FAILED'}`);
+    await logRuntime({ event: "sync.failed", level: "error", fields: { reasonCode: error instanceof Error && error.message.startsWith("UPLOAD_QUEUE_") ? "UPLOAD_QUEUE_FAILURE" : "LOCAL_UPLOAD_QUEUE_WRITE_FAILED" } });
     throw new Error('LOCAL_UPLOAD_QUEUE_WRITE_FAILED');
   } finally {
     syncing = false;
@@ -493,11 +496,11 @@ async function performCoverMetadataInspection() {
     const result = await inspectCoverMetadata({ config, browser, profilePath: assertManagedProfile(managedProfile(paths().root, config.browserConfig, config.accountId), path.join(paths().root, 'profiles')), bridge: new ScraplingWorkerBridge(app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '../../..'), () => undefined, app.isPackaged) });
     if (result.termination_reason === 'login_required') profileAuthentication = 'unauthenticated';
     else if (result.execution_status === 'completed') profileAuthentication = 'authenticated';
-    await log(`封面来源检查完成：status=${result.execution_status} reason=${result.termination_reason}`);
+    await logRuntime({ event: "cover_metadata.completed", fields: { status: result.execution_status, reasonCode: result.termination_reason === "login_required" ? "LOGIN_REQUIRED" : "OTHER" } });
     return result;
   } catch (error) {
     const code = coverInspectionFailureCode(error);
-    await log(`封面来源检查失败：${code}`);
+    await logRuntime({ event: "cover_metadata.failed", level: "warn", fields: { reasonCode: "OTHER" } });
     throw new Error(code);
   } finally { coverMetadataInspecting = false; await emit(); }
 }
@@ -515,9 +518,7 @@ async function schedule() {
     try {
       await performSync(usesExportFocusedSync(config.syncConfig.interval));
     } catch (error) {
-      await log(
-        `自动同步失败：${error instanceof Error ? error.message : String(error)}`,
-      );
+      await logRuntime({ event: "sync.scheduled_failed", level: "error", fields: { errorClass: safeErrorClass(error) } });
     } finally {
       await schedule();
     }
@@ -533,9 +534,7 @@ async function sendHeartbeat() {
       browserLoginStatus: heartbeatLoginStatus(browserLoginStatus),
     });
   } catch (error) {
-    await log(
-      `心跳失败：${error instanceof Error ? error.message : String(error)}`,
-    );
+    await logRuntime({ event: "agent.heartbeat_failed", level: "warn", fields: { errorClass: safeErrorClass(error) } });
   }
 }
 function startHeartbeat() {
@@ -560,19 +559,24 @@ function createWindow() {
   mainWindow.webContents.once("did-finish-load", async () => {
     try {
       const renderer = await mainWindow?.webContents.executeJavaScript(`(() => { const text=document.body?.innerText||''; return {preloadApi:typeof window.xmtAgent==='object',surface:text.includes('安全接口加载失败')?'safe-error':text.trim()?'content':'blank'}; })()`);
-      console.log("renderer loaded, preload API:", renderer?.preloadApi === true);
+      await logRuntime({ event: "renderer.loaded", fields: { preloadApi: renderer?.preloadApi === true } }, true);
       await writeRuntimeProbe({renderer});
-    } catch { await writeRuntimeProbe({renderer:{preloadApi:false,surface:'blank'}}); }
+    } catch {
+      await logRuntime({ event: "renderer.loaded", level: "warn", fields: { preloadApi: false } }, true);
+      await writeRuntimeProbe({renderer:{preloadApi:false,surface:'blank'}});
+    }
   });
-  mainWindow.webContents.on("did-fail-load", (_event, code, description, url) =>
-    console.error("renderer load failed:", { code, description, url }),
+  mainWindow.webContents.on("did-fail-load", (_event, code) =>
+    void logRuntime({ event: "renderer.load_failed", level: "error", fields: { errorCode: code } }, true),
   );
   const dev = process.env.ELECTRON_RENDERER_URL;
-  if (dev) void mainWindow.loadURL(dev);
+  if (dev) {
+    void logRuntime({ event: "renderer.loading", fields: { target: "dev_server" } }, true);
+    void mainWindow.loadURL(dev);
+  }
   else {
-    const filePath = path.join(__dirname, "../renderer/index.html");
-    console.log("loading renderer:", filePath);
-    void mainWindow.loadFile(filePath);
+    void logRuntime({ event: "renderer.loading", fields: { target: "file" } }, true);
+    void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.on("close", (event) => {
@@ -645,7 +649,7 @@ ipcMain.handle("agent:setup", async (_event, input: SetupInput) => {
   };
   await writeConfig(config);
   await saveToken(bound.agent_token);
-  await log("XMT 一次性绑定码已使用，设备绑定成功");
+  await logRuntime({ event: "device.bound" });
   await startUploadQueueScheduler();
   return emit();
 });
@@ -675,7 +679,7 @@ ipcMain.handle("agent:rebind", async (_event, input: RebindInput) => {
   config.accountName = bound.account_id;
   await writeConfig(config);
   await saveToken(bound.agent_token);
-  await log("XMT 服务器已通过一次性绑定码安全更换");
+  await logRuntime({ event: "server.rebound" });
   startHeartbeat();
   await startUploadQueueScheduler();
   return emit();
@@ -691,9 +695,7 @@ ipcMain.handle("agent:login-open", async () => {
     await page.bringToFront();
     await refreshProfileAuthentication(config, true);
     loginWindowState = profileAuthentication === "authenticated" ? "closed" : "awaiting_confirmation";
-    await log(
-      `已启动 ${session.getBrowserInfo().displayName} 独立会话，login_window_state=${loginWindowState}`,
-    );
+    await logRuntime({ event: "browser.login_session_started", fields: { engine: session.getBrowserInfo().engine, loginWindowState } });
     return emit();
   } catch (error) {
     loginWindowState = "error";
@@ -713,7 +715,7 @@ ipcMain.handle("agent:login-complete", async () => {
   clearLoginWindowState();
   const config = await readConfig();
   if (config) await markBrowserCompatible(config, activeSession);
-  await log(`${activeSession.getBrowserInfo().displayName} 登录状态正常`);
+  await logRuntime({ event: "browser.login_confirmed", fields: { engine: activeSession.getBrowserInfo().engine } });
   return emit();
 });
 function registerDatabaseReadyIpc() {
@@ -765,9 +767,7 @@ ipcMain.handle(
         path: process.execPath,
       });
     await schedule();
-    await log(
-      `桌面设置已更新，浏览器 ${selected.displayName}，运行模式 ${portableMode ? "portable" : "standard"}`,
-    );
+    await logRuntime({ event: "settings.updated", fields: { engine: selected.engine, mode: portableMode ? "portable" : "standard" } });
     return emit();
   },
 );
@@ -804,9 +804,7 @@ ipcMain.handle("agent:browser-restart", async () => {
   clearLoginWindowState();
   const session = await readyBrowserSession(config);
   await refreshProfileAuthentication(config, true);
-  await log(
-    `${session.getBrowserInfo().displayName} 会话测试完成，profile_authentication=${profileAuthentication}`,
-  );
+  await logRuntime({ event: "browser.session_test_completed", fields: { engine: session.getBrowserInfo().engine, profileAuthentication } });
   return emit();
 });
 ipcMain.handle("agent:browser-profile-clear", async () => {
@@ -839,12 +837,11 @@ ipcMain.handle("agent:browser-profile-clear", async () => {
   profileAuthentication = "unauthenticated";
   clearLoginWindowState();
   await fs.rm(target, { recursive: true, force: true });
-  await log(
-    `已清理当前账号的独立浏览器资料：${config.browserConfig.type}/${config.accountId}`,
-  );
+  await logRuntime({ event: "browser.profile_cleared", fields: { engine: config.browserConfig.engine } });
   return { cleared: true, state: await emit() };
 });
 app.whenReady().then(async () => {
+  await logRuntime({ event: "agent.started", fields: { mode: portableMode ? "portable" : "standard" } }, true);
   globalThis.fetch = net.fetch as typeof fetch;
   initializeDatabase();
   await initializePackageContractBootstrap();
@@ -858,7 +855,7 @@ app.whenReady().then(async () => {
 }).catch(async (error) => {
   const runtimeProbe = process.env.XMT_AGENT_RUNTIME_PROBE_FILE;
   const message = error instanceof Error ? error.message : String(error);
-  console.error("XMT Agent startup failed:", message);
+  await logRuntime({ event: "agent.startup_failed", level: "error", fields: { errorClass: safeErrorClass(error) } }, true).catch(() => undefined);
   if (runtimeProbe) {
     await fs.mkdir(path.dirname(runtimeProbe), { recursive: true });
     await fs.writeFile(runtimeProbe, JSON.stringify({ startupError: message }, null, 2), "utf8");

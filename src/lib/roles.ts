@@ -13,5 +13,5 @@ export function getRoleDisplayName(roleCode?: string | null) {
     return '\u672a\u5206\u914d\u89d2\u8272';
   }
 
-  return ROLE_LABELS[roleCode] || roleCode;
+  return ROLE_LABELS[roleCode] || '\u81ea\u5b9a\u4e49\u89d2\u8272';
 }

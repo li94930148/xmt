@@ -17,7 +17,7 @@ export default function DailyReportReviewDialog({ report, loading, onClose, onRe
   }
 
   return (
-    <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-modal flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
       <div className="w-full max-w-2xl rounded-panel border border-studio-border-soft bg-studio-surface p-5 shadow-2xl">
         <div className="mb-4">
           <h2 className="text-lg font-semibold text-studio-text-primary">审核日报</h2>

@@ -39,6 +39,10 @@ async function getUserPermissions(userId: number): Promise<string[]> {
   return permList;
 }
 
+export async function userHasPermission(userId: number, permissionCode: string): Promise<boolean> {
+  return (await getUserPermissions(userId)).includes(permissionCode);
+}
+
 /**
  * 清除用户权限缓存
  */

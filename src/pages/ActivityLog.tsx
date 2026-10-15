@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { useAppStore } from '../store';
 import { getActivityLogs, getUsers } from '../api';
 import type { ActivityLog as ActivityLogType, User } from '../types';
-import { Clock, User as UserIcon, Filter, ChevronLeft, ChevronRight, Loader2, FileText, Settings, Trash2, Edit, Plus, LogIn, Send } from 'lucide-react';
+import { Clock, Filter, ChevronLeft, ChevronRight, Loader2, FileText, Settings, Trash2, Edit, Plus, LogIn, Send } from 'lucide-react';
 import { formatBeijingTime } from '../lib/utils';
+import ActionButton from '../components/studio/ActionButton';
 
 const actionIcons: Record<string, typeof FileText> = {
   create: Plus,
@@ -40,41 +40,48 @@ export default function ActivityLog() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [limit] = useState(20);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [logsError, setLogsError] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<number | undefined>(undefined);
   const styles = useThemeStyles();
-  const appStore = useAppStore();
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
+    setLogsError(null);
     try {
       const result = await getActivityLogs({ page, limit, user_id: selectedUser });
       setLogs(result.data);
       setTotal(result.total);
     } catch (error) {
-      appStore.addNotification({ title: '获取日志失败', message: (error as Error).message, type: 'error' });
+      setLogsError(error instanceof Error ? error.message : '获取活动日志失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, limit, selectedUser]);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
+    setUsersLoading(true);
+    setUsersError(null);
     try {
       const result = await getUsers({ limit: 100 });
       setUsers(result.data);
-    } catch {
-      // 静默失败
+    } catch (error) {
+      setUsersError(error instanceof Error ? error.message : '获取成员筛选列表失败');
+    } finally {
+      setUsersLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchUsers();
   }, []);
 
   useEffect(() => {
-    fetchLogs();
-  }, [page, selectedUser]);
+    void fetchUsers();
+  }, [fetchUsers]);
+
+  useEffect(() => {
+    void fetchLogs();
+  }, [fetchLogs]);
 
   const totalPages = Math.ceil(total / limit);
 
@@ -134,16 +141,24 @@ export default function ActivityLog() {
               ))}
             </select>
           </div>
+          {usersError ? <div role="status" className="flex flex-wrap items-center gap-2 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-3 py-2 text-xs text-studio-amber-contrast">
+            <span>成员筛选暂不可用。{usersError}</span>
+            <ActionButton type="button" variant="secondary" disabled={usersLoading} onClick={() => void fetchUsers()}>{usersLoading ? '正在加载成员…' : '重试成员筛选'}</ActionButton>
+          </div> : null}
         </div>
       </div>
 
       {/* 时间线 */}
       <div className={`${styles.card} p-6`}>
+        {logsError ? <div role="alert" className="mb-4 flex flex-col gap-3 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-4 py-3 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
+          <span>{logs.length ? '活动日志刷新失败，仍显示最近一次成功读取的记录。' : '活动日志暂时无法读取。'} {logsError}</span>
+          <ActionButton type="button" variant="secondary" disabled={loading} onClick={() => void fetchLogs()}>{loading ? '正在重新加载…' : '重新加载日志'}</ActionButton>
+        </div> : null}
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="w-6 h-6 animate-spin text-studio-primary" />
           </div>
-        ) : logs.length === 0 ? (
+        ) : logsError && logs.length === 0 ? null : logs.length === 0 ? (
           <div className="text-center py-16">
             <Clock className={`w-12 h-12 mx-auto ${styles.textMuted} mb-3`} />
             <p className={styles.textSecondary}>暂无活动记录</p>

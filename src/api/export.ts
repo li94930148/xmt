@@ -2,25 +2,54 @@ import { useAuthStore } from '../store';
 
 const BASE_URL = '/api';
 
+export interface TopicExportRecord {
+  id: number;
+  title: string;
+  description?: string | null;
+  status: string;
+  platform?: string | null;
+  deadline?: string | null;
+  creator_name?: string | null;
+  assignee_name?: string | null;
+  creator_id?: number | null;
+  assignee_id?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TopicsExportResponse {
+  data: TopicExportRecord[];
+  stats: { total: number; byStatus: Record<string, number>; byPlatform: Record<string, number> };
+  exportTime: string;
+}
+
+export interface AnalyticsExportResponse {
+  topicStats: { status: string; count: number }[];
+  userActivity: { id: number; name: string; topics_created: number; pomodoros_completed: number }[];
+  dailyTrend: { date: string; topics_created: number }[];
+  platformDistribution: { platform: string; count: number }[];
+  exportTime: string;
+}
+
 function getAuthHeader(): Record<string, string> {
   const token = useAuthStore.getState().token;
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export async function exportTopics(): Promise<any[]> {
+export async function exportTopics(): Promise<TopicsExportResponse> {
   const response = await fetch(`${BASE_URL}/export/topics`, {
     headers: getAuthHeader()
   });
   if (!response.ok) throw new Error('导出选题数据失败');
-  return response.json();
+  return response.json() as Promise<TopicsExportResponse>;
 }
 
-export async function exportAnalytics(): Promise<any[]> {
+export async function exportAnalytics(): Promise<AnalyticsExportResponse> {
   const response = await fetch(`${BASE_URL}/export/analytics`, {
     headers: getAuthHeader()
   });
   if (!response.ok) throw new Error('导出分析数据失败');
-  return response.json();
+  return response.json() as Promise<AnalyticsExportResponse>;
 }
 
 export async function getWeeklyReport(): Promise<{

@@ -56,6 +56,7 @@ export default function CalendarPage() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [confirmedCreatedEventTitle, setConfirmedCreatedEventTitle] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -78,6 +79,7 @@ export default function CalendarPage() {
       ]);
       setEvents(eventsRes.data || []);
       setTopics(topicsRes.data || []);
+      setConfirmedCreatedEventTitle('');
     } catch (error) {
       setLoadError((error as Error).message || '获取日历事件失败');
     } finally {
@@ -225,6 +227,7 @@ export default function CalendarPage() {
         event_type: formData.event_type,
         topic_id: formData.topic_id ? Number(formData.topic_id) : undefined,
       });
+      setConfirmedCreatedEventTitle(formData.title.trim());
       addNotification({
         title: '创建成功',
         message: '日历事件已创建',
@@ -280,7 +283,16 @@ export default function CalendarPage() {
       {loading ? (
         <LoadingState type="page" text="正在加载日历..." />
       ) : loadError ? (
-        <ErrorState title="日历加载失败" description={loadError} actionText="重试加载" onRetry={() => void fetchEvents()} />
+        <ErrorState
+          title={confirmedCreatedEventTitle ? '事件已创建，日历未刷新' : '日历加载失败'}
+          description={
+            confirmedCreatedEventTitle
+              ? `“${confirmedCreatedEventTitle}”已由服务器确认创建。重新加载只会读取日历，不会重复创建事件。`
+              : loadError
+          }
+          actionText={confirmedCreatedEventTitle ? '重新加载日历' : '重试加载'}
+          onRetry={() => void fetchEvents()}
+        />
       ) : (
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <GlassPanel className="min-w-0 overflow-hidden">
@@ -312,7 +324,7 @@ export default function CalendarPage() {
                           <span
                             className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold sm:h-7 sm:w-7 sm:text-sm ${
                               isToday(cell.date)
-                                ? 'bg-studio-primary text-white shadow-glow-primary'
+                                ? 'bg-studio-primary-button text-white shadow-glow-primary'
                                 : cell.isCurrentMonth
                                   ? 'text-studio-text-primary'
                                   : 'text-studio-text-muted'

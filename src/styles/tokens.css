@@ -16,6 +16,21 @@ html.dark,
   --xmt-text-primary: #F2F5FA;
   --xmt-text-secondary: #A3AFC4;
   --xmt-text-muted: #6B7A93;
+  /* RGB channels mirror the semantic colors above for Tailwind opacity utilities. */
+  --xmt-app-bg-rgb: 8 11 18;
+  --xmt-app-bg-soft-rgb: 12 16 24;
+  --xmt-surface-rgb: 18 24 38;
+  --xmt-surface-soft-rgb: 23 30 46;
+  --xmt-surface-glass-rgb: 18 24 38;
+  --xmt-surface-glass-alpha: 0.72;
+  --xmt-surface-elevated-rgb: 28 36 54;
+  --xmt-border-soft-rgb: 148 163 184;
+  --xmt-border-soft-alpha: 0.12;
+  --xmt-border-active-rgb: 107 140 255;
+  --xmt-border-active-alpha: 0.50;
+  --xmt-text-primary-rgb: 242 245 250;
+  --xmt-text-secondary-rgb: 163 175 196;
+  --xmt-text-muted-rgb: 107 122 147;
 
   --xmt-primary: #6B8CFF;
   --xmt-primary-button: color-mix(in srgb, var(--xmt-primary) 72%, black);
@@ -26,6 +41,12 @@ html.dark,
   --xmt-success: #3DDBA0;
   --xmt-danger: #FF7A93;
   --xmt-warning: #F5C86B;
+  --xmt-primary-rgb: 107 140 255;
+  --xmt-cyan-rgb: 92 225 230;
+  --xmt-violet-rgb: 167 139 250;
+  --xmt-coral-rgb: 255 122 147;
+  --xmt-amber-rgb: 245 200 107;
+  --xmt-success-rgb: 61 219 160;
 
   --xmt-primary-contrast: #C9D6FF;
   --xmt-cyan-contrast: #B5F6F8;
@@ -33,6 +54,12 @@ html.dark,
   --xmt-coral-contrast: #FFD0D8;
   --xmt-amber-contrast: #FDEFC8;
   --xmt-success-contrast: #B9F5DC;
+  --xmt-primary-contrast-rgb: 201 214 255;
+  --xmt-cyan-contrast-rgb: 181 246 248;
+  --xmt-violet-contrast-rgb: 228 218 255;
+  --xmt-coral-contrast-rgb: 255 208 216;
+  --xmt-amber-contrast-rgb: 253 239 200;
+  --xmt-success-contrast-rgb: 185 245 220;
   --xmt-primary-soft: rgba(107, 140, 255, 0.14);
   --xmt-cyan-soft: rgba(92, 225, 230, 0.14);
   --xmt-violet-soft: rgba(167, 139, 250, 0.14);
@@ -66,8 +93,10 @@ html.dark,
   --xmt-z-sticky: 30;
   --xmt-z-page-overlay: 80;
   --xmt-z-modal: 200;
+  --xmt-z-notification: calc(var(--xmt-z-modal) + 10);
   --xmt-z-command: 300;
   --xmt-z-editor-menu: 400;
+  --xmt-z-editor-backdrop: calc(var(--xmt-z-editor-menu) - 1);
 
   --xmt-font-heading: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
   --xmt-font-body: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
@@ -135,6 +164,21 @@ html.light,
   --xmt-text-primary: #0F172A;
   --xmt-text-secondary: #475569;
   --xmt-text-muted: #5B667A;
+  /* RGB channels mirror the semantic colors above for Tailwind opacity utilities. */
+  --xmt-app-bg-rgb: 244 246 250;
+  --xmt-app-bg-soft-rgb: 234 240 255;
+  --xmt-surface-rgb: 255 255 255;
+  --xmt-surface-soft-rgb: 238 242 248;
+  --xmt-surface-glass-rgb: 255 255 255;
+  --xmt-surface-glass-alpha: 0.78;
+  --xmt-surface-elevated-rgb: 231 238 255;
+  --xmt-border-soft-rgb: 15 23 42;
+  --xmt-border-soft-alpha: 0.10;
+  --xmt-border-active-rgb: 61 90 254;
+  --xmt-border-active-alpha: 0.42;
+  --xmt-text-primary-rgb: 15 23 42;
+  --xmt-text-secondary-rgb: 71 85 105;
+  --xmt-text-muted-rgb: 91 102 122;
 
   --xmt-primary: #3D5AFE;
   --xmt-primary-button: var(--xmt-primary);
@@ -145,6 +189,12 @@ html.light,
   --xmt-success: #0F9F6E;
   --xmt-danger: #E11D48;
   --xmt-warning: #B45309;
+  --xmt-primary-rgb: 61 90 254;
+  --xmt-cyan-rgb: 8 145 178;
+  --xmt-violet-rgb: 124 92 252;
+  --xmt-coral-rgb: 225 29 72;
+  --xmt-amber-rgb: 180 83 9;
+  --xmt-success-rgb: 15 159 110;
 
   --xmt-primary-contrast: #1E3A8A;
   --xmt-cyan-contrast: #155E75;
@@ -152,6 +202,12 @@ html.light,
   --xmt-coral-contrast: #9F1239;
   --xmt-amber-contrast: #78350F;
   --xmt-success-contrast: #065F46;
+  --xmt-primary-contrast-rgb: 30 58 138;
+  --xmt-cyan-contrast-rgb: 21 94 117;
+  --xmt-violet-contrast-rgb: 91 33 182;
+  --xmt-coral-contrast-rgb: 159 18 57;
+  --xmt-amber-contrast-rgb: 120 53 15;
+  --xmt-success-contrast-rgb: 6 95 70;
   --xmt-primary-soft: rgba(61, 90, 254, 0.08);
   --xmt-cyan-soft: rgba(21, 94, 117, 0.08);
   --xmt-violet-soft: rgba(91, 33, 182, 0.08);

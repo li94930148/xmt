@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
-import { getShootingById, updateShooting } from '../api';
+import { getShootingById, getShootingScriptVersions, syncShootingPublishedArchive, updateShooting } from '../api';
+import type { WorkflowDocumentVersion } from '../api';
 import { Shooting as ShootingType } from '../types';
 import { ChevronLeft, Calendar, MapPin, Camera, User as UserIcon, CheckCircle, Clock, FileText, ArrowRight, PanelRight, PanelRightClose } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
@@ -15,10 +16,15 @@ import { setCurrentContentDocument } from '../content/orchestrator/currentConten
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
-import { parseStoredBjt } from '@shared/time';
 import { celebrateMilestone } from '../utils/confetti';
 import { useCompactEditorToolbar } from '../hooks/useCompactEditorToolbar';
 import { getWorkflowStatusLabel } from '../platform/workflow-status-labels';
+import { workflowScriptSourceLabel, workflowScriptSourceReference, workflowScriptSourceTimestamp } from '../utils/workflow-script-source';
+import ActionButton from '../components/studio/ActionButton';
+import GlassPanel from '../components/studio/GlassPanel';
+import { usePermission } from '../hooks/usePermission';
+import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
+import { sanitizeHtml } from '../utils/sanitizeHtml';
 
 interface ShootingDetailData extends ShootingType {
   production: {
@@ -27,9 +33,13 @@ interface ShootingDetailData extends ShootingType {
     content: string;
     content_markdown: string;
     status: string;
+    created_at?: string;
+    version_timestamp?: string;
     operator_name: string;
   } | null;
   script_content?: string | null;
+  published_archive_script_sync_pending?: boolean | null;
+  can_sync_published_archive?: boolean;
 }
 
 const WORKFLOW_STEPS = [
@@ -45,12 +55,29 @@ export default function ShootingDetail() {
   const appStore = useAppStore();
   const styles = useThemeStyles();
   const compactEditorToolbar = useCompactEditorToolbar();
+  const { hasPermission } = usePermission();
 
   const [shooting, setShooting] = useState<ShootingDetailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const hasLocalScript = shooting?.script_content !== null && shooting?.script_content !== undefined;
+  const sourceProductionId = shooting
+    ? hasLocalScript ? shooting.script_source_production_id : shooting.production?.id
+    : null;
+  const sourceVersion = shooting
+    ? hasLocalScript ? shooting.script_source_version : shooting.production?.version
+    : null;
+  const sourceProduction = shooting
+    ? hasLocalScript ? shooting.script_source_production : shooting.production
+    : null;
+  const sourceProductionTimestamp = workflowScriptSourceTimestamp(sourceProduction);
 
   // 剧本编辑状态
   const [scriptContent, setScriptContent] = useState('');
+  const [scriptVersions, setScriptVersions] = useState<WorkflowDocumentVersion[]>([]);
+  const [savingScriptVersion, setSavingScriptVersion] = useState(false);
+  const [archiveSyncPending, setArchiveSyncPending] = useState(false);
+  const [archiveSyncRetrying, setArchiveSyncRetrying] = useState(false);
+  const archiveSyncSaveSequenceRef = useRef(0);
   const [showSidebar, setShowSidebar] = useState(false);
   const [leaveFailureDialogDismissed, setLeaveFailureDialogDismissed] = useState(false);
   const activeDocId = shooting ? getCollaborationRoomId('shooting', shooting.id) : undefined;
@@ -80,7 +107,7 @@ export default function ShootingDetail() {
     setLeaveFailureDialogDismissed(false);
     const leaveResult = await requestLeave({
       reason: 'route_transition',
-      continuation: () => navigate(to),
+      continuation: () => navigate(to, { state: { mobileReturnTo: `/shooting/${id}` } }),
     });
 
     if (leaveResult.warning === 'collaboration_unconfirmed') {
@@ -90,7 +117,7 @@ export default function ShootingDetail() {
         type: 'warning',
       });
     }
-  }, [appStore, navigate, requestLeave]);
+  }, [appStore, id, navigate, requestLeave]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -98,13 +125,15 @@ export default function ShootingDetail() {
       try {
         const result = await getShootingById(parseInt(id!));
         setShooting(result);
+        setScriptVersions(await getShootingScriptVersions(result.id).catch(() => []));
+        setArchiveSyncPending(result.published_archive_script_sync_pending === true);
         setCurrentContentDocument(
           getCollaborationRoomId('shooting', result.id),
           result.topic_title || `成片 ${result.id}`,
         );
 
         // 初始化剧本内容：优先使用本地编辑版，其次使用创作管理审核通过的内容
-        const content = result.script_content || result.production?.content || result.production?.content_markdown || '';
+        const content = result.script_content ?? result.production?.content ?? result.production?.content_markdown ?? '';
         setScriptContent(content);
       } catch (error) {
         appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
@@ -130,9 +159,81 @@ export default function ShootingDetail() {
         immersive: true,
         pageScroll: false,
       },
-      persist: (content) => updateShooting(shooting.id, { script_content: content }).then(() => undefined),
+      persist: (content) => {
+        const saveSequence = ++archiveSyncSaveSequenceRef.current;
+        const source = workflowScriptSourceReference(
+          shooting.script_content,
+          { id: shooting.script_source_production_id, version: shooting.script_source_version },
+          shooting.production,
+        );
+        return updateShooting(shooting.id, { script_content: content, ...source }).then((result) => {
+          if (saveSequence === archiveSyncSaveSequenceRef.current) {
+            setArchiveSyncPending(result.archiveSync === 'pending');
+          }
+        });
+      },
     });
   }, [scriptContent, shooting]);
+
+  const handleRetryPublishedArchiveSync = async () => {
+    if (!shooting || archiveSyncRetrying || syncStatus === 'saving') return;
+    setArchiveSyncRetrying(true);
+    try {
+      const result = await syncShootingPublishedArchive(shooting.id);
+      setArchiveSyncPending(false);
+      appStore.addNotification({
+        title: result.archiveSync === 'skipped' ? '归档无需更新' : '归档已同步',
+        message: result.message,
+        type: 'success',
+      });
+    } catch (error) {
+      appStore.addNotification({ title: '归档仍待同步', message: (error as Error).message, type: 'warning' });
+    } finally {
+      setArchiveSyncRetrying(false);
+    }
+  };
+
+  const handleSaveScriptVersion = async (versionAction: 'minor' | 'major') => {
+    if (!shooting || savingScriptVersion) return;
+    setSavingScriptVersion(true);
+    try {
+      const flushResult = await runtimeHandleRef.current?.flush({ timeoutMs: 8000 });
+      if (flushResult && flushResult.status !== 'synced') {
+        throw new Error('当前修改尚未完成保存，请处理保存状态后重试。');
+      }
+      const source = workflowScriptSourceReference(
+        shooting.script_content,
+        { id: shooting.script_source_production_id, version: shooting.script_source_version },
+        shooting.production,
+      );
+      const result = await updateShooting(shooting.id, {
+        script_content: scriptContent,
+        expected_content: scriptContent,
+        version_action: versionAction,
+        ...source,
+      });
+      setArchiveSyncPending(result.archiveSync === 'pending');
+      setShooting((current) => current ? {
+        ...current,
+        script_content: scriptContent,
+        script_source_production_id: source.script_source_production_id ?? current.script_source_production_id,
+        script_source_version: source.script_source_version ?? current.script_source_version,
+      } : current);
+      const refreshedVersions = await getShootingScriptVersions(shooting.id).catch(() => null);
+      if (refreshedVersions) setScriptVersions(refreshedVersions);
+      appStore.addNotification({
+        title: refreshedVersions ? '版本已保存' : '版本已保存，历史列表未刷新',
+        message: refreshedVersions
+          ? `成片剧本已保存为${versionAction === 'major' ? '大版本' : '小版本'}`
+          : '服务端已确认版本；请重新加载查看历史，不要重复创建。',
+        type: refreshedVersions ? 'success' : 'warning',
+      });
+    } catch (error) {
+      appStore.addNotification({ title: '版本保存失败', message: (error as Error).message, type: 'error' });
+    } finally {
+      setSavingScriptVersion(false);
+    }
+  };
   const handleStatusChange = async (newStatus: string) => {
     if (!shooting) return;
 
@@ -144,18 +245,33 @@ export default function ShootingDetail() {
         equipment: shooting.equipment || '',
         status: newStatus
       });
-
-      const updated = await getShootingById(parseInt(id!));
-      setShooting(updated);
-
-      if (newStatus === 'completed') {
-        appStore.addNotification({ title: '制作完成', message: '成片制作已完成，自动流转到发布管理', type: 'success' });
-        celebrateMilestone();
-      } else {
-        appStore.addNotification({ title: '状态更新', message: '状态已更新', type: 'success' });
-      }
     } catch (error) {
       appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+      return;
+    }
+
+    // The write is confirmed; keep the accepted status even if the follow-up read fails.
+    setShooting((current) => current ? { ...current, status: newStatus } : current);
+
+    try {
+      const updated = await getShootingById(parseInt(id!));
+      setShooting(updated);
+    } catch {
+      const message = '服务端已确认更新，但页面刷新失败。请重新加载确认，不要重复操作。';
+      if (newStatus === 'completed') {
+        appStore.addNotification({ title: '制作已完成', message: `${message} 成片已自动流转到发布管理。`, type: 'warning' });
+        celebrateMilestone();
+      } else {
+        appStore.addNotification({ title: '状态已更新', message, type: 'warning' });
+      }
+      return;
+    }
+
+    if (newStatus === 'completed') {
+      appStore.addNotification({ title: '制作完成', message: '成片制作已完成，自动流转到发布管理', type: 'success' });
+      celebrateMilestone();
+    } else {
+      appStore.addNotification({ title: '状态更新', message: '状态已更新', type: 'success' });
     }
   };
 
@@ -183,34 +299,36 @@ export default function ShootingDetail() {
     }
 
     return getTimelineView(getCollaborationRoomId('shooting', shooting.id), {
-      versionEvents: shooting.production ? [{
-        id: `production-version-${shooting.production.id}`,
-        timestamp: parseStoredBjt(shooting.updated_at || shooting.created_at)?.getTime() ?? Date.now(),
-        version: shooting.production.version,
-        status: shooting.production.status,
-        operatorName: shooting.production.operator_name,
+      versionEvents: sourceProduction && sourceProductionTimestamp !== null ? [{
+        id: `production-version-${sourceProduction.id}`,
+        timestamp: sourceProductionTimestamp,
+        version: sourceProduction.version,
+        status: sourceProduction.status,
+        operatorName: sourceProduction.operator_name,
         label: '关联创作版本',
       }] : [],
     });
-  }, [shooting]);
+  }, [shooting, sourceProduction, sourceProductionTimestamp]);
 
   useEffect(() => {
-    if (!shooting?.production) return;
+    if (!shooting) return;
+    if (!sourceProduction) return;
+    if (sourceProductionTimestamp === null) return;
 
     recordTimelineEvent({
-      id: `shooting:${shooting.id}:production-version:${shooting.production.id}`,
+      id: `shooting:${shooting.id}:production-version:${sourceProduction.id}`,
       docId: getCollaborationRoomId('shooting', shooting.id),
-      timestamp: parseStoredBjt(shooting.updated_at || shooting.created_at)?.getTime() ?? Date.now(),
+      timestamp: sourceProductionTimestamp,
       type: 'version',
       source: 'version',
-      userId: shooting.production.operator_name,
+      userId: sourceProduction.operator_name || undefined,
       payload: {
-        version: shooting.production.version,
-        status: shooting.production.status,
+        version: sourceProduction.version,
+        status: sourceProduction.status,
         label: '关联创作版本',
       },
     });
-  }, [shooting]);
+  }, [shooting, sourceProduction, sourceProductionTimestamp]);
 
   if (loading) {
     return (
@@ -236,6 +354,8 @@ export default function ShootingDetail() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <button
+              type="button"
+              aria-label="返回制作列表"
               onClick={() => void handleGuardedNavigate('/shooting')}
               className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
             >
@@ -245,8 +365,17 @@ export default function ShootingDetail() {
               <h1 className={`truncate text-base font-semibold ${styles.textPrimary}`}>
                 {shooting.topic_title || '成片制作'}
               </h1>
-              {shooting.production?.version && (
-                <span className={`text-xs ${styles.textMuted}`}>创作版本 {shooting.production.version}</span>
+              <span className={`text-xs ${styles.textMuted}`}>
+                {workflowScriptSourceLabel(
+                  shooting.script_content,
+                  shooting.script_source_version,
+                  shooting.production?.version,
+                )}
+              </span>
+              {sourceProduction && (
+                <span className={`text-xs ${styles.textMuted}`}>
+                  {sourceProductionTimestamp === null ? '创作版本时间未记录' : `创作版本时间 ${formatBeijingTime(sourceProductionTimestamp, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
+                </span>
               )}
               <span className={`text-xs ${styles.textMuted}`}>{formatBeijingDate(shooting.plan_date)}</span>
               <span className={`text-xs ${styles.textMuted}`}>{formatBeijingTime(shooting.updated_at || shooting.created_at)}</span>
@@ -256,7 +385,7 @@ export default function ShootingDetail() {
               {hasLocalScriptEdit && (
                 <span className="rounded-full bg-studio-primary-soft px-2 py-0.5 text-xs text-studio-primary-contrast">本地编辑版</span>
               )}
-              <span className={`text-xs ${syncStatus === 'conflicted' ? 'text-studio-coral' : syncStatus === 'saving' ? 'text-studio-primary' : styles.textMuted}`}>
+              <span className={`text-xs ${syncStatus === 'conflicted' ? 'text-studio-coral-contrast' : syncStatus === 'saving' ? 'text-studio-primary-contrast' : styles.textMuted}`}>
                 {editorStateLabel(syncStatus)}
               </span>
               <span className={`text-xs ${styles.textMuted}`}>时间轴 {timelineView.timeline.length} 个节点</span>
@@ -264,9 +393,20 @@ export default function ShootingDetail() {
           </div>
 
           <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
+            {hasPermission('workflow:shooting') && (
+              <>
+                <ActionButton type="button" disabled={savingScriptVersion || syncStatus === 'conflicted'} onClick={() => void handleSaveScriptVersion('minor')} className="min-h-10 px-3 py-2 text-xs">
+                  {savingScriptVersion ? '保存中…' : '小版本保存'}
+                </ActionButton>
+                <ActionButton type="button" variant="primary" disabled={savingScriptVersion || syncStatus === 'conflicted'} onClick={() => void handleSaveScriptVersion('major')} className="min-h-10 px-3 py-2 text-xs">
+                  大版本保存
+                </ActionButton>
+              </>
+            )}
             <button
               onClick={() => setShowSidebar((prev) => !prev)}
               className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
+              aria-label={showSidebar ? '收起信息栏' : '展开信息栏'}
               title={showSidebar ? '收起信息栏' : '展开信息栏'}
             >
               {showSidebar ? (
@@ -278,7 +418,7 @@ export default function ShootingDetail() {
             {shooting.status === 'planned' && (
               <button
                 onClick={() => handleStatusChange('in_progress')}
-                className="flex items-center gap-1.5 rounded-lg bg-studio-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-studio-primary"
+                className="xmt-btn xmt-btn-primary min-h-10 px-3 py-1.5 text-xs"
               >
                 <Camera className="w-4 h-4" />
                 开始制作
@@ -288,7 +428,7 @@ export default function ShootingDetail() {
             {shooting.status === 'in_progress' && (
               <button
                 onClick={() => handleStatusChange('completed')}
-                className="flex items-center gap-1.5 rounded-lg bg-studio-success px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-studio-success"
+                className="xmt-btn min-h-10 border border-studio-success/30 bg-studio-success-soft px-3 py-1.5 text-xs font-medium text-studio-success-contrast hover:bg-studio-success/12"
               >
                 <CheckCircle className="w-4 h-4" />
                 完成制作
@@ -298,7 +438,7 @@ export default function ShootingDetail() {
             {shooting.status === 'cancelled' && (
               <button
                 onClick={() => handleStatusChange('planned')}
-                className="flex items-center gap-1.5 rounded-lg bg-studio-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-studio-primary"
+                className="xmt-btn xmt-btn-primary min-h-10 px-3 py-1.5 text-xs"
               >
                 <Clock className="w-4 h-4" />
                 重新计划
@@ -314,6 +454,49 @@ export default function ShootingDetail() {
           </div>
         </div>
       </div>
+
+      {archiveSyncPending && (
+        <section
+          role="status"
+          aria-live="polite"
+          className="flex flex-col gap-3 rounded-xl border border-studio-border-soft bg-studio-amber-soft px-4 py-3 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p>成片剧本已保存，但发布归档尚未更新。重试只会同步已保存内容，不会改写剧本。</p>
+          {shooting.can_sync_published_archive ? (
+            <button
+              type="button"
+              onClick={() => void handleRetryPublishedArchiveSync()}
+              disabled={archiveSyncRetrying || syncStatus === 'saving'}
+              className="xmt-btn xmt-btn-warning min-h-10 shrink-0 px-3 py-2 text-xs disabled:opacity-50"
+            >
+              {archiveSyncRetrying ? '同步中...' : syncStatus === 'saving' ? '等待剧本保存...' : '重试同步归档'}
+            </button>
+          ) : (
+            <p className="text-xs text-studio-text-muted">请联系有成片制作权限的成员重试归档同步。</p>
+          )}
+        </section>
+      )}
+
+      {sourceProductionId && sourceVersion ? (
+        <GlassPanel
+          role="region"
+          aria-label="创作来源版本"
+          className="flex min-w-0 flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between xl:hidden"
+        >
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-studio-text-secondary">创作来源版本</p>
+            <p className="mt-1 truncate text-sm text-studio-text-primary">当前成片剧本引用创作 {sourceVersion}</p>
+          </div>
+          <ActionButton
+            type="button"
+            variant="secondary"
+            className="min-h-10 w-full shrink-0 px-3 py-2 text-xs sm:w-auto"
+            onClick={() => void handleGuardedNavigate(`/production/${sourceProductionId}?version=${encodeURIComponent(sourceVersion)}`)}
+          >
+            查看创作版本 {sourceVersion}
+          </ActionButton>
+        </GlassPanel>
+      ) : null}
 
       <div className="flex gap-3">
         <main className="min-w-0 flex-1">
@@ -348,16 +531,20 @@ export default function ShootingDetail() {
                 <p className={`text-xs uppercase tracking-[0.18em] ${styles.textMuted}`}>版本入口</p>
                 <div className={`rounded-xl ${styles.bgTertiary} p-3`}>
                   <p className={`text-sm font-medium ${styles.textPrimary}`}>
-                    当前创作版本：{shooting.production?.version || '-'}
+                    剧本来源版本：{shooting.script_source_version || shooting.production?.version || '-'}
                   </p>
                   <p className={`mt-1 text-xs ${styles.textMuted}`}>版本已纳入统一时间轴，当前页保留本地剧本编辑版。</p>
                 </div>
                 <button
-                  onClick={() => shooting.production?.id && void handleGuardedNavigate(`/production/${shooting.production.id}`)}
-                  disabled={!shooting.production?.id}
+                  onClick={() => {
+                    if (sourceProductionId && sourceVersion) {
+                      void handleGuardedNavigate(`/production/${sourceProductionId}?version=${encodeURIComponent(sourceVersion)}`);
+                    }
+                  }}
+                  disabled={!sourceProductionId || !sourceVersion}
                   className={`w-full rounded-lg px-3 py-2 text-xs ${styles.buttonSecondary} disabled:opacity-50`}
                 >
-                  查看创作版本历史
+                  {sourceProductionId && sourceVersion ? `查看创作版本 ${sourceVersion}` : '创作来源版本未记录'}
                 </button>
               </section>
               <section className="space-y-2">
@@ -388,7 +575,7 @@ export default function ShootingDetail() {
                     return (
                       <div key={step.key} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${styles.bgTertiary}`}>
                         <Icon className={`h-4 w-4 ${stepStatus === 'current' ? 'text-studio-primary' : styles.textMuted}`} />
-                        <span className={stepStatus === 'current' ? 'text-studio-primary' : styles.textSecondary}>
+                        <span className={stepStatus === 'current' ? 'text-studio-primary-contrast' : styles.textSecondary}>
                           {step.label}
                         </span>
                       </div>
@@ -404,6 +591,38 @@ export default function ShootingDetail() {
           </aside>
         )}
       </div>
+
+      <GlassPanel role="region" aria-label="剧本版本历史" className="p-4 sm:p-5">
+        <div>
+          <h2 className="text-sm font-semibold text-studio-text-primary">剧本版本历史</h2>
+          <p className="mt-1 text-xs text-studio-text-muted">自动保存更新当前稿；仅小版本和大版本操作会留档。</p>
+        </div>
+        {scriptVersions.length > 0 ? (
+          <ol className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {scriptVersions.map((version) => (
+              <li key={version.id} className="rounded-xl border border-studio-border-soft bg-studio-surface-soft/60 p-3">
+                <p className="text-sm font-medium text-studio-text-primary">{version.is_baseline ? '历史原稿（时间未记录）' : `${version.version} · ${version.change_type === 'major' ? '大版本' : '小版本'}`}</p>
+                <p className="mt-1 text-xs text-studio-text-muted">{version.is_baseline ? '旧内容未记录操作人和时间' : `${version.operator_name || '系统记录'} · ${version.created_at || '时间未记录'}`}</p>
+                {Number(version.source_production_id) > 0 && version.source_production_version ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleGuardedNavigate(`/production/${version.source_production_id}?version=${encodeURIComponent(version.source_production_version!)}`)}
+                    className="mt-2 inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-medium text-studio-cyan-contrast hover:bg-studio-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring"
+                  >
+                    来源创作稿：{version.source_production_version} · 查看
+                  </button>
+                ) : (
+                  <p className="mt-2 text-xs text-studio-text-muted">该版本的创作来源未记录</p>
+                )}
+                <details className="mt-2">
+                  <summary className="min-h-8 cursor-pointer py-1 text-xs font-medium text-studio-primary-contrast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring">查看此版本正文</summary>
+                  <div className="editor-content-preview tiptap mt-2 max-h-80 overflow-auto rounded-lg border border-studio-border-soft bg-studio-surface-soft p-4 text-sm leading-relaxed text-studio-text-primary" dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(version.content)) }} />
+                </details>
+              </li>
+            ))}
+          </ol>
+        ) : <p className="mt-3 rounded-xl border border-studio-border-soft bg-studio-surface-soft/50 p-3 text-xs text-studio-text-muted">暂无已保存版本</p>}
+      </GlassPanel>
 
       <EditorLeaveFailureDialog
         open={leaveGuardState === 'waiting_confirmation' && !leaveFailureDialogDismissed}

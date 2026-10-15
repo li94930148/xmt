@@ -1,5 +1,6 @@
 import { db } from './db';
 import { dateKeyBjt, formatBjtDatabase, nowBjt } from '../../shared/time';
+import { apiLogger } from '../observability/logger.js';
 
 type DbArg = string | number | boolean | null;
 
@@ -69,7 +70,13 @@ function buildDatabaseError(operation: string, sql: string, params: unknown[], e
   const sqliteMessage = err instanceof Error ? err.message : String(err);
   const table = sql.match(/\b(?:INSERT\s+INTO|UPDATE|FROM|TABLE)\s+([a-zA-Z0-9_]+)/i)?.[1] || 'unknown';
   // Never log bound parameters: this layer is also used for encrypted OAuth tokens.
-  console.error('[DB] operation failed', { operation, table, sqliteMessage });
+  apiLogger.error({
+    module: 'database',
+    operation: 'query.failed',
+    databaseOperation: operation,
+    table,
+    error: { code: 'DATABASE_OPERATION_FAILED', name: err instanceof Error ? err.name : 'UnknownError' },
+  }, 'api.database.query_failed');
   return new DatabaseError(`Database ${operation} failed on ${table}: ${sqliteMessage}`, sql, params, err);
 }
 

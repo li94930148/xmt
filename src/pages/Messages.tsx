@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   Bell,
   CheckCircle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   Info,
   Inbox,
@@ -13,7 +15,7 @@ import {
   Trash2,
   XCircle,
 } from 'lucide-react';
-import { getMessages, markMessageAsRead, clearMessages } from '../api';
+import { getMessages, markMessageAsRead, markAllAsRead, clearMessages } from '../api';
 import { ConfirmModal, LoadingState } from '../components/common';
 import {
   ActionButton,
@@ -26,7 +28,9 @@ import {
 } from '../components/studio';
 import { formatBeijingTime } from '../lib/utils';
 import { useAppStore, useMessageStore } from '../store';
-import { Message } from '../types';
+import type { Message } from '../types';
+
+const MESSAGE_PAGE_SIZE = 20;
 
 type MessageFilter = 'all' | 'unread' | 'actionable' | 'system';
 
@@ -47,9 +51,19 @@ const typeMeta: Record<string, { icon: ReactNode; tone: 'success' | 'coral' | 'a
 export default function Messages() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState({ total: 0, unread: 0, actionable: 0 });
+  const [searchParams] = useSearchParams();
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<MessageFilter>('all');
+  const [markingAll, setMarkingAll] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<MessageFilter>(() => searchParams.get('filter') === 'actionable' ? 'actionable' : 'all');
+  const markingMessageIdsRef = useRef(new Set<number>());
+  const latestMessageRequestRef = useRef(0);
+  const [markingMessageIds, setMarkingMessageIds] = useState<Set<number>>(() => new Set());
 
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
@@ -58,44 +72,82 @@ export default function Messages() {
   const markStoreMessageAsRead = useMessageStore((state) => state.markAsRead);
 
   useEffect(() => {
-    const fetchMessages = async () => {
-      setLoading(true);
-      try {
-        const result = await getMessages();
-        setMessages(result.data);
-        setStoreMessages(result.data);
-        setUnreadCount(result.data.filter((message: Message) => !message.read).length);
-      } catch (error) {
-        addNotification({ title: '获取消息失败', message: (error as Error).message, type: 'error' });
-      } finally {
-        setLoading(false);
-      }
+    const refreshMessages = () => setReloadKey((current) => current + 1);
+    window.addEventListener('xmt-messages-refresh', refreshMessages);
+    return () => window.removeEventListener('xmt-messages-refresh', refreshMessages);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const requestId = ++latestMessageRequestRef.current;
+    const params = {
+      page,
+      limit: MESSAGE_PAGE_SIZE,
+      ...(activeFilter === 'unread' ? { read: 'unread' as const } : {}),
+      ...(activeFilter === 'actionable' ? { read: 'unread' as const, link: 'present' as const } : {}),
+      ...(activeFilter === 'system' ? { link: 'absent' as const } : {}),
     };
 
-    void fetchMessages();
-  }, [addNotification, setStoreMessages, setUnreadCount]);
+    setLoading(true);
+    setLoadError(null);
+    void getMessages(params)
+      .then((result) => {
+        if (!active || requestId !== latestMessageRequestRef.current) return;
+        setMessages(result.data);
+        setTotal(result.total);
+        setSummary(result.summary);
+        setStoreMessages(result.data);
+        setUnreadCount(result.summary.unread);
+      })
+      .catch((error) => {
+        if (!active || requestId !== latestMessageRequestRef.current) return;
+        const message = error instanceof Error ? error.message : '请检查网络后重试';
+        setMessages([]);
+        setTotal(0);
+        setSummary({ total: 0, unread: 0, actionable: 0 });
+        setStoreMessages([]);
+        setUnreadCount(0);
+        setLoadError(message);
+        addNotification({ title: '获取消息失败', message, type: 'error' });
+      })
+      .finally(() => {
+        if (active && requestId === latestMessageRequestRef.current) setLoading(false);
+      });
 
-  const unreadCount = messages.filter((message) => !message.read).length;
-  const actionableCount = messages.filter((message) => Boolean(message.link) && !message.read).length;
+    return () => {
+      active = false;
+    };
+  }, [activeFilter, addNotification, page, reloadKey, setStoreMessages, setUnreadCount]);
 
-  const filteredMessages = useMemo(() => {
-    if (activeFilter === 'unread') {
-      return messages.filter((message) => !message.read);
-    }
-    if (activeFilter === 'actionable') {
-      return messages.filter((message) => Boolean(message.link));
-    }
-    if (activeFilter === 'system') {
-      return messages.filter((message) => !message.link);
-    }
-    return messages;
-  }, [activeFilter, messages]);
+  const totalPages = Math.max(1, Math.ceil(total / MESSAGE_PAGE_SIZE));
+  const unreadCount = summary.unread;
+  const actionableCount = summary.actionable;
+  const filteredMessages = messages;
+  const showUnreadOnly = activeFilter === 'unread' || activeFilter === 'actionable';
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const handleMessageClick = async (message: Message) => {
     if (!message.read) {
+      if (markingMessageIdsRef.current.has(message.id)) return;
+      markingMessageIdsRef.current.add(message.id);
+      setMarkingMessageIds(new Set(markingMessageIdsRef.current));
+
       try {
         await markMessageAsRead(message.id);
-        setMessages((current) => current.map((item) => (item.id === message.id ? { ...item, read: true } : item)));
+        latestMessageRequestRef.current += 1;
+        setLoading(false);
+        setMessages((current) => showUnreadOnly
+          ? current.filter((item) => item.id !== message.id)
+          : current.map((item) => (item.id === message.id ? { ...item, read: true } : item)));
+        if (showUnreadOnly) setTotal((current) => Math.max(0, current - 1));
+        setSummary((current) => ({
+          ...current,
+          unread: Math.max(0, current.unread - 1),
+          actionable: message.link ? Math.max(0, current.actionable - 1) : current.actionable,
+        }));
         markStoreMessageAsRead(message.id);
       } catch (error) {
         addNotification({
@@ -103,6 +155,10 @@ export default function Messages() {
           message: error instanceof Error ? error.message : '消息仍保持未读，请稍后重试',
           type: 'error',
         });
+        return;
+      } finally {
+        markingMessageIdsRef.current.delete(message.id);
+        setMarkingMessageIds(new Set(markingMessageIdsRef.current));
       }
     }
 
@@ -112,24 +168,51 @@ export default function Messages() {
   };
 
   const handleMarkAllAsRead = async () => {
-    const unreadMessages = messages.filter((message) => !message.read);
-    const settled = await Promise.allSettled(unreadMessages.map((message) => markMessageAsRead(message.id)));
-    const succeededIds = new Set(unreadMessages.filter((_, index) => settled[index].status === 'fulfilled').map((message) => message.id));
-    const failed = settled.filter((result) => result.status === 'rejected').length;
-    if (succeededIds.size) {
-      setMessages((current) => current.map((message) => succeededIds.has(message.id) ? { ...message, read: true } : message));
-      for (const id of succeededIds) markStoreMessageAsRead(id);
-      setUnreadCount(Math.max(0, unreadCount - succeededIds.size));
+    if (markingAll || unreadCount === 0) return;
+    setMarkingAll(true);
+    try {
+      const result = await markAllAsRead();
+      latestMessageRequestRef.current += 1;
+      setLoading(false);
+      const nextMessages = showUnreadOnly
+        ? []
+        : messages.map((message) => ({ ...message, read: true }));
+      setMessages(nextMessages);
+      setStoreMessages(nextMessages);
+      setSummary((current) => ({ ...current, unread: 0, actionable: 0 }));
+      setUnreadCount(0);
+      if (showUnreadOnly) {
+        setTotal(0);
+        setPage(1);
+      }
+      addNotification({
+        title: '操作成功',
+        message: result.updatedCount > 0
+          ? `已将 ${result.updatedCount} 条未读消息标记为已读`
+          : '当前没有需要标记的未读消息',
+        type: 'success',
+      });
+    } catch (error) {
+      addNotification({
+        title: '操作失败',
+        message: error instanceof Error ? error.message : '消息仍保持未读，请稍后重试',
+        type: 'error',
+      });
+    } finally {
+      setMarkingAll(false);
     }
-    if (failed) addNotification({ title: succeededIds.size ? '部分消息未标记' : '操作失败', message: `${succeededIds.size} 条已标记为已读，${failed} 条仍未读，可重试。`, type: 'error' });
-    else addNotification({ title: '操作成功', message: '所有消息已标记为已读', type: 'success' });
   };
 
   const handleClearAll = async () => {
     setClearing(true);
     try {
       await clearMessages();
+      latestMessageRequestRef.current += 1;
+      setLoading(false);
       setMessages([]);
+      setPage(1);
+      setTotal(0);
+      setSummary({ total: 0, unread: 0, actionable: 0 });
       setStoreMessages([]);
       setUnreadCount(0);
       setShowClearConfirm(false);
@@ -149,11 +232,11 @@ export default function Messages() {
           description="聚合协作提醒、审核反馈和系统通知，优先处理仍未读的内容节点。"
           actions={
             <>
-              <ActionButton onClick={handleMarkAllAsRead} disabled={unreadCount === 0}>
+              <ActionButton onClick={handleMarkAllAsRead} disabled={unreadCount === 0 || markingAll}>
                 <CheckCircle2 className="h-4 w-4" />
-                全部已读
+                {markingAll ? '处理中' : '全部已读'}
               </ActionButton>
-              <ActionButton onClick={() => setShowClearConfirm(true)} className="border-studio-coral/35 text-studio-coral-contrast hover:bg-studio-coral/10">
+              <ActionButton onClick={() => setShowClearConfirm(true)} variant="danger">
                 <Trash2 className="h-4 w-4" />
                 清空
               </ActionButton>
@@ -164,7 +247,7 @@ export default function Messages() {
         <div className="grid gap-4 md:grid-cols-3">
           <MetricCard title="未读消息" value={unreadCount} trend={{ label: '需要关注', up: unreadCount === 0 }} icon={Bell} tone="cyan" />
           <MetricCard title="待处理跳转" value={actionableCount} trend={{ label: '关联业务页面', up: actionableCount === 0 }} icon={Radio} tone="violet" />
-          <MetricCard title="消息总量" value={messages.length} trend={{ label: '本地通知流', up: true }} icon={Inbox} tone="amber" />
+          <MetricCard title="消息总量" value={summary.total} trend={{ label: '本地通知流', up: true }} icon={Inbox} tone="amber" />
         </div>
 
         <GlassPanel className="overflow-hidden">
@@ -174,7 +257,11 @@ export default function Messages() {
                 <button
                   key={filter.key}
                   type="button"
-                  onClick={() => setActiveFilter(filter.key)}
+                  aria-pressed={activeFilter === filter.key}
+                  onClick={() => {
+                    setPage(1);
+                    setActiveFilter(filter.key);
+                  }}
                   className={`min-h-10 rounded-button border px-3 py-2 text-sm font-semibold leading-snug transition ${
                     activeFilter === filter.key
                       ? 'border-studio-border-active bg-studio-primary/14 text-studio-text-primary'
@@ -185,12 +272,17 @@ export default function Messages() {
                 </button>
               ))}
             </div>
-            <span className="text-sm text-studio-text-muted">当前 {filteredMessages.length} 条</span>
+            <span className="text-sm text-studio-text-muted">本页 {filteredMessages.length} 条，共 {total} 条</span>
           </div>
 
           {loading ? (
             <div className="px-6 py-12">
               <LoadingState type="section" text="正在同步消息流..." />
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center gap-4 p-6">
+              <EmptyState icon={AlertTriangle} title="消息加载失败" description={loadError} />
+              <ActionButton type="button" onClick={() => setReloadKey((current) => current + 1)}>重试加载</ActionButton>
             </div>
           ) : messages.length === 0 ? (
             <div className="p-6">
@@ -204,25 +296,28 @@ export default function Messages() {
             <div className="divide-y divide-studio-border-soft">
               {filteredMessages.map((message) => {
                 const meta = typeMeta[message.type] || typeMeta.info;
+                const isMarking = markingMessageIds.has(message.id);
 
                 return (
                   <button
                     key={message.id}
                     type="button"
                     onClick={() => handleMessageClick(message)}
+                    disabled={isMarking}
+                    aria-busy={isMarking}
                     className={`group w-full px-5 py-4 text-left transition hover:bg-studio-surface-soft ${
                       !message.read ? 'bg-studio-primary/[0.055] shadow-[inset_3px_0_0_rgba(34,211,238,0.65)]' : ''
-                    } ${message.link ? 'cursor-pointer' : 'cursor-default'}`}
+                    } ${isMarking ? 'cursor-wait' : message.link ? 'cursor-pointer' : 'cursor-default'}`}
                   >
                     <div className="flex items-start gap-4">
                       <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border bg-studio-surface-soft ${
                         meta.tone === 'success'
-                          ? 'border-studio-success/35 text-studio-success'
+                          ? 'border-studio-success/35 text-studio-success-contrast'
                           : meta.tone === 'coral'
-                            ? 'border-studio-coral/35 text-studio-coral'
+                            ? 'border-studio-coral/35 text-studio-coral-contrast'
                             : meta.tone === 'amber'
-                              ? 'border-studio-amber/35 text-studio-amber'
-                              : 'border-studio-cyan/35 text-studio-cyan'
+                              ? 'border-studio-amber/35 text-studio-amber-contrast'
+                              : 'border-studio-cyan/35 text-studio-cyan-contrast'
                       }`}
                       >
                         {meta.icon}
@@ -230,14 +325,14 @@ export default function Messages() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug text-studio-text-primary">{message.title}</h3>
-                          <StatusPill tone={message.read ? 'muted' : 'cyan'}>{message.read ? '已读' : '未读'}</StatusPill>
+                          <StatusPill tone={message.read ? 'muted' : 'cyan'}>{isMarking ? '标记中' : message.read ? '已读' : '未读'}</StatusPill>
                           {message.link ? <ExternalLink className="h-4 w-4 text-studio-text-muted opacity-60 transition group-hover:opacity-100" /> : null}
                         </div>
                         <p className="mt-1 text-sm leading-6 text-studio-text-secondary">{message.content}</p>
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
                           <span>{formatBeijingTime(message.created_at)}</span>
                           <span>{meta.label}</span>
-                          {message.link ? <span className="text-studio-cyan">可进入关联页面</span> : null}
+                          {message.link ? <span className="text-studio-cyan-contrast">可进入关联页面</span> : null}
                         </div>
                       </div>
                     </div>
@@ -246,6 +341,30 @@ export default function Messages() {
               })}
             </div>
           )}
+
+          {!loading && !loadError && total > MESSAGE_PAGE_SIZE ? (
+            <div className="flex flex-col gap-3 border-t border-studio-border-soft px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-sm text-studio-text-secondary">共 {total} 条，第 {page} / {totalPages} 页</span>
+              <div className="flex items-center gap-2">
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" /> 上一页
+                </ActionButton>
+                <ActionButton
+                  type="button"
+                  variant="ghost"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                >
+                  下一页 <ChevronRight className="h-4 w-4" />
+                </ActionButton>
+              </div>
+            </div>
+          ) : null}
         </GlassPanel>
       </PageShell>
 

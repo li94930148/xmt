@@ -28,7 +28,7 @@ interface Spark {
 }
 
 const ClickSpark: React.FC<ClickSparkProps> = ({
-  sparkColor = '#fff',
+  sparkColor = 'var(--xmt-primary-contrast)',
   sparkSize = 10,
   sparkRadius = 15,
   sparkCount = 8,
@@ -103,8 +103,10 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
         startTimeRef.current = timestamp;
       }
       ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      const activeSparks = sparksRef.current;
+      const resolvedSparkColor = activeSparks.length > 0 ? getComputedStyle(canvas).color : '';
 
-      sparksRef.current = sparksRef.current.filter((spark: Spark) => {
+      sparksRef.current = activeSparks.filter((spark: Spark) => {
         const elapsed = timestamp - spark.startTime;
         if (elapsed >= duration) {
           return false;
@@ -121,7 +123,7 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
         const x2 = spark.x + (distance + lineLength) * Math.cos(spark.angle);
         const y2 = spark.y + (distance + lineLength) * Math.sin(spark.angle);
 
-        ctx.strokeStyle = sparkColor;
+        ctx.strokeStyle = resolvedSparkColor;
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -161,7 +163,7 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
 
   return (
     <div className="relative w-full h-full" onClick={handleClick}>
-      <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
+      <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ color: sparkColor }} />
       {children}
     </div>
   );

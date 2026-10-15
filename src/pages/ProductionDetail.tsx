@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
   ChevronLeft,
@@ -37,18 +37,15 @@ import { editorStateLabel, useEditorEventState } from '../editor/state/editorSta
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
 import ProductionResourcesPanel from '../components/production/ProductionResourcesPanel';
+import ProductionMaterialHistorySnapshot from '../components/production/ProductionMaterialHistorySnapshot';
+import ProductionOriginPanel from '../components/production/ProductionOriginPanel';
+import ProductionReviewPanel from '../components/production/ProductionReviewPanel';
+import { productionStatusLabel } from '../components/production/productionStatusLabel';
 import type { ResourceReference } from '../components/production/resourceReference';
 import { buildResourceReferenceHtml } from '../components/production/resourceReference';
 import { celebrateMilestone } from '../utils/confetti';
 import { useSocket } from '../hooks/useSocket';
 import { COLLABORATION_EVENTS, type VersionSupersededPayload } from '../collaboration/core/events';
-
-const STATUS_TEXT: Record<string, string> = {
-  draft: '草稿',
-  review: '审核中',
-  approved: '已通过',
-  rejected: '已驳回',
-};
 
 const STATUS_TONE: Record<string, 'amber' | 'cyan' | 'success' | 'coral' | 'muted'> = {
   draft: 'amber',
@@ -82,6 +79,7 @@ type VersionEntry = {
   createdAt: string;
   isCurrent: boolean;
   versionState?: 'historical' | 'superseded';
+  materialDraftSnapshotHtml?: string | null;
 };
 
 function normalizeVersionContent(contentMarkdown?: string, content?: string) {
@@ -124,6 +122,8 @@ function syncTone(syncStatus: string): 'cyan' | 'success' | 'coral' | 'muted' {
 export default function ProductionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedVersion = searchParams.get('version')?.trim() || '';
   const addNotification = useAppStore((state) => state.addNotification);
   const theme = useAppStore((state) => state.theme);
   const authUser = useAuthStore((state) => state.user);
@@ -135,13 +135,16 @@ export default function ProductionDetail() {
   const [production, setProduction] = useState<ProductionType | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null);
   const [history, setHistory] = useState<HistoryVersion[]>([]);
+  const [linkedHistoryVersion, setLinkedHistoryVersion] = useState<HistoryVersion | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const detailRequestRef = useRef(0);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [outlineEditorReady, setOutlineEditorReady] = useState(false);
+  const [reviewEditorHandle, setReviewEditorHandle] = useState<EditorCommandHandle | null>(null);
   const [editData, setEditData] = useState({
     content: '',
     status: 'draft',
@@ -149,6 +152,7 @@ export default function ProductionDetail() {
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
   const [leaveFailureDialogDismissed, setLeaveFailureDialogDismissed] = useState(false);
   const [superseded, setSuperseded] = useState<VersionSupersededPayload | null>(null);
+  const displayedCurrentVersion = production?.version || 'v1.0';
 
   const canEditProduction = Boolean(
     production &&
@@ -159,7 +163,11 @@ export default function ProductionDetail() {
         Number(topic?.assignee_id) === authUser?.id
       ),
   );
-  const canDelete = canEditProduction && hasPermission('production:delete');
+  const requestedHistoryUnavailable = Boolean(
+    production && requestedVersion && requestedVersion !== displayedCurrentVersion && !linkedHistoryVersion,
+  );
+  const canEditSelectedVersion = canEditProduction && !requestedHistoryUnavailable && selectedVersionId === 'current';
+  const canDelete = canEditSelectedVersion && hasPermission('production:delete');
   const activeDocId = production ? getProductionVersionRoomId(production.id, production.version) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
   const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
@@ -178,7 +186,16 @@ export default function ProductionDetail() {
   }, []);
   const handleOutlineEditorChange = useCallback((handle: EditorCommandHandle | null) => {
     outlineEditorHandleRef.current = handle;
+    setReviewEditorHandle(handle);
     setOutlineEditorReady(Boolean(handle));
+  }, []);
+  const handleReviewEditorCommandHandleChange = useCallback((handle: EditorCommandHandle | null) => {
+    outlineEditorHandleRef.current = handle;
+    setReviewEditorHandle(handle);
+  }, []);
+  const flushReviewEditor = useCallback(async () => {
+    const handle = runtimeHandleRef.current;
+    return handle ? handle.flush({ timeoutMs: 15_000 }) : { status: 'failed' };
   }, []);
 
   useEffect(() => {
@@ -228,10 +245,28 @@ export default function ProductionDetail() {
   const fetchData = useCallback(async () => {
     if (!id) return;
 
+    const requestId = ++detailRequestRef.current;
     setLoading(true);
+    setHistoryLoading(false);
+    setLinkedHistoryVersion(null);
 
     try {
       const productionData = await getProductionById(Number.parseInt(id, 10));
+      if (requestId !== detailRequestRef.current) return;
+
+      const currentVersion = productionData.version || 'v1.0';
+      const exactHistoryRequest = requestedVersion && requestedVersion !== currentVersion
+        ? getProductionHistory(Number.parseInt(id, 10), 1, 1, true, requestedVersion)
+          .then((result) => result.data.find((entry) => entry.version === requestedVersion) || null)
+          .catch(() => null)
+        : Promise.resolve(null);
+      const [topicData, historyData, exactHistoryVersion] = await Promise.all([
+        getTopic(productionData.topic_id),
+        getProductionHistory(Number.parseInt(id, 10)),
+        exactHistoryRequest,
+      ]);
+      if (requestId !== detailRequestRef.current) return;
+
       setProduction(productionData);
       persistedContentRef.current = productionData.content || '';
       setCurrentContentDocument(
@@ -242,44 +277,50 @@ export default function ProductionDetail() {
         content: productionData.content || '',
         status: productionData.status,
       });
-
-      const [topicData, historyData] = await Promise.all([
-        getTopic(productionData.topic_id),
-        getProductionHistory(Number.parseInt(id, 10)),
-      ]);
-
       setTopic(topicData);
       setHistory(historyData.data);
+      setLinkedHistoryVersion(exactHistoryVersion);
       setHistoryPage(historyData.page);
       setHistoryTotal(historyData.total);
-      setSelectedVersionId('current');
+      setSelectedVersionId(exactHistoryVersion ? `history-${exactHistoryVersion.id}` : 'current');
       setSuperseded(null);
+      if (requestedVersion && requestedVersion !== currentVersion && !exactHistoryVersion) {
+        addNotification({ title: '创作来源版本暂不可用', message: `没有找到 ${requestedVersion}，当前创作稿仍可正常查看。`, type: 'warning' });
+      }
     } catch (error) {
+      if (requestId !== detailRequestRef.current) return;
       addNotification({
         title: '获取创作详情失败',
         message: (error as Error).message,
         type: 'error',
       });
     } finally {
-      setLoading(false);
+      if (requestId === detailRequestRef.current) setLoading(false);
     }
-  }, [addNotification, id]);
+  }, [addNotification, id, requestedVersion]);
 
   const loadMoreHistory = useCallback(async () => {
     if (!id || historyLoading || history.length >= historyTotal) return;
+    const requestId = detailRequestRef.current;
     setHistoryLoading(true);
     try {
       const next = await getProductionHistory(Number.parseInt(id, 10), historyPage + 1);
+      if (requestId !== detailRequestRef.current) return;
       setHistory((existing) => [...existing, ...next.data]);
       setHistoryPage(next.page);
       setHistoryTotal(next.total);
     } catch {
-      addNotification({ title: '加载历史版本失败', message: '请稍后重试', type: 'error' });
-    } finally { setHistoryLoading(false); }
+      if (requestId === detailRequestRef.current) addNotification({ title: '加载历史版本失败', message: '请稍后重试', type: 'error' });
+    } finally {
+      if (requestId === detailRequestRef.current) setHistoryLoading(false);
+    }
   }, [addNotification, history.length, historyLoading, historyPage, historyTotal, id]);
 
   useEffect(() => {
     void fetchData();
+    return () => {
+      detailRequestRef.current += 1;
+    };
   }, [fetchData]);
 
   const versionEntries = useMemo<VersionEntry[]>(() => {
@@ -303,7 +344,9 @@ export default function ProductionDetail() {
       isCurrent: true,
     };
 
-    const historyEntries: VersionEntry[] = history.map((record) => ({
+      const historyById = new Map<number, HistoryVersion>(history.map((record) => [record.id, record]));
+      if (linkedHistoryVersion) historyById.set(linkedHistoryVersion.id, linkedHistoryVersion);
+      const historyEntries: VersionEntry[] = Array.from(historyById.values()).map((record) => ({
       id: `history-${record.id}`,
       version: record.version || 'v1.0',
       changeType: record.change_type === 'major' ? 'major' : 'minor',
@@ -314,13 +357,14 @@ export default function ProductionDetail() {
       createdAt: record.created_at,
       isCurrent: false,
       versionState: record.version_state,
+      materialDraftSnapshotHtml: record.material_draft_snapshot_html,
     }));
 
     return [currentEntry, ...historyEntries];
-  }, [history, production]);
+  }, [history, linkedHistoryVersion, production]);
 
   const selectedVersion = versionEntries.find((entry) => entry.id === selectedVersionId) || versionEntries[0] || null;
-  const canFocusWrite = Boolean(selectedVersion?.isCurrent && canEditProduction && !superseded);
+  const canFocusWrite = Boolean(selectedVersion?.isCurrent && canEditSelectedVersion && !superseded);
   const outlineHeadings = useMemo(() => extractOutlineHeadings(topic?.outline || ''), [topic?.outline]);
 
   useEffect(() => {
@@ -365,7 +409,10 @@ export default function ProductionDetail() {
       }
     }
 
-    return Array.from(latestByMajor.values()).sort((a, b) => {
+    const visibleEntries = Array.from(latestByMajor.values());
+    const selectedEntry = versionEntries.find((entry) => entry.id === selectedVersionId);
+    if (selectedEntry && !visibleEntries.some((entry) => entry.id === selectedEntry.id)) visibleEntries.push(selectedEntry);
+    return visibleEntries.sort((a, b) => {
       const aParts = parseVersionParts(a.version);
       const bParts = parseVersionParts(b.version);
 
@@ -375,7 +422,7 @@ export default function ProductionDetail() {
 
       return bParts.minor - aParts.minor;
     });
-  }, [versionEntries]);
+  }, [selectedVersionId, versionEntries]);
 
   const startEditing = () => {
     if (!production) return;
@@ -407,7 +454,7 @@ export default function ProductionDetail() {
       documentId: room,
       collaborationRoom: room,
       initialContent: editData.content,
-      readonly: !canEditProduction || selectedVersionId !== 'current' || Boolean(superseded),
+      readonly: !canEditSelectedVersion || selectedVersionId !== 'current' || Boolean(superseded),
       capabilities: {
         collaboration: true,
         manualSave: false,
@@ -431,10 +478,10 @@ export default function ProductionDetail() {
         persistedContentRef.current = content;
       },
     });
-  }, [addNotification, canEditProduction, editData.content, editData.status, production, selectedVersionId, superseded]);
+  }, [addNotification, canEditSelectedVersion, editData.content, editData.status, production, selectedVersionId, superseded]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
-    if (!production || !canEditProduction || superseded) return;
+    if (!production || !canEditSelectedVersion || superseded) return;
 
     try {
       const result = await updateProduction(production.id, {
@@ -464,7 +511,7 @@ export default function ProductionDetail() {
   };
 
   const handleSubmitReview = async () => {
-    if (!production || !canEditProduction || superseded) return;
+    if (!production || !canEditSelectedVersion || superseded) return;
 
     try {
       await updateProduction(production.id, {
@@ -493,7 +540,7 @@ export default function ProductionDetail() {
   };
 
   const handleStatusUpdate = async (status: string) => {
-    if (!production || !canEditProduction || superseded) return;
+    if (!production || !canEditSelectedVersion || superseded) return;
 
     try {
       await updateProduction(production.id, {
@@ -564,10 +611,10 @@ export default function ProductionDetail() {
   }
 
   const statusTone = STATUS_TONE[production.status] || 'muted';
-  const statusLabel = STATUS_TEXT[production.status] || production.status;
+  const statusLabel = productionStatusLabel(production.status);
   const syncLabel = editorStateLabel(syncStatus);
   const editorLocked = Boolean(superseded);
-  const canManageProductionResources = canEditProduction
+  const canManageProductionResources = canEditSelectedVersion
     && production?.status !== 'approved'
     && selectedVersionId === 'current'
     && !editorLocked
@@ -626,7 +673,7 @@ export default function ProductionDetail() {
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
                 <span>{production.version || 'v1.0'}</span>
-                <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="text-studio-cyan transition hover:text-studio-primary-contrast">
+                <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="text-studio-cyan-contrast transition hover:text-studio-primary-contrast">
                   {topic?.title || production.topic_title || '关联选题'}
                 </button>
                 <span className="inline-flex items-center gap-1">
@@ -660,11 +707,11 @@ export default function ProductionDetail() {
               {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
               版本历史
             </ActionButton>
-            <ActionButton onClick={startEditing} className="px-3 py-2">
+            {!requestedHistoryUnavailable ? <ActionButton onClick={startEditing} className="px-3 py-2">
               <FileText className="h-4 w-4" />
               当前稿件
-            </ActionButton>
-            {canEditProduction && production.status !== 'approved' ? (
+            </ActionButton> : null}
+            {canEditSelectedVersion && production.status !== 'approved' ? (
               <ActionButton onClick={() => handleStatusUpdate(NEXT_STATUSES[production.status])} variant="primary" className="px-3 py-2">
                 <ArrowRight className="h-4 w-4" />
                 {production.status === 'draft' ? '提交审核' : production.status === 'review' ? '审核通过' : '重新编辑'}
@@ -708,16 +755,26 @@ export default function ProductionDetail() {
       </GlassPanel>
 
       <div className={writingFocused ? 'hidden' : ''}>
-        <ProductionResourcesPanel
-          productionId={production.id}
-          canManage={canManageProductionResources}
-          manuscriptHtml={editData.content}
-          referenceReady={outlineEditorReady}
-          onInsertReference={insertResourceReference}
-        />
+        {selectedVersion?.isCurrent ? (
+          <ProductionResourcesPanel
+            key={production.id}
+            productionId={production.id}
+            canManage={canManageProductionResources}
+            manuscriptHtml={editData.content}
+            referenceReady={outlineEditorReady}
+            onInsertReference={insertResourceReference}
+          />
+        ) : selectedVersion ? (
+          <ProductionMaterialHistorySnapshot
+            key={selectedVersion.id}
+            version={selectedVersion.version}
+            snapshotHtml={selectedVersion.materialDraftSnapshotHtml}
+          />
+        ) : null}
       </div>
 
       <div className={`grid items-start gap-6 ${writingFocused ? 'grid-cols-1' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}>
+        <div className="min-w-0 space-y-5">
         <GlassPanel className="min-w-0 overflow-visible">
           {superseded && canEditProduction ? (
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-coral/30 bg-studio-coral/10 px-4 py-3" role="status" aria-live="polite">
@@ -733,7 +790,7 @@ export default function ProductionDetail() {
             </div>
           ) : null}
           {writingFocused && (
-            <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2 border-b border-studio-border-soft bg-[var(--editor-panel)] px-4 py-2">
+            <div className="sticky top-0 z-sticky flex flex-wrap items-center justify-between gap-2 border-b border-studio-border-soft bg-[var(--editor-panel)] px-4 py-2">
               <div className="flex min-w-0 items-center gap-2 text-xs text-studio-text-secondary">
                 <span className="truncate font-semibold text-studio-text-primary">{production.topic_title || '当前稿件'}</span>
                 <StatusPill tone={syncTone(syncStatus)}>{syncLabel}</StatusPill>
@@ -756,7 +813,17 @@ export default function ProductionDetail() {
             ) : null}
           </div>
 
-          {selectedVersion?.isCurrent && canEditProduction && !editorLocked ? (
+          {requestedHistoryUnavailable ? (
+            <div role="alert" className="flex min-h-[300px] flex-col items-start justify-center gap-4 bg-studio-surface-soft p-6 lg:p-8">
+              <div>
+                <p className="text-sm font-semibold text-studio-coral-contrast">引用的历史版本 {requestedVersion} 暂不可用</p>
+                <p className="mt-2 text-sm text-studio-text-secondary">为避免把当前稿误当作来源，本页不会替换显示当前正文。</p>
+              </div>
+              <ActionButton onClick={() => void handleGuardedNavigate(`/production/${production.id}`)} variant="primary" className="px-3 py-2">
+                返回当前版本
+              </ActionButton>
+            </div>
+          ) : selectedVersion?.isCurrent && canEditSelectedVersion && !editorLocked ? (
             <div className="min-h-[300px] bg-[var(--editor-bg)]">
               <ContentEditor
                 value={editData.content}
@@ -774,25 +841,39 @@ export default function ProductionDetail() {
             </div>
           ) : (
             <div className="min-h-[300px] bg-[var(--editor-bg)] p-6 lg:p-8">
-              <div
+              <ContentEditor
+                value={sanitizeHtml(normalizeLegacyEditorHtmlTheme(
+                  selectedVersion?.contentMarkdown ||
+                    normalizeVersionContent(
+                      (production as ProductionType & {
+                        contentMarkdown?: string;
+                        content_markdown?: string;
+                      }).contentMarkdown ||
+                        (production as ProductionType & { content_markdown?: string }).content_markdown,
+                      production.content,
+                    ),
+                ))}
+                mode="readonly"
+                minHeight={300}
                 className={`editor-content-preview production-preview tiptap prose max-w-none leading-relaxed text-studio-text-primary ${isDark ? 'prose-invert' : ''}`}
-                dangerouslySetInnerHTML={{
-                  __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(
-                    selectedVersion?.contentMarkdown ||
-                      normalizeVersionContent(
-                        (production as ProductionType & {
-                          contentMarkdown?: string;
-                          content_markdown?: string;
-                        }).contentMarkdown ||
-                          (production as ProductionType & { content_markdown?: string }).content_markdown,
-                        production.content,
-                      ),
-                  )),
-                }}
+                onEditorCommandHandleChange={handleReviewEditorCommandHandleChange}
               />
             </div>
           )}
         </GlassPanel>
+        <ProductionReviewPanel
+          productionId={production.id}
+          version={selectedVersion?.version || production.version}
+          currentVersion={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked)}
+          canComment={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked && hasPermission('workflow:comment'))}
+          canAccept={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked && canEditSelectedVersion && hasPermission('production:update'))}
+          canModerate={hasPermission('comment:delete')}
+          currentUserId={authUser?.id ?? null}
+          editorHandle={reviewEditorHandle}
+          flushEditor={flushReviewEditor}
+          onNotice={(title, message, type) => addNotification({ title, message, type })}
+        />
+        </div>
 
         <GlassPanel className={`flex flex-col self-start overflow-visible ${writingFocused ? 'hidden' : ''}`}>
           <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4">
@@ -817,11 +898,12 @@ export default function ProductionDetail() {
                   key={entry.id}
                   type="button"
                   onClick={() => setSelectedVersionId(entry.id)}
+                  disabled={requestedHistoryUnavailable}
                   className={`w-full rounded-card border px-4 py-3 text-left transition ${
                     selectedVersionId === entry.id
                       ? 'border-studio-border-active bg-studio-primary/12 shadow-glow-primary'
                       : 'border-studio-border-soft bg-studio-surface-soft/70 hover:border-studio-border-active hover:bg-studio-surface-elevated/70'
-                  }`}
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-semibold text-studio-text-primary">{entry.version}</span>
@@ -837,12 +919,19 @@ export default function ProductionDetail() {
               {history.length < historyTotal && <button type="button" disabled={historyLoading} onClick={() => void loadMoreHistory()} className="w-full rounded-lg border border-studio-border-soft px-3 py-2 text-sm text-studio-text-secondary disabled:opacity-50">{historyLoading ? '正在加载…' : '查看更多历史版本'}</button>}
             </div>
 
+            <ProductionOriginPanel
+              sourceType={production.origin_source_type}
+              sourceSnapshot={production.origin_source_content_snapshot}
+              sourceOutlineVersion={production.origin_source_outline_version}
+              sourceTopicId={production.topic_id}
+            />
+
             <div className="space-y-3 border-t border-studio-border-soft pt-5">
               <p className="text-xs font-semibold uppercase text-studio-text-muted">版本操作</p>
-              {canEditProduction && !editorLocked && <ActionButton onClick={startEditing} className="w-full">
+              {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && <ActionButton onClick={startEditing} className="w-full">
                 当前版本查看 / 编辑
               </ActionButton>}
-              {canEditProduction && !editorLocked && (
+              {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && (
                 <div className="flex flex-wrap gap-2">
                   <ActionButton onClick={() => handleVersionedSave('minor')} className="min-w-0 flex-1 px-3 py-2">
                     <Save className="h-4 w-4" />
@@ -854,7 +943,7 @@ export default function ProductionDetail() {
                   </ActionButton>
                 </div>
               )}
-              {canEditProduction && !editorLocked && editData.status === 'draft' ? (
+              {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && editData.status === 'draft' ? (
                 <ActionButton onClick={handleSubmitReview} variant="primary" className="w-full">
                   <ArrowRight className="h-4 w-4" />
                   提交审核
@@ -864,7 +953,7 @@ export default function ProductionDetail() {
 
             <div className="border-t border-studio-border-soft pt-5">
               <p className="text-xs font-semibold uppercase text-studio-text-muted">关联选题</p>
-              <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan transition hover:text-studio-primary-contrast">
+              <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan-contrast transition hover:text-studio-primary-contrast">
                 {topic?.title || production.topic_title || '-'}
               </button>
             </div>

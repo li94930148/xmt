@@ -5,6 +5,7 @@ import { notifyDesktop } from '../utils/notification';
 import { buildMessageDesktopNotification, type MessageNotificationGroup } from '../utils/message-notification';
 import { SocketCoordinator, createRuntimeTokenProvider, readSocketCoordinatorEnabled, SocketTabCoordinator } from '../auth/socket';
 import { SocketClientLifecycleDiagnostics } from '../observability/socket-client-lifecycle';
+import { emitClientLog, normalizeSocketDisconnectReason, safeClientErrorClass } from '../observability/client-logger';
 import { getSocketBaseUrl, isNative } from '@/platform/runtime';
 
 let globalSocket: Socket | null = null;
@@ -95,19 +96,23 @@ export function useSocket() {
         nextSocket.emit('socket:lifecycle:reconnect', { attempt: reconnectAttempt });
         reconnectAttempt = 0;
       }
-      console.info('[Socket] connected:', nextSocket.id);
+      emitClientLog({ event: 'socket.connected', level: 'info' });
       setSocketRevision((revision) => revision + 1);
       setSocket(nextSocket);
+      import('../api').then(({ getUnreadCount }) => {
+        getUnreadCount().then((data) => setUnreadCount(data.unreadCount)).catch(() => {});
+      }).catch(() => {});
+      window.dispatchEvent(new Event('xmt-messages-refresh'));
     });
 
     nextSocket.on('connect_error', (error) => {
-      console.warn('[Socket] connect_error:', error.message);
+      emitClientLog({ event: 'socket.connect_failed', level: 'warn', fields: { errorClass: safeClientErrorClass(error) } });
       setSocketRevision((revision) => revision + 1);
     });
 
     nextSocket.on('disconnect', (reason) => {
       lifecycleDiagnostics.disconnected(reason);
-      console.info('[Socket] disconnected:', reason);
+      emitClientLog({ event: 'socket.disconnected', level: 'info', fields: { reason: normalizeSocketDisconnectReason(reason) } });
       setSocketRevision((revision) => revision + 1);
     });
 
@@ -130,6 +135,7 @@ export function useSocket() {
     nextSocket.on('new_message', (message) => {
       addMessage(message);
       notifyDesktop(buildMessageDesktopNotification(message, desktopMessageGroups));
+      window.dispatchEvent(new Event('xmt-messages-refresh'));
     });
 
     nextSocket.on('unread_count', () => {

@@ -9,22 +9,6 @@
 
 import React, { useEffect, useRef, useCallback, CSSProperties, ReactNode } from 'react';
 
-function hexToRgba(hex: string, alpha: number = 1): string {
-  if (!hex) return `rgba(0,0,0,${alpha})`;
-  let h = hex.replace('#', '');
-  if (h.length === 3) {
-    h = h
-      .split('')
-      .map(c => c + c)
-      .join('');
-  }
-  const int = parseInt(h.slice(0, 6), 16);
-  const r = (int >> 16) & 255;
-  const g = (int >> 8) & 255;
-  const b = int & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
 interface ElectricBorderProps {
   children?: ReactNode;
   color?: string;
@@ -37,7 +21,7 @@ interface ElectricBorderProps {
 
 const ElectricBorder: React.FC<ElectricBorderProps> = ({
   children,
-  color = '#5227FF',
+  color = 'var(--xmt-primary)',
   speed = 1,
   chaos = 0.12,
   borderRadius = 24,
@@ -189,6 +173,13 @@ const ElectricBorder: React.FC<ElectricBorderProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    let resolvedColor = getComputedStyle(canvas).color;
+    const themeScope = container.closest('.xmt-theme-scope') ?? document.documentElement;
+    const themeObserver = new MutationObserver(() => {
+      resolvedColor = getComputedStyle(canvas).color;
+    });
+    themeObserver.observe(themeScope, { attributes: true, attributeFilter: ['class', 'data-theme'] });
+
     const octaves = 10;
     const lacunarity = 1.6;
     const gain = 0.7;
@@ -235,7 +226,7 @@ const ElectricBorder: React.FC<ElectricBorderProps> = ({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.scale(dpr, dpr);
 
-      ctx.strokeStyle = color;
+      ctx.strokeStyle = resolvedColor;
       ctx.lineWidth = 1;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -311,6 +302,7 @@ const ElectricBorder: React.FC<ElectricBorderProps> = ({
         cancelAnimationFrame(animationRef.current);
       }
       resizeObserver.disconnect();
+      themeObserver.disconnect();
     };
   }, [color, speed, chaos, borderRadius, octavedNoise, getRoundedRectPoint]);
 
@@ -321,12 +313,12 @@ const ElectricBorder: React.FC<ElectricBorderProps> = ({
       style={{ '--electric-border-color': color, borderRadius, ...style } as CSSProperties}
     >
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[2]">
-        <canvas ref={canvasRef} className="block" />
+        <canvas ref={canvasRef} className="block" style={{ color }} />
       </div>
       <div className="absolute inset-0 rounded-[inherit] pointer-events-none z-0">
         <div
           className="absolute inset-0 rounded-[inherit] pointer-events-none"
-          style={{ border: `2px solid ${hexToRgba(color, 0.6)}`, filter: 'blur(1px)' }}
+          style={{ border: `2px solid color-mix(in srgb, ${color} 60%, transparent)`, filter: 'blur(1px)' }}
         />
         <div
           className="absolute inset-0 rounded-[inherit] pointer-events-none"

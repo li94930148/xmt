@@ -132,6 +132,21 @@ try {
   assert.equal(savedDraft.revision, initialDraft.revision + 1);
   assert.equal(savedDraft.content_html.includes('<script'), false);
   assert.equal(savedDraft.content_html.includes('javascript:'), false);
+  assert.equal(savedDraft.content_html.includes(`/asset-center/resources/${secondResourceId}`), false);
+  assert.equal((await queryOne<{ content: string }>('SELECT content FROM production WHERE id=?', [productionId]))?.content, '<p>正式稿</p>', 'saving the materials scratchpad never writes the formal manuscript');
+
+  const sourceLinkedMaterials = await fetch(`${base}/${productionId}/material-draft`, {
+    method: 'PUT', headers: editorHeaders,
+    body: JSON.stringify({
+      content_html: `<blockquote><p>第三段</p></blockquote><p><a href="/asset-center/resources/${secondResourceId}">来源：来源二</a></p>`,
+      revision: savedDraft.revision,
+    }),
+  });
+  assert.equal(sourceLinkedMaterials.status, 200);
+  const sourceLinkedDraft = (await sourceLinkedMaterials.json()).data;
+  assert.match(sourceLinkedDraft.content_html, /第三段/);
+  assert.match(sourceLinkedDraft.content_html, new RegExp(`/asset-center/resources/${secondResourceId}`));
+  assert.equal((await queryOne<{ content: string }>('SELECT content FROM production WHERE id=?', [productionId]))?.content, '<p>正式稿</p>', 'source-linked material notes remain separate from the formal manuscript');
 
   const stale = await fetch(`${base}/${productionId}/material-draft`, {
     method: 'PUT', headers: editorHeaders,
@@ -159,11 +174,61 @@ try {
   assert.equal(firstSave.status, 200);
   assert.equal((await firstSave.json()).data.revision, 1);
 
-  await execute(`UPDATE resources SET content_text='来源已变化' WHERE id=?`, [resourceId]);
+  const dbClient = db as unknown as { execute: typeof db.execute };
+  const originalExecute = dbClient.execute.bind(db);
+  let missedPostWriteReadbackCount = 0;
+  dbClient.execute = (async (...args: Parameters<typeof db.execute>) => {
+    const statement = args[0];
+    const sql = typeof statement === 'string'
+      ? statement
+      : typeof statement === 'object' && statement !== null && 'sql' in statement
+        ? String(statement.sql)
+        : '';
+    if (/^\s*SELECT \* FROM production_material_drafts WHERE production_id=\?/i.test(sql)) {
+      missedPostWriteReadbackCount += 1;
+      return { rows: [], rowsAffected: 0 } as Awaited<ReturnType<typeof db.execute>>;
+    }
+    return originalExecute(...args);
+  }) as typeof db.execute;
+  try {
+    const saveWithReadbackMiss = await fetch(`${base}/${emptyProductionId}/material-draft`, {
+      method: 'PUT', headers: editorHeaders,
+      body: JSON.stringify({ content_html: '<p>写入确认不依赖额外读取</p>', revision: 1 }),
+    });
+    assert.equal(saveWithReadbackMiss.status, 200, 'a committed material-draft write succeeds without a follow-up read');
+    const confirmedDraft = (await saveWithReadbackMiss.json()).data;
+    assert.equal(confirmedDraft.revision, 2, 'the confirmed response returns the committed revision');
+    assert.equal(confirmedDraft.content_html, '<p>写入确认不依赖额外读取</p>');
+    assert.equal(missedPostWriteReadbackCount, 0, 'the save route never performs a separate post-write readback');
+  } finally {
+    dbClient.execute = originalExecute;
+  }
+  assert.deepEqual(
+    await queryOne('SELECT content_html,revision FROM production_material_drafts WHERE production_id=?', [emptyProductionId]),
+    { content_html: '<p>写入确认不依赖额外读取</p>', revision: 2 },
+    'the saved content persists even when an additional readback would have missed it',
+  );
+
+  await execute(`UPDATE resources SET content_text='来源已变化' WHERE id=?`, [secondResourceId]);
   const stableDraft = (await (await fetch(`${base}/${productionId}/material-draft`, { headers: editorHeaders })).json()).data;
-  assert.match(stableDraft.content_html, /统一草稿/);
+  assert.match(stableDraft.content_html, /第三段/);
+  assert.match(stableDraft.content_html, new RegExp(`/asset-center/resources/${secondResourceId}`));
   assert.equal(stableDraft.content_html.includes('来源已变化'), false, 'editing the library source never changes the saved draft');
+  assert.equal((await queryOne<{ content: string }>('SELECT content FROM production WHERE id=?', [productionId]))?.content, '<p>正式稿</p>');
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) count FROM production_materials WHERE production_id=?', [productionId]))?.count, 2, 'legacy card data is retained');
+
+  await execute(`UPDATE resources SET status='deleted',deleted_at=datetime('now','+8 hours') WHERE id=?`, [secondResourceId]);
+  const draftAfterSourceRemovalResponse = await fetch(`${base}/${productionId}/material-draft`, { headers: editorHeaders });
+  assert.equal(draftAfterSourceRemovalResponse.status, 200, 'moving an original resource to recycle does not invalidate the independent materials draft');
+  const draftAfterSourceRemoval = (await draftAfterSourceRemovalResponse.json()).data;
+  assert.match(draftAfterSourceRemoval.content_html, /第三段/, 'the copied source text remains available after its original resource is removed');
+  assert.match(draftAfterSourceRemoval.content_html, new RegExp(`/asset-center/resources/${secondResourceId}`), 'the draft keeps the original source identity instead of silently dropping the link');
+  const reinsertRemovedSource = await fetch(`${base}/${productionId}/material-draft/resources`, {
+    method: 'POST', headers: editorHeaders, body: JSON.stringify({ resource_ids: [secondResourceId] }),
+  });
+  assert.equal(reinsertRemovedSource.status, 404, 'a recycled source cannot be fetched for a new insertion');
+  const unchangedAfterRejectedReinsert = (await (await fetch(`${base}/${productionId}/material-draft`, { headers: editorHeaders })).json()).data;
+  assert.equal(unchangedAfterRejectedReinsert.content_html, draftAfterSourceRemoval.content_html, 'a rejected re-insertion does not alter the saved draft');
 
   const removedManualEndpoint = await fetch(`${base}/${productionId}/materials/manual`, {
     method: 'POST', headers: editorHeaders, body: JSON.stringify({ content_html: '<p>不可达</p>' }),

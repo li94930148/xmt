@@ -80,8 +80,8 @@ topics + history + production/shooting/publishing 等表
 | `topic_history.topic_id → topics.id` | 创建、审核、状态变化历史 | 有索引，未在初始定义中声明外键 |
 | `production.topic_id → topics.id` | 进入创作后的一对零/一主记录 | 应用层避免重复创建 |
 | `shooting.topic_id → topics.id` | 进入拍摄后的主记录 | 应用层避免重复创建 |
-| `publishing.topic_id → topics.id` | 进入发布后的主记录 | 应用层避免重复创建 |
-| `analytics.topic_id → topics.id` | 发布后数据分析 | 通过 topic 聚合 |
+| `publishing.topic_id → topics.id` | 一个选题的多个平台发布记录 | 可有多条记录；任一平台已发布即完成 Topic；无成功发布时，全部发布异常也按处理完成 |
+| `analytics.topic_id → topics.id` | 历史选题级分析数据 | 仅在选题与发布时间唯一匹配一条发布记录时作为兼容来源；正式指标按 `publishing_id` 逐条计算，不跨平台合并 |
 | `calendar_events.topic_id → topics.id` | 选题关联排期 | 可选关联 |
 | `comments(target_type='topic', target_id)` | 选题评论 | 多态关系，无直接外键 |
 | `workflow_template_id → workflow_templates.id` | 自定义流程模板 | 兼容迁移字段 |
@@ -132,7 +132,9 @@ Topic 权限定义为：`topic:create`、`topic:view`、`topic:update`、`topic:
 
 ### 5.2 创建页
 
-`AddTopic.tsx → createTopic → POST /api/topics`，并另外调用 users API 加载负责人。页面“提交”和“保存草稿”最终都创建 status=`pending` 的 Topic，后端没有独立草稿语义。
+`AddTopic.tsx → createTopic → POST /api/topics`，并另外调用 users API 加载负责人。桌面与移动提报页共用按账号隔离的本机多草稿集合，支持新建、续写和删除；旧版单草稿格式迁移到列表。只有提交才创建 status=`pending` 的 Topic。草稿不跨设备、不进入服务端；服务端草稿列表仍是后续可选方案。
+
+相似标题检查与提交共用同步锁；提报等待期间表单和本机草稿操作暂时锁定，桌面富文本切为只读，避免响应确认后清理未提交的新输入。失败后恢复原稿。成功只清理本次已提交草稿，最后一份草稿删除和遗留键清理均确认结果；本机清理失败明确提示选题已提报、不要重复操作，不能把删除异常视为清理成功。
 
 ### 5.3 详情页
 

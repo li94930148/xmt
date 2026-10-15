@@ -281,12 +281,8 @@ async function assertAnalyticsInitialStructure(page: Page) {
   const headingBox = await heading.boundingBox();
   assert(headingBox && headingBox.width > 0 && headingBox.height > 0, 'Analytics title is clipped or unavailable');
 
-  const navigation = page.locator('[data-reactbits-navigation^="analytics-dimensions:"]');
-  assert(await navigation.count() === 1, 'Analytics dimensions navigation is not unique');
-  for (const label of ['数据复盘', '数据导出', '周报生成']) {
-    const tab = navigation.getByRole('button', { name: label, exact: true });
-    assert(await tab.count() === 1 && await tab.isVisible(), `Analytics tab is unavailable: ${label}`);
-  }
+  assert(await page.getByRole('button', { name: '数据导出', exact: true }).count() === 0, 'duplicate export tab remains in Analytics');
+  assert(await page.getByRole('button', { name: '周报生成', exact: true }).count() === 0, 'duplicate weekly report tab remains in Analytics');
 
   for (const label of ['本月完成', '完成率', '逾期率', '平均耗时', '播放量', '点赞量', '分享量', '评论量']) {
     const metric = page.getByText(label, { exact: true });
@@ -643,10 +639,14 @@ async function runAnalyticsMatrix(page: Page, errors: string[], phase: 'metrics'
     }
 
     await openAnalyticsFromCommandPalette(page);
-    for (const label of ['数据导出', '周报生成', '数据复盘']) {
-      await page.locator('[data-reactbits-navigation^="analytics-dimensions:"]').getByRole('button', { name: label, exact: true }).click();
-      await page.getByText(label, { exact: true }).last().waitFor({ state: 'visible', timeout: 10_000 });
-    }
+    await page.goto(`${baseUrl}/export`, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('heading', { name: '报告中心', exact: true }).waitFor({ state: 'visible', timeout: 10_000 });
+    await page.getByRole('button', { name: '周报', exact: true }).click();
+    await page.getByRole('heading', { name: '周报生成', exact: true }).waitFor({ state: 'visible', timeout: 10_000 });
+    await page.getByRole('button', { name: '导出', exact: true }).click();
+    await page.getByRole('heading', { name: '数据导出', exact: true }).waitFor({ state: 'visible', timeout: 10_000 });
+    await page.goto(`${baseUrl}/analytics`, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('heading', { name: '个人统计排行', exact: true }).waitFor({ state: 'visible', timeout: 10_000 });
     await assertAnalyticsSelectors(page);
     await assertAnalyticsModal(page);
     assert(JSON.stringify(await assertAnalyticsRuntime(page)) === JSON.stringify(originalMetrics), 'Analytics business metrics changed during appearance matrix');

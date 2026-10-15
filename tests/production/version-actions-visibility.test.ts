@@ -42,7 +42,11 @@ function testButtonsMayShrinkNotClip() {
 }
 
 function testPermissionRulesPreserved() {
-  assert.ok(source.includes('canEditProduction && !editorLocked'), '保留编辑权限判断');
+  assert.ok(
+    /const canEditSelectedVersion = canEditProduction && !requestedHistoryUnavailable && selectedVersionId === 'current'/.test(source),
+    '编辑操作必须保留原权限校验，并限制为可用的当前版本',
+  );
+  assert.ok(source.includes('!canEditSelectedVersion || superseded'), '保存操作仍须校验权限和过期状态');
   assert.ok(source.includes("editData.status === 'draft'"), '保留提交审核状态判断');
   assert.ok(source.includes("handleVersionedSave('major')"), '保留另开新版业务入口');
 }

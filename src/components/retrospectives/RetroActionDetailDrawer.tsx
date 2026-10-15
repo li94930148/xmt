@@ -66,13 +66,13 @@ export default function RetroActionDetailDrawer({
   return (
     <BaseModal
       open={Boolean(action)}
-      onClose={onClose}
+          onClose={() => { if (!loading) onClose(); }}
       size="xl"
       title="行动项详情"
       description={action.retroTitle || `复盘 #${action.retroId}`}
       footer={
         <div className="flex justify-end gap-3">
-          <ActionButton variant="ghost" onClick={onClose}>关闭</ActionButton>
+          <ActionButton variant="ghost" onClick={onClose} disabled={loading}>关闭</ActionButton>
           {canSave ? (
             <ActionButton variant="primary" onClick={handleSave} disabled={loading || !title.trim()}>
               <Save className="h-4 w-4" />
@@ -88,7 +88,7 @@ export default function RetroActionDetailDrawer({
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            disabled={!canManageActions}
+            disabled={!canManageActions || loading}
             className="w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
           />
         </label>
@@ -98,7 +98,7 @@ export default function RetroActionDetailDrawer({
           <select
             value={ownerId}
             onChange={(event) => setOwnerId(event.target.value)}
-            disabled={!canManageActions}
+            disabled={!canManageActions || loading}
             className="w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
           >
             <option value="">未指定</option>
@@ -112,7 +112,7 @@ export default function RetroActionDetailDrawer({
             type="date"
             value={dueDate}
             onChange={(event) => setDueDate(event.target.value)}
-            disabled={!canManageActions}
+            disabled={!canManageActions || loading}
             className="w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
           />
         </label>
@@ -122,7 +122,7 @@ export default function RetroActionDetailDrawer({
           <select
             value={status}
             onChange={(event) => setStatus(event.target.value as RetroActionStatus)}
-            disabled={!canUpdateResult}
+            disabled={!canUpdateResult || loading}
             className="w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
           >
             {statuses.map((item) => <option key={item} value={item}>{retroActionStatusLabels[item]}</option>)}
@@ -141,7 +141,7 @@ export default function RetroActionDetailDrawer({
           <textarea
             value={descriptionMd}
             onChange={(event) => setDescriptionMd(event.target.value)}
-            disabled={!canManageActions}
+            disabled={!canManageActions || loading}
             className="min-h-28 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
           />
         </label>
@@ -151,7 +151,7 @@ export default function RetroActionDetailDrawer({
           <textarea
             value={resultMd}
             onChange={(event) => setResultMd(event.target.value)}
-            disabled={!canUpdateResult}
+            disabled={!canUpdateResult || loading}
             className="min-h-32 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
             placeholder="填写进展、结论或关闭说明"
           />

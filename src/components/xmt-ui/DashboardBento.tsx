@@ -111,7 +111,7 @@ export default function DashboardBento({
       <ReactBitsRevealSlot className="block">
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(480px,0.9fr)] lg:items-end">
           <div className="max-w-3xl">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-studio-cyan">岚曜 XMT 新媒体协作平台</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-studio-cyan-contrast">岚曜 XMT 新媒体协作平台</p>
             <h1 id="home-showcase-title" className="mt-4 text-[clamp(2.35rem,5vw,4.6rem)] font-semibold leading-[1.08] tracking-[-0.04em] text-studio-text-primary"><ReactBitsTextSlot semantic="brand-title" className="text-inherit">内容生产驾驶舱</ReactBitsTextSlot></h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-studio-text-secondary md:text-lg">
               让选题、创作、发布与复盘在同一节奏里前进。

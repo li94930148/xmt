@@ -169,3 +169,21 @@ design-system/*       → XMTCard / ProgressBar / AnimatedNumber
 - 命令面板用 `.xmt-overlay-top`（顶部 15vh），其余用 `.xmt-overlay-center`
 - 节奏：遮罩 180ms 淡入 → 面板 220ms 上浮缩放（`cubic-bezier(0.22,1,0.36,1)`）
 - 尊重 `prefers-reduced-motion`；禁止再混用 ad-hoc `animate-in` / 各写各的 zoom
+
+## 14. 全局层叠契约
+
+全局层级由 `src/styles/tokens.css` 唯一声明，Tailwind 的 `z-*` 语义工具类仅映射这些变量；`.xmt-overlay` 默认使用弹窗层级。
+
+| 层级 | Token | 默认值 | Tailwind |
+|------|-------|--------|----------|
+| 壳层、吸顶工具栏 | `--xmt-z-sticky` | 30 | `z-sticky` |
+| 页面操作浮层、全屏编辑器 | `--xmt-z-page-overlay` | 80 | `z-page-overlay` |
+| 对话框、详情抽屉 | `--xmt-z-modal` | 200 | `z-modal` |
+| 操作反馈 | `--xmt-z-notification` | 弹窗层 + 10 | `z-notification` |
+| 命令面板 | `--xmt-z-command` | 300 | `z-command` |
+| 编辑器菜单 | `--xmt-z-editor-menu` | 400 | `z-editor-menu` |
+| 编辑器菜单关闭遮罩 | `--xmt-z-editor-backdrop` | 菜单层 - 1 | `z-editor-backdrop` |
+
+全局菜单应挂载到页面根层，避免被玻璃面板的 transform、backdrop-filter 或 overflow 建立的局部层叠/裁切约束。表格固定单元和卡片装饰的局部先后顺序可使用小数值，不将其用于全局弹窗或菜单。通知必须保持在弹窗之上，命令面板可在普通弹窗打开时接收输入。
+
+点击锚定的批注操作菜单按实际宽高限制在视口内；外部滚动或视口变化后关闭，避免操作浮在已移走的正文上，并支持 Escape。`FloatingMenu.tsx` 当前未挂载，其保留的插入/块操作子菜单须先补齐视口限界再重新启用，不能将其视为现有页面路径的验收结果。

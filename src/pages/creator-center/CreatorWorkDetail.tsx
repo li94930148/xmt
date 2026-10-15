@@ -9,14 +9,13 @@ import {
   Share2,
   TrendingUp,
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   getDouyinWorkReview,
   type DouyinWorkDetailData,
 } from "@/api/creatorCenter";
 import CreatorCoverImage from "@/components/common/CreatorCoverImage";
 import {
-  ErrorState,
   LineChart,
   LoadingState,
   MetricCard,
@@ -28,25 +27,54 @@ import {
 export default function CreatorWorkDetail() {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const accountUid = params.get('account_id') || undefined;
   const [data, setData] = useState<DouyinWorkDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError("");
     try {
-      setData(await getDouyinWorkReview(id));
+      const result = await getDouyinWorkReview(id, accountUid, signal);
+      if (!signal?.aborted) setData(result);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "作品复盘加载失败");
+      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "作品复盘加载失败");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [id]);
+  }, [accountUid, id]);
   useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    setData(null);
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
   if (loading && !data) return <LoadingState />;
-  if (error) return <ErrorState message={error} />;
+  if (error && !data) return (
+    <div className="mx-auto max-w-[1400px] space-y-5 pb-12">
+      <button
+        type="button"
+        onClick={() => navigate("/analytics/creator-center/works")}
+        className="inline-flex items-center gap-2 text-sm text-studio-text-muted hover:text-studio-text"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        返回作品库
+      </button>
+      <section role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-coral/30 bg-studio-coral/10 p-5 text-sm text-studio-coral-contrast sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="font-semibold">作品复盘暂不可用</h1>
+          <p className="mt-1">{error}。可以重新读取；不会修改作品或复盘数据。</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={loading}
+          className="shrink-0 rounded-lg border border-studio-border bg-studio-card px-4 py-2 font-medium disabled:opacity-60"
+        >{loading ? "正在读取…" : "重试读取"}</button>
+      </section>
+    </div>
+  );
   if (!data) return null;
   const { work, performance } = data;
   const analysis = asRecord(data.analysis?.content);
@@ -74,6 +102,7 @@ export default function CreatorWorkDetail() {
       <header className="flex flex-col gap-5 rounded-2xl border border-studio-border bg-studio-card p-5 sm:flex-row">
         <CreatorCoverImage
           work={work}
+          accountUid={accountUid}
           loading="eager"
           className="h-44 w-72 rounded-xl object-cover"
         />
@@ -83,7 +112,7 @@ export default function CreatorWorkDetail() {
               {work.title}
             </h1>
             {performance.is_viral ? (
-              <span className="rounded-lg bg-studio-coral/10 px-3 py-1 text-sm font-medium text-studio-coral">
+              <span className="rounded-lg bg-studio-coral/10 px-3 py-1 text-sm font-medium text-studio-coral-contrast">
                 爆款
               </span>
             ) : null}
@@ -100,7 +129,7 @@ export default function CreatorWorkDetail() {
             href={`https://www.douyin.com/video/${encodeURIComponent(work.aweme_id)}`}
             target="_blank"
             rel="noreferrer"
-            className="mt-4 inline-flex text-sm font-medium text-studio-cyan"
+            className="mt-4 inline-flex text-sm font-medium text-studio-cyan-contrast"
           >
             打开抖音作品
           </a>
@@ -251,7 +280,7 @@ export default function CreatorWorkDetail() {
               key={suggestion}
               className="flex gap-3 rounded-xl bg-studio-surface p-4"
             >
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-studio-cyan/10 text-xs font-semibold text-studio-cyan">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-studio-cyan/10 text-xs font-semibold text-studio-cyan-contrast">
                 {index + 1}
               </span>
               <p className="text-sm leading-6">{suggestion}</p>

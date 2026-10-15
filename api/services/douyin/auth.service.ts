@@ -6,6 +6,7 @@ import { decryptToken } from './token.service.js';
 import { fetchAuthorizedUserProfile } from './user.service.js';
 import { queryOne, runInTransaction } from '../../database/utils.js';
 import type { OAuthState } from './types.js';
+import { apiLogger } from '../../observability/logger.js';
 
 const states = new Map<string, OAuthState>();
 export function createAuthorizationUrl(userId: number) {
@@ -26,7 +27,15 @@ export async function completeAuthorization(code: string, state: string) {
   // Token persistence must not be rolled back merely because the optional
   // user-info scope has not propagated yet; syncAccount retries it afterwards.
   let profile: { nickname?: string; avatar?: string; union_id?: string } = {};
-  try { profile = await fetchAuthorizedUserProfile(decryptToken(access), data.open_id); } catch (error) { console.warn('[Douyin] initial profile sync deferred:', (error as Error).message); }
+  try {
+    profile = await fetchAuthorizedUserProfile(decryptToken(access), data.open_id);
+  } catch (error) {
+    apiLogger.warn({
+      module: 'douyin_auth',
+      operation: 'profile.initial_sync_deferred',
+      error: { code: 'PROFILE_SYNC_DEFERRED', name: error instanceof Error ? error.name : 'UnknownError' },
+    }, 'api.douyin_auth.profile_sync_deferred');
+  }
   const accountName = profile.nickname || (data as { nickname?: string }).nickname || '抖音账号';
   const profileUrl = profile.avatar || '';
   const accountId = await runInTransaction(async (tx) => {

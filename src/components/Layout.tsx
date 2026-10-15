@@ -367,7 +367,7 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
   if (mobileLayout) {
     return <WritingFocusContext.Provider value={writingFocusContext}>
       <MobileShell user={user} unreadCount={unreadCount} onLogout={handleLogout} />
-      <div className="fixed inset-x-4 bottom-28 z-50 space-y-2" role="status" aria-live="polite">
+      <div className="fixed inset-x-4 bottom-28 z-notification space-y-2" role="status" aria-live="polite">
         {notifications.map((notification) => <NotificationItem key={notification.id} notification={notification} />)}
       </div>
     </WritingFocusContext.Provider>;
@@ -405,9 +405,9 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
             <button onClick={() => setShowCmdPalette(true)} className="relative hidden min-w-0 items-center md:flex">
               <Search className="absolute left-3 h-4 w-4 text-studio-text-muted" />
               <div className="xmt-field w-[min(18rem,34vw)] min-w-0 cursor-pointer py-2 pl-9 pr-16 text-left text-sm text-studio-text-muted">
-                搜索选题、稿件、成员...
+                搜索稿件、资料、日报、复盘...
               </div>
-              <kbd className="absolute right-3 rounded-md border border-studio-border-soft bg-studio-surface-soft px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-studio-text-muted">
+              <kbd className="absolute right-3 rounded-md border border-studio-border-soft bg-studio-surface-soft px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-studio-text-secondary">
                 Ctrl K
               </kbd>
             </button>
@@ -421,7 +421,7 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
             >
               <Bell className="h-[18px] w-[18px]" />
               {unreadCount > 0 && (
-                <span className="absolute right-1.5 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-studio-coral px-1 text-[10px] font-bold text-white shadow-[0_0_10px_rgba(255,122,147,0.45)]">
+                <span className="absolute right-1.5 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-studio-coral-soft px-1 text-[10px] font-bold text-studio-coral-contrast shadow-[0_0_10px_rgba(255,122,147,0.45)]">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
@@ -440,7 +440,8 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
               <button
                 onClick={() => setUserMenuOpen((value) => !value)}
                 className="flex items-center gap-3 rounded-xl px-2 py-1.5 transition hover:bg-studio-surface-soft"
-                aria-label="打开用户菜单"
+                aria-expanded={userMenuOpen}
+                title="打开用户菜单"
               >
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-studio-primary to-studio-violet shadow-sm shadow-studio-primary/25 ring-1 ring-inset ring-white/15">
                   <User className="h-4 w-4 text-white" />
@@ -480,6 +481,14 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
           </div>
         </Topbar>}
 
+        {showUpdateNotification && !writingFocused && (
+          <div className="px-4 pt-3 sm:px-6">
+            <div className="mx-auto max-w-7xl">
+              <UpdateNotification onClose={handleCloseUpdateNotification} onGoToChangelog={handleGoToChangelog} />
+            </div>
+          </div>
+        )}
+
         <main className={`xmt-business-content ${writingFocused ? 'px-3 py-3 sm:px-6 sm:py-5' : 'px-4 py-4 sm:px-6 sm:py-6'}`} style={{ fontSize: 'var(--system-font-size)' }}>
           <div className={`mx-auto w-full space-y-4 ${writingFocused ? 'max-w-5xl' : 'max-w-7xl'}`}>
             {!writingFocused && <Breadcrumbs />}
@@ -490,16 +499,13 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
         </main>
       </div>
 
-      <div className="fixed bottom-4 right-4 z-50 space-y-2">
+      <div className="fixed bottom-4 right-4 z-notification space-y-2" role="status" aria-live="polite">
         {notifications.map((notification) => (
           <NotificationItem key={notification.id} notification={notification} />
         ))}
       </div>
 
       <CommandPalette isOpen={showCmdPalette} onClose={() => setShowCmdPalette(false)} />
-      {showUpdateNotification && (
-        <UpdateNotification onClose={handleCloseUpdateNotification} onGoToChangelog={handleGoToChangelog} />
-      )}
       <KeyboardHelp isOpen={showHelp} onClose={() => setShowHelp(false)} />
     </AppShell>
     </WritingFocusContext.Provider>

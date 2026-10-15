@@ -9,17 +9,17 @@ export default function ResourceTable({ items, canEdit, canDelete, onDelete }: {
   return (
     <ResponsiveTableShell>
       <table className="w-full min-w-[760px] text-left text-sm">
-        <thead className="border-b border-studio-border-soft text-xs text-studio-text-muted">
-          <tr><th className="px-5 py-3 font-medium">标题</th><th className="px-4 py-3 font-medium">分类</th><th className="px-4 py-3 font-medium">标签</th><th className="px-4 py-3 font-medium">更新时间</th><th className="px-5 py-3 text-right font-medium">操作</th></tr>
+        <thead className="border-b border-studio-border-soft bg-studio-surface-soft text-xs text-studio-text-muted">
+          <tr><th className="px-5 py-3 font-medium">标题</th><th className="px-4 py-3 font-medium">分类</th><th className="px-4 py-3 font-medium">标签</th><th className="px-4 py-3 font-medium">更新时间</th><th className="sticky right-0 z-20 border-l border-studio-border-soft bg-studio-surface-soft px-5 py-3 text-right font-medium">操作</th></tr>
         </thead>
         <tbody className="divide-y divide-studio-border-soft">
           {items.map((item) => (
-            <tr key={item.id} className="transition-colors hover:bg-studio-surface-soft">
-              <td className="px-5 py-4"><Link className="font-medium text-studio-text-primary hover:text-studio-cyan" to={`/asset-center/resources/${item.id}`}>{item.title}</Link></td>
+            <tr key={item.id} className="group transition-colors hover:bg-studio-surface-soft">
+              <td className="px-5 py-4"><Link className="font-medium text-studio-text-primary hover:text-studio-cyan-contrast" to={`/asset-center/resources/${item.id}`}>{item.title}</Link></td>
               <td className="px-4 py-4 text-studio-text-secondary">{item.category?.name || '—'}</td>
               <td className="px-4 py-4"><div className="flex max-w-56 flex-wrap gap-1.5">{item.tags.length ? item.tags.slice(0, 3).map((tag) => <span key={tag.id} className="rounded-button bg-studio-surface-elevated px-2 py-1 text-xs text-studio-text-secondary">{tag.name}</span>) : <span className="text-studio-text-muted">—</span>}</div></td>
               <td className="px-4 py-4 whitespace-nowrap text-studio-text-secondary">{formatBeijingDate(item.updated_at)}</td>
-              <td className="px-5 py-4"><div className="flex justify-end gap-1"><Link aria-label="查看" className="rounded-button p-2 text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-cyan-contrast" to={`/asset-center/resources/${item.id}`}><Eye className="h-4 w-4" /></Link>{canEdit ? <Link aria-label="编辑" className="rounded-button p-2 text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-cyan-contrast" to={`/asset-center/resources/${item.id}?edit=1`}><Pencil className="h-4 w-4" /></Link> : null}{canDelete && onDelete ? <button type="button" aria-label="删除" onClick={() => onDelete(item)} className="rounded-button p-2 text-studio-text-muted hover:bg-studio-coral/10 hover:text-studio-coral-contrast"><Trash2 className="h-4 w-4" /></button> : null}</div></td>
+              <td className="sticky right-0 z-10 border-l border-studio-border-soft bg-studio-surface px-5 py-4 transition-colors group-hover:bg-studio-surface-soft"><div className="flex justify-end gap-1"><Link aria-label={`查看资料 ${item.title}`} className="rounded-button p-2 text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-cyan-contrast" to={`/asset-center/resources/${item.id}`}><Eye className="h-4 w-4" /></Link>{canEdit ? <Link aria-label={`编辑资料 ${item.title}`} className="rounded-button p-2 text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-cyan-contrast" to={`/asset-center/resources/${item.id}?edit=1`}><Pencil className="h-4 w-4" /></Link> : null}{canDelete && onDelete ? <button type="button" aria-label={`删除资料 ${item.title}`} onClick={() => onDelete(item)} className="rounded-button p-2 text-studio-text-muted hover:bg-studio-coral-soft hover:text-studio-coral-contrast"><Trash2 className="h-4 w-4" /></button> : null}</div></td>
             </tr>
           ))}
         </tbody>

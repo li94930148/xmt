@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
@@ -52,8 +52,9 @@ function today() {
 
 export default function RetrospectivesPage() {
   const navigate = useNavigate();
-  const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
   const currentUser = useAuthStore((state) => state.user);
+  const currentUserId = currentUser?.id;
   const { hasPermission } = usePermission();
   const canCreate = currentUser?.role === 'admin' || currentUser?.role === 'director' || hasPermission('analytics:retro:create');
 
@@ -67,62 +68,102 @@ export default function RetrospectivesPage() {
   const [end, setEnd] = useState(today());
   const [loading, setLoading] = useState(true);
   const [loadingMyActions, setLoadingMyActions] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [myActionsError, setMyActionsError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const createInFlightRef = useRef(false);
+  const listRequestRef = useRef(0);
+  const actionsRequestRef = useRef(0);
+  const listOwnerRef = useRef(currentUserId);
+  const actionsOwnerRef = useRef(currentUserId);
+  const [listOwnerId, setListOwnerId] = useState(currentUserId);
+  const [actionsOwnerId, setActionsOwnerId] = useState(currentUserId);
+  const listScope = JSON.stringify([currentUserId, status, category, start, end]);
+  const latestListScopeRef = useRef(listScope);
+  latestListScopeRef.current = listScope;
 
   const loadList = useCallback(async () => {
+    const requestId = ++listRequestRef.current;
+    const isCurrent = () => requestId === listRequestRef.current
+      && latestListScopeRef.current === listScope
+      && useAuthStore.getState().user?.id === currentUserId;
+    if (listOwnerRef.current !== currentUserId) {
+      listOwnerRef.current = currentUserId;
+      setListOwnerId(currentUserId);
+      setRetrospectives([]);
+    }
     setLoading(true);
+    setListError(null);
     try {
+      if (!currentUserId) return;
       const result = await getRetrospectives({ status, category, start, end });
+      if (!isCurrent()) return;
       setRetrospectives(result.retrospectives);
     } catch (error) {
-      setRetrospectives([]);
-      appStore.addNotification({ title: '加载复盘列表失败', message: toFriendlyRetroError(error), type: 'error' });
+      if (!isCurrent()) return;
+      setListError(toFriendlyRetroError(error));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [appStore, category, end, start, status]);
+  }, [category, currentUserId, end, listScope, start, status]);
 
   const loadMyActions = useCallback(async () => {
-    setLoadingMyActions(true);
-    try {
-      const result = await getMyRetroActions({ status: 'open' });
-      setMyActions(result.actions);
-    } catch {
+    const requestId = ++actionsRequestRef.current;
+    const isCurrent = () => requestId === actionsRequestRef.current && useAuthStore.getState().user?.id === currentUserId;
+    if (actionsOwnerRef.current !== currentUserId) {
+      actionsOwnerRef.current = currentUserId;
+      setActionsOwnerId(currentUserId);
       setMyActions([]);
-    } finally {
-      setLoadingMyActions(false);
     }
-  }, []);
+    setLoadingMyActions(true);
+    setMyActionsError(null);
+    try {
+      if (!currentUserId) return;
+      const result = await getMyRetroActions({ status: 'open' });
+      if (!isCurrent()) return;
+      setMyActions(result.actions);
+    } catch (error) {
+      if (!isCurrent()) return;
+      setMyActionsError(toFriendlyRetroError(error));
+    } finally {
+      if (isCurrent()) setLoadingMyActions(false);
+    }
+  }, [currentUserId]);
 
   useEffect(() => {
     void loadList();
+    return () => { listRequestRef.current += 1; };
   }, [loadList]);
 
   useEffect(() => {
     void loadMyActions();
+    return () => { actionsRequestRef.current += 1; };
   }, [loadMyActions]);
 
   useEffect(() => {
     getRetroTemplates()
       .then((result) => setTemplates(result.templates))
-      .catch((error) => appStore.addNotification({ title: '加载复盘模板失败', message: toFriendlyRetroError(error), type: 'warning' }));
+      .catch((error) => addNotification({ title: '加载复盘模板失败', message: toFriendlyRetroError(error), type: 'warning' }));
 
     getUsers({ page: 1, limit: 200 })
       .then((result) => setUsers(result.data || []))
       .catch(() => setUsers(currentUser ? [currentUser] : []));
-  }, [appStore, currentUser]);
+  }, [addNotification, currentUser]);
 
   const handleCreate = async (payload: CreateRetrospectivePayload) => {
+    if (createInFlightRef.current) return;
+    createInFlightRef.current = true;
     setCreating(true);
     try {
       const detail = await createRetrospective(payload);
-      appStore.addNotification({ title: '复盘已创建', message: '正在进入详情页', type: 'success' });
+      addNotification({ title: '复盘已创建', message: '正在进入详情页', type: 'success' });
       setCreateOpen(false);
       navigate(`/retrospectives/${detail.retrospective.id}`);
     } catch (error) {
-      appStore.addNotification({ title: '创建复盘失败', message: toFriendlyRetroError(error), type: 'error' });
+      addNotification({ title: '创建复盘失败', message: toFriendlyRetroError(error), type: 'error' });
     } finally {
+      createInFlightRef.current = false;
       setCreating(false);
     }
   };
@@ -145,8 +186,9 @@ export default function RetrospectivesPage() {
       />
 
       <MyRetroActionsPanel
-        actions={myActions}
-        loading={loadingMyActions}
+        actions={actionsOwnerId === currentUserId ? myActions : []}
+        loading={loadingMyActions || actionsOwnerId !== currentUserId}
+        error={actionsOwnerId === currentUserId ? myActionsError : null}
         onRefresh={loadMyActions}
         onOpen={(id) => navigate(`/retrospectives/${id}`)}
       />
@@ -184,8 +226,9 @@ export default function RetrospectivesPage() {
       </GlassPanel>
 
       <RetroList
-        retrospectives={retrospectives}
-        loading={loading}
+        retrospectives={listOwnerId === currentUserId ? retrospectives : []}
+        loading={loading || listOwnerId !== currentUserId}
+        error={listOwnerId === currentUserId ? listError : null}
         canCreate={canCreate}
         onCreate={() => setCreateOpen(true)}
         onRefresh={loadList}

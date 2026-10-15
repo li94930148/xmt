@@ -7,14 +7,15 @@ import { formatDate, formatDateTime, retroCategoryLabels } from './retroLabels';
 type Props = {
   retrospectives: Retrospective[];
   loading: boolean;
+  error: string | null;
   canCreate: boolean;
   onCreate: () => void;
   onRefresh: () => void;
   onOpen: (id: number) => void;
 };
 
-export default function RetroList({ retrospectives, loading, canCreate, onCreate, onRefresh, onOpen }: Props) {
-  if (!loading && retrospectives.length === 0) {
+export default function RetroList({ retrospectives, loading, error, canCreate, onCreate, onRefresh, onOpen }: Props) {
+  if (!loading && !error && retrospectives.length === 0) {
     return (
       <GlassPanel className="flex min-h-[320px] flex-col items-center justify-center p-8 text-center">
         <div className="rounded-full border border-studio-border-soft bg-studio-surface-soft p-4">
@@ -35,7 +36,7 @@ export default function RetroList({ retrospectives, loading, canCreate, onCreate
   }
 
   return (
-    <GlassPanel className="overflow-hidden">
+    <GlassPanel data-testid="retrospective-list-panel" className="overflow-visible">
       <div className="flex items-center justify-between gap-3 border-b border-studio-border-soft px-5 py-4">
         <div>
           <h2 className="text-base font-bold text-studio-text-primary">复盘列表</h2>
@@ -47,8 +48,15 @@ export default function RetroList({ retrospectives, loading, canCreate, onCreate
         </ActionButton>
       </div>
 
+      {error ? (
+        <div role="alert" className="flex flex-col gap-3 border-b border-studio-border-soft bg-studio-surface-soft px-5 py-4 text-sm text-studio-text-primary sm:flex-row sm:items-center sm:justify-between">
+          <p>{retrospectives.length > 0 ? `列表刷新失败，仍显示最近一次成功读取的记录：${error}` : `复盘列表暂不可用：${error}`}</p>
+          <ActionButton onClick={onRefresh} disabled={loading}>重新加载复盘列表</ActionButton>
+        </div>
+      ) : null}
+
       <div className="overflow-x-auto">
-        <table className="min-w-[980px] w-full text-left text-sm">
+        <table className="min-w-[980px] w-full table-fixed text-left text-sm">
           <thead className="border-b border-studio-border-soft text-xs uppercase tracking-wide text-studio-text-muted">
             <tr>
               <th className="px-5 py-3 font-semibold">标题</th>
@@ -59,7 +67,7 @@ export default function RetroList({ retrospectives, loading, canCreate, onCreate
               <th className="px-4 py-3 font-semibold">快照</th>
               <th className="px-4 py-3 font-semibold">行动项</th>
               <th className="px-4 py-3 font-semibold">发布时间</th>
-              <th className="px-5 py-3 font-semibold">操作</th>
+              <th className="sticky right-0 z-20 w-[112px] bg-studio-surface-soft px-5 py-3 font-semibold">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-studio-border-soft">
@@ -69,13 +77,17 @@ export default function RetroList({ retrospectives, loading, canCreate, onCreate
                   正在加载复盘列表...
                 </td>
               </tr>
+            ) : retrospectives.length === 0 ? (
+              <tr>
+                <td role="status" className="px-5 py-10 text-center text-studio-text-muted" colSpan={9}>复盘列表暂不可用，请重新加载。</td>
+              </tr>
             ) : retrospectives.map((retro) => (
               <tr key={retro.id} className="transition hover:bg-studio-surface-soft">
                 <td className="max-w-[260px] px-5 py-4">
                   <button
                     type="button"
                     onClick={() => onOpen(retro.id)}
-                    className="line-clamp-2 text-left font-semibold text-studio-text-primary hover:text-studio-cyan"
+                    className="line-clamp-2 text-left font-semibold text-studio-text-primary hover:text-studio-cyan-contrast"
                   >
                     {retro.title}
                   </button>
@@ -92,8 +104,8 @@ export default function RetroList({ retrospectives, loading, canCreate, onCreate
                 <td className="px-4 py-4 text-studio-text-primary">{retro.snapshotCount}</td>
                 <td className="px-4 py-4 text-studio-text-primary">{retro.actionCount}</td>
                 <td className="px-4 py-4 text-studio-text-secondary">{formatDateTime(retro.publishedAt)}</td>
-                <td className="px-5 py-4">
-                  <ActionButton variant="ghost" onClick={() => onOpen(retro.id)}>
+                <td data-testid={`retrospective-row-actions-${retro.id}`} className="sticky right-0 z-10 w-[112px] bg-studio-surface px-3 py-4">
+                  <ActionButton variant="ghost" className="scroll-mb-20" onClick={() => onOpen(retro.id)}>
                     <Eye className="h-4 w-4" />
                     详情
                   </ActionButton>

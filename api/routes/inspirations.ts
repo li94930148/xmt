@@ -1,10 +1,10 @@
 import express from 'express';
-import { beijingNow, queryOne, queryAll, execute, executeInsert } from '../database/utils';
+import { beijingNow, queryOne, queryAll, executeInsert, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
-import { canOwnerOrPermission } from '../utils/access';
 import { createMessage } from '../utils/messageHelper';
 import { broadcastToRoom } from '../utils/socket';
+import { InspirationPromotionError, promoteInspirationInTransaction } from '../modules/inspirations/inspiration-promotion';
 
 const router = express.Router();
 
@@ -115,7 +115,7 @@ router.post('/', authenticate, async (req, res) => {
     const newInspiration = await getInspirationById(inspirationId, userId);
     broadcastToRoom('inspirations', 'inspiration:created', newInspiration);
 
-    res.json({ message: '灵感创建成功', id: inspirationId });
+    res.json({ message: '灵感创建成功', id: inspirationId, inspiration: newInspiration });
   } catch {
     res.status(500).json({ message: '创建灵感失败' });
   }
@@ -162,48 +162,55 @@ router.post('/:id/comments', authenticate, async (req, res) => {
       return res.status(400).json({ message: '评论内容不能为空' });
     }
 
-    const inspiration = await getInspirationById(id, userId);
-    if (!inspiration) {
+    const result = await runInTransaction(async (tx) => {
+      const inspiration = await tx.queryOne<{ id: number }>(`SELECT id FROM inspirations WHERE id = ?`, [id]);
+      if (!inspiration) return null;
+
+      const commentId = await tx.executeInsert(
+        `INSERT INTO inspiration_comments (inspiration_id, creator_id, content, created_at) VALUES (?, ?, ?, ?)`,
+        [id, userId, content, beijingNow()]
+      );
+
+      const updatedRows = await tx.execute(
+        `UPDATE inspirations SET updated_at = datetime('now', '+8 hours') WHERE id = ?`,
+        [id]
+      );
+      if (updatedRows !== 1) throw new Error('INSPIRATION_COMMENT_PARENT_UPDATE_FAILED');
+
+      const comment = await tx.queryOne(
+        `
+          SELECT
+            ic.*,
+            u.name as creator_name
+          FROM inspiration_comments ic
+          LEFT JOIN users u ON ic.creator_id = u.id
+          WHERE ic.id = ?
+        `,
+        [commentId]
+      );
+      const commentCountRow = await tx.queryOne<{ total: number }>(
+        `SELECT COUNT(*) as total FROM inspiration_comments WHERE inspiration_id = ?`,
+        [id]
+      );
+      if (!comment || !commentCountRow) throw new Error('INSPIRATION_COMMENT_RESPONSE_UNAVAILABLE');
+
+      return { comment, commentCount: Number(commentCountRow.total) };
+    });
+
+    if (!result) {
       return res.status(404).json({ message: '灵感不存在' });
     }
 
-    const commentId = await executeInsert(
-      `INSERT INTO inspiration_comments (inspiration_id, creator_id, content, created_at) VALUES (?, ?, ?, ?)`,
-      [id, userId, content, beijingNow()]
-    );
-
-    await execute(
-      `UPDATE inspirations SET updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-      [id]
-    );
-
-    const comment = await queryOne(
-      `
-        SELECT
-          ic.*,
-          u.name as creator_name
-        FROM inspiration_comments ic
-        LEFT JOIN users u ON ic.creator_id = u.id
-        WHERE ic.id = ?
-      `,
-      [commentId]
-    );
-
-    const commentCountRow = await queryOne(
-      `SELECT COUNT(*) as total FROM inspiration_comments WHERE inspiration_id = ?`,
-      [id]
-    );
-
     broadcastToRoom('inspirations', 'inspiration:commented', {
       inspirationId: id,
-      comment,
-      comment_count: commentCountRow?.total || 0,
+      comment: result.comment,
+      comment_count: result.commentCount,
     });
 
     res.json({
       message: '评论成功',
-      comment,
-      comment_count: commentCountRow?.total || 0,
+      comment: result.comment,
+      comment_count: result.commentCount,
     });
   } catch {
     res.status(500).json({ message: '评论失败' });
@@ -216,43 +223,53 @@ router.post('/:id/vote', authenticate, async (req, res) => {
     const id = Number(req.params.id);
     const userId = Number(req.user?.id);
 
-    const inspiration = await queryOne(`SELECT * FROM inspirations WHERE id = ?`, [id]);
-    if (!inspiration) {
+    const result = await runInTransaction(async (tx) => {
+      const inspiration = await tx.queryOne<{ id: number }>(`SELECT id FROM inspirations WHERE id = ?`, [id]);
+      if (!inspiration) return null;
+
+      const existingVote = await tx.queryOne<{ id: number }>(
+        `SELECT id FROM inspiration_votes WHERE inspiration_id = ? AND user_id = ?`,
+        [id, userId]
+      );
+
+      let voted: boolean;
+      if (existingVote) {
+        const deletedRows = await tx.execute(
+          `DELETE FROM inspiration_votes WHERE inspiration_id = ? AND user_id = ?`,
+          [id, userId]
+        );
+        if (deletedRows !== 1) throw new Error('INSPIRATION_VOTE_DELETE_FAILED');
+        voted = false;
+      } else {
+        await tx.executeInsert(
+          `INSERT INTO inspiration_votes (inspiration_id, user_id) VALUES (?, ?)`,
+          [id, userId]
+        );
+        voted = true;
+      }
+
+      const voteCount = await tx.queryOne<{ total: number }>(
+        `SELECT COUNT(*) as total FROM inspiration_votes WHERE inspiration_id = ?`,
+        [id]
+      );
+      if (!voteCount) throw new Error('INSPIRATION_VOTE_COUNT_UNAVAILABLE');
+
+      const votes = Number(voteCount.total);
+      const updatedRows = await tx.execute(
+        `UPDATE inspirations SET votes = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
+        [votes, id]
+      );
+      if (updatedRows !== 1) throw new Error('INSPIRATION_VOTE_PARENT_UPDATE_FAILED');
+
+      return { voted, votes };
+    });
+
+    if (!result) {
       return res.status(404).json({ message: '灵感不存在' });
     }
 
-    const existingVote = await queryOne(
-      `SELECT * FROM inspiration_votes WHERE inspiration_id = ? AND user_id = ?`,
-      [id, userId]
-    );
-
-    if (existingVote) {
-      await execute(
-        `DELETE FROM inspiration_votes WHERE inspiration_id = ? AND user_id = ?`,
-        [id, userId]
-      );
-      await execute(
-        `UPDATE inspirations SET votes = votes - 1, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-        [id]
-      );
-      const updated = await queryOne(`SELECT votes FROM inspirations WHERE id = ?`, [id]);
-      broadcastToRoom('inspirations', 'inspiration:voted', { id, votes: updated?.votes, userId });
-
-      res.json({ message: '取消投票成功', voted: false });
-    } else {
-      await execute(
-        `INSERT INTO inspiration_votes (inspiration_id, user_id) VALUES (?, ?)`,
-        [id, userId]
-      );
-      await execute(
-        `UPDATE inspirations SET votes = votes + 1, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-        [id]
-      );
-      const updated = await queryOne(`SELECT votes FROM inspirations WHERE id = ?`, [id]);
-      broadcastToRoom('inspirations', 'inspiration:voted', { id, votes: updated?.votes, userId });
-
-      res.json({ message: '投票成功', voted: true });
-    }
+    broadcastToRoom('inspirations', 'inspiration:voted', { id, votes: result.votes, userId });
+    res.json({ message: result.voted ? '投票成功' : '取消投票成功', voted: result.voted });
   } catch {
     res.status(500).json({ message: '投票操作失败' });
   }
@@ -262,19 +279,39 @@ router.post('/:id/vote', authenticate, async (req, res) => {
 router.delete('/:id', authenticate, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const inspiration = await queryOne(`SELECT * FROM inspirations WHERE id = ?`, [id]);
-    if (!inspiration) {
+    const userId = Number(req.user?.id);
+    const result = await runInTransaction(async (tx) => {
+      const inspiration = await tx.queryOne<{ id: number; creator_id: number | null }>(
+        `SELECT id, creator_id FROM inspirations WHERE id = ?`,
+        [id]
+      );
+      if (!inspiration) return 'not_found' as const;
+
+      const permission = await tx.queryOne<{ count: number }>(
+        `SELECT COUNT(*) as count
+         FROM permissions p
+         JOIN role_permissions rp ON p.id = rp.permission_id
+         JOIN user_roles ur ON rp.role_id = ur.role_id
+         WHERE ur.user_id = ? AND p.code = ?`,
+        [userId, 'inspiration:delete']
+      );
+      const canDelete = Number(inspiration.creator_id) === userId || req.user?.role === 'admin' || Number(permission?.count || 0) > 0;
+      if (!canDelete) return 'forbidden' as const;
+
+      await tx.execute(`DELETE FROM inspiration_comments WHERE inspiration_id = ?`, [id]);
+      await tx.execute(`DELETE FROM inspiration_votes WHERE inspiration_id = ?`, [id]);
+      const deletedRows = await tx.execute(`DELETE FROM inspirations WHERE id = ?`, [id]);
+      if (deletedRows !== 1) throw new Error('INSPIRATION_DELETE_PARENT_FAILED');
+      return 'deleted' as const;
+    });
+
+    if (result === 'not_found') {
       return res.status(404).json({ message: '灵感不存在' });
     }
-
-    const canDeleteInspiration = await canOwnerOrPermission(req.user, inspiration.creator_id, 'inspiration:delete');
-    if (!canDeleteInspiration) {
+    if (result === 'forbidden') {
       return res.status(403).json({ message: '无权限删除此灵感' });
     }
 
-    await execute(`DELETE FROM inspiration_comments WHERE inspiration_id = ?`, [id]);
-    await execute(`DELETE FROM inspiration_votes WHERE inspiration_id = ?`, [id]);
-    await execute(`DELETE FROM inspirations WHERE id = ?`, [id]);
     broadcastToRoom('inspirations', 'inspiration:deleted', { id });
 
     res.json({ message: '灵感删除成功' });
@@ -288,38 +325,22 @@ router.post('/:id/promote', authenticate, requirePermission('inspiration:promote
   try {
     const id = Number(req.params.id);
     const userId = Number(req.user?.id);
+    const result = await runInTransaction((tx) => promoteInspirationInTransaction(tx, id, userId));
 
-    const inspiration: any = await queryOne(`SELECT * FROM inspirations WHERE id = ?`, [id]);
-    if (!inspiration) {
-      return res.status(404).json({ message: '灵感不存在' });
-    }
-
-    const topicId = await executeInsert(
-      `INSERT INTO topics (title, description, status, creator_id) VALUES (?, ?, 'pending', ?)`,
-      [inspiration.title, inspiration.description, userId]
-    );
-
-    await execute(
-      `INSERT INTO topic_history (topic_id, action, comment, operator_id) VALUES (?, ?, ?, ?)`,
-      [topicId, 'created', `从灵感「${inspiration.title}」转为正式选题`, userId]
-    );
-
-    await execute(
-      `UPDATE inspirations SET status = 'promoted', updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-      [id]
-    );
-
-    if (Number(inspiration.creator_id) !== userId) {
+    if (result.created && Number(result.inspiration.creator_id) !== userId) {
       createMessage(
-        inspiration.creator_id,
+        Number(result.inspiration.creator_id),
         '灵感已转为选题',
-        `您的灵感「${inspiration.title}」已被转为正式选题`,
+        `您的灵感「${result.inspiration.title}」已被转为正式选题`,
         'success'
       );
     }
 
-    res.json({ message: '灵感已转为选题', topicId });
-  } catch {
+    res.json({ message: result.created ? '灵感已转为选题' : '已返回关联选题', topicId: result.topicId });
+  } catch (error) {
+    if (error instanceof InspirationPromotionError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
     res.status(500).json({ message: '转为选题失败' });
   }
 });

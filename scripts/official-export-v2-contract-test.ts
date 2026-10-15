@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import bcrypt from 'bcrypt';
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const root = mkdtempSync(path.join(tmpdir(), 'xmt-official-export-'));
-process.env.XMT_DB_PATH = path.join(root, 'test.db'); process.env.NODE_ENV = 'test';
+const databasePath = path.join(root, 'test.db');
+process.env.XMT_DB_PATH = databasePath; process.env.NODE_ENV = 'test';
 const { db, initDatabase } = await import('../api/database/db.js');
 const { execute, executeInsert, queryOne } = await import('../api/database/utils.js');
 const { acceptCreatorDataSync } = await import('../api/services/creatorSyncV291.js');
@@ -31,8 +35,107 @@ const payload={schema_version:2,batch_id:batch,agent_version:'2.14.0-agent',pars
   {file_type:'official_export',dataset_type:'account_daily',period:'7d',file_name:'近7天.xlsx',sha256:'c'.repeat(64),size_bytes:42,downloaded_at:'2026-08-28T00:00:00.000Z'},
   {file_type:'official_export',dataset_type:'account_daily',period:'30d',file_name:'近30天.xlsx',sha256:'d'.repeat(64),size_bytes:42,downloaded_at:'2026-08-28T00:00:00.000Z'},
 ],datasets:{content_metrics:[{source_item_key:'work-key',title:'脱敏作品',published_at:'2026-08-27T00:00:00.000Z',metrics:{views:100,likes:2}}],account_daily_metrics:[...periodRows('yesterday',1),...periodRows('7d',7),...periodRows('30d',30)],income_metrics:[{metric_date:'2026-08-27',metric_code:'sound_wave_amount',value:'12',unit:'sound_wave'}]},quality:{source_rows:40,accepted_rows:40,duplicate_rows:0,rejected_rows:0,warnings:[]}};
+
+function startConcurrentWorker(request: Record<string, unknown>) {
+  const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const projectRoot = path.resolve(scriptDirectory, '..');
+  const child = spawn(process.execPath, ['--import', 'tsx', path.join(scriptDirectory, 'official-export-v2-worker.ts')], {
+    cwd: projectRoot,
+    env: {
+      PATH: process.env.PATH || '',
+      NODE_ENV: 'test',
+      XMT_DB_PATH: databasePath,
+      XMT_TEST_OFFICIAL_EXPORT_TOKEN: token,
+      XMT_TEST_OFFICIAL_EXPORT_REQUEST: JSON.stringify(request),
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const lines = createInterface({ input: child.stdout });
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+  let resolveReady!: () => void;
+  let rejectReady!: (error: Error) => void;
+  const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  type WorkerResult =
+    | { type: 'imported'; duplicate_batch: boolean; batch_id: string }
+    | { type: 'retryable'; statusCode: number; message: string };
+  let resolveResult!: (value: WorkerResult) => void;
+  let rejectResult!: (error: Error) => void;
+  const result = new Promise<WorkerResult>((resolve, reject) => { resolveResult = resolve; rejectResult = reject; });
+  const exit = new Promise<void>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      if (code === 0) resolve();
+      else {
+        const error = new Error(`Official export worker exited with ${code}: ${stderr}`);
+        rejectReady(error);
+        rejectResult(error);
+        reject(error);
+      }
+    });
+  });
+  lines.on('line', (line) => {
+    if (line === 'READY') resolveReady();
+    if (line.startsWith('RESULT:')) resolveResult({ type: 'imported', ...JSON.parse(line.slice('RESULT:'.length)) as { duplicate_batch: boolean; batch_id: string } });
+    if (line.startsWith('ERROR:')) resolveResult({ type: 'retryable', ...JSON.parse(line.slice('ERROR:'.length)) as { statusCode: number; message: string } });
+  });
+  return { child, lines, ready, result, exit };
+}
+
+async function verifyConcurrentBatchIdempotency() {
+  const concurrentPayload = { ...payload, batch_id: crypto.randomUUID() };
+  // Each process receives a separately authenticated envelope, while the stable
+  // batch ID and payload are identical. This models two API instances receiving
+  // a legitimate retry at nearly the same time.
+  const requests = [envelope(concurrentPayload), envelope(concurrentPayload)];
+  const workers = requests.map(startConcurrentWorker);
+  let timeout: NodeJS.Timeout | undefined;
+  const withTimeout = <T>(promise: Promise<T>, stage: string) => Promise.race([
+    promise,
+    new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`Official export workers ${stage} timed out`)), 20_000); }),
+  ]);
+  try {
+    await withTimeout(Promise.all(workers.map((worker) => worker.ready)), 'readiness');
+    if (timeout) clearTimeout(timeout);
+    for (const worker of workers) worker.child.stdin.end('go\n');
+    const results = await withTimeout(Promise.all(workers.map((worker) => worker.result)), 'import');
+    if (timeout) clearTimeout(timeout);
+    await withTimeout(Promise.all(workers.map((worker) => worker.exit)), 'shutdown');
+    if (timeout) clearTimeout(timeout);
+    const duplicateFlags: boolean[] = [];
+    for (const result of results) {
+      if (result.type === 'imported') {
+        assert.equal(result.batch_id, concurrentPayload.batch_id);
+        duplicateFlags.push(result.duplicate_batch);
+        continue;
+      }
+      assert.equal(result.statusCode, 503, `only an explicitly retryable contention response is acceptable, got: ${result.message}`);
+      const retry = await acceptCreatorDataSync(envelope(concurrentPayload), `Bearer ${token}`) as { duplicate_batch: boolean; batch_id: string };
+      assert.equal(retry.batch_id, concurrentPayload.batch_id);
+      duplicateFlags.push(retry.duplicate_batch);
+    }
+    assert.deepEqual(duplicateFlags.sort(), [false, true], 'concurrent replay across independent processes imports a batch once; any contention response can be retried with a fresh nonce and stable batch ID');
+    assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_ingest_batches WHERE batch_id=?', [concurrentPayload.batch_id]))?.count, 1, 'one batch row is committed across both API processes');
+  } catch (error) {
+    for (const worker of workers) worker.child.kill('SIGTERM');
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    for (const worker of workers) worker.lines.close();
+  }
+}
+
 const first=await acceptCreatorDataSync(envelope(payload),`Bearer ${token}`) as { duplicate_batch:boolean; result:{inserted:number;daily_inserted:number} }; assert.equal(first.duplicate_batch,false); assert.equal(first.result.inserted,3); assert.equal(first.result.daily_inserted,152);
 assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM douyin_works WHERE aweme_id=?',['work-id']))?.play_count,100,'官方导出应校准完全匹配作品的播放量');
+assert.deepEqual(
+  await queryOne<{source_type:string;source_file_sha256:string;has_play_count:number;has_like_count:number;has_comment_count:number;has_share_count:number}>(
+    `SELECT source_type,source_file_sha256,has_play_count,has_like_count,has_comment_count,has_share_count
+     FROM douyin_work_snapshots WHERE work_id=(SELECT id FROM douyin_works WHERE aweme_id='work-id') ORDER BY id DESC LIMIT 1`,
+  ),
+  { source_type:'douyin_official_export',source_file_sha256:sha,has_play_count:1,has_like_count:1,has_comment_count:0,has_share_count:0 },
+  'official import records its file provenance and only marks columns present in the source as observed',
+);
 assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM creator_content_metrics WHERE content_id=? ORDER BY id DESC LIMIT 1',[contentId]))?.play_count,100,'统一内容指标应使用官方导出值');
 assert.deepEqual(await queryOne<{fans_count:number;fans_count_available:number;play_count:number}>('SELECT fans_count,fans_count_available,play_count FROM douyin_daily_snapshots WHERE account_id=?',[douyinAccountId]), {fans_count:0,fans_count_available:0,play_count:100,}, '仅官方作品导出不能把旧粉丝总量伪装为当天实测值');
 await execute('UPDATE douyin_daily_snapshots SET fans_count=2163,fans_count_available=1 WHERE account_id=?',[douyinAccountId]);
@@ -52,4 +155,5 @@ const stalePayload={...payload,batch_id:crypto.randomUUID(),datasets:{...payload
 const stale=await acceptCreatorDataSync(envelope(stalePayload,'2026-08-29T00:00:00.000Z'),`Bearer ${token}`) as {result:{stale_ignored:number}};
 assert(stale.result.stale_ignored > 0);
 assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM douyin_works WHERE aweme_id=?',['work-id']))?.play_count,200,'较旧官方批次不得回写当前作品指标');
-console.log('官方导出 v3 契约通过：四文件完整性、精确周期、负值修正、AES-GCM/HMAC/nonce 与幂等入库。'); db.close(); rmSync(root,{recursive:true,force:true});
+await verifyConcurrentBatchIdempotency();
+console.log('官方导出 v3 契约通过：四文件完整性、精确周期、负值修正、AES-GCM/HMAC/nonce、幂等入库与双进程并发批次去重。'); db.close(); rmSync(root,{recursive:true,force:true});

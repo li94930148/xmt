@@ -4,7 +4,9 @@ import { douyinDataNormalizer, type NormalizedDouyinContract, type NormalizedDou
 import { analyzeDouyinWorks, calculateDouyinAccountHealth, DOUYIN_OPERATIONS_FORMULAS, type DouyinMetricsWork } from './douyinOperationsAnalytics.js';
 import { resolveCoverUrl } from '../utils/coverResolver.js';
 import { canonicalizeDouyinWorks } from './canonicalWorks.js';
+import { buildCreatorTopicSuggestions } from './creatorTopicSuggestions.js';
 import { reconcilePublishingDouyinLinks } from './publishingDouyinLink.js';
+import { apiLogger } from '../observability/logger.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentIdentity = { id: number; user_id: number; platform: string; account_id: string };
@@ -22,6 +24,12 @@ export type OfficialDailySummary = Omit<OfficialDailyPoint, 'metric_date'> & { d
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const parse = (value: unknown): JsonRecord => { try { return typeof value === 'string' ? JSON.parse(value) as JsonRecord : value && typeof value === 'object' ? value as JsonRecord : {}; } catch { return {}; } };
+const metricObserved = (work: NormalizedDouyinWork, keys: string[]) => {
+  const metrics = parse(work.raw).metrics;
+  if (!metrics || typeof metrics !== 'object' || Array.isArray(metrics)) return false;
+  const source = metrics as JsonRecord;
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(source, key) && source[key] !== null && source[key] !== undefined && source[key] !== '');
+};
 const shanghaiDate = (value: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
 const days = (period: Period) => ({ '7d': 7, '30d': 30, '90d': 90 })[period];
 const COVER_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
@@ -224,9 +232,13 @@ export async function persistNormalizedDouyinSync(agent: AgentIdentity, payload:
         [account.id, work.aweme_id, work.title, work.cover_url, work.publish_time, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, work.duration, work.completion_rate, work.interaction_rate, snapshotTime]);
       const row = await tx.queryOne<{ id: number }>('SELECT id FROM douyin_works WHERE account_id=? AND aweme_id=?', [account.id, work.aweme_id]);
       if (!row) continue;
-      await tx.execute(`INSERT INTO douyin_work_snapshots(work_id,snapshot_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate,interaction_rate)
-        VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate`,
-        [row.id, snapshotTime, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, work.completion_rate, work.interaction_rate]);
+      await tx.execute(`INSERT INTO douyin_work_snapshots(work_id,snapshot_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate,interaction_rate,source_type,has_play_count,has_like_count,has_comment_count,has_share_count)
+        VALUES(?,?,?,?,?,?,?,?,?,'douyin_creator_collection',?,?,?,?) ON CONFLICT(work_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate,source_type=excluded.source_type,source_file_sha256=NULL,has_play_count=excluded.has_play_count,has_like_count=excluded.has_like_count,has_comment_count=excluded.has_comment_count,has_share_count=excluded.has_share_count`,
+        [row.id, snapshotTime, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, work.completion_rate, work.interaction_rate,
+          Number(metricObserved(work, ['play_count', 'playCount', 'vv', 'views', 'view_count'])),
+          Number(metricObserved(work, ['digg_count', 'like_count', 'likeCount', 'likes'])),
+          Number(metricObserved(work, ['comment_count', 'commentCount', 'comments'])),
+          Number(metricObserved(work, ['share_count', 'shareCount', 'shares']))]);
       const analysis = workAnalysis(work, medianPlay);
       await tx.execute(`INSERT INTO douyin_analysis_records(account_id,work_id,analysis_type,viral_tag,content_category,content_json,ai_analysis_json,snapshot_time)
         VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(work_id,analysis_type,snapshot_time) DO UPDATE SET viral_tag=excluded.viral_tag,content_category=excluded.content_category,content_json=excluded.content_json,ai_analysis_json=excluded.ai_analysis_json`,
@@ -244,10 +256,11 @@ export async function persistNormalizedDouyinSync(agent: AgentIdentity, payload:
   try {
     await reconcilePublishingDouyinLinks({ accountId: result.account_id });
   } catch (error) {
-    console.error('[publishing-douyin-link] reconcile failed after normalized sync', {
-      accountId: result.account_id,
-      message: error instanceof Error ? error.message : 'unknown error',
-    });
+    apiLogger.error({
+      module: 'publishing',
+      operation: 'douyin_link.reconcile_after_normalized_sync_failed',
+      error: { code: 'RECONCILIATION_FAILED', name: error instanceof Error ? error.name : 'UnknownError' },
+    }, 'api.publishing.douyin_link_reconciliation_failed');
   }
   return result;
 }
@@ -308,9 +321,13 @@ async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: 
         [content.id, account.id, work.aweme_id, work.title, work.cover_url, work.publish_time, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, work.duration, work.completion_rate, work.interaction_rate, snapshotTime]);
       const douyinWork = await tx.queryOne<{ id: number }>('SELECT id FROM douyin_works WHERE account_id=? AND aweme_id=?', [account.id, work.aweme_id]);
       if (!douyinWork) throw new Error(`标准抖音作品写入失败: ${work.aweme_id}`);
-      await tx.execute(`INSERT INTO douyin_work_snapshots(work_id,snapshot_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate,interaction_rate)
-        VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate`,
-        [douyinWork.id, snapshotTime, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, work.completion_rate, work.interaction_rate]);
+      await tx.execute(`INSERT INTO douyin_work_snapshots(work_id,snapshot_time,play_count,like_count,comment_count,share_count,collect_count,completion_rate,interaction_rate,source_type,has_play_count,has_like_count,has_comment_count,has_share_count)
+        VALUES(?,?,?,?,?,?,?,?,?,'douyin_creator_collection',?,?,?,?) ON CONFLICT(work_id,snapshot_time) DO UPDATE SET play_count=excluded.play_count,like_count=excluded.like_count,comment_count=excluded.comment_count,share_count=excluded.share_count,collect_count=excluded.collect_count,completion_rate=excluded.completion_rate,interaction_rate=excluded.interaction_rate,source_type=excluded.source_type,source_file_sha256=NULL,has_play_count=excluded.has_play_count,has_like_count=excluded.has_like_count,has_comment_count=excluded.has_comment_count,has_share_count=excluded.has_share_count`,
+        [douyinWork.id, snapshotTime, work.play_count, work.like_count, work.comment_count, work.share_count, work.collect_count, work.completion_rate, work.interaction_rate,
+          Number(metricObserved(work, ['play_count', 'playCount', 'vv', 'views', 'view_count'])),
+          Number(metricObserved(work, ['digg_count', 'like_count', 'likeCount', 'likes'])),
+          Number(metricObserved(work, ['comment_count', 'commentCount', 'comments'])),
+          Number(metricObserved(work, ['share_count', 'shareCount', 'shares']))]);
       const analysis = workAnalysis(work, medianPlay);
       await tx.execute(`INSERT INTO douyin_analysis_records(account_id,work_id,analysis_type,viral_tag,content_category,content_json,ai_analysis_json,snapshot_time)
         VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(work_id,analysis_type,snapshot_time) DO UPDATE SET viral_tag=excluded.viral_tag,content_category=excluded.content_category,content_json=excluded.content_json,ai_analysis_json=excluded.ai_analysis_json`,
@@ -329,10 +346,11 @@ async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: 
   try {
     await reconcilePublishingDouyinLinks({ accountId: result.account_id });
   } catch (error) {
-    console.error('[publishing-douyin-link] reconcile failed after contract sync', {
-      accountId: result.account_id,
-      message: error instanceof Error ? error.message : 'unknown error',
-    });
+    apiLogger.error({
+      module: 'publishing',
+      operation: 'douyin_link.reconcile_after_contract_sync_failed',
+      error: { code: 'RECONCILIATION_FAILED', name: error instanceof Error ? error.name : 'UnknownError' },
+    }, 'api.publishing.douyin_link_reconciliation_failed');
   }
   return result;
 }
@@ -393,7 +411,9 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   const reconciliation = officialReconciliationSummary(totals.plays, official?.plays ?? null);
   // Shadow mode deliberately leaves the public dashboard shape and values on
   // the established path. The log contains only a safe aggregate summary.
-  if (mode === 'shadow_compare') console.info('[creator-official-shadow]', JSON.stringify({ account_id: creatorAccountId, metric: 'play_count', ...reconciliation }));
+  if (mode === 'shadow_compare') {
+    apiLogger.info({ module: 'creator_analytics', operation: 'official_metrics.shadow_compare', metric: 'play_count', ...reconciliation }, 'api.creator_analytics.shadow_compare');
+  }
   const useOfficial = mode === 'official_preferred' && official !== null;
   const displayPlays = useOfficial ? official.plays : totals.plays;
   const displayInteractions = useOfficial ? official.likes + official.comments + official.shares + official.collects : totals.interactions;
@@ -429,6 +449,7 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     growth_7d: growth7d,
     growth_30d: growth30d,
     top_works: await resolveWorkCovers(account, rankedWorks.slice(0, 5)),
+    topic_suggestions: buildCreatorTopicSuggestions(canonical, String(account.douyin_uid || '')),
     snapshot_count: snapshots.length,
     snapshot_start_date: snapshots[0]?.snapshot_date ?? null,
     data_status: missingFields.length ? 'partial' : 'ready',

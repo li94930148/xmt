@@ -29,11 +29,11 @@ interface GlareHoverProps {
 const GlareHover: React.FC<GlareHoverProps> = ({
   width = '500px',
   height = '500px',
-  background = '#000',
+  background = 'var(--xmt-surface)',
   borderRadius = '10px',
-  borderColor = '#333',
+  borderColor = 'var(--xmt-border-soft)',
   children,
-  glareColor = '#ffffff',
+  glareColor = 'var(--xmt-primary)',
   glareOpacity = 0.5,
   glareAngle = -45,
   glareSize = 250,
@@ -42,20 +42,6 @@ const GlareHover: React.FC<GlareHoverProps> = ({
   className = '',
   style = {}
 }) => {
-  const hex = glareColor.replace('#', '');
-  let rgba = glareColor;
-  if (/^[\dA-Fa-f]{6}$/.test(hex)) {
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    rgba = `rgba(${r}, ${g}, ${b}, ${glareOpacity})`;
-  } else if (/^[\dA-Fa-f]{3}$/.test(hex)) {
-    const r = parseInt(hex[0] + hex[0], 16);
-    const g = parseInt(hex[1] + hex[1], 16);
-    const b = parseInt(hex[2] + hex[2], 16);
-    rgba = `rgba(${r}, ${g}, ${b}, ${glareOpacity})`;
-  }
-
   const overlayRef = useRef<HTMLDivElement | null>(null);
 
   const animateIn = () => {
@@ -84,10 +70,11 @@ const GlareHover: React.FC<GlareHoverProps> = ({
   const overlayStyle: React.CSSProperties = {
     position: 'absolute',
     inset: 0,
-    background: `linear-gradient(${glareAngle}deg,
+    backgroundImage: `linear-gradient(${glareAngle}deg,
         hsla(0,0%,0%,0) 60%,
-        ${rgba} 70%,
+        ${glareColor} 70%,
         hsla(0,0%,0%,0) 100%)`,
+    opacity: glareOpacity,
     backgroundSize: `${glareSize}% ${glareSize}%, 100% 100%`,
     backgroundRepeat: 'no-repeat',
     backgroundPosition: '-100% -100%, 0 0',

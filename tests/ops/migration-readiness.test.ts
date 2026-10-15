@@ -21,6 +21,10 @@ const migration015 = databaseMigrations.find((migration) => migration.version ==
 await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?', args: ['015'] });
 assert.equal(run().status, 0, 'pending integrity remediation migration remains rollback compatible');
 await client.execute({ sql: 'INSERT INTO database_migrations (version, name, checksum, status) VALUES (?, ?, ?, ?)', args: [migration015.version, migration015.name, migration015.checksum, 'applied'] });
+const migration016 = databaseMigrations.find((migration) => migration.version === '016')!;
+await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?', args: ['016'] });
+assert.equal(run().status, 0, 'pending inspiration link expansion remains rollback compatible');
+await client.execute({ sql: 'INSERT INTO database_migrations (version, name, checksum, status) VALUES (?, ?, ?, ?)', args: [migration016.version, migration016.name, migration016.checksum, 'applied'] });
 await client.execute({ sql: 'DELETE FROM database_migrations WHERE version = ?', args: ['006'] });
 const review = run(); assert.notEqual(review.status, 0); assert.match(review.stdout, /REVIEW_REQUIRED/);
 await client.execute({ sql: 'INSERT INTO database_migrations (version, name, checksum, status) VALUES (?, ?, ?, ?)', args: ['006', databaseMigrations.find((migration) => migration.version === '006')!.name, 'invalid', 'applied'] });

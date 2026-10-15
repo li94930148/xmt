@@ -1,3 +1,5 @@
+import { buildResourceReferenceHtml, type ResourceReference } from './resourceReference';
+
 export const DEFAULT_MATERIAL_WORKSPACE_HEIGHT = 360;
 export const MIN_MATERIAL_WORKSPACE_HEIGHT = 240;
 
@@ -17,8 +19,8 @@ export function canPersistMaterialDraft(canManage: boolean) {
 // One empty paragraph represents two text newlines without an oversized visual gap.
 const INSERTION_GAP_HTML = '<p><br></p>';
 
-export function buildMaterialInsertionHtml(contents: readonly string[]) {
-  const nonEmpty = contents.map((content) => content.trim()).filter(Boolean);
+export function buildMaterialInsertionHtml(resources: readonly ResourceReference[]) {
+  const nonEmpty = resources.map((resource) => buildResourceReferenceHtml(resource)).filter(Boolean);
   if (nonEmpty.length === 0) return '';
   return `${INSERTION_GAP_HTML}${nonEmpty.join(INSERTION_GAP_HTML)}${INSERTION_GAP_HTML}`;
 }

@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useId, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useThemeStyles } from '../../hooks/useThemeStyles';
 
@@ -13,6 +14,7 @@ interface BaseModalProps {
   footer?: ReactNode;
   size?: ModalSize;
   closeOnOverlayClick?: boolean;
+  closeOnEscape?: boolean;
   showCloseButton?: boolean;
   className?: string;
 }
@@ -33,27 +35,33 @@ export default function BaseModal({
   footer,
   size = 'md',
   closeOnOverlayClick = true,
+  closeOnEscape = false,
   showCloseButton = true,
   className = '',
 }: BaseModalProps) {
   const styles = useThemeStyles();
+  const titleId = useId();
 
   useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
+    if (!open || !closeOnEscape) return;
+    const handleEscapeKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [onClose, open]);
+    window.addEventListener('keydown', handleEscapeKey);
+    return () => window.removeEventListener('keydown', handleEscapeKey);
+  }, [closeOnEscape, onClose, open]);
 
   if (!open) {
     return null;
   }
 
-  return (
+  return createPortal((
     <div
-      className="xmt-overlay xmt-overlay-center z-50 px-4 py-6"
+      className="xmt-overlay xmt-overlay-center px-4 py-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={title ? titleId : undefined}
+      aria-label={title ? undefined : '对话框'}
       onClick={(event) => {
         if (!closeOnOverlayClick) {
           return;
@@ -67,7 +75,7 @@ export default function BaseModal({
         {title || description || showCloseButton ? (
           <div className={`flex items-start justify-between gap-4 border-b px-6 py-5 ${styles.border}`}>
             <div className="min-w-0 flex-1">
-              {title ? <h2 className={`text-xl font-bold ${styles.textPrimary}`}>{title}</h2> : null}
+              {title ? <h2 id={titleId} className={`text-xl font-bold ${styles.textPrimary}`}>{title}</h2> : null}
               {description ? <p className={`mt-2 text-sm leading-6 ${styles.textSecondary}`}>{description}</p> : null}
             </div>
 
@@ -84,10 +92,10 @@ export default function BaseModal({
           </div>
         ) : null}
 
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-5">{children}</div>
+        <div className="max-h-[min(70vh,calc(100dvh-12rem))] overflow-y-auto px-6 py-5">{children}</div>
 
         {footer ? <div className={`border-t px-6 py-4 ${styles.border}`}>{footer}</div> : null}
       </div>
     </div>
-  );
+  ), document.body);
 }

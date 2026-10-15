@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import * as Y from 'yjs';
 
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-collaboration-access-'));
 process.env.XMT_DB_PATH = path.join(tempDirectory, 'collaboration-access.test.db');
@@ -78,6 +79,7 @@ assert.equal(broadcasts.some((item) => item.event === 'collaboration:update' || 
 assert.equal((await (await import('../../api/database/utils.js')).queryOne<{ content: string }>('SELECT content FROM production WHERE id = ?', [productionId]))?.content, beforeContent?.content);
 const deniedEvents: string[] = [];
 const deniedSocket = { ...fakeSocket, id: 'collaboration-denied-socket', data: { user: { ...outsider, name: 'Outsider' }, auth: { userId: outsiderId } }, emit: (event: string) => deniedEvents.push(event) } as never;
+const deniedLockBroadcastsBefore = broadcasts.filter((item) => item.event === 'collaboration:doc-locked').length;
 await joinRoom(fakeIo, deniedSocket, { roomId, user: { id: ownerId, name: 'forged owner', role: 'admin', color: '#000' } });
 assert.equal(Boolean((deniedSocket.data.collaborationRooms as Set<string> | undefined)?.has(roomId)), false);
 assert.equal(deniedEvents.includes('collaboration:conflict-detected'), true);
@@ -91,6 +93,26 @@ await joinRoom(fakeIo, fakeSocket, { roomId, user: { id: outsiderId, name: 'forg
 assert.equal((fakeSocket.data.collaborationRooms as Set<string>).has(roomId), true);
 assert.equal(emitted.some((item) => item.event === 'collaboration:sync'), true);
 assert.equal(broadcasts.some((item) => item.event === 'collaboration:user-joined' && (item.payload as { user: { id: number; role: string } }).user.id === ownerId), true);
+const updateDoc = new Y.Doc();
+updateDoc.getText('content').insert(0, '已确认保存');
+const acknowledgements: Array<{ ok: boolean; version?: number; code?: string }> = [];
+await handleDocumentUpdate(fakeIo, fakeSocket, {
+  roomId,
+  update: Array.from(Y.encodeStateAsUpdate(updateDoc)),
+}, (acknowledgement) => acknowledgements.push(acknowledgement));
+assert.equal(acknowledgements.length, 1);
+assert.equal(acknowledgements[0]?.ok, true);
+assert.ok((acknowledgements[0]?.version || 0) > 0);
+updateDoc.destroy();
+const notJoinedSocket = {
+  ...fakeSocket,
+  id: 'collaboration-not-joined-socket',
+  data: { user: { ...owner, name: 'Owner' }, auth: { userId: ownerId } },
+} as never;
+const deniedAcknowledgements: Array<{ ok: boolean; code?: string }> = [];
+await handleDocumentUpdate(fakeIo, notJoinedSocket, { roomId, update: [0] }, (acknowledgement) => deniedAcknowledgements.push(acknowledgement));
+assert.deepEqual(deniedAcknowledgements, [{ ok: false, code: 'ROOM_NOT_JOINED', reason: 'Join the room before editing' }]);
+assert.equal(broadcasts.filter((item) => item.event === 'collaboration:doc-locked').length, deniedLockBroadcastsBefore, 'an unauthorized update must not broadcast a false room lock');
 await joinRoom(fakeIo, fakeSocket, { roomId: 'production:not-a-number', user: { id: ownerId, name: 'Owner', role: 'member', color: '#000' } });
 assert.equal((fakeSocket.data.collaborationRooms as Set<string>).has('production:not-a-number'), false);
 

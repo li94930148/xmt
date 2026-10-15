@@ -89,9 +89,7 @@ export class AuthService {
     }
 
     const passwordHash = await this.dependencies.passwordService.hash(newPassword);
-    await this.dependencies.repository.updatePassword(userId, passwordHash);
-    await this.dependencies.repository.clearForceChangePassword(userId);
-    await this.dependencies.repository.writeActivityLog(userId, 'change_password', 'auth', '用户修改了密码');
+    await this.dependencies.repository.changePasswordAndAudit(userId, passwordHash);
   }
 
   async updateProfile(input: LegacyUpdateProfileInput): Promise<LegacyCurrentUserResult> {
@@ -104,8 +102,7 @@ export class AuthService {
     const user = await this.dependencies.repository.findUserById(input.userId);
     if (!user) throw new AuthServiceError('USER_NOT_FOUND');
     if (!user.enabled) throw new AuthServiceError('ACCOUNT_DISABLED');
-    await this.dependencies.repository.updateProfile(user.id, { name, email });
-    await this.dependencies.repository.writeActivityLog(user.id, 'update_profile', 'auth', '用户更新了个人资料');
+    await this.dependencies.repository.updateProfileAndAudit(user.id, { name, email });
     return this.getCurrentUser(user.id);
   }
 

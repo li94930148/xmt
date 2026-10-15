@@ -32,7 +32,7 @@ export default function StatCard({ title, value, unit, icon: Icon, color, change
           </div>
           {change && (
             <div className="flex items-center gap-1 mt-2">
-              <span className={`text-xs font-medium ${up ? 'text-studio-coral' : 'text-studio-success'}`}>
+              <span className={`text-xs font-medium ${up ? 'text-studio-coral-contrast' : 'text-studio-success-contrast'}`}>
                 {change}
               </span>
               <span className={`text-xs ${styles.textMuted}`}>vs 上月</span>

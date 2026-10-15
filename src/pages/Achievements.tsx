@@ -9,12 +9,12 @@ import {
 import type { Achievement, AchievementStats, AchievementProgress, LeaderboardEntry, RecentAchievement } from '../api/achievements';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
-import { StatusBadge, RarityBadge, PointBadge } from '../components/Badge';
+import { RarityBadge, PointBadge } from '../components/Badge';
 import { ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_RARITIES, ACHIEVEMENT_LEVELS } from '../constants';
 import { formatBeijingDate } from '../lib/utils';
 import {
   Trophy, Award, Star, Sparkles, Lock, CheckCircle, RefreshCw,
-  TrendingUp, Users, Crown, Zap, Filter, ChevronRight
+  TrendingUp, Users, Crown, Zap
 } from 'lucide-react';
 
 type TabKey = 'all' | 'earned' | 'locked';
@@ -169,21 +169,23 @@ export default function Achievements() {
               ) : (
                 <Zap className="w-4 h-4" />
               )}
-              <span className="font-medium text-sm">初始化预设成就</span>
+              <span className="font-medium text-sm">启用预设成就</span>
             </button>
           )}
-          <button
-            onClick={handleCheck}
-            disabled={checking}
-            className={`flex items-center gap-2 px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50`}
-          >
-            {checking ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4" />
-            )}
-            <span className="font-medium text-sm">检查新成就</span>
-          </button>
+          {allAchievements.length > 0 && (
+            <button
+              onClick={handleCheck}
+              disabled={checking}
+              className={`flex items-center gap-2 px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50`}
+            >
+              {checking ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+              <span className="font-medium text-sm">检查新成就</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -266,7 +268,7 @@ export default function Achievements() {
       {/* 视图切换 + 筛选 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         {/* Tab 切换 */}
-        <div className={`flex items-center gap-1 p-1 rounded-xl ${styles.bgTertiary}`}>
+              <div className={`flex items-center gap-1 p-1 rounded-xl ${styles.bgTertiary}`}>
           {[
             { key: 'all', label: '全部', count: totalCount },
             { key: 'earned', label: '已获得', count: earnedCount },
@@ -281,7 +283,7 @@ export default function Achievements() {
                   : `${styles.textSecondary} hover:${styles.textPrimary}`
               }`}
             >
-              {tab.label} <span className={`ml-1 text-xs ${styles.textMuted}`}>({tab.count})</span>
+              {tab.label} <span data-testid="achievement-filter-count" className="ml-1 text-xs text-studio-text-secondary">({tab.count})</span>
             </button>
           ))}
         </div>
@@ -289,8 +291,11 @@ export default function Achievements() {
         {/* 筛选 & 视图 */}
         <div className="flex items-center gap-2">
           <select
+            id="achievement-category-filter"
+            name="achievementCategory"
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
+            aria-label="按成就类别筛选"
             className={`px-3 py-2 text-sm rounded-lg ${styles.input}`}
           >
             <option value="all">全部分类</option>
@@ -299,8 +304,11 @@ export default function Achievements() {
             ))}
           </select>
           <select
+            id="achievement-rarity-filter"
+            name="achievementRarity"
             value={rarityFilter}
             onChange={(e) => setRarityFilter(e.target.value)}
+            aria-label="按成就稀有度筛选"
             className={`px-3 py-2 text-sm rounded-lg ${styles.input}`}
           >
             <option value="all">全部稀有度</option>
@@ -337,14 +345,19 @@ export default function Achievements() {
       {/* 内容区域 */}
       {viewMode === 'grid' && (
         <>
+          <h2 className="sr-only">成就列表</h2>
           {filteredAchievements.length === 0 ? (
             <div className={`${styles.card} p-12 text-center`}>
               <Trophy className={`w-12 h-12 ${styles.textMuted} mx-auto mb-4`} />
               <h3 className={`text-lg font-medium ${styles.textPrimary} mb-2`}>
-                {allAchievements.length === 0 ? '暂无成就' : '没有匹配的成就'}
+                {allAchievements.length === 0 ? '暂无可查看的成就' : '没有匹配的成就'}
               </h3>
               <p className={styles.textSecondary}>
-                {allAchievements.length === 0 ? '点击上方按钮初始化预设成就' : '尝试调整筛选条件'}
+                {allAchievements.length === 0
+                  ? canManageAchievements
+                    ? '启用预设成就后，成员即可查看并解锁。'
+                    : '当前还没有可查看的成就，请联系管理员启用成就内容。'
+                  : '尝试调整筛选条件'}
               </p>
             </div>
           ) : (
@@ -447,13 +460,14 @@ export default function Achievements() {
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-studio-amber/10`}>
                 <Crown className="w-4 h-4 text-studio-amber" />
               </div>
-              <h3 className={`text-base font-semibold ${styles.textPrimary}`}>积分排行榜</h3>
+              <h2 className={`text-base font-semibold ${styles.textPrimary}`}>积分排行榜</h2>
             </div>
 
             {leaderboard.length === 0 ? (
-              <div className={`p-8 text-center ${styles.textMuted}`}>
+              <div role="status" className={`p-8 text-center ${styles.textMuted}`}>
                 <Users className="w-10 h-10 mx-auto mb-3 opacity-50" />
-                <p className="text-sm">暂无数据</p>
+                <p className={`text-sm font-medium ${styles.textSecondary}`}>当前没有可显示的成员积分排行</p>
+                <p className="mt-1 text-xs">启用成员后，这里会显示成就积分排行。</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -472,7 +486,7 @@ export default function Achievements() {
                       }`}>
                         {isTop3 ? medals[index] : index + 1}
                       </div>
-                      <div className={`w-9 h-9 rounded-full bg-gradient-to-br from-studio-primary to-studio-primary flex items-center justify-center text-white font-bold text-sm`}>
+                      <div data-testid="achievement-leaderboard-avatar" className="flex h-9 w-9 items-center justify-center rounded-full bg-studio-primary-button text-sm font-bold text-white">
                         {entry.user_name?.charAt(0) || '?'}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -496,7 +510,7 @@ export default function Achievements() {
               <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-studio-primary/10`}>
                 <TrendingUp className="w-4 h-4 text-studio-primary" />
               </div>
-              <h3 className={`text-base font-semibold ${styles.textPrimary}`}>分类统计</h3>
+              <h2 className={`text-base font-semibold ${styles.textPrimary}`}>分类统计</h2>
             </div>
 
             <div className="space-y-3">
@@ -513,7 +527,7 @@ export default function Achievements() {
                         <span className="text-lg">{cat.icon}</span>
                         <span className={`text-sm font-medium ${styles.textPrimary}`}>{cat.label}</span>
                       </div>
-                      <span className={`text-xs ${styles.textMuted}`}>{earned}/{total}</span>
+                      <span data-testid="achievement-category-count" className="text-xs text-studio-text-secondary">{earned}/{total}</span>
                     </div>
                     <div className={`h-1.5 rounded-full ${styles.progressBg}`}>
                       <div
@@ -528,7 +542,7 @@ export default function Achievements() {
 
             {/* 稀有度分布 */}
             <div className="mt-6">
-              <h4 className={`text-sm font-medium ${styles.textPrimary} mb-3`}>稀有度分布</h4>
+              <h3 className={`text-sm font-medium ${styles.textPrimary} mb-3`}>稀有度分布</h3>
               <div className="grid grid-cols-2 gap-2">
                 {ACHIEVEMENT_RARITIES.map(rarity => {
                   const rStats = stats?.byRarity?.find(r => r.rarity === rarity.value);
@@ -538,7 +552,7 @@ export default function Achievements() {
                         <span className={`w-2 h-2 rounded-full ${rarity.dot}`} />
                         <span className={`text-xs font-medium ${rarity.color}`}>{rarity.label}</span>
                       </div>
-                      <span className={`text-xs ${styles.textMuted}`}>{rStats?.earned || 0}/{rStats?.total || 0}</span>
+                      <span data-testid="achievement-rarity-count" className="text-xs text-studio-text-secondary">{rStats?.earned || 0}/{rStats?.total || 0}</span>
                     </div>
                   );
                 })}
@@ -555,7 +569,7 @@ export default function Achievements() {
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-studio-violet/10`}>
               <Sparkles className="w-4 h-4 text-studio-violet" />
             </div>
-            <h3 className={`text-base font-semibold ${styles.textPrimary}`}>最近获得的成就</h3>
+            <h2 className={`text-base font-semibold ${styles.textPrimary}`}>最近获得的成就</h2>
           </div>
 
           {recentAchievements.length === 0 ? (
@@ -566,14 +580,13 @@ export default function Achievements() {
           ) : (
             <div className="space-y-3">
               {recentAchievements.map((item, index) => {
-                const rarityConfig = ACHIEVEMENT_RARITIES.find(r => r.value === item.rarity) || ACHIEVEMENT_RARITIES[0];
                 return (
                   <div
                     key={item.id}
                     className={`flex items-center gap-4 p-4 rounded-xl transition-all duration-200 ${styles.hoverBg}`}
                     style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-studio-primary to-studio-primary flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                    <div data-testid="achievement-feed-avatar" className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-studio-primary-button text-sm font-bold text-white">
                       {item.user_name?.charAt(0) || '?'}
                     </div>
                     <div className="flex-1 min-w-0">

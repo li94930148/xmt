@@ -48,7 +48,7 @@ export default function AnonymousFeedbackPage() {
 
       <GlassPanel className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-studio-primary/12 text-studio-cyan">
+          <div data-testid="anonymous-feedback-icon" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] bg-studio-cyan-soft text-studio-cyan-contrast">
             <MessageSquareText className="h-5 w-5" />
           </div>
           <div>
@@ -81,7 +81,7 @@ export default function AnonymousFeedbackPage() {
                 <p className="mt-4 text-xs text-studio-text-muted">提交时间：{formatBeijingDate(item.created_at)}</p>
                 {item.reply_content ? (
                   <div className="mt-4 rounded-card border border-studio-primary/20 bg-studio-primary/8 p-4">
-                    <p className="text-xs font-semibold text-studio-cyan">管理员回复</p>
+                    <p className="text-xs font-semibold text-studio-cyan-contrast">管理员回复</p>
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{item.reply_content}</p>
                   </div>
                 ) : null}

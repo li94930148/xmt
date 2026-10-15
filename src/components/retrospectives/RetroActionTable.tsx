@@ -19,12 +19,23 @@ type Props = {
   currentUserId?: number;
   canManageActions: boolean;
   loading: boolean;
-  onCreate: (payload: CreateRetroActionPayload) => void;
-  onUpdate: (actionId: number, payload: UpdateRetroActionPayload) => void;
+  onCreate: (payload: CreateRetroActionPayload) => Promise<boolean> | boolean;
+  onUpdate: (actionId: number, payload: UpdateRetroActionPayload) => Promise<boolean> | boolean;
   onOpenDetail?: (action: RetroAction) => void;
 };
 
 const statuses: RetroActionStatus[] = ['todo', 'doing', 'done', 'cancelled'];
+
+type ActionDraft = {
+  status: RetroActionStatus;
+  resultMd: string;
+  baselineStatus: RetroActionStatus;
+  baselineResultMd: string;
+};
+
+function toActionDraft(action: RetroAction): ActionDraft {
+  return { status: action.status, resultMd: action.resultMd || '', baselineStatus: action.status, baselineResultMd: action.resultMd || '' };
+}
 
 function today() {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
@@ -49,25 +60,44 @@ export default function RetroActionTable({
   const [descriptionMd, setDescriptionMd] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [dueDate, setDueDate] = useState('');
-  const [drafts, setDrafts] = useState<Record<number, { status: RetroActionStatus; resultMd: string }>>({});
+  const [drafts, setDrafts] = useState<Record<number, ActionDraft>>({});
   const canCreate = status !== 'archived' && canManageActions;
 
   const actionDrafts = useMemo(() => {
-    const next = { ...drafts };
+    const next: Record<number, ActionDraft> = {};
     for (const action of actions) {
-      next[action.id] = next[action.id] || { status: action.status, resultMd: action.resultMd || '' };
+      const draft = drafts[action.id];
+      const isDirty = draft && (draft.status !== draft.baselineStatus || draft.resultMd !== draft.baselineResultMd);
+      next[action.id] = isDirty ? draft : toActionDraft(action);
     }
     return next;
   }, [actions, drafts]);
 
-  const handleCreate = () => {
-    if (!title.trim()) return;
-    onCreate({
+  const handleUpdate = async (actionId: number, draft: ActionDraft) => {
+    if (loading) return;
+    const confirmed = await onUpdate(actionId, { status: draft.status, resultMd: draft.resultMd });
+    if (!confirmed) return;
+    setDrafts((current) => {
+      const next = { ...current };
+      const latest = current[actionId];
+      if (!latest || (latest.status === draft.status && latest.resultMd === draft.resultMd)) {
+        delete next[actionId];
+      } else {
+        next[actionId] = { ...latest, baselineStatus: draft.status, baselineResultMd: draft.resultMd };
+      }
+      return next;
+    });
+  };
+
+  const handleCreate = async () => {
+    if (!title.trim() || loading) return;
+    const created = await onCreate({
       title: title.trim(),
       descriptionMd: descriptionMd.trim(),
       ownerId: ownerId ? Number(ownerId) : undefined,
       dueDate: dueDate || undefined,
     });
+    if (!created) return;
     setTitle('');
     setDescriptionMd('');
     setOwnerId('');
@@ -75,7 +105,7 @@ export default function RetroActionTable({
   };
 
   return (
-    <GlassPanel className="p-5">
+    <GlassPanel data-testid="retro-action-table-panel" className="overflow-visible p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-studio-text-primary">行动项</h2>
@@ -91,18 +121,21 @@ export default function RetroActionTable({
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
+            disabled={loading}
             className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
             placeholder="行动项标题"
           />
           <input
             value={descriptionMd}
             onChange={(event) => setDescriptionMd(event.target.value)}
+            disabled={loading}
             className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
             placeholder="说明，可选"
           />
           <select
             value={ownerId}
             onChange={(event) => setOwnerId(event.target.value)}
+            disabled={loading}
             className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           >
             <option value="">默认负责人</option>
@@ -112,17 +145,18 @@ export default function RetroActionTable({
             type="date"
             value={dueDate}
             onChange={(event) => setDueDate(event.target.value)}
+            disabled={loading}
             className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           />
-          <ActionButton variant="primary" onClick={handleCreate} disabled={loading || !title.trim()}>
+          <ActionButton variant="primary" onClick={() => void handleCreate()} disabled={loading || !title.trim()}>
             <Plus className="h-4 w-4" />
             新增
           </ActionButton>
         </div>
       ) : null}
 
-      <div className="mt-5 overflow-x-auto">
-        <table className="min-w-[1080px] w-full text-left text-sm">
+      <div data-testid="retro-action-table-scroll" className="mt-5 overflow-x-auto">
+        <table className="min-w-[1080px] w-full table-fixed text-left text-sm">
           <thead className="border-b border-studio-border-soft text-xs text-studio-text-muted">
             <tr>
               <th className="px-3 py-3">标题</th>
@@ -131,7 +165,7 @@ export default function RetroActionTable({
               <th className="px-3 py-3">状态</th>
               <th className="px-3 py-3">结果</th>
               <th className="px-3 py-3">关闭时间</th>
-              <th className="px-3 py-3">操作</th>
+              <th className="sticky right-0 z-20 w-[116px] bg-studio-surface-soft px-3 py-3 sm:w-[188px]">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-studio-border-soft">
@@ -140,7 +174,7 @@ export default function RetroActionTable({
                 <td colSpan={7} className="px-3 py-8 text-center text-studio-text-muted">暂无行动项</td>
               </tr>
             ) : actions.map((action) => {
-              const draft = actionDrafts[action.id] || { status: action.status, resultMd: action.resultMd || '' };
+              const draft = actionDrafts[action.id] || toActionDraft(action);
               const canUpdate = canManageActions || action.ownerId === currentUserId;
               return (
                 <tr key={action.id} className="align-top">
@@ -151,12 +185,13 @@ export default function RetroActionTable({
                   <td className="px-3 py-4 text-studio-text-secondary">{action.ownerName || '-'}</td>
                   <td className="px-3 py-4">
                     <div className="text-studio-text-secondary">{formatDate(action.dueDate)}</div>
-                    {isOverdue(action) ? <span className="mt-1 inline-flex rounded-full bg-studio-coral/10 px-2 py-0.5 text-xs text-studio-coral">已逾期</span> : null}
+                    {isOverdue(action) ? <span className="mt-1 inline-flex rounded-full bg-studio-coral/10 px-2 py-0.5 text-xs text-studio-coral-contrast">已逾期</span> : null}
                   </td>
                   <td className="px-3 py-4">
                     {canUpdate ? (
                       <select
                         value={draft.status}
+                        disabled={loading}
                         onChange={(event) => setDrafts((current) => ({
                           ...current,
                           [action.id]: { ...draft, status: event.target.value as RetroActionStatus },
@@ -173,6 +208,7 @@ export default function RetroActionTable({
                     {canUpdate ? (
                       <textarea
                         value={draft.resultMd}
+                        disabled={loading}
                         onChange={(event) => setDrafts((current) => ({
                           ...current,
                           [action.id]: { ...draft, resultMd: event.target.value },
@@ -185,10 +221,10 @@ export default function RetroActionTable({
                     )}
                   </td>
                   <td className="px-3 py-4 text-studio-text-secondary">{formatDateTime(action.closedAt)}</td>
-                  <td className="px-3 py-4">
-                    <div className="flex flex-wrap gap-2">
+                  <td data-testid={`retro-action-row-actions-${action.id}`} className="sticky right-0 z-10 w-[116px] bg-studio-surface px-3 py-4 sm:w-[188px]">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                       {onOpenDetail ? (
-                        <ActionButton variant="ghost" onClick={() => onOpenDetail(action)}>
+                        <ActionButton variant="ghost" className="scroll-mb-20" onClick={() => onOpenDetail(action)}>
                           <Eye className="h-4 w-4" />
                           详情
                         </ActionButton>
@@ -196,8 +232,9 @@ export default function RetroActionTable({
                       {canUpdate ? (
                         <ActionButton
                           variant="ghost"
+                          className="scroll-mb-20"
                           disabled={loading}
-                          onClick={() => onUpdate(action.id, { status: draft.status, resultMd: draft.resultMd })}
+                          onClick={() => void handleUpdate(action.id, draft)}
                         >
                           <Save className="h-4 w-4" />
                           保存

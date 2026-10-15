@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -68,6 +68,21 @@ const statusTone: Record<string, StatusTone> = {
   scheduled: 'cyan',
 };
 
+const metricSourceLabels: Record<string, string> = {
+  douyin_official_export: '官方',
+  manual: '手录',
+  douyin_creator_collection: '采集',
+  douyin_legacy_current: '旧同步',
+  legacy_analytics: '旧历史',
+  unavailable: '待补',
+};
+
+function formMetricValue(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function getNextAction(status: string) {
   if (status === 'published') {
     return '查看数据';
@@ -91,6 +106,8 @@ export default function Publishing() {
   const [formData, setFormData] = useState(initialFormData);
   const [deleteTarget, setDeleteTarget] = useState<PublishingType | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [savingPublishing, setSavingPublishing] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   // 页大小以服务端返回为准，避免前端写死与后端默认值脱节
@@ -100,7 +117,12 @@ export default function Publishing() {
   const [linkQuery, setLinkQuery] = useState('');
   const [linkCandidates, setLinkCandidates] = useState<PublishingDouyinCandidate[]>([]);
   const [linkLoading, setLinkLoading] = useState(false);
+  const [savingDouyinLink, setSavingDouyinLink] = useState(false);
   const [syncingDouyin, setSyncingDouyin] = useState(false);
+  const mutationLockRef = useRef(false);
+  const deleteLockRef = useRef(false);
+  const reconcileLockRef = useRef(false);
+  const douyinLinkLockRef = useRef(false);
 
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
@@ -108,8 +130,9 @@ export default function Publishing() {
   const canManageDouyinLinks = !permissionsLoading
     && hasAllPermissions(['workflow:publishing', 'creator:data:view']);
 
-  const fetchData = useCallback(async (requestedPage = 1) => {
+  const fetchData = useCallback(async (requestedPage = 1): Promise<boolean> => {
     setLoading(true);
+    setListError(null);
     try {
       const [initialResult, topicList] = await Promise.all([
         getPublishing({ page: requestedPage }),
@@ -126,16 +149,22 @@ export default function Publishing() {
       setPageSize(result.limit || 50);
       setSummary(result.summary);
       setTopics(topicList.data.filter((topic) => topic.status === 'publishing' || topic.status === 'shooting'));
+      return true;
     } catch (error) {
-      addNotification({
-        title: '获取数据失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
+      setListError((error as Error).message || '暂时无法读取发布列表');
+      return false;
     } finally {
       setLoading(false);
     }
-  }, [addNotification]);
+  }, []);
+
+  const refreshAfterConfirmedMutation = async (requestedPage: number, confirmedAction: string) => {
+    const refreshed = await fetchData(requestedPage);
+    if (!refreshed) {
+      setListError(`${confirmedAction}，但发布列表刷新失败；请重新加载列表确认，不要重复操作。`);
+    }
+    return refreshed;
+  };
 
   useEffect(() => {
     void fetchData(1);
@@ -147,6 +176,7 @@ export default function Publishing() {
   };
 
   const handleCreate = async () => {
+    if (mutationLockRef.current) return;
     if (!formData.topic_id) {
       addNotification({
         title: '创建失败',
@@ -156,8 +186,21 @@ export default function Publishing() {
       return;
     }
 
+    mutationLockRef.current = true;
+    setSavingPublishing(true);
     try {
       const isEditing = Boolean(editingPublishing);
+      const manualMetricInputs = [formData.views, formData.likes, formData.shares, formData.comments];
+      if (manualMetricInputs.some((value) => value.trim() !== '' && formMetricValue(value) === null)) {
+        addNotification({ title: '数据无效', message: '手工补充指标必须是非负整数', type: 'error' });
+        return;
+      }
+      const manualMetrics = {
+        views: formMetricValue(formData.views),
+        likes: formMetricValue(formData.likes),
+        shares: formMetricValue(formData.shares),
+        comments: formMetricValue(formData.comments),
+      };
       if (editingPublishing) {
         const usesDouyinData = editingPublishing.data_source === 'douyin';
         await updatePublishing(editingPublishing.id, {
@@ -165,10 +208,7 @@ export default function Publishing() {
           url: formData.url,
           status: usesDouyinData ? undefined : formData.status,
           publish_time: usesDouyinData ? undefined : formData.publish_time,
-          views: usesDouyinData ? undefined : Number.parseInt(formData.views, 10) || 0,
-          likes: usesDouyinData ? undefined : Number.parseInt(formData.likes, 10) || 0,
-          shares: usesDouyinData ? undefined : Number.parseInt(formData.shares, 10) || 0,
-          comments: usesDouyinData ? undefined : Number.parseInt(formData.comments, 10) || 0,
+          ...manualMetrics,
         });
         addNotification({
           title: '更新成功',
@@ -182,10 +222,7 @@ export default function Publishing() {
           url: formData.url,
           status: formData.status,
           publish_time: formData.publish_time,
-          views: Number.parseInt(formData.views, 10) || 0,
-          likes: Number.parseInt(formData.likes, 10) || 0,
-          shares: Number.parseInt(formData.shares, 10) || 0,
-          comments: Number.parseInt(formData.comments, 10) || 0,
+          ...manualMetrics,
         });
 
         addNotification({
@@ -199,44 +236,63 @@ export default function Publishing() {
       resetForm();
 
       // 新建记录排在最前，回到第 1 页才能看到；编辑则停留在当前页
-      await fetchData(isEditing ? page : 1);
+      await refreshAfterConfirmedMutation(
+        isEditing ? page : 1,
+        isEditing ? '服务端已确认发布记录更新' : '服务端已确认发布记录创建',
+      );
     } catch (error) {
       addNotification({
         title: '操作失败',
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      mutationLockRef.current = false;
+      setSavingPublishing(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: number): Promise<boolean> => {
     try {
       await deletePublishing(id);
-      addNotification({
-        title: '删除成功',
-        message: '发布记录已删除',
-        type: 'success',
-      });
-      await fetchData(page);
     } catch (error) {
       addNotification({
         title: '删除失败',
         message: (error as Error).message,
         type: 'error',
       });
+      return false;
     }
+
+    const deletedRecord = publishings.find((publishing) => publishing.id === id);
+    if (deletedRecord) {
+      setPublishings((current) => current.filter((publishing) => publishing.id !== id));
+      setTotal((current) => Math.max(0, current - 1));
+    }
+    addNotification({
+      title: '删除成功',
+      message: '服务端已确认发布记录删除',
+      type: 'success',
+    });
+
+    const requestedPage = deletedRecord && publishings.length === 1 && page > 1 ? page - 1 : page;
+    if (requestedPage !== page) setPage(requestedPage);
+    await refreshAfterConfirmedMutation(requestedPage, '服务端已确认发布记录删除；该行已从当前页面移除，汇总可能尚未更新');
+    return true;
   };
 
   const handleDeleteConfirm = async () => {
-    if (!deleteTarget) {
+    if (!deleteTarget || deleteLockRef.current) {
       return;
     }
 
+    deleteLockRef.current = true;
     setDeleteLoading(true);
     try {
-      await handleDelete(deleteTarget.id);
-      setDeleteTarget(null);
+      const deleted = await handleDelete(deleteTarget.id);
+      if (deleted) setDeleteTarget(null);
     } finally {
+      deleteLockRef.current = false;
       setDeleteLoading(false);
     }
   };
@@ -254,6 +310,7 @@ export default function Publishing() {
   };
 
   const openDouyinLink = (publishing: PublishingType) => {
+    if (douyinLinkLockRef.current) return;
     setLinkTarget(publishing);
     setLinkQuery('');
     setLinkCandidates([]);
@@ -261,6 +318,8 @@ export default function Publishing() {
   };
 
   const handleReconcileDouyin = async () => {
+    if (reconcileLockRef.current) return;
+    reconcileLockRef.current = true;
     setSyncingDouyin(true);
     try {
       const result = await reconcilePublishingDouyin();
@@ -271,26 +330,31 @@ export default function Publishing() {
           : '没有发现新的唯一高置信关联，现有绑定保持不变。',
         type: 'success',
       });
-      await fetchData(page);
+      await refreshAfterConfirmedMutation(page, '服务端已确认抖音数据关联刷新');
     } catch (error) {
       addNotification({ title: '刷新关联失败', message: (error as Error).message, type: 'error' });
     } finally {
+      reconcileLockRef.current = false;
       setSyncingDouyin(false);
     }
   };
 
   const handleDouyinLink = async (workId: number | null) => {
-    if (!linkTarget) return;
+    if (!linkTarget || douyinLinkLockRef.current) return;
+    douyinLinkLockRef.current = true;
+    setSavingDouyinLink(true);
     setLinkLoading(true);
     try {
       const result = await updatePublishingDouyinLink(linkTarget.id, workId);
       addNotification({ title: workId === null ? '关联已解除' : '关联成功', message: result.message, type: 'success' });
       setLinkTarget(null);
       setLinkCandidates([]);
-      await fetchData(page);
+      await refreshAfterConfirmedMutation(page, workId === null ? '服务端已确认抖音作品关联解除' : '服务端已确认抖音作品关联');
     } catch (error) {
       addNotification({ title: '更新关联失败', message: (error as Error).message, type: 'error' });
     } finally {
+      douyinLinkLockRef.current = false;
+      setSavingDouyinLink(false);
       setLinkLoading(false);
     }
   };
@@ -305,10 +369,10 @@ export default function Publishing() {
       publish_time: (publishing.publishing_publish_time ?? publishing.publish_time)
         ? formatBjtDatabase(publishing.publishing_publish_time ?? publishing.publish_time).replace(' ', 'T').slice(0, 16)
         : '',
-      views: publishing.views?.toString() || '',
-      likes: publishing.likes?.toString() || '',
-      shares: publishing.shares?.toString() || '',
-      comments: publishing.comments?.toString() || '',
+      views: publishing.manual_views?.toString() || '',
+      likes: publishing.manual_likes?.toString() || '',
+      shares: publishing.manual_shares?.toString() || '',
+      comments: publishing.manual_comments?.toString() || '',
     });
     setShowCreateModal(true);
   };
@@ -328,7 +392,7 @@ export default function Publishing() {
     <PageShell>
       <PageHeader
         title="发布管理"
-        description="查看多平台发布节奏；已关联作品的发布时间和互动数据以抖音运营中心为准。"
+        description="每条作品单独统计；抖音官方数据优先，手工补充只填缺项并标明来源。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {canManageDouyinLinks ? (
@@ -359,8 +423,21 @@ export default function Publishing() {
         <MetricCard title="发布异常" value={summary.failed} icon={AlertTriangle} tone="coral" />
       </div>
 
+      {listError ? (
+        <div role="alert" className="flex flex-col items-stretch gap-3 rounded-button border border-studio-coral/30 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral-contrast sm:flex-row sm:items-center sm:justify-between">
+          <p className="w-full min-w-0 sm:flex-1">发布列表未能刷新：{listError}</p>
+          <ActionButton type="button" className="self-start sm:self-auto" onClick={() => void fetchData(page)} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? '正在重新加载' : '重新加载列表'}
+          </ActionButton>
+        </div>
+      ) : null}
+
       <GlassPanel className="p-4">
         <SearchBar
+          id="publishing-search"
+          name="publishing-search"
+          aria-label="搜索发布记录"
           value={searchTerm}
           onChange={(event) => setSearchTerm(event.target.value)}
           placeholder="搜索选题标题或发布平台..."
@@ -370,7 +447,8 @@ export default function Publishing() {
 
       {loading ? (
         <LoadingState type="section" text="正在加载发布记录..." />
-      ) : filteredPublishings.length === 0 ? (
+      ) : listError && publishings.length === 0 ? null : (
+        filteredPublishings.length === 0 ? (
         <StudioEmptyState
           icon={FileText}
           title="暂无发布记录"
@@ -381,7 +459,7 @@ export default function Publishing() {
             setShowCreateModal(true);
           }}
         />
-      ) : (
+        ) : (
         <ResponsiveTableShell>
           <table className="min-w-[1080px] w-full">
             <thead>
@@ -392,28 +470,28 @@ export default function Publishing() {
                 <th className="px-5 py-4">数据</th>
                 <th className="px-5 py-4">状态</th>
                 <th className="px-5 py-4">下一步</th>
-                <th className="px-5 py-4 text-right">操作</th>
+                <th className="sticky right-0 z-20 w-[152px] min-w-[152px] border-l border-studio-border-soft bg-studio-surface-soft px-1 py-4 text-right sm:w-[208px] sm:min-w-[208px] sm:px-4">操作</th>
               </tr>
             </thead>
             <tbody>
               {filteredPublishings.map((publishing) => (
                 <tr key={publishing.id} className="group border-b border-studio-border-soft/70 transition hover:bg-studio-surface-soft">
-                  <td className="px-5 py-4">
+                  <td className="px-2 py-4 sm:px-5">
                     <button
                       type="button"
                       onClick={() => navigate(`/publishing/${publishing.id}`)}
                       className="flex min-w-0 items-start gap-3 text-left"
                     >
-                      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-button border border-studio-border-soft bg-studio-surface-soft text-studio-cyan">
+                      <span className="mt-0.5 hidden h-9 w-9 shrink-0 items-center justify-center rounded-button border border-studio-border-soft bg-studio-surface-soft text-studio-cyan sm:flex">
                         <FileText className="h-4 w-4" />
                       </span>
                       <span className="min-w-0">
-                        <span className="line-clamp-2 font-semibold text-studio-text-primary group-hover:text-studio-cyan">
+                        <span className="line-clamp-2 font-semibold text-studio-text-primary group-hover:text-studio-cyan-contrast">
                           {publishing.topic_title || '未命名发布内容'}
                         </span>
                         {publishing.data_source === 'douyin' ? (
-                          <span className="mt-1 block line-clamp-1 text-xs text-studio-cyan" title={publishing.douyin_title || undefined}>
-                            抖音实时数据{publishing.douyin_title && publishing.douyin_title !== publishing.topic_title ? ` · ${publishing.douyin_title}` : ''}
+                          <span className="mt-1 block line-clamp-1 text-xs text-studio-cyan-contrast" title={publishing.douyin_title || undefined}>
+                            抖音作品{publishing.douyin_title && publishing.douyin_title !== publishing.topic_title ? ` · ${publishing.douyin_title}` : ''}
                           </span>
                         ) : null}
                         <span className="mt-1 flex items-center gap-1 text-xs text-studio-text-muted">
@@ -434,21 +512,25 @@ export default function Publishing() {
                   </td>
                   <td className="px-5 py-4">
                     <div className="flex flex-wrap gap-3 text-xs">
-                      <span className="flex items-center gap-1 text-studio-cyan" title="播放量">
+                      <span className="flex items-center gap-1 text-studio-cyan-contrast" title={`播放量 · ${metricSourceLabels[publishing.views_source || 'unavailable']}`}>
                         <Play className="h-3.5 w-3.5" />
                         {publishing.views ? publishing.views.toLocaleString() : 0}
+                        <span className="text-[10px] text-studio-text-secondary">{metricSourceLabels[publishing.views_source || 'unavailable']}</span>
                       </span>
-                      <span className="flex items-center gap-1 text-studio-coral" title="点赞量">
+                      <span className="flex items-center gap-1 text-studio-coral-contrast" title={`点赞量 · ${metricSourceLabels[publishing.likes_source || 'unavailable']}`}>
                         <Heart className="h-3.5 w-3.5" />
                         {publishing.likes ? publishing.likes.toLocaleString() : 0}
+                        <span className="text-[10px] text-studio-text-secondary">{metricSourceLabels[publishing.likes_source || 'unavailable']}</span>
                       </span>
-                      <span className="flex items-center gap-1 text-studio-success" title="分享量">
+                      <span className="flex items-center gap-1 text-studio-success-contrast" title={`分享量 · ${metricSourceLabels[publishing.shares_source || 'unavailable']}`}>
                         <Share2 className="h-3.5 w-3.5" />
                         {publishing.shares ? publishing.shares.toLocaleString() : 0}
+                        <span className="text-[10px] text-studio-text-secondary">{metricSourceLabels[publishing.shares_source || 'unavailable']}</span>
                       </span>
-                      <span className="flex items-center gap-1 text-studio-violet" title="评论量">
+                      <span className="flex items-center gap-1 text-studio-violet-contrast" title={`评论量 · ${metricSourceLabels[publishing.comments_source || 'unavailable']}`}>
                         <MessageCircle className="h-3.5 w-3.5" />
                         {publishing.comments ? publishing.comments.toLocaleString() : 0}
+                        <span className="text-[10px] text-studio-text-secondary">{metricSourceLabels[publishing.comments_source || 'unavailable']}</span>
                       </span>
                     </div>
                   </td>
@@ -458,23 +540,26 @@ export default function Publishing() {
                     </StatusPill>
                   </td>
                   <td className="px-5 py-4 text-sm font-medium text-studio-text-secondary">{getNextAction(publishing.status)}</td>
-                  <td className="px-5 py-4">
-                    <div className="flex items-center justify-end gap-2 opacity-100 transition-opacity md:opacity-70 md:group-hover:opacity-100">
+                  <td className="sticky right-0 z-10 w-[152px] min-w-[152px] border-l border-studio-border-soft bg-studio-surface px-1 py-4 transition-colors group-hover:bg-studio-surface-soft sm:w-[208px] sm:min-w-[208px] sm:px-4">
+                    <div className="flex items-center justify-end gap-1 opacity-100 transition-opacity md:gap-2 md:opacity-70 md:group-hover:opacity-100">
                       {canManageDouyinLinks ? (
                         <button
                           type="button"
                           onClick={() => openDouyinLink(publishing)}
-                          className={`rounded-button border p-2 transition ${publishing.douyin_work_id ? 'border-studio-cyan/40 bg-studio-cyan/10 text-studio-cyan' : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary hover:border-studio-border-active hover:text-studio-text-primary'}`}
+                          disabled={savingDouyinLink}
+                          className={`min-h-8 min-w-8 rounded-button border p-1 transition sm:p-2 ${publishing.douyin_work_id ? 'border-studio-cyan/40 bg-studio-cyan/10 text-studio-cyan-contrast' : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary hover:border-studio-border-active hover:text-studio-text-primary'}`}
                           title={publishing.douyin_work_id ? '调整抖音作品关联' : '关联抖音作品'}
+                          aria-label={`${publishing.douyin_work_id ? '调整抖音作品关联' : '关联抖音作品'} ${publishing.topic_title || '未命名发布内容'}`}
                         >
                           <Link2 className="h-4 w-4" />
                         </button>
                       ) : null}
-                      <button
+                        <button
                         type="button"
                         onClick={() => handleEdit(publishing)}
-                          className="rounded-button border border-studio-border-soft bg-studio-surface-soft p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+                          className="min-h-8 min-w-8 rounded-button border border-studio-border-soft bg-studio-surface-soft p-1 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary sm:p-2"
                         title="编辑"
+                          aria-label={`编辑发布记录 ${publishing.topic_title || '未命名发布内容'}`}
                       >
                         <Edit3 className="h-4 w-4" />
                       </button>
@@ -483,8 +568,9 @@ export default function Publishing() {
                           href={publishing.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                        className="rounded-button border border-studio-border-soft bg-studio-surface-soft p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+                          className="min-h-8 min-w-8 rounded-button border border-studio-border-soft bg-studio-surface-soft p-1 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary sm:p-2"
                           title="打开链接"
+                          aria-label={`打开发布链接 ${publishing.topic_title || '未命名发布内容'}`}
                         >
                           <ExternalLink className="h-4 w-4" />
                         </a>
@@ -492,8 +578,9 @@ export default function Publishing() {
                       <button
                         type="button"
                         onClick={() => setDeleteTarget(publishing)}
-                        className="rounded-button border border-studio-coral/30 bg-studio-coral/10 p-2 text-studio-coral-contrast transition hover:bg-studio-coral/15"
+                        className="min-h-8 min-w-8 rounded-button border border-studio-coral/30 bg-studio-coral/10 p-1 text-studio-coral-contrast transition hover:bg-studio-coral/15 sm:p-2"
                         title="删除"
+                        aria-label={`删除发布记录 ${publishing.topic_title || '未命名发布内容'}`}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -504,6 +591,7 @@ export default function Publishing() {
             </tbody>
           </table>
         </ResponsiveTableShell>
+        )
       )}
 
       {total > pageSize ? (
@@ -519,10 +607,12 @@ export default function Publishing() {
       <FormModal
         open={showCreateModal}
         onCancel={() => {
+          if (savingPublishing) return;
           setShowCreateModal(false);
           resetForm();
         }}
         onSubmit={handleCreate}
+        loading={savingPublishing}
         title={editingPublishing ? '编辑发布记录' : '添加发布记录'}
         submitText={editingPublishing ? '更新' : '保存'}
         cancelText="取消"
@@ -531,7 +621,7 @@ export default function Publishing() {
         <div className="space-y-4">
           {editingUsesDouyinData ? (
             <div className="rounded-button border border-studio-cyan/30 bg-studio-cyan/10 px-4 py-3 text-sm text-studio-cyan-contrast">
-              该稿件已关联抖音作品。平台、发布时间、状态和互动数据由抖音运营中心实时提供；发布链接仍可维护。
+              已关联抖音作品。平台、发布时间和状态由作品关联记录决定；下方数值填写这条作品截至当前的累计表现，官方导出中已有指标仍优先展示。
             </div>
           ) : null}
           <div>
@@ -620,27 +710,33 @@ export default function Publishing() {
                   <div key={field.key}>
                     <label className="mb-2 flex items-center gap-1 text-sm font-medium text-studio-text-secondary">
                       <Icon className="h-4 w-4 text-studio-cyan" />
-                      {field.label}
+                      手工补充{field.label}
                     </label>
                     <input
                       type="number"
                       value={formData[field.key as keyof typeof formData]}
                       onChange={(event) => setFormData({ ...formData, [field.key]: event.target.value })}
                       className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
-                      placeholder="0"
-                      disabled={editingUsesDouyinData}
+                      min="0"
+                      step="1"
+                      placeholder="留空表示未补充"
                     />
                   </div>
                 );
               })}
             </div>
+            <p className="mt-3 text-xs text-studio-text-muted">请填写单条作品截至当前的累计值，不是某一天的新增量。手工值按发布记录分别保存；留空表示未补充，不会写入 0，也不会覆盖抖音官方已提供的指标。</p>
           </div>
         </div>
       </FormModal>
 
       <BaseModal
         open={Boolean(linkTarget)}
-        onClose={() => setLinkTarget(null)}
+        onClose={() => {
+          if (!savingDouyinLink) setLinkTarget(null);
+        }}
+        closeOnOverlayClick={!savingDouyinLink}
+        showCloseButton={!savingDouyinLink}
         size="lg"
         title="关联抖音作品"
         description={linkTarget ? `发布稿件：${linkTarget.topic_title || '未命名发布内容'}` : undefined}
@@ -648,19 +744,22 @@ export default function Publishing() {
           <div className="flex items-center justify-between gap-3">
             <div>
               {linkTarget?.douyin_work_id ? (
-                <ActionButton type="button" onClick={() => void handleDouyinLink(null)} disabled={linkLoading}>
+                <ActionButton type="button" onClick={() => void handleDouyinLink(null)} disabled={linkLoading || savingDouyinLink}>
                   <Unlink className="h-4 w-4" />
                   解除当前关联
                 </ActionButton>
               ) : null}
             </div>
-            <ActionButton type="button" onClick={() => setLinkTarget(null)}>关闭</ActionButton>
+            <ActionButton type="button" onClick={() => setLinkTarget(null)} disabled={savingDouyinLink}>关闭</ActionButton>
           </div>
         }
       >
         <div className="space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row">
             <SearchBar
+              id="douyin-candidate-search"
+              name="douyin-candidate-search"
+              aria-label="搜索抖音作品标题关键词"
               value={linkQuery}
               onChange={(event) => setLinkQuery(event.target.value)}
               placeholder="输入抖音作品标题关键词"
@@ -668,7 +767,7 @@ export default function Publishing() {
             />
             <ActionButton
               type="button"
-              disabled={linkLoading || !linkTarget}
+              disabled={linkLoading || savingDouyinLink || !linkTarget}
               onClick={() => linkTarget && void loadLinkCandidates(linkTarget, linkQuery)}
             >
               搜索候选
@@ -696,14 +795,14 @@ export default function Publishing() {
                         <p className="mt-1 text-xs text-studio-text-muted">
                           {formatBeijingDate(candidate.publish_time)} · 播放 {(candidate.play_count || 0).toLocaleString()} · 点赞 {(candidate.like_count || 0).toLocaleString()}
                         </p>
-                        <p className="mt-1 text-xs text-studio-cyan">
+                        <p className="mt-1 text-xs text-studio-cyan-contrast">
                           标题匹配 {Math.round(candidate.match_score * 100)}% · {candidate.match_method === 'exact' ? '标题一致' : candidate.match_method === 'containment' ? '标题包含' : '近似标题'}
                         </p>
                       </div>
                       <ActionButton
                         type="button"
                         variant={linkedHere ? 'primary' : 'secondary'}
-                        disabled={linkLoading || linkedHere || linkedElsewhere}
+                        disabled={linkLoading || savingDouyinLink || linkedHere || linkedElsewhere}
                         onClick={() => void handleDouyinLink(candidate.id)}
                       >
                         {linkedHere ? '当前关联' : linkedElsewhere ? '已关联其他稿件' : '关联此作品'}

@@ -18,6 +18,12 @@ interface FloatingMenuProps {
   editor: Editor;
 }
 
+const positioningOptions = {
+  strategy: 'fixed' as const,
+  flip: { padding: 8 },
+  shift: { padding: 8, crossAxis: true },
+};
+
 export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const [showInsertMenu, setShowInsertMenu] = useState(false);
@@ -122,12 +128,14 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
   return (
     <TiptapFloatingMenu
       editor={editor}
+      appendTo={() => document.body}
+      options={positioningOptions}
       shouldShow={({ editor: e, state }) => {
         const { $from } = state.selection;
         // 只在空段落或段落开头显示
         return $from.parent.type.name === 'paragraph';
       }}
-      className="flex items-center gap-0.5"
+      className="z-editor-menu flex items-center gap-0.5"
     >
       {/* + 按钮 */}
       <div className="relative" ref={insertRef}>
@@ -201,7 +209,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
             <button onClick={copyBlock} className={menuBtnClass}>
               <Copy className="w-4 h-4" /> 复制块
             </button>
-            <button onClick={deleteBlock} className={`${menuBtnClass} text-studio-coral`}>
+            <button onClick={deleteBlock} className={`${menuBtnClass} text-studio-coral-contrast`}>
               <Trash2 className="w-4 h-4" /> 删除块
             </button>
             <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />

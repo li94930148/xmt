@@ -1,5 +1,5 @@
 import { Save, Send } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMyDailyReport, saveDailyReportDraft, submitDailyReport, type DailyReport, type DailyReportItem } from '@/api/dailyReports';
 import { clearSafeDraft, readSafeDraftValue, userSafeDraftKey, writeSafeDraft } from '@/platform/safe-draft';
 import { useAuthStore } from '@/store';
@@ -24,7 +24,11 @@ function toItems(report: DailyReport | null): DailyReportItem[] {
 }
 
 export default function MobileDaily() {
-  const userId = useAuthStore((state) => state.user?.id);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  return <MobileDailySession key={userId ?? 'signed-out'} userId={userId} />;
+}
+
+function MobileDailySession({ userId }: { userId: number | null }) {
   const draftKey = userSafeDraftKey(userId, `daily:${reportDate}`);
   const [report, setReport] = useState<DailyReport | null>(null);
   const [items, setItems] = useState<DailyReportItem[]>(() => toItems(null));
@@ -32,6 +36,8 @@ export default function MobileDaily() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const [loadError, setLoadError] = useState('');
+  const loadRequestSequence = useRef(0);
+  const persistInFlight = useRef(false);
   const networkState = useNetworkState();
   const { hasPermission, loading: permissionsLoading } = usePermission();
   const canSubmit = !permissionsLoading && hasPermission('report:daily:submit');
@@ -39,12 +45,14 @@ export default function MobileDaily() {
   const readonly = dailyStatus.readOnly;
 
   const load = useCallback(async () => {
+    const requestSequence = ++loadRequestSequence.current;
     if (permissionsLoading) return;
     if (!canSubmit || !draftKey) { setLoading(false); setNotice('当前账号没有填写日报的权限。'); return; }
     setLoading(true);
     setLoadError('');
     try {
       const result = await getMyDailyReport(reportDate);
+      if (requestSequence !== loadRequestSequence.current || useAuthStore.getState().user?.id !== userId) return;
       setReport(result.report);
       const localDraft = readSafeDraftValue<DailyReportItem[]>(draftKey);
       const reportReadOnly = getMobileDailyReportStatusView(result.report?.status).readOnly;
@@ -53,18 +61,23 @@ export default function MobileDaily() {
       if (recovered) setNotice('已恢复本地草稿，请确认后保存或提交。');
       else if (reportReadOnly && localDraft) setNotice('日报当前为只读状态，本机未提交草稿未应用且仍保留在本机。');
     } catch (error) {
+      if (requestSequence !== loadRequestSequence.current || useAuthStore.getState().user?.id !== userId) return;
       const message = error instanceof Error ? error.message : '加载日报失败';
       setLoadError(message);
       setNotice(message);
     } finally {
-      setLoading(false);
+      if (requestSequence === loadRequestSequence.current && useAuthStore.getState().user?.id === userId) setLoading(false);
     }
-  }, [canSubmit, draftKey, permissionsLoading]);
+  }, [canSubmit, draftKey, permissionsLoading, userId]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadRequestSequence.current += 1; };
+  }, [load]);
   useEffect(() => { if (canSubmit && draftKey && !readonly && !loading && !loadError) writeSafeDraft(draftKey, items); }, [canSubmit, draftKey, items, loadError, loading, readonly]);
 
   const persist = async (submit: boolean) => {
+    if (persistInFlight.current) return;
     if (!canSubmit || !draftKey) { setNotice('当前账号没有填写日报的权限。'); return; }
     if (loadError) { setNotice('日报尚未成功加载，请先重试，避免覆盖已有内容。'); return; }
     if (!items.some((item) => item.contentMd.trim())) {
@@ -72,22 +85,26 @@ export default function MobileDaily() {
       return;
     }
     if (networkState === 'offline') { setNotice('当前离线，内容已保存在本地草稿，恢复网络后再提交。'); return; }
+    persistInFlight.current = true;
     setSaving(true);
     setNotice('');
     try {
       const saved = await saveDailyReportDraft({ reportDate, version: report?.version, manualSummaryMd: '', riskLevel: 'normal', items });
+      if (useAuthStore.getState().user?.id !== userId) return;
       // Saving the draft commits a new server version even if the follow-up submit fails.
       // Keep that version so a retry does not send a stale optimistic-concurrency token.
       setReport(saved);
       const next = submit ? await submitDailyReport(saved.id) : saved;
+      if (useAuthStore.getState().user?.id !== userId) return;
       setReport(next);
       setItems(toItems(next));
       clearSafeDraft(draftKey);
       setNotice(submit ? '日报已提交' : '草稿已保存');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '保存日报失败');
+      if (useAuthStore.getState().user?.id === userId) setNotice(error instanceof Error ? error.message : '保存日报失败');
     } finally {
-      setSaving(false);
+      persistInFlight.current = false;
+      if (useAuthStore.getState().user?.id === userId) setSaving(false);
     }
   };
 
@@ -111,7 +128,7 @@ export default function MobileDaily() {
         <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{report.reviewComment}</p>
       </div> : null}
     </div>
-    {loadError ? <div className="rounded-2xl border border-studio-coral/30 bg-studio-coral/10 p-4"><p role="alert" className="text-sm text-studio-text-secondary">日报加载失败，当前不会保存未确认的数据：{loadError}</p><button type="button" disabled={loading} onClick={() => void load()} className="mt-3 min-h-10 text-sm font-semibold text-studio-primary">{loading ? '正在重试…' : '重试加载'}</button></div> : null}
+    {loadError ? <div className="rounded-2xl border border-studio-coral/30 bg-studio-coral/10 p-4"><p role="alert" className="text-sm text-studio-text-secondary">日报加载失败，当前不会保存未确认的数据：{loadError}</p><button type="button" disabled={loading} onClick={() => void load()} className="mt-3 min-h-10 text-sm font-semibold text-studio-primary-contrast">{loading ? '正在重试…' : '重试加载'}</button></div> : null}
     {sections.map((section) => {
       const item = items.find((candidate) => candidate.sectionKey === section.key);
       return <label key={section.key} className="block rounded-2xl border border-studio-border-soft bg-studio-surface p-4">
@@ -122,7 +139,7 @@ export default function MobileDaily() {
     {notice ? <p role="status" className="px-1 text-sm text-studio-text-secondary">{notice}</p> : null}
     <div className="grid grid-cols-2 gap-3">
       <button type="button" disabled={readonly || saving || loading || Boolean(loadError) || permissionsLoading || !canSubmit} onClick={() => void persist(false)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-studio-border-soft text-sm font-semibold disabled:opacity-50"><Save className="h-4 w-4" />保存草稿</button>
-      <button type="button" disabled={readonly || saving || loading || Boolean(loadError) || permissionsLoading || !canSubmit} onClick={() => void persist(true)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{saving ? '处理中…' : '提交日报'}</button>
+      <button type="button" disabled={readonly || saving || loading || Boolean(loadError) || permissionsLoading || !canSubmit} onClick={() => void persist(true)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{saving ? '处理中…' : '提交日报'}</button>
     </div>
   </div>;
 }

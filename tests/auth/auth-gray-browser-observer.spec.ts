@@ -4,12 +4,12 @@ import { chromium, type ConsoleMessage, type Page, type Response } from 'playwri
 
 type TraceEvent = {
   event: string;
-  metadata: Record<string, boolean | number | string | null>;
+  fields: Record<string, boolean | number | string>;
 };
 
 type Observation = {
-  loginAttemptId: string | null;
-  requestId: string | null;
+  hasLoginAttemptId: boolean;
+  hasRequestId: boolean;
   httpStatus: number | null;
   responseType: 'not_received' | 'http_success' | 'http_failure';
   adapterMode: string | null;
@@ -30,36 +30,33 @@ if (!useMock && (!liveUsername || !livePassword)) {
 
 const origin = new URL(target).origin;
 const observation: Observation = {
-  loginAttemptId: null, requestId: null, httpStatus: null, responseType: 'not_received',
+  hasLoginAttemptId: false, hasRequestId: false, httpStatus: null, responseType: 'not_received',
   adapterMode: null, runtimeState: null, pathname: null, stopReason: null, traceEvents: [],
 };
 
-async function safeMetadata(message: ConsoleMessage): Promise<Record<string, boolean | number | string | null>> {
-  const candidate = message.args()[1];
-  if (!candidate) return {};
-  const value = await candidate.jsonValue();
-  if (!value || typeof value !== 'object') return {};
-  const allowed = new Set(['mode', 'responseKind', 'status', 'requestId', 'loginAttemptId', 'loginCompleted', 'hasAccessToken', 'hasUserId']);
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .filter(([key, item]) => allowed.has(key) && (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean' || item === null))) as Record<string, boolean | number | string | null>;
-}
-
-async function captureConsole(message: ConsoleMessage) {
-  const text = message.text();
-  if (!text.startsWith('[xmt-auth] ')) return;
-  const event = text.slice('[xmt-auth] '.length).split(' ')[0] ?? 'unknown';
-  const metadata = await safeMetadata(message);
-  observation.traceEvents.push({ event, metadata });
-  observation.loginAttemptId ??= typeof metadata.loginAttemptId === 'string' ? metadata.loginAttemptId : null;
-  observation.requestId ??= typeof metadata.requestId === 'string' ? metadata.requestId : null;
-  if (event === 'auth.adapter.selected') observation.adapterMode = typeof metadata.mode === 'string' ? metadata.mode : null;
+function captureConsole(message: ConsoleMessage) {
+  let record: Record<string, unknown>;
+  try {
+    record = JSON.parse(message.text()) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  if (record.application !== 'xmt-web' || record.event !== 'auth.login_trace' || typeof record.authEvent !== 'string') return;
+  const allowed = new Set(['mode', 'responseKind', 'status', 'httpStatus', 'hasRequestId', 'hasLoginAttemptId', 'loginCompleted', 'hasAccessToken', 'hasUserId']);
+  const fields = Object.fromEntries(Object.entries(record)
+    .filter(([key, item]) => allowed.has(key) && (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean'))) as Record<string, boolean | number | string>;
+  const event = record.authEvent;
+  observation.traceEvents.push({ event, fields });
+  observation.hasLoginAttemptId ||= fields.hasLoginAttemptId === true;
+  observation.hasRequestId ||= fields.hasRequestId === true;
+  if (event === 'auth.adapter.selected') observation.adapterMode = typeof fields.mode === 'string' ? fields.mode : null;
 }
 
 async function captureResponse(response: Response) {
   if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/auth/login') return;
   observation.httpStatus = response.status();
   observation.responseType = response.ok() ? 'http_success' : 'http_failure';
-  observation.requestId = response.headers()['x-request-id'] ?? observation.requestId;
+  observation.hasRequestId ||= Boolean(response.headers()['x-request-id']);
 }
 
 async function writeObservation() {
@@ -85,7 +82,7 @@ function mockLoginResponse() {
 }
 
 async function run(page: Page) {
-  page.on('console', (message) => { void captureConsole(message); });
+  page.on('console', captureConsole);
   page.on('response', (response) => { void captureResponse(response); });
   await page.addInitScript(() => { window.__xmtAuthGrayBrowserObserver = true; });
   if (useMock) {
@@ -115,10 +112,13 @@ const context = await browser.newContext();
 try {
   await run(await context.newPage());
   assert.equal(observation.responseType, 'http_success');
+  assert.equal(observation.hasRequestId, true);
+  assert.equal(observation.hasLoginAttemptId, true);
   assert.equal(observation.adapterMode, 'v1-web');
   assert.equal(observation.runtimeState?.status, 'redirecting');
   assert.equal(observation.pathname, '/');
   assert.equal(observation.traceEvents.some((item) => item.event === 'auth.redirect.end'), true);
+  assert.doesNotMatch(JSON.stringify(observation), /requestId|loginAttemptId|gray-observer-mock-request|fixture-v1-access-token/);
 } finally {
   await context.close();
   await browser.close();

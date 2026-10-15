@@ -1,7 +1,9 @@
 // 统一导出入口 - 保持向后兼容
 export { login, mobileLogin, mobileRefresh, getMe, updateMyProfile, changePassword } from './auth';
 export { getMobileDeviceId, registerMobileDevice, revokeMobileDevice } from './mobileDevices';
-export { getTopics, getTopic, createTopic, updateTopic, deleteTopic, auditTopic, updateTopicStatus } from './topics';
+export { getTopics, getTopic, getTopicOutlineVersions, repairCurrentTopicStageRecord, createTopic, updateTopic, deleteTopic, auditTopic, updateTopicStatus } from './topics';
+export { getHomeAttention, getHomeActivity } from './homeDashboard';
+export type { HomeAttentionSummary, HomeAttentionTopic, HomePipelineTopic, HomeDraftTask, HomeTodayPublishingTask, HomeSyncAnomalyTask, HomeActivitySummary, HomeActivityEvent } from './homeDashboard';
 export { TopicApiError } from './topics';
 export { getUsers, getAssignableRoles, createUser, updateUser, deleteUser, getLogs } from './users';
 export { getMessages, getUnreadCount, markMessageAsRead, clearMessages, markAllAsRead } from './messages';
@@ -9,12 +11,12 @@ export { getTeamStats, getMonthlyStats, getUserStats, createAnalytics, getTopicA
 export { deleteResource, getCategories, getArchives, getArchiveDetail } from './resources';
 export {
   getProduction, createProduction, getProductionById, updateProduction, deleteProduction, getProductionHistory,
-  getComments, addComment, deleteComment,
-  getShooting, getShootingById, updateShooting, createShooting,
-  getPublishing, getPublishingById, createPublishing, updatePublishing, deletePublishing,
+  getComments, addComment, deleteComment, getShootingScriptVersions,
+  getShooting, getShootingById, updateShooting, createShooting, syncShootingPublishedArchive,
+  getPublishing, getPublishingById, createPublishing, updatePublishing, deletePublishing, syncPublishingPublishedArchive, getPublishingScriptVersions,
   reconcilePublishingDouyin, getPublishingDouyinCandidates, updatePublishingDouyinLink
 } from './workflow';
-export type { PublishingDouyinCandidate } from './workflow';
+export type { PublishedArchiveSyncState, PublishingDouyinCandidate, WorkflowDocumentVersion } from './workflow';
 
 // 新增 API 模块
 export {

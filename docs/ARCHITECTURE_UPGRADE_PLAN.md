@@ -270,6 +270,20 @@ Sentry 分阶段接入 Web、API 和 Agent，上传 source map，并设置环境
 
 退出条件：双实例协作、presence、通知和故障恢复测试通过；定时任务不会重复执行；可回退单实例模式。
 
+进度：v5.0.0–5.0.1 在 XMT 的 P2-8 中加入可选 Redis Streams adapter，并在本机双 API 进程/隔离 SQLite/临时 Redis 与 sticky-cookie 测试代理中验收协作广播、presence、持久写入及 Redis 中断恢复。v5.0.2 为 Creator Agent 标准同步（schema v1）加入账号级数据库唯一约束，并以双 Node 进程竞态验证互斥、终态重试和释放；忙时使用可重试 503。v5.0.3 修正站内消息实时推送 ID，并在双 API 测试中验收跨实例消息、用户隔离、已读和断线后恢复；Playwright MCP 与 Chrome DevTools MCP 在隔离浏览器/API/Socket.IO 环境验证消息页实时更新及断网重连后从 API 恢复消息和未读数。v6.0.0 新增 SAFE_EXPAND 迁移 024 与共享数据库租约 runner，按数据库时钟原子抢占/续租/释放，过期接管递增 fencing token；双独立 Node 进程验证互斥、超出租期仍持有、主动释放、崩溃过期接管及旧持有者无法续期或释放新租约。该模块尚未注册生产任务；官方导出 schema v2 仍走既有幂等事务，未挂载的旧采集服务不纳入。快照多实例关闭、房间清理本地化、备份在 Web 之外使用共享锁。生产 Caddy/负载均衡、生产 Redis 持久性/HA、具体任务的副作用幂等/取消与崩溃恢复仍未验收。本 Phase 仍未完成，不得据此将整套服务横向扩容。下一本地步骤应盘点可安全迁移的具体任务及副作用契约，再逐项接入；不得直接启动 social ingestion scheduler。
+
+v6.0.0 后续接入审查已完成：房间清理和远程浏览器画面流必须保持实例/会话本地；内存快照在多实例已关闭；备份继续由 systemd/CLI 持有现有文件锁。旧短视频采集计划虽然是唯一发现的业务定时器候选，但其 `social-review` 路由在 `api/app.ts` 明确不挂载，且服务会复用账号持久 Chrome Profile、允许手动与计划入口并行、每次尝试新建采集记录，并在完成后才推进计划时间。因此不应为未挂载的 legacy 服务扩建任务租约。当前代码检索仅发现实例本地协作清理和 API 外备份；下一步应检查已挂载的抖音 OpenAPI / Creator Agent 路径是否有真实共享调度需求。只有产品决定恢复旧路径时，才补账号级跨入口互斥、计划发生幂等键、崩溃记录收敛及租约失效取消语义；未启动调度器，也未更改运行配置。
+
+v6.0.1 完成已挂载抖音路径的并发合同核对：Creator Agent schema v1 由迁移 023 单飞索引保护；schema v2 官方导入在共享数据库事务中按批次 ID 幂等，并新增两独立 Node 进程并发重放测试（含可重试 SQLite 争用）。旧 `/api/douyin/sync*` 当前明确返回 410；Webhook 只验签/去重入库且 worker 无调用，因此没有可安全交给通用租约 runner 的现行周期任务。`npm run test:collaboration-coordination` 与临时 Redis 双 API 集成复验通过；该测试关闭 RDB/AOF，不覆盖故障重启后的 Redis 数据保留。部署目录只有单后端 Caddy 示例，开发机没有 Caddy 可执行文件，安全部署脚本继续硬性限制单 PM2 实例。未改业务运行逻辑或数据库；真实 Caddy 粘性会话、Redis 持久性/HA 与生产代理仍需独立验收。
+
+v6.0.2 扩展本地临时 Redis 双 API 集成测试：AOF 开启且 `appendfsync always`，写入 Socket.IO stream 后重启 Redis，确认 stream 长度持久保留，API 协作随后恢复。该证据仅限隔离测试，不等于生产 Redis 备份、HA 或故障切换验收。部署目录仍只有单后端 Caddy 示例，本机无 Caddy 可执行文件，安全部署仍强制单 PM2 实例；真实代理、粘性会话及生产 Redis 持久性/HA 未验收，Phase 4 未退出。
+
+v6.0.3 在 v6.0.2 的本地 AOF 测试上增加针对测试专用 Redis 子进程的 `SIGKILL`：重启后 Socket.IO stream 长度不变；两个 API 实例在 Redis 中断期间 fail-closed，恢复后继续写入并广播 Yjs 更新。该验收只针对进程级强制终止，不覆盖断电、存储损坏、备份恢复或生产 HA。真实 Caddy/代理仍未验证，安全部署继续强制单 PM2 实例，Phase 4 未退出。
+
+v6.1.0 增加 Pino API logger 与请求完成中间件，输出 requestId、数字 userId、module、路由模板 operation、statusCode、durationMs、error.code 和 environment；不记录请求/响应对象、URL 查询、正文或凭据。活跃 API 的认证、限流、Socket、协作、数据库、消息、日报、工作流和发布日志改为白名单结构字段；移除原始 IP、URL、UA、房间/用户标识、原始异常/SQL 消息，并规范化 Origin/transport。活跃 API 路径无普通 `console.*`，只保留致命配置错误直出；未挂载的 legacy remote-browser/social-review 不改。Creator Agent 2.14.5-agent 将桌面与采集阶段写入本地 NDJSON 白名单日志，不记录账号/设备标识、浏览器路径、URL、worker 原始消息或异常文本。相关字段、敏感信息排除与协作/Agent 回归通过。将 `ip-address@10.5.0` 与 `engine.io@6.6.9` 的生产依赖覆写升级到已修复版本，并把开发树 `brace-expansion` 定点更新至兼容范围的修复版；完整 `npm audit` 清零。Sentry 外部接入仍需 DSN、脱敏/采样政策；Web 浏览器错误采集和生产日志采集/保留容量尚未完成，Phase 4 仍未退出。
+
+v6.1.1 为活跃 Web 诊断增加统一 JSON 控制台 logger，覆盖认证流程、Socket 生命周期、前端 API 错误、错误边界、权限、通知、编辑器和运行环境；事件/字段白名单、原始标识仅保留存在性、错误类别与已知断连原因枚举，避免动态异常消息和堆栈进入诊断输出。该实现不发送外部遥测，不能替代 Sentry，也没有建立生产采集或保留策略；Phase 4 仍未退出。
+
 ### Phase 5：数据库演进
 
 范围：Repository 全面覆盖核心域、正式迁移体系和 PostgreSQL 迁移方案/演练。

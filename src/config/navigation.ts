@@ -15,14 +15,12 @@ import {
   GitBranch,
   History,
   Images,
-  Kanban,
   LayoutDashboard,
   Lightbulb,
   PackageOpen,
   Send,
   Settings,
   Shield,
-  Sparkles,
   Users,
   Video,
   Database,
@@ -59,7 +57,7 @@ export interface NavigationSection {
  * - 运营数据：数据分析和增长
  * - 系统管理：管理员治理
  *
- * 技术型页面仅保留为管理员调试入口，不能占用日常导航空间。
+ * 技术型内容分析集中在管理员「系统管理 → 内容实验室」，不占用日常导航空间。
  */
 export const navigationSections: NavigationSection[] = [
   {
@@ -79,10 +77,9 @@ export const navigationSections: NavigationSection[] = [
     items: [
       { id: 'inspirations', label: '灵感库', icon: Lightbulb, path: '/inspirations' },
       { id: 'topics', label: '选题管理', icon: FileText, path: '/topics' },
-      { id: 'kanban', label: '创意看板', icon: Kanban, path: '/kanban' },
-      { id: 'calendar', label: '排期日历', icon: Calendar, path: '/calendar' },
       { id: 'production', label: '创作管理', icon: Video, path: '/production' },
       { id: 'shooting', label: '成片制作', icon: Camera, path: '/shooting', permissions: ['workflow:shooting'] },
+      { id: 'calendar', label: '排期日历', icon: Calendar, path: '/calendar' },
       { id: 'publishing', label: '发布管理', icon: Send, path: '/publishing', permissions: ['workflow:publishing'] },
       { id: 'content-timeline', label: '内容动态', icon: History, path: '/content-timeline', permissions: ['analytics:view'] },
     ],
@@ -95,6 +92,7 @@ export const navigationSections: NavigationSection[] = [
       { id: 'asset-center', label: '资料中心概览', icon: Archive, path: '/asset-center' },
       { id: 'project-library', label: '项目资料库', icon: PackageOpen, path: '/asset-center/projects' },
       { id: 'content-archives', label: '内容档案库', icon: FileText, path: '/asset-center/resources?library_type=content_archive' },
+      { id: 'published-archives', label: '发布归档', icon: Send, path: '/asset-center/published-archives' },
       { id: 'knowledge-base', label: '知识库', icon: BookOpen, path: '/asset-center/knowledge' },
       { id: 'media-archive', label: '素材归档', icon: Images, path: '/asset-center/media' },
     ],
@@ -108,7 +106,8 @@ export const navigationSections: NavigationSection[] = [
       { id: 'creator-works', label: '作品管理', icon: ListFilter, path: '/analytics/creator-center/works', permissions: ['creator:data:view'] },
       { id: 'creator-trends', label: '数据趋势', icon: BarChart3, path: '/analytics/creator-center/trends', permissions: ['creator:data:view'] },
       { id: 'creator-reports', label: '复盘报告', icon: FileBarChart, path: '/analytics/creator-center/reports', permissions: ['creator:report:view'] },
-      { id: 'retrospectives', label: '内容复盘', icon: History, path: '/retrospectives', permissions: ['analytics:view'] },
+      { id: 'report-center', label: '报告中心', icon: FileBarChart, path: '/export', permissions: ['export:data'] },
+      { id: 'retrospectives', label: '内容复盘', icon: History, path: '/retrospectives', permissions: ['analytics:retro:view'] },
     ],
   },
   {
@@ -121,27 +120,13 @@ export const navigationSections: NavigationSection[] = [
       { id: 'permissions', label: '角色权限', icon: Shield, path: '/permissions', permissions: ['system:role', 'system:permission'], requireAllPermissions: true },
       { id: 'workflow-designer', label: '审批流设计', icon: GitBranch, path: '/workflow-designer', permissions: ['system:template'] },
       { id: 'topic-templates', label: '选题模板', icon: BookOpen, path: '/templates', permissions: ['system:template'] },
+      { id: 'content-lab', label: '内容实验室', icon: BookOpenCheck, path: '/content-lab', permissions: ['analytics:view'] },
       { id: 'notification-settings', label: '系统配置', icon: Settings, path: '/notification-settings' },
       { id: 'backup', label: '备份管理', icon: Archive, path: '/backup', permissions: ['system:backup'] },
       { id: 'activity', label: '活动日志', icon: Activity, path: '/activity', permissions: ['user:logs'] },
       { id: 'anonymous-feedback', label: '匿名意见管理', icon: Inbox, path: '/admin/anonymous-feedback', roles: ['admin'] },
       { id: 'auth-rollout', label: '登录安全升级', icon: ShieldCheck, path: '/admin/auth-rollout', roles: ['admin'] },
       // TODO: 独立运维中心就绪后在此接入服务状态、定时任务、队列与系统健康能力。
-    ],
-  },
-  {
-    id: 'debug-tools',
-    label: '调试入口',
-    icon: Settings,
-    roles: ['admin'],
-    debugOnly: true,
-    items: [
-      { id: 'collaboration-dashboard', label: '协作仪表盘', icon: BarChart3, path: '/collaboration-dashboard', permissions: ['analytics:view'] },
-      { id: 'collaboration-ux', label: '协作体验面板', icon: Users, path: '/collaboration-ux', permissions: ['analytics:view'] },
-      { id: 'content-intelligence', label: '内容智能面板', icon: BookOpenCheck, path: '/content-intelligence', permissions: ['analytics:view'] },
-      { id: 'content-generation', label: '内容生成面板', icon: Sparkles, path: '/content-generation', permissions: ['analytics:view'] },
-      { id: 'content-os', label: '内容操作系统', icon: LayoutDashboard, path: '/content-os', permissions: ['analytics:view'] },
-      { id: 'pomodoro', label: '专注计时器', icon: FileClock, path: '/pomodoro' },
     ],
   },
 ];
@@ -166,12 +151,20 @@ export function canAccessNavigationItem(
   return item.requireAllPermissions ? helpers.hasAllPermissions(item.permissions) : helpers.hasAnyPermission(item.permissions);
 }
 
-export function isNavigationItemActive(pathname: string, itemPath: string) {
+function navigationPathMatches(pathname: string, itemPath: string) {
   const normalizedItemPath = itemPath.split('?')[0];
   if (itemPath === '/') return pathname === '/' || pathname === '/home' || pathname === '/dashboard';
   if (itemPath === '/analytics/creator-center') return pathname === itemPath;
   if (itemPath === '/analytics/creator-center/works' && /^\/analytics\/creator-center\/(work|content)\//.test(pathname)) return true;
   return pathname === normalizedItemPath || pathname.startsWith(`${normalizedItemPath}/`);
+}
+
+export function isNavigationItemActive(pathname: string, itemPath: string) {
+  if (!navigationPathMatches(pathname, itemPath)) return false;
+  const itemDepth = itemPath.split('?')[0].length;
+  return !allNavigationItems.some((candidate) => (
+    candidate.path.split('?')[0].length > itemDepth && navigationPathMatches(pathname, candidate.path)
+  ));
 }
 
 export function findNavigationItem(pathname: string) {
@@ -186,6 +179,6 @@ export function buildBreadcrumbs(pathname: string) {
   if (pathname === '/') return crumbs;
   if (activeSection) crumbs.push({ label: activeSection.label });
   if (activeItem) crumbs.push({ label: activeItem.label, path: activeItem.path });
-  if (pathname.split('/').filter(Boolean).length >= 2 && activeItem?.path !== pathname) crumbs.push({ label: '详情' });
+  if (pathname.split('/').filter(Boolean).length >= 2 && activeItem?.path.split('?')[0] !== pathname) crumbs.push({ label: '详情' });
   return crumbs;
 }

@@ -1,4 +1,5 @@
 export type LoginLayoutMode = 'style1' | 'style2' | 'style3';
+export type ThemeMode = 'light' | 'dark';
 
 export type ManagedSystemSettings = {
   system: {
@@ -6,6 +7,7 @@ export type ManagedSystemSettings = {
     browserTitle: string;
     description: string;
     icon: string;
+    defaultTheme: ThemeMode;
   };
   branding: {
     brandName: string;
@@ -25,6 +27,7 @@ export const defaultSystemSettings: ManagedSystemSettings = {
     browserTitle: '新媒体协作管理系统',
     description: '统一管理选题、创作、拍摄、发布与复盘流程。',
     icon: '新',
+    defaultTheme: 'dark',
   },
   branding: {
     brandName: '新媒体协作管理系统',
@@ -63,6 +66,7 @@ export function normalizeSystemSettings(input: unknown): ManagedSystemSettings {
       browserTitle: sanitizeString(system.browserTitle, defaultSystemSettings.system.browserTitle),
       description: sanitizeString(system.description, defaultSystemSettings.system.description),
       icon: sanitizeString(system.icon, defaultSystemSettings.system.icon),
+      defaultTheme: system.defaultTheme === 'light' ? 'light' : 'dark',
     },
     branding: {
       brandName: sanitizeString(branding.brandName, defaultSystemSettings.branding.brandName),
@@ -78,6 +82,10 @@ export function normalizeSystemSettings(input: unknown): ManagedSystemSettings {
       welcomeMessage: sanitizeString(login.welcomeMessage, defaultSystemSettings.login.welcomeMessage),
     },
   };
+}
+
+export function resolveInitialTheme(preference: unknown, defaultTheme: ThemeMode): ThemeMode {
+  return preference === 'light' || preference === 'dark' ? preference : defaultTheme;
 }
 
 export function mergeSystemSettings(

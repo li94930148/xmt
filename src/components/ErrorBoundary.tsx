@@ -1,4 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
 
 interface Props {
   children: ReactNode;
@@ -20,8 +21,8 @@ export default class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('[ErrorBoundary] 捕获到错误:', error, errorInfo);
+  componentDidCatch(error: Error, _errorInfo: ErrorInfo) {
+    emitClientLog({ event: 'renderer.error_boundary_caught', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
   }
 
   handleReset = () => {

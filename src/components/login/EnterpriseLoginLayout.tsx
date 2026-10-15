@@ -46,7 +46,7 @@ function BrandMark({ systemLogo, systemIcon, systemName }: { systemLogo?: string
   }
 
   return (
-    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-studio-cyan via-studio-cyan to-studio-primary text-base font-semibold text-white shadow-[0_14px_32px_rgba(14,116,144,0.28)]">
+    <div data-testid="login-brand-mark" className="flex h-12 w-12 items-center justify-center rounded-2xl bg-studio-primary-button text-base font-semibold text-white shadow-studio-primary/25">
       {systemIcon || systemName.slice(0, 1)}
     </div>
   );
@@ -79,7 +79,7 @@ export default function EnterpriseLoginLayout({
       <div className="relative mx-auto flex min-h-screen max-w-[1480px] flex-col justify-center gap-10 px-5 py-8 sm:px-8 lg:grid lg:grid-cols-[1.06fr_0.94fr] lg:items-center lg:px-10 xl:px-14">
         <section className="order-2 lg:order-1">
           <div className="max-w-2xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-4 py-2 text-xs uppercase tracking-[0.24em] text-studio-cyan/88 backdrop-blur-xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-4 py-2 text-xs uppercase tracking-[0.24em] text-studio-cyan-contrast backdrop-blur-xl">
               <Sparkles className="h-3.5 w-3.5" />
               企业内容协同平台
             </div>
@@ -113,7 +113,7 @@ export default function EnterpriseLoginLayout({
 
             <div className="mt-8 flex flex-wrap gap-3">
               {trustPoints.map((item) => (
-                <div key={item} className="inline-flex items-center gap-2 rounded-full border border-studio-cyan/16 bg-studio-cyan/[0.07] px-3.5 py-2 text-sm text-studio-cyan/88">
+                <div key={item} className="inline-flex items-center gap-2 rounded-full border border-studio-cyan/16 bg-studio-cyan/[0.07] px-3.5 py-2 text-sm text-studio-cyan-contrast">
                   <ShieldCheck className="h-4 w-4 text-studio-cyan" />
                   {item}
                 </div>
@@ -141,7 +141,7 @@ export default function EnterpriseLoginLayout({
                 </div>
 
                 {errorMessage && (
-                  <div className="mb-6 flex items-start gap-3 rounded-2xl border border-studio-coral/22 bg-studio-coral/[0.10] px-4 py-3 text-sm text-studio-coral">
+                  <div className="mb-6 flex items-start gap-3 rounded-2xl border border-studio-coral/22 bg-studio-coral/[0.10] px-4 py-3 text-sm text-studio-coral-contrast">
                     <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-studio-coral" />
                     <span>{errorMessage}</span>
                   </div>
@@ -195,7 +195,7 @@ export default function EnterpriseLoginLayout({
                       />
                       记住我
                     </label>
-                    <button type="button" onClick={onForgotPassword} className="text-sm font-medium text-studio-cyan transition hover:text-studio-cyan">
+                    <button type="button" onClick={onForgotPassword} className="text-sm font-medium text-studio-cyan-contrast transition hover:text-studio-cyan-contrast">
                       忘记密码
                     </button>
                   </div>

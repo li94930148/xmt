@@ -16,7 +16,7 @@ import {
   Trash2,
   XCircle,
 } from 'lucide-react';
-import { auditTopic, deleteTopic, getTopics } from '../api';
+import { auditTopic, deleteTopic, getTopics, getPublishing, getShooting, updateTopicStatus } from '../api';
 import { ConfirmModal } from '../components/common';
 import {
   ActionButton,
@@ -46,20 +46,15 @@ import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/Rea
 import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCardSlot';
 import { ReactBitsRevealSlot } from '../features/reactbits-appearance/ReactBitsRevealSlot';
 import { parseStoredBjt } from '@shared/time';
+import TopicsBoardView from '../components/topics/TopicsBoardView';
+import { topicStatusLabel } from '../components/topics/topicStatusLabel';
+import { getKanbanTopicDestination } from '../platform/kanban-navigation';
+import { getBatchActionFeedback } from '../utils/batch-action-feedback';
+import { celebrateMilestone } from '../utils/confetti';
 
 type SortField = 'title' | 'created_at' | 'deadline' | 'status' | 'submitted_at';
 type SortDir = 'asc' | 'desc';
 type StudioTone = 'primary' | 'cyan' | 'violet' | 'coral' | 'amber' | 'success' | 'muted';
-
-const topicStatusLabel: Record<string, string> = {
-  pending: '待审核',
-  approved: '已通过',
-  rejected: '已驳回',
-  production: '创作中',
-  shooting: '成片制作',
-  publishing: '发布中',
-  completed: '已完成',
-};
 
 const topicStatusTone: Record<string, StudioTone> = {
   pending: 'amber',
@@ -140,13 +135,17 @@ export default function Topics() {
   const [sortField, setSortField] = useState<SortField>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [batchActionLoading, setBatchActionLoading] = useState(false);
+  const [batchRefreshNotice, setBatchRefreshNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Topic | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const batchActionInFlightRef = useRef(false);
 
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const statusFromUrl = searchParams.get('status') || '';
+  const view = searchParams.get('view') === 'board' ? 'board' : 'list';
   const [statusFilter, setStatusFilter] = useState(statusFromUrl);
   const debouncedSearch = useDebounce(searchTerm, 400);
   const socket = useSocket();
@@ -192,7 +191,7 @@ export default function Topics() {
 
   const fetchControllerRef = useRef(createListFetchController());
 
-  const fetchTopics = useCallback(async (options?: { resetErrorNotify?: boolean }) => {
+  const fetchTopics = useCallback(async (options?: { resetErrorNotify?: boolean; suppressErrorNotify?: boolean }) => {
     const controller = fetchControllerRef.current;
     if (options?.resetErrorNotify) {
       controller.resetErrorNotify();
@@ -200,34 +199,42 @@ export default function Topics() {
     const requestId = controller.begin();
     setLoading(true);
     try {
-      const result = await getTopics({ status: statusFilter, search: debouncedSearch, page, limit });
+      const result = await getTopics({
+        status: statusFilter,
+        search: debouncedSearch,
+        page: view === 'board' ? 1 : page,
+        limit: view === 'board' ? 200 : limit,
+      });
       if (!controller.isCurrent(requestId)) {
-        return;
+        return null;
       }
       setTopics(result.data);
       setTotal(result.total);
       setLoadError(null);
+      setBatchRefreshNotice(null);
       controller.markSettledSuccess();
+      return true;
     } catch (error) {
       if (!controller.isCurrent(requestId)) {
-        return;
+        return null;
       }
       const message = error instanceof Error && error.message ? error.message : '获取选题列表失败';
       setLoadError(message);
       const key = listErrorKey('获取选题列表失败', message, 'error');
-      if (controller.shouldNotifyError(key)) {
+      if (!options?.suppressErrorNotify && controller.shouldNotifyError(key)) {
         addNotification({
           title: '获取选题列表失败',
           message,
           type: 'error',
         });
       }
+      return false;
     } finally {
       if (controller.isCurrent(requestId)) {
         setLoading(false);
       }
     }
-  }, [addNotification, debouncedSearch, limit, page, statusFilter]);
+  }, [addNotification, debouncedSearch, limit, page, statusFilter, view]);
 
   useEffect(() => {
     setStatusFilter(statusFromUrl);
@@ -315,7 +322,7 @@ export default function Topics() {
     });
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: number): Promise<boolean> => {
     try {
       await deleteTopic(id);
       addNotification({
@@ -330,12 +337,14 @@ export default function Topics() {
         next.delete(id);
         return next;
       });
+      return true;
     } catch (error) {
       addNotification({
         title: '删除失败',
         message: (error as Error).message,
         type: 'error',
       });
+      return false;
     }
   };
 
@@ -346,48 +355,129 @@ export default function Topics() {
 
     setDeleteLoading(true);
     try {
-      await handleDelete(deleteTarget.id);
-      setDeleteTarget(null);
+      const deleted = await handleDelete(deleteTarget.id);
+      if (deleted) setDeleteTarget(null);
     } finally {
       setDeleteLoading(false);
     }
   };
 
+  const finishBatchAction = async (action: '删除' | '审核', succeededIds: number[], failedIds: number[], total: number) => {
+    setSelected(new Set(failedIds));
+    addNotification(getBatchActionFeedback(action, total, succeededIds.length));
+    if (succeededIds.length === 0) return;
+
+    const refreshed = await fetchTopics({ suppressErrorNotify: true });
+    if (refreshed === false) {
+      const failedSummary = failedIds.length > 0 ? `；失败的 ${failedIds.length} 项仍保留选择，可单独重试` : '';
+      setBatchRefreshNotice(`服务端已确认批量${action}成功 ${succeededIds.length}/${total} 项${failedSummary}。选题列表刷新失败；重新加载列表只会读取数据，不会再次执行已成功的操作。`);
+    }
+  };
+
   const handleBatchDelete = async () => {
-    if (!confirm(`确定删除选中的 ${selected.size} 个选题吗？`)) {
+    if (batchActionInFlightRef.current || selected.size === 0) return;
+    const ids = Array.from(selected);
+    if (!confirm(`确定删除选中的 ${ids.length} 个选题吗？`)) {
       return;
     }
-    let success = 0;
-    for (const id of selected) {
-      try {
-        await deleteTopic(id);
-        success++;
-      } catch {}
+    batchActionInFlightRef.current = true;
+    setBatchActionLoading(true);
+    setBatchRefreshNotice(null);
+    const succeededIds: number[] = [];
+    const failedIds: number[] = [];
+    try {
+      for (const id of ids) {
+        try {
+          await deleteTopic(id);
+          succeededIds.push(id);
+        } catch {
+          failedIds.push(id);
+        }
+      }
+      const succeeded = new Set(succeededIds);
+      if (succeeded.size > 0) {
+        setTopics((current) => current.filter((topic) => !succeeded.has(topic.id)));
+        setTotal((current) => Math.max(0, current - succeeded.size));
+      }
+      await finishBatchAction('删除', succeededIds, failedIds, ids.length);
+    } finally {
+      batchActionInFlightRef.current = false;
+      setBatchActionLoading(false);
     }
-    addNotification({
-      title: '批量删除完成',
-      message: `成功 ${success}/${selected.size}`,
-      type: 'success',
-    });
-    setSelected(new Set());
-    await fetchTopics();
   };
 
   const handleBatchAudit = async (status: 'approved' | 'rejected') => {
-    let success = 0;
-    for (const id of selected) {
-      try {
-        await auditTopic(id, { status, comment: '批量审核' });
-        success++;
-      } catch {}
+    if (batchActionInFlightRef.current || selected.size === 0) return;
+    const ids = Array.from(selected);
+    batchActionInFlightRef.current = true;
+    setBatchActionLoading(true);
+    setBatchRefreshNotice(null);
+    const succeededIds: number[] = [];
+    const failedIds: number[] = [];
+    try {
+      for (const id of ids) {
+        try {
+          await auditTopic(id, { status, comment: '批量审核' });
+          succeededIds.push(id);
+        } catch {
+          failedIds.push(id);
+        }
+      }
+      const succeeded = new Set(succeededIds);
+      if (succeeded.size > 0) {
+        setTopics((current) => current.map((topic) => succeeded.has(topic.id) ? { ...topic, status } : topic));
+      }
+      await finishBatchAction('审核', succeededIds, failedIds, ids.length);
+    } finally {
+      batchActionInFlightRef.current = false;
+      setBatchActionLoading(false);
     }
-    addNotification({
-      title: '批量审核完成',
-      message: `成功 ${success}/${selected.size}`,
-      type: 'success',
+  };
+
+  const retryTopicsList = async () => {
+    await fetchTopics({ resetErrorNotify: true, suppressErrorNotify: Boolean(batchRefreshNotice) });
+  };
+
+  const openBoardTopic = async (topic: Topic) => {
+    try {
+      const path = await getKanbanTopicDestination(topic, {
+        getShooting: (topicId) => getShooting({ topic_id: topicId, page: 1, limit: 1 }),
+        getPublishing: (topicId) => getPublishing({ topic_id: topicId, page: 1, limit: 1 }),
+      });
+      if (!path) {
+        addNotification({ title: '暂时无法打开流程详情', message: '该选题还没有对应的流程记录，请从选题详情查看状态。', type: 'warning' });
+        navigate(`/topics/${topic.id}`);
+        return;
+      }
+      navigate(path);
+    } catch (error) {
+      addNotification({ title: '流程详情加载失败', message: error instanceof Error ? error.message : '暂时无法打开流程详情', type: 'error' });
+      navigate(`/topics/${topic.id}`);
+    }
+  };
+
+  const handleBoardTransition = async (topic: Topic, status: Topic['status']) => {
+    try {
+      if (topic.status === 'pending' && (status === 'approved' || status === 'rejected')) {
+        await auditTopic(topic.id, { status, comment: '' });
+      } else {
+        await updateTopicStatus(topic.id, status);
+      }
+      setTopics((current) => current.map((item) => item.id === topic.id ? { ...item, status } : item));
+      addNotification({ title: '状态已更新', message: `《${topic.title}》已更新为${topicStatusLabel(status)}`, type: 'success' });
+      if (status === 'shooting' || status === 'completed') celebrateMilestone();
+    } catch (error) {
+      addNotification({ title: '状态更新失败', message: error instanceof Error ? error.message : '请检查权限或当前阶段后重试', type: 'error' });
+    }
+  };
+
+  const setTopicsView = (nextView: 'list' | 'board') => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (nextView === 'board') next.set('view', 'board');
+      else next.delete('view');
+      return next;
     });
-    setSelected(new Set());
-    await fetchTopics();
   };
 
   return (
@@ -404,6 +494,11 @@ export default function Topics() {
           ) : null
         }
       />
+
+      {batchRefreshNotice ? <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
+        <p>{batchRefreshNotice}</p>
+        <ActionButton type="button" variant="secondary" onClick={() => void retryTopicsList()} disabled={loading} className="shrink-0">{loading ? '正在重新加载…' : '重新加载列表'}</ActionButton>
+      </div> : null}
 
       <ReactBitsRevealSlot className="block"><div className="grid gap-4 md:grid-cols-3">
         <ReactBitsCardSlot semantic="topic-card" className="p-5">
@@ -426,7 +521,7 @@ export default function Topics() {
       {spotlightTopics.length > 0 ? (
         <section aria-labelledby="priority-topics-title" className="space-y-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-studio-cyan">Priority focus</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-studio-cyan-contrast">Priority focus</p>
             <h2 id="priority-topics-title" className="mt-1 text-lg font-semibold text-studio-text-primary">重点选题</h2>
           </div>
           <div className="grid gap-4 lg:grid-cols-3">
@@ -434,7 +529,7 @@ export default function Topics() {
               <TopicSpotlightCard
                 key={topic.id}
                 topic={topic}
-                statusLabel={topicStatusLabel[topic.status] || topic.status}
+                statusLabel={topicStatusLabel(topic.status)}
                 formattedTime={formatBeijingTime(topic.submitted_at || topic.created_at)}
                 onOpen={() => navigate(`/topics/${topic.id}`)}
               />
@@ -443,9 +538,18 @@ export default function Topics() {
         </section>
       ) : null}
 
+      <GlassPanel className="flex flex-wrap items-center gap-2 p-3" aria-label="选题视图切换">
+        <button type="button" aria-pressed={view === 'list'} onClick={() => setTopicsView('list')} className={`xmt-btn min-h-9 px-3 py-2 text-sm ${view === 'list' ? 'xmt-btn-primary' : 'xmt-btn-secondary'}`}>列表</button>
+        <button type="button" aria-pressed={view === 'board'} onClick={() => setTopicsView('board')} className={`xmt-btn min-h-9 px-3 py-2 text-sm ${view === 'board' ? 'xmt-btn-primary' : 'xmt-btn-secondary'}`}>看板</button>
+        <span className="text-xs text-studio-text-muted">列表和看板共用选题筛选；日历继续保留独立排期事件入口。</span>
+      </GlassPanel>
+
       <GlassPanel className="p-4">
         <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
           <SearchBar
+            id="topics-search"
+            name="topicsSearch"
+            aria-label="搜索选题标题或描述"
             value={searchTerm}
             onChange={(event) => {
               setSearchTerm(event.target.value);
@@ -456,6 +560,9 @@ export default function Topics() {
           <label className="relative">
             <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-studio-text-muted" />
             <select
+              id="topics-status-filter"
+              name="topicsStatusFilter"
+              aria-label="按状态筛选选题"
               value={statusFilter}
               onChange={(event) => {
                 setStatusFilter(event.target.value);
@@ -473,46 +580,62 @@ export default function Topics() {
         </div>
       </GlassPanel>
 
-      <ResponsiveTableShell footer={<Pagination page={page} total={total} limit={limit} onChange={setPage} />}>
+      {view === 'board' ? (
+        <TopicsBoardView
+          topics={sortedTopics}
+          total={total}
+          statusFilter={statusFilter}
+          loading={loading}
+          canUpdate={hasPermission('topic:update')}
+          canAudit={hasPermission('topic:audit')}
+          onOpenTopic={openBoardTopic}
+          onTransition={(topic, status) => { void handleBoardTransition(topic, status); }}
+        />
+      ) : <ResponsiveTableShell footer={<Pagination page={page} total={total} limit={limit} onChange={setPage} />}>
           <table className="w-full min-w-max">
             <thead>
               <tr className="border-b border-studio-border-soft bg-studio-surface-soft text-left text-xs font-semibold uppercase text-studio-text-muted">
                 <th className="w-12 px-4 py-3">
-                  <button type="button" onClick={toggleSelectAll} className="rounded-lg p-1.5 hover:bg-studio-surface-soft">
+                  <button
+                    type="button"
+                    onClick={toggleSelectAll}
+                    className="rounded-lg p-1.5 hover:bg-studio-surface-soft"
+                    aria-label={allSelected ? '取消全选选题' : '选择全部选题'}
+                    aria-pressed={allSelected}
+                  >
                     {allSelected ? <CheckSquare className="h-4 w-4 text-studio-cyan" /> : <Square className="h-4 w-4" />}
                   </button>
                 </th>
                 <th className="px-4 py-3">
-                  <button type="button" onClick={() => toggleSort('title')} className="flex items-center gap-1 hover:text-studio-cyan">
+                  <button type="button" onClick={() => toggleSort('title')} className="flex items-center gap-1 hover:text-studio-cyan-contrast">
                     选题 <SortIcon field="title" />
                   </button>
                 </th>
                 <th className="px-4 py-3">负责人</th>
                 <th className="px-4 py-3">平台</th>
                 <th className="px-4 py-3">
-                  <button type="button" onClick={() => toggleSort('submitted_at')} className="flex items-center gap-1 hover:text-studio-cyan">
+                  <button type="button" onClick={() => toggleSort('submitted_at')} className="flex items-center gap-1 hover:text-studio-cyan-contrast">
                     提交时间 <SortIcon field="submitted_at" />
                   </button>
                 </th>
                 <th className="px-4 py-3">
-                  <button type="button" onClick={() => toggleSort('deadline')} className="flex items-center gap-1 hover:text-studio-cyan">
+                  <button type="button" onClick={() => toggleSort('deadline')} className="flex items-center gap-1 hover:text-studio-cyan-contrast">
                     截止 <SortIcon field="deadline" />
                   </button>
                 </th>
                 <th className="px-4 py-3">流程</th>
                 <th className="px-4 py-3">
-                  <button type="button" onClick={() => toggleSort('status')} className="flex items-center gap-1 hover:text-studio-cyan">
+                  <button type="button" onClick={() => toggleSort('status')} className="flex items-center gap-1 hover:text-studio-cyan-contrast">
                     状态 <SortIcon field="status" />
                   </button>
                 </th>
-                <th className="px-4 py-3">下一步</th>
                 <th className="sticky right-0 z-10 bg-studio-surface px-4 py-3">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-studio-border-soft">
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="p-5">
+                  <td colSpan={9} className="p-5">
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       {Array.from({ length: 6 }).map((_, index) => (
                         <StudioSkeletonCard key={index} />
@@ -522,21 +645,19 @@ export default function Topics() {
                 </tr>
               ) : loadError ? (
                 <tr>
-                  <td colSpan={10} className="p-6">
+                  <td colSpan={9} className="p-6">
                     <EmptyState
                       icon={AlertTriangle}
                       title="获取选题列表失败"
                       description={loadError}
                       actionLabel="重试"
-                      onAction={() => {
-                        void fetchTopics({ resetErrorNotify: true });
-                      }}
+                      onAction={() => { void retryTopicsList(); }}
                     />
                   </td>
                 </tr>
               ) : sortedTopics.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-6">
+                  <td colSpan={9} className="p-6">
                     <EmptyState
                       icon={FileText}
                       title="暂无选题"
@@ -567,7 +688,13 @@ export default function Topics() {
                       } ${newTopicIds.has(topic.id) ? 'animate-new-item new-item-highlight' : ''}`}
                     >
                       <td className="px-4 py-4">
-                        <button type="button" onClick={() => toggleSelect(topic.id)} className="rounded-lg p-1.5 hover:bg-studio-surface-soft">
+                        <button
+                          type="button"
+                          onClick={() => toggleSelect(topic.id)}
+                          className="rounded-lg p-1.5 hover:bg-studio-surface-soft"
+                          aria-label={`选择选题 ${topic.title}`}
+                          aria-pressed={selectedRow}
+                        >
                           {selectedRow ? <CheckSquare className="h-4 w-4 text-studio-cyan" /> : <Square className="h-4 w-4 text-studio-text-muted" />}
                         </button>
                       </td>
@@ -577,12 +704,23 @@ export default function Topics() {
                           <button
                             type="button"
                             onClick={() => navigate(`/topics/${topic.id}`)}
-                            className="truncate text-left text-sm font-semibold text-studio-text-primary transition hover:text-studio-cyan"
+                            className="truncate text-left text-sm font-semibold text-studio-text-primary transition hover:text-studio-cyan-contrast"
                           >
                             {topic.title}
                           </button>
                         </div>
                         <p className="mt-1 truncate text-xs text-studio-text-muted">提报：{topic.creator_name || '-'}</p>
+                        <div className="mt-2 flex min-w-0 items-center gap-2">
+                          <span className="shrink-0 text-[10px] font-medium text-studio-text-muted">下一步</span>
+                          <button
+                            type="button"
+                            onClick={() => navigate(nextAction.path)}
+                            className="inline-flex min-h-7 min-w-0 items-center gap-1 rounded-button border border-studio-border-soft bg-studio-surface-soft px-2.5 py-1 text-xs font-semibold leading-snug text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+                          >
+                            {nextAction.label}
+                            <ArrowRight className="h-3.5 w-3.5 shrink-0" />
+                          </button>
+                        </div>
                       </td>
                       <td className="px-4 py-4 text-sm text-studio-text-secondary">{topic.assignee_name || '未指派'}</td>
                       <td className="px-4 py-4 text-sm text-studio-text-secondary">{topic.platform || '-'}</td>
@@ -594,33 +732,25 @@ export default function Topics() {
                         <StageProgress stages={getWorkflowStages(topic.status)} />
                       </td>
                       <td className="px-4 py-4">
-                        <StatusPill tone={topicStatusTone[topic.status] || 'muted'}>{topicStatusLabel[topic.status] || topic.status}</StatusPill>
-                      </td>
-                      <td className="px-4 py-4">
-                        <button
-                          type="button"
-                          onClick={() => navigate(nextAction.path)}
-                          className="inline-flex min-h-8 items-center gap-1.5 rounded-button border border-studio-border-soft bg-studio-surface-soft px-3 py-1.5 text-xs font-semibold leading-snug text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
-                        >
-                          {nextAction.label}
-                          <ArrowRight className="h-3.5 w-3.5" />
-                        </button>
+                        <StatusPill tone={topicStatusTone[topic.status] || 'muted'}>{topicStatusLabel(topic.status)}</StatusPill>
                       </td>
                       <td className="sticky right-0 z-10 bg-studio-surface px-4 py-4">
                         <div className="flex items-center gap-1 opacity-70 transition group-hover:opacity-100">
                           <button
                             type="button"
                             onClick={() => navigate(`/topics/${topic.id}`)}
-                            className="rounded-lg p-2 text-studio-text-muted transition hover:bg-studio-surface-soft hover:text-studio-cyan"
+                            className="rounded-lg p-2 text-studio-text-muted transition hover:bg-studio-surface-soft hover:text-studio-cyan-contrast"
                             title="查看"
+                            aria-label={`查看选题 ${topic.title}`}
                           >
                             <Eye className="h-4 w-4" />
                           </button>
                           <button
                             type="button"
                             onClick={() => setDeleteTarget(topic)}
-                            className="rounded-lg p-2 text-studio-text-muted transition hover:bg-studio-coral/10 hover:text-studio-coral"
+                            className="rounded-lg p-2 text-studio-text-muted transition hover:bg-studio-coral-soft hover:text-studio-coral-contrast"
                             title="删除"
+                            aria-label={`删除选题 ${topic.title}`}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -632,24 +762,24 @@ export default function Topics() {
               )}
             </tbody>
           </table>
-      </ResponsiveTableShell>
+      </ResponsiveTableShell>}
 
       {selected.size > 0 ? (
-        <GlassPanel className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center gap-3 px-4 py-3">
+        <GlassPanel className="fixed bottom-6 left-1/2 z-page-overlay flex -translate-x-1/2 flex-wrap items-center gap-3 px-4 py-3">
           <span className="text-sm font-semibold text-studio-text-primary">已选 {selected.size} 个选题</span>
-          <ActionButton onClick={() => handleBatchAudit('approved')} className="px-3 py-2">
+          <ActionButton onClick={() => handleBatchAudit('approved')} disabled={batchActionLoading} className="px-3 py-2">
             <CheckCircle className="h-4 w-4" />
-            通过
+            {batchActionLoading ? '正在处理…' : '通过'}
           </ActionButton>
-          <ActionButton onClick={() => handleBatchAudit('rejected')} className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10">
+          <ActionButton onClick={() => handleBatchAudit('rejected')} disabled={batchActionLoading} className="border-studio-coral-soft px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral-soft">
             <XCircle className="h-4 w-4" />
-            驳回
+            {batchActionLoading ? '正在处理…' : '驳回'}
           </ActionButton>
-          <ActionButton onClick={handleBatchDelete} className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10">
+          <ActionButton onClick={handleBatchDelete} disabled={batchActionLoading} variant="danger" className="px-3 py-2">
             <Trash2 className="h-4 w-4" />
-            删除
+            {batchActionLoading ? '正在处理…' : '删除'}
           </ActionButton>
-          <ActionButton onClick={() => setSelected(new Set())} variant="ghost" className="px-3 py-2">
+          <ActionButton onClick={() => setSelected(new Set())} disabled={batchActionLoading} variant="ghost" className="px-3 py-2">
             取消选择
           </ActionButton>
         </GlassPanel>

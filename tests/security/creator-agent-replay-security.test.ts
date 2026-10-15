@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import bcrypt from 'bcrypt';
+import { createClient } from '@libsql/client';
 
 const root = mkdtempSync(path.join(tmpdir(), 'xmt-creator-replay-'));
 process.env.XMT_DB_PATH = path.join(root, 'creator-replay.db');
@@ -122,6 +123,29 @@ app.use('/api/creator-agent', creatorAgentRouter);
 const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const instance = app.listen(0, () => resolve(instance)); });
 const address = server.address();
 assert(address && typeof address !== 'string');
+await execute(`INSERT INTO creator_sync_tasks(agent_id,task_id,start_time,platform,account,status)
+  VALUES(?,?,CURRENT_TIMESTAMP,'douyin',?,'running')`, [agents[0].id, 'already-running-task', agents[0].accountId]);
+const concurrentSyncResponse = await fetch(`http://127.0.0.1:${address.port}/api/creator-agent/data-sync`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', authorization: `Bearer ${agents[0].token}` },
+  body: JSON.stringify(envelope(agents[0])),
+});
+assert.equal(concurrentSyncResponse.status, 503, 'busy sync must be retryable, not mistaken for an accepted duplicate');
+assert.equal(concurrentSyncResponse.headers.get('retry-after'), '5');
+assert.equal((await concurrentSyncResponse.json() as { code: string }).code, 'CREATOR_SYNC_BUSY');
+const lockingClient = createClient({ url: `file:${process.env.XMT_DB_PATH}` });
+const lock = await lockingClient.transaction('write');
+try {
+  await lock.execute("UPDATE creator_sync_tasks SET error_message='test write lock' WHERE task_id='already-running-task'");
+  const busyEnvelope = envelope(agents[1]);
+  const databaseBusyResponse = await fetch(`http://127.0.0.1:${address.port}/api/creator-agent/data-sync`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${agents[1].token}` },
+    body: JSON.stringify(busyEnvelope),
+  });
+  assert.equal(databaseBusyResponse.status, 503, 'nonce reservation lock is not a replay or accepted duplicate');
+  assert.equal(await nonceCount(agents[1].id, String(busyEnvelope.nonce)), 0);
+} finally { await lock.rollback(); lock.close(); lockingClient.close(); }
+await execute(`UPDATE creator_sync_tasks SET status='failed',end_time=CURRENT_TIMESTAMP WHERE agent_id=? AND task_id='already-running-task'`, [agents[0].id]);
 const retiredBody = envelope(agents[0]);
 retiredBody.signature = crypto.createHmac('sha256', agents[0].token).update(legacyCanonical(retiredBody)).digest('hex');
 const reportResponse = await fetch(`http://127.0.0.1:${address.port}/api/creator-agent/report`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${agents[0].token}` }, body: JSON.stringify(retiredBody) });

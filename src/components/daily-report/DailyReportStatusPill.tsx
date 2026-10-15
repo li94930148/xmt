@@ -1,13 +1,6 @@
 import { StatusPill, type StatusTone } from '../studio';
 import type { DailyReportRiskLevel, DailyReportStatus } from '../../api/dailyReports';
-
-const statusText: Record<DailyReportStatus, string> = {
-  draft: '草稿',
-  submitted: '已提交',
-  approved: '已审核',
-  rejected: '已退回',
-  archived: '已归档',
-};
+import { dailyReportStatusLabel } from './dailyReportStatusLabel';
 
 const statusTone: Record<DailyReportStatus, StatusTone> = {
   draft: 'amber',
@@ -38,7 +31,8 @@ const riskTone: Record<string, StatusTone> = {
 };
 
 export function DailyReportStatusPill({ status }: { status: DailyReportStatus }) {
-  return <StatusPill tone={statusTone[status] || 'muted'}>{statusText[status] || '未知状态'}</StatusPill>;
+  const tone = Object.prototype.hasOwnProperty.call(statusTone, status) ? statusTone[status] : 'muted';
+  return <StatusPill tone={tone}>{dailyReportStatusLabel(status)}</StatusPill>;
 }
 
 export function DailyReportRiskPill({ risk }: { risk?: DailyReportRiskLevel }) {

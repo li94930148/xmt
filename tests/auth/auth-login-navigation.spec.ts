@@ -23,6 +23,7 @@ app.post('/api/auth/login', (request, response) => {
           forceChangePassword: false,
         },
         accessToken: 'v1-navigation-memory-token',
+        expiresIn: 900,
         session: {
           id: 'session-v1-navigation',
           clientType: 'web',
@@ -100,8 +101,14 @@ async function loginAndAssert(username: string, expectedV1: boolean) {
   const page = await context.newPage();
   const traceEvents: string[] = [];
   page.on('console', (message) => {
-    const text = message.text();
-    if (text.includes('[xmt-auth]')) traceEvents.push(text);
+    try {
+      const record = JSON.parse(message.text()) as { application?: unknown; event?: unknown; authEvent?: unknown };
+      if (record.application === 'xmt-web' && record.event === 'auth.login_trace' && typeof record.authEvent === 'string') {
+        traceEvents.push(record.authEvent);
+      }
+    } catch {
+      // Ignore non-structured browser console messages.
+    }
   });
   try {
     await page.goto(`${baseUrl}/login`);
@@ -130,7 +137,7 @@ async function loginAndAssert(username: string, expectedV1: boolean) {
         'auth.redirect.start',
         'auth.redirect.end',
       ]) {
-        assert(traceEvents.some((event) => event.includes(trace)), `Missing development trace: ${trace}`);
+        assert(traceEvents.includes(trace), `Missing development trace: ${trace}`);
       }
     }
   } finally {

@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, useAppStore } from '../store';
-import { getTopic, auditTopic, updateTopicStatus, updateTopic, getProduction, createProduction } from '../api';
+import { getTopic, getTopicOutlineVersions, repairCurrentTopicStageRecord, auditTopic, updateTopicStatus, updateTopic, getProduction, createProduction } from '../api';
 import { celebrateMilestone } from '../utils/confetti';
 import { getUsers } from '../api';
 import { Topic, User } from '../types';
+import type { WorkflowDocumentVersion } from '../api';
 import { ChevronLeft, Clock, User as UserIcon, Calendar, FileText, CheckCircle, XCircle, ArrowRight, Save, AlertTriangle, Camera, Scissors, Send, List, FileText as FileIcon } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
 import BaseModal from '../components/common/BaseModal';
@@ -29,8 +30,11 @@ import {
   type TopicDetailFields,
   type TopicDetailParsedFields,
 } from './topicDetailAggregateDraft';
-import { resolveTopicDetailEditorBranch, type TopicDetailEditorBranch } from './topicDetailEditorBranch';
+import { canSaveTopicDetailDraft, resolveTopicDetailEditorBranch, type TopicDetailEditorBranch } from './topicDetailEditorBranch';
 import TopicResourcesPanel from '../components/topic/TopicResourcesPanel';
+import TopicAssetDimensionsPanel from '../components/topics/TopicAssetDimensionsPanel';
+import { startOrResumeTopicProduction } from '../utils/topicProductionHandoff';
+import { ActionButton } from '../components/studio';
 
 export default function TopicDetail() {
   const { id } = useParams<{ id: string }>();
@@ -40,6 +44,8 @@ export default function TopicDetail() {
   const [loading, setLoading] = useState(true);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [startingProduction, setStartingProduction] = useState(false);
+  const [repairingStageRecord, setRepairingStageRecord] = useState(false);
+  const startProductionInFlight = useRef(false);
   const [auditData, setAuditData] = useState({ status: 'approved' as 'approved' | 'rejected', comment: '', assignee_id: 0 });
   
   const [editTitle, setEditTitle] = useState(false);
@@ -54,6 +60,11 @@ export default function TopicDetail() {
   const [parsedFields, setParsedFields] = useState<TopicDetailParsedFields>({ projectBackground: '', targetAudience: '' });
   const [isTopicDirty, setIsTopicDirty] = useState(false);
   const [isAggregateSaving, setIsAggregateSaving] = useState(false);
+  const [topicSaveFeedback, setTopicSaveFeedback] = useState<string | null>(null);
+  const [outlineVersions, setOutlineVersions] = useState<WorkflowDocumentVersion[]>([]);
+  const [outlineVersionsLoadState, setOutlineVersionsLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const requestedOutlineCardRef = useRef<HTMLLIElement | null>(null);
+  const pendingTopicVersionActionRef = useRef<'minor' | 'major' | null>(null);
   const baselineDraftRef = useRef<TopicDetailAggregateDraft | null>(null);
   const draftRef = useRef<TopicDetailAggregateDraft>({
     title: '', description: '', details: { assignee_id: 0, deadline: '', platform: '' }, outline: '',
@@ -66,6 +77,7 @@ export default function TopicDetail() {
   const aggregatePersistCommandRef = useRef<(
     snapshot: TopicDetailAggregateDraft,
     revision: number,
+    versionAction?: 'minor' | 'major',
   ) => Promise<void>>(async () => {
     throw new Error('Topic aggregate save command is not ready');
   });
@@ -75,15 +87,19 @@ export default function TopicDetail() {
   ));
   
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const authStore = useAuthStore();
   const appStore = useAppStore();
   const styles = useThemeStyles();
   const { hasPermission, loading: permissionsLoading } = usePermission();
+  const requestedOutlineVersion = searchParams.get('outlineVersion')?.trim() || '';
+  const canAudit = !requestedOutlineVersion && hasPermission('topic:audit');
+  const auditRequested = searchParams.get('action') === 'audit';
   const contentEditRoles = new Set(['admin', 'editor', 'copywriter', 'post_production', 'camera']);
   const persistTopicManualBridge = useCallback(async (_content: string, context: ContentEditorSaveContext) => {
     const snapshot = manualSaveSnapshotsRef.current.get(context.contentRevision);
     if (!snapshot) throw new Error('Topic manual save snapshot is unavailable');
-    await aggregatePersistCommandRef.current(snapshot, context.contentRevision);
+    await aggregatePersistCommandRef.current(snapshot, context.contentRevision, pendingTopicVersionActionRef.current ?? undefined);
   }, []);
   const handleTopicRuntimeHandleChange = useCallback((handle: ContentEditorRuntimeHandle | null) => {
     topicRuntimeHandleRef.current = handle;
@@ -93,9 +109,17 @@ export default function TopicDetail() {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
+      setOutlineVersionsLoadState('loading');
       try {
         const topicData = await getTopic(parseInt(id!));
         setTopic(topicData);
+        try {
+          setOutlineVersions(await getTopicOutlineVersions(topicData.id));
+          setOutlineVersionsLoadState('ready');
+        } catch {
+          setOutlineVersions([]);
+          setOutlineVersionsLoadState('error');
+        }
         // Resolve once per loaded Topic. The policy is static for the page
         // lifetime, so a dirty draft can never hot-switch editor renderers.
         setTopicEditorBranch(resolveTopicDetailEditorBranch(
@@ -146,6 +170,36 @@ export default function TopicDetail() {
     fetchData();
   }, [id]);
 
+  const reloadOutlineVersions = async () => {
+    if (!topic || outlineVersionsLoadState === 'loading') return;
+    setOutlineVersionsLoadState('loading');
+    try {
+      setOutlineVersions(await getTopicOutlineVersions(topic.id));
+      setOutlineVersionsLoadState('ready');
+    } catch {
+      setOutlineVersionsLoadState('error');
+    }
+  };
+
+  const requestedOutlineVersionEntry = outlineVersions.find((version) => (
+    !version.is_baseline && version.version === requestedOutlineVersion
+  ));
+
+  useEffect(() => {
+    if (!requestedOutlineVersionEntry || outlineVersionsLoadState !== 'ready') return;
+    requestedOutlineCardRef.current?.scrollIntoView({ block: 'center' });
+  }, [outlineVersionsLoadState, requestedOutlineVersionEntry]);
+
+  useEffect(() => {
+    if (!auditRequested || loading || permissionsLoading) return;
+
+    if (topic?.status === 'pending' && canAudit) setShowAuditModal(true);
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('action');
+    setSearchParams(nextParams, { replace: true });
+  }, [auditRequested, canAudit, loading, permissionsLoading, searchParams, setSearchParams, topic?.status]);
+
   const applyDraft = (draft: TopicDetailAggregateDraft) => {
     draftRef.current = cloneTopicDetailDraft(draft);
     setTitle(draft.title);
@@ -194,73 +248,133 @@ export default function TopicDetail() {
   const handleAudit = async () => {
     try {
       await auditTopic(parseInt(id!), auditData);
-      appStore.addNotification({ 
-        title: '审核成功', 
-        message: auditData.status === 'approved' ? '选题已通过审核' : '选题已驳回', 
-        type: 'success' 
-      });
-      setShowAuditModal(false);
-      const topicData = await getTopic(parseInt(id!));
-      setTopic(topicData);
     } catch (error) {
       appStore.addNotification({ title: '审核失败', message: (error as Error).message, type: 'error' });
+      return;
+    }
+
+    setShowAuditModal(false);
+    try {
+      setTopic(await getTopic(parseInt(id!)));
+      appStore.addNotification({
+        title: '审核成功',
+        message: auditData.status === 'approved' ? '选题已通过审核' : '选题已驳回',
+        type: 'success',
+      });
+    } catch {
+      appStore.addNotification({ title: '审核已提交', message: '审核结果已保存，但页面刷新失败；请重新加载确认当前状态。', type: 'warning' });
     }
   };
 
   const handleUpdateStatus = async (status: string) => {
     try {
       await updateTopicStatus(parseInt(id!), status);
-      appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
-      if (status === 'shooting' || status === 'completed') celebrateMilestone();
-      const topicData = await getTopic(parseInt(id!));
-      setTopic(topicData);
     } catch (error) {
       appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+      return;
+    }
+
+    if (status === 'shooting' || status === 'completed') celebrateMilestone();
+    try {
+      setTopic(await getTopic(parseInt(id!)));
+      appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
+    } catch {
+      appStore.addNotification({ title: '状态已更新', message: '状态已保存，但页面刷新失败；请重新加载确认当前状态。', type: 'warning' });
     }
   };
 
   const handleStartProduction = async () => {
-    if (!topic) return;
+    if (!topic || startProductionInFlight.current) return;
+    startProductionInFlight.current = true;
     setStartingProduction(true);
     try {
-      const existing = await getProduction({ topic_id: topic.id });
-      const current = existing[0];
-      if (current) {
-        navigate(`/production/${current.id}`);
-        return;
-      }
-
-      const created = await createProduction({
-        topic_id: topic.id,
-        version: 'v1.0',
-        content: topic.outline || '',
-        status: 'draft',
+      const result = await startOrResumeTopicProduction(topic, {
+        advanceTopic: updateTopicStatus,
+        listProductions: async (topicId) => getProduction({ topic_id: topicId }),
+        createDraft: createProduction,
       });
-      try {
-        await updateTopicStatus(topic.id, 'production');
-      } catch {
+      if (result.advanced) setTopic((current) => current ? { ...current, status: 'production' } : current);
+      if (result.created || result.advanced) {
         appStore.addNotification({
-          title: '创作已建立',
-          message: '稿件已创建，但选题阶段尚未自动推进，可稍后在选题页重试。',
-          type: 'warning',
+          title: result.created ? (result.advanced ? '创作已建立' : '创作草稿已补齐') : '已进入创作',
+          message: result.created
+            ? '已带入选题大纲，可以直接开始写稿。'
+            : '选题阶段已同步，继续已有稿件。',
+          type: 'success',
         });
       }
-      appStore.addNotification({ title: '创作已建立', message: '已带入选题大纲，可以直接开始写稿。', type: 'success' });
-      navigate(`/production/${created.productionId}`);
+      navigate(`/production/${result.productionId}`);
     } catch (error) {
       appStore.addNotification({ title: '开始创作失败', message: (error as Error).message, type: 'error' });
     } finally {
+      startProductionInFlight.current = false;
       setStartingProduction(false);
     }
   };
 
-  const persistTopicAggregate = (saveSnapshot: TopicDetailAggregateDraft, saveRevision: number) => (
+  const handleRepairStageRecord = async () => {
+    if (!topic || !canEditTopic || repairingStageRecord) return;
+    setRepairingStageRecord(true);
+    let result: Awaited<ReturnType<typeof repairCurrentTopicStageRecord>>;
+    try {
+      result = await repairCurrentTopicStageRecord(topic.id);
+    } catch (error) {
+      appStore.addNotification({ title: '补齐阶段记录失败', message: (error as Error).message, type: 'error' });
+      setRepairingStageRecord(false);
+      return;
+    }
+
+    try {
+      setTopic(await getTopic(topic.id));
+      appStore.addNotification({
+        title: result.created ? '阶段记录已补齐' : '阶段记录已存在',
+        message: result.created ? '选题阶段保持不变，操作已记入历史记录。' : '没有重复创建记录，页面已刷新。',
+        type: 'success',
+      });
+    } catch {
+      appStore.addNotification({
+        title: result.created ? '阶段记录已补齐' : '阶段记录已存在',
+        message: '服务端已确认结果，但页面刷新失败；请重新加载确认当前状态，不要重复操作。',
+        type: 'warning',
+      });
+    } finally {
+      setRepairingStageRecord(false);
+    }
+  };
+
+  const persistTopicAggregate = (saveSnapshot: TopicDetailAggregateDraft, saveRevision: number, versionAction?: 'minor' | 'major') => (
     aggregateSaveGateRef.current.run(async () => {
       setIsAggregateSaving(true);
+      const payload = {
+        ...buildTopicDetailUpdatePayload(saveSnapshot),
+        ...(versionAction ? { version_action: versionAction, expected_content: topic?.outline ?? '' } : {}),
+      };
       try {
-        await updateTopic(parseInt(id!), buildTopicDetailUpdatePayload(saveSnapshot));
+        await updateTopic(parseInt(id!), payload);
+      } catch (error) {
+        setIsAggregateSaving(false);
+        appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+        throw error;
+      }
+
+      const confirmedDraft = cloneTopicDetailDraft(saveSnapshot);
+      baselineDraftRef.current = cloneTopicDetailDraft(confirmedDraft);
+      setTopic((current) => current ? { ...current, ...payload } : current);
+      if (aggregateRevisionRef.current === saveRevision) {
+        applyDraft(confirmedDraft);
+        setIsTopicDirty(false);
+        setEditTitle(false);
+        setEditDetails(false);
+        setEditDescription(false);
+        setEditOutline(false);
+      } else {
+        setIsTopicDirty(!topicDetailDraftEquals(draftRef.current, confirmedDraft));
+      }
+
+      try {
         const topicData = await getTopic(parseInt(id!));
         setTopic(topicData);
+        if (versionAction) setOutlineVersions(await getTopicOutlineVersions(topicData.id).catch(() => outlineVersions));
         if (aggregateRevisionRef.current === saveRevision) {
           const refreshedDraft = createTopicDetailDraft(topicData);
           baselineDraftRef.current = cloneTopicDetailDraft(refreshedDraft);
@@ -271,14 +385,13 @@ export default function TopicDetail() {
           setEditDescription(false);
           setEditOutline(false);
         } else {
-          // A stale response confirms only an older snapshot. Keep the current
-          // baseline so that it cannot clear or redefine a newer local draft.
-          setIsTopicDirty(!baselineDraftRef.current || !topicDetailDraftEquals(draftRef.current, baselineDraftRef.current));
+          // Preserve the confirmed save as the baseline; edits made while the
+          // request was in flight remain dirty and cannot be discarded.
+          setIsTopicDirty(!topicDetailDraftEquals(draftRef.current, confirmedDraft));
         }
-        appStore.addNotification({ title: '保存成功', message: '选题信息已更新', type: 'success' });
-      } catch (error) {
-        appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
-        throw error;
+        appStore.addNotification({ title: versionAction ? '版本已保存' : '保存成功', message: versionAction ? `选题大纲已保存为${versionAction === 'major' ? '大版本' : '小版本'}` : '选题信息已更新', type: 'success' });
+      } catch {
+        appStore.addNotification({ title: '选题信息已保存', message: '服务端已确认保存，但页面刷新失败；当前内容已保留，请稍后重新加载确认，不要重复保存。', type: 'warning' });
       } finally {
         setIsAggregateSaving(false);
       }
@@ -288,17 +401,19 @@ export default function TopicDetail() {
   aggregatePersistCommandRef.current = persistTopicAggregate;
 
   const performTopicManualSave = (): Promise<void> => {
+    setTopicSaveFeedback(null);
     const saveRevision = aggregateRevisionRef.current;
     const saveSnapshot = cloneTopicDetailDraft(draftRef.current);
 
-    if (!topicEditorBranch.usesRuntimeManualSave) {
-      return persistTopicAggregate(saveSnapshot, saveRevision);
+    if (!topicEditorBranch.usesRuntimeManualSave || !editOutline) {
+      return persistTopicAggregate(saveSnapshot, saveRevision, pendingTopicVersionActionRef.current ?? undefined);
     }
     const runtimeHandle = topicRuntimeHandleRef.current;
 
     if (!runtimeHandle?.manualSave) {
-      appStore.addNotification({ title: '保存不可用', message: '编辑器保存能力尚未就绪，请稍后重试。', type: 'error' });
-      return Promise.reject(new Error('Topic manual save is unavailable'));
+      const message = '当前无法保存这次修改，请稍后重试。';
+      appStore.addNotification({ title: '暂时无法保存', message, type: 'error' });
+      return Promise.reject(new Error(message));
     }
 
     manualSaveSnapshotsRef.current.set(saveRevision, saveSnapshot);
@@ -307,15 +422,32 @@ export default function TopicDetail() {
       if (result.status === 'saved') return;
       if (result.status === 'failed') throw result.error;
       if (result.status === 'already_destroyed') {
-        appStore.addNotification({ title: '保存失败', message: '编辑器已释放，未能保存当前修改。', type: 'error' });
-        throw new Error('Topic manual save was destroyed');
+        const message = '编辑器已关闭，当前修改未保存。';
+        appStore.addNotification({ title: '保存未完成', message, type: 'error' });
+        throw new Error(message);
       }
-      throw new Error('Topic manual save was cancelled');
+      throw new Error('保存已取消，当前修改仍保留。');
     });
   };
 
   const handleSave = () => {
-    void performTopicManualSave().catch(() => undefined);
+    void performTopicManualSave().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : '请检查连接后重试。';
+      setTopicSaveFeedback(`保存未完成，当前修改仍保留：${detail}`);
+    });
+  };
+
+  const handleCreateOutlineVersion = async (versionAction: 'minor' | 'major') => {
+    if (!canEditTopic || isAggregateSaving || !editOutline) return;
+    pendingTopicVersionActionRef.current = versionAction;
+    try {
+      await performTopicManualSave();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '请检查连接后重试。';
+      setTopicSaveFeedback(`版本未保存，当前修改仍保留：${detail}`);
+    } finally {
+      pendingTopicVersionActionRef.current = null;
+    }
   };
 
   const handleCancel = () => {
@@ -384,18 +516,36 @@ export default function TopicDetail() {
     completed: 'completed',
   };
 
-  const canAudit = hasPermission('topic:audit');
   const canEditTopicPermission = hasPermission('topic:update');
-  const canStartProduction = hasPermission('production:update');
-  const canManageTopicResources = canEditTopicPermission && hasPermission('resource:view');
+  const canStartProduction = !requestedOutlineVersion && hasPermission('production:update');
+  const canManageTopicResources = !requestedOutlineVersion && canEditTopicPermission && hasPermission('resource:view');
   const canEditTopic = Boolean(
-    topic &&
+    !requestedOutlineVersion && topic &&
       canEditTopicPermission &&
       (
         contentEditRoles.has(authStore.user?.role || '') ||
         Number(topic.creator_id) === authStore.user?.id ||
         Number(topic.assignee_id) === authStore.user?.id
       ),
+  );
+  const currentStageRecord = topic
+    ? topic.status === 'approved' || topic.status === 'production'
+      ? 'production'
+      : topic.status === 'shooting'
+        ? 'shooting'
+        : topic.status === 'publishing' || topic.status === 'completed'
+          ? 'publishing'
+          : null
+    : null;
+  const currentStageRecordLabel = currentStageRecord === 'production'
+    ? '创作稿'
+    : currentStageRecord === 'shooting'
+      ? '成片制作'
+      : currentStageRecord === 'publishing'
+        ? '发布'
+        : '';
+  const missingCurrentStageRecord = Boolean(
+    topic && currentStageRecord && topic.stage_record_presence && !topic.stage_record_presence[currentStageRecord],
   );
   const topicDetailManualAdapter = useMemo(() => createTopicDetailManualAdapter({
     documentId: `topic:${topic?.id ?? id ?? 'unbound'}`,
@@ -408,8 +558,8 @@ export default function TopicDetail() {
   const beginEditingTopic = () => {
     if (!permissionsLoading && !canEditTopic) {
       appStore.addNotification({
-        title: '无编辑权限',
-        message: '当前账号没有编辑选题的权限。',
+        title: '暂不可编辑',
+        message: '当前账号仅可查看此选题，如需修改请联系负责人。',
         type: 'warning',
       });
       return;
@@ -434,6 +584,11 @@ export default function TopicDetail() {
   }
 
   const isEditing = editTitle || editDetails || editDescription || editOutline;
+  const canPersistTopicDraft = canSaveTopicDetailDraft(
+    topicEditorBranch,
+    editOutline,
+    hasTopicManualRuntimeHandle,
+  );
   // Only readonly varies while this page is active. The renderer mode was
   // captured after Topic load, which prevents a dirty draft from hot-switching.
   const activeTopicEditorBranch: TopicDetailEditorBranch = {
@@ -662,14 +817,70 @@ export default function TopicDetail() {
           ) : (
             <div className={`editor-content-preview tiptap ${styles.bgTertiary} rounded-lg p-6 ${styles.textPrimary} min-h-[200px] leading-relaxed`} dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(scriptContent || '暂无大纲内容')) }}></div>
           )}
+          <section aria-label="大纲版本历史" className="mt-4 rounded-xl border border-studio-border-soft bg-studio-surface-soft/50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-semibold text-studio-text-primary">版本历史</h4>
+                <p className="mt-1 text-xs text-studio-text-muted">普通保存会更新当前稿；仅小版本和大版本操作会留档。</p>
+              </div>
+              {canEditTopic && editOutline && (
+                <div className="flex flex-wrap gap-2">
+                  <ActionButton type="button" disabled={isAggregateSaving || !canPersistTopicDraft} onClick={() => void handleCreateOutlineVersion('minor')}>小版本保存</ActionButton>
+                  <ActionButton type="button" variant="primary" disabled={isAggregateSaving || !canPersistTopicDraft} onClick={() => void handleCreateOutlineVersion('major')}>大版本保存</ActionButton>
+                </div>
+              )}
+            </div>
+            {canEditTopic && editOutline && topicEditorBranch.usesRuntimeManualSave && !hasTopicManualRuntimeHandle ? (
+              <p role="status" className="mt-2 text-xs text-studio-text-muted">编辑器正在准备，准备完成后即可保存。</p>
+            ) : null}
+            {requestedOutlineVersion ? (
+              <p
+                role={outlineVersionsLoadState === 'error' || (outlineVersionsLoadState === 'ready' && !requestedOutlineVersionEntry) ? 'alert' : 'status'}
+                className={`mt-3 rounded-lg px-3 py-2 text-sm ${outlineVersionsLoadState === 'error' || (outlineVersionsLoadState === 'ready' && !requestedOutlineVersionEntry) ? 'bg-studio-amber-soft text-studio-amber-contrast' : 'bg-studio-cyan-soft text-studio-cyan-contrast'}`}
+              >
+                {outlineVersionsLoadState === 'loading'
+                  ? `正在读取来源大纲版本 ${requestedOutlineVersion}…`
+                  : outlineVersionsLoadState === 'error'
+                    ? `来源大纲版本 ${requestedOutlineVersion} 读取失败；不会用当前大纲替代。`
+                    : requestedOutlineVersionEntry
+                      ? `正在查看创作初稿引用的大纲版本 ${requestedOutlineVersion}。`
+                      : `来源大纲版本 ${requestedOutlineVersion} 当前无法定位；没有回退到最新大纲。`}
+              </p>
+            ) : null}
+            {outlineVersionsLoadState === 'error' ? (
+              <button type="button" onClick={() => void reloadOutlineVersions()} className="xmt-btn-secondary mt-2 min-h-9 px-3 text-xs">
+                重新加载大纲历史
+              </button>
+            ) : null}
+            {outlineVersions.length > 0 ? (
+              <ol className="mt-3 space-y-2">
+                {outlineVersions.map((version) => (
+                  <li
+                    key={version.id}
+                    ref={!version.is_baseline && version.version === requestedOutlineVersion ? requestedOutlineCardRef : undefined}
+                    className={`rounded-lg border border-studio-border-soft bg-studio-surface-soft px-3 py-2 text-xs ${!version.is_baseline && version.version === requestedOutlineVersion ? 'ring-2 ring-studio-focus-ring' : ''}`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium text-studio-text-primary">{version.is_baseline ? '历史原稿（时间未记录）' : `${version.version} · ${version.change_type === 'major' ? '大版本' : '小版本'}`}</span>
+                      <span className="text-studio-text-muted">{version.is_baseline ? '旧内容未记录操作人和时间' : `${version.operator_name || '系统记录'} · ${version.created_at || '时间未记录'}`}</span>
+                    </div>
+                    <details className="mt-2" open={!version.is_baseline && version.version === requestedOutlineVersion}>
+                      <summary className="min-h-8 cursor-pointer py-1 font-medium text-studio-primary-contrast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring">查看此版本正文</summary>
+                      <div className={`editor-content-preview tiptap mt-2 max-h-80 overflow-auto rounded-lg border border-studio-border-soft ${styles.bgTertiary} p-4 leading-relaxed ${styles.textPrimary}`} dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(version.content)) }} />
+                    </details>
+                  </li>
+                ))}
+              </ol>
+            ) : <p className="mt-3 text-xs text-studio-text-muted">暂无已保存版本</p>}
+          </section>
         </div>
 
         {isEditing && (
           <div className="flex gap-3 mb-6">
             <button
               onClick={handleSave}
-              disabled={isAggregateSaving}
-              className="flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-white transition-colors hover:bg-studio-primary"
+              disabled={isAggregateSaving || !canPersistTopicDraft}
+              className="flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-white transition-colors hover:bg-studio-primary-button"
             >
               <Save className="w-4 h-4" />
               保存
@@ -682,12 +893,38 @@ export default function TopicDetail() {
             </button>
           </div>
         )}
+        {topicSaveFeedback ? (
+          <p role="alert" className="mb-6 rounded-xl border border-studio-coral/30 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral-contrast">
+            {topicSaveFeedback}
+          </p>
+        ) : null}
 
         <TopicResourcesPanel topicId={topic.id} canManage={canEditTopic && canManageTopicResources} />
+        <TopicAssetDimensionsPanel key={topic.id} topicId={topic.id} canManage={canEditTopic} />
 
         <div className="mb-6">
           <h3 className={`${styles.textSecondary} text-sm mb-4`}>流程进度</h3>
-          <div className="flex items-center gap-2">
+          {missingCurrentStageRecord && currentStageRecord && (
+            <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-studio-border-soft bg-studio-amber-soft p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-studio-amber-contrast" />
+                <div>
+                  <p className="font-medium text-studio-amber-contrast">当前阶段缺少{currentStageRecordLabel}记录</p>
+                  <p className="mt-1 text-sm text-studio-text-secondary">
+                    {topic.status === 'completed'
+                      ? '选题已完成，请先核对发布历史；系统不会自动补建历史发布数据。'
+                      : '请先补齐当前阶段记录，再推进到下一阶段。补齐不会改变选题状态，操作会记入历史。'}
+                  </p>
+                </div>
+              </div>
+              {topic.status !== 'completed' && canEditTopic && (
+                <ActionButton type="button" variant="primary" disabled={repairingStageRecord} onClick={() => void handleRepairStageRecord()}>
+                  {repairingStageRecord ? '正在补齐…' : `补齐${currentStageRecordLabel}记录`}
+                </ActionButton>
+              )}
+            </div>
+          )}
+          <div role="group" aria-label="选题流程进度" className="flex max-w-full items-center gap-2 overflow-x-auto pb-2">
             {workflowSteps.map((step, index) => {
               const isCompleted = workflowSteps.findIndex(s => s.status === topic.status) >= index;
               const isCurrent = step.status === topic.status;
@@ -697,7 +934,7 @@ export default function TopicDetail() {
                 <div key={step.status} className="flex items-center">
                   <div className={`flex flex-col items-center ${isCurrent ? 'scale-110' : ''}`}>
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      isCurrent ? 'bg-studio-primary text-white' : isCompleted ? 'bg-studio-success/15 text-studio-success-contrast' : `${styles.bgTertiary} text-studio-text-muted`
+                      isCurrent ? 'bg-studio-primary-button text-white' : isCompleted ? 'bg-studio-success/15 text-studio-success-contrast' : `${styles.bgTertiary} text-studio-text-muted`
                     }`}>
                       <Icon className="w-5 h-5" />
                     </div>
@@ -724,7 +961,7 @@ export default function TopicDetail() {
             {topic.status === 'pending' && canAudit && (
               <button
                 onClick={() => setShowAuditModal(true)}
-                className="flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-white transition-colors hover:bg-studio-primary"
+                className="flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-white transition-colors hover:bg-studio-primary-button"
               >
                 <CheckCircle className="w-4 h-4" />
                 审核选题
@@ -734,7 +971,7 @@ export default function TopicDetail() {
               <button
                 onClick={() => { void handleStartProduction(); }}
                 disabled={startingProduction}
-                className="flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <FileIcon className="h-4 w-4" />
                 {startingProduction ? '正在准备…' : topic.status === 'approved' ? '开始创作' : '进入创作'}
@@ -750,16 +987,15 @@ export default function TopicDetail() {
                   编辑选题
                 </button>
               ) : (
-                <span className={`px-4 py-2 ${styles.bgTertiary} ${styles.textSecondary} rounded-lg flex items-center gap-2`}>
-                  <FileText className="w-4 h-4" />
-                  无编辑权限
-                </span>
+                <p role="status" className="text-sm text-studio-text-muted">
+                  当前账号仅可查看此选题
+                </p>
               )
             )}
-            {canEditTopic && (topic.status === 'shooting' || topic.status === 'publishing') && (
+            {canEditTopic && !missingCurrentStageRecord && (topic.status === 'shooting' || topic.status === 'publishing') && (
               <button
                 onClick={() => handleUpdateStatus(nextStatuses[topic.status])}
-                className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-studio-primary to-studio-cyan px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90"
+                className="xmt-btn xmt-btn-primary"
               >
                 <ArrowRight className="w-4 h-4" />
                 推进到下一阶段
@@ -789,7 +1025,7 @@ export default function TopicDetail() {
       </div>
 
       {showAuditModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-modal">
           <div className={`${styles.bgSecondary} rounded-xl p-6 w-full max-w-lg mx-4 ${styles.border}`}>
             <h2 className={`text-xl font-bold ${styles.textPrimary} mb-6`}>审核选题</h2>
             
@@ -801,7 +1037,7 @@ export default function TopicDetail() {
                     onClick={() => setAuditData({ ...auditData, status: 'approved' })}
                     className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
                       auditData.status === 'approved' 
-                        ? 'bg-studio-success text-white' 
+                        ? 'border border-studio-success/30 bg-studio-success-soft text-studio-success-contrast'
                         : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
                     }`}
                   >
@@ -812,7 +1048,7 @@ export default function TopicDetail() {
                     onClick={() => setAuditData({ ...auditData, status: 'rejected' })}
                     className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
                       auditData.status === 'rejected' 
-                        ? 'bg-studio-coral text-white' 
+                        ? 'border border-studio-coral/30 bg-studio-coral-soft text-studio-coral-contrast'
                         : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
                     }`}
                   >
@@ -859,8 +1095,10 @@ export default function TopicDetail() {
                 <button
                   onClick={handleAudit}
                   className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
-                    auditData.status === 'approved' ? 'bg-studio-success hover:bg-studio-success' : 'bg-studio-coral hover:bg-studio-coral'
-                  } text-white`}
+                    auditData.status === 'approved'
+                      ? 'border border-studio-success/30 bg-studio-success-soft text-studio-success-contrast hover:bg-studio-success-soft'
+                      : 'border border-studio-coral/30 bg-studio-coral-soft text-studio-coral-contrast hover:bg-studio-coral-soft'
+                  }`}
                 >
                   {auditData.status === 'approved' ? '通过审核' : '驳回选题'}
                 </button>
@@ -893,7 +1131,7 @@ export default function TopicDetail() {
               type="button"
               onClick={() => { void discardTopicAndLeave(); }}
               disabled={topicLeaveState === 'saving'}
-              className="rounded-xl bg-studio-coral px-4 py-2.5 text-sm text-white transition-colors hover:bg-studio-coral disabled:opacity-60"
+              className="xmt-btn xmt-btn-danger rounded-xl disabled:opacity-60"
             >
               放弃离开
             </button>
@@ -901,7 +1139,7 @@ export default function TopicDetail() {
               type="button"
               onClick={() => { void saveTopicAndLeave(); }}
               disabled={topicLeaveState === 'saving'}
-              className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm text-white transition-colors hover:bg-brand-400 disabled:opacity-60"
+              className="xmt-btn xmt-btn-primary rounded-xl disabled:opacity-60"
             >
               {topicLeaveState === 'saving' ? '正在保存…' : '保存并离开'}
             </button>

@@ -15,6 +15,7 @@ export type TopicRecord = Record<string, unknown> & {
   status: TopicStatus;
   creator_id: number | null;
   assignee_id: number | null;
+  stage_entered_at?: string | null;
   outline?: string | null;
   outline_markdown?: string | null;
   outline_json?: string | null;
@@ -29,7 +30,13 @@ export type TopicPage = {
   limit: number;
 };
 
-export type TopicDetail = TopicRecord & { history: TopicHistoryRecord[] };
+export type TopicStageRecord = 'production' | 'shooting' | 'publishing';
+export type TopicStageRecordPresence = Record<TopicStageRecord, boolean>;
+
+export type TopicDetail = TopicRecord & {
+  history: TopicHistoryRecord[];
+  stage_record_presence: TopicStageRecordPresence;
+};
 
 export type TopicPersistencePatch = {
   title?: unknown;
@@ -51,6 +58,10 @@ export type TopicServiceErrorCode =
   | 'TOPIC_NOT_FOUND'
   | 'TOPIC_FORBIDDEN'
   | 'TOPIC_INVALID_INPUT'
+  | 'TOPIC_SUGGESTION_STALE'
+  | 'TOPIC_STAGE_CONFLICT'
+  | 'TOPIC_STAGE_NOT_REPAIRABLE'
+  | 'TOPIC_VERSION_CONFLICT'
   | 'TOPIC_INVALID_TRANSITION';
 
 export class TopicServiceError extends Error {

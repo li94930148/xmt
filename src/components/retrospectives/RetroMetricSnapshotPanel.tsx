@@ -17,6 +17,7 @@ const sourceTableLabels: Record<string, string> = {
   topics: '选题库',
   production: '创作管理',
   publishing: '发布管理',
+  publishing_metric_facts: '发布记录指标',
   daily_reports: '日报记录',
   daily_report_items: '日报分段',
   retro_actions: '复盘行动项',
@@ -27,6 +28,19 @@ const sourceFieldLabels: Record<string, string> = {
   created_at: '创建时间',
   report_date: '日报日期',
   risk_level: '风险等级',
+  views: '播放量',
+  likes: '点赞量',
+  shares: '分享量',
+  comments: '评论量',
+};
+
+const metricSourceLabels: Record<string, string> = {
+  douyin_official_export: '抖音官方',
+  manual: '手工补充',
+  douyin_creator_collection: '运营采集',
+  douyin_legacy_current: '旧版抖音数据',
+  legacy_analytics: '旧选题级数据',
+  unavailable: '未录入',
 };
 
 const sectionLabels: Record<string, string> = {
@@ -40,10 +54,20 @@ function sourceText(snapshot: RetroMetricSnapshot) {
   const table = typeof source.table === 'string' ? source.table : 'internal';
   const field = typeof source.field === 'string' ? source.field : '';
   const sectionKey = typeof source.sectionKey === 'string' ? source.sectionKey : '';
+  const metricSources = source.metricSources && typeof source.metricSources === 'object'
+    ? source.metricSources as Record<string, unknown>
+    : null;
+  const sourceSummary = metricSources
+    ? Object.entries(metricSources)
+      .filter(([, count]) => Number(count) > 0)
+      .map(([key, count]) => `${metricSourceLabels[key] || '其他'} ${count}`)
+      .join('、')
+    : '';
   return [
     sourceTableLabels[table] || '系统内部数据',
     field ? sourceFieldLabels[field] || '业务字段' : '',
     sectionKey ? sectionLabels[sectionKey] || '日报分段' : '',
+    sourceSummary,
   ].filter(Boolean).join(' / ');
 }
 
@@ -68,7 +92,9 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
         <div>
           <h2 className="text-lg font-bold text-studio-text-primary">指标快照</h2>
           <p className="mt-1 text-sm text-studio-text-muted">
-            来自 XMT 系统内部数据，不包含外部平台数据；外部平台数据后续接入。
+            {snapshots.some((snapshot) => snapshot.metricKey.startsWith('published_'))
+              ? '包含周期内已发布作品指标；每项按来源优先级取值，手工补充不覆盖抖音官方数据。'
+              : '生成后会固定复盘周期内的流程数据；发布表现也会按单条发布记录带入。'}
           </p>
         </div>
         {status === 'draft' && canGenerate ? (
@@ -87,7 +113,7 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
         <div className="mt-5 rounded-panel border border-dashed border-studio-border-soft p-8 text-center">
           <Database className="mx-auto h-8 w-8 text-studio-text-muted" />
           <p className="mt-3 text-sm font-semibold text-studio-text-primary">尚未生成指标快照</p>
-          <p className="mt-2 text-sm text-studio-text-muted">在草稿状态下生成快照后，复盘周期内的内部指标会固定下来。</p>
+          <p className="mt-2 text-sm text-studio-text-muted">在草稿状态下生成快照后，周期内流程指标和发布记录表现会固定下来。</p>
         </div>
       ) : (
         <div className="mt-5 space-y-5">

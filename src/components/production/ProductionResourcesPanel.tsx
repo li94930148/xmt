@@ -17,7 +17,7 @@ import {
   DEFAULT_MATERIAL_WORKSPACE_HEIGHT,
   materialWorkspaceStorageKey,
 } from './materialWorkspace';
-import { MAX_REFERENCE_EXCERPT_CHARS, referencedResourceIds, resourceIncludesExcerpt, type ResourceReference } from './resourceReference';
+import { getResourceUsageLabel, MAX_REFERENCE_EXCERPT_CHARS, referencedResourceIds, resourceIncludesExcerpt, type ResourceReference } from './resourceReference';
 
 const libraryNames: Record<LibraryType, string> = {
   project: '项目资料库',
@@ -53,10 +53,16 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
   const [selectedExcerpt, setSelectedExcerpt] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [editorReady, setEditorReady] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const userId = useAuthStore((state) => state.user?.id || 0);
   const addNotification = useAppStore((state) => state.addNotification);
   const mountedRef = useRef(true);
+  const draftReadyRef = useRef(false);
+  const loadSequenceRef = useRef(0);
+  const addingRef = useRef(false);
+  const canManageRef = useRef(canManage);
+  canManageRef.current = canManage;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
   const saveQueuedRef = useRef(false);
@@ -70,24 +76,29 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
   const workspaceHeightRef = useRef(DEFAULT_MATERIAL_WORKSPACE_HEIGHT);
   const storageKey = useMemo(() => materialWorkspaceStorageKey(userId), [userId]);
   const [workspaceHeight, setWorkspaceHeight] = useState(DEFAULT_MATERIAL_WORKSPACE_HEIGHT);
-  const usedResourceIds = useMemo(() => pickerOpen ? referencedResourceIds(manuscriptHtml) : new Set<number>(), [manuscriptHtml, pickerOpen]);
+  const materialDraftResourceIds = useMemo(() => pickerOpen ? referencedResourceIds(content) : new Set<number>(), [content, pickerOpen]);
+  const manuscriptResourceIds = useMemo(() => pickerOpen ? referencedResourceIds(manuscriptHtml) : new Set<number>(), [manuscriptHtml, pickerOpen]);
 
   const load = useCallback(async () => {
+    if (addingRef.current || savingRef.current || hasUnsavedRef.current) return;
+    const sequence = ++loadSequenceRef.current;
+    draftReadyRef.current = false;
     setLoading(true);
     setFailed(false);
     try {
       const draft = await getProductionMaterialDraft(productionId);
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || sequence !== loadSequenceRef.current) return;
       contentRef.current = draft.content_html;
       revisionRef.current = draft.revision;
       generationRef.current = 0;
       hasUnsavedRef.current = false;
       setContent(draft.content_html);
       setSaveState('saved');
+      draftReadyRef.current = true;
     } catch {
-      if (mountedRef.current) setFailed(true);
+      if (mountedRef.current && sequence === loadSequenceRef.current) setFailed(true);
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current && sequence === loadSequenceRef.current) setLoading(false);
     }
   }, [productionId]);
 
@@ -133,7 +144,7 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
   }, [addNotification, canManage, productionId]);
 
   const scheduleSave = useCallback((nextContent: string) => {
-    if (!canPersistMaterialDraft(canManage)) return;
+    if (!canPersistMaterialDraft(canManage) || !draftReadyRef.current) return;
     if (!contentRef.current.trim() && nextContent === '<p></p>') return;
     contentRef.current = nextContent;
     generationRef.current += 1;
@@ -179,22 +190,33 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
 
   const search = async (event: FormEvent) => {
     event.preventDefault();
+    if (addingRef.current) return;
     const term = keyword.trim();
     if (!term) return;
     setSearching(true);
     try {
-      setResults((await searchResourceCenter({ keyword: term })).data);
+      const response = await searchResourceCenter({ keyword: term });
+      if (!mountedRef.current) return;
+      setResults(response.data);
     } catch (error) {
+      if (!mountedRef.current) return;
       addNotification({ title: '搜索失败', message: (error as Error).message, type: 'error' });
     } finally {
-      setSearching(false);
+      if (mountedRef.current) setSearching(false);
     }
   };
 
   const openPicker = (excerpt: string | null) => {
+    if (!canManageRef.current || !draftReadyRef.current || !editorHandleRef.current || addingRef.current) return;
     setSelectedExcerpt(excerpt);
     setSelectedIds([]);
     setPickerOpen(true);
+  };
+
+  const closePicker = () => {
+    if (addingRef.current) return;
+    setPickerOpen(false);
+    setSelectedExcerpt(null);
   };
 
   const quoteSelectedExcerpt = () => {
@@ -211,10 +233,16 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
   };
 
   const addSelected = async (destination: 'draft' | 'manuscript' | 'excerpt') => {
+    if (addingRef.current || !canManageRef.current || !draftReadyRef.current || !editorHandleRef.current || searching) return;
     if (selectedIds.length === 0 || (destination !== 'draft' && selectedIds.length !== 1)) return;
+    addingRef.current = true;
     setAdding(true);
     try {
       const response = await getProductionResourceInsertions(productionId, selectedIds);
+      if (!mountedRef.current) return;
+      if (!canManageRef.current || !draftReadyRef.current || !editorHandleRef.current) {
+        throw new Error('当前资料不可编辑，原有内容已保留，请稍后重试。');
+      }
       if (destination !== 'draft') {
         const resource = response.data[0];
         if (!resource) {
@@ -231,10 +259,10 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
         }
         addNotification({ title: '已引用到正文', message: `正文已加入“${resource.title}”${destination === 'excerpt' ? '的选中片段' : '的全文'}及来源链接`, type: 'success' });
       } else {
-        const insertion = buildMaterialInsertionHtml(response.data.map((item) => item.content_html));
+        const insertion = buildMaterialInsertionHtml(response.data);
         if (insertion) {
           const inserted = editorHandleRef.current?.insertHtmlAtSelectionOrEnd(insertion) ?? false;
-          if (!inserted) scheduleSave(`${contentRef.current}${insertion}`);
+          if (!inserted) throw new Error('资料尚未插入，原有草稿已保留，请稍后重试。');
           addNotification({ title: '资料正文已插入', message: `已插入 ${response.data.length} 条资料正文`, type: 'success' });
         }
       }
@@ -245,9 +273,11 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
       setSelectedIds([]);
       setSelectedExcerpt(null);
     } catch (error) {
+      if (!mountedRef.current) return;
       addNotification({ title: '插入失败', message: (error as Error).message, type: 'error' });
     } finally {
-      setAdding(false);
+      addingRef.current = false;
+      if (mountedRef.current) setAdding(false);
     }
   };
 
@@ -276,20 +306,31 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
     localStorage.setItem(storageKey, String(height));
   };
 
-  const saveLabel = saveState === 'failed' ? '保存失败' : saveState === 'saved' || saveState === 'idle' ? '已保存' : '保存中';
-  const setEditorHandle = useCallback((handle: EditorCommandHandle | null) => { editorHandleRef.current = handle; }, []);
+  const workspaceReady = !loading && !failed && editorReady;
+  const saveLabel = loading ? '正在读取…' : failed ? '尚未读取' : !editorReady ? '正在准备…' : saveState === 'failed' ? '保存失败' : saveState === 'saved' || saveState === 'idle' ? '已保存' : '保存中';
+  const setEditorHandle = useCallback((handle: EditorCommandHandle | null) => {
+    editorHandleRef.current = handle;
+    setEditorReady(Boolean(handle));
+  }, []);
 
   return <>
-    <GlassPanel className="relative flex min-w-0 flex-col overflow-hidden" style={{ height: workspaceHeight }}>
+    <GlassPanel data-testid="production-resources-panel" className="relative flex min-w-0 flex-col overflow-hidden" style={{ height: workspaceHeight }}>
       <div className="z-10 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft bg-studio-surface/95 px-5 py-3 backdrop-blur">
-        <div className="flex items-center gap-3">
-          <h2 className="text-sm font-semibold text-studio-text-primary">创作资料</h2>
-          <span className={`text-xs ${saveState === 'failed' ? 'text-studio-coral-contrast' : 'text-studio-text-muted'}`}>{saveLabel}</span>
-          {canManage && saveState === 'failed' ? <button type="button" onClick={() => void saveLatest()} className="text-xs text-studio-cyan">重试</button> : null}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-sm font-semibold text-studio-text-primary">创作资料</h2>
+              <span className={`text-xs ${saveState === 'failed' ? 'text-studio-coral-contrast' : 'text-studio-text-muted'}`}>{saveLabel}</span>
+            </div>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-studio-text-secondary">
+              这是独立保存的资料草稿，不会自动修改正式正文；“加入草稿”和“引用到正文”是两项独立操作。原资料更新或移入回收站后，已复制内容仍会保留；回收的资料可能无法打开。
+            </p>
+          </div>
+          {canManage && saveState === 'failed' ? <button type="button" onClick={() => void saveLatest()} className="xmt-btn xmt-btn-ghost min-h-7 px-2 py-1 text-xs text-studio-cyan-contrast underline-offset-2 hover:underline">重试</button> : null}
         </div>
         {canManage ? <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={quoteSelectedExcerpt} disabled={!referenceReady || loading} className="xmt-btn xmt-btn-ghost">引用选中片段</button>
-          <button type="button" onClick={() => openPicker(null)} className="inline-flex items-center gap-2 rounded-button bg-studio-primary px-3 py-2 text-sm text-white"><Link2 className="h-4 w-4" />添加资料</button>
+          <button type="button" onClick={quoteSelectedExcerpt} disabled={!referenceReady || !workspaceReady || adding} className="xmt-btn xmt-btn-ghost">引用选中片段</button>
+          <button type="button" onClick={() => openPicker(null)} disabled={!workspaceReady || adding} className="xmt-btn xmt-btn-primary"><Link2 className="h-4 w-4" />添加资料</button>
         </div> : null}
       </div>
 
@@ -335,27 +376,33 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
       ><GripHorizontal className="h-4 w-4" /></div>
     </GlassPanel>
 
-    <BaseModal open={pickerOpen} onClose={() => { setPickerOpen(false); setSelectedExcerpt(null); }} title={selectedExcerpt ? '选择片段来源' : '添加资料'} size="lg">
+    <BaseModal open={pickerOpen} onClose={closePicker} closeOnOverlayClick={!adding} closeOnEscape={!adding} showCloseButton={!adding} title={selectedExcerpt ? '选择片段来源' : '添加资料'} size="lg">
       {selectedExcerpt ? <p className="mb-3 rounded-card border border-studio-border-soft bg-studio-surface-soft/50 px-3 py-2 text-xs text-studio-text-secondary">已选中 {selectedExcerpt.length} 字，请选择原文所在的资料。只有能在资料原文中找到的片段才能引用。</p> : null}
       <form onSubmit={search} className="flex gap-3">
-        <SearchBar value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索资料标题或正文" className="flex-1" />
-        <button type="submit" className="rounded-button bg-studio-primary px-4 text-sm text-white"><Search className="mr-2 inline h-4 w-4" />搜索</button>
+        <SearchBar value={keyword} onChange={(event) => { if (!addingRef.current) setKeyword(event.target.value); }} disabled={adding} placeholder="搜索资料标题或正文" className="flex-1" />
+        <button type="submit" disabled={adding || searching} className="xmt-btn xmt-btn-primary"><Search className="mr-2 inline h-4 w-4" />搜索</button>
       </form>
+      {adding ? <p role="status" className="mt-3 text-sm text-studio-text-secondary">正在插入资料，请稍候…</p> : null}
       <div className="mt-4 max-h-[420px] space-y-2 overflow-y-auto">
         {searching ? <LoadingState type="inline" /> : results.length ? results.map((result) => {
           const selected = selectedIds.includes(result.resource_id);
+          const usageLabel = getResourceUsageLabel(result.resource_id, materialDraftResourceIds, manuscriptResourceIds);
           return <button
             key={result.resource_id}
             type="button"
-            onClick={() => setSelectedIds((current) => selected ? current.filter((id) => id !== result.resource_id) : [...current, result.resource_id])}
+            disabled={adding}
+            onClick={() => {
+              if (addingRef.current) return;
+              setSelectedIds((current) => selected ? current.filter((id) => id !== result.resource_id) : [...current, result.resource_id]);
+            }}
             className={`flex w-full items-start gap-3 rounded-card border p-3 text-left ${selected ? 'border-studio-cyan bg-studio-cyan/5' : 'border-studio-border-soft'}`}
           >
-            <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${selected ? 'border-studio-cyan bg-studio-cyan text-white' : 'border-studio-border-active'}`}>{selected ? <Check className="h-3.5 w-3.5" /> : null}</span>
+            <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${selected ? 'border-studio-cyan bg-studio-cyan-soft text-studio-cyan-contrast' : 'border-studio-border-active'}`}>{selected ? <Check className="h-3.5 w-3.5" /> : null}</span>
             <span className="min-w-0 flex-1">
               <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-studio-text-primary">
                 <span className="min-w-0 truncate">{result.title}</span>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${usedResourceIds.has(result.resource_id) ? 'bg-studio-success/12 text-studio-success-contrast' : 'bg-studio-surface-soft text-studio-text-muted'}`}>
-                  {usedResourceIds.has(result.resource_id) ? '已用' : '待用'}
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${usageLabel === '待用' ? 'bg-studio-surface-soft text-studio-text-muted' : 'bg-studio-success/12 text-studio-success-contrast'}`}>
+                  {usageLabel}
                 </span>
               </span>
               <span className="mt-1 block text-xs text-studio-text-muted">{libraryNames[result.library_type]} · {result.category?.name || '未分类'}</span>
@@ -364,10 +411,10 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
           </button>;
         }) : keyword ? <EmptyState title="暂无资料" /> : null}
       </div>
-      <div className="mt-4 flex justify-end gap-2 border-t border-studio-border-soft pt-4">
-        <button type="button" onClick={() => { setPickerOpen(false); setSelectedExcerpt(null); }} className="rounded-button border border-studio-border-soft px-4 py-2 text-sm text-studio-text-secondary">取消</button>
-        <button type="button" disabled={adding || selectedIds.length === 0} onClick={() => void addSelected('draft')} className="xmt-btn xmt-btn-ghost">{adding ? '插入中…' : `加入资料草稿（${selectedIds.length}）`}</button>
-        <button type="button" disabled={adding || selectedIds.length !== 1 || !referenceReady} onClick={() => void addSelected(selectedExcerpt ? 'excerpt' : 'manuscript')} className="xmt-btn xmt-btn-primary">{selectedExcerpt ? '引用选中片段' : '引用到正文'}</button>
+      <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-studio-border-soft pt-4">
+        <button type="button" disabled={adding} onClick={closePicker} className="xmt-btn xmt-btn-ghost">取消</button>
+        <button type="button" disabled={adding || searching || !workspaceReady || selectedIds.length === 0} onClick={() => void addSelected('draft')} className="xmt-btn xmt-btn-ghost">{adding ? '插入中…' : `加入资料草稿（${selectedIds.length}）`}</button>
+        <button type="button" disabled={adding || searching || !workspaceReady || selectedIds.length !== 1 || !referenceReady} onClick={() => void addSelected(selectedExcerpt ? 'excerpt' : 'manuscript')} className="xmt-btn xmt-btn-primary">{selectedExcerpt ? '引用选中片段' : '引用到正文'}</button>
       </div>
     </BaseModal>
   </>;

@@ -34,3 +34,15 @@ export function resolveTopicDetailEditorBranch(
     saveOwner: 'page-aggregate',
   });
 }
+
+/**
+ * Aggregate saves only need the editor runtime when the outline itself is
+ * being edited. Other topic fields are persisted by the page-owned save path.
+ */
+export function canSaveTopicDetailDraft(
+  branch: TopicDetailEditorBranch,
+  editingOutline: boolean,
+  hasRuntimeManualSaveHandle: boolean,
+): boolean {
+  return !branch.usesRuntimeManualSave || !editingOutline || hasRuntimeManualSaveHandle;
+}

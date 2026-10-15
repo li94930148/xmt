@@ -11,6 +11,11 @@ export const topicStatusSchema = z.enum([
 ]);
 
 const emptyToUndefined = (value: unknown) => (value === '' || value === undefined || value === null ? undefined : value);
+const creatorTopicSuggestionSourceSchema = z.object({
+  account_uid: z.string().trim().min(1).max(256),
+  suggestion_id: z.string().regex(/^[a-f0-9]{20}$/),
+  evidence_id: z.string().regex(/^[a-f0-9]{32}$/),
+}).strict();
 
 export const topicQuerySchema = z.object({
   status: z.preprocess(emptyToUndefined, topicStatusSchema.optional()),
@@ -28,10 +33,22 @@ export const createTopicInputSchema = z.object({
   platform: z.string().max(100).optional().default(''),
   deadline: z.string().optional().default(''),
   assignee_id: z.coerce.number().int().positive().nullable().optional(),
+  creator_suggestion_source: creatorTopicSuggestionSourceSchema.optional(),
 }).strict();
 
 export const updateTopicInputSchema = createTopicInputSchema
+  .omit({ creator_suggestion_source: true })
   .partial()
+  .extend({
+    version_action: z.enum(['minor', 'major', 'none']).optional(),
+    expected_content: z.string().optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.version_action && value.version_action !== 'none'
+      && (value.outline === undefined || value.expected_content === undefined)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: '创建选题版本时必须提供当前大纲和预期原稿' });
+    }
+  })
   .refine((value) => Object.keys(value).length > 0, '没有需要更新的字段');
 
 export const auditTopicInputSchema = z.object({
@@ -59,6 +76,7 @@ export const topicResponseSchema = z.object({
   creator_name: z.string().nullable().optional(),
   assignee_name: z.string().nullable().optional(),
   submitted_at: z.string().nullable().optional(),
+  stage_entered_at: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 }).passthrough();

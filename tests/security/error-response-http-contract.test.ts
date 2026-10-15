@@ -66,7 +66,39 @@ try {
   assert.equal(body.includes('操作失败'), true, '业务 message 不应被一并抹掉');
   assert.equal(body.includes('INTERNAL_ERROR'), true, '应返回 INTERNAL_ERROR 便于前后端定位');
 
-  console.log('错误响应 HTTP 层脱敏契约通过：SQL 与绑定参数均未外泄，业务 message 保留');
+  const notFoundResponse = await fetch(`http://127.0.0.1:${port}/api/__missing_error_contract_probe`);
+  const notFoundBody = await notFoundResponse.json() as { error?: string };
+  assert.equal(notFoundResponse.status, 404);
+  assert.equal(notFoundBody.error, '暂时找不到此功能，请刷新页面后重试', '未知功能的提示应使用用户可读中文');
+
+  const notFoundV1Response = await fetch(`http://127.0.0.1:${port}/api/v1/__missing_error_contract_probe`);
+  const notFoundV1Body = await notFoundV1Response.json() as { error?: { message?: string } };
+  assert.equal(notFoundV1Response.status, 404);
+  assert.equal(notFoundV1Body.error?.message, '暂时找不到此功能，请刷新页面后重试', '新接口的兜底提示也应使用用户可读中文');
+
+  const oversizedBody = JSON.stringify({ content: 'x'.repeat(16 * 1024 * 1024) });
+  for (const endpoint of ['/api/__payload_limit_contract_probe', '/api/v1/__payload_limit_contract_probe']) {
+    const oversizedResponse = await fetch(`http://127.0.0.1:${port}${endpoint}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: oversizedBody,
+    });
+    const oversizedResponseBody = await oversizedResponse.json() as {
+      error?: string | { message?: string };
+      message?: string;
+    };
+    assert.equal(oversizedResponse.status, 413);
+    if (endpoint.startsWith('/api/v1/')) {
+      assert.equal(typeof oversizedResponseBody.error, 'object');
+      assert.equal((oversizedResponseBody.error as { message?: string }).message, '文件或内容过大，请精简后重试');
+    } else {
+      assert.equal(oversizedResponseBody.error, '内容过大');
+      assert.equal(oversizedResponseBody.message, '文件或内容过大，请精简后重试');
+    }
+    assert.equal(JSON.stringify(oversizedResponseBody).includes('请求体'), false, '提示中不应出现请求体术语');
+  }
+
+  console.log('错误响应 HTTP 层契约通过：SQL/参数未外泄，404/413 提示使用用户可读中文');
 
 } finally {
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

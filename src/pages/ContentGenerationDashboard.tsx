@@ -7,9 +7,9 @@ import { getCurrentContentDocument, resolveContentDocument, setCurrentContentDoc
 import ContentDocumentPicker from '../components/ContentDocumentPicker';
 
 function priorityClass(priority: string) {
-  if (priority === 'high') return 'bg-studio-coral/10 text-studio-coral';
-  if (priority === 'medium') return 'bg-studio-amber/10 text-studio-amber';
-  return 'bg-studio-success/10 text-studio-success';
+  if (priority === 'high') return 'bg-studio-coral/10 text-studio-coral-contrast';
+  if (priority === 'medium') return 'bg-studio-amber/10 text-studio-amber-contrast';
+  return 'bg-studio-success/10 text-studio-success-contrast';
 }
 
 function priorityLabel(priority: string) {
@@ -70,7 +70,7 @@ export default function ContentGenerationDashboard() {
             />
             <button
               onClick={() => loadData(docId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary-button disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4" />
               生成
@@ -92,7 +92,7 @@ export default function ContentGenerationDashboard() {
           </div>
           <div className="flex flex-wrap gap-2">
             {title.alternatives.map((item) => (
-              <span key={item} className="rounded-full bg-studio-primary/10 px-3 py-1 text-xs text-studio-primary">
+              <span key={item} className="rounded-full bg-studio-primary/10 px-3 py-1 text-xs text-studio-primary-contrast">
                 {item}
               </span>
             ))}

@@ -187,10 +187,9 @@ async function assertAnalyticsBasicStructure(page: Page) {
   const scene = page.locator('[data-reactbits-scene="analytics"]');
   await scene.waitFor({ state: 'visible', timeout: 15_000 });
   assert(await scene.count() === 1 && await scene.isVisible(), 'Analytics scene is not mounted and visible');
-  for (const label of ['数据复盘', '数据导出', '周报生成']) {
-    const tab = page.locator('[data-reactbits-navigation^="analytics-dimensions:"]').getByRole('button', { name: label, exact: true });
-    assert(await tab.count() === 1 && await tab.isVisible(), `Analytics tab is unavailable: ${label}`);
-  }
+  assert(await page.getByRole('heading', { name: '数据复盘', exact: true }).count() === 1, 'Analytics overview heading is unavailable');
+  assert(await page.getByRole('button', { name: '数据导出', exact: true }).count() === 0, 'duplicate export tab remains in Analytics');
+  assert(await page.getByRole('button', { name: '周报生成', exact: true }).count() === 0, 'duplicate weekly report tab remains in Analytics');
   assert(await page.getByRole('heading', { name: '个人统计排行', exact: true }).count() === 1, 'Analytics basic structure is incomplete');
   assert(await page.getByText('页面出错了', { exact: true }).count() === 0, 'Real ErrorBoundary is visible');
 }

@@ -45,6 +45,9 @@ const failureDialogMarkup = renderToStaticMarkup(createElement(EditorLeaveFailur
 assert.match(failureDialogMarkup, /未能确认保存/);
 assert.match(failureDialogMarkup, /重试保存/);
 assert.match(failureDialogMarkup, /放弃离开/);
+assert.match(failureDialogMarkup, /xmt-btn-primary/, 'retry action uses the theme-safe primary button');
+assert.match(failureDialogMarkup, /xmt-btn-danger/, 'discard action uses the theme-safe danger button');
+assert.doesNotMatch(failureDialogMarkup, /bg-brand-500|bg-red-600/, 'leave failure actions do not use fixed legacy color fills');
 
 const interrupted = getEditorLeaveFailureDialogView(leaveResult('interrupted'));
 assert.equal(interrupted?.title, '保存过程已中断');

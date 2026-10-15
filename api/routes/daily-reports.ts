@@ -7,16 +7,27 @@ import {
   autosaveDailyReport,
   getMyDailyReport,
   listDailyReportArchive,
+  searchDailyReports,
   listTeamDailyReports,
   reviewDailyReport,
   saveDailyReportDraft,
   submitDailyReport,
 } from '../services/dailyReports.js';
 import type { DailyReportStatus, ReviewDailyReportInput, SaveDailyReportDraftInput } from '../types/dailyReports.js';
+import { apiLogger } from '../observability/logger.js';
 
 const router = express.Router();
 
 router.use(authenticate);
+
+router.get('/search', requirePermission('report:daily:archive', 'report:daily:submit'), async (req, res) => {
+  try {
+    const keyword = typeof req.query.keyword === 'string' ? req.query.keyword.trim() : '';
+    res.json({ success: true, data: await searchDailyReports(req.user, keyword) });
+  } catch (error) {
+    handleDailyReportError(error, res);
+  }
+});
 
 function getQueryString(req: Request, key: string) {
   const value = req.query[key];
@@ -40,7 +51,11 @@ function handleDailyReportError(error: unknown, res: Response) {
     });
   }
 
-  console.error('[DailyReports] unexpected error:', error);
+  apiLogger.error({
+    module: 'daily_reports',
+    operation: 'request.failed',
+    error: { code: 'INTERNAL_ERROR', name: error instanceof Error ? error.name : 'UnknownError' },
+  }, 'api.daily_reports.request_failed');
   return res.status(500).json({
     success: false,
     code: 'INTERNAL_ERROR',
@@ -142,7 +157,7 @@ router.post('/:id/review', requirePermission('report:daily:review'), async (req,
   }
 });
 
-router.get('/archive', requirePermission('report:daily:archive'), async (req, res) => {
+router.get('/archive', requirePermission('report:daily:archive', 'report:daily:submit'), async (req, res) => {
   try {
     const userId = getQueryString(req, 'userId');
     const result = await listDailyReportArchive(req.user, {

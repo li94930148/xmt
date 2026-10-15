@@ -115,7 +115,7 @@ export default function ContentOSDashboard() {
             />
             <button
               onClick={() => loadData(docId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary-button disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4" />
               调度

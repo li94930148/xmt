@@ -41,14 +41,18 @@ export default function DailyReportPage() {
   const [mineError, setMineError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const submitInFlight = useRef(false);
+  const teamRequestSequenceRef = useRef(0);
   const [submissionNotice, setSubmissionNotice] = useState('');
   const [teamDate, setTeamDate] = useState(today());
   const [teamReports, setTeamReports] = useState<DailyReport[]>([]);
+  const [teamReportsQueryKey, setTeamReportsQueryKey] = useState('');
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState('');
   const [detail, setDetail] = useState<DailyReport | null>(null);
   const reportDate = today();
   const canSubmitDaily = !permissionsLoading && hasPermission('report:daily:submit') && canCreateDaily;
+  const teamStatus = user?.role === 'admin' || user?.role === 'director' ? 'all' : 'submitted';
+  const teamQueryKey = `${user?.id ?? 'anonymous'}:${teamDate}:${teamStatus}`;
 
   const loadMine = useCallback(async () => {
     if (submitInFlight.current) return;
@@ -58,12 +62,18 @@ export default function DailyReportPage() {
     finally { setLoading(false); }
   }, [reportDate]);
   const loadTeam = useCallback(async () => {
+    const requestId = ++teamRequestSequenceRef.current;
     if (!canViewTeam) return;
     setTeamLoading(true); setTeamError('');
-    try { const result = await getTeamDailyReports({ date: teamDate, status: user?.role === 'admin' || user?.role === 'director' ? 'all' : 'submitted' }); setTeamReports(result.reports); }
-    catch (error) { setTeamError(error instanceof Error ? error.message : '加载团队日报失败'); setTeamReports([]); }
-    finally { setTeamLoading(false); }
-  }, [canViewTeam, teamDate, user?.role]);
+    try {
+      const result = await getTeamDailyReports({ date: teamDate, status: teamStatus });
+      if (requestId !== teamRequestSequenceRef.current) return;
+      setTeamReports(result.reports);
+      setTeamReportsQueryKey(teamQueryKey);
+    }
+    catch (error) { if (requestId === teamRequestSequenceRef.current) setTeamError(error instanceof Error ? error.message : '加载团队日报失败'); }
+    finally { if (requestId === teamRequestSequenceRef.current) setTeamLoading(false); }
+  }, [canViewTeam, teamDate, teamQueryKey, teamStatus]);
 
   useEffect(() => { void loadMine(); }, [loadMine]);
   useEffect(() => { if (tab === 'team') void loadTeam(); }, [loadTeam, tab]);
@@ -113,8 +123,8 @@ export default function DailyReportPage() {
       {submissionNotice ? <div role="alert" className="rounded-xl border border-studio-amber/30 bg-studio-amber/10 px-4 py-3 text-sm leading-6 text-studio-amber-contrast">{submissionNotice}</div> : null}
       {permissionsLoading ? <GlassPanel className="p-6 text-center text-sm text-studio-text-secondary">正在确认日报权限…</GlassPanel> : !report && !canSubmitDaily ? <GlassPanel className="p-5"><EmptyState icon={FileClock} title="当前没有日报记录" description="当前账号未开通填写日报权限；已有日报仍可查看。" /></GlassPanel> : <DailyReportComposer status={report?.status || 'draft'} canEdit={canSubmitDaily} items={items} submitting={submitting} onItemsChange={setItems} onSubmit={() => void submit()} />}
     </> : <DailyReportSummaryForm kind={entryType} />}</ReactBitsCardSlot></ReactBitsRevealSlot> : null}
-    {tab === 'team' ? permissionsLoading ? <GlassPanel className="p-6 text-center text-sm text-studio-text-secondary">正在确认团队日报权限…</GlassPanel> : canViewTeam ? <DailyReportTeamBoard date={teamDate} reports={teamReports} loading={teamLoading} error={teamError} onDateChange={setTeamDate} onRefresh={loadTeam} onView={setDetail} /> : <GlassPanel className="p-5"><EmptyState icon={Users} title="当前账号无权查看团队日报" description="如需查看，请联系管理员开通团队日报权限。" actionLabel="返回我的日报" onAction={() => setTab('mine')} /></GlassPanel> : null}
-    {tab === 'summary' ? permissionsLoading ? <GlassPanel className="p-6 text-center text-sm text-studio-text-secondary">正在确认归档权限…</GlassPanel> : <DailyReportSummaryArchive canViewArchive={canViewArchive} canViewOwnDaily={canViewOwnDailyArchive} onView={setDetail} /> : null}
+    {tab === 'team' ? permissionsLoading ? <GlassPanel className="p-6 text-center text-sm text-studio-text-secondary">正在确认团队日报权限…</GlassPanel> : canViewTeam ? <div data-testid="team-daily-report-board"><DailyReportTeamBoard date={teamDate} reports={teamReportsQueryKey === teamQueryKey ? teamReports : []} loading={teamLoading} error={teamError} stale={teamReportsQueryKey === teamQueryKey && teamReports.length > 0} onDateChange={setTeamDate} onRefresh={loadTeam} onView={setDetail} /></div> : <GlassPanel className="p-5"><EmptyState icon={Users} title="当前账号无权查看团队日报" description="如需查看，请联系管理员开通团队日报权限。" actionLabel="返回我的日报" onAction={() => setTab('mine')} /></GlassPanel> : null}
+    {tab === 'summary' ? permissionsLoading ? <GlassPanel className="p-6 text-center text-sm text-studio-text-secondary">正在确认归档权限…</GlassPanel> : <DailyReportSummaryArchive key={`${user?.id ?? 'anonymous'}:${canViewArchive ? 'archive' : 'own'}:${canViewOwnDailyArchive ? 'daily' : 'none'}`} canViewArchive={canViewArchive} canViewOwnDaily={canViewOwnDailyArchive} onView={setDetail} /> : null}
     <DailyReportDetailDrawer report={detail} onClose={() => setDetail(null)} />
   </PageShell></ReactBitsPageScene>;
 }

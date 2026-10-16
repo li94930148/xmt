@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
 import { getPublishingById, getPublishingScriptVersions, syncPublishingPublishedArchive, updatePublishing } from '../api';
 import type { WorkflowDocumentVersion } from '../api';
-import { ChevronLeft, FileText, Camera, Send, Calendar, User as UserIcon, Clock, Save, CheckCircle, ArrowRight, MapPin, ExternalLink } from 'lucide-react';
+import { ChevronLeft, FileText, Camera, Send, Clock, Save, CheckCircle, ArrowRight, ExternalLink } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
@@ -14,6 +14,7 @@ import { useCompactEditorToolbar } from '../hooks/useCompactEditorToolbar';
 import { getWorkflowStatusLabel, isKnownWorkflowStatus } from '../platform/workflow-status-labels';
 import { workflowScriptSourceLabel, workflowScriptSourceReference, workflowScriptSourceTimestamp } from '../utils/workflow-script-source';
 import { usePermission } from '../hooks/usePermission';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 
 interface PublishingDetailData {
   id: number;
@@ -84,6 +85,7 @@ export default function PublishingDetail() {
   currentPublishingIdRef.current = id;
   const navigate = useNavigate();
   const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
   const styles = useThemeStyles();
   const compactEditorToolbar = useCompactEditorToolbar();
   const { hasPermission } = usePermission();
@@ -91,10 +93,13 @@ export default function PublishingDetail() {
   const [data, setData] = useState<PublishingDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const detailRequestSequenceRef = useRef(0);
+  const scriptVersionRequestSequenceRef = useRef(0);
   const [editMode, setEditMode] = useState(false);
   const [scriptContent, setScriptContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [scriptVersions, setScriptVersions] = useState<WorkflowDocumentVersion[]>([]);
+  const [scriptVersionsLoading, setScriptVersionsLoading] = useState(false);
+  const [scriptVersionsLoadError, setScriptVersionsLoadError] = useState(false);
   const [archiveSyncPending, setArchiveSyncPending] = useState(false);
   const [archiveSyncRetrying, setArchiveSyncRetrying] = useState(false);
   const sourceProductionId = data
@@ -107,35 +112,88 @@ export default function PublishingDetail() {
     ? data.script_content !== null ? data.script_source_production : data.production
     : null;
   const sourceProductionTimestamp = workflowScriptSourceTimestamp(sourceProduction);
+  const savedScriptContent = data?.script_content ?? data?.production?.content ?? data?.production?.content_markdown ?? '';
+  const hasUnsavedScript = Boolean(data && editMode && scriptContent !== savedScriptContent);
+
+  const loadScriptVersions = useCallback(async (recordId: number, detailRequestId?: number) => {
+    const requestId = ++scriptVersionRequestSequenceRef.current;
+    const isCurrent = () => requestId === scriptVersionRequestSequenceRef.current
+      && Number(currentPublishingIdRef.current) === recordId
+      && (detailRequestId === undefined || detailRequestId === detailRequestSequenceRef.current);
+    setScriptVersionsLoading(true);
+    setScriptVersionsLoadError(false);
+    try {
+      const versions = await getPublishingScriptVersions(recordId);
+      if (!isCurrent()) return null;
+      setScriptVersions(versions);
+      return versions;
+    } catch {
+      if (isCurrent()) {
+        setScriptVersionsLoadError(true);
+        setScriptVersions([]);
+      }
+      return null;
+    } finally {
+      if (isCurrent()) setScriptVersionsLoading(false);
+    }
+  }, []);
+
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    if (saving) {
+      appStore.addNotification({ title: '剧本保存尚未完成', message: '保存完成前不能离开当前发布记录，请稍候再试。', type: 'warning' });
+      stay();
+      return;
+    }
+    if (hasUnsavedScript && !window.confirm('当前剧本还有未保存的修改，离开后可能无法恢复。是否放弃修改并离开？')) {
+      stay();
+      return;
+    }
+    proceed();
+  }, [appStore, hasUnsavedScript, saving]);
+  useRouteNavigationGuard(Boolean(data && (saving || hasUnsavedScript)), handleRouteNavigationAttempt);
+
+  useEffect(() => {
+    if (!hasUnsavedScript && !saving) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [hasUnsavedScript, saving]);
 
   useEffect(() => {
     const requestId = ++detailRequestSequenceRef.current;
+    scriptVersionRequestSequenceRef.current += 1;
     const fetchData = async () => {
       setLoading(true);
       setData(null);
       setScriptVersions([]);
+      setScriptVersionsLoading(false);
+      setScriptVersionsLoadError(false);
       try {
         const result = await getPublishingById(parseInt(id!));
         if (requestId !== detailRequestSequenceRef.current || Number(currentPublishingIdRef.current) !== Number(id)) return;
-        const versions = await getPublishingScriptVersions(result.id).catch(() => []);
-        if (requestId !== detailRequestSequenceRef.current || Number(currentPublishingIdRef.current) !== Number(id)) return;
         setData(result);
-        setScriptVersions(versions);
+        void loadScriptVersions(result.id, requestId);
         setArchiveSyncPending(result.published_archive_script_sync_pending === true);
         // 优先使用本地编辑的剧本，其次使用创作管理的剧本
         const content = result.script_content ?? result.production?.content ?? result.production?.content_markdown ?? '';
         setScriptContent(content);
       } catch (error) {
         if (requestId === detailRequestSequenceRef.current && Number(currentPublishingIdRef.current) === Number(id)) {
-          appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
         }
       } finally {
         if (requestId === detailRequestSequenceRef.current && Number(currentPublishingIdRef.current) === Number(id)) setLoading(false);
       }
     };
     void fetchData();
-    return () => { detailRequestSequenceRef.current += 1; };
-  }, [id]);
+    return () => {
+      detailRequestSequenceRef.current += 1;
+      scriptVersionRequestSequenceRef.current += 1;
+    };
+  }, [addNotification, id, loadScriptVersions]);
 
   const handleSaveScript = async (versionAction?: 'minor' | 'major') => {
     if (!data) return;
@@ -167,12 +225,11 @@ export default function PublishingDetail() {
         script_source_version: source.script_source_version ?? data.script_source_version,
       });
       setEditMode(false);
-      const refreshedVersions = versionAction ? await getPublishingScriptVersions(requestedPublishingId).catch(() => null) : undefined;
+      const refreshedVersions = versionAction ? await loadScriptVersions(requestedPublishingId) : undefined;
       if (Number(currentPublishingIdRef.current) !== requestedPublishingId) {
         appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
         return;
       }
-      if (refreshedVersions) setScriptVersions(refreshedVersions);
       if (result.archiveSync === 'pending') {
         appStore.addNotification({
           title: '剧本已保存，归档待同步',
@@ -574,7 +631,14 @@ export default function PublishingDetail() {
           <h3 className="text-sm font-semibold text-studio-text-primary">版本历史</h3>
           <p className="mt-1 text-xs text-studio-text-muted">普通保存会更新当前稿；仅小版本和大版本操作会留档。</p>
         </div>
-        {scriptVersions.length > 0 ? (
+        {scriptVersionsLoadError ? (
+          <div role="alert" data-testid="publishing-script-history-error" className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-studio-danger/30 bg-studio-danger/10 p-3 text-sm text-studio-danger">
+            <span>版本历史读取失败，列表可能不完整；已保存的剧本仍可正常使用，请重试读取。</span>
+            <ActionButton type="button" disabled={scriptVersionsLoading || saving} onClick={() => data && void loadScriptVersions(data.id)} className="px-3 py-2">重新加载版本历史</ActionButton>
+          </div>
+        ) : scriptVersionsLoading ? (
+          <p role="status" className="mt-3 text-sm text-studio-text-muted">正在加载版本历史…</p>
+        ) : scriptVersions.length > 0 ? (
           <ol className="mt-3 grid gap-2 md:grid-cols-2">
             {scriptVersions.map((version) => (
               <li key={version.id} className="rounded-xl border border-studio-border-soft bg-studio-surface-soft/60 p-3">

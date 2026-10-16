@@ -37,6 +37,8 @@ let failNextSubmit = true;
 let summaryWriteRequests = 0;
 let failNextSummaryWrite = true;
 let yearlyWriteRequests = 0;
+let userDirectoryRequests = 0;
+let failNextUserDirectoryRead = true;
 
 function resetFixture() {
   report = null;
@@ -47,6 +49,8 @@ function resetFixture() {
   summaryWriteRequests = 0;
   failNextSummaryWrite = true;
   yearlyWriteRequests = 0;
+  userDirectoryRequests = 0;
+  failNextUserDirectoryRead = true;
 }
 
 const app = express();
@@ -55,11 +59,19 @@ app.get('/__qa', (_req, res) => {
   resetFixture();
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','daily-report-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/daily-report');</script>`);
 });
-app.get('/__qa/state', (_req, res) => res.json({ report, draftVersions, draftRequests, submitRequests, failNextSubmit }));
+app.get('/__qa/state', (_req, res) => res.json({ report, draftVersions, draftRequests, submitRequests, failNextSubmit, userDirectoryRequests }));
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.get('/api/permissions/my', (_req, res) => res.json(['*']));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
+app.get('/api/users', (_req, res) => {
+  userDirectoryRequests += 1;
+  if (failNextUserDirectoryRead) {
+    failNextUserDirectoryRead = false;
+    return res.status(503).json({ success: false, message: '模拟成员名单读取失败' });
+  }
+  return res.json({ success: true, data: [{ ...user, created_at: '2026-01-01T00:00:00.000Z' }] });
+});
 app.get('/api/daily-reports/me', (_req, res) => res.json({
   success: true,
   data: { reportDate, template: { id: null, name: '默认模板', description: '', sections: [] }, report, canCreate: true },
@@ -272,6 +284,20 @@ try {
   assert.equal(yearlyWriteRequests, 1, 'a double click sends one yearly summary write');
   await page.getByRole('button', { name: '总结归档', exact: true }).click();
   await page.getByRole('heading', { name: '总结归档', exact: true }).waitFor();
+  const userDirectoryAlert = page.getByRole('alert').filter({ hasText: '成员名单加载失败' });
+  await userDirectoryAlert.waitFor();
+  await page.screenshot({ path: '/tmp/xmt-daily-report-member-list-retry.png', fullPage: false });
+  const initialDirectoryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(initialDirectoryState.userDirectoryRequests, 1, 'the member directory failure is surfaced after one scoped read');
+  const userDirectoryRetry = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().includes('/api/users') && response.status() === 200);
+  await userDirectoryAlert.getByRole('button', { name: '重试', exact: true }).click();
+  await userDirectoryRetry;
+  assert.equal(await userDirectoryAlert.count(), 0, 'a successful member-directory retry clears the warning');
+  await page.waitForFunction(() => Array.from(document.querySelector<HTMLSelectElement>('[data-testid="daily-report-archive-user-filter"]')?.options || [])
+    .some((option) => option.textContent?.includes('日报恢复验收')));
+  const directoryRetryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(directoryRetryState.userDirectoryRequests, 2, 'the explicit retry reloads only the member directory');
   for (const label of ['草稿', '已提交', '已审核', '已退回', '已归档', '状态待确认']) {
     await page.getByText(label, { exact: true }).waitFor();
   }
@@ -311,7 +337,7 @@ try {
   assert.equal(afterArchiveRead.draftRequests, afterRetry.draftRequests, 'viewing summary archives must not save a draft');
   assert.equal(afterArchiveRead.submitRequests, afterRetry.submitRequests, 'viewing summary archives must not submit a report');
   assert.deepEqual(unexpectedErrors, [], 'the isolated desktop report flow renders without unexpected browser errors');
-  assert.equal(expectedHttpErrors.length, 2, 'browser HTTP errors are limited to the injected daily and summary failures');
+  assert.equal(expectedHttpErrors.length, 3, 'browser HTTP errors are limited to the injected daily, summary, and member-directory failures');
   await context.close();
   console.log('Daily Report browser test passed: safe submit recovery, accurate archive statuses, and complete read-only monthly/yearly detail dialogs on desktop and mobile.');
 } finally {

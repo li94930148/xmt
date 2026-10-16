@@ -93,6 +93,10 @@ let collaborationUpdateCount = 0;
 let rejectedCollaborationUpdateCount = 0;
 let rejectedScriptSaveCount = 0;
 let failNextShootingRead = false;
+let failNextShootingVersionsRead = false;
+let failNextPublishingVersionsRead = false;
+let shootingVersionReadCount = 0;
+let publishingVersionReadCount = 0;
 let shootingStatusWriteCount = 0;
 let historicalSourceEditable = false;
 let delayNextProduction303Read = false;
@@ -129,6 +133,10 @@ app.get('/__qa', (req, res) => {
   const historicalDerivedScript = req.query.script === 'historical-derived';
   const sourceSave = req.query.script === 'source-save';
   const archiveMode = String(req.query.archive || '');
+  failNextShootingVersionsRead = req.query.versionRead === 'shooting';
+  failNextPublishingVersionsRead = req.query.versionRead === 'publishing';
+  shootingVersionReadCount = 0;
+  publishingVersionReadCount = 0;
   delayMaterialDraft303 = false;
   publishedArchiveSyncPending = archiveMode === 'pending';
   archiveSyncFailuresRemaining = archiveMode === 'pending' ? 1 : 0;
@@ -205,7 +213,7 @@ app.get('/__qa/script-source-state', (_req, res) => res.json({
   shooting: { script_content: shooting.script_content, script_source_production_id: shooting.script_source_production_id, script_source_version: shooting.script_source_version },
 }));
 app.get('/__qa/collaboration-state', (_req, res) => res.json({ collaborationUpdateCount, rejectedCollaborationUpdateCount, rejectedScriptSaveCount }));
-app.get('/__qa/workflow-version-state', (_req, res) => res.json({ shooting: shootingVersionRequests, publishing: publishingVersionRequests }));
+app.get('/__qa/workflow-version-state', (_req, res) => res.json({ shooting: shootingVersionRequests, publishing: publishingVersionRequests, shootingReadCount: shootingVersionReadCount, publishingReadCount: publishingVersionReadCount }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
 app.get('/api/achievements', (_req, res) => res.json({ data: [] }));
 app.get('/api/achievements/me', (_req, res) => res.json({ data: [] }));
@@ -220,7 +228,14 @@ app.get('/api/workflow/shooting/301', (_req, res) => {
   }
   return res.json({ ...shooting, published_archive_script_sync_pending: publishedArchiveSyncPending, can_sync_published_archive: true });
 });
-app.get('/api/workflow/shooting/301/versions', (_req, res) => res.json({ data: [...shootingScriptVersions].reverse() }));
+app.get('/api/workflow/shooting/301/versions', (_req, res) => {
+  shootingVersionReadCount += 1;
+  if (failNextShootingVersionsRead) {
+    failNextShootingVersionsRead = false;
+    return res.status(503).json({ message: '模拟成片剧本历史读取失败' });
+  }
+  return res.json({ data: [...shootingScriptVersions].reverse() });
+});
 app.get('/api/workflow/shooting', (_req, res) => res.json({ data: [shooting], total: 1, page: 1, limit: 20 }));
 app.put('/api/workflow/shooting/301', (req, res) => {
   if (rejectCollaborationUpdates && Object.hasOwn(req.body, 'script_content')) {
@@ -260,7 +275,14 @@ app.post('/api/workflow/shooting/301/archive-sync', (_req, res) => {
   return res.json({ message: '发布归档已同步', archiveSync: 'synced' });
 });
 app.get('/api/workflow/publishing/501', (_req, res) => res.json({ ...publishing, published_archive_script_sync_pending: publishedArchiveSyncPending, can_sync_published_archive: true }));
-app.get('/api/workflow/publishing/501/versions', (_req, res) => res.json({ data: [...publishingScriptVersions].reverse() }));
+app.get('/api/workflow/publishing/501/versions', (_req, res) => {
+  publishingVersionReadCount += 1;
+  if (failNextPublishingVersionsRead) {
+    failNextPublishingVersionsRead = false;
+    return res.status(503).json({ message: '模拟发布剧本历史读取失败' });
+  }
+  return res.json({ data: [...publishingScriptVersions].reverse() });
+});
 app.put('/api/workflow/publishing/501', (req, res) => {
   if (Object.hasOwn(req.body, 'script_content')) {
     publishingScriptWriteCount += 1;
@@ -525,10 +547,24 @@ if (process.env.XMT_WORKFLOW_DETAIL_QA_SERVE === '1') {
 const browser = await chromium.launch({ headless: true });
 try {
   const errors: string[] = [];
+  const expectedVersionHistoryFailures: string[] = [];
+  let expectedVersionHistoryConsoleErrors = 0;
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
   page.setDefaultTimeout(5000);
   page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (message.text() === 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)'
+      && expectedVersionHistoryConsoleErrors < expectedVersionHistoryFailures.length) {
+      expectedVersionHistoryConsoleErrors += 1;
+      return;
+    }
+    errors.push(message.text());
+  });
+  page.on('response', (response) => {
+    if (response.status() === 503 && (response.url().endsWith('/api/workflow/shooting/301/versions')
+      || response.url().endsWith('/api/workflow/publishing/501/versions'))) expectedVersionHistoryFailures.push(response.url());
+  });
 
   const assertButtonFits = async (button: import('playwright').Locator, label: string, viewport: { width: number; height: number }, zoom: number) => {
     await button.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
@@ -564,13 +600,26 @@ try {
     assert.ok(geometry.x >= -1 && geometry.right <= geometry.viewportWidth + 1 && geometry.y >= -1 && geometry.bottom <= geometry.viewportHeight + 1, `${label} stays inside the viewport at ${viewport.width}x${viewport.height} / ${zoom * 100}%: ${JSON.stringify(geometry)}`);
   };
 
-  await page.goto(`${base}/__qa?page=shooting`);
+  await page.goto(`${base}/__qa?page=shooting&versionRead=shooting`);
   await page.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
   const finishProduction = page.getByRole('button', { name: '完成制作', exact: true });
   const saveShootingMinor = page.getByRole('button', { name: '小版本保存', exact: true });
   const saveShootingMajor = page.getByRole('button', { name: '大版本保存', exact: true });
   const shootingHistory = page.getByRole('region', { name: '剧本版本历史' });
   await shootingHistory.waitFor();
+  const shootingHistoryError = page.getByTestId('shooting-script-history-error');
+  await shootingHistoryError.waitFor();
+  assert.equal(await shootingHistory.getByText('暂无已保存版本', { exact: true }).count(), 0, 'a failed history request is not presented as an empty history');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the shooting history error and retry fit at 390px');
+  await shootingHistoryError.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: '/tmp/xmt-shooting-script-history-retry-390.png', fullPage: false });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const shootingHistoryRetry = page.waitForResponse((response) => response.url().endsWith('/api/workflow/shooting/301/versions') && response.request().method() === 'GET' && response.status() === 200);
+  await shootingHistoryError.getByRole('button', { name: '重新加载版本历史', exact: true }).click();
+  await shootingHistoryRetry;
+  await shootingHistory.getByText('暂无已保存版本', { exact: true }).waitFor();
+  assert.equal((await page.request.get(`${base}/__qa/workflow-version-state`).then((response) => response.json())).shootingReadCount, 2, 'explicit retry reloads only the shooting version history');
   await saveShootingMinor.click();
   await page.waitForFunction(async () => (await (await fetch('/__qa/workflow-version-state')).json()).shooting.length > 0);
   const shootingVersionBody = await page.evaluate(async () => (await (await fetch('/__qa/workflow-version-state')).json()).shooting[0]);
@@ -624,10 +673,23 @@ try {
   await page.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
   assert.ok(await contrastRatio(page.getByRole('button', { name: '完成制作', exact: true })) >= 4.5, 'dark-theme shooting completion action has accessible text contrast');
 
-  await page.goto(`${base}/__qa?page=publishing`);
+  await page.goto(`${base}/__qa?page=publishing&versionRead=publishing`);
   await page.getByRole('heading', { name: '城市早餐探店拍摄计划' }).waitFor();
   const editScript = page.getByRole('button', { name: '编辑剧本', exact: true });
   const publishingHistory = page.locator('[aria-label="发布剧本版本历史"]');
+  const publishingHistoryError = page.getByTestId('publishing-script-history-error');
+  await publishingHistoryError.waitFor();
+  assert.equal(await publishingHistory.getByText('暂无已保存版本', { exact: true }).count(), 0, 'a failed publishing history request is not presented as empty');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the publishing history error and retry fit at 390px');
+  await publishingHistoryError.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: '/tmp/xmt-publishing-script-history-retry-390.png', fullPage: false });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const publishingHistoryRetry = page.waitForResponse((response) => response.url().endsWith('/api/workflow/publishing/501/versions') && response.request().method() === 'GET' && response.status() === 200);
+  await publishingHistoryError.getByRole('button', { name: '重新加载版本历史', exact: true }).click();
+  await publishingHistoryRetry;
+  await publishingHistory.getByText('暂无已保存版本', { exact: true }).waitFor();
+  assert.equal((await page.request.get(`${base}/__qa/workflow-version-state`).then((response) => response.json())).publishingReadCount, 2, 'explicit retry reloads only the publishing version history');
   await editScript.click();
   const savePublishingMinor = page.getByRole('button', { name: '小版本保存', exact: true });
   await savePublishingMinor.click();
@@ -1317,7 +1379,9 @@ try {
   await materialScopePage.screenshot({ path: '/tmp/xmt-production-material-scope-isolation.png', fullPage: false });
   await materialScopePage.close();
 
-  assert.deepEqual(errors, [], 'shooting and publishing detail pages render without browser errors');
+  assert.equal(expectedVersionHistoryFailures.length, 2, 'only the two deliberately injected version-history 503 responses are expected');
+  assert.equal(expectedVersionHistoryConsoleErrors, 2, 'only the two known version-history 503 browser resource errors are expected');
+  assert.deepEqual(errors, [], 'shooting and publishing detail pages render without unexpected browser errors');
   console.log('Workflow detail responsive browser test passed: archive-sync partial-save feedback and retry, light/dark workflow contrast, desktop/320/390px detail actions, exact history routing, and stale route/material requests cannot cross production scopes.');
 } finally {
   await browser.close();

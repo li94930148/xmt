@@ -144,6 +144,7 @@ let messageReadAttempts = 0;
 const messageReadFailureIds = new Set<number>();
 let messageReadDelayMs = 0;
 let messageBulkReadAttempts = 0;
+let messageBulkReadFailures = 0;
 let messageClearFailures = 0;
 let messageClearAttempts = 0;
 let messageListReadHold = false;
@@ -447,13 +448,35 @@ fixtureApi.use('/api', async (request, response) => {
       scope: 'personal',
       generated_at: '2026-10-09T00:00:00.000Z',
       stale_stage_days: 2,
-      counts: { overdue: 0, due_soon: 0, stalled: 0, total: 0 },
+      active_topics: { total: 1, topics: [{ id: unknownStatusTopic.id, title: unknownStatusTopic.title, status: unknownStatusTopic.status }] },
+      counts: { overdue: 1, due_soon: 0, stalled: 0, total: 1 },
       today_publishing: { total: 0, tasks: [] },
       sync_anomalies: { available: false, total: 0, tasks: [] },
       production_reviews: { available: false, total: 0, tasks: [] },
       retrospectives: { available: true, total: 0, tasks: [] },
-      topics: [],
+      topics: [{
+        id: unknownStatusTopic.id,
+        title: unknownStatusTopic.title,
+        status: unknownStatusTopic.status,
+        deadline: '2026-09-27T00:00:00.000Z',
+        stage_entered_at: '2026-09-28T00:00:00.000Z',
+        assignee_name: '移动验收',
+        is_overdue: true,
+        is_due_soon: false,
+        is_stalled: false,
+      }],
+      topic_stages: {
+        pending: { total: 0, topics: [] },
+        production: { total: 0, topics: [] },
+        shooting: { total: 0, topics: [] },
+        publishing: { total: 0, topics: [] },
+        completed: { total: 0, topics: [] },
+      },
+      my_drafts: { tasks: [] },
     });
+  }
+  if (request.path === '/dashboard/home-activity' && request.method === 'GET') {
+    return response.json({ scope: 'personal', generated_at: '2026-10-09T00:00:00.000Z', events: [] });
   }
   if (request.path === '/calendar' && request.method === 'POST') {
     const title = String(request.body?.title ?? '');
@@ -655,6 +678,10 @@ fixtureApi.use('/api', async (request, response) => {
   }
   if (request.path === '/messages/read-all' && request.method === 'POST') {
     messageBulkReadAttempts += 1;
+    if (messageBulkReadFailures > 0) {
+      messageBulkReadFailures -= 1;
+      return response.status(503).json({ message: '消息服务暂不可用，批量标记失败' });
+    }
     const updatedCount = mobileMessagesFixture.filter((message) => !message.read).length;
     mobileMessagesFixture = mobileMessagesFixture.map((message) => ({ ...message, read: true }));
     return response.json({ message: '所有消息已标记为已读', updatedCount });
@@ -1058,11 +1085,82 @@ try {
   }
 
   {
+    const desktopMessageRefreshUser = { ...user, id: 9, username: 'desktop-message-refresh-recovery', name: '桌面消息刷新恢复', role: 'member' };
+    fixtureUser = desktopMessageRefreshUser;
+    fixturePermissions = [];
+    mobileMessagesFixture = [{ id: 991, title: '保留的桌面消息', content: '刷新失败后仍应留在消息中心。', read: false, type: 'info', created_at: '2026-09-28T09:00:00.000Z' }];
+    const { context, page, errors, expectConsoleFailure } = await openMobilePage(1440, desktopMessageRefreshUser);
+    try {
+      await page.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+      assert.ok((await page.title()).trim().length > 0, 'the desktop message page must have a document title');
+      const retainedMessage = page.getByRole('button', { name: /保留的桌面消息/ });
+      await retainedMessage.waitFor();
+
+      messageLoadFailures = 1;
+      expectConsoleFailure();
+      const failedMessageRefresh = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 503);
+      await page.evaluate(() => window.dispatchEvent(new Event('xmt-messages-refresh')));
+      await failedMessageRefresh;
+      await page.getByText('刷新失败，仍显示上次成功加载的消息', { exact: true }).waitFor();
+      assert.equal(await retainedMessage.count(), 1, 'a failed refresh must retain the last successful same-scope message');
+      assert.equal(await page.getByText('暂无消息', { exact: true }).count(), 0, 'a failed refresh must not present the retained inbox as empty');
+      await page.screenshot({ path: '/tmp/xmt-desktop-message-refresh-stale-1440.png', fullPage: true });
+
+      const recoveredMessageRefresh = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+      await page.getByRole('button', { name: '重新加载', exact: true }).click();
+      await recoveredMessageRefresh;
+      assert.equal(await page.getByText('刷新失败，仍显示上次成功加载的消息', { exact: true }).count(), 0, 'a successful retry clears the stale warning');
+      assert.equal(await retainedMessage.count(), 1, 'a successful retry continues to show the latest message result');
+      assert.equal(await page.locator('vite-error-overlay, #webpack-dev-server-client-overlay, [data-nextjs-dialog]').count(), 0, 'the desktop message page must not show a framework error overlay');
+
+      messageLoadFailures = 1;
+      expectConsoleFailure();
+      const failedScopeChange = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.url().includes('link=present') && response.status() === 503);
+      await page.getByRole('button', { name: '待处理', exact: true }).click();
+      await failedScopeChange;
+      await page.getByRole('heading', { name: '消息加载失败' }).waitFor();
+      assert.equal(await retainedMessage.count(), 0, 'a failed filter change must not display an old query result as current');
+      const recoveredScopeChange = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.url().includes('link=present') && response.status() === 200);
+      await page.getByRole('button', { name: '重试加载', exact: true }).click();
+      await recoveredScopeChange;
+      await page.getByText('暂无消息', { exact: true }).waitFor();
+      assert.deepEqual(errors, [], errors.join('\n'));
+      console.log('Desktop message refresh recovery checks passed at 1440px');
+    } finally {
+      messageLoadFailures = 0;
+      fixtureUser = user;
+      fixturePermissions = [];
+      mobileMessagesFixture = [];
+      await context.close();
+    }
+  }
+
+  {
+    const desktopHomeUser = { ...user, id: 50, username: 'desktop-home-status', name: '桌面状态验收', role: 'member' };
+    fixtureUser = desktopHomeUser;
+    fixturePermissions = [];
+    const { context, page, errors } = await openMobilePage(1440, desktopHomeUser);
+    try {
+      await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+      const unknownStatusAttention = page.getByRole('button', { name: /未知状态移动选题/ });
+      await unknownStatusAttention.waitFor();
+      assert.equal(await unknownStatusAttention.getByText('状态待确认').count(), 1, 'desktop home must label unknown topic states for confirmation');
+      assert.equal(await page.getByText('legacy_review', { exact: true }).count(), 0, 'desktop home must not expose an unknown topic status code');
+      assert.equal(await page.locator('vite-error-overlay, #webpack-dev-server-client-overlay, [data-nextjs-dialog]').count(), 0, 'desktop home must not show a framework error overlay');
+      assert.deepEqual(errors, [], `desktop home unknown state: ${errors.join('\n')}`);
+    } finally {
+      fixtureUser = user;
+      fixturePermissions = [];
+      await context.close();
+    }
+  }
+
+  {
     const { context, page, errors } = await openMobilePage(320);
     try {
       await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
-      await page.getByText(unknownStatusTopic.title, { exact: true }).waitFor();
-      await page.getByText('状态待确认', { exact: true }).waitFor();
+      await page.getByRole('button', { name: `查看需要关注的选题：${unknownStatusTopic.title}`, exact: true }).waitFor();
+      await page.getByRole('button', { name: `${unknownStatusTopic.title} 状态待确认`, exact: true }).waitFor();
       assert.equal(await page.getByText('legacy_review', { exact: true }).count(), 0, 'mobile home must not expose an unknown topic status');
       await assertMobileLayout(page, 320, 'home-unknown-status');
       await page.goto(`${baseUrl}/topics`, { waitUntil: 'domcontentloaded' });
@@ -1875,29 +1973,69 @@ try {
     await messageReadContext.close();
   }
 
-  mobileMessagesFixture = [
-    { id: 994, title: '批量已读成功提醒', content: '成功项应保留已读状态。', read: false },
-    { id: 995, title: '批量已读失败提醒', content: '失败项应保留未读并允许重试。', read: false },
-  ];
+  mobileMessagesFixture = Array.from({ length: 45 }, (_, index) => ({
+    id: 994 + index,
+    title: `移动分页消息 ${index + 1}`,
+    content: '检查移动消息分页、全局未读摘要和账号级全部已读。',
+    read: index % 3 === 0,
+    type: 'info',
+  }));
   messageReadFailures = 0;
   messageReadFailureIds.clear();
-  messageReadFailureIds.add(995);
   messageReadAttempts = 0;
+  messageBulkReadAttempts = 0;
+  messageBulkReadFailures = 0;
   const { context: mobileBulkReadContext, page: mobileBulkReadPage, errors: mobileBulkReadErrors, expectConsoleFailure: expectMobileBulkReadFailure } = await openMobilePage(390, messageUser);
   try {
     await mobileBulkReadPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
-    await mobileBulkReadPage.getByRole('button', { name: /批量已读成功提醒/ }).waitFor();
+    await mobileBulkReadPage.getByRole('button', { name: /移动分页消息 1/ }).waitFor();
+    await mobileBulkReadPage.getByText('未读 30 条', { exact: true }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByLabel('移动主导航').getByText('9+', { exact: true }).count(), 1, 'mobile navigation badge uses the account-wide unread summary rather than the first page count');
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 45 条）', exact: true }).waitFor();
+    messageLoadFailures = 1;
     expectMobileBulkReadFailure();
+    const failedNextPage = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).searchParams.get('page') === '2' && response.status() === 503);
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 45 条）', exact: true }).click();
+    await failedNextPage;
+    await mobileBulkReadPage.getByRole('button', { name: '重试加载更多', exact: true }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /移动分页消息 1/ }).count(), 1, 'failed next page retains the already loaded first page');
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /移动分页消息 21/ }).count(), 0, 'failed next page does not render incomplete data');
+    await mobileBulkReadPage.getByRole('button', { name: '重试加载更多', exact: true }).click();
+    await mobileBulkReadPage.getByRole('button', { name: /移动分页消息 21/ }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /移动分页消息 21/ }).count(), 1, 'retry appends the next page exactly once');
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 40 / 45 条）', exact: true }).click();
+    await mobileBulkReadPage.getByRole('button', { name: /移动分页消息 45/ }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByText('未读 30 条', { exact: true }).count(), 1, 'loading additional pages does not replace the account-wide unread count with a page count');
+
+    await mobileBulkReadPage.getByRole('button', { name: '未读', exact: true }).click();
+    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 2(?:\s|$)/ }).waitFor();
+    const individualRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/messages/995') && response.status() === 200);
+    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 2(?:\s|$)/ }).click();
+    await individualRead;
+    await mobileBulkReadPage.getByText('未读 29 条', { exact: true }).waitFor();
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 29 条）', exact: true }).waitFor();
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 29 条）', exact: true }).click();
+    await mobileBulkReadPage.getByRole('button', { name: /移动分页消息 44/ }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /移动分页消息/ }).count(), 29, 'marking one unread item refreshes the first server page and loads all remaining rows without a pagination gap');
+    messageReadAttempts = 0;
+
+    messageBulkReadFailures = 1;
+    expectMobileBulkReadFailure();
+    const failedBulkRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 503);
     await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).click();
-    await mobileBulkReadPage.getByText('1 条已标记为已读，1 条仍未读，可重试。', { exact: true }).waitFor();
-    assert.equal(mobileMessagesFixture.find((message) => message.id === 994)?.read, true, 'successful messages are reflected as read after partial completion');
-    assert.equal(mobileMessagesFixture.find((message) => message.id === 995)?.read, false, 'failed messages remain unread after partial completion');
-    await mobileBulkReadPage.getByText('未读 1 条', { exact: true }).waitFor();
-    assert.equal(messageReadAttempts, 2, 'bulk read sends one individual request for each unread message');
+    await failedBulkRead;
+    await mobileBulkReadPage.getByText('批量标记失败', { exact: true }).waitFor();
+    await mobileBulkReadPage.getByText('未读 29 条', { exact: true }).waitFor();
+    assert.ok(mobileMessagesFixture.some((message) => !message.read), 'failed all-read keeps server unread states unchanged');
+    const successfulBulkRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 200);
     await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).click();
-    await mobileBulkReadPage.getByText('所有消息已标记为已读', { exact: true }).waitFor();
-    assert.ok(mobileMessagesFixture.every((message) => message.read), 'a successful retry eventually marks all messages read');
-    assert.equal(messageReadAttempts, 3, 'retry submits only the one message that remained unread');
+    await successfulBulkRead;
+    await mobileBulkReadPage.getByText('已将 29 条未读消息标记为已读', { exact: true }).waitFor();
+    await mobileBulkReadPage.getByText('未读 0 条', { exact: true }).waitFor();
+    assert.ok(mobileMessagesFixture.every((message) => message.read), 'mobile all-read covers the account across every page');
+    assert.equal(messageReadAttempts, 0, 'bulk read uses the atomic account endpoint instead of per-message requests');
+    assert.equal(messageBulkReadAttempts, 2, 'failed bulk read retries exactly once');
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).isDisabled(), true, 'global unread summary disables all-read after success');
     assert.deepEqual(mobileBulkReadErrors, [], mobileBulkReadErrors.join('\n'));
   } finally {
     await mobileBulkReadContext.close();

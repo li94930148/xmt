@@ -60,13 +60,18 @@ let createdResource = { ...createdResourceBase };
 const existingResourceIds = new Set([listResource.id, detailResource.id, raceFirstResource.id, raceSecondResource.id]);
 let failNextDeleteId: number | null = null;
 let failNextResourceListRead = false;
+let failNextCategoryRead = false;
 let failNextCreatedResourceDetailRead = false;
 let delayedDeleteId: number | null = null;
 let resourceListReads = 0;
+let categoryReads = 0;
 let resourceDeleteRequests = 0;
 let successfulResourceDeletes = 0;
 let resourceCreateRequests = 0;
 let createdResourceDetailReads = 0;
+let resourceDetailReads = 0;
+let resourceAuditReads = 0;
+let failNextAuditRead = false;
 let delayNextRaceDetailRead = false;
 let resolveRaceDetailReadStarted: (() => void) | null = null;
 let resolveRaceDetailReadFinished: (() => void) | null = null;
@@ -76,6 +81,8 @@ const app = express();
 app.use(express.json());
 app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
+  if (req.query.fail_audit === 'true') failNextAuditRead = true;
+  if (req.query.fail_categories === 'true') failNextCategoryRead = true;
   const route = req.query.view === 'knowledge' ? '/asset-center/knowledge'
     : req.query.view === 'detail' ? `/asset-center/resources/${detailResource.id}`
       : req.query.view === 'race' ? `/asset-center/resources/${raceFirstResource.id}`
@@ -83,7 +90,7 @@ app.get('/__qa', (req, res) => {
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','resource-hover-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace(${JSON.stringify(route)});</script>`);
 });
 app.get('/api/auth/me', (_req, res) => res.json(user));
-app.get('/api/permissions/my', (_req, res) => res.json(['resource:update', 'resource:delete']));
+app.get('/api/permissions/my', (_req, res) => res.json(['resource:update', 'resource:delete', 'resource:audit']));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
 app.get('/api/resource-center/resources', (_req, res) => {
@@ -98,6 +105,7 @@ app.get('/api/resource-center/resources', (_req, res) => {
   });
 });
 app.get('/api/resource-center/resources/:id', (req, res) => {
+  resourceDetailReads += 1;
   if (Number(req.params.id) === createdResource.id) {
     createdResourceDetailReads += 1;
     if (failNextCreatedResourceDetailRead) {
@@ -119,6 +127,14 @@ app.get('/api/resource-center/resources/:id', (req, res) => {
   }
   return res.json(resource);
 });
+app.get('/api/resource-center/resources/:id/audit', (_req, res) => {
+  resourceAuditReads += 1;
+  if (failNextAuditRead) {
+    failNextAuditRead = false;
+    return res.status(503).json({ message: '模拟资料审计记录读取失败' });
+  }
+  return res.json({ data: [] });
+});
 app.post('/api/resource-center/resources', (req, res) => {
   resourceCreateRequests += 1;
   createdResource = { ...createdResourceBase, title: String(req.body?.title || createdResourceBase.title) };
@@ -138,7 +154,14 @@ app.delete('/api/resource-center/resources/:id', async (req, res) => {
   successfulResourceDeletes += 1;
   return res.json({ message: '资料已删除' });
 });
-app.get('/api/resource-center/categories', (req, res) => res.json({ data: req.query.library_type === 'knowledge' ? [{ id: 81, library_type: 'knowledge', parent_id: null, name: '浅色主题分类', code: 'light-theme', path: null, sort_order: 1, enabled: 1, resource_count: 1 }] : [] }));
+app.get('/api/resource-center/categories', (req, res) => {
+  categoryReads += 1;
+  if (failNextCategoryRead) {
+    failNextCategoryRead = false;
+    return res.status(503).json({ message: '模拟分类列表读取失败' });
+  }
+  return res.json({ data: req.query.library_type === 'knowledge' ? [{ id: 81, library_type: 'knowledge', parent_id: null, name: '浅色主题分类', code: 'light-theme', path: null, sort_order: 1, enabled: 1, resource_count: 1 }] : [] });
+});
 app.use('/api', (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 20 }));
 
 const server = http.createServer(app);
@@ -315,6 +338,48 @@ try {
     assert.ok(namedForeground && contrastRatio(namedForeground, namedBackground) >= 4.5, `${theme} selected named knowledge category contrast is ${namedForeground ? contrastRatio(namedForeground, namedBackground).toFixed(2) : 'unavailable'}:1; expected at least 4.5:1`);
   }
 
+  await page.goto(`${base}/__qa?theme=light&fail_categories=true`);
+  await page.getByRole('heading', { name: '项目资料库', exact: true }).waitFor();
+  await page.getByRole('link', { name: listResource.title, exact: true }).waitFor();
+  const categoryFailure = page.getByRole('alert').filter({ hasText: '分类暂时无法读取' });
+  await categoryFailure.waitFor();
+  assert.equal(await page.getByText(listResource.title, { exact: true }).count(), 1, 'the resource list remains visible when its category request fails');
+  const listReadsBeforeCategoryRetry = resourceListReads;
+  const categoryReadsBeforeRetry = categoryReads;
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const geometry = await page.evaluate(() => ({ pageWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+    assert.ok(geometry.pageWidth <= geometry.clientWidth + 1, `the category recovery notice does not overflow at ${width}px: ${JSON.stringify(geometry)}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await categoryFailure.getByRole('button', { name: '重新加载分类', exact: true }).click();
+  await categoryFailure.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('button')).some((button) => button.textContent?.includes('分类管理') && !(button as HTMLButtonElement).disabled));
+  assert.equal(categoryReads, categoryReadsBeforeRetry + 1, 'category retry performs one category-list request');
+  assert.equal(resourceListReads, listReadsBeforeCategoryRetry, 'category retry does not reload the resource list');
+
+  const knowledgeListReadsBeforeFailure = resourceListReads;
+  await page.goto(`${base}/__qa?theme=light&view=knowledge&fail_categories=true`);
+  await page.getByRole('heading', { name: '知识库', exact: true }).waitFor();
+  await page.getByRole('link', { name: listResource.title, exact: true }).waitFor();
+  const knowledgeCategoryFailure = page.getByRole('alert').filter({ hasText: '分类目录暂不可用' });
+  await knowledgeCategoryFailure.waitFor();
+  assert.equal(await page.getByText(listResource.title, { exact: true }).count(), 1, 'the knowledge results remain visible when its category-tree request fails');
+  const knowledgeCategoryReadsBeforeRetry = categoryReads;
+  assert.equal(await page.getByRole('button', { name: '分类管理', exact: true }).isDisabled(), true, 'category management stays closed while its directory is unavailable');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const geometry = await page.evaluate(() => ({ pageWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+    assert.ok(geometry.pageWidth <= geometry.clientWidth + 1, `the knowledge category recovery notice does not overflow at ${width}px: ${JSON.stringify(geometry)}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await knowledgeCategoryFailure.getByRole('button', { name: '重新加载分类', exact: true }).click();
+  await knowledgeCategoryFailure.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('button')).some((button) => button.textContent?.includes('分类管理') && !(button as HTMLButtonElement).disabled));
+  assert.equal(categoryReads, knowledgeCategoryReadsBeforeRetry + 1, 'knowledge category retry performs one category-list request');
+  assert.equal(resourceListReads, knowledgeListReadsBeforeFailure + 1, 'knowledge category failure and retry do not duplicate the resource-list request');
+  assert.equal(await page.getByRole('button', { name: '分类管理', exact: true }).isDisabled(), false, 'category management becomes available after the directory is restored');
+
   await page.goto(`${base}/__qa?theme=light`);
   await page.getByRole('heading', { name: '项目资料库', exact: true }).waitFor();
   failNextDeleteId = listResource.id;
@@ -388,8 +453,31 @@ try {
   await racePage.close();
 
   failNextDeleteId = detailResource.id;
+  failNextAuditRead = true;
+  const detailReadsBeforeAuditFailure = resourceDetailReads;
+  const auditReadsBeforeFailure = resourceAuditReads;
   await page.goto(`${base}/__qa?theme=dark&view=detail`);
   await page.getByRole('heading', { name: detailResource.title, exact: true }).waitFor();
+  const auditFailure = page.getByRole('alert').filter({ hasText: '审计记录暂时无法读取' });
+  await auditFailure.waitFor();
+  assert.equal(await page.getByText(detailResource.content_text!, { exact: true }).count(), 1, 'the resource detail remains usable when its optional audit request fails');
+  assert.equal(await page.getByRole('heading', { name: '资料详情暂时无法读取', exact: true }).count(), 0, 'an audit-only failure is not presented as a resource detail failure');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const geometry = await page.evaluate(() => ({ pageWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+    assert.ok(geometry.pageWidth <= geometry.clientWidth + 1, `the audit recovery notice does not overflow at ${width}px: ${JSON.stringify(geometry)}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  assert.equal(resourceDetailReads, detailReadsBeforeAuditFailure + 1, 'the initial audit failure does not cause a second resource detail read');
+  assert.equal(resourceAuditReads, auditReadsBeforeFailure + 1, 'the audit panel makes one initial read');
+  const createsBeforeAuditRetry = resourceCreateRequests;
+  const deletesBeforeAuditRetry = resourceDeleteRequests;
+  await auditFailure.getByRole('button', { name: '重新加载审计记录', exact: true }).click();
+  await auditFailure.waitFor({ state: 'detached' });
+  assert.equal(resourceAuditReads, auditReadsBeforeFailure + 2, 'retry performs one additional audit read');
+  assert.equal(resourceDetailReads, detailReadsBeforeAuditFailure + 1, 'audit retry does not reload the resource detail');
+  assert.equal(resourceCreateRequests, createsBeforeAuditRetry, 'audit retry does not create a resource');
+  assert.equal(resourceDeleteRequests, deletesBeforeAuditRetry, 'audit retry does not delete a resource');
   const detailPageIdentity = await page.evaluate(() => ({
     path: window.location.pathname,
     title: document.title,
@@ -435,8 +523,8 @@ try {
   assert.equal(resourceDeleteRequests, detailDeleteRequestsBeforeRetry + 1, 'a rapid double trigger sends only one detail delete request');
 
   assert.deepEqual(errors, [], 'resource table light/dark hover states render without browser errors');
-  assert.equal(expectedHttpErrors.length, 4, 'two intentional delete failures, post-delete list failure and post-create detail failure each return one 503 response');
-  console.log('Resource browser test passed: fixed table actions stay visible at 320/390px; resource hover, selected knowledge categories, detail request ownership and list/detail delete success/failure feedback meet their contracts.');
+  assert.equal(expectedHttpErrors.length, 7, 'two intentional delete failures, post-delete list failure, post-create detail failure, two isolated category read failures and audit read failure each return one 503 response');
+  console.log('Resource browser test passed: fixed table actions stay visible at 320/390px; project and knowledge category failures plus audit failures recover independently; resource hover, detail request ownership and list/detail delete feedback meet their contracts.');
 } finally {
   await browser.close();
   await vite.close();

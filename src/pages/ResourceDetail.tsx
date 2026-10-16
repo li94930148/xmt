@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { deleteResourceCenterResource, getResourceAudit, getResourceCenterResource, type ResourceDetailData } from '@/api/resourceCenter';
 import { ConfirmModal, ErrorState, LoadingState } from '@/components/common';
+import ActionButton from '@/components/studio/ActionButton';
 import { GlassPanel, PageHeader, PageShell } from '@/components/studio';
 import { usePermission } from '@/hooks/usePermission';
 import { formatBeijingDate, formatBeijingTime } from '@/lib/utils';
@@ -19,38 +20,60 @@ export default function ResourceDetail() {
   const [confirmedCreatedTitle] = useState(typeof routeState?.confirmedCreatedTitle === 'string' ? routeState.confirmedCreatedTitle : null);
   const [resource, setResource] = useState<ResourceDetailData | null>(null);
   const [audit, setAudit] = useState<Array<{ id: number; action: string; created_at: string }>>([]);
+  const [auditState, setAuditState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const deleteLockRef = useRef(false);
   const loadSequenceRef = useRef(0);
+  const auditSequenceRef = useRef(0);
   const addNotification = useAppStore((store) => store.addNotification);
   const { hasPermission } = usePermission();
   const canAudit = hasPermission('resource:audit');
+  const loadAudit = useCallback(async () => {
+    const requestId = ++auditSequenceRef.current;
+    setAuditState('loading');
+    setAuditError(null);
+    try {
+      const response = await getResourceAudit(id);
+      if (requestId !== auditSequenceRef.current || currentResourceIdRef.current !== id) return;
+      setAudit(response.data);
+      setAuditState('ready');
+    } catch (cause) {
+      if (requestId !== auditSequenceRef.current || currentResourceIdRef.current !== id) return;
+      setAuditError(cause instanceof Error ? cause.message : '审计记录暂时无法读取');
+      setAuditState('error');
+    }
+  }, [id]);
   const load = useCallback(async () => {
     const requestId = ++loadSequenceRef.current;
+    auditSequenceRef.current += 1;
     setState('loading');
     setLoadError(null);
     setResource(null);
     setAudit([]);
+    setAuditState(canAudit ? 'loading' : 'ready');
+    setAuditError(null);
     try {
       const data = await getResourceCenterResource(id);
       if (requestId !== loadSequenceRef.current || currentResourceIdRef.current !== id) return;
-      const auditData = canAudit ? (await getResourceAudit(id)).data : [];
-      if (requestId !== loadSequenceRef.current || currentResourceIdRef.current !== id) return;
       setResource(data);
-      setAudit(auditData);
       setState('ready');
+      if (canAudit) await loadAudit();
     } catch (cause) {
       if (requestId !== loadSequenceRef.current || currentResourceIdRef.current !== id) return;
       setLoadError(cause instanceof Error ? cause.message : '资料详情暂时无法读取');
       setState('error');
     }
-  }, [id, canAudit]);
+  }, [id, canAudit, loadAudit]);
   useEffect(() => {
     void load();
-    return () => { loadSequenceRef.current += 1; };
+    return () => {
+      loadSequenceRef.current += 1;
+      auditSequenceRef.current += 1;
+    };
   }, [load]);
   const handleDelete = async () => {
     if (!resource || deleteLockRef.current) return;
@@ -78,7 +101,7 @@ export default function ResourceDetail() {
     {confirmedCreatedTitle ? <p role="status" className="text-sm text-studio-success-contrast">资料「{confirmedCreatedTitle}」已创建。</p> : null}
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-4"><GlassPanel className="p-5"><div className="grid gap-4 text-sm sm:grid-cols-2"><div><span className="text-studio-text-muted">分类</span><p className="mt-1 text-studio-text-primary">{resource.category?.name || '—'}</p></div><div><span className="text-studio-text-muted">更新时间</span><p className="mt-1 text-studio-text-primary">{formatBeijingTime(resource.updated_at)}</p></div><div><span className="text-studio-text-muted">可见范围</span><p className="mt-1 text-studio-text-primary">{resourceVisibilityLabel(resource.visibility)}</p></div><div><span className="text-studio-text-muted">状态</span><p className="mt-1 text-studio-text-primary">{resourceStatusLabel(resource.status)}</p></div></div>{resource.summary ? <p className="mt-5 border-t border-studio-border-soft pt-5 text-sm leading-7 text-studio-text-secondary">{resource.summary}</p> : null}</GlassPanel><GlassPanel className="p-5"><h2 className="mb-4 font-semibold text-studio-text-primary">正文</h2><div className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-studio-text-secondary">{resource.content_text || '—'}</div></GlassPanel></div>
-      <div className="space-y-4"><GlassPanel className="p-5"><h2 className="font-semibold text-studio-text-primary">标签</h2><div className="mt-3 flex flex-wrap gap-2">{resource.tags.length ? resource.tags.map((tag) => <span key={tag.id} className="rounded-button bg-studio-surface-elevated px-2.5 py-1 text-xs text-studio-text-secondary">{tag.name}</span>) : <span className="text-sm text-studio-text-muted">—</span>}</div></GlassPanel><GlassPanel className="p-5"><h2 className="font-semibold text-studio-text-primary">文件</h2><div className="mt-3 space-y-2">{resource.files.length ? resource.files.map((file) => <div key={file.id} className="flex items-center gap-2 rounded-button bg-studio-surface-soft p-3 text-sm text-studio-text-secondary"><File className="h-4 w-4" /><span className="truncate">{file.original_name}</span></div>) : <span className="text-sm text-studio-text-muted">—</span>}</div></GlassPanel><GlassPanel className="p-5"><h2 className="font-semibold text-studio-text-primary">关联内容</h2><div className="mt-3 space-y-2 text-sm text-studio-text-secondary">{resource.relations.length ? resource.relations.map((relation) => <div key={relation.id}>{relation.target_type} · {relation.target_id}</div>) : '—'}</div></GlassPanel><GlassPanel className="p-5"><h2 className="font-semibold text-studio-text-primary">审计记录</h2><div className="mt-3 space-y-2 text-sm text-studio-text-secondary">{audit.length ? audit.slice(0, 8).map((item) => <div key={item.id} className="flex justify-between gap-2"><span>{item.action}</span><span>{formatBeijingDate(item.created_at)}</span></div>) : resource.audit_summary?.total ? <div className="flex justify-between"><span>{resource.audit_summary.last_action || '记录'}</span><span>{resource.audit_summary.total}</span></div> : '—'}</div></GlassPanel></div>
+      <div className="space-y-4"><GlassPanel className="p-5"><h2 className="font-semibold text-studio-text-primary">标签</h2><div className="mt-3 flex flex-wrap gap-2">{resource.tags.length ? resource.tags.map((tag) => <span key={tag.id} className="rounded-button bg-studio-surface-elevated px-2.5 py-1 text-xs text-studio-text-secondary">{tag.name}</span>) : <span className="text-sm text-studio-text-muted">—</span>}</div></GlassPanel><GlassPanel className="p-5"><h2 className="font-semibold text-studio-text-primary">文件</h2><div className="mt-3 space-y-2">{resource.files.length ? resource.files.map((file) => <div key={file.id} className="flex items-center gap-2 rounded-button bg-studio-surface-soft p-3 text-sm text-studio-text-secondary"><File className="h-4 w-4" /><span className="truncate">{file.original_name}</span></div>) : <span className="text-sm text-studio-text-muted">—</span>}</div></GlassPanel><GlassPanel className="p-5"><h2 className="font-semibold text-studio-text-primary">关联内容</h2><div className="mt-3 space-y-2 text-sm text-studio-text-secondary">{resource.relations.length ? resource.relations.map((relation) => <div key={relation.id}>{relation.target_type} · {relation.target_id}</div>) : '—'}</div></GlassPanel><GlassPanel className="p-5"><h2 className="font-semibold text-studio-text-primary">审计记录</h2>{auditState === 'loading' ? <p role="status" className="mt-3 text-sm text-studio-text-muted">正在加载审计记录…</p> : auditState === 'error' ? <div role="alert" className="mt-3 space-y-3 rounded-button border border-studio-amber/25 bg-studio-amber/10 p-3 text-sm text-studio-amber-contrast"><p>审计记录暂时无法读取，详情仍可正常查看；记录可能不完整。{auditError ? ` ${auditError}` : ''}</p><ActionButton type="button" variant="secondary" onClick={() => void loadAudit()}>重新加载审计记录</ActionButton></div> : <div className="mt-3 space-y-2 text-sm text-studio-text-secondary">{audit.length ? audit.slice(0, 8).map((item) => <div key={item.id} className="flex justify-between gap-2"><span>{item.action}</span><span>{formatBeijingDate(item.created_at)}</span></div>) : resource.audit_summary?.total ? <div className="flex justify-between"><span>{resource.audit_summary.last_action || '记录'}</span><span>{resource.audit_summary.total}</span></div> : '—'}</div>}</GlassPanel></div>
     </div>
     <ConfirmModal open={confirmDelete} title="删除资料" description={resource.title} variant="danger" confirmText="删除" loading={deleting} onCancel={() => setConfirmDelete(false)} onConfirm={handleDelete} />
   </PageShell>;

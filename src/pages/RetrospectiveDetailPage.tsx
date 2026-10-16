@@ -17,9 +17,9 @@ import {
   type RetrospectiveDetail,
   type UpdateRetroActionPayload,
 } from '../api/retrospectives';
-import { getUsers } from '../api/users';
-import type { User } from '../types';
 import { useAppStore, useAuthStore } from '../store';
+import { usePermission } from '../hooks/usePermission';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 import { ActionButton, GlassPanel, PageHeader, PageShell } from '../components/studio';
 import RetroStatusPill from '../components/retrospectives/RetroStatusPill';
 import RetroMetricSnapshotPanel from '../components/retrospectives/RetroMetricSnapshotPanel';
@@ -28,6 +28,8 @@ import RetroPublishPanel from '../components/retrospectives/RetroPublishPanel';
 import RetroActionTable from '../components/retrospectives/RetroActionTable';
 import RetroActionDetailDrawer from '../components/retrospectives/RetroActionDetailDrawer';
 import RetroDailyRiskPanel from '../components/retrospectives/RetroDailyRiskPanel';
+import RetroAssigneeDirectoryNotice from '../components/retrospectives/RetroAssigneeDirectoryNotice';
+import { useRetroAssigneeDirectory } from '../components/retrospectives/useRetroAssigneeDirectory';
 import {
   formatDate,
   formatDateTime,
@@ -53,6 +55,15 @@ export default function RetrospectiveDetailPage() {
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
   const currentUser = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.token);
+  const permissionState = usePermission();
+  const assigneeDirectory = useRetroAssigneeDirectory({
+    currentUser,
+    token,
+    canViewUsers: permissionState.hasPermission('user:view'),
+    permissionsLoading: permissionState.loading,
+    refreshPermissions: permissionState.refreshPermissions,
+  });
   const retroId = Number(params.id);
   const currentRetroIdRef = useRef(retroId);
   currentRetroIdRef.current = retroId;
@@ -65,7 +76,6 @@ export default function RetrospectiveDetailPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [dailyRisksError, setDailyRisksError] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] = useState<RetroAction | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingRisks, setLoadingRisks] = useState(false);
   const [working, setWorking] = useState(false);
@@ -77,18 +87,37 @@ export default function RetrospectiveDetailPage() {
   const summaryIsDirty = Boolean(detail && summary !== (detail.retrospective.summaryMd || ''));
 
   useEffect(() => {
-    if (!summaryIsDirty && !working) return;
+    if (!summaryIsDirty && !working && !saving) return;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warnBeforeUnload);
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
-  }, [summaryIsDirty, working]);
+  }, [summaryIsDirty, saving, working]);
+
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    if (mutationInFlightRef.current || working || saving) {
+      addNotification({
+        title: '操作尚未完成',
+        message: '当前复盘操作完成前不能离开，请稍候再试。',
+        type: 'warning',
+      });
+      stay();
+      return;
+    }
+
+    if (summaryIsDirty && !window.confirm('本页还有未保存的复盘结论，离开后这些修改可能无法恢复。请取消并先保存；当前已只读时请先复制保留。是否放弃未保存修改并离开？')) {
+      stay();
+      return;
+    }
+
+    proceed();
+  }, [addNotification, saving, summaryIsDirty, working]);
+  useRouteNavigationGuard(summaryIsDirty || working || saving, handleRouteNavigationAttempt);
 
   const handleReturnToList = () => {
     if (mutationInFlightRef.current) return;
-    if (summaryIsDirty && !window.confirm('本页还有未保存的复盘结论，离开后这些修改可能无法恢复。请取消并先保存；当前已只读时请先复制保留。是否放弃未保存修改并返回列表？')) return;
     navigate('/retrospectives');
   };
 
@@ -160,12 +189,6 @@ export default function RetrospectiveDetailPage() {
       risksRequestSequenceRef.current += 1;
     };
   }, [loadDetail, loadDailyRisks]);
-
-  useEffect(() => {
-    getUsers({ page: 1, limit: 200 })
-      .then((result) => setUsers(result.data || []))
-      .catch(() => setUsers(currentUser ? [currentUser] : []));
-  }, [currentUser]);
 
   const applyDetail = (next: RetrospectiveDetail, submittedSummary?: string) => {
     if (next.retrospective.id !== currentRetroIdRef.current) return;
@@ -371,6 +394,12 @@ export default function RetrospectiveDetailPage() {
         </div>
       ) : null}
 
+      <RetroAssigneeDirectoryNotice
+        status={assigneeDirectory.status}
+        error={assigneeDirectory.error}
+        onRetry={assigneeDirectory.retry}
+      />
+
       <GlassPanel className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -451,7 +480,7 @@ export default function RetrospectiveDetailPage() {
           />
           <RetroDailyRiskPanel
             risks={dailyRisks}
-            users={users}
+            users={assigneeDirectory.users}
             status={retrospective.status}
             canManageActions={permissions.canManageActions}
             loading={loadingRisks || working}
@@ -461,7 +490,7 @@ export default function RetrospectiveDetailPage() {
           />
           <RetroActionTable
             actions={actions}
-            users={users}
+            users={assigneeDirectory.users}
             status={retrospective.status}
             currentUserId={currentUser?.id}
             canManageActions={permissions.canManageActions}
@@ -493,7 +522,7 @@ export default function RetrospectiveDetailPage() {
 
       <RetroActionDetailDrawer
         action={selectedAction}
-        users={users}
+        users={assigneeDirectory.users}
         currentUserId={currentUser?.id}
         canManageActions={permissions.canManageActions}
         loading={working}

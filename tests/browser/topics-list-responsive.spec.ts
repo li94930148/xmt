@@ -31,8 +31,20 @@ const topic = {
   created_at: '2026-10-07 09:00:00',
   deadline: '2026-10-20',
 };
+const boardAuditTopic = {
+  ...topic,
+  id: 952,
+  title: '看板审核重复提交验收选题',
+  description: '隔离看板审核互斥验收。',
+  status: 'pending' as string,
+};
 let topicExists = true;
 let failNextTopicDelete = false;
+let holdNextBoardAudit = false;
+let boardAuditStartedCallback: (() => void) | null = null;
+let releaseBoardAudit: (() => void) | null = null;
+let boardAuditAttempts = 0;
+let boardAuditWrites = 0;
 
 function luminance(channel: number) {
   const normalized = channel / 255;
@@ -110,12 +122,33 @@ async function contrastRatio(locator: import('playwright').Locator) {
 }
 
 const app = express();
+app.use(express.json());
 app.get('/__qa', (req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','topics-list-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(req.query.theme === 'dark' ? 'dark' : 'light')});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics');</script>`));
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.get('/api/permissions/my', (_req, res) => res.json(['*']));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
-app.get('/api/topics', (_req, res) => res.json({ data: topicExists ? [topic] : [], total: topicExists ? 31 : 30, page: 1, limit: 15 }));
+app.get('/api/topics', (req, res) => {
+  const isBoardRequest = Number(req.query.limit) >= 200;
+  const data = topicExists ? (isBoardRequest ? [topic, boardAuditTopic] : [topic]) : [];
+  return res.json({ data, total: topicExists ? 31 : 30, page: 1, limit: Number(req.query.limit) || 15 });
+});
+app.post('/api/topics/:id/audit', async (req, res) => {
+  if (Number(req.params.id) === boardAuditTopic.id) {
+    boardAuditAttempts += 1;
+    if (holdNextBoardAudit) {
+      holdNextBoardAudit = false;
+      boardAuditStartedCallback?.();
+      boardAuditStartedCallback = null;
+      await new Promise<void>((resolve) => { releaseBoardAudit = resolve; });
+      releaseBoardAudit = null;
+    }
+    boardAuditWrites += 1;
+    boardAuditTopic.status = String(req.body?.status);
+    return res.json({ message: '审核结果已保存' });
+  }
+  return res.status(404).json({ message: '选题不存在' });
+});
 app.delete('/api/topics/:id', (_req, res) => {
   if (failNextTopicDelete) {
     failNextTopicDelete = false;
@@ -169,18 +202,72 @@ try {
   assert.ok((await lightCurrentPage.getAttribute('class'))?.includes('bg-studio-primary-button'), 'active pagination uses the theme-aware primary-button token');
   assert.ok((await elementBackgroundContrast(lightCurrentPage)) >= 4.5, 'light theme current page number maintains at least 4.5:1 contrast');
 
-  await page.goto(`${base}/topics?view=board`);
+  const boardPage = await context.newPage();
+  boardPage.setDefaultTimeout(5000);
+  boardPage.on('pageerror', (error) => errors.push(error.message));
+  boardPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await boardPage.goto(`${base}/__qa`);
+  await boardPage.getByRole('heading', { name: '选题管理' }).waitFor();
+  await boardPage.goto(`${base}/topics?view=board`);
   for (const [name, id, controlName] of [
     ['看板平台筛选', 'topics-board-platform-filter', 'topicsBoardPlatformFilter'],
     ['看板负责人筛选', 'topics-board-assignee-filter', 'topicsBoardAssigneeFilter'],
   ]) {
-    const filter = page.getByRole('combobox', { name });
+    const filter = boardPage.getByRole('combobox', { name });
     await filter.waitFor();
     assert.equal(await filter.getAttribute('id'), id);
     assert.equal(await filter.getAttribute('name'), controlName);
   }
-  await page.goto(`${base}/topics`);
-  await page.getByRole('heading', { name: '选题管理' }).waitFor();
+  const boardAuditCard = boardPage.locator('article').filter({ hasText: boardAuditTopic.title });
+  const boardAuditAttemptsBefore = boardAuditAttempts;
+  let resolveBoardAuditStarted!: () => void;
+  const boardAuditStarted = new Promise<void>((resolve) => { resolveBoardAuditStarted = resolve; });
+  boardAuditStartedCallback = resolveBoardAuditStarted;
+  holdNextBoardAudit = true;
+  await boardAuditCard.getByRole('button', { name: '通过', exact: true }).click();
+  await boardAuditStarted;
+  const pendingBoardAuditButtons = boardAuditCard.getByRole('button', { name: '处理中…', exact: true });
+  await pendingBoardAuditButtons.first().waitFor();
+  assert.equal(await pendingBoardAuditButtons.count(), 2, 'all stage changes for the same topic expose one in-flight state');
+  assert.equal(await pendingBoardAuditButtons.nth(0).isDisabled(), true, 'the in-flight board audit action is disabled');
+  assert.equal(await pendingBoardAuditButtons.nth(1).isDisabled(), true, 'a second transition for the topic is disabled');
+  assert.equal(boardAuditAttempts, boardAuditAttemptsBefore + 1, 'the board starts only one audit request for the topic');
+  releaseBoardAudit?.();
+  releaseBoardAudit = null;
+  await boardPage.getByText('状态已更新', { exact: true }).waitFor();
+  assert.equal(boardAuditTopic.status, 'approved', 'the delayed board audit updates the isolated topic after confirmation');
+  assert.equal(boardAuditWrites, 1, 'the board audit is written exactly once');
+  assert.equal(boardAuditAttempts, boardAuditAttemptsBefore + 1, 'the board does not issue a duplicate audit write');
+  await boardPage.close();
+
+  boardAuditTopic.status = 'pending';
+  const mobileBoard = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  mobileBoard.setDefaultTimeout(5000);
+  mobileBoard.on('pageerror', (error) => errors.push(error.message));
+  mobileBoard.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await mobileBoard.goto(`${base}/__qa`);
+  await mobileBoard.getByRole('textbox', { name: '搜索选题' }).waitFor();
+  await mobileBoard.goto(`${base}/topics?view=board`);
+  const mobileBoardAuditCard = mobileBoard.locator('article').filter({ hasText: boardAuditTopic.title });
+  let resolveMobileBoardAuditStarted!: () => void;
+  const mobileBoardAuditStarted = new Promise<void>((resolve) => { resolveMobileBoardAuditStarted = resolve; });
+  boardAuditStartedCallback = resolveMobileBoardAuditStarted;
+  holdNextBoardAudit = true;
+  const mobileAttemptsBefore = boardAuditAttempts;
+  await mobileBoardAuditCard.getByRole('button', { name: '通过', exact: true }).click();
+  await mobileBoardAuditStarted;
+  const pendingMobileBoardButtons = mobileBoardAuditCard.getByRole('button', { name: '处理中…', exact: true });
+  await pendingMobileBoardButtons.first().waitFor();
+  assert.equal(await pendingMobileBoardButtons.count(), 2, 'mobile board blocks all transitions for the in-flight topic');
+  assert.ok(await pendingMobileBoardButtons.nth(0).isDisabled() && await pendingMobileBoardButtons.nth(1).isDisabled(), 'mobile board transition buttons are disabled until confirmation');
+  assert.equal(boardAuditAttempts, mobileAttemptsBefore + 1, 'the mobile board starts one audit request');
+  releaseBoardAudit?.();
+  releaseBoardAudit = null;
+  await mobileBoard.getByText('状态已更新', { exact: true }).waitFor();
+  assert.equal(boardAuditTopic.status, 'approved', 'the mobile board applies the confirmed audit result');
+  assert.equal(boardAuditWrites, 2, 'desktop and mobile board audits each write exactly once');
+  assert.equal(boardAuditAttempts, mobileAttemptsBefore + 1, 'the mobile board does not issue a duplicate audit write');
+  await mobileBoard.close();
 
   const darkContext = await browser.newContext({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   const darkPage = await darkContext.newPage();
@@ -303,7 +390,7 @@ try {
   assert.ok(await contrastRatio(darkViewAction.locator('svg')) >= 3, 'dark theme hovered topic view icon maintains at least 3:1 contrast');
 
   for (const [qaPage, theme] of [[page, 'light'], [darkPage, 'dark']] as const) {
-    const selectTopic = qaPage.getByRole('button', { name: `选择选题 ${topic.title}` });
+    const selectTopic = qaPage.getByRole('button', { name: `选择选题：${topic.title}` });
     assert.equal(await selectTopic.getAttribute('aria-pressed'), 'false', `${theme} theme topic selection control starts unselected`);
     await selectTopic.click();
     assert.equal(await selectTopic.getAttribute('aria-pressed'), 'true', `${theme} theme topic selection control exposes its selected state`);
@@ -327,7 +414,7 @@ try {
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), `Topics page fits a ${width}px viewport without page-level horizontal overflow`);
     const tableScroller = page.locator('table').locator('xpath=ancestor::div[contains(@class,"overflow-x-auto")]').first();
     await tableScroller.evaluate((element) => { element.scrollLeft = 0; });
-    await page.getByRole('button', { name: `选择选题 ${topic.title}` }).click();
+    await page.getByRole('button', { name: `选择选题：${topic.title}` }).click();
     const selectionToolbar = page.getByText('已选 1 个选题', { exact: true }).locator('..');
     await selectionToolbar.waitFor();
     const toolbarBox = await selectionToolbar.boundingBox();
@@ -364,7 +451,7 @@ try {
   assert.equal(expectedHttpErrors.length, 1, 'the isolated topic deletion fixture returns one intentional 503 response');
   await context.close();
   await darkContext.close();
-  console.log('Topics list responsive browser test passed: sticky row actions visible and unclipped at 1366/1440/1920px and 80%–125% zoom in light theme.');
+  console.log('Topics list responsive browser test passed: topic board transition locking at desktop/mobile widths, sticky actions, and desktop zoom matrix.');
 } finally {
   await browser.close();
   await vite.close();

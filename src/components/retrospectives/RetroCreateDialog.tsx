@@ -9,6 +9,7 @@ import type {
 import type { User } from '../../types';
 import { BaseModal } from '../common';
 import { ActionButton } from '../studio';
+import RetroAssigneeDirectoryNotice, { type RetroAssigneeDirectoryStatus } from './RetroAssigneeDirectoryNotice';
 import { retroCategoryLabels, retroScopeLabels } from './retroLabels';
 
 type Props = {
@@ -17,6 +18,9 @@ type Props = {
   users: User[];
   currentUserId?: number;
   loading: boolean;
+  usersStatus: RetroAssigneeDirectoryStatus;
+  usersError: string | null;
+  onRetryUsers: () => void;
   onClose: () => void;
   onSubmit: (payload: CreateRetrospectivePayload) => void;
 };
@@ -41,7 +45,18 @@ function rangeDays(start: string, end: string) {
   return Math.floor((endTime - startTime) / 86_400_000) + 1;
 }
 
-export default function RetroCreateDialog({ open, templates, users, currentUserId, loading, onClose, onSubmit }: Props) {
+export default function RetroCreateDialog({
+  open,
+  templates,
+  users,
+  currentUserId,
+  loading,
+  usersStatus,
+  usersError,
+  onRetryUsers,
+  onClose,
+  onSubmit,
+}: Props) {
   const firstTemplate = useMemo(() => templates.find((template) => template.status === 'active') || templates[0], [templates]);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<RetroTemplateCategory>('weekly');
@@ -156,19 +171,22 @@ export default function RetroCreateDialog({ open, templates, users, currentUserI
           </select>
         </label>
 
-        <label>
-          <span className="text-sm font-semibold text-studio-text-primary">负责人</span>
-          <select
-            value={ownerId}
-            onChange={(event) => setOwnerId(event.target.value)}
-            className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
-          >
-            <option value="">由后端默认</option>
-            {users.map((user) => (
-              <option key={user.id} value={user.id}>{user.name || user.username}</option>
-            ))}
-          </select>
-        </label>
+        <div>
+          <label>
+            <span className="text-sm font-semibold text-studio-text-primary">负责人</span>
+            <select
+              value={ownerId}
+              onChange={(event) => setOwnerId(event.target.value)}
+              className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
+            >
+              <option value="">由后端默认</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>{user.name || user.username}</option>
+              ))}
+            </select>
+          </label>
+          <RetroAssigneeDirectoryNotice status={usersStatus} error={usersError} onRetry={onRetryUsers} />
+        </div>
 
         <label>
           <span className="flex items-center gap-2 text-sm font-semibold text-studio-text-primary">

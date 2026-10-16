@@ -12,7 +12,16 @@ type QaTemplate = { id: number; name: string; platform: string; description: str
 let templates: QaTemplate[] = [{ id: 1, name: '通用工作选题', platform: '', description: '用于隔离验收', template_data: '背景：\n目标：\n', creator_name: '测试成员' }];
 let nextId = 2;
 let failTemplateReads = 0;
+let failNextTemplateWrite = false;
 let templateCreateAttempts = 0;
+let delayNextTemplateWrite = false;
+let releaseTemplateWrite: (() => void) | null = null;
+
+function waitForTemplateWriteIfRequested() {
+  if (!delayNextTemplateWrite) return Promise.resolve();
+  delayNextTemplateWrite = false;
+  return new Promise<void>((resolve) => { releaseTemplateWrite = resolve; });
+}
 
 const app = express();
 app.use(express.json());
@@ -21,6 +30,14 @@ app.get('/__qa', (req, res) => {
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(admin))});localStorage.setItem('xmt_token','template-qa-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/templates');</script>`);
 });
 app.post('/__qa/fail-next-template-read', (_req, res) => { failTemplateReads += 1; res.json({ ok: true }); });
+app.post('/__qa/fail-next-template-write', (_req, res) => { failNextTemplateWrite = true; res.json({ ok: true }); });
+app.post('/__qa/delay-next-template-write', (_req, res) => { delayNextTemplateWrite = true; res.json({ ok: true }); });
+app.post('/__qa/release-template-write', (_req, res) => {
+  const release = releaseTemplateWrite;
+  releaseTemplateWrite = null;
+  release?.();
+  res.json({ released: Boolean(release) });
+});
 app.get('/api/auth/me', (_req, res) => res.json(admin));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({
@@ -36,13 +53,17 @@ app.get('/api/templates', (_req, res) => {
 });
 app.post('/api/templates', (req, res) => {
   templateCreateAttempts += 1;
+  if (failNextTemplateWrite) {
+    failNextTemplateWrite = false;
+    return res.status(503).json({ message: '隔离夹具模拟保存失败' });
+  }
   const created = { id: nextId++, ...req.body, creator_name: admin.name } as QaTemplate;
   templates = [...templates, created];
-  res.status(201).json({ success: true, data: created });
+  void waitForTemplateWriteIfRequested().then(() => res.status(201).json({ success: true, data: created }));
 });
 app.put('/api/templates/:id', (req, res) => {
   templates = templates.map((template) => template.id === Number(req.params.id) ? { ...template, ...req.body } : template);
-  res.json({ success: true });
+  void waitForTemplateWriteIfRequested().then(() => res.json({ success: true }));
 });
 app.delete('/api/templates/:id', (req, res) => {
   templates = templates.filter((template) => template.id !== Number(req.params.id));
@@ -55,10 +76,17 @@ const io = new SocketServer(server);
 io.on('connection', () => undefined);
 const vite = await createViteServer({ root: process.cwd(), server: { middlewareMode: true, hmr: { server } }, appType: 'spa', logLevel: 'error' });
 app.use(vite.middlewares);
-await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+const inspectionPort = Number(process.env.XMT_BROWSER_MCP_PORT) || 0;
+await new Promise<void>((resolve) => server.listen(inspectionPort, '127.0.0.1', resolve));
 const address = server.address();
 assert(address && typeof address !== 'string');
 const base = `http://127.0.0.1:${address.port}`;
+
+if (process.env.XMT_TEMPLATE_MANAGEMENT_QA_SERVE === '1') {
+  console.log(`Isolated template management browser fixture: ${base}/__qa`);
+  await new Promise<void>(() => {});
+}
+
 const browser = await chromium.launch({ headless: true });
 const unexpectedErrors: string[] = [];
 
@@ -148,13 +176,33 @@ try {
   await mobile.getByLabel('平台').fill('视频号');
   await mobile.getByLabel('说明').fill('只写入本地夹具');
   await mobile.getByLabel('模板正文').fill('内容背景：\n传播目标：\n');
-  await mobile.evaluate(async () => { await fetch('/__qa/fail-next-template-read', { method: 'POST' }); });
+  await mobile.evaluate(async () => { await fetch('/__qa/fail-next-template-write', { method: 'POST' }); });
   expected503.count = 1;
+  const failedCreate = mobile.waitForResponse((response) => response.url().endsWith('/api/templates') && response.request().method() === 'POST' && response.status() === 503);
+  await mobile.getByRole('button', { name: '保存模板', exact: true }).dblclick({ delay: 10 });
+  await failedCreate;
+  await mobile.getByRole('status').filter({ hasText: '保存模板失败' }).waitFor();
+  assert.equal(await mobile.getByLabel('名称').inputValue(), createName, 'a rejected save keeps the name for retry');
+  assert.equal(await mobile.getByLabel('平台').inputValue(), '视频号', 'a rejected save keeps the platform for retry');
+  assert.equal(await mobile.getByLabel('说明').inputValue(), '只写入本地夹具', 'a rejected save keeps the description for retry');
+  assert.equal(await mobile.getByLabel('模板正文').inputValue(), '内容背景：\n传播目标：\n', 'a rejected save keeps the body for retry');
+  assert.equal(templateCreateAttempts, 1, 'a rapid double click produces only one rejected create request');
+
+  await mobile.evaluate(async () => { await fetch('/__qa/fail-next-template-read', { method: 'POST' }); });
+  await mobile.evaluate(async () => { await fetch('/__qa/delay-next-template-write', { method: 'POST' }); });
+  expected503.count = 1;
+  const createStarted = mobile.waitForRequest((request) => request.url().endsWith('/api/templates') && request.method() === 'POST');
   const failedRefresh = mobile.waitForResponse((response) => response.url().endsWith('/api/templates') && response.request().method() === 'GET' && response.status() === 503);
   await mobile.getByRole('button', { name: '保存模板', exact: true }).dblclick({ delay: 10 });
+  await createStarted;
+  await mobile.getByRole('status').filter({ hasText: '正在创建模板' }).waitFor();
+  for (const label of ['名称', '平台', '说明', '模板正文']) {
+    assert.equal(await mobile.getByLabel(label).isDisabled(), true, `${label} stays locked until the create is confirmed`);
+  }
+  await mobile.evaluate(async () => { await fetch('/__qa/release-template-write', { method: 'POST' }); });
   await failedRefresh;
   await mobile.getByRole('status').filter({ hasText: '服务端已确认模板保存，但列表刷新失败' }).waitFor();
-  assert.equal(templateCreateAttempts, 1, 'rapid duplicate save click creates only one template');
+  assert.equal(templateCreateAttempts, 2, 'explicit retry creates only one template after the rejected request');
   assert.equal(await mobile.getByLabel('名称').inputValue(), '', 'confirmed save closes and clears the form');
   await assertReadable(mobile, 'confirmed-save warning', mobile.getByRole('status').filter({ hasText: '服务端已确认模板保存，但列表刷新失败' }));
   await mobile.screenshot({ path: '/tmp/xmt-template-management-390-light-refresh-warning.png', fullPage: false });
@@ -164,7 +212,27 @@ try {
   await retry;
   await mobile.getByText(createName, { exact: true }).waitFor();
   await mobile.getByRole('status').filter({ hasText: '模板列表已重新加载' }).waitFor();
-  assert.equal(templateCreateAttempts, 1, 'recovery performs only a GET and does not repeat the confirmed save');
+  assert.equal(templateCreateAttempts, 2, 'recovery performs only a GET and does not repeat the confirmed save');
+
+  const createdTemplate = mobile.locator('li').filter({ hasText: createName });
+  await createdTemplate.getByRole('button', { name: '编辑', exact: true }).click();
+  await mobile.getByLabel('名称').fill('隔离浏览器更新模板');
+  await mobile.getByLabel('模板正文').fill('更新后的正文，仅保留在隔离夹具。');
+  await mobile.evaluate(async () => { await fetch('/__qa/delay-next-template-write', { method: 'POST' }); });
+  const updateStarted = mobile.waitForRequest((request) => request.url().endsWith('/api/templates/2') && request.method() === 'PUT');
+  const updateConfirmed = mobile.waitForResponse((response) => response.url().endsWith('/api/templates/2') && response.request().method() === 'PUT' && response.status() === 200);
+  await mobile.getByRole('button', { name: '保存模板', exact: true }).click();
+  await updateStarted;
+  await mobile.getByRole('status').filter({ hasText: '正在保存模板' }).waitFor();
+  for (const label of ['名称', '平台', '说明', '模板正文']) {
+    assert.equal(await mobile.getByLabel(label).isDisabled(), true, `${label} stays locked until the update is confirmed`);
+  }
+  assert.equal(await mobile.getByRole('button', { name: '取消编辑', exact: true }).isDisabled(), true, 'edit cannot be canceled while the update is in flight');
+  await mobile.evaluate(async () => { await fetch('/__qa/release-template-write', { method: 'POST' }); });
+  await updateConfirmed;
+  await mobile.getByText('隔离浏览器更新模板', { exact: true }).waitFor();
+  await mobile.getByRole('status').filter({ hasText: '模板已保存' }).waitFor();
+  assert.equal(templateCreateAttempts, 2, 'updating a template does not create another record');
   await mobile.screenshot({ path: '/tmp/xmt-template-management-390-light-recovered.png', fullPage: false });
   await mobile.close();
 
@@ -184,7 +252,7 @@ try {
     true,
     'the compact-page save action reaches the native required-field validation',
   );
-  assert.equal(templateCreateAttempts, 1, 'compact validation does not write a partial template');
+  assert.equal(templateCreateAttempts, 2, 'compact validation does not write a partial template');
 
   assert.equal(expected503.count, 0, 'the single injected 503 is accounted for');
   assert.deepEqual(unexpectedErrors, [], 'no unexpected page, framework, or console errors');

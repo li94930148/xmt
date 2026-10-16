@@ -4,7 +4,8 @@ import { CreatorDatabase } from "../database/creatorDatabase.js";
 import { upload } from "../uploader/client.js";
 import { toOfficialExportPayload } from '../uploader/officialPayload.js';
 import { canonicalJson, canonicalJsonHash } from '../database/sqliteValues.js';
-import type { AgentConfig, CollectionMode, SyncResult } from "../types.js";
+import { readOfficialExportQualityReceipt } from '../uploader/qualityReceipt.js';
+import type { AgentConfig, CollectionMode, OfficialExportQualityReport, SyncResult } from "../types.js";
 import { ScraplingCreatorCollector } from "./scrapling.js";
 import { ScraplingWorkerBridge } from "./workerBridge.js";
 import { automatedCollectorBrowserLaunch, collectorBrowserEvidence } from "./browserLaunch.js";
@@ -89,7 +90,7 @@ export async function runCreatorCollectorTask(options: {
     const officialPayload = snapshot.official_data?.length ? toOfficialExportPayload(snapshot, config.accountId) : null;
     const canonicalPayloadJson = officialPayload ? canonicalJson('canonical_payload_json', officialPayload) : null;
     const queueJob = officialPayload && canonicalPayloadJson ? database.enqueueUpload({ batch_id: officialPayload.batch_id, platform: config.platform, platform_account_id: config.accountId, source_file_sha256: String(officialPayload.source_files[0]?.sha256 || ''), parser_version: officialPayload.parser_version, payload_json: canonicalPayloadJson, payload_sha256: canonicalJsonHash(canonicalPayloadJson) }) : null;
-    const result = await upload(config, token, { ...snapshot, official_data: [] }, {
+    let result: Awaited<ReturnType<typeof upload>> & { official_export_quality?: OfficialExportQualityReport } = await upload(config, token, { ...snapshot, official_data: [] }, {
       knownContentIds,
       taskId,
     });
@@ -100,6 +101,8 @@ export async function runCreatorCollectorTask(options: {
       if (!flushOfficialQueue) throw new Error('官方导出已入队，等待 Electron 队列调度器发送');
       await flushOfficialQueue();
       const completed = database.uploadJob(queueJob.job_id); if (completed?.status !== 'succeeded') throw new Error(completed?.last_error_message_sanitized || '官方导出已入队，等待重试');
+      const officialExportQuality = readOfficialExportQualityReceipt(completed.receipt_json);
+      if (officialExportQuality) result = { ...result, official_export_quality: officialExportQuality };
     }
     database.finishSyncTask(
       taskId,

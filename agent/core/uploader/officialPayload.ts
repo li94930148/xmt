@@ -10,7 +10,10 @@ export function toOfficialExportPayload(snapshot: CreatorSnapshot, accountId: st
   const quality = records(snapshot.official_data).reduce<{ source_rows: number; accepted_rows: number; duplicate_rows: number; rejected_rows: number; warnings: string[] }>((total, item) => {
     const value = item.quality as Record<string, unknown> | undefined;
     for (const key of ['source_rows', 'accepted_rows', 'duplicate_rows', 'rejected_rows'] as const) total[key] += Number(value?.[key] || 0);
-    total.warnings.push(...(Array.isArray(value?.warnings) ? value.warnings.map(String) : [])); return total;
+    for (const warning of Array.isArray(value?.warnings) ? value.warnings.map(String) : []) {
+      if (!total.warnings.includes(warning)) total.warnings.push(warning);
+    }
+    return total;
   }, { source_rows: 0, accepted_rows: 0, duplicate_rows: 0, rejected_rows: 0, warnings: [] as string[] });
   const parserVersion = 'douyin-export-v3';
   const batchSeed = JSON.stringify({ accountId, parser: parserVersion, files: files.map(file => file.sha256).sort() });

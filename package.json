@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "9.1.20",
+  "version": "9.1.43",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -16,6 +16,7 @@
     "test:activity-log-browser": "tsx tests/browser/activity-log-read-recovery.spec.ts",
     "test:analytics-browser": "tsx tests/browser/analytics-read-recovery.spec.ts",
     "test:achievements-leaderboard-browser": "tsx tests/browser/achievements-leaderboard-empty-state.spec.ts",
+    "test:achievements-check": "tsx tests/achievements/achievement-check-http.test.ts",
     "test:creator-trends-browser": "tsx tests/browser/creator-trends-official-daily.spec.ts",
     "test:creator-works-browser": "tsx tests/browser/creator-works-read-recovery.spec.ts",
     "test:rate-limit": "tsx scripts/rate-limit-contract-test.ts",
@@ -247,6 +248,7 @@
     "test:creator-cover-assets": "tsx tests/creator-cover-assets.test.ts",
     "test:creator-agent-replay-security": "tsx tests/security/creator-agent-replay-security.test.ts",
     "test:official-export-v2": "tsx scripts/official-export-v2-contract-test.ts",
+    "test:creator-agent-export-quality": "npm --prefix agent run test:official-export-quality",
     "test:official-export-real-http": "tsx scripts/official-export-real-http-test.ts",
     "test:official-export-queue": "tsx scripts/official-export-queue.test.ts",
     "test:official-export-dashboard-mode": "tsx scripts/official-export-dashboard-mode.test.ts",

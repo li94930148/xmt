@@ -14,6 +14,7 @@ import { clearSafeDraft, readSafeDraftValue, userSafeDraftKey, writeSafeDraft } 
 import { useAuthStore } from '@/store';
 import { useNetworkState } from '@/platform/network';
 import { usePermission } from '@/hooks/usePermission';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '@/hooks/useRouteNavigationGuard';
 import { isWeb } from '@/platform/runtime';
 import AccessDeniedState from '@/components/AccessDeniedState';
 
@@ -40,6 +41,7 @@ export default function MobileProductionEditor() {
   const [notice, setNotice] = useState('');
   const [reviewEditorHandle, setReviewEditorHandle] = useState<EditorCommandHandle | null>(null);
   const persistedContentRef = useRef('');
+  const allowRouteTransitionRef = useRef(false);
   const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
   const savingRef = useRef(false);
   const loadRequestRef = useRef(0);
@@ -57,10 +59,12 @@ export default function MobileProductionEditor() {
   const displayedVersion = historicalVersion?.version || production?.version || 'v1.0';
   const displayedContent = historicalVersion ? historicalVersion.content_markdown ?? historicalVersion.content ?? '' : content;
   const canEdit = canEditPermission && (isNewProduction || production?.can_edit === true) && !isHistoricalView && routeDataReady;
+  const hasUnsavedChanges = Boolean(canEdit && (saving || (production ? content !== persistedContentRef.current : Boolean(topicId || content))));
   const draftKey = userSafeDraftKey(userId, `production:${id ?? 'new'}`);
 
   const load = useCallback(async () => {
     if (permissionsLoading) return;
+    allowRouteTransitionRef.current = false;
     const requestId = ++loadRequestRef.current;
     setLoading(true);
     setNotice('');
@@ -131,6 +135,34 @@ export default function MobileProductionEditor() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (canEdit && draftKey && !loading && content) writeSafeDraft(draftKey, content); }, [canEdit, content, draftKey, loading]);
 
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    if (allowRouteTransitionRef.current) {
+      proceed();
+      return;
+    }
+    if (savingRef.current || saving) {
+      setNotice('稿件保存尚未完成，请稍候后再离开。');
+      stay();
+      return;
+    }
+    if (!window.confirm('当前稿件尚未提交，正文草稿已尽可能保存在本机。确认离开并稍后续写吗？')) {
+      stay();
+      return;
+    }
+    proceed();
+  }, [saving]);
+  useRouteNavigationGuard(hasUnsavedChanges, handleRouteNavigationAttempt);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   const adapter = useMemo(() => production && !isHistoricalView ? createProductionEditorAdapter({ documentId: getProductionVersionRoomId(production.id, production.version), collaborationRoom: getProductionVersionRoomId(production.id, production.version), initialContent: content, readonly: !canEdit, capabilities: { collaboration: canEdit, manualSave: false, immersive: false, pageScroll: true }, persist: async (next) => { if (!canEdit) throw new Error('当前账号没有修改创作稿件的权限'); await updateProduction(production.id, { topic_id: production.topic_id, version: production.version, content: next, expected_content: persistedContentRef.current, status: production.status, version_action: 'none' }); persistedContentRef.current = next; } }) : undefined, [canEdit, content, isHistoricalView, production]);
   const handleRuntimeHandleChange = useCallback((handle: ContentEditorRuntimeHandle | null) => { runtimeHandleRef.current = handle; }, []);
   const handleReviewEditorHandleChange = useCallback((handle: EditorCommandHandle | null) => { setReviewEditorHandle(handle); }, []);
@@ -147,7 +179,7 @@ export default function MobileProductionEditor() {
     setSaving(true); setNotice('');
     try {
       if (production) { await updateProduction(production.id, { topic_id: Number(topicId), version: production.version, content, expected_content: persistedContentRef.current, status: submit ? 'review' : production.status, version_action: 'none' }); persistedContentRef.current = content; clearSafeDraft(draftKey); }
-      else { const result = await createProduction({ topic_id: Number(topicId), content, status: submit ? 'review' : 'draft' }); clearSafeDraft(draftKey); navigate(`/production/content/${result.productionId}`, { replace: true }); }
+      else { const result = await createProduction({ topic_id: Number(topicId), content, status: submit ? 'review' : 'draft' }); clearSafeDraft(draftKey); allowRouteTransitionRef.current = true; navigate(`/production/content/${result.productionId}`, { replace: true }); }
       setNotice(submit ? '已提交审核' : '已保存草稿');
     } catch (error) { setNotice(error instanceof Error ? error.message : '保存稿件失败'); } finally { savingRef.current = false; setSaving(false); }
   };

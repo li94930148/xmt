@@ -11,6 +11,233 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.1.43',
+    date: '2026-10-16',
+    title: '避免自动保存与状态或版本写入争用',
+    impactScope: ['创作详情', '正文保存', '状态与版本操作'],
+    changes: [
+      { type: 'fix', description: '状态变更和小修/另开版本前先确认自动保存；未确认时不提交后续写入，确认后使用最新正文。' },
+    ],
+  },
+  {
+    version: '9.1.42',
+    date: '2026-10-16',
+    title: '保护审核中的稿件不被并发操作覆盖',
+    impactScope: ['创作详情', '审核提交', '版本与删除操作'],
+    changes: [
+      { type: 'fix', description: '审核等待服务端确认期间，正文、版本切换/保存、状态更新与删除统一锁定；快速重复操作不会产生并发稿件写入。' },
+    ],
+  },
+  {
+    version: '9.1.41',
+    date: '2026-10-16',
+    title: '让创作审核提交更可靠',
+    impactScope: ['创作详情', '正文保存', '审核反馈'],
+    changes: [
+      { type: 'fix', description: '提交审核前确认正文已保存；审核请求期间锁定正文并防止重复提交，失败保留草稿可重试，成功后立即更新审核状态。' },
+    ],
+  },
+  {
+    version: '9.1.40',
+    date: '2026-10-16',
+    title: '保护工作台免受不完整摘要回包影响',
+    impactScope: ['移动工作台', '摘要读取恢复'],
+    changes: [
+      { type: 'fix', description: '摘要 HTTP 200 回包缺少必需列表时显示可重试提示，避免移动首页渲染崩溃；正常回包后恢复首页。' },
+    ],
+  },
+  {
+    version: '9.1.39',
+    date: '2026-10-16',
+    title: '让官方导出部分解析遗漏可见',
+    impactScope: ['Creator Agent', '官方导出', '数据质量提示'],
+    changes: [
+      { type: 'improvement', description: '部分作品行未通过解析时，最近同步展示采集器报告的读取、接收、拒绝和重复数量及提示；质量摘要只作诊断，不覆盖指标事实。' },
+      { type: 'fix', description: '官方导出回执在上传队列中保留质量报告，重试后仍可读取。' },
+    ],
+  },
+  {
+    version: '9.1.38',
+    date: '2026-10-16',
+    title: '修复成就检查挂起与导出数据静默漏收',
+    impactScope: ['成就检查', '抖音官方导出', '数据质量'],
+    changes: [
+      { type: 'fix', description: '已获得的成就只跳过当前项目，接口继续检查并授予后续符合条件的成就。' },
+      { type: 'fix', description: '官方导出解析失败或所有数据行均被拒绝时整批失败关闭，避免部分数据成功入库造成静默漏收。' },
+    ],
+  },
+  {
+    version: '9.1.37',
+    date: '2026-10-16',
+    title: '选题操作防重复提交并提升登录可访问性',
+    impactScope: ['选题详情', '移动端操作', '登录页', '文字对比度'],
+    changes: [
+      { type: 'fix', description: '桌面阶段推进及移动端保存、阶段推进、补齐阶段记录和审核增加同步互斥，避免慢网下快速重复点击造成多次写入。' },
+      { type: 'improvement', description: '写入等待服务端确认期间禁用对应操作并显示处理中状态。' },
+      { type: 'fix', description: '登录页三个布局为账号、密码输入框补齐显式标签关联，备案链接切换到满足对比度的主题文字令牌。' },
+    ],
+  },
+  {
+    version: '9.1.36',
+    date: '2026-10-16',
+    title: '选题审核与看板操作支持防重复提交',
+    impactScope: ['选题审核', '桌面/移动看板', '重复提交保护'],
+    changes: [
+      { type: 'fix', description: '桌面审核和桌面/移动看板阶段操作增加同步互斥，避免慢网下重复写入。' },
+      { type: 'improvement', description: '提交期间锁定相关表单或同一选题操作，并显示处理中状态，服务端确认后再恢复。' },
+    ],
+  },
+  {
+    version: '9.1.35',
+    date: '2026-10-16',
+    title: '移动消息中心支持完整分页与全局已读',
+    impactScope: ['移动端消息中心', '全局未读数', '历史消息恢复'],
+    changes: [
+      { type: 'improvement', description: '移动端按页加载消息并使用服务端全账号摘要显示未读数量。' },
+      { type: 'fix', description: '全部已读覆盖所有账号消息；请求失败时保留状态并支持安全重试。' },
+    ],
+  },
+  {
+    version: '9.1.34',
+    date: '2026-10-16',
+    title: '首页待处理任务读取状态更准确',
+    impactScope: ['工作台', '待处理消息', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '消息尚未读取确认或读取失败时不再误显示空任务，错误提示保持至只读重试成功。' },
+      { type: 'improvement', description: '仅有消息任务的负责人首页显示明确的读取中状态。' },
+    ],
+  },
+  {
+    version: '9.1.33',
+    date: '2026-10-16',
+    title: '模板保存期间保护表单内容',
+    impactScope: ['选题模板', '保存与更新', '内容保护'],
+    changes: [
+      { type: 'fix', description: '模板写入等待服务端确认期间锁定字段与取消入口，避免已确认保存后清空等待期间的新输入。' },
+      { type: 'improvement', description: '模板表单公开忙碌状态，写入确认后再进入清空和列表恢复流程。' },
+    ],
+  },
+  {
+    version: '9.1.32',
+    date: '2026-10-16',
+    title: '知识库分类与资料独立恢复',
+    impactScope: ['知识库', '分类筛选', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '分类读取失败时知识库资料结果仍可使用，分类管理在目录恢复前保持关闭。' },
+      { type: 'improvement', description: '分类读取提供独立重试；搜索或筛选变化只刷新资料结果。' },
+    ],
+  },
+  {
+    version: '9.1.31',
+    date: '2026-10-16',
+    title: '资料分类列表读取恢复',
+    impactScope: ['资料列表', '分类筛选', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '分类读取失败不再使资料列表整体不可用；资料列表独立加载。' },
+      { type: 'improvement', description: '分类读取失败可只读重试，当前分类筛选不会被误显示为空或全部分类。' },
+    ],
+  },
+  {
+    version: '9.1.30',
+    date: '2026-10-16',
+    title: '资料详情审计记录读取恢复',
+    impactScope: ['资料详情', '审计记录', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '审计记录读取失败不再让资料详情整页不可用；详情主记录独立完成加载。' },
+      { type: 'improvement', description: '审计记录错误可见且可只读重试，不会重复读取详情或执行资料写入。' },
+    ],
+  },
+  {
+    version: '9.1.29',
+    date: '2026-10-16',
+    title: '选题提报负责人名单读取恢复',
+    impactScope: ['选题提报', '本机草稿', '负责人选择'],
+    changes: [
+      { type: 'fix', description: '负责人名单读取失败时不再静默退化，表单可继续使用且显示清晰的恢复提示。' },
+      { type: 'improvement', description: '负责人名单提供只读重试，已有草稿和负责人选择会保留。' },
+    ],
+  },
+  {
+    version: '9.1.28',
+    date: '2026-10-16',
+    title: '选题负责人名单读取恢复',
+    impactScope: ['选题详情', '负责人选择', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '负责人名单读取失败时，选题详情仍保持可用，不再误报为整页读取失败。' },
+      { type: 'improvement', description: '负责人名单状态可见并支持只读重试，当前负责人信息在名单暂不可用时仍会保留。' },
+    ],
+  },
+  {
+    version: '9.1.27',
+    date: '2026-10-16',
+    title: '发布/成片剧本历史读取恢复',
+    impactScope: ['发布详情', '成片详情', '剧本版本历史', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '剧本版本历史读取失败时不再误显示为空；详情主记录仍可用，并提供只重试历史读取的入口。' },
+      { type: 'improvement', description: '版本保存后的历史回读失败会明确说明，不会要求重复创建已确认版本。' },
+    ],
+  },
+  {
+    version: '9.1.26',
+    date: '2026-10-16',
+    title: '日报归档成员名单读取恢复',
+    impactScope: ['日报总结归档', '成员筛选', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '成员名单读取失败时明确说明筛选选项可能不完整，并提供只重新读取名单的重试。' },
+      { type: 'security', description: '归档筛选状态按账号与权限范围隔离；迟到的旧成员名单不会覆盖当前账号内容。' },
+    ],
+  },
+  {
+    version: '9.1.25',
+    date: '2026-10-16',
+    title: '复盘负责人名单读取恢复与账号隔离',
+    impactScope: ['复盘新建', '复盘行动项负责人', '权限范围', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '成员名单读取失败时明确说明负责人选项可能不完整，并提供重新加载入口。' },
+      { type: 'security', description: '仅在当前账号具备 user:view 时读取成员目录；账号切换后忽略旧账号的迟到响应。' },
+    ],
+  },
+  {
+    version: '9.1.24',
+    date: '2026-10-16',
+    title: '消息读取恢复与未知状态提示',
+    impactScope: ['消息中心', '工作台状态提示', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '消息中心同一账号、筛选和页码刷新失败时保留最近一次成功结果并提供重试；查询范围变化后不展示旧列表。' },
+      { type: 'improvement', description: '工作台未知选题状态显示“状态待确认”，避免与进行中状态混淆。' },
+    ],
+  },
+  {
+    version: '9.1.23',
+    date: '2026-10-16',
+    title: '团队日报刷新保护',
+    impactScope: ['团队日报', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '团队日报刷新失败时保留同一查询范围内最近一次成功结果；日期切换后忽略旧请求迟到回包，避免误示为空或覆盖当前内容。' },
+      { type: 'improvement', description: '旧结果明确标注可能不是最新并支持只读重试；切换日期后不显示旧日期数据。' },
+    ],
+  },
+  {
+    version: '9.1.22',
+    date: '2026-10-16',
+    title: '首页最近变化刷新保护',
+    impactScope: ['工作台', '最近变化'],
+    changes: [
+      { type: 'fix', description: '最近变化刷新失败时保留最近一次成功读取的内容，并明确标注内容可能不是最新。' },
+      { type: 'improvement', description: '最近变化增加手动刷新入口；刷新期间旧内容仍可查看，失败后可只读重试。' },
+    ],
+  },
+  {
+    version: '9.1.21',
+    date: '2026-10-15',
+    title: '全站未保存修改离页保护',
+    impactScope: ['选题与复盘', '创作与发布', '侧栏导航', '浏览器后退与退出登录'],
+    changes: [
+      { type: 'fix', description: '侧栏导航、浏览器后退和退出登录遵循页面未保存保护；取消离开后仍可继续当前修改。' },
+      { type: 'fix', description: '保存或协作交接尚未完成时阻止离开；刷新/关闭页面提醒继续生效，窄屏网页编辑页纳入保护。' },
+    ],
+  },
+  {
     version: '9.1.20',
     date: '2026-10-15',
     title: '协作与同步异常恢复',

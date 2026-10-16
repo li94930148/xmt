@@ -57,8 +57,11 @@ let myActionReadAttempts = 0;
 let retrospectiveCreateFailures = 0;
 let retrospectiveCreateDelayMs = 0;
 let retrospectiveCreateAttempts = 0;
+let userListReadFailures = 0;
+let userListReadAttempts = 0;
 let createdRetrospective: typeof retrospective | null = null;
 let fixtureUser = admin;
+let fixturePermissions = ['*'];
 let filterRaceFixture = false;
 let holdNextListRead = false;
 let failHeldListRead = false;
@@ -67,16 +70,27 @@ let listReadStarted: (() => void) | null = null;
 let holdNextActionsRead = false;
 let releaseActionsRead: (() => void) | null = null;
 let actionsReadStarted: (() => void) | null = null;
+let holdNextUserListRead = false;
+let releaseUserListRead: (() => void) | null = null;
+let userListReadStarted: (() => void) | null = null;
 
 const app = express();
 app.use(express.json());
 app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'light' ? 'light' : 'dark';
+  fixtureUser = req.query.restricted === '1'
+    ? { ...admin, id: 102, username: 'retrospective-limited-qa', role: 'director', name: '成员名单权限受限验收' }
+    : admin;
+  fixturePermissions = fixtureUser.role === 'admin'
+    ? ['*']
+    : ['analytics:retro:view', 'analytics:retro:create'];
+  if (req.query.failUsers) userListReadFailures = Number(req.query.failUsers) || 1;
   if (req.query.fail === 'both') {
     retrospectiveListReadFailures = 1;
     myActionReadFailures = 1;
   }
-  res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(admin))});localStorage.setItem('xmt_token','retrospective-responsive-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/retrospectives');</script>`);
+  const destination = req.query.detail === '1' ? `/retrospectives/${retrospective.id}` : '/retrospectives';
+  res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','retrospective-responsive-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace(${JSON.stringify(destination)});</script>`);
 });
 app.post('/__qa/fail-next-reads', (req, res) => {
   if (req.query.scope === 'both' || req.query.scope === 'list') retrospectiveListReadFailures += 1;
@@ -89,6 +103,7 @@ app.post('/__qa/configure-create', (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/auth/me', (_req, res) => res.json(fixtureUser));
+app.get('/api/permissions/my', (_req, res) => res.json(fixturePermissions));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
 app.get('/api/retrospectives/actions/mine', async (_req, res) => {
@@ -168,7 +183,22 @@ app.get('/api/retrospectives/:id', (req, res) => {
   });
 });
 app.get('/api/retrospectives/:id/daily-risks', (_req, res) => res.json({ success: true, data: { risks: [] } }));
-app.get('/api/users', (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 200 }));
+app.get('/api/users', async (req, res) => {
+  userListReadAttempts += 1;
+  const authorization = req.get('authorization') || '';
+  const visibleUser = authorization.includes('second-account-fixture')
+    ? { ...admin, id: 101, name: '新账号可见成员', username: 'new-visible-member' }
+    : { ...admin, id: 98, name: '旧账号可见成员', username: 'old-visible-member' };
+  if (holdNextUserListRead) {
+    holdNextUserListRead = false;
+    await new Promise<void>((resolve) => { releaseUserListRead = resolve; userListReadStarted?.(); });
+  }
+  if (userListReadFailures > 0) {
+    userListReadFailures -= 1;
+    return res.status(503).json({ message: '模拟成员名单暂时不可用' });
+  }
+  return res.json({ data: [visibleUser], total: 1, page: 1, limit: 200 });
+});
 app.use('/api', (_req, res) => res.json({ success: true, data: {} }));
 
 const server = http.createServer(app);
@@ -286,6 +316,113 @@ try {
   assert.equal(expected503, 0, 'all expected 503 console messages are accounted for');
   assert.deepEqual(errors, [], 'retrospective list has no unexpected browser errors');
   await recoveryPage.close();
+
+  userListReadFailures = 0;
+  userListReadAttempts = 0;
+  const directoryPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  let expectedAssignee503 = 0;
+  directoryPage.on('pageerror', (error) => errors.push(error.message));
+  directoryPage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (expectedAssignee503 > 0 && message.text().includes('503')) {
+      expectedAssignee503 -= 1;
+      return;
+    }
+    errors.push(message.text());
+  });
+  expectedAssignee503 = 1;
+  await directoryPage.goto(`${base}/__qa?theme=light&failUsers=1`);
+  await directoryPage.getByRole('heading', { name: '复盘中心' }).waitFor();
+  await directoryPage.getByRole('button', { name: '新建复盘' }).click();
+  await directoryPage.getByRole('alert').filter({ hasText: '成员名单暂不可用' }).waitFor();
+  const ownerSelect = directoryPage.getByLabel('负责人');
+  assert.equal(await ownerSelect.locator('option', { hasText: '复盘列表响应式验收' }).count(), 1, 'a failed member list keeps the current user as a safe fallback');
+  assert.equal(await ownerSelect.locator('option', { hasText: '旧账号可见成员' }).count(), 0, 'the incomplete directory is not presented as complete');
+  await directoryPage.screenshot({ path: '/tmp/xmt-retro-assignee-directory-error-390.png', fullPage: true });
+  const directoryRetry = directoryPage.waitForResponse((response) => response.url().includes('/api/users') && response.request().method() === 'GET' && response.status() === 200);
+  await directoryPage.getByRole('button', { name: '重新加载成员名单', exact: true }).click();
+  await directoryRetry;
+  await directoryPage.waitForFunction(() => Array.from(document.querySelectorAll('select option')).some((option) => option.textContent?.includes('旧账号可见成员')));
+  assert.equal(await ownerSelect.locator('option', { hasText: '旧账号可见成员' }).count(), 1, 'a successful retry restores the complete member option');
+  assert.equal(await directoryPage.getByRole('alert').filter({ hasText: '成员名单暂不可用' }).count(), 0, 'successful directory retry clears the warning');
+  assert.equal(userListReadAttempts, 2, 'member list failure and explicit retry issue exactly two read requests');
+  await directoryPage.close();
+
+  userListReadFailures = 0;
+  userListReadAttempts = 0;
+  const detailDirectoryPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  detailDirectoryPage.on('pageerror', (error) => errors.push(error.message));
+  detailDirectoryPage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (expectedAssignee503 > 0 && message.text().includes('503')) {
+      expectedAssignee503 -= 1;
+      return;
+    }
+    errors.push(message.text());
+  });
+  expectedAssignee503 = 1;
+  await detailDirectoryPage.goto(`${base}/__qa?theme=light&detail=1&failUsers=1`);
+  await detailDirectoryPage.getByRole('heading', { name: retrospective.title, exact: true }).waitFor();
+  await detailDirectoryPage.getByRole('alert').filter({ hasText: '成员名单暂不可用' }).waitFor();
+  const detailDirectoryRetry = detailDirectoryPage.waitForResponse((response) => response.url().includes('/api/users') && response.request().method() === 'GET' && response.status() === 200);
+  await detailDirectoryPage.getByRole('button', { name: '重新加载成员名单', exact: true }).click();
+  await detailDirectoryRetry;
+  assert.equal(await detailDirectoryPage.getByRole('alert').filter({ hasText: '成员名单暂不可用' }).count(), 0, 'detail action-owner directory can be retried after a read failure');
+  assert.equal(userListReadAttempts, 2, 'detail directory failure and retry issue exactly two read requests');
+  await detailDirectoryPage.close();
+
+  userListReadAttempts = 0;
+  const restrictedDirectoryPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  restrictedDirectoryPage.on('pageerror', (error) => errors.push(error.message));
+  restrictedDirectoryPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await restrictedDirectoryPage.goto(`${base}/__qa?theme=light&restricted=1`);
+  await restrictedDirectoryPage.getByRole('heading', { name: '复盘中心' }).waitFor();
+  await restrictedDirectoryPage.getByRole('button', { name: '新建复盘' }).click();
+  await restrictedDirectoryPage.getByRole('status').filter({ hasText: '暂未确认具备查看成员名单的权限' }).waitFor();
+  const restrictedOwnerSelect = restrictedDirectoryPage.getByLabel('负责人');
+  assert.equal(await restrictedOwnerSelect.locator('option', { hasText: '成员名单权限受限验收' }).count(), 1, 'a user without member-view permission can still choose themself');
+  assert.equal(await restrictedOwnerSelect.locator('option', { hasText: '可见成员' }).count(), 0, 'a user without member-view permission never fetches other members');
+  const permissionRetry = restrictedDirectoryPage.waitForResponse((response) => response.url().includes('/api/permissions/my') && response.request().method() === 'GET');
+  await restrictedDirectoryPage.getByRole('button', { name: '重新检查权限', exact: true }).click();
+  await permissionRetry;
+  await restrictedDirectoryPage.getByRole('status').filter({ hasText: '暂未确认具备查看成员名单的权限' }).waitFor();
+  assert.equal(userListReadAttempts, 0, 'permission-limited users do not request the member directory, including after permission retry');
+  await restrictedDirectoryPage.close();
+
+  holdNextUserListRead = true;
+  userListReadAttempts = 0;
+  const usersReadStarted = new Promise<void>((resolve) => { userListReadStarted = resolve; });
+  const directoryRacePage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  directoryRacePage.on('pageerror', (error) => errors.push(error.message));
+  directoryRacePage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await directoryRacePage.goto(`${base}/__qa?theme=light`);
+  await directoryRacePage.getByRole('heading', { name: '复盘中心' }).waitFor();
+  await usersReadStarted;
+  const directoryRaceUser = { ...admin, id: 100, name: '新账号复盘验收', username: 'retrospective-directory-second-account', role: 'director' };
+  fixtureUser = directoryRaceUser;
+  fixturePermissions = ['analytics:retro:view', 'analytics:retro:create', 'user:view'];
+  const newAccountDirectoryResponse = directoryRacePage.waitForResponse((response) => response.url().includes('/api/users') && response.request().headers().authorization?.includes('second-account-fixture'));
+  await directoryRacePage.evaluate(async (user) => {
+    const { useAuthStore } = await import('/src/store/index.ts');
+    useAuthStore.getState().login(user, 'second-account-fixture', { persist: 'memory' });
+  }, directoryRaceUser);
+  const newAccountDirectory = await newAccountDirectoryResponse;
+  await directoryRacePage.getByRole('button', { name: '新建复盘' }).click();
+  const switchedOwnerSelect = directoryRacePage.getByLabel('负责人');
+  await directoryRacePage.waitForFunction(() => Array.from(document.querySelectorAll('select option')).some((option) => option.textContent?.includes('新账号可见成员')));
+  assert.equal(await switchedOwnerSelect.locator('option', { hasText: '新账号可见成员' }).count(), 1, 'the current account member appears in the owner options');
+  assert.equal(await switchedOwnerSelect.locator('option', { hasText: '旧账号可见成员' }).count(), 0, 'the new account receives only its own member directory');
+  const delayedOldDirectoryResponse = directoryRacePage.waitForResponse((response) => response.url().includes('/api/users') && response.request().headers().authorization?.includes('retrospective-responsive-fixture'));
+  releaseUserListRead?.();
+  releaseUserListRead = null;
+  await delayedOldDirectoryResponse;
+  await directoryRacePage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  assert.equal(await switchedOwnerSelect.locator('option', { hasText: '新账号可见成员' }).count(), 1, 'a late old-account response cannot replace the current member directory');
+  assert.equal(await switchedOwnerSelect.locator('option', { hasText: '旧账号可见成员' }).count(), 0, 'no previous-account member is exposed after its response arrives');
+  assert.equal(userListReadAttempts, 2, 'account switch causes one new scoped directory request');
+  assert.ok(newAccountDirectory.ok(), 'the current account member request succeeds');
+  await directoryRacePage.close();
+  assert.equal(expectedAssignee503, 0, 'both expected member-directory 503 responses are accounted for');
 
   retrospectiveCreateAttempts = 0;
   const createPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });

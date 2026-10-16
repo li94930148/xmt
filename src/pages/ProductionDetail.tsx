@@ -36,6 +36,7 @@ import { setCurrentContentDocument } from '../content/orchestrator/currentConten
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 import ProductionResourcesPanel from '../components/production/ProductionResourcesPanel';
 import ProductionMaterialHistorySnapshot from '../components/production/ProductionMaterialHistorySnapshot';
 import ProductionOriginPanel from '../components/production/ProductionOriginPanel';
@@ -149,6 +150,13 @@ export default function ProductionDetail() {
     content: '',
     status: 'draft',
   });
+  const latestEditContentRef = useRef('');
+  const productionMutationLockRef = useRef(false);
+  const [reviewSubmitPhase, setReviewSubmitPhase] = useState<'preparing' | 'submitting' | null>(null);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [versionSaving, setVersionSaving] = useState<'minor' | 'major' | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const hasProductionMutation = reviewSubmitPhase !== null || statusUpdating || versionSaving !== null || deleting;
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
   const [leaveFailureDialogDismissed, setLeaveFailureDialogDismissed] = useState(false);
   const [superseded, setSuperseded] = useState<VersionSupersededPayload | null>(null);
@@ -197,6 +205,18 @@ export default function ProductionDetail() {
     const handle = runtimeHandleRef.current;
     return handle ? handle.flush({ timeoutMs: 15_000 }) : { status: 'failed' };
   }, []);
+  const flushProductionEditorBeforeMutation = useCallback(async () => {
+    const result = await flushReviewEditor();
+    if (result.status === 'synced') return true;
+
+    const message = result.status === 'timed_out'
+      ? '编辑器仍在保存，当前操作未执行，请稍后重试。'
+      : result.status === 'cancelled'
+        ? '编辑器保存已中断，当前操作未执行，请刷新确认正文后重试。'
+        : '正文保存未确认，当前操作未执行；请检查保存提示并重试。';
+    addNotification({ title: '正文尚未确认保存', message, type: 'error' });
+    return false;
+  }, [addNotification, flushReviewEditor]);
 
   useEffect(() => {
     if (!socket || !production || !authUser) return;
@@ -209,7 +229,10 @@ export default function ProductionDetail() {
     return () => { socket.off(COLLABORATION_EVENTS.VERSION_SUPERSEDED, handleSuperseded); };
   }, [authUser, production, socket]);
 
+  const pendingRouteStayRef = useRef<(() => void) | null>(null);
   const handleContinueEditing = useCallback(() => {
+    pendingRouteStayRef.current?.();
+    pendingRouteStayRef.current = null;
     setLeaveFailureDialogDismissed(true);
   }, []);
 
@@ -217,30 +240,38 @@ export default function ProductionDetail() {
 
   const handleDiscardAndLeave = useCallback(() => discardAndLeave(), [discardAndLeave]);
 
-  const handleGuardedNavigate = useCallback(async (to: string) => {
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    let continued = false;
+    const continueOnce = () => {
+      if (continued) return;
+      continued = true;
+      pendingRouteStayRef.current = null;
+      proceed();
+    };
+    pendingRouteStayRef.current = stay;
     setLeaveFailureDialogDismissed(false);
-    const leaveResult = await requestLeave({
-      reason: 'route_transition',
-      continuation: () => navigate(to),
-    });
-
-    if (leaveResult.decision === 'waiting_confirmation') {
-      addNotification({
-        title: '最后修改尚未保存',
-        message: '已阻止离开当前页面，请留在此页后重试保存。',
-        type: 'warning',
-      });
-      return;
-    }
-
-    if (leaveResult.warning === 'collaboration_unconfirmed') {
-      addNotification({
-        title: '内容已保存',
-        message: '协作交接尚未确认，已按安全保存结果继续导航。',
-        type: 'warning',
-      });
-    }
-  }, [addNotification, navigate, requestLeave]);
+    void requestLeave({ reason: 'route_transition', continuation: continueOnce })
+      .then((leaveResult) => {
+        if (leaveResult.decision === 'waiting_confirmation') {
+          addNotification({
+            title: '最后修改尚未保存',
+            message: '已阻止离开当前页面，请留在此页后重试保存。',
+            type: 'warning',
+          });
+          return;
+        }
+        continueOnce();
+        if (leaveResult.warning === 'collaboration_unconfirmed') {
+          addNotification({
+            title: '内容已保存',
+            message: '协作交接尚未确认，已按安全保存结果继续导航。',
+            type: 'warning',
+          });
+        }
+      })
+      .catch(stay);
+  }, [addNotification, requestLeave]);
+  useRouteNavigationGuard(Boolean(production), handleRouteNavigationAttempt);
 
   const fetchData = useCallback(async () => {
     if (!id) return;
@@ -277,6 +308,7 @@ export default function ProductionDetail() {
         content: productionData.content || '',
         status: productionData.status,
       });
+      latestEditContentRef.current = productionData.content || '';
       setTopic(topicData);
       setHistory(historyData.data);
       setLinkedHistoryVersion(exactHistoryVersion);
@@ -364,7 +396,7 @@ export default function ProductionDetail() {
   }, [history, linkedHistoryVersion, production]);
 
   const selectedVersion = versionEntries.find((entry) => entry.id === selectedVersionId) || versionEntries[0] || null;
-  const canFocusWrite = Boolean(selectedVersion?.isCurrent && canEditSelectedVersion && !superseded);
+  const canFocusWrite = Boolean(selectedVersion?.isCurrent && canEditSelectedVersion && !superseded && !hasProductionMutation);
   const outlineHeadings = useMemo(() => extractOutlineHeadings(topic?.outline || ''), [topic?.outline]);
 
   useEffect(() => {
@@ -427,8 +459,9 @@ export default function ProductionDetail() {
   const startEditing = () => {
     if (!production) return;
     setSelectedVersionId('current');
+    latestEditContentRef.current = production.content || editData.content || '';
     setEditData({
-      content: production.content || editData.content || '',
+      content: latestEditContentRef.current,
       status: production.status,
     });
   };
@@ -454,7 +487,7 @@ export default function ProductionDetail() {
       documentId: room,
       collaborationRoom: room,
       initialContent: editData.content,
-      readonly: !canEditSelectedVersion || selectedVersionId !== 'current' || Boolean(superseded),
+      readonly: !canEditSelectedVersion || selectedVersionId !== 'current' || Boolean(superseded) || hasProductionMutation,
       capabilities: {
         collaboration: true,
         manualSave: false,
@@ -478,16 +511,20 @@ export default function ProductionDetail() {
         persistedContentRef.current = content;
       },
     });
-  }, [addNotification, canEditSelectedVersion, editData.content, editData.status, production, selectedVersionId, superseded]);
+  }, [addNotification, canEditSelectedVersion, editData.content, editData.status, hasProductionMutation, production, selectedVersionId, superseded]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
-    if (!production || !canEditSelectedVersion || superseded) return;
+    if (!production || !canEditSelectedVersion || superseded || productionMutationLockRef.current) return;
 
+    productionMutationLockRef.current = true;
+    setVersionSaving(versionAction);
     try {
+      if (!await flushProductionEditorBeforeMutation()) return;
+      const versionedContent = latestEditContentRef.current;
       const result = await updateProduction(production.id, {
         topic_id: production.topic_id,
         version: production.version,
-        content: editData.content,
+        content: versionedContent,
         expected_content: persistedContentRef.current,
         status: editData.status,
         change_type: versionAction,
@@ -507,22 +544,44 @@ export default function ProductionDetail() {
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      productionMutationLockRef.current = false;
+      setVersionSaving(null);
     }
   };
 
   const handleSubmitReview = async () => {
-    if (!production || !canEditSelectedVersion || superseded) return;
+    if (!production || !canEditSelectedVersion || superseded || productionMutationLockRef.current) return;
 
+    productionMutationLockRef.current = true;
+    setReviewSubmitPhase('preparing');
     try {
+      const flushResult = await flushReviewEditor();
+      if (flushResult.status !== 'synced') {
+        const message = flushResult.status === 'timed_out'
+          ? '编辑器仍在保存，请稍后重试提交审核。'
+          : flushResult.status === 'cancelled'
+            ? '编辑器保存已中断，请刷新确认正文后再提交审核。'
+            : '正文保存未确认，请检查编辑器提示并重试后再提交审核。';
+        addNotification({ title: '正文尚未确认保存', message, type: 'error' });
+        return;
+      }
+
+      const submittedContent = latestEditContentRef.current;
+      setReviewSubmitPhase('submitting');
       await updateProduction(production.id, {
         topic_id: production.topic_id,
         version: production.version,
-        content: editData.content,
+        content: submittedContent,
         expected_content: persistedContentRef.current,
         status: 'review',
         version_action: 'none',
       });
 
+      persistedContentRef.current = submittedContent;
+      latestEditContentRef.current = submittedContent;
+      setProduction((current) => current ? { ...current, content: submittedContent, status: 'review' } : current);
+      setEditData((current) => ({ ...current, content: submittedContent, status: 'review' }));
       addNotification({
         title: '提交成功',
         message: '创作内容已提交审核',
@@ -536,22 +595,32 @@ export default function ProductionDetail() {
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      productionMutationLockRef.current = false;
+      setReviewSubmitPhase(null);
     }
   };
 
   const handleStatusUpdate = async (status: string) => {
-    if (!production || !canEditSelectedVersion || superseded) return;
+    if (!production || !canEditSelectedVersion || superseded || productionMutationLockRef.current) return;
 
+    productionMutationLockRef.current = true;
+    setStatusUpdating(true);
     try {
+      if (!await flushProductionEditorBeforeMutation()) return;
+      const statusUpdateContent = latestEditContentRef.current;
       await updateProduction(production.id, {
         topic_id: production.topic_id,
         version: production.version,
-        content: production.content,
+        content: statusUpdateContent,
         expected_content: persistedContentRef.current,
         status,
         version_action: 'none',
       });
 
+      persistedContentRef.current = statusUpdateContent;
+      setProduction((current) => current ? { ...current, content: statusUpdateContent, status } : current);
+      setEditData((current) => ({ ...current, content: statusUpdateContent, status }));
       addNotification({
         title: '状态更新成功',
         message: '创作状态已同步',
@@ -567,12 +636,17 @@ export default function ProductionDetail() {
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      productionMutationLockRef.current = false;
+      setStatusUpdating(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!production) return;
+    if (!production || productionMutationLockRef.current) return;
 
+    productionMutationLockRef.current = true;
+    setDeleting(true);
     try {
       await deleteProduction(production.id);
       addNotification({
@@ -587,6 +661,9 @@ export default function ProductionDetail() {
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      productionMutationLockRef.current = false;
+      setDeleting(false);
     }
   };
 
@@ -618,6 +695,7 @@ export default function ProductionDetail() {
     && production?.status !== 'approved'
     && selectedVersionId === 'current'
     && !editorLocked
+    && !hasProductionMutation
     && hasPermission('production:update')
     && hasPermission('resource:view');
 
@@ -653,7 +731,7 @@ export default function ProductionDetail() {
           <div className="flex min-w-0 items-start gap-3">
             <button
               type="button"
-              onClick={() => void handleGuardedNavigate('/production')}
+              onClick={() => navigate('/production')}
               className="mt-1 rounded-button border border-studio-border-soft bg-studio-surface-soft/70 p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
               title="返回创作管理"
             >
@@ -673,7 +751,7 @@ export default function ProductionDetail() {
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
                 <span>{production.version || 'v1.0'}</span>
-                <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="text-studio-cyan-contrast transition hover:text-studio-primary-contrast">
+                <button type="button" onClick={() => navigate(`/topics/${production.topic_id}`)} className="text-studio-cyan-contrast transition hover:text-studio-primary-contrast">
                   {topic?.title || production.topic_title || '关联选题'}
                 </button>
                 <span className="inline-flex items-center gap-1">
@@ -694,12 +772,12 @@ export default function ProductionDetail() {
 
           <div className="flex flex-wrap items-center gap-2">
             {canFocusWrite && (
-              <ActionButton onClick={continueFromOutline} disabled={outlineHeadings.length === 0 || !outlineEditorReady} className="px-3 py-2" title={outlineHeadings.length === 0 ? '请先在选题大纲中设置标题' : `补入 ${outlineHeadings.length} 个大纲标题中尚未写入正文的小节`}>
+              <ActionButton onClick={continueFromOutline} disabled={outlineHeadings.length === 0 || !outlineEditorReady || hasProductionMutation} className="px-3 py-2" title={outlineHeadings.length === 0 ? '请先在选题大纲中设置标题' : `补入 ${outlineHeadings.length} 个大纲标题中尚未写入正文的小节`}>
                 按大纲续写
               </ActionButton>
             )}
             {canFocusWrite && (
-              <ActionButton onClick={() => setWritingFocused(true)} className="px-3 py-2">
+              <ActionButton onClick={() => setWritingFocused(true)} disabled={hasProductionMutation} className="px-3 py-2">
                 专注写作
               </ActionButton>
             )}
@@ -707,17 +785,25 @@ export default function ProductionDetail() {
               {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
               版本历史
             </ActionButton>
-            {!requestedHistoryUnavailable ? <ActionButton onClick={startEditing} className="px-3 py-2">
+            {!requestedHistoryUnavailable ? <ActionButton onClick={startEditing} disabled={hasProductionMutation} className="px-3 py-2">
               <FileText className="h-4 w-4" />
               当前稿件
             </ActionButton> : null}
             {canEditSelectedVersion && production.status !== 'approved' ? (
-              <ActionButton onClick={() => handleStatusUpdate(NEXT_STATUSES[production.status])} variant="primary" className="px-3 py-2">
+              <ActionButton
+                onClick={() => production.status === 'draft' ? void handleSubmitReview() : void handleStatusUpdate(NEXT_STATUSES[production.status])}
+                variant="primary"
+                className="px-3 py-2"
+                disabled={hasProductionMutation}
+                aria-busy={hasProductionMutation}
+              >
                 <ArrowRight className="h-4 w-4" />
-                {production.status === 'draft' ? '提交审核' : production.status === 'review' ? '审核通过' : '重新编辑'}
+                {production.status === 'draft'
+                  ? reviewSubmitPhase === 'preparing' ? '正在确认正文保存…' : reviewSubmitPhase === 'submitting' ? '正在提交审核…' : '提交审核'
+                  : statusUpdating ? '状态处理中…' : versionSaving ? '版本保存中…' : deleting ? '正在删除…' : production.status === 'review' ? '审核通过' : '重新编辑'}
               </ActionButton>
             ) : production.status === 'approved' ? (
-              <ActionButton onClick={() => void handleGuardedNavigate('/shooting')} variant="primary" className="px-3 py-2">
+              <ActionButton onClick={() => navigate('/shooting')} variant="primary" disabled={hasProductionMutation} className="px-3 py-2">
                 <ArrowRight className="h-4 w-4" />
                 成片制作
               </ActionButton>
@@ -725,6 +811,8 @@ export default function ProductionDetail() {
             {canDelete ? (
               <ActionButton
                 onClick={() => setShowDeleteModal(true)}
+                disabled={hasProductionMutation}
+                aria-busy={deleting}
                 className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10"
                 title="删除创作记录"
               >
@@ -819,7 +907,7 @@ export default function ProductionDetail() {
                 <p className="text-sm font-semibold text-studio-coral-contrast">引用的历史版本 {requestedVersion} 暂不可用</p>
                 <p className="mt-2 text-sm text-studio-text-secondary">为避免把当前稿误当作来源，本页不会替换显示当前正文。</p>
               </div>
-              <ActionButton onClick={() => void handleGuardedNavigate(`/production/${production.id}`)} variant="primary" className="px-3 py-2">
+              <ActionButton onClick={() => navigate(`/production/${production.id}`)} variant="primary" className="px-3 py-2">
                 返回当前版本
               </ActionButton>
             </div>
@@ -827,7 +915,10 @@ export default function ProductionDetail() {
             <div className="min-h-[300px] bg-[var(--editor-bg)]">
               <ContentEditor
                 value={editData.content}
-                onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
+                onChange={(content) => {
+                  latestEditContentRef.current = content;
+                  setEditData((prev) => ({ ...prev, content }));
+                }}
                 mode="rich"
                 collaborationKey={getProductionVersionRoomId(production.id, production.version)}
                 persistenceStatus={syncStatus}
@@ -835,6 +926,7 @@ export default function ProductionDetail() {
                 focusMode={writingFocused}
                 pageScroll
                 adapter={productionEditorAdapter}
+              readOnly={hasProductionMutation}
                 onRuntimeHandleChange={handleRuntimeHandleChange}
                 onEditorCommandHandleChange={handleOutlineEditorChange}
               />
@@ -866,7 +958,7 @@ export default function ProductionDetail() {
           version={selectedVersion?.version || production.version}
           currentVersion={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked)}
           canComment={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked && hasPermission('workflow:comment'))}
-          canAccept={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked && canEditSelectedVersion && hasPermission('production:update'))}
+          canAccept={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked && !hasProductionMutation && canEditSelectedVersion && hasPermission('production:update'))}
           canModerate={hasPermission('comment:delete')}
           currentUserId={authUser?.id ?? null}
           editorHandle={reviewEditorHandle}
@@ -898,7 +990,7 @@ export default function ProductionDetail() {
                   key={entry.id}
                   type="button"
                   onClick={() => setSelectedVersionId(entry.id)}
-                  disabled={requestedHistoryUnavailable}
+                  disabled={requestedHistoryUnavailable || hasProductionMutation}
                   className={`w-full rounded-card border px-4 py-3 text-left transition ${
                     selectedVersionId === entry.id
                       ? 'border-studio-border-active bg-studio-primary/12 shadow-glow-primary'
@@ -916,7 +1008,7 @@ export default function ProductionDetail() {
                 </button>
               ))}
               {sidebarVersionEntries.length === 0 ? <EmptyState title="暂无版本历史" description="保存版本后会在这里形成时间线。" /> : null}
-              {history.length < historyTotal && <button type="button" disabled={historyLoading} onClick={() => void loadMoreHistory()} className="w-full rounded-lg border border-studio-border-soft px-3 py-2 text-sm text-studio-text-secondary disabled:opacity-50">{historyLoading ? '正在加载…' : '查看更多历史版本'}</button>}
+              {history.length < historyTotal && <button type="button" disabled={historyLoading || hasProductionMutation} onClick={() => void loadMoreHistory()} className="w-full rounded-lg border border-studio-border-soft px-3 py-2 text-sm text-studio-text-secondary disabled:opacity-50">{historyLoading ? '正在加载…' : '查看更多历史版本'}</button>}
             </div>
 
             <ProductionOriginPanel
@@ -928,32 +1020,38 @@ export default function ProductionDetail() {
 
             <div className="space-y-3 border-t border-studio-border-soft pt-5">
               <p className="text-xs font-semibold uppercase text-studio-text-muted">版本操作</p>
-              {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && <ActionButton onClick={startEditing} className="w-full">
+              {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && <ActionButton onClick={startEditing} disabled={hasProductionMutation} className="w-full">
                 当前版本查看 / 编辑
               </ActionButton>}
               {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && (
                 <div className="flex flex-wrap gap-2">
-                  <ActionButton onClick={() => handleVersionedSave('minor')} className="min-w-0 flex-1 px-3 py-2">
+                  <ActionButton onClick={() => handleVersionedSave('minor')} disabled={hasProductionMutation} aria-busy={versionSaving === 'minor'} className="min-w-0 flex-1 px-3 py-2">
                     <Save className="h-4 w-4" />
-                    小修保存
+                    {versionSaving === 'minor' ? '正在保存…' : '小修保存'}
                   </ActionButton>
-                  <ActionButton onClick={() => handleVersionedSave('major')} className="min-w-0 flex-1 px-3 py-2" variant="primary">
+                  <ActionButton onClick={() => handleVersionedSave('major')} disabled={hasProductionMutation} aria-busy={versionSaving === 'major'} className="min-w-0 flex-1 px-3 py-2" variant="primary">
                     <Save className="h-4 w-4" />
-                    另开新版
+                    {versionSaving === 'major' ? '正在保存…' : '另开新版'}
                   </ActionButton>
                 </div>
               )}
               {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && editData.status === 'draft' ? (
-                <ActionButton onClick={handleSubmitReview} variant="primary" className="w-full">
+                <ActionButton
+                  onClick={handleSubmitReview}
+                  variant="primary"
+                  className="w-full"
+                  disabled={hasProductionMutation}
+                  aria-busy={hasProductionMutation}
+                >
                   <ArrowRight className="h-4 w-4" />
-                  提交审核
+                  {reviewSubmitPhase === 'preparing' ? '正在确认正文保存…' : reviewSubmitPhase === 'submitting' ? '正在提交审核…' : '提交审核'}
                 </ActionButton>
               ) : null}
             </div>
 
             <div className="border-t border-studio-border-soft pt-5">
               <p className="text-xs font-semibold uppercase text-studio-text-muted">关联选题</p>
-              <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan-contrast transition hover:text-studio-primary-contrast">
+              <button type="button" onClick={() => navigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan-contrast transition hover:text-studio-primary-contrast">
                 {topic?.title || production.topic_title || '-'}
               </button>
             </div>
@@ -970,6 +1068,7 @@ export default function ProductionDetail() {
         variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteModal(false)}
+        loading={deleting}
       />
 
       <EditorLeaveFailureDialog

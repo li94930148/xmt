@@ -134,7 +134,30 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       if (!accountDailyMetricCodes.has(code) || !Number.isFinite(numeric) || (ratioMetricCodes.has(code) && (numeric < 0 || numeric > 1))) throw Object.assign(new Error('官方导出账号日指标无效'), { statusCode: 422 });
     }
   }
+  let dataQuality: { source_rows: number; accepted_rows: number; duplicate_rows: number; rejected_rows: number; warnings: string[] } | undefined;
   if (parserVersion === 'douyin-export-v3') {
+    const quality = payload.quality && typeof payload.quality === 'object' ? payload.quality as JsonRecord : null;
+    const warnings = quality?.warnings;
+    if (!quality || !Array.isArray(warnings) || warnings.length > 200 || warnings.some(warning => typeof warning !== 'string' || warning.length > 120)) {
+      throw Object.assign(new Error('官方导出质量摘要无效'), { statusCode: 422 });
+    }
+    const fatalWarnings = warnings.filter(warning => warning === 'HEADER_UNRECOGNIZED'
+      || warning === 'ACCOUNT_DAILY_PERIOD_MISSING'
+      || warning === 'ALL_ROWS_REJECTED'
+      || warning.startsWith('PARSE_FAILED:'));
+    if (fatalWarnings.length > 0) {
+      throw Object.assign(new Error('官方导出文件解析未通过质量校验，本批次未入库；请检查导出文件并重新同步。'), { statusCode: 422 });
+    }
+    const qualityCounts = ['source_rows', 'accepted_rows', 'duplicate_rows', 'rejected_rows'].map(field => quality[field]);
+    if (qualityCounts.some(value => typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)) throw Object.assign(new Error('官方导出质量摘要无效'), { statusCode: 422 });
+    const [sourceRows, acceptedRows, duplicateRows, rejectedRows] = qualityCounts as number[];
+    const qualityMessages = new Set<string>();
+    if (rejectedRows! > 0) qualityMessages.add(`采集器报告 ${rejectedRows} 行未通过解析；本次入库仅包含已接受的行。`);
+    if (duplicateRows! > 0) qualityMessages.add(`采集器报告 ${duplicateRows} 行为重复数据。`);
+    if (warnings.includes('FALLBACK_IDENTITY_COLLISION')) qualityMessages.add('作品列表存在重复身份记录，相关行已跳过。');
+    if (warnings.includes('ACCOUNT_DAILY_DATE_DUPLICATE')) qualityMessages.add('账号日指标存在重复日期记录，相关行已跳过。');
+    if (warnings.length > 0 && qualityMessages.size === 0) qualityMessages.add('采集器报告存在解析提示，请核对本机采集诊断。');
+    dataQuality = { source_rows: sourceRows!, accepted_rows: acceptedRows!, duplicate_rows: duplicateRows!, rejected_rows: rejectedRows!, warnings: [...qualityMessages] };
     const sourceKeys = new Set(sourceFiles.map(file => `${text(file.dataset_type)}:${text(file.period)}`));
     const required = ['content_list:', 'account_daily:yesterday', 'account_daily:7d', 'account_daily:30d'];
     if (required.some(value => !sourceKeys.has(value))) throw Object.assign(new Error('官方导出文件不完整，需同时包含作品列表及昨天、近7天、近30天'), { statusCode: 422 });
@@ -245,7 +268,7 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       ...(unmatchedContentRows ? [`${unmatchedContentRows} 条官方作品未找到标题与发布日期完全一致的本地记录，已保留官方汇总但未覆盖作品明细`] : []),
       ...(ambiguousContentRows ? [`${ambiguousContentRows} 条官方作品存在多个标题与发布日期相同的本地候选，已保留官方汇总并等待人工确认`] : []),
     ];
-    const result={result:{inserted,updated,unchanged,rejected,stale_ignored:staleIgnored,daily_inserted:dailyInserted,daily_updated:dailyUpdated,daily_unchanged:dailyUnchanged,reconciled_content_rows:reconciledContentRows,reconciled_work_rows:reconciledWorkRows,unmatched_content_rows:unmatchedContentRows,ambiguous_content_rows:ambiguousContentRows},warnings}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[JSON.stringify(result),batch.id]);
+    const result={result:{inserted,updated,unchanged,rejected,stale_ignored:staleIgnored,daily_inserted:dailyInserted,daily_updated:dailyUpdated,daily_unchanged:dailyUnchanged,reconciled_content_rows:reconciledContentRows,reconciled_work_rows:reconciledWorkRows,unmatched_content_rows:unmatchedContentRows,ambiguous_content_rows:ambiguousContentRows},warnings,...(dataQuality ? { data_quality: dataQuality } : {})}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[JSON.stringify(result),batch.id]);
     return {success:true,batch_id:batchId,duplicate_batch:false,...result};
   });
 }

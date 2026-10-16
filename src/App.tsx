@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom';
+import { createBrowserRouter, Navigate, Route, Routes, RouterProvider, useNavigate } from 'react-router-dom';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import Layout from '@/components/Layout';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -13,6 +13,31 @@ import { installNativeAuthRuntime, refreshNativeSession } from '@/auth/native/na
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
 import { getPublicSystemSettings } from '@/api/systemSettings';
 import { resolveInitialTheme } from '@/lib/systemSettings';
+import { RouteNavigationGuardProvider } from '@/hooks/useRouteNavigationGuard';
+import { revokeMobileDevice } from '@/api';
+import { apiFetch } from '@/api/transport';
+
+function LogoutRedirect() {
+  const navigate = useNavigate();
+  const logout = useAuthStore((state) => state.logout);
+  const token = useAuthStore((state) => state.token);
+  const handledRef = useRef(false);
+
+  useEffect(() => {
+    if (handledRef.current) return;
+    handledRef.current = true;
+    if (isAndroid() && token) {
+      void revokeMobileDevice().catch(() => undefined);
+      void apiFetch('/v1/auth/mobile/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
+      void nativeRefreshCredentials.clear().catch(() => undefined);
+      nativeUserProfile.clear();
+    }
+    logout();
+    navigate('/login', { replace: true });
+  }, [logout, navigate, token]);
+
+  return <PageLoading />;
+}
 
 function applyTheme(theme: 'light' | 'dark') {
   const root = document.documentElement;
@@ -160,43 +185,16 @@ function NativeSessionBootstrap({ children }: { children: React.ReactNode }) {
   return ready ? children : <PageLoading />;
 }
 
-export default function App() {
+function AppRoutes() {
   const [mobileLayout] = useState(() => shouldUseMobileLayout(isAndroid(), window.innerWidth));
-  const setTheme = useAppStore((state) => state.setTheme);
-  useEffect(() => {
-    const applySystemDefault = async () => {
-      try {
-        const settings = await getPublicSystemSettings();
-        const preference = localStorage.getItem('xmt_theme');
-        setTheme(resolveInitialTheme(preference, settings.system.defaultTheme), false);
-      } catch {
-        // Keep the existing local/default theme if the public settings endpoint is unavailable.
-      }
-    };
-
-    try {
-      const preference = localStorage.getItem('xmt_theme');
-      if (preference === 'light' || preference === 'dark') {
-        applyTheme(preference);
-      } else {
-        void applySystemDefault();
-      }
-    } catch {
-      void applySystemDefault();
-    }
-
-    window.addEventListener('xmt-settings-changed', applySystemDefault);
-    return () => window.removeEventListener('xmt-settings-changed', applySystemDefault);
-  }, [setTheme]);
 
   return (
-    <ErrorBoundary>
-      <RealtimeToast />
-      <Router>
+      <RouteNavigationGuardProvider>
         <NativeSessionBootstrap>
           <Suspense fallback={<PageLoading />}>
             <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/logout" element={<LogoutRedirect />} />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<Layout mobileLayout={mobileLayout} />}>
@@ -308,7 +306,44 @@ export default function App() {
             </Routes>
           </Suspense>
         </NativeSessionBootstrap>
-      </Router>
+      </RouteNavigationGuardProvider>
+  );
+}
+
+const appRouter = createBrowserRouter([{ path: '*', element: <AppRoutes /> }]);
+
+export default function App() {
+  const setTheme = useAppStore((state) => state.setTheme);
+  useEffect(() => {
+    const applySystemDefault = async () => {
+      try {
+        const settings = await getPublicSystemSettings();
+        const preference = localStorage.getItem('xmt_theme');
+        setTheme(resolveInitialTheme(preference, settings.system.defaultTheme), false);
+      } catch {
+        // Keep the existing local/default theme if the public settings endpoint is unavailable.
+      }
+    };
+
+    try {
+      const preference = localStorage.getItem('xmt_theme');
+      if (preference === 'light' || preference === 'dark') {
+        applyTheme(preference);
+      } else {
+        void applySystemDefault();
+      }
+    } catch {
+      void applySystemDefault();
+    }
+
+    window.addEventListener('xmt-settings-changed', applySystemDefault);
+    return () => window.removeEventListener('xmt-settings-changed', applySystemDefault);
+  }, [setTheme]);
+
+  return (
+    <ErrorBoundary>
+      <RealtimeToast />
+      <RouterProvider router={appRouter} />
     </ErrorBoundary>
   );
 }

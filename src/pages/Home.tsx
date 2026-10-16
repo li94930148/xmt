@@ -188,7 +188,6 @@ export default function Home() {
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setRecentActivity(null);
         setRecentActivityError(error instanceof Error ? error.message : '最近变化暂时无法读取，请重试。');
       })
       .finally(() => {
@@ -359,6 +358,7 @@ export default function Home() {
   const attentionTotal = attention?.counts.total ?? null;
   const taskSourcesUnavailable = Boolean(attentionError)
     || Boolean(isManagementRole && actionableMessages.error);
+  const taskSourcesLoading = Boolean(isManagementRole && actionableMessages.loading && !actionableMessages.messages.length && actionableMessages.count === 0);
   const recentChanges = useMemo<ChangeItem[]>(() => (recentActivity?.events || []).map((event) => ({
     id: event.id,
     type: event.label,
@@ -414,7 +414,7 @@ export default function Home() {
               <div className="flex min-w-0 flex-1 items-center gap-3"><div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-button ${stageToneClasses[task.tone] || stageToneClasses.primary}`}><task.icon className="h-5 w-5" /></div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-semibold text-studio-text-primary">{task.title}</p><StatusPill tone={task.tone}>{task.action}</StatusPill></div><p className="mt-1 truncate text-sm text-studio-text-secondary">{task.context}</p><p className="mt-1 text-xs text-studio-text-muted">{task.meta}</p></div></div>
               <ActionButton className="shrink-0" variant={task.tone === 'coral' ? 'danger' : 'primary'} onClick={() => navigate(task.path)}>{task.action}<ChevronRight className="h-4 w-4" /></ActionButton>
             </div>)}
-          </div> : taskSourcesUnavailable ? <p className="p-5 text-sm text-studio-text-muted" role="status">部分任务来源暂时无法读取，当前无法确认是否还有待处理任务；请修复读取问题后重试。</p> : <EmptyState icon={CheckCircle2} title="今天没有必须处理的任务" description={canCreateTopic ? '可以从记录灵感或创建选题开始下一轮内容生产。' : '可以从记录灵感开始下一轮内容生产。'} actionLabel={canCreateTopic ? '新建选题' : '记灵感'} onAction={() => navigate(canCreateTopic ? '/topics/add' : '/inspirations')} />}
+          </div> : taskSourcesUnavailable ? <p className="p-5 text-sm text-studio-text-muted" role="status">部分任务来源暂时无法读取，当前无法确认是否还有待处理任务；请修复读取问题后重试。</p> : taskSourcesLoading ? <p className="p-5 text-sm text-studio-text-muted" role="status">正在确认是否有待处理消息…</p> : <EmptyState icon={CheckCircle2} title="今天没有必须处理的任务" description={canCreateTopic ? '可以从记录灵感或创建选题开始下一轮内容生产。' : '可以从记录灵感开始下一轮内容生产。'} actionLabel={canCreateTopic ? '新建选题' : '记灵感'} onAction={() => navigate(canCreateTopic ? '/topics/add' : '/inspirations')} />}
         </GlassPanel>
 
         <GlassPanel>
@@ -425,7 +425,7 @@ export default function Home() {
               : topic.is_stalled
                 ? `${formatStageElapsed(topic.stage_entered_at)} · 本阶段已超过 2 天`
                 : `截止临近 · ${formatBeijingDate(topic.deadline)}`;
-            return <button key={topic.id} type="button" onClick={() => navigate(`/topics/${topic.id}`)} className="flex w-full items-start gap-3 rounded-card border border-studio-border-soft bg-studio-surface-soft/45 p-3 text-left transition hover:border-studio-border-active hover:bg-studio-surface-elevated/60"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-studio-coral" /><div className="min-w-0 flex-1"><p className="line-clamp-2 text-sm font-semibold text-studio-text-primary">{topic.title}</p><p className="mt-1 text-xs text-studio-coral-contrast">{reason}</p><p className="mt-1 text-xs text-studio-text-muted">{topicStatusText[topic.status as TopicStatus] || '进行中'} · {topic.assignee_name || '待认领'}</p></div><ChevronRight className="mt-1 h-4 w-4 shrink-0 text-studio-text-muted" /></button>;
+            return <button key={topic.id} type="button" onClick={() => navigate(`/topics/${topic.id}`)} className="flex w-full items-start gap-3 rounded-card border border-studio-border-soft bg-studio-surface-soft/45 p-3 text-left transition hover:border-studio-border-active hover:bg-studio-surface-elevated/60"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-studio-coral" /><div className="min-w-0 flex-1"><p className="line-clamp-2 text-sm font-semibold text-studio-text-primary">{topic.title}</p><p className="mt-1 text-xs text-studio-coral-contrast">{reason}</p><p className="mt-1 text-xs text-studio-text-muted">{topicStatusText[topic.status as TopicStatus] || '状态待确认'} · {topic.assignee_name || '待认领'}</p></div><ChevronRight className="mt-1 h-4 w-4 shrink-0 text-studio-text-muted" /></button>;
           })}{attentionTotal !== null && attentionTotal > attentionTopics.length ? <p className="px-1 pt-1 text-xs text-studio-text-muted">先显示最需要处理的 {attentionTopics.length} 条，共 {attentionTotal} 条。</p> : null}</div> : <EmptyState icon={CheckCircle2} title="目前没有逾期或卡点内容" description="临近截止事项和超过两天未推进的内容会显示在这里。" />}
         </GlassPanel>
       </div>
@@ -436,7 +436,15 @@ export default function Home() {
       </GlassPanel>
 
       <GlassPanel>
-        <button type="button" onClick={() => setShowChanges((current) => !current)} className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"><div><h2 className="text-base font-semibold text-studio-text-primary">最近变化</h2><p className="mt-1 text-xs text-studio-text-muted">可追溯的稿件版本、批注和选题阶段变化</p></div>{showChanges ? <ChevronDown className="h-5 w-5 text-studio-text-muted" /> : <ChevronRight className="h-5 w-5 text-studio-text-muted" />}</button>
+        <div className="flex items-center justify-between gap-3 px-5 py-4">
+          <button type="button" onClick={() => setShowChanges((current) => !current)} className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left">
+            <div><h2 className="text-base font-semibold text-studio-text-primary">最近变化</h2><p className="mt-1 text-xs text-studio-text-muted">可追溯的稿件版本、批注和选题阶段变化</p></div>
+            {showChanges ? <ChevronDown className="h-5 w-5 shrink-0 text-studio-text-muted" /> : <ChevronRight className="h-5 w-5 shrink-0 text-studio-text-muted" />}
+          </button>
+          {recentActivity && !recentActivityLoading && !recentActivityError ? (
+            <ActionButton aria-label="刷新最近变化" variant="ghost" onClick={() => setRecentActivityReload((current) => current + 1)}>刷新</ActionButton>
+          ) : null}
+        </div>
       {hasPermission('workflow:publishing') && (attention?.today_publishing.total || 0) > tasks.filter((task) => task.category === 'publishing').length ? <p className="-mt-3 text-xs text-studio-text-muted">今日待发布 {attention?.today_publishing.total} 项，当前任务区显示其中优先事项。</p> : null}
 
       {showChanges ? <div className="border-t border-studio-border-soft">
@@ -450,7 +458,13 @@ export default function Home() {
           </dl>
           <p className="mt-3 text-xs text-studio-text-muted">播放为近 7 天数据变化；粉丝数是最近一次可用的总量，不代表本周新增。{currentCreatorMetrics.data.last_success_at ? ` 数据同步于 ${formatBeijingTime(currentCreatorMetrics.data.last_success_at)}。` : ''}</p>
         </section> : null}
-        <div className="divide-y divide-studio-border-soft">{recentActivityError ? <div className="flex flex-wrap items-center justify-between gap-3 p-4" role="alert"><p className="text-sm text-studio-coral-contrast">{recentActivityError}</p><ActionButton variant="ghost" disabled={recentActivityLoading} onClick={() => setRecentActivityReload((current) => current + 1)}>{recentActivityLoading ? '正在重试…' : '重新加载'}</ActionButton></div> : recentActivityLoading ? <p className="p-5 text-sm text-studio-text-muted" role="status">正在读取最近变化…</p> : recentChanges.length > 0 ? recentChanges.map((change) => <button key={change.id} type="button" onClick={() => navigate(change.path)} className="grid w-full gap-2 px-5 py-3 text-left transition hover:bg-studio-surface-soft/55 sm:grid-cols-[110px_minmax(0,1fr)_minmax(0,1fr)_150px] sm:items-center"><StatusPill className="justify-self-start" tone={change.tone}>{change.type}</StatusPill><span className="truncate text-sm font-medium text-studio-text-primary">{change.title}</span><span className="truncate text-sm text-studio-text-secondary">{change.detail}</span><span className="text-xs text-studio-text-muted sm:text-right">{formatBeijingTime(change.time)}</span></button>) : <EmptyState title="还没有最近变化" description="有新的稿件版本、批注或选题阶段变化后会显示在这里。" />}</div>
+        <div className="divide-y divide-studio-border-soft">
+          {recentActivityError ? <div className="flex flex-wrap items-center justify-between gap-3 p-4" role="alert"><div><p className="text-sm text-studio-coral-contrast">{recentActivityError}</p>{recentActivity ? <p className="mt-1 text-xs text-studio-text-secondary">仍显示最近一次成功读取的数据，可能不是最新。</p> : null}</div><ActionButton variant="ghost" disabled={recentActivityLoading} onClick={() => setRecentActivityReload((current) => current + 1)}>{recentActivityLoading ? '正在重试…' : '重新加载'}</ActionButton></div> : null}
+          {recentActivityLoading && !recentActivity ? <p className="p-5 text-sm text-studio-text-muted" role="status">正在读取最近变化…</p> : null}
+          {recentActivityLoading && recentActivity ? <p className="p-4 text-sm text-studio-text-muted" role="status">正在更新最近变化；上次成功读取的内容仍可查看。</p> : null}
+          {recentActivity && recentChanges.length > 0 ? recentChanges.map((change) => <button key={change.id} type="button" onClick={() => navigate(change.path)} className="grid w-full gap-2 px-5 py-3 text-left transition hover:bg-studio-surface-soft/55 sm:grid-cols-[110px_minmax(0,1fr)_minmax(0,1fr)_150px] sm:items-center"><StatusPill className="justify-self-start" tone={change.tone}>{change.type}</StatusPill><span className="truncate text-sm font-medium text-studio-text-primary">{change.title}</span><span className="truncate text-sm text-studio-text-secondary">{change.detail}</span><span className="text-xs text-studio-text-muted sm:text-right">{formatBeijingTime(change.time)}</span></button>) : null}
+          {recentActivity && recentChanges.length === 0 && !recentActivityError && !recentActivityLoading ? <EmptyState title="还没有最近变化" description="有新的稿件版本、批注或选题阶段变化后会显示在这里。" /> : null}
+        </div>
       </div> : null}
       </GlassPanel>
     </PageShell>

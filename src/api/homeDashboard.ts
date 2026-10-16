@@ -77,6 +77,49 @@ export type HomeActivitySummary = {
   events: HomeActivityEvent[];
 };
 
+const INVALID_HOME_ATTENTION_MESSAGE = '工作台摘要数据格式暂不兼容，请重新加载；如问题持续，请联系管理员。';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRecordArray(value: unknown): value is Record<string, unknown>[] {
+  return Array.isArray(value) && value.every(isRecord);
+}
+
+function hasCountAndRecords(value: unknown): value is Record<string, unknown> & { total: number; tasks: Record<string, unknown>[] } {
+  return isRecord(value) && typeof value.total === 'number' && Number.isFinite(value.total) && isRecordArray(value.tasks);
+}
+
+function isHomeAttentionSummary(value: unknown): value is HomeAttentionSummary {
+  if (!isRecord(value) || !isRecord(value.active_topics) || !isRecord(value.counts)) return false;
+
+  const counts = value.counts;
+  const stages = value.topic_stages;
+  const stageNames: HomePipelineTopic['status'][] = ['pending', 'production', 'shooting', 'publishing', 'completed'];
+  const hasStagePreviews = isRecord(stages) && stageNames.every((stage) => {
+    const entry = stages[stage];
+    return isRecord(entry) && typeof entry.total === 'number' && Number.isFinite(entry.total) && isRecordArray(entry.topics);
+  });
+
+  return (value.scope === 'all-visible-content' || value.scope === 'personal')
+    && typeof value.generated_at === 'string'
+    && typeof value.stale_stage_days === 'number' && Number.isFinite(value.stale_stage_days)
+    && typeof value.active_topics.total === 'number' && Number.isFinite(value.active_topics.total)
+    && isRecordArray(value.active_topics.topics)
+    && ['overdue', 'due_soon', 'stalled', 'total'].every((key) => typeof counts[key] === 'number' && Number.isFinite(counts[key]))
+    && hasCountAndRecords(value.today_publishing)
+    && hasCountAndRecords(value.sync_anomalies)
+    && typeof value.sync_anomalies.available === 'boolean'
+    && hasCountAndRecords(value.production_reviews)
+    && typeof value.production_reviews.available === 'boolean'
+    && hasCountAndRecords(value.retrospectives)
+    && typeof value.retrospectives.available === 'boolean'
+    && isRecordArray(value.topics)
+    && hasStagePreviews
+    && isRecord(value.my_drafts) && isRecordArray(value.my_drafts.tasks);
+}
+
 export type HomeTodayPublishingTask = {
   id: number;
   topic_id: number;
@@ -129,7 +172,9 @@ export async function getHomeAttention(signal?: AbortSignal): Promise<HomeAttent
     const message = payload && typeof payload.message === 'string' ? payload.message : '工作台摘要暂时无法读取，请重试。';
     throw new Error(message);
   }
-  return response.json();
+  const payload: unknown = await response.json().catch(() => null);
+  if (!isHomeAttentionSummary(payload)) throw new Error(INVALID_HOME_ATTENTION_MESSAGE);
+  return payload;
 }
 
 export async function getHomeActivity(): Promise<HomeActivitySummary> {

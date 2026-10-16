@@ -60,9 +60,8 @@ export default function Sidebar({
   };
 
   const handleLogout = () => {
-    authStore.logout();
     onMobileClose?.();
-    navigate('/login');
+    navigate('/logout', { replace: true });
   };
 
   const visibleSections = navigationSections

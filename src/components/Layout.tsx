@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Menu, Moon, Search, Settings, Sun, User, LogOut, ChevronRight } from 'lucide-react';
-import { getMe, getPublicSystemSettings, getUnreadCount, registerMobileDevice, revokeMobileDevice } from '../api';
+import { getMe, getPublicSystemSettings, getUnreadCount, registerMobileDevice } from '../api';
 import { useAuthStore, useAppStore, useMessageStore } from '../store';
 import { buildBreadcrumbs } from '../config/navigation';
 import Sidebar from './Sidebar';
@@ -18,7 +18,6 @@ import { AnimatedPage, AppShell, Topbar } from '@/components/studio';
 import { MobileShell } from '@/components/mobile/MobileShell';
 import { isAndroid } from '@/platform/runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
-import { apiFetch } from '@/api/transport';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 
@@ -336,15 +335,8 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
   }, [navigate]);
 
   const handleLogout = useCallback(() => {
-    if (isAndroid() && token) {
-      void revokeMobileDevice().catch(() => undefined);
-      void apiFetch('/v1/auth/mobile/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined);
-      void nativeRefreshCredentials.clear().catch(() => undefined);
-      nativeUserProfile.clear();
-    }
-    logout();
-    navigate('/login', { replace: true });
-  }, [logout, navigate, token]);
+    navigate('/logout', { replace: true });
+  }, [navigate]);
 
   const settingsMenuLabel = hasPermission('system:settings') ? '设置中心' : '个人设置';
 

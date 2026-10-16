@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Camera, CheckCircle, Clock3, ExternalLink, FileText, Send, UserRound, XCircle } from 'lucide-react';
 import { ActionButton, EmptyState, GlassPanel, StatusPill } from '../studio';
 import { formatBeijingDate } from '../../lib/utils';
@@ -45,7 +45,7 @@ export type TopicsBoardViewProps = {
   canUpdate: boolean;
   canAudit: boolean;
   onOpenTopic: (topic: Topic) => void;
-  onTransition: (topic: Topic, status: TopicStatus) => void;
+  onTransition: (topic: Topic, status: TopicStatus) => void | Promise<void>;
 };
 
 export default function TopicsBoardView({
@@ -53,6 +53,8 @@ export default function TopicsBoardView({
 }: TopicsBoardViewProps) {
   const [platformFilter, setPlatformFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [transitioningTopicIds, setTransitioningTopicIds] = useState<Set<number>>(() => new Set());
+  const transitionsInFlightRef = useRef(new Set<number>());
   const platforms = useMemo(() => [...new Set(topics.map((topic) => topic.platform).filter(Boolean))].sort(), [topics]);
   const assignees = useMemo(() => {
     const unique = new Map<number, string>();
@@ -67,6 +69,21 @@ export default function TopicsBoardView({
     return true;
   }), [assigneeFilter, platformFilter, topics]);
   const visibleColumns = statusFilter ? columns.filter((column) => column.status === statusFilter) : columns;
+  const transitionTopic = async (topic: Topic, status: TopicStatus) => {
+    if (transitionsInFlightRef.current.has(topic.id)) return;
+    transitionsInFlightRef.current.add(topic.id);
+    setTransitioningTopicIds((current) => new Set(current).add(topic.id));
+    try {
+      await onTransition(topic, status);
+    } finally {
+      transitionsInFlightRef.current.delete(topic.id);
+      setTransitioningTopicIds((current) => {
+        const next = new Set(current);
+        next.delete(topic.id);
+        return next;
+      });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -115,6 +132,7 @@ export default function TopicsBoardView({
                   <div className="max-h-[calc(100vh-24rem)] min-h-40 space-y-3 overflow-y-auto p-3">
                     {items.length === 0 ? <p className="py-8 text-center text-xs text-studio-text-muted">暂无选题</p> : items.map((topic) => {
                       const canChange = topic.status === 'pending' ? canAudit : canUpdate;
+                      const isTransitioning = transitioningTopicIds.has(topic.id);
                       return (
                         <article key={topic.id} className="rounded-card border border-studio-border-soft bg-studio-surface-soft p-3.5 transition hover:border-studio-border-active">
                           <button type="button" onClick={() => onOpenTopic(topic)} className="group flex w-full items-start justify-between gap-2 text-left">
@@ -132,8 +150,8 @@ export default function TopicsBoardView({
                           {canChange && nextStatuses[topic.status].length ? (
                             <div className="mt-3 flex flex-wrap gap-2 border-t border-studio-border-soft pt-3">
                               {nextStatuses[topic.status].map((next) => (
-                                <ActionButton key={next.status} type="button" variant="secondary" className="min-h-8 px-2.5 py-1 text-xs" onClick={() => onTransition(topic, next.status)}>
-                                  {next.label}
+                                <ActionButton key={next.status} type="button" variant="secondary" disabled={isTransitioning} aria-busy={isTransitioning} className="min-h-8 px-2.5 py-1 text-xs" onClick={() => { void transitionTopic(topic, next.status); }}>
+                                  {isTransitioning ? '处理中…' : next.label}
                                 </ActionButton>
                               ))}
                             </div>

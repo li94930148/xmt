@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Archive, Eye } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { getDailyReportArchive, getSummaryArchive, type DailyReport, type MonthlyRecord, type SummaryArchive, type YearlyRecord } from '../../api/dailyReports';
@@ -29,6 +29,9 @@ export default function DailyReportSummaryArchive({ canViewArchive, canViewOwnDa
   const [end, setEnd] = useState(requestedDate || dateKeyBjt(now));
   const [userId, setUserId] = useState(canViewArchive ? requestedUserId : '');
   const [users, setUsers] = useState<User[]>([]);
+  const userDirectoryRequestRef = useRef(0);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersLoadError, setUsersLoadError] = useState(false);
   const [daily, setDaily] = useState<DailyReport[]>([]);
   const [summary, setSummary] = useState<SummaryArchive | null>(null);
   const [selectedSummary, setSelectedSummary] = useState<MonthlyRecord | YearlyRecord | null>(null);
@@ -42,9 +45,31 @@ export default function DailyReportSummaryArchive({ canViewArchive, canViewOwnDa
     if (canViewArchive && requestedUserId) setUserId(requestedUserId);
   }, [canViewArchive, requestedDate, requestedUserId]);
 
-  useEffect(() => {
-    if (canViewArchive) void getUsers({ page: 1, limit: 200 }).then((result) => setUsers(result.data || [])).catch(() => setUsers([]));
+  const loadUsers = useCallback(async () => {
+    const requestId = ++userDirectoryRequestRef.current;
+    if (!canViewArchive) {
+      setUsers([]);
+      setUsersLoadError(false);
+      setUsersLoading(false);
+      return;
+    }
+
+    setUsersLoading(true);
+    setUsersLoadError(false);
+    try {
+      const result = await getUsers({ page: 1, limit: 200 });
+      if (requestId === userDirectoryRequestRef.current) setUsers(result.data || []);
+    } catch {
+      if (requestId === userDirectoryRequestRef.current) setUsersLoadError(true);
+    } finally {
+      if (requestId === userDirectoryRequestRef.current) setUsersLoading(false);
+    }
   }, [canViewArchive]);
+
+  useEffect(() => {
+    void loadUsers();
+    return () => { userDirectoryRequestRef.current += 1; };
+  }, [loadUsers]);
 
   const load = useCallback(async () => {
     if (!canViewOwnDaily) return;
@@ -94,10 +119,18 @@ export default function DailyReportSummaryArchive({ canViewArchive, canViewOwnDa
           {canViewArchive ? (
             <label className="block">
               <span className="mb-2 block text-xs text-studio-text-muted">成员</span>
-              <select value={userId} onChange={(event) => setUserId(event.target.value)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary">
+              <select data-testid="daily-report-archive-user-filter" value={userId} onChange={(event) => setUserId(event.target.value)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary">
                 <option value="">全部成员</option>
+                {userId && !users.some((user) => String(user.id) === userId) ? <option value={userId} disabled>已选择成员（名称暂不可用）</option> : null}
                 {users.map((user) => <option key={user.id} value={String(user.id)}>{user.name || user.username}</option>)}
               </select>
+              {usersLoading ? <span role="status" className="mt-1 block text-xs text-studio-text-muted">正在加载成员名单…</span> : null}
+              {usersLoadError ? (
+                <span role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-xs text-studio-danger">
+                  <span>成员名单加载失败，筛选选项可能不完整。</span>
+                  <ActionButton onClick={() => void loadUsers()} disabled={usersLoading} className="px-2 py-1">重试</ActionButton>
+                </span>
+              ) : null}
             </label>
           ) : <span className="text-xs text-studio-text-muted">仅显示自己的日报</span>}
           {kind === 'daily' ? (

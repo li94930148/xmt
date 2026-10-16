@@ -63,3 +63,13 @@ def test_account_daily_export_rejects_ambiguous_period(tmp_path: Path):
     result = parse_official_export(export, {"datasetType": "account_daily"})
     assert result["datasets"] == {}
     assert result["quality"]["warnings"] == ["ACCOUNT_DAILY_PERIOD_MISSING"]
+
+
+def test_content_export_with_only_rejected_rows_is_marked_fatal(tmp_path: Path):
+    export = tmp_path / "content.xlsx"
+    write_xlsx(export, [["作品名称", "发布时间", "播放量"], ["作品没有发布时间", "", 10]])
+    result = parse_official_export(export, {"datasetType": "content_list"})
+    assert result["datasets"]["content_metrics"] == []
+    assert result["quality"]["source_rows"] == 1
+    assert result["quality"]["rejected_rows"] == 1
+    assert result["quality"]["warnings"] == ["ALL_ROWS_REJECTED"]

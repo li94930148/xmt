@@ -27,7 +27,7 @@ import {
   StatusPill,
 } from '../components/studio';
 import { formatBeijingTime } from '../lib/utils';
-import { useAppStore, useMessageStore } from '../store';
+import { useAppStore, useAuthStore, useMessageStore } from '../store';
 import type { Message } from '../types';
 
 const MESSAGE_PAGE_SIZE = 20;
@@ -63,9 +63,13 @@ export default function Messages() {
   const [activeFilter, setActiveFilter] = useState<MessageFilter>(() => searchParams.get('filter') === 'actionable' ? 'actionable' : 'all');
   const markingMessageIdsRef = useRef(new Set<number>());
   const latestMessageRequestRef = useRef(0);
+  const loadedQueryKeyRef = useRef<string | null>(null);
+  const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null);
   const [markingMessageIds, setMarkingMessageIds] = useState<Set<number>>(() => new Set());
 
   const navigate = useNavigate();
+  const userId = useAuthStore((state) => state.user?.id);
+  const messageQueryKey = JSON.stringify([userId ?? null, page, activeFilter]);
   const addNotification = useAppStore((state) => state.addNotification);
   const setStoreMessages = useMessageStore((state) => state.setMessages);
   const setUnreadCount = useMessageStore((state) => state.setUnreadCount);
@@ -96,17 +100,23 @@ export default function Messages() {
         setMessages(result.data);
         setTotal(result.total);
         setSummary(result.summary);
+        loadedQueryKeyRef.current = messageQueryKey;
+        setLoadedQueryKey(messageQueryKey);
         setStoreMessages(result.data);
         setUnreadCount(result.summary.unread);
       })
       .catch((error) => {
         if (!active || requestId !== latestMessageRequestRef.current) return;
         const message = error instanceof Error ? error.message : '请检查网络后重试';
-        setMessages([]);
-        setTotal(0);
-        setSummary({ total: 0, unread: 0, actionable: 0 });
-        setStoreMessages([]);
-        setUnreadCount(0);
+        if (loadedQueryKeyRef.current !== messageQueryKey) {
+          setMessages([]);
+          setTotal(0);
+          setSummary({ total: 0, unread: 0, actionable: 0 });
+          setLoadedQueryKey(null);
+          loadedQueryKeyRef.current = null;
+          setStoreMessages([]);
+          setUnreadCount(0);
+        }
         setLoadError(message);
         addNotification({ title: '获取消息失败', message, type: 'error' });
       })
@@ -117,13 +127,14 @@ export default function Messages() {
     return () => {
       active = false;
     };
-  }, [activeFilter, addNotification, page, reloadKey, setStoreMessages, setUnreadCount]);
+  }, [activeFilter, addNotification, messageQueryKey, page, reloadKey, setStoreMessages, setUnreadCount]);
 
   const totalPages = Math.max(1, Math.ceil(total / MESSAGE_PAGE_SIZE));
   const unreadCount = summary.unread;
   const actionableCount = summary.actionable;
   const filteredMessages = messages;
   const showUnreadOnly = activeFilter === 'unread' || activeFilter === 'actionable';
+  const hasCurrentResults = loadedQueryKey === messageQueryKey;
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -279,70 +290,86 @@ export default function Messages() {
             <div className="px-6 py-12">
               <LoadingState type="section" text="正在同步消息流..." />
             </div>
-          ) : loadError ? (
+          ) : loadError && !hasCurrentResults ? (
             <div className="flex flex-col items-center gap-4 p-6">
               <EmptyState icon={AlertTriangle} title="消息加载失败" description={loadError} />
               <ActionButton type="button" onClick={() => setReloadKey((current) => current + 1)}>重试加载</ActionButton>
             </div>
-          ) : messages.length === 0 ? (
-            <div className="p-6">
-              <EmptyState icon={Bell} title="暂无消息" description="协作通知、审核反馈和系统提醒会出现在这里。" />
-            </div>
-          ) : filteredMessages.length === 0 ? (
-            <div className="p-6">
-              <EmptyState icon={Inbox} title="当前筛选无消息" description="切换筛选条件查看其他消息类型。" />
-            </div>
           ) : (
-            <div className="divide-y divide-studio-border-soft">
-              {filteredMessages.map((message) => {
-                const meta = typeMeta[message.type] || typeMeta.info;
-                const isMarking = markingMessageIds.has(message.id);
-
-                return (
-                  <button
-                    key={message.id}
-                    type="button"
-                    onClick={() => handleMessageClick(message)}
-                    disabled={isMarking}
-                    aria-busy={isMarking}
-                    className={`group w-full px-5 py-4 text-left transition hover:bg-studio-surface-soft ${
-                      !message.read ? 'bg-studio-primary/[0.055] shadow-[inset_3px_0_0_rgba(34,211,238,0.65)]' : ''
-                    } ${isMarking ? 'cursor-wait' : message.link ? 'cursor-pointer' : 'cursor-default'}`}
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border bg-studio-surface-soft ${
-                        meta.tone === 'success'
-                          ? 'border-studio-success/35 text-studio-success-contrast'
-                          : meta.tone === 'coral'
-                            ? 'border-studio-coral/35 text-studio-coral-contrast'
-                            : meta.tone === 'amber'
-                              ? 'border-studio-amber/35 text-studio-amber-contrast'
-                              : 'border-studio-cyan/35 text-studio-cyan-contrast'
-                      }`}
-                      >
-                        {meta.icon}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug text-studio-text-primary">{message.title}</h3>
-                          <StatusPill tone={message.read ? 'muted' : 'cyan'}>{isMarking ? '标记中' : message.read ? '已读' : '未读'}</StatusPill>
-                          {message.link ? <ExternalLink className="h-4 w-4 text-studio-text-muted opacity-60 transition group-hover:opacity-100" /> : null}
-                        </div>
-                        <p className="mt-1 text-sm leading-6 text-studio-text-secondary">{message.content}</p>
-                        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
-                          <span>{formatBeijingTime(message.created_at)}</span>
-                          <span>{meta.label}</span>
-                          {message.link ? <span className="text-studio-cyan-contrast">可进入关联页面</span> : null}
-                        </div>
-                      </div>
+            <>
+              {loadError ? (
+                <div role="alert" className="flex flex-col gap-3 border-b border-studio-amber/30 bg-studio-amber/10 px-5 py-4 text-studio-text-primary md:flex-row md:items-center md:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-studio-amber-contrast" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">刷新失败，仍显示上次成功加载的消息</p>
+                      <p className="mt-1 break-words text-sm text-studio-text-secondary">{loadError} 当前内容可能不是最新。</p>
                     </div>
-                  </button>
-                );
-              })}
-            </div>
+                  </div>
+                  <ActionButton type="button" onClick={() => setReloadKey((current) => current + 1)}>重新加载</ActionButton>
+                </div>
+              ) : null}
+              {messages.length === 0 ? (
+                <div className="p-6">
+                  <EmptyState icon={Bell} title="暂无消息" description="协作通知、审核反馈和系统提醒会出现在这里。" />
+                </div>
+              ) : filteredMessages.length === 0 ? (
+                <div className="p-6">
+                  <EmptyState icon={Inbox} title="当前筛选无消息" description="切换筛选条件查看其他消息类型。" />
+                </div>
+              ) : (
+                <div className="divide-y divide-studio-border-soft">
+                  {filteredMessages.map((message) => {
+                    const meta = typeMeta[message.type] || typeMeta.info;
+                    const isMarking = markingMessageIds.has(message.id);
+
+                    return (
+                      <button
+                        key={message.id}
+                        type="button"
+                        onClick={() => handleMessageClick(message)}
+                        disabled={isMarking}
+                        aria-busy={isMarking}
+                        className={`group w-full px-5 py-4 text-left transition hover:bg-studio-surface-soft ${
+                          !message.read ? 'bg-studio-primary/[0.055] shadow-[inset_3px_0_0_rgba(34,211,238,0.65)]' : ''
+                        } ${isMarking ? 'cursor-wait' : message.link ? 'cursor-pointer' : 'cursor-default'}`}
+                      >
+                        <div className="flex items-start gap-4">
+                          <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border bg-studio-surface-soft ${
+                            meta.tone === 'success'
+                              ? 'border-studio-success/35 text-studio-success-contrast'
+                              : meta.tone === 'coral'
+                                ? 'border-studio-coral/35 text-studio-coral-contrast'
+                                : meta.tone === 'amber'
+                                  ? 'border-studio-amber/35 text-studio-amber-contrast'
+                                  : 'border-studio-cyan/35 text-studio-cyan-contrast'
+                          }`}
+                          >
+                            {meta.icon}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug text-studio-text-primary">{message.title}</h3>
+                              <StatusPill tone={message.read ? 'muted' : 'cyan'}>{isMarking ? '标记中' : message.read ? '已读' : '未读'}</StatusPill>
+                              {message.link ? <ExternalLink className="h-4 w-4 text-studio-text-muted opacity-60 transition group-hover:opacity-100" /> : null}
+                            </div>
+                            <p className="mt-1 text-sm leading-6 text-studio-text-secondary">{message.content}</p>
+                            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
+                              <span>{formatBeijingTime(message.created_at)}</span>
+                              <span>{meta.label}</span>
+                              {message.link ? <span className="text-studio-cyan-contrast">可进入关联页面</span> : null}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
 
-          {!loading && !loadError && total > MESSAGE_PAGE_SIZE ? (
+          {!loading && (!loadError || hasCurrentResults) && total > MESSAGE_PAGE_SIZE ? (
             <div className="flex flex-col gap-3 border-t border-studio-border-soft px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm text-studio-text-secondary">共 {total} 条，第 {page} / {totalPages} 页</span>
               <div className="flex items-center gap-2">

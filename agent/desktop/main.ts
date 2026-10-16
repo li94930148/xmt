@@ -47,7 +47,7 @@ import type { RebindInput } from "./types.js";
 import { rendererAccountIdentity, rendererSettings } from './mainOnlyAccountIdentity.js';
 import { sanitizeRendererState } from './browserSafeRendererContract.js';
 import { collectorCheckpointLog, safeErrorClass, serializeAgentRuntimeLog, type AgentRuntimeLogInput } from './runtimeLogger.js';
-const AGENT_VERSION = '2.14.5-agent';
+const AGENT_VERSION = '2.14.6-agent';
 const SYSTEM_VERSION = '3.1.0';
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));

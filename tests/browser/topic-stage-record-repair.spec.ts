@@ -71,6 +71,28 @@ const mobileMissingAdvanceTopic = {
   title: '移动端缺少成片记录时不可推进',
   stage_record_presence: { production: true, shooting: false, publishing: false },
 };
+const desktopDelayedAdvanceTopic = {
+  ...leaveGuardTopic,
+  id: 947,
+  title: '桌面阶段推进重复提交保护验收',
+};
+const mobileDelayedAdvanceTopic = {
+  ...leaveGuardTopic,
+  id: 948,
+  title: '移动阶段推进重复提交保护验收',
+};
+const mobileDelayedSaveTopic = {
+  ...productionTopic,
+  id: 950,
+  title: '移动端保存重复提交保护验收',
+  stage_record_presence: { production: true, shooting: true, publishing: true },
+};
+const mobileDelayedRepairTopic = {
+  ...leaveGuardTopic,
+  id: 951,
+  title: '移动端补齐记录重复提交保护验收',
+  stage_record_presence: { production: true, shooting: false, publishing: false },
+};
 const mobileTopic = {
   ...productionTopic,
   id: 933,
@@ -96,7 +118,7 @@ const manualSaveTopic = {
   title: '手动保存失败反馈验收选题',
   stage_record_presence: { production: true, shooting: true, publishing: false },
 };
-const topics = new Map([[productionTopic.id, productionTopic], [completedTopic.id, completedTopic], [mobileTopic.id, mobileTopic], [auditTopic.id, auditTopic], [secondPendingTopic.id, secondPendingTopic], [thirdPendingTopic.id, thirdPendingTopic], [fourthPendingTopic.id, fourthPendingTopic], [leaveGuardTopic.id, leaveGuardTopic], [missingAdvanceTopic.id, missingAdvanceTopic], [mobileMissingAdvanceTopic.id, mobileMissingAdvanceTopic], [saveTopic.id, saveTopic], [manualSaveTopic.id, manualSaveTopic]]);
+const topics = new Map([[productionTopic.id, productionTopic], [completedTopic.id, completedTopic], [mobileTopic.id, mobileTopic], [auditTopic.id, auditTopic], [secondPendingTopic.id, secondPendingTopic], [thirdPendingTopic.id, thirdPendingTopic], [fourthPendingTopic.id, fourthPendingTopic], [leaveGuardTopic.id, leaveGuardTopic], [missingAdvanceTopic.id, missingAdvanceTopic], [mobileMissingAdvanceTopic.id, mobileMissingAdvanceTopic], [desktopDelayedAdvanceTopic.id, desktopDelayedAdvanceTopic], [mobileDelayedAdvanceTopic.id, mobileDelayedAdvanceTopic], [mobileDelayedSaveTopic.id, mobileDelayedSaveTopic], [mobileDelayedRepairTopic.id, mobileDelayedRepairTopic], [saveTopic.id, saveTopic], [manualSaveTopic.id, manualSaveTopic]]);
 const repairedStages: string[] = [];
 const auditWrites: Array<{ topicId: number; status: string }> = [];
 const statusWrites: Array<{ topicId: number; status: string }> = [];
@@ -107,6 +129,24 @@ let hideCreatorMetricsForHome = false;
 let failNextCreatorSyncLogs = false;
 let failNextCreatorAgentStatus = false;
 let failNextAuditSave: string | null = null;
+let holdNextAuditSave = false;
+let auditSaveStartedCallback: (() => void) | null = null;
+let releaseAuditSave: (() => void) | null = null;
+let auditSaveAttempts = 0;
+let holdNextTopicStatusSave = false;
+let topicStatusSaveStartedCallback: (() => void) | null = null;
+let releaseTopicStatusSave: (() => void) | null = null;
+let topicStatusSaveAttempts = 0;
+let holdNextMobileTopicSave = false;
+let mobileTopicSaveStartedCallback: (() => void) | null = null;
+let releaseMobileTopicSave: (() => void) | null = null;
+let mobileTopicSaveAttempts = 0;
+let holdNextMobileStageRepair = false;
+let mobileStageRepairStartedCallback: (() => void) | null = null;
+let releaseMobileStageRepair: (() => void) | null = null;
+let mobileStageRepairAttempts = 0;
+let failNextTopicUserDirectoryRead = false;
+let topicUserDirectoryReads = 0;
 const linkedResource = { id: 991, title: '解除关联反馈验收资料', summary: '隔离浏览器资料', library_type: 'knowledge', category: { id: 1, name: '验收资料', path: '验收资料' } };
 let isResourceLinked = true;
 let topicResourceListReads = 0;
@@ -117,8 +157,12 @@ let failNextManualTopicSave = false;
 let manualTopicSaveWrites = 0;
 const manualTopicVersions: Array<Record<string, unknown>> = [];
 let failNextHomeAttention = false;
+let returnMalformedNextHomeAttention = false;
 let failNextHomeActivity = false;
 let failNextHomeRetrospectives = false;
+let failNextHomeActionableMessages = false;
+let delayNextHomeActionableMessages = 0;
+let emptyHomeTasks = false;
 let homeTopicListReads = 0;
 let homeProductionListReads = 0;
 let allowHomeCreate = false;
@@ -150,8 +194,18 @@ app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get('/api/messages', (req, res) => {
   const isManager = req.get('authorization') === 'Bearer topic-stage-manager-fixture';
   if (isManager) managerMessageQueries.push({ read: typeof req.query.read === 'string' ? req.query.read : undefined, link: typeof req.query.link === 'string' ? req.query.link : undefined });
-  const data = isManager ? [actionableManagerMessage] : [];
-  return res.json({ data, total: data.length, page: Number(req.query.page) || 1, limit: Number(req.query.limit) || 20, summary: { total: data.length, unread: data.length, actionable: data.length } });
+  const isHomeActionableRead = isManager && req.query.link === 'present';
+  const delayMs = isHomeActionableRead ? delayNextHomeActionableMessages : 0;
+  if (isHomeActionableRead) delayNextHomeActionableMessages = 0;
+  if (isManager && req.query.link === 'present' && failNextHomeActionableMessages) {
+    failNextHomeActionableMessages = false;
+    if (delayMs > 0) return setTimeout(() => res.status(503).json({ message: '待处理消息服务暂不可用，请稍后重试。' }), delayMs);
+    return res.status(503).json({ message: '待处理消息服务暂不可用，请稍后重试。' });
+  }
+  const data = isManager && !emptyHomeTasks ? [actionableManagerMessage] : [];
+  const sendResponse = () => res.json({ data, total: data.length, page: Number(req.query.page) || 1, limit: Number(req.query.limit) || 20, summary: { total: data.length, unread: data.length, actionable: data.length } });
+  if (delayMs > 0) return setTimeout(sendResponse, delayMs);
+  return sendResponse();
 });
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
 app.get('/api/permissions/my', (req, res) => {
@@ -168,6 +222,10 @@ app.get('/api/dashboard/home-attention', (req, res) => {
   if (failNextHomeAttention) {
     failNextHomeAttention = false;
     return res.status(503).json({ message: '工作台摘要暂时无法读取，请重试。' });
+  }
+  if (returnMalformedNextHomeAttention) {
+    returnMalformedNextHomeAttention = false;
+    return res.json({ scope: 'all-visible-content' });
   }
   const retrospectiveSummary = failNextHomeRetrospectives
     ? { available: false, total: 0, tasks: [] }
@@ -210,6 +268,13 @@ app.get('/api/dashboard/home-attention', (req, res) => {
     },
     my_drafts: { tasks: [{ id: 943, topic_id: productionTopic.id, topic_title: '我的待续写稿件', status: 'draft', version: 'v1.1', updated_at: '2026-10-09 09:10:00' }] },
   };
+  if (emptyHomeTasks) {
+    payload.sync_anomalies = { available: true, total: 0, tasks: [] };
+    payload.production_reviews = { available: true, total: 0, tasks: [] };
+    payload.today_publishing = { total: 0, tasks: [] };
+    payload.my_drafts = { tasks: [] };
+    payload.topic_stages.pending = { total: 0, topics: [] };
+  }
   if (holdOldHomeReads && req.get('authorization') !== 'Bearer topic-stage-viewer-fixture') {
     payload.active_topics = { total: 99, topics: [{ id: mobileTopic.id, title: '迟到的旧账号选题', status: 'approved' }] };
     heldOldHomeReplies.push(() => res.json(payload));
@@ -267,14 +332,21 @@ app.get('/api/creator-agent/status', (_req, res) => {
 app.get('/api/topics', (req, res) => {
   if (typeof req.query.status === 'string') homeTopicListReads += 1;
   const matches = Array.from(topics.values())
-    .filter((topic) => topic.status === req.query.status)
+    .filter((topic) => !req.query.status || topic.status === req.query.status)
     .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
   const limit = Number(req.query.limit) || 5;
   return res.json({ success: true, data: matches.slice(0, limit), pagination: { total: matches.length, page: 1, limit } });
 });
 app.get('/api/workflow/production', (_req, res) => { homeProductionListReads += 1; return res.json({ data: [], total: 0, page: 1, limit: 12 }); });
 app.get('/api/workflow/publishing', (_req, res) => res.json({ data: [{ id: 941, topic_id: 934, topic_title: '今日待发布验收', status: 'pending', platform: '抖音', publish_time: '2026-10-09 15:00:00', updated_at: '2026-10-09 09:00:00' }], total: 1, page: 1, limit: 12, summary: { published: 0 } }));
-app.get('/api/users', (_req, res) => res.json({ data: [editor], total: 1, page: 1, limit: 10 }));
+app.get('/api/users', (_req, res) => {
+  topicUserDirectoryReads += 1;
+  if (failNextTopicUserDirectoryRead) {
+    failNextTopicUserDirectoryRead = false;
+    return res.status(503).json({ message: '负责人名单暂不可用。' });
+  }
+  return res.json({ data: [editor], total: 1, page: 1, limit: 10 });
+});
 app.get('/api/topics/:id/resources', (req, res) => {
   topicResourceListReads += 1;
   return res.json({ data: Number(req.params.id) === productionTopic.id && isResourceLinked ? [linkedResource] : [] });
@@ -322,10 +394,26 @@ app.get('/api/workflow/production/942', (_req, res) => res.json({
 }));
 app.get('/api/workflow/production/942/history', (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 20 }));
 app.put('/api/topics/:id', (req, res) => {
-  const topic = topics.get(Number(req.params.id));
+  const topicId = Number(req.params.id);
+  const topic = topics.get(topicId);
   if (!topic) return res.status(404).json({ error: '选题不存在' });
-  if (Number(req.params.id) === saveTopic.id) topicSaveWrites += 1;
-  if (Number(req.params.id) === manualSaveTopic.id) {
+  if (topicId === mobileDelayedSaveTopic.id) {
+    mobileTopicSaveAttempts += 1;
+    if (holdNextMobileTopicSave) {
+      holdNextMobileTopicSave = false;
+      mobileTopicSaveStartedCallback?.();
+      mobileTopicSaveStartedCallback = null;
+      void new Promise<void>((resolve) => { releaseMobileTopicSave = resolve; }).then(() => {
+        releaseMobileTopicSave = null;
+        topic.title = String(req.body?.title ?? topic.title);
+        topic.description = String(req.body?.description ?? topic.description);
+        res.json({ message: '选题已更新' });
+      });
+      return;
+    }
+  }
+  if (topicId === saveTopic.id) topicSaveWrites += 1;
+  if (topicId === manualSaveTopic.id) {
     manualTopicSaveWrites += 1;
     if (failNextManualTopicSave) {
       failNextManualTopicSave = false;
@@ -367,6 +455,20 @@ app.put('/api/topics/:id', (req, res) => {
   return res.json({ message: '选题已更新' });
 });
 app.post('/api/topics/:id/audit', (req, res) => {
+  auditSaveAttempts += 1;
+  if (holdNextAuditSave) {
+    holdNextAuditSave = false;
+    auditSaveStartedCallback?.();
+    auditSaveStartedCallback = null;
+    void new Promise<void>((resolve) => { releaseAuditSave = resolve; }).then(() => {
+      releaseAuditSave = null;
+      finishTopicAudit(req, res);
+    });
+    return;
+  }
+  finishTopicAudit(req, res);
+});
+function finishTopicAudit(req: express.Request, res: express.Response) {
   if (failNextAuditSave) {
     const message = failNextAuditSave;
     failNextAuditSave = null;
@@ -378,8 +480,22 @@ app.post('/api/topics/:id/audit', (req, res) => {
   topic.status = req.body?.status;
   auditWrites.push({ topicId, status: String(req.body?.status) });
   return res.json({ message: '审核结果已保存' });
-});
+}
 app.post('/api/topics/:id/status', (req, res) => {
+  topicStatusSaveAttempts += 1;
+  if (holdNextTopicStatusSave) {
+    holdNextTopicStatusSave = false;
+    topicStatusSaveStartedCallback?.();
+    topicStatusSaveStartedCallback = null;
+    void new Promise<void>((resolve) => { releaseTopicStatusSave = resolve; }).then(() => {
+      releaseTopicStatusSave = null;
+      finishTopicStatus(req, res);
+    });
+    return;
+  }
+  finishTopicStatus(req, res);
+});
+function finishTopicStatus(req: express.Request, res: express.Response) {
   const topicId = Number(req.params.id);
   const topic = topics.get(topicId);
   if (!topic) return res.status(404).json({ message: '选题不存在' });
@@ -388,8 +504,24 @@ app.post('/api/topics/:id/status', (req, res) => {
   if (status === 'publishing') topic.stage_record_presence.publishing = true;
   statusWrites.push({ topicId, status });
   return res.json({ message: '选题状态已更新' });
-});
+}
 app.post('/api/topics/:id/repair-stage-record', (req, res) => {
+  if (Number(req.params.id) === mobileDelayedRepairTopic.id) {
+    mobileStageRepairAttempts += 1;
+    if (holdNextMobileStageRepair) {
+      holdNextMobileStageRepair = false;
+      mobileStageRepairStartedCallback?.();
+      mobileStageRepairStartedCallback = null;
+      void new Promise<void>((resolve) => { releaseMobileStageRepair = resolve; }).then(() => {
+        releaseMobileStageRepair = null;
+        finishTopicStageRecordRepair(req, res);
+      });
+      return;
+    }
+  }
+  finishTopicStageRecordRepair(req, res);
+});
+function finishTopicStageRecordRepair(req: express.Request, res: express.Response) {
   const topic = topics.get(Number(req.params.id));
   if (!topic) return res.status(404).json({ error: '选题不存在' });
   if (topic.status === 'completed') return res.status(409).json({ success: false, error: '已完成选题不得自动补建发布历史' });
@@ -401,7 +533,7 @@ app.post('/api/topics/:id/repair-stage-record', (req, res) => {
     repairedStages.push(stage);
   }
   return res.json({ success: true, data: { stage, created } });
-});
+}
 app.get('/api/resource-center/search', (_req, res) => res.json({ data: [{ resource_id: linkedResource.id, title: linkedResource.title, summary: linkedResource.summary, snippet: '<mark>隔离</mark>验收素材', library_type: linkedResource.library_type, category: linkedResource.category }], total: 1 }));
 app.get('/api/resource-center/resources', (_req, res) => res.json({ data: [], pagination: { page: 1, page_size: 1, total: 0, total_pages: 0 } }));
 app.get('/api/retrospectives', (_req, res) => res.json({ retrospectives: [] }));
@@ -521,6 +653,30 @@ try {
   assert.equal(await auditSubmit.getByRole('heading', { name: '审核选题', exact: true }).count(), 0, 'successful audit closes the review dialog');
   assert.equal(expectedAuditHttpErrors.length, 1, 'only the injected audit-save 503 is expected');
   assert.equal(expectedAuditConsoleErrors.length, 1, 'only the injected audit-save 503 is logged by the browser');
+
+  auditTopic.status = 'pending';
+  await auditSubmit.goto(`${base}/__qa/${auditTopic.id}`);
+  await auditSubmit.getByRole('heading', { name: auditTopic.title }).waitFor();
+  await auditSubmit.getByRole('button', { name: '审核选题', exact: true }).click();
+  let resolveAuditSaveStarted!: () => void;
+  const auditSaveStarted = new Promise<void>((resolve) => { resolveAuditSaveStarted = resolve; });
+  auditSaveStartedCallback = resolveAuditSaveStarted;
+  holdNextAuditSave = true;
+  const auditAttemptsBeforeDelayedSave = auditSaveAttempts;
+  await auditSubmit.getByRole('button', { name: '通过审核', exact: true }).click();
+  await auditSaveStarted;
+  const pendingAuditSubmit = auditSubmit.getByRole('button', { name: '正在提交审核…', exact: true });
+  await pendingAuditSubmit.waitFor();
+  assert.equal(await pendingAuditSubmit.isDisabled(), true, 'the audit submit button stays disabled until the server confirms the result');
+  assert.equal(await auditSubmit.getByRole('button', { name: '审核处理中…', exact: true }).isDisabled(), true, 'the dialog cannot be dismissed while the audit request is pending');
+  assert.equal(await auditSubmit.locator('textarea').isDisabled(), true, 'audit comments cannot change while their submitted values are in flight');
+  assert.equal(auditSaveAttempts, auditAttemptsBeforeDelayedSave + 1, 'one delayed audit request is in flight');
+  releaseAuditSave?.();
+  releaseAuditSave = null;
+  await auditSubmit.getByText('选题已通过审核', { exact: true }).waitFor();
+  assert.equal(auditTopic.status, 'approved', 'the delayed audit is reflected after server confirmation');
+  assert.deepEqual(auditWrites.at(-1), { topicId: auditTopic.id, status: 'approved' }, 'the delayed audit is recorded once');
+  assert.equal(auditSaveAttempts, auditAttemptsBeforeDelayedSave + 1, 'the locked dialog does not issue a duplicate write');
   await auditSubmit.close();
 
   auditTopic.status = 'pending';
@@ -668,6 +824,54 @@ try {
   assert.equal(await partialRetrospectiveHome.getByText('今天没有必须处理的任务', { exact: true }).count(), 0, 'the isolated retrospective failure does not block other Home sections');
   assert.equal(await partialRetrospectiveHome.getByRole('alert').count(), 1, 'the partial failure is reported in the dashboard summary');
   await partialRetrospectiveHome.close();
+
+  const actionableRecoveryHome = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const expectedActionableReadErrors: string[] = [];
+  const actionableHomeApiMethods: string[] = [];
+  actionableRecoveryHome.on('pageerror', (error) => errors.push(error.message));
+  actionableRecoveryHome.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (message.text().includes('status of 503 (Service Unavailable)')) expectedActionableReadErrors.push(message.text());
+    else errors.push(message.text());
+  });
+  actionableRecoveryHome.on('request', (request) => {
+    if (request.url().includes('/api/')) actionableHomeApiMethods.push(request.method());
+  });
+  actionableRecoveryHome.on('response', (response) => {
+    if (response.status() < 400) return;
+    if (response.status() === 503 && response.url().includes('/api/messages?') && response.url().includes('link=present')) expectedActionableReadErrors.push(`${response.status()} ${response.url()}`);
+    else errors.push(`Unexpected HTTP error: ${response.status()} ${response.url()}`);
+  });
+  emptyHomeTasks = true;
+  failNextHomeActionableMessages = true;
+  delayNextHomeActionableMessages = 1800;
+  const firstActionableRead = actionableRecoveryHome.waitForResponse((response) => response.url().includes('/api/messages?') && response.url().includes('link=present'));
+  await actionableRecoveryHome.goto(`${base}/__qa-manager-home`);
+  await actionableRecoveryHome.getByRole('heading', { name: '团队今日重点' }).waitFor();
+  await actionableRecoveryHome.getByText('正在确认是否有待处理消息…', { exact: true }).waitFor();
+  assert.equal(await actionableRecoveryHome.getByText('今天没有必须处理的任务', { exact: true }).count(), 0, 'a pending actionable-message read is not presented as a confirmed empty task list');
+  await actionableRecoveryHome.screenshot({ path: '/tmp/xmt-home-actionable-read-loading-1440.png', fullPage: false });
+  assert.equal((await firstActionableRead).status(), 503, 'the isolated first actionable-message read fails as injected');
+  await actionableRecoveryHome.getByText('待处理消息暂时无法读取，请重试。', { exact: true }).waitFor();
+  assert.equal(await actionableRecoveryHome.getByText('今天没有必须处理的任务', { exact: true }).count(), 0, 'a failed actionable-message read is not presented as an empty task list');
+  await actionableRecoveryHome.screenshot({ path: '/tmp/xmt-home-actionable-read-error-1440.png', fullPage: false });
+  const actionableQueriesBeforeFailure = managerMessageQueries.length;
+  delayNextHomeActionableMessages = 1200;
+  const failedActionableRead = actionableRecoveryHome.waitForResponse((response) => response.url().includes('/api/messages?') && response.url().includes('link=present'));
+  await actionableRecoveryHome.getByRole('button', { name: '重新加载', exact: true }).click();
+  await actionableRecoveryHome.getByRole('button', { name: '正在重试…', exact: true }).waitFor();
+  await actionableRecoveryHome.getByText('待处理消息暂时无法读取，请重试。', { exact: true }).waitFor();
+  assert.equal(await actionableRecoveryHome.getByText('今天没有必须处理的任务', { exact: true }).count(), 0, 'retry keeps the unresolved message source visible instead of briefly claiming there are no tasks');
+  await actionableRecoveryHome.screenshot({ path: '/tmp/xmt-home-actionable-read-retrying-1440.png', fullPage: false });
+  assert.equal((await failedActionableRead).status(), 200, 'the explicit read-only retry succeeds');
+  await actionableRecoveryHome.getByText('今天没有必须处理的任务', { exact: true }).waitFor();
+  assert.equal(await actionableRecoveryHome.getByText('待处理消息暂时无法读取，请重试。', { exact: true }).count(), 0, 'successful retry clears the read error and confirms the empty task state');
+  await actionableRecoveryHome.screenshot({ path: '/tmp/xmt-home-actionable-read-confirmed-empty-1440.png', fullPage: false });
+  assert.equal(managerMessageQueries.length, actionableQueriesBeforeFailure + 1, 'retry performs exactly one scoped actionable-message read');
+  assert.ok(expectedActionableReadErrors.length >= 2, 'the only expected errors are the isolated actionable-message 503 and its response record');
+  assert.ok(actionableHomeApiMethods.every((method) => method === 'GET'), 'Home actionable-message failure and retry perform no API writes');
+  emptyHomeTasks = false;
+  await actionableRecoveryHome.close();
 
   const managerHome = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   managerHome.on('pageerror', (error) => errors.push(error.message));
@@ -888,8 +1092,42 @@ try {
   await activityRetry.getByRole('button', { name: '重新加载', exact: true }).click();
   await activityRetry.getByText('最近变化验收稿件', { exact: true }).waitFor();
   assert.equal(await activityRetry.getByText('最近变化暂不可用，请重试。', { exact: true }).count(), 0, 'successful retry clears only the recent activity error');
-  assert.ok(expectedActivityErrors.length >= 1, 'the only recent activity read failure is the deliberately injected 503');
+  failNextHomeActivity = true;
+  const staleActivityFailure = activityRetry.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-activity') && response.status() === 503);
+  await activityRetry.getByRole('button', { name: '刷新最近变化' }).click();
+  await staleActivityFailure;
+  await activityRetry.getByText('仍显示最近一次成功读取的数据，可能不是最新。', { exact: true }).waitFor();
+  assert.equal(await activityRetry.getByText('最近变化验收稿件', { exact: true }).count(), 1, 'a failed refresh keeps the last successful activity visible');
+  assert.equal(await activityRetry.getByRole('alert').getByRole('button', { name: '重新加载', exact: true }).count(), 1, 'a failed refresh offers a read-only recovery action beside the retained data');
+  await activityRetry.screenshot({ path: '/tmp/xmt-home-recent-activity-stale-1440.png', fullPage: false });
+  const staleActivityRecovery = activityRetry.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-activity') && response.status() === 200);
+  await activityRetry.getByRole('alert').getByRole('button', { name: '重新加载', exact: true }).click();
+  await staleActivityRecovery;
+  await activityRetry.getByText('最近变化验收稿件', { exact: true }).waitFor();
+  await activityRetry.getByText('最近变化暂不可用，请重试。', { exact: true }).waitFor({ state: 'hidden' });
+  assert.equal(await activityRetry.getByText('最近变化暂不可用，请重试。', { exact: true }).count(), 0, 'successful recovery clears the refresh error');
+  assert.ok(expectedActivityErrors.length >= 2, 'only the deliberately injected initial and refresh 503 responses are expected');
   await activityRetry.close();
+
+  const malformedHomeMobile = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  const malformedHomeRuntimeErrors: string[] = [];
+  malformedHomeMobile.on('pageerror', (error) => malformedHomeRuntimeErrors.push(error.message));
+  malformedHomeMobile.on('console', (message) => { if (message.type() === 'error') malformedHomeRuntimeErrors.push(message.text()); });
+  returnMalformedNextHomeAttention = true;
+  await malformedHomeMobile.goto(`${base}/__qa-home`);
+  await malformedHomeMobile.getByText('工作台摘要数据格式暂不兼容，请重新加载；如问题持续，请联系管理员。', { exact: true }).waitFor();
+  assert.equal(await malformedHomeMobile.getByRole('alert').count(), 1, 'an incompatible summary response becomes a recoverable card error, not a route crash');
+  assert.equal(await malformedHomeMobile.getByText('Unexpected Application Error!', { exact: true }).count(), 0, 'the framework error page is not shown for an incompatible summary response');
+  assert.equal(await malformedHomeMobile.locator('vite-error-overlay').count(), 0, 'the malformed summary does not trigger a Vite overlay');
+  assert(await malformedHomeMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the malformed-summary recovery card fits a 390px viewport');
+  await malformedHomeMobile.screenshot({ path: '/tmp/xmt-home-malformed-summary-recovery-390.png', fullPage: false });
+  const malformedSummaryRetry = malformedHomeMobile.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-attention'));
+  await malformedHomeMobile.getByRole('button', { name: '重新加载', exact: true }).click();
+  assert.equal((await malformedSummaryRetry).status(), 200, 'retry re-reads the summary without writing data');
+  await malformedHomeMobile.getByRole('heading', { name: '团队选题关注' }).waitFor();
+  assert.equal(await malformedHomeMobile.getByRole('alert').count(), 0, 'a valid summary clears the contract error');
+  assert.deepEqual(malformedHomeRuntimeErrors, [], 'the incompatible summary response causes no page or console runtime errors');
+  await malformedHomeMobile.close();
 
   const homeMobile = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   const expectedMobileAttentionErrors: string[] = [];
@@ -1013,6 +1251,41 @@ try {
   await staleAudit.close();
   auditTopic.status = 'pending';
 
+  const topicDirectoryRetry = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const directoryHttpErrors: string[] = [];
+  const directoryConsoleErrors: string[] = [];
+  const directoryMutationRequests: string[] = [];
+  const directoryReadsBefore = topicUserDirectoryReads;
+  topicDirectoryRetry.on('pageerror', (error) => errors.push(error.message));
+  topicDirectoryRetry.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (message.text().includes('status of 503 (Service Unavailable)')) directoryConsoleErrors.push(message.text());
+    else errors.push(message.text());
+  });
+  topicDirectoryRetry.on('response', (response) => {
+    if (response.status() === 503 && new URL(response.url()).pathname === '/api/users') directoryHttpErrors.push(`${response.status()} ${response.url()}`);
+    else if (response.status() >= 400) errors.push(`Unexpected HTTP error: ${response.status()} ${response.url()}`);
+  });
+  topicDirectoryRetry.on('request', (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() !== 'GET' && /^\/api\/topics\/\d+(?:\/audit|\/status|\/repair-stage-record)?$/.test(pathname)) directoryMutationRequests.push(`${request.method()} ${pathname}`);
+  });
+  failNextTopicUserDirectoryRead = true;
+  await topicDirectoryRetry.goto(`${base}/__qa/${saveTopic.id}`);
+  await topicDirectoryRetry.getByRole('heading', { name: saveTopic.title }).waitFor();
+  await topicDirectoryRetry.getByRole('alert').filter({ hasText: '负责人名单暂不可用' }).waitFor();
+  assert.equal(await topicDirectoryRetry.getByRole('heading', { name: saveTopic.title }).count(), 1, 'the main topic remains available while the directory request fails');
+  assert.equal(topicUserDirectoryReads, directoryReadsBefore + 1, 'the injected failure affects only the separate user directory request');
+  await topicDirectoryRetry.getByRole('button', { name: '编辑选题', exact: true }).click();
+  await topicDirectoryRetry.getByRole('button', { name: '重新加载负责人名单', exact: true }).click();
+  await topicDirectoryRetry.waitForFunction((name) => Array.from(document.querySelectorAll('select option')).some((option) => option.textContent?.trim() === name), editor.name);
+  assert.equal(await topicDirectoryRetry.getByRole('alert').filter({ hasText: '负责人名单暂不可用' }).count(), 0, 'a successful GET-only retry clears the directory error');
+  assert.equal(topicUserDirectoryReads, directoryReadsBefore + 2, 'retry re-reads the directory exactly once');
+  assert.deepEqual(directoryMutationRequests, [], 'loading or retrying the assignee list performs no topic writes');
+  assert.equal(directoryHttpErrors.length, 1, 'only the deliberately injected user-directory 503 is expected');
+  assert.equal(directoryConsoleErrors.length, 1, 'only the injected user-directory 503 reaches the console');
+  await topicDirectoryRetry.close();
+
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   desktop.on('pageerror', (error) => errors.push(error.message));
   desktop.on('console', (message) => {
@@ -1132,6 +1405,32 @@ try {
   assert.equal(missingAdvanceTopic.status, 'publishing');
   await blockedAdvance.close();
 
+  const delayedDesktopAdvance = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  delayedDesktopAdvance.on('pageerror', (error) => errors.push(error.message));
+  delayedDesktopAdvance.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await delayedDesktopAdvance.goto(`${base}/__qa/${desktopDelayedAdvanceTopic.id}`);
+  await delayedDesktopAdvance.getByRole('heading', { name: desktopDelayedAdvanceTopic.title }).waitFor();
+  const desktopAdvanceButton = delayedDesktopAdvance.getByRole('button', { name: '推进到下一阶段', exact: true });
+  let resolveDesktopStatusSaveStarted!: () => void;
+  const desktopStatusSaveStarted = new Promise<void>((resolve) => { resolveDesktopStatusSaveStarted = resolve; });
+  topicStatusSaveStartedCallback = resolveDesktopStatusSaveStarted;
+  holdNextTopicStatusSave = true;
+  const desktopStatusAttemptsBefore = topicStatusSaveAttempts;
+  await desktopAdvanceButton.evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await desktopStatusSaveStarted;
+  const pendingDesktopAdvance = delayedDesktopAdvance.getByRole('button', { name: '阶段处理中…', exact: true });
+  await pendingDesktopAdvance.waitFor();
+  assert.equal(await pendingDesktopAdvance.isDisabled(), true, 'desktop stage advance stays disabled until server confirmation');
+  assert.equal(topicStatusSaveAttempts, desktopStatusAttemptsBefore + 1, 'two synchronous desktop clicks send one stage request');
+  releaseTopicStatusSave?.();
+  releaseTopicStatusSave = null;
+  await delayedDesktopAdvance.getByText('选题状态已更新', { exact: true }).waitFor();
+  assert.deepEqual(statusWrites.filter((write) => write.topicId === desktopDelayedAdvanceTopic.id), [{ topicId: desktopDelayedAdvanceTopic.id, status: 'publishing' }], 'desktop delayed stage advance writes exactly once');
+  await delayedDesktopAdvance.close();
+
   const completed = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   completed.on('pageerror', (error) => errors.push(error.message));
   completed.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
@@ -1173,6 +1472,16 @@ try {
   assert.equal(mobileTopic.status, 'production', 'mobile repair keeps the active Topic stage unchanged');
   assert.deepEqual(repairedStages, ['production', 'shooting', 'production'], 'desktop and mobile repair actions create only their missing current-stage records');
   assert(await mobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the topic detail fits a 390px viewport without horizontal overflow');
+  const mobileDraftTitle = `${mobileTopic.title}（移动未保存）`;
+  await mobile.getByRole('textbox', { name: '选题标题' }).fill(mobileDraftTitle);
+  const mobileNavDialog = mobile.waitForEvent('dialog');
+  const mobileNavClick = mobile.getByRole('button', { name: '选题', exact: true }).click();
+  const mobileRouteConfirmation = await mobileNavDialog;
+  assert.equal(mobileRouteConfirmation.type(), 'confirm', 'mobile route navigation asks before leaving a local topic draft');
+  await mobileRouteConfirmation.dismiss();
+  await mobileNavClick;
+  assert.equal(new URL(mobile.url()).pathname, `/topics/${mobileTopic.id}`, 'canceling mobile navigation stays on the topic detail');
+  assert.equal(await mobile.getByRole('textbox', { name: '选题标题' }).inputValue(), mobileDraftTitle, 'canceling mobile navigation preserves the local topic draft');
   await mobile.screenshot({ path: '/tmp/xmt-topic-stage-repair-390.png', fullPage: true });
 
   const mobileBlockedAdvance = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
@@ -1192,6 +1501,118 @@ try {
   assert.deepEqual(statusWrites.filter((write) => write.topicId === mobileMissingAdvanceTopic.id), [{ topicId: mobileMissingAdvanceTopic.id, status: 'publishing' }], 'mobile repair then retry submits one transition');
   assert.equal(mobileMissingAdvanceTopic.status, 'publishing');
   await mobileBlockedAdvance.close();
+
+  const delayedMobileAdvance = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  delayedMobileAdvance.on('pageerror', (error) => errors.push(error.message));
+  delayedMobileAdvance.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await delayedMobileAdvance.goto(`${base}/__qa/${mobileDelayedAdvanceTopic.id}`);
+  await delayedMobileAdvance.getByRole('textbox', { name: '选题标题' }).waitFor();
+  const mobileAdvanceButton = delayedMobileAdvance.getByRole('button', { name: '进入发布', exact: true });
+  let resolveMobileStatusSaveStarted!: () => void;
+  const mobileStatusSaveStarted = new Promise<void>((resolve) => { resolveMobileStatusSaveStarted = resolve; });
+  topicStatusSaveStartedCallback = resolveMobileStatusSaveStarted;
+  holdNextTopicStatusSave = true;
+  const mobileStatusAttemptsBefore = topicStatusSaveAttempts;
+  await mobileAdvanceButton.evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await mobileStatusSaveStarted;
+  const pendingMobileAdvance = delayedMobileAdvance.getByRole('button', { name: '正在推进阶段…', exact: true });
+  await pendingMobileAdvance.waitFor();
+  assert.equal(await pendingMobileAdvance.isDisabled(), true, 'mobile stage advance stays disabled until server confirmation');
+  assert.equal(topicStatusSaveAttempts, mobileStatusAttemptsBefore + 1, 'two synchronous mobile clicks send one stage request');
+  releaseTopicStatusSave?.();
+  releaseTopicStatusSave = null;
+  await delayedMobileAdvance.getByRole('status').getByText('已推进至发布中', { exact: true }).waitFor();
+  assert.deepEqual(statusWrites.filter((write) => write.topicId === mobileDelayedAdvanceTopic.id), [{ topicId: mobileDelayedAdvanceTopic.id, status: 'publishing' }], 'mobile delayed stage advance writes exactly once');
+  await delayedMobileAdvance.close();
+
+  const delayedMobileSave = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  delayedMobileSave.on('pageerror', (error) => errors.push(error.message));
+  delayedMobileSave.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await delayedMobileSave.goto(`${base}/__qa/${mobileDelayedSaveTopic.id}`);
+  await delayedMobileSave.getByRole('textbox', { name: '选题标题' }).waitFor();
+  const revisedMobileTitle = `${mobileDelayedSaveTopic.title}（已保存）`;
+  await delayedMobileSave.getByRole('textbox', { name: '选题标题' }).fill(revisedMobileTitle);
+  const mobileSaveButton = delayedMobileSave.getByRole('button', { name: '保存修改', exact: true });
+  let resolveMobileTopicSaveStarted!: () => void;
+  const mobileTopicSaveStarted = new Promise<void>((resolve) => { resolveMobileTopicSaveStarted = resolve; });
+  mobileTopicSaveStartedCallback = resolveMobileTopicSaveStarted;
+  holdNextMobileTopicSave = true;
+  const mobileTopicSaveAttemptsBefore = mobileTopicSaveAttempts;
+  await mobileSaveButton.evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await mobileTopicSaveStarted;
+  const pendingMobileSave = delayedMobileSave.getByRole('button', { name: '保存中…', exact: true });
+  await pendingMobileSave.waitFor();
+  assert.equal(await pendingMobileSave.isDisabled(), true, 'mobile detail save stays disabled until server confirmation');
+  assert.equal(mobileTopicSaveAttempts, mobileTopicSaveAttemptsBefore + 1, 'two synchronous mobile save clicks send one request');
+  releaseMobileTopicSave?.();
+  releaseMobileTopicSave = null;
+  await delayedMobileSave.getByRole('status').getByText('已保存', { exact: true }).waitFor();
+  assert.equal(mobileDelayedSaveTopic.title, revisedMobileTitle, 'the one confirmed mobile save updates the isolated topic');
+  assert.equal(mobileTopicSaveAttempts, mobileTopicSaveAttemptsBefore + 1, 'mobile detail save is not repeated after confirmation');
+  await delayedMobileSave.close();
+
+  const delayedMobileRepair = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  delayedMobileRepair.on('pageerror', (error) => errors.push(error.message));
+  delayedMobileRepair.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await delayedMobileRepair.goto(`${base}/__qa/${mobileDelayedRepairTopic.id}`);
+  await delayedMobileRepair.getByRole('textbox', { name: '选题标题' }).waitFor();
+  const mobileRepairButton = delayedMobileRepair.getByRole('button', { name: '补齐成片制作记录', exact: true });
+  let resolveMobileStageRepairStarted!: () => void;
+  const mobileStageRepairStarted = new Promise<void>((resolve) => { resolveMobileStageRepairStarted = resolve; });
+  mobileStageRepairStartedCallback = resolveMobileStageRepairStarted;
+  holdNextMobileStageRepair = true;
+  const mobileStageRepairAttemptsBefore = mobileStageRepairAttempts;
+  await mobileRepairButton.evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await mobileStageRepairStarted;
+  const pendingMobileRepair = delayedMobileRepair.getByRole('button', { name: '正在补齐…', exact: true });
+  await pendingMobileRepair.waitFor();
+  assert.equal(await pendingMobileRepair.isDisabled(), true, 'mobile stage-record repair stays disabled until server confirmation');
+  assert.equal(mobileStageRepairAttempts, mobileStageRepairAttemptsBefore + 1, 'two synchronous mobile repair clicks send one request');
+  releaseMobileStageRepair?.();
+  releaseMobileStageRepair = null;
+  await delayedMobileRepair.getByText('阶段记录已补齐；选题阶段未变更，操作已记入历史。', { exact: true }).waitFor();
+  assert.equal(mobileDelayedRepairTopic.stage_record_presence.shooting, true, 'the one confirmed repair creates the current-stage record');
+  assert.equal(mobileStageRepairAttempts, mobileStageRepairAttemptsBefore + 1, 'mobile stage-record repair is not repeated after confirmation');
+  await delayedMobileRepair.close();
+
+  auditTopic.status = 'pending';
+  const mobileAudit = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  mobileAudit.on('pageerror', (error) => errors.push(error.message));
+  mobileAudit.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await mobileAudit.goto(`${base}/__qa/${auditTopic.id}`);
+  await mobileAudit.getByRole('textbox', { name: '选题标题' }).waitFor();
+  await mobileAudit.getByRole('button', { name: '开始审核', exact: true }).click();
+  const mobileAuditSubmit = mobileAudit.getByRole('button', { name: '确认通过选题', exact: true });
+  let resolveMobileAuditSaveStarted!: () => void;
+  const mobileAuditSaveStarted = new Promise<void>((resolve) => { resolveMobileAuditSaveStarted = resolve; });
+  auditSaveStartedCallback = resolveMobileAuditSaveStarted;
+  holdNextAuditSave = true;
+  const mobileAuditAttemptsBefore = auditSaveAttempts;
+  await mobileAuditSubmit.evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await mobileAuditSaveStarted;
+  const pendingMobileAudit = mobileAudit.getByRole('button', { name: '正在提交审核…', exact: true });
+  await pendingMobileAudit.waitFor();
+  assert.equal(await pendingMobileAudit.isDisabled(), true, 'mobile audit submit stays disabled while the request is pending');
+  assert.equal(auditSaveAttempts, mobileAuditAttemptsBefore + 1, 'two synchronous mobile audit clicks send one request');
+  releaseAuditSave?.();
+  releaseAuditSave = null;
+  await mobileAudit.getByRole('status').getByText('选题审核已通过', { exact: true }).waitFor();
+  const auditWritesForTopic = auditWrites.filter((write) => write.topicId === auditTopic.id);
+  assert.equal(auditWritesForTopic.length, 3, 'desktop retry, desktop delayed submit, and mobile delayed submit each write once');
+  assert.deepEqual(auditWritesForTopic.at(-1), { topicId: auditTopic.id, status: 'approved' }, 'mobile delayed audit writes one approved result');
+  await mobileAudit.close();
 
   for (const theme of ['light', 'dark'] as const) {
     const leavePage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
@@ -1222,6 +1643,39 @@ try {
     await leavePage.screenshot({ path: `/tmp/xmt-topic-leave-confirm-${theme}.png` });
     await leavePage.getByRole('button', { name: '继续编辑', exact: true }).click();
     await leavePage.getByRole('heading', { name: '存在未保存的修改' }).waitFor({ state: 'hidden' });
+
+    if (theme === 'light') {
+      // Create a real SPA history entry, then ensure browser POP and sidebar
+      // navigation both reuse the page-owned unsaved-draft confirmation.
+      await leavePage.reload();
+      await leavePage.getByRole('heading', { name: leaveGuardTopic.title }).waitFor();
+      await leavePage.getByRole('button', { name: '选题管理', exact: true }).click();
+      await leavePage.waitForURL((url) => url.pathname === '/topics');
+      await leavePage.getByRole('button', { name: leaveGuardTopic.title, exact: true }).click();
+      await leavePage.waitForURL((url) => url.pathname === `/topics/${leaveGuardTopic.id}`);
+      await leavePage.getByRole('button', { name: '编辑选题', exact: true }).click();
+      const routeDraftTitle = `${leaveGuardTopic.title}（路由保护测试）`;
+      await leavePage.locator('input[type="text"]').first().fill(routeDraftTitle);
+
+      await leavePage.goBack();
+      await leavePage.getByRole('heading', { name: '存在未保存的修改' }).waitFor();
+      await leavePage.getByRole('button', { name: '继续编辑', exact: true }).click();
+      await leavePage.getByRole('heading', { name: '存在未保存的修改' }).waitFor({ state: 'hidden' });
+      assert.equal(await leavePage.locator('input[type="text"]').first().inputValue(), routeDraftTitle, 'canceling browser Back preserves the current topic draft');
+
+      await leavePage.getByRole('button', { name: '灵感库', exact: true }).click();
+      await leavePage.getByRole('heading', { name: '存在未保存的修改' }).waitFor();
+      await leavePage.getByRole('button', { name: '继续编辑', exact: true }).click();
+      await leavePage.getByRole('heading', { name: '存在未保存的修改' }).waitFor({ state: 'hidden' });
+      assert.equal(await leavePage.locator('input[type="text"]').first().inputValue(), routeDraftTitle, 'canceling sidebar navigation preserves the current topic draft');
+
+      await leavePage.getByRole('button', { name: '退出登录', exact: true }).click();
+      await leavePage.getByRole('heading', { name: '存在未保存的修改' }).waitFor();
+      await leavePage.getByRole('button', { name: '继续编辑', exact: true }).click();
+      await leavePage.getByRole('heading', { name: '存在未保存的修改' }).waitFor({ state: 'hidden' });
+      assert.notEqual(await leavePage.evaluate(() => localStorage.getItem('xmt_token')), null, 'canceling logout leaves the current session active');
+    }
+
     await leavePage.close();
   }
 

@@ -161,7 +161,7 @@ function StyleShell({ children }: { children: ReactNode }) {
 function FilingLinks({ light = false }: { light?: boolean }) {
   const linkClass = light
     ? 'text-studio-text-secondary hover:text-studio-text-primary'
-    : 'text-studio-text-muted/80 hover:text-studio-primary';
+    : 'text-studio-text-secondary hover:text-studio-primary';
 
   return (
     <div className="pointer-events-auto absolute inset-x-0 bottom-4 z-20 px-4 text-center text-xs leading-6 text-studio-text-muted sm:bottom-5">
@@ -248,8 +248,9 @@ function LoginForm({
 
       <form onSubmit={onSubmit} className="space-y-5">
         <div>
-          <label className={`mb-2 block text-sm font-medium ${labelClass}`}>账号</label>
+          <label htmlFor="login-username" className={`mb-2 block text-sm font-medium ${labelClass}`}>账号</label>
           <input
+            id="login-username"
             value={username}
             onChange={(event) => onUsernameChange(event.target.value)}
             className={`h-12 w-full rounded-xl border px-4 outline-none transition-all ${surfaceClass}`}
@@ -259,9 +260,10 @@ function LoginForm({
         </div>
 
         <div>
-          <label className={`mb-2 block text-sm font-medium ${labelClass}`}>密码</label>
+          <label htmlFor="login-password" className={`mb-2 block text-sm font-medium ${labelClass}`}>密码</label>
           <div className="relative">
             <input
+              id="login-password"
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
@@ -764,9 +766,10 @@ export default function Login() {
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div className="group">
-                    <label className="mb-3 block text-xs font-medium uppercase tracking-wider text-studio-text-secondary">用户名</label>
+                    <label htmlFor="login-username" className="mb-3 block text-xs font-medium uppercase tracking-wider text-studio-text-secondary">用户名</label>
                     <div className="relative">
                       <input
+                        id="login-username"
                         type="text"
                         value={username}
                         onChange={(event) => {
@@ -785,9 +788,10 @@ export default function Login() {
                   </div>
 
                   <div className="group">
-                    <label className="mb-3 block text-xs font-medium uppercase tracking-wider text-studio-text-secondary">密码</label>
+                    <label htmlFor="login-password" className="mb-3 block text-xs font-medium uppercase tracking-wider text-studio-text-secondary">密码</label>
                     <div className="relative">
                       <input
+                        id="login-password"
                         type={showPassword ? 'text' : 'password'}
                         value={password}
                         onChange={(event) => {

@@ -128,5 +128,8 @@ def parse_official_export(file: Path, source: dict[str, Any]) -> dict[str, Any]:
             key = f"{date}:sound_wave_amount"
             if key in seen: continue
             seen.add(key); accepted.append({"metric_date": date[:10], "metric_code": "sound_wave_amount", "value": str(amount), "unit": "sound_wave"})
+    source_rows = max(0, len(rows) - header_index - 1)
+    if source_rows > 0 and not accepted and rejected > 0:
+        warnings.append("ALL_ROWS_REJECTED")
     datasets = {"account_daily_metrics": accepted} if is_account_daily else {"content_metrics": accepted} if content else {"income_metrics": accepted}
-    return {"file": source, "confidence": "confirmed" if is_account_daily or content or "收获音浪" in mapping else "probable", "quality": {"source_rows": max(0, len(rows) - header_index - 1), "accepted_rows": len(accepted), "duplicate_rows": 0, "rejected_rows": rejected, "warnings": warnings}, "datasets": datasets}
+    return {"file": source, "confidence": "confirmed" if is_account_daily or content or "收获音浪" in mapping else "probable", "quality": {"source_rows": source_rows, "accepted_rows": len(accepted), "duplicate_rows": 0, "rejected_rows": rejected, "warnings": warnings}, "datasets": datasets}

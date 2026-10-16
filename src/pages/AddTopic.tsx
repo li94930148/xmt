@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
 import { createTopic, getUsers } from '../api';
@@ -18,6 +18,7 @@ import { emitClientLog, safeClientErrorClass } from '../observability/client-log
 import { hasTopicDraftContent } from '../utils/topicDraft';
 import { useTopicDraftCollection } from '../hooks/useTopicDraftCollection';
 import type { User } from '../types';
+import { ActionButton } from '../components/studio';
 
 export default function AddTopic() {
   const navigate = useNavigate();
@@ -33,6 +34,11 @@ export default function AddTopic() {
   const draftStorageUnavailable = draftState.storageUnavailable;
   
   const [users, setUsers] = useState<User[]>([]);
+  const [usersLoadState, setUsersLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const usersRequestSequenceRef = useRef(0);
+  const userDirectoryScope = `${userId ?? ''}:${authStore.user?.role ?? ''}:${authStore.token ?? ''}`;
+  const userDirectoryScopeRef = useRef(userDirectoryScope);
+  userDirectoryScopeRef.current = userDirectoryScope;
   const [submitting, setSubmitting] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [similarTopicReview, setSimilarTopicReview] = useState<{
@@ -43,17 +49,26 @@ export default function AddTopic() {
   const reviewedTitle = useRef<string | null>(null);
   const submitInFlight = useRef(false);
 
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const userList = await getUsers();
-        setUsers(userList.data);
-      } catch (error) {
-        emitClientLog({ event: 'topics.user_list_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
-      }
-    };
-    fetchUsers();
+  const loadUsers = useCallback(async (requestScope: string) => {
+    const requestId = ++usersRequestSequenceRef.current;
+    setUsersLoadState('loading');
+    try {
+      const userList = await getUsers();
+      if (requestId !== usersRequestSequenceRef.current || requestScope !== userDirectoryScopeRef.current) return;
+      setUsers(userList.data || []);
+      setUsersLoadState('ready');
+    } catch (error) {
+      if (requestId !== usersRequestSequenceRef.current || requestScope !== userDirectoryScopeRef.current) return;
+      emitClientLog({ event: 'topics.user_list_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
+      setUsersLoadState('error');
+    }
   }, []);
+
+  useEffect(() => {
+    setUsers([]);
+    void loadUsers(userDirectoryScope);
+    return () => { usersRequestSequenceRef.current += 1; };
+  }, [loadUsers, userDirectoryScope]);
 
   const handleSubmit = async (confirmedTitle?: string) => {
     if (submitInFlight.current) return;
@@ -252,13 +267,28 @@ export default function AddTopic() {
                   <select
                     value={formData.assignee_id}
                     onChange={(e) => setFormData({ ...formData, assignee_id: e.target.value })}
+                    disabled={usersLoadState === 'loading'}
                     className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing}`}
                   >
                     <option value="">选择负责人</option>
+                    {formData.assignee_id && !users.some(user => String(user.id) === formData.assignee_id) ? (
+                      <option value={formData.assignee_id}>
+                        已保存负责人（{usersLoadState === 'error' ? '名单暂不可用' : '暂未匹配'}）
+                      </option>
+                    ) : null}
                     {users.map(user => (
                       <option key={user.id} value={user.id}>{user.name}</option>
                     ))}
                   </select>
+                  {usersLoadState === 'loading' && users.length === 0 ? (
+                    <p role="status" className="mt-2 text-xs text-studio-text-secondary">正在读取负责人名单…</p>
+                  ) : null}
+                  {usersLoadState === 'error' ? (
+                    <div role="alert" className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-3 py-2 text-xs text-studio-amber-contrast">
+                      <span>负责人名单暂时无法读取，可重试后再选择；当前表单和已保存的负责人选择会保留。</span>
+                      <ActionButton type="button" variant="ghost" onClick={() => void loadUsers(userDirectoryScope)}>重新加载负责人名单</ActionButton>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -343,7 +373,7 @@ export default function AddTopic() {
                 <p className={`text-xs text-studio-text-muted mb-1`}>负责人</p>
                 <p className={`${styles.textSecondary}`}>
                   {formData.assignee_id 
-                    ? users.find(u => u.id === parseInt(formData.assignee_id))?.name 
+                    ? users.find(u => u.id === parseInt(formData.assignee_id))?.name || '已选择负责人（姓名暂不可用）'
                     : '-'}
                 </p>
               </div>

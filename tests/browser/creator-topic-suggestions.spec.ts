@@ -19,6 +19,8 @@ let topicWrites = 0;
 let bindingCodeMode: 'ready' | 'delayed' | 'failed' = 'ready';
 let bindingCodeRequests = 0;
 let lastBindingAccountId = '';
+let failNextUserDirectoryRead = false;
+let userDirectoryReads = 0;
 let delayedDashboardAccount = '';
 let delayDashboardMs = 0;
 let lastTopic: Record<string, unknown> = {};
@@ -39,7 +41,14 @@ app.get('/api/auth/me', (_req, res) => res.json(mode === 'no-create' || mode ===
 app.get('/api/permissions/my', (_req, res) => res.json(mode === 'no-view' ? ['topic:create', 'topic:view'] : ['creator:data:view', 'topic:view']));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
-app.get('/api/users', (_req, res) => res.json({ data: [user], total: 1, page: 1, limit: 20 }));
+app.get('/api/users', (_req, res) => {
+  userDirectoryReads++;
+  if (failNextUserDirectoryRead) {
+    failNextUserDirectoryRead = false;
+    return res.status(503).json({ message: '验收模拟：负责人名单暂不可用' });
+  }
+  return res.json({ data: [user], total: 1, page: 1, limit: 20 });
+});
 app.get('/api/topics', (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 20 }));
 app.post('/api/topics', (req, res) => { topicWrites++; lastTopic = req.body; res.status(503).json({ message: '验收模拟：提报失败，内容保留' }); });
 app.get('/api/creator-agent/status', (_req, res) => res.json({ agents: [], protocol_version: 1 }));
@@ -288,8 +297,20 @@ try {
     const ratio = foreground ? contrastRatio(foreground, background) : 0;
     assert.ok(foreground && ratio >= 4.5, `${theme} Creator Center agent status contrast is ${ratio.toFixed(2)}:1; expected at least 4.5:1`);
   }
+  const userDirectoryReadsBefore = userDirectoryReads;
+  const topicWritesBeforeUserDirectoryRecovery = topicWrites;
+  failNextUserDirectoryRead = true;
+  await page.goto(`${base}/topics/add`);
+  await page.getByPlaceholder('请输入选题标题').waitFor();
+  await page.getByRole('alert').filter({ hasText: '负责人名单暂时无法读取' }).waitFor();
+  assert.equal(userDirectoryReads, userDirectoryReadsBefore + 1, 'the failed owner list is an independent read');
+  await page.getByRole('button', { name: '重新加载负责人名单', exact: true }).click();
+  await page.waitForFunction((name) => Array.from(document.querySelectorAll('select option')).some((option) => option.textContent?.trim() === name), user.name);
+  assert.equal(await page.getByRole('alert').filter({ hasText: '负责人名单暂时无法读取' }).count(), 0, 'successful owner-list retry clears the warning');
+  assert.equal(userDirectoryReads, userDirectoryReadsBefore + 2, 'owner-list retry performs one additional GET');
+  assert.equal(topicWrites, topicWritesBeforeUserDirectoryRecovery, 'owner-list failure and recovery do not submit a topic');
   await context.close();
-  console.log('Creator topic suggestions browser passed: evidence → authorized handoff → draft-preserving apply/adoption feedback, explicit non-adoption feedback and retry; failed submit recovery, stale evidence, sample gates and permissions; 1440/390/320px.');
+  console.log('Creator topic suggestions browser passed: evidence → authorized handoff → draft-preserving apply/adoption feedback, explicit non-adoption feedback and retry; failed submit recovery, stale evidence, sample gates and permissions; 1440/390/320px; AddTopic owner-list 503 and read-only retry.');
 } finally {
   await browser.close(); await vite.close(); await new Promise<void>(resolve => io.close(() => resolve()));
 }

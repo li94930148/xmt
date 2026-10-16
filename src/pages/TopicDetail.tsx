@@ -13,6 +13,7 @@ import { createTopicDetailManualAdapter } from '../editor/adapters/topicDetailMa
 import type { ContentEditorRuntimeHandle, ContentEditorSaveContext } from '../editor/contracts/contentEditorAdapter';
 import { getCurrentTopicEditorModePolicy } from '../editor/topic/topicEditorModePolicy';
 import { useTopicDetailLeaveGuard } from '../hooks/useTopicDetailLeaveGuard';
+import { useRouteNavigationGuard } from '../hooks/useRouteNavigationGuard';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
@@ -43,11 +44,17 @@ export default function TopicDetail() {
   const topicEditorModePolicy = useMemo(() => getCurrentTopicEditorModePolicy(), []);
   const [topic, setTopic] = useState<Topic | null>(null);
   const detailRequestSequenceRef = useRef(0);
+  const userDirectoryRequestSequenceRef = useRef(0);
   const [users, setUsers] = useState<User[]>([]);
+  const [userDirectoryLoadState, setUserDirectoryLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loading, setLoading] = useState(true);
   const [showAuditModal, setShowAuditModal] = useState(false);
+  const [auditSubmitting, setAuditSubmitting] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
   const [startingProduction, setStartingProduction] = useState(false);
   const [repairingStageRecord, setRepairingStageRecord] = useState(false);
+  const auditSubmissionInFlightRef = useRef(false);
+  const statusUpdateInFlightRef = useRef(false);
   const startProductionInFlight = useRef(false);
   const [auditData, setAuditData] = useState({ status: 'approved' as 'approved' | 'rejected', comment: '', assignee_id: 0 });
   
@@ -91,8 +98,13 @@ export default function TopicDetail() {
   
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const authStore = useAuthStore();
+  const currentUserId = useAuthStore((state) => state.user?.id);
+  const currentUserRole = useAuthStore((state) => state.user?.role);
+  const currentAuthToken = useAuthStore((state) => state.token);
   const appStore = useAppStore();
+  const userDirectoryScope = `${id ?? ''}:${currentUserId ?? ''}:${currentUserRole ?? ''}:${currentAuthToken ?? ''}`;
+  const userDirectoryScopeRef = useRef(userDirectoryScope);
+  userDirectoryScopeRef.current = userDirectoryScope;
   const styles = useThemeStyles();
   const { hasPermission, loading: permissionsLoading } = usePermission();
   const requestedOutlineVersion = searchParams.get('outlineVersion')?.trim() || '';
@@ -108,6 +120,34 @@ export default function TopicDetail() {
     topicRuntimeHandleRef.current = handle;
     setHasTopicManualRuntimeHandle(Boolean(handle?.manualSave));
   }, []);
+
+  const loadUserDirectory = useCallback(async (requestScope: string) => {
+    const requestId = ++userDirectoryRequestSequenceRef.current;
+    const requestedTopicId = Number(id);
+    setUserDirectoryLoadState('loading');
+    try {
+      const usersData = await getUsers();
+      if (requestId !== userDirectoryRequestSequenceRef.current || requestScope !== userDirectoryScopeRef.current || Number(currentTopicIdRef.current) !== requestedTopicId) return;
+      setUsers(usersData.data);
+      setUserDirectoryLoadState('ready');
+    } catch {
+      if (requestId !== userDirectoryRequestSequenceRef.current || requestScope !== userDirectoryScopeRef.current || Number(currentTopicIdRef.current) !== requestedTopicId) return;
+      setUserDirectoryLoadState('error');
+    }
+  }, [id]);
+
+  useEffect(() => {
+    setUsers([]);
+    void loadUserDirectory(userDirectoryScope);
+    return () => { userDirectoryRequestSequenceRef.current += 1; };
+  }, [loadUserDirectory, userDirectoryScope]);
+
+  const userDirectoryFeedback = userDirectoryLoadState === 'error' ? (
+    <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-3 py-2 text-xs text-studio-amber-contrast">
+      <span>负责人名单暂不可用。选题详情仍可使用，但负责人姓名或可选名单可能不完整。</span>
+      <ActionButton type="button" variant="ghost" onClick={() => void loadUserDirectory(userDirectoryScope)}>重新加载负责人名单</ActionButton>
+    </div>
+  ) : null;
 
   useEffect(() => {
     const requestId = ++detailRequestSequenceRef.current;
@@ -153,10 +193,6 @@ export default function TopicDetail() {
           deadline: topicData.deadline,
           platform: topicData.platform
         });
-
-        const usersData = await getUsers();
-        if (requestId !== detailRequestSequenceRef.current || Number(currentTopicIdRef.current) !== Number(id)) return;
-        setUsers(usersData.data);
 
         // 大纲内容从 topic 取
         const draft = createTopicDetailDraft(topicData);
@@ -263,46 +299,62 @@ export default function TopicDetail() {
   };
 
   const handleAudit = async () => {
+    if (auditSubmissionInFlightRef.current) return;
     const requestedTopicId = Number(id);
+    auditSubmissionInFlightRef.current = true;
+    setAuditSubmitting(true);
     try {
-      await auditTopic(requestedTopicId, auditData);
-    } catch (error) {
-      appStore.addNotification({ title: '审核失败', message: (error as Error).message, type: 'error' });
-      return;
-    }
+      try {
+        await auditTopic(requestedTopicId, auditData);
+      } catch (error) {
+        appStore.addNotification({ title: '审核失败', message: (error as Error).message, type: 'error' });
+        return;
+      }
 
-    if (Number(currentTopicIdRef.current) === requestedTopicId) setShowAuditModal(false);
-    try {
-      const refreshed = await getTopic(requestedTopicId);
-      if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
-      appStore.addNotification({
-        title: '审核成功',
-        message: auditData.status === 'approved' ? '选题已通过审核' : '选题已驳回',
-        type: 'success',
-      });
-    } catch {
-      setTopic((current) => current?.id === requestedTopicId ? { ...current, status: auditData.status } : current);
-      appStore.addNotification({ title: '审核已提交', message: '审核操作已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
+      if (Number(currentTopicIdRef.current) === requestedTopicId) setShowAuditModal(false);
+      try {
+        const refreshed = await getTopic(requestedTopicId);
+        if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
+        appStore.addNotification({
+          title: '审核成功',
+          message: auditData.status === 'approved' ? '选题已通过审核' : '选题已驳回',
+          type: 'success',
+        });
+      } catch {
+        setTopic((current) => current?.id === requestedTopicId ? { ...current, status: auditData.status } : current);
+        appStore.addNotification({ title: '审核已提交', message: '审核操作已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
+      }
+    } finally {
+      auditSubmissionInFlightRef.current = false;
+      setAuditSubmitting(false);
     }
   };
 
   const handleUpdateStatus = async (status: string) => {
+    if (statusUpdateInFlightRef.current) return;
     const requestedTopicId = Number(id);
+    statusUpdateInFlightRef.current = true;
+    setStatusUpdating(true);
     try {
-      await updateTopicStatus(requestedTopicId, status);
-    } catch (error) {
-      appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
-      return;
-    }
+      try {
+        await updateTopicStatus(requestedTopicId, status);
+      } catch (error) {
+        appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+        return;
+      }
 
-    if (status === 'shooting' || status === 'completed') celebrateMilestone();
-    try {
-      const refreshed = await getTopic(requestedTopicId);
-      if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
-      appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
-    } catch {
-      setTopic((current) => current?.id === requestedTopicId ? { ...current, status: status as Topic['status'] } : current);
-      appStore.addNotification({ title: '状态已更新', message: '状态更新已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
+      if (status === 'shooting' || status === 'completed') celebrateMilestone();
+      try {
+        const refreshed = await getTopic(requestedTopicId);
+        if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
+        appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
+      } catch {
+        setTopic((current) => current?.id === requestedTopicId ? { ...current, status: status as Topic['status'] } : current);
+        appStore.addNotification({ title: '状态已更新', message: '状态更新已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
+      }
+    } finally {
+      statusUpdateInFlightRef.current = false;
+      setStatusUpdating(false);
     }
   };
 
@@ -521,9 +573,36 @@ export default function TopicDetail() {
     discard: handleCancel,
   });
 
+  const pendingRouteStayRef = useRef<(() => void) | null>(null);
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: { proceed: () => void; stay: () => void }) => {
+    let continued = false;
+    const continueOnce = () => {
+      if (continued) return;
+      continued = true;
+      pendingRouteStayRef.current = null;
+      proceed();
+    };
+    pendingRouteStayRef.current = stay;
+    void requestTopicLeave(continueOnce)
+      .then((result) => {
+        if (result.decision === 'proceeded') continueOnce();
+      })
+      .catch(stay);
+  }, [requestTopicLeave]);
+  useRouteNavigationGuard(
+    Boolean(topic && !loading && (isTopicDirty || isAggregateSaving || isCurrentDraftDirty())),
+    handleRouteNavigationAttempt,
+  );
+
+  const handleContinueTopicEditing = useCallback(() => {
+    continueTopicEditing();
+    pendingRouteStayRef.current?.();
+    pendingRouteStayRef.current = null;
+  }, [continueTopicEditing]);
+
   const handleReturnToTopics = useCallback(() => {
-    void requestTopicLeave(() => navigate('/topics'));
-  }, [navigate, requestTopicLeave]);
+    navigate('/topics');
+  }, [navigate]);
 
   const statusColors: Record<string, string> = {
     pending: 'bg-studio-amber-soft text-studio-amber-contrast border-studio-border-soft',
@@ -570,9 +649,9 @@ export default function TopicDetail() {
     !requestedOutlineVersion && topic &&
       canEditTopicPermission &&
       (
-        contentEditRoles.has(authStore.user?.role || '') ||
-        Number(topic.creator_id) === authStore.user?.id ||
-        Number(topic.assignee_id) === authStore.user?.id
+        contentEditRoles.has(currentUserRole || '') ||
+        Number(topic.creator_id) === currentUserId ||
+        Number(topic.assignee_id) === currentUserId
       ),
   );
   const currentStageRecord = topic
@@ -715,10 +794,14 @@ export default function TopicDetail() {
             {editDetails ? (
               <select
                 value={details.assignee_id}
+                disabled={userDirectoryLoadState === 'loading' || (userDirectoryLoadState === 'error' && users.length === 0)}
                 onChange={(e) => changeDetails({ ...details, assignee_id: parseInt(e.target.value) })}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
               >
                 <option value={0}>未分配</option>
+                {details.assignee_id && !users.some((user) => user.id === details.assignee_id) ? (
+                  <option value={details.assignee_id}>{topic.assignee_name || '当前负责人（暂不可确认）'}</option>
+                ) : null}
                 {users.filter(u => u.enabled).map(user => (
                   <option key={user.id} value={user.id}>{user.name}</option>
                 ))}
@@ -730,9 +813,10 @@ export default function TopicDetail() {
                   if (canEditTopic) setEditDetails(true);
                 }}
               >
-                {details.assignee_id ? users.find(u => u.id === details.assignee_id)?.name || '未指派' : '未指派'}
+                {details.assignee_id ? topic.assignee_name || users.find(u => u.id === details.assignee_id)?.name || '负责人信息暂不可用' : '未指派'}
               </p>
             )}
+            {!showAuditModal ? userDirectoryFeedback : null}
           </div>
           <div className={`${styles.bgTertiary} rounded-lg p-4`}>
             <div className={`flex items-center gap-2 ${styles.textSecondary} mb-2`}>
@@ -1042,10 +1126,12 @@ export default function TopicDetail() {
             {canEditTopic && !missingCurrentStageRecord && (topic.status === 'shooting' || topic.status === 'publishing') && (
               <button
                 onClick={() => handleUpdateStatus(nextStatuses[topic.status])}
+                disabled={statusUpdating}
+                aria-busy={statusUpdating}
                 className="xmt-btn xmt-btn-primary"
               >
                 <ArrowRight className="w-4 h-4" />
-                推进到下一阶段
+                {statusUpdating ? '阶段处理中…' : '推进到下一阶段'}
               </button>
             )}
           </div>
@@ -1072,7 +1158,7 @@ export default function TopicDetail() {
       </div>
 
       {showAuditModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-modal">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-modal" aria-busy={auditSubmitting}>
           <div className={`${styles.bgSecondary} rounded-xl p-6 w-full max-w-lg mx-4 ${styles.border}`}>
             <h2 className={`text-xl font-bold ${styles.textPrimary} mb-6`}>审核选题</h2>
             
@@ -1081,8 +1167,10 @@ export default function TopicDetail() {
                 <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>审核结果</label>
                 <div className="flex gap-4">
                   <button
+                    type="button"
+                    disabled={auditSubmitting}
                     onClick={() => setAuditData({ ...auditData, status: 'approved' })}
-                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
+                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-60 ${
                       auditData.status === 'approved' 
                         ? 'border border-studio-success/30 bg-studio-success-soft text-studio-success-contrast'
                         : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
@@ -1092,8 +1180,10 @@ export default function TopicDetail() {
                     审核通过
                   </button>
                   <button
+                    type="button"
+                    disabled={auditSubmitting}
                     onClick={() => setAuditData({ ...auditData, status: 'rejected' })}
-                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
+                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-60 ${
                       auditData.status === 'rejected' 
                         ? 'border border-studio-coral/30 bg-studio-coral-soft text-studio-coral-contrast'
                         : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
@@ -1110,6 +1200,7 @@ export default function TopicDetail() {
                   <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>指派负责人</label>
                   <select
                     value={auditData.assignee_id}
+                    disabled={auditSubmitting || userDirectoryLoadState === 'loading' || (userDirectoryLoadState === 'error' && users.length === 0)}
                     onChange={(e) => setAuditData({ ...auditData, assignee_id: parseInt(e.target.value) })}
                     className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
                   >
@@ -1118,6 +1209,7 @@ export default function TopicDetail() {
                       <option key={user.id} value={user.id}>{user.name}</option>
                     ))}
                   </select>
+                  {userDirectoryFeedback}
                 </div>
               )}
               
@@ -1125,6 +1217,7 @@ export default function TopicDetail() {
                 <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>审核意见</label>
                 <textarea
                   value={auditData.comment}
+                  disabled={auditSubmitting}
                   onChange={(e) => setAuditData({ ...auditData, comment: e.target.value })}
                   rows={3}
                   className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary resize-none ${styles.textPlaceholder}`}
@@ -1134,20 +1227,25 @@ export default function TopicDetail() {
               
               <div className="flex gap-3 mt-6">
                 <button
+                  type="button"
+                  disabled={auditSubmitting}
                   onClick={() => setShowAuditModal(false)}
-                  className={`flex-1 px-4 py-2 ${styles.bgTertiary} ${styles.hoverBg} ${styles.textPrimary} rounded-lg transition-colors`}
+                  className={`flex-1 px-4 py-2 ${styles.bgTertiary} ${styles.hoverBg} ${styles.textPrimary} rounded-lg transition-colors disabled:cursor-wait disabled:opacity-60`}
                 >
-                  取消
+                  {auditSubmitting ? '审核处理中…' : '取消'}
                 </button>
                 <button
+                  type="button"
+                  disabled={auditSubmitting}
+                  aria-busy={auditSubmitting}
                   onClick={handleAudit}
-                  className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
+                  className={`flex-1 px-4 py-2 rounded-lg transition-colors disabled:cursor-wait disabled:opacity-60 ${
                     auditData.status === 'approved'
                       ? 'border border-studio-success/30 bg-studio-success-soft text-studio-success-contrast hover:bg-studio-success-soft'
                       : 'border border-studio-coral/30 bg-studio-coral-soft text-studio-coral-contrast hover:bg-studio-coral-soft'
                   }`}
                 >
-                  {auditData.status === 'approved' ? '通过审核' : '驳回选题'}
+                  {auditSubmitting ? '正在提交审核…' : auditData.status === 'approved' ? '通过审核' : '驳回选题'}
                 </button>
               </div>
             </div>
@@ -1157,7 +1255,7 @@ export default function TopicDetail() {
 
       <BaseModal
         open={topicLeaveState === 'dirty' || topicLeaveState === 'saving' || topicLeaveState === 'failed'}
-        onClose={continueTopicEditing}
+        onClose={handleContinueTopicEditing}
         title={topicLeaveState === 'failed' ? '保存失败，无法离开' : '存在未保存的修改'}
         description={topicLeaveState === 'failed'
           ? '保存未完成。您可以重试保存，放弃本次修改后离开，或继续编辑。'
@@ -1168,7 +1266,7 @@ export default function TopicDetail() {
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button
               type="button"
-              onClick={continueTopicEditing}
+              onClick={handleContinueTopicEditing}
               disabled={topicLeaveState === 'saving'}
               className={`rounded-xl px-4 py-2.5 text-sm disabled:opacity-60 ${styles.buttonSecondary}`}
             >

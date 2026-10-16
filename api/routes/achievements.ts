@@ -314,7 +314,7 @@ router.post('/check', authenticate, async (req, res) => {
         [userId, achievement.id]
       );
 
-      if (existing) return; // 已获得，跳过
+      if (existing) continue; // 已获得，继续检查后续成就
 
       let earned = false;
 

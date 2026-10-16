@@ -126,7 +126,8 @@ async function verifyConcurrentBatchIdempotency() {
   }
 }
 
-const first=await acceptCreatorDataSync(envelope(payload),`Bearer ${token}`) as { duplicate_batch:boolean; result:{inserted:number;daily_inserted:number} }; assert.equal(first.duplicate_batch,false); assert.equal(first.result.inserted,3); assert.equal(first.result.daily_inserted,152);
+const first=await acceptCreatorDataSync(envelope(payload),`Bearer ${token}`) as { duplicate_batch:boolean; result:{inserted:number;daily_inserted:number}; data_quality:{source_rows:number;accepted_rows:number;duplicate_rows:number;rejected_rows:number;warnings:string[]} }; assert.equal(first.duplicate_batch,false); assert.equal(first.result.inserted,3); assert.equal(first.result.daily_inserted,152);
+assert.deepEqual(first.data_quality,{source_rows:40,accepted_rows:40,duplicate_rows:0,rejected_rows:0,warnings:[]},'clean batches expose the collector-reported quality summary without altering metric calculations');
 assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM douyin_works WHERE aweme_id=?',['work-id']))?.play_count,100,'官方导出应校准完全匹配作品的播放量');
 assert.deepEqual(
   await queryOne<{source_type:string;source_file_sha256:string;has_play_count:number;has_like_count:number;has_comment_count:number;has_share_count:number}>(
@@ -145,6 +146,13 @@ assert.equal((await queryOne<{fans_count:number;fans_count_available:number}>('S
 const refreshedSha='e'.repeat(64); const refreshedPayload={...payload,batch_id:crypto.randomUUID(),source_files:payload.source_files.map((file,index)=>index===0?{...file,sha256:refreshedSha}:file)}; const refreshed=await acceptCreatorDataSync(envelope(refreshedPayload),`Bearer ${token}`) as { result:{unchanged:number} }; assert.equal(refreshed.result.unchanged,3);
 assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_metrics WHERE source_file_sha256=?',[refreshedSha]))?.count,3,'相同指标也必须更新到最新官方文件来源，避免已移除作品继续累计');
 await assert.rejects(()=>acceptCreatorDataSync(envelope({...payload,batch_id:crypto.randomUUID(),datasets:{...payload.datasets,content_metrics:[{...payload.datasets.content_metrics[0],metrics:{untrusted_metric:1}}]}}),`Bearer ${token}`),{statusCode:422});
+for (const warning of ['HEADER_UNRECOGNIZED', 'ALL_ROWS_REJECTED', 'PARSE_FAILED:ValueError']) {
+  await assert.rejects(
+    () => acceptCreatorDataSync(envelope({ ...payload, batch_id: crypto.randomUUID(), datasets: { ...payload.datasets, content_metrics: [] }, quality: { ...payload.quality, warnings: [warning] } }), `Bearer ${token}`),
+    (error: unknown) => Boolean(error && typeof error === 'object' && (error as { statusCode?: number }).statusCode === 422),
+    `${warning} must fail closed before the batch is persisted`,
+  );
+}
 await assert.rejects(()=>acceptCreatorDataSync(envelope({...payload,batch_id:crypto.randomUUID(),source_files:[...payload.source_files,...payload.source_files]}),`Bearer ${token}`)); assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_ingest_batches'))?.count,3);
 const count=await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_metrics'); assert.equal(count?.count,3);
 assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_daily_metrics'))?.count,152);
@@ -156,4 +164,9 @@ const stale=await acceptCreatorDataSync(envelope(stalePayload,'2026-08-29T00:00:
 assert(stale.result.stale_ignored > 0);
 assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM douyin_works WHERE aweme_id=?',['work-id']))?.play_count,200,'较旧官方批次不得回写当前作品指标');
 await verifyConcurrentBatchIdempotency();
+const partialQualityPayload={...payload,batch_id:crypto.randomUUID(),quality:{source_rows:43,accepted_rows:40,duplicate_rows:0,rejected_rows:3,warnings:['FALLBACK_IDENTITY_COLLISION','FALLBACK_IDENTITY_COLLISION']}};
+const partialQuality=await acceptCreatorDataSync(envelope(partialQualityPayload),`Bearer ${token}`) as {data_quality:{source_rows:number;accepted_rows:number;duplicate_rows:number;rejected_rows:number;warnings:string[]}};
+assert.deepEqual(partialQuality.data_quality,{source_rows:43,accepted_rows:40,duplicate_rows:0,rejected_rows:3,warnings:['采集器报告 3 行未通过解析；本次入库仅包含已接受的行。','作品列表存在重复身份记录，相关行已跳过。']},'partial row rejection is returned as a clear diagnostic while valid rows remain importable');
+const storedQuality=await queryOne<{result_json:string}>('SELECT result_json FROM creator_ingest_batches WHERE batch_id=?',[partialQualityPayload.batch_id]);
+assert.deepEqual(JSON.parse(storedQuality!.result_json).data_quality,partialQuality.data_quality,'quality feedback survives idempotent retries in the stored receipt');
 console.log('官方导出 v3 契约通过：四文件完整性、精确周期、负值修正、AES-GCM/HMAC/nonce、幂等入库与双进程并发批次去重。'); db.close(); rmSync(root,{recursive:true,force:true});

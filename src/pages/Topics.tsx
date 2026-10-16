@@ -606,7 +606,7 @@ export default function Topics() {
           canUpdate={hasPermission('topic:update')}
           canAudit={hasPermission('topic:audit')}
           onOpenTopic={openBoardTopic}
-          onTransition={(topic, status) => { void handleBoardTransition(topic, status); }}
+          onTransition={handleBoardTransition}
         />
       ) : <ResponsiveTableShell footer={<Pagination page={page} total={total} limit={limit} onChange={setPage} />}>
           <table className="w-full min-w-max">

@@ -11,6 +11,7 @@ import { celebrateMilestone } from '@/utils/confetti';
 import { STATUS_COLORS } from '@/constants';
 import { usePermission } from '@/hooks/usePermission';
 import { useAppStore, useAuthStore } from '@/store';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '@/hooks/useRouteNavigationGuard';
 import { formatBeijingDate } from '@/lib/utils';
 import TopicAssetDimensionsPanel from '@/components/topics/TopicAssetDimensionsPanel';
 import { startOrResumeTopicProduction } from '@/utils/topicProductionHandoff';
@@ -60,6 +61,8 @@ export default function MobileTopicDetail() {
   const [edited, setEdited] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+  const [submittingAudit, setSubmittingAudit] = useState(false);
   const [startingProduction, setStartingProduction] = useState(false);
   const [repairingStageRecord, setRepairingStageRecord] = useState(false);
   const [notice, setNotice] = useState('');
@@ -70,6 +73,10 @@ export default function MobileTopicDetail() {
   const [auditStatus, setAuditStatus] = useState<'approved' | 'rejected'>('approved');
   const [auditComment, setAuditComment] = useState('');
   const startProductionInFlight = useRef(false);
+  const saveInFlightRef = useRef(false);
+  const advanceInFlightRef = useRef(false);
+  const auditSubmissionInFlightRef = useRef(false);
+  const repairStageRecordInFlightRef = useRef(false);
   const resourcesRequestSequenceRef = useRef(0);
   const networkState = useNetworkState();
   const appStore = useAppStore();
@@ -82,6 +89,29 @@ export default function MobileTopicDetail() {
     ['admin', 'editor', 'copywriter', 'post_production', 'camera'].includes(user?.role ?? '') ||
     Number(topic.creator_id) === user?.id || Number(topic.assignee_id) === user?.id
   ));
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    if (saving) {
+      appStore.addNotification({ title: '保存尚未完成', message: '当前选题保存完成前不能离开，请稍候再试。', type: 'warning' });
+      stay();
+      return;
+    }
+    if (edited && !window.confirm('当前选题修改已保存为本机草稿，重新进入此选题时可继续编辑。是否离开？')) {
+      stay();
+      return;
+    }
+    proceed();
+  }, [appStore, edited, saving]);
+  useRouteNavigationGuard(Boolean(topic && canEditTopic && (edited || saving)), handleRouteNavigationAttempt);
+
+  useEffect(() => {
+    if (!edited && !saving) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [edited, saving]);
   const canStartProduction = Boolean(
     !requestedOutlineVersion
     && !permissionsLoading
@@ -173,6 +203,7 @@ export default function MobileTopicDetail() {
   }, [canEditTopic, description, draftKey, edited, loading, title]);
 
   const save = async () => {
+    if (saveInFlightRef.current) return;
     if (!canEditTopic) { setNotice('当前账号没有编辑该选题的权限。'); return; }
     if (!topic || !title.trim()) {
       setNotice('选题标题不能为空');
@@ -183,6 +214,7 @@ export default function MobileTopicDetail() {
       setNotice('当前网络未恢复，修改已保存为本地草稿，尚未提交。');
       return;
     }
+    saveInFlightRef.current = true;
     setSaving(true);
     setNotice('');
     try {
@@ -194,16 +226,20 @@ export default function MobileTopicDetail() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '保存选题失败');
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
   };
   const advance = async () => {
+    if (advanceInFlightRef.current) return;
     if (!topic) return;
     if (missingCurrentStageRecord) { setNotice('请先补齐当前阶段记录，再推进到下一阶段。'); return; }
     if (!canAdvanceWorkflow) { setNotice('当前阶段暂不支持在移动端推进，请使用有权限的工作流操作。'); return; }
     const next = nextStatus[topic.status];
     if (!next) { setNotice(topic.status === 'pending' ? '待审核选题需由有审核权限的成员处理。' : '当前阶段没有可推进的后续状态。'); return; }
     if (networkState !== 'online') { setNotice('当前网络未恢复，尚未推进状态。'); return; }
+    advanceInFlightRef.current = true;
+    setAdvancing(true);
     setSaving(true); setNotice('');
     try {
       await updateTopicStatus(topic.id, next);
@@ -225,7 +261,11 @@ export default function MobileTopicDetail() {
       if (next === 'shooting' || next === 'completed') celebrateMilestone();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '状态推进失败');
-    } finally { setSaving(false); }
+    } finally {
+      advanceInFlightRef.current = false;
+      setAdvancing(false);
+      setSaving(false);
+    }
   };
   const startProduction = async () => {
     if (!topic || !canStartProduction || startProductionInFlight.current) return;
@@ -258,37 +298,43 @@ export default function MobileTopicDetail() {
     }
   };
   const repairStageRecord = async () => {
-    if (!topic || !canEditTopic || repairingStageRecord) return;
+    if (!topic || !canEditTopic || repairStageRecordInFlightRef.current) return;
     if (networkState !== 'online') { setNotice('目前离线，尚未补建阶段记录。'); return; }
+    repairStageRecordInFlightRef.current = true;
     setRepairingStageRecord(true);
     setNotice('');
-    let result: Awaited<ReturnType<typeof repairCurrentTopicStageRecord>>;
     try {
-      result = await repairCurrentTopicStageRecord(topic.id);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '补齐阶段记录失败，请稍后重试。');
-      setRepairingStageRecord(false);
-      return;
-    }
+      let result: Awaited<ReturnType<typeof repairCurrentTopicStageRecord>>;
+      try {
+        result = await repairCurrentTopicStageRecord(topic.id);
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : '补齐阶段记录失败，请稍后重试。');
+        return;
+      }
 
-    try {
-      const refreshed = await getTopic(topic.id);
-      setTopic(refreshed);
-      setNotice(result.created ? '阶段记录已补齐；选题阶段未变更，操作已记入历史。' : '阶段记录已存在，未重复创建。');
-    } catch {
-      setNotice(result.created
-        ? '服务端已确认阶段记录补齐；页面刷新失败，请重新加载确认当前状态，不要重复操作。'
-        : '服务端已确认阶段记录存在；页面刷新失败，请重新加载确认当前状态。');
+      try {
+        const refreshed = await getTopic(topic.id);
+        setTopic(refreshed);
+        setNotice(result.created ? '阶段记录已补齐；选题阶段未变更，操作已记入历史。' : '阶段记录已存在，未重复创建。');
+      } catch {
+        setNotice(result.created
+          ? '服务端已确认阶段记录补齐；页面刷新失败，请重新加载确认当前状态，不要重复操作。'
+          : '服务端已确认阶段记录存在；页面刷新失败，请重新加载确认当前状态。');
+      }
     } finally {
+      repairStageRecordInFlightRef.current = false;
       setRepairingStageRecord(false);
     }
   };
   const audit = async () => {
+    if (auditSubmissionInFlightRef.current) return;
     if (!topic || topic.status !== 'pending' || !canAudit) {
       setNotice('当前账号没有审核该选题的权限，或选题已不在待审核状态。');
       return;
     }
     if (networkState !== 'online') { setNotice('当前网络未恢复，审核结果尚未提交。'); return; }
+    auditSubmissionInFlightRef.current = true;
+    setSubmittingAudit(true);
     setSaving(true);
     setNotice('');
     try {
@@ -301,7 +347,11 @@ export default function MobileTopicDetail() {
       if (!refreshed) setNotice('审核结果已提交；页面刷新失败，请重新加载确认当前状态，不要重复审核。');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '审核失败；选题状态未确认更新，请刷新后检查。');
-    } finally { setSaving(false); }
+    } finally {
+      auditSubmissionInFlightRef.current = false;
+      setSubmittingAudit(false);
+      setSaving(false);
+    }
   };
   const currentStatusColors = topic
     ? STATUS_COLORS[topic.status] || {
@@ -375,13 +425,13 @@ export default function MobileTopicDetail() {
       </section>
       <TopicAssetDimensionsPanel key={topic.id} topicId={topic.id} canManage={canEditTopic} />
       {topic.history?.length ? <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><h2 className="inline-flex items-center gap-2 text-sm font-semibold"><Clock3 className="h-4 w-4 text-studio-cyan" />协作动态</h2><div className="mt-3 space-y-3">{topic.history.slice(0, 5).map((record) => <div key={record.id} className="border-l border-studio-border-soft pl-3 text-sm"><p>{record.operator_name ?? '成员'} · {historyActionName[record.action] ?? record.action}</p><p className="mt-1 text-xs text-studio-text-muted">{record.comment || record.created_at}</p></div>)}</div></section> : null}
-      {topic.status === 'pending' && canAudit ? <section className="space-y-3 rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold">选题审核</h2><p className="mt-1 text-xs text-studio-text-muted">审核操作独立于选题内容编辑权限。</p></div><button type="button" disabled={saving || networkState !== 'online'} onClick={() => setShowAudit((current) => !current)} className="min-h-10 rounded-xl bg-studio-primary-button px-3 text-sm font-semibold text-white disabled:opacity-50">{showAudit ? '收起审核' : '开始审核'}</button></div>{showAudit ? <><div className="grid grid-cols-2 gap-2"><button type="button" aria-pressed={auditStatus === 'approved'} onClick={() => setAuditStatus('approved')} className={`min-h-10 rounded-xl border text-sm font-semibold ${auditStatus === 'approved' ? 'border-studio-success bg-studio-success/15 text-studio-success-contrast' : 'border-studio-border-soft text-studio-text-secondary'}`}>通过</button><button type="button" aria-pressed={auditStatus === 'rejected'} onClick={() => setAuditStatus('rejected')} className={`min-h-10 rounded-xl border text-sm font-semibold ${auditStatus === 'rejected' ? 'border-studio-coral bg-studio-coral/10 text-studio-coral-contrast' : 'border-studio-border-soft text-studio-text-secondary'}`}>驳回</button></div><label className="block"><span className="mb-2 block text-sm font-medium">审核意见（选填）</span><textarea value={auditComment} onChange={(event) => setAuditComment(event.target.value)} disabled={saving} className="min-h-24 w-full rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm disabled:opacity-60" placeholder="填写通过说明或需要修改的内容" /></label><button type="button" disabled={saving || networkState !== 'online'} onClick={() => void audit()} className="min-h-11 w-full rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50">{saving ? '正在提交审核…' : auditStatus === 'approved' ? '确认通过选题' : '确认驳回选题'}</button></> : null}</section> : null}
+      {topic.status === 'pending' && canAudit ? <section className="space-y-3 rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold">选题审核</h2><p className="mt-1 text-xs text-studio-text-muted">审核操作独立于选题内容编辑权限。</p></div><button type="button" disabled={saving || networkState !== 'online'} onClick={() => setShowAudit((current) => !current)} className="min-h-10 rounded-xl bg-studio-primary-button px-3 text-sm font-semibold text-white disabled:opacity-50">{showAudit ? '收起审核' : '开始审核'}</button></div>{showAudit ? <><div className="grid grid-cols-2 gap-2"><button type="button" aria-pressed={auditStatus === 'approved'} disabled={submittingAudit} onClick={() => setAuditStatus('approved')} className={`min-h-10 rounded-xl border text-sm font-semibold disabled:opacity-60 ${auditStatus === 'approved' ? 'border-studio-success bg-studio-success/15 text-studio-success-contrast' : 'border-studio-border-soft text-studio-text-secondary'}`}>通过</button><button type="button" aria-pressed={auditStatus === 'rejected'} disabled={submittingAudit} onClick={() => setAuditStatus('rejected')} className={`min-h-10 rounded-xl border text-sm font-semibold disabled:opacity-60 ${auditStatus === 'rejected' ? 'border-studio-coral bg-studio-coral/10 text-studio-coral-contrast' : 'border-studio-border-soft text-studio-text-secondary'}`}>驳回</button></div><label className="block"><span className="mb-2 block text-sm font-medium">审核意见（选填）</span><textarea value={auditComment} onChange={(event) => setAuditComment(event.target.value)} disabled={submittingAudit} className="min-h-24 w-full rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm disabled:opacity-60" placeholder="填写通过说明或需要修改的内容" /></label><button type="button" disabled={saving || networkState !== 'online'} onClick={() => void audit()} className="min-h-11 w-full rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50">{submittingAudit ? '正在提交审核…' : auditStatus === 'approved' ? '确认通过选题' : '确认驳回选题'}</button></> : null}</section> : null}
       {notice ? <p role="status" className="px-1 text-sm text-studio-text-secondary">{notice}</p> : null}
       {permissionsLoading ? <p role="status" className="text-sm text-studio-text-muted">正在确认操作权限…</p> : null}
       {!permissionsLoading && !canEditTopic ? <p className="text-sm text-studio-text-muted">当前为只读查看；如需修改，请联系管理员或选题负责人。</p> : null}
       {!permissionsLoading && (canEditTopic || canStartProduction) ? <div className={`sticky z-sticky -mx-1 grid ${canEditTopic ? 'grid-cols-2' : 'grid-cols-1'} gap-3 bg-studio-bg px-1 py-2`} style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}>
         {canEditTopic ? <button type="button" disabled={saving || startingProduction} onClick={() => void save()} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-studio-border-soft text-sm font-semibold disabled:opacity-50"><Save className="h-4 w-4" />{saving ? '保存中…' : '保存修改'}</button> : null}
-        {canStartProduction ? <button type="button" disabled={saving || startingProduction || networkState !== 'online'} onClick={() => void startProduction()} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{startingProduction ? '正在准备…' : topic.status === 'approved' ? '开始创作' : '进入创作'}</button> : canAdvanceWorkflow ? <button type="button" disabled={saving || networkState !== 'online'} onClick={() => void advance()} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{statusLabel[topic.status] ?? '推进阶段'}</button> : null}
+        {canStartProduction ? <button type="button" disabled={saving || startingProduction || networkState !== 'online'} onClick={() => void startProduction()} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{startingProduction ? '正在准备…' : topic.status === 'approved' ? '开始创作' : '进入创作'}</button> : canAdvanceWorkflow ? <button type="button" disabled={saving || networkState !== 'online'} onClick={() => void advance()} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{advancing ? '正在推进阶段…' : statusLabel[topic.status] ?? '推进阶段'}</button> : null}
       </div> : null}
     </> : <p className="text-sm text-studio-text-secondary">未找到该选题。</p>}
   </div>;

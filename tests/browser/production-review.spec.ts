@@ -92,6 +92,19 @@ const threads: Array<Record<string, unknown> & { id: number; replies: Array<Reco
 let nextThreadId = 1;
 let nextReplyId = 1;
 let content = '<p>第一段文字需要审阅。</p>';
+let productionStatus = 'draft';
+let productionSaveAttempts = 0;
+let productionSaveFailuresRemaining = 0;
+let productionReviewAttempts = 0;
+let failNextProductionReview = false;
+let productionReviewGate: Promise<void> | null = null;
+let releaseProductionReview: (() => void) | null = null;
+let productionSaveGate: Promise<void> | null = null;
+let releaseProductionSave: (() => void) | null = null;
+let productionStatusUpdateAttempts = 0;
+let productionStatusUpdateContent = '';
+let productionVersionSaveAttempts = 0;
+let productionVersionSaveContent = '';
 let collaborationUpdatesToReject = 0;
 let collaborationUpdateCount = 0;
 let rejectedCollaborationUpdateCount = 0;
@@ -111,13 +124,58 @@ app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'light' ? 'light' : 'dark';
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','review-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/production/content/${productionId}');</script>`);
 });
-app.get('/__qa/state', (_req, res) => res.json({ content, savedContents, threads, collaborationUpdateCount, rejectedCollaborationUpdateCount }));
+app.get('/__qa/state', (_req, res) => res.json({ content, savedContents, threads, productionStatus, productionSaveAttempts, productionReviewAttempts, productionStatusUpdateAttempts, productionStatusUpdateContent, productionVersionSaveAttempts, productionVersionSaveContent, collaborationUpdateCount, rejectedCollaborationUpdateCount }));
 app.post('/__qa/reset-review-fixture', (_req, res) => {
   content = '<p>第一段文字需要审阅。</p>';
+  productionStatus = 'draft';
+  productionSaveAttempts = 0;
+  productionSaveFailuresRemaining = 0;
+  productionReviewAttempts = 0;
+  failNextProductionReview = false;
+  releaseProductionReview?.();
+  releaseProductionReview = null;
+  productionReviewGate = null;
+  releaseProductionSave?.();
+  releaseProductionSave = null;
+  productionSaveGate = null;
+  productionStatusUpdateAttempts = 0;
+  productionStatusUpdateContent = '';
+  productionVersionSaveAttempts = 0;
+  productionVersionSaveContent = '';
   savedContents.length = 0;
   threads.length = 0;
   nextThreadId = 1;
   nextReplyId = 1;
+  return res.json({ ok: true });
+});
+app.post('/__qa/fail-next-production-saves', (_req, res) => {
+  productionSaveFailuresRemaining = 2;
+  return res.json({ ok: true });
+});
+app.post('/__qa/fail-next-production-review', (_req, res) => {
+  failNextProductionReview = true;
+  return res.json({ ok: true });
+});
+app.post('/__qa/hold-next-production-review', (_req, res) => {
+  productionReviewGate = new Promise<void>((resolve) => { releaseProductionReview = resolve; });
+  return res.json({ ok: true });
+});
+app.post('/__qa/hold-next-production-save', (_req, res) => {
+  productionSaveGate = new Promise<void>((resolve) => { releaseProductionSave = resolve; });
+  return res.json({ ok: true });
+});
+app.post('/__qa/release-production-review', (_req, res) => {
+  releaseProductionReview?.();
+  releaseProductionReview = null;
+  return res.json({ ok: true });
+});
+app.post('/__qa/release-production-save', (_req, res) => {
+  releaseProductionSave?.();
+  releaseProductionSave = null;
+  return res.json({ ok: true });
+});
+app.post('/__qa/set-production-rejected-state', (_req, res) => {
+  productionStatus = 'rejected';
   return res.json({ ok: true });
 });
 app.post('/__qa/fail-next-collaboration-update', (_req, res) => {
@@ -136,7 +194,7 @@ app.get('/api/resource-center/search', (_req, res) => res.json({ data: [{
 }], total: 1 }));
 app.get('/api/topics/:id', (_req, res) => res.json({ success: true, data: { id: topicId, title: '协作审阅稿件', outline: '', creator_id: user.id, assignee_id: user.id, status: 'production', platform: 'douyin' } }));
 app.get(`/api/workflow/production/${productionId}`, (_req, res) => res.json({
-  id: productionId, topic_id: topicId, topic_title: '协作审阅稿件', version: 'v1.0', status: 'draft',
+  id: productionId, topic_id: topicId, topic_title: '协作审阅稿件', version: 'v1.0', status: productionStatus,
   content, contentMarkdown: content, content_markdown: content, content_json: content,
   operator_id: user.id, operator_name: user.name, can_edit: true, created_at: '2026-09-29 09:00:00', updated_at: '2026-09-29 09:00:00',
 }));
@@ -178,7 +236,37 @@ app.post(`/api/productions/${productionId}/material-draft/resources`, async (req
   assert.deepEqual(req.body.resource_ids, [88], 'the selected source must stay stable throughout insertion');
   return res.json({ data: [{ resource_id: 88, title: '隔离参考资料', content_html: '<p>资料引用单次插入验收。</p>' }], empty_resource_ids: [] });
 });
-app.put(`/api/workflow/production/${productionId}`, (req, res) => {
+app.put(`/api/workflow/production/${productionId}`, async (req, res) => {
+  if (req.body.status === 'review') {
+    productionReviewAttempts += 1;
+    const gate = productionReviewGate;
+    productionReviewGate = null;
+    if (gate) await gate;
+    if (failNextProductionReview) {
+      failNextProductionReview = false;
+      return res.status(503).json({ message: '隔离测试模拟审核提交失败，请重试' });
+    }
+    productionStatus = 'review';
+  } else {
+    productionSaveAttempts += 1;
+    const gate = productionSaveGate;
+    productionSaveGate = null;
+    if (gate) await gate;
+    if (productionSaveFailuresRemaining > 0) {
+      productionSaveFailuresRemaining -= 1;
+      return res.status(503).json({ message: '隔离测试模拟正文保存失败' });
+    }
+    if (req.body.status === 'draft') {
+      if (req.body.version_action === 'minor' || req.body.version_action === 'major') {
+        productionVersionSaveAttempts += 1;
+        productionVersionSaveContent = String(req.body.content ?? '');
+      } else if (productionStatus !== 'draft') {
+        productionStatusUpdateAttempts += 1;
+        productionStatusUpdateContent = String(req.body.content ?? '');
+        productionStatus = 'draft';
+      }
+    }
+  }
   content = String(req.body.content ?? content);
   savedContents.push(content);
   return res.json({ message: '保存成功', version: 'v1.0' });
@@ -250,10 +338,15 @@ try {
   if (process.env.XMT_MATERIAL_PROTECTION_QA_ONLY !== '1') {
   const errors: string[] = [];
   const consoleProblems: string[] = [];
+  let expectedReview503ConsoleErrors = 0;
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
+    if (message.type() === 'error' && /Failed to load resource.*503/.test(message.text()) && expectedReview503ConsoleErrors > 0) {
+      expectedReview503ConsoleErrors -= 1;
+      return;
+    }
     if (message.type() === 'error' || message.type() === 'warning') consoleProblems.push(`${message.type()}: ${message.text()}`);
   });
   await page.goto(`${base}/__qa`);
@@ -261,6 +354,132 @@ try {
   await page.getByText('草稿', { exact: true }).first().waitFor();
   assert.equal(await page.getByText('draft', { exact: true }).count(), 0, 'production detail should not show raw status codes');
   await page.getByText('这个版本还没有批注或修改建议').waitFor();
+  await page.request.post(`${base}/__qa/fail-next-production-saves`);
+  expectedReview503ConsoleErrors += 3;
+  const mainDraftEditor = page.locator('.ProseMirror').last();
+  const firstDraftSaveFailure = page.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 503);
+  await mainDraftEditor.click();
+  await mainDraftEditor.press('End');
+  await mainDraftEditor.pressSequentially('正文保护验证', { delay: 1 });
+  await firstDraftSaveFailure;
+
+  const submitReviewButtons = page.getByRole('button', { name: '提交审核', exact: true });
+  const submitReviewTop = submitReviewButtons.first();
+  const submitReviewPanel = submitReviewButtons.last();
+  const flushedDraftSaveFailure = page.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 503);
+  await submitReviewTop.click();
+  await flushedDraftSaveFailure;
+  await page.getByText('正文保存未确认，请检查编辑器提示并重试后再提交审核。', { exact: true }).waitFor();
+  let reviewState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(reviewState.productionStatus, 'draft', 'failed review submission keeps the manuscript in draft');
+  assert.equal(await submitReviewTop.isEnabled(), true, 'failed review submission can be retried from the primary action');
+  assert.equal(await submitReviewPanel.isEnabled(), true, 'failed review submission can also be retried from the version panel');
+  assert.equal(reviewState.productionReviewAttempts, 0, 'unconfirmed autosave blocks the review mutation entirely');
+  assert.ok(reviewState.productionSaveAttempts >= 2, 'submitting retries the failed autosave before refusing to review');
+
+  await page.request.post(`${base}/__qa/fail-next-production-review`);
+  const failedReviewResponse = page.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 503);
+  await submitReviewTop.click();
+  await failedReviewResponse;
+  await page.getByText('隔离测试模拟审核提交失败，请重试', { exact: true }).waitFor();
+  await submitReviewTop.waitFor({ state: 'visible' });
+  assert.equal(await submitReviewTop.isEnabled(), true, 'a failed review request releases the shared production mutation lock');
+  reviewState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(reviewState.productionStatus, 'draft', 'failed review submission keeps the confirmed draft state');
+  assert.match(reviewState.content, /正文保护验证/, 'autosave recovery preserves the edited manuscript before the review attempt');
+  assert.equal(reviewState.productionReviewAttempts, 1, 'a failed review request is recorded once and leaves retry available');
+
+  await page.request.post(`${base}/__qa/hold-next-production-review`);
+  await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll('button')).filter((button) => button.textContent?.trim() === '提交审核');
+    if (buttons.length !== 2) throw new Error(`Expected both review-submit entry points, found ${buttons.length}`);
+    buttons[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    buttons[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  const pendingReviewSubmit = page.getByRole('button', { name: '正在提交审核…', exact: true });
+  await pendingReviewSubmit.first().waitFor();
+  await page.waitForFunction((expectedAttempts: number) => fetch('/__qa/state')
+    .then((response) => response.json())
+    .then((state) => state.productionReviewAttempts === expectedAttempts), 2);
+  assert.equal(await pendingReviewSubmit.count(), 2, 'the primary and version-panel controls report the same in-flight review');
+  for (const button of await pendingReviewSubmit.all()) {
+    assert.equal(await button.isDisabled(), true, 'both review submission entry points stay locked until the server confirms');
+  }
+  assert.equal(await mainDraftEditor.getAttribute('contenteditable'), 'false', 'the submitted manuscript cannot change while its review request is in flight');
+  for (const button of [
+    page.getByRole('button', { name: '小修保存', exact: true }),
+    page.getByRole('button', { name: '另开新版', exact: true }),
+    page.getByRole('button', { name: '当前稿件', exact: true }),
+    page.locator('button[title="删除创作记录"]'),
+  ]) {
+    assert.equal(await button.isDisabled(), true, 'version, edit, and delete actions cannot race with review submission');
+  }
+  reviewState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(reviewState.productionReviewAttempts, 2, 'rapid repeated clicks produce only one in-flight review write after the failed attempt');
+  await page.request.post(`${base}/__qa/release-production-review`);
+  await page.getByText('审核中', { exact: true }).first().waitFor();
+  reviewState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(reviewState.productionStatus, 'review', 'successful review submission updates the confirmed page state');
+  assert.equal(await page.getByRole('button', { name: '提交审核', exact: true }).count(), 0, 'a confirmed review submission cannot be accidentally repeated');
+  await page.request.post(`${base}/__qa/reset-review-fixture`);
+  await page.request.post(`${base}/__qa/set-production-rejected-state`);
+  await page.reload();
+  await page.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+  await page.getByText('已驳回', { exact: true }).first().waitFor();
+  await page.getByText('这个版本还没有批注或修改建议').waitFor();
+
+  await page.request.post(`${base}/__qa/hold-next-production-save`);
+  const pendingAutosaveEditor = page.locator('.ProseMirror').last();
+  await pendingAutosaveEditor.click();
+  await pendingAutosaveEditor.press('End');
+  await pendingAutosaveEditor.pressSequentially('状态写入并发验证', { delay: 1 });
+  await page.waitForFunction(() => fetch('/__qa/state')
+    .then((response) => response.json())
+    .then((state) => state.productionSaveAttempts === 1), 2);
+  await page.getByRole('button', { name: '重新编辑', exact: true }).click();
+  await page.getByRole('button', { name: '状态处理中…', exact: true }).waitFor();
+  assert.equal(await pendingAutosaveEditor.getAttribute('contenteditable'), 'false', 'status changes lock the editor while confirming any pending autosave');
+  let statusState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(statusState.productionStatusUpdateAttempts, 0, 'a status write waits until the in-flight autosave is confirmed');
+  assert.equal(statusState.productionStatus, 'rejected', 'the status remains unchanged while the autosave is pending');
+
+  await page.request.post(`${base}/__qa/release-production-save`);
+  await page.getByRole('button', { name: '提交审核', exact: true }).first().waitFor();
+  statusState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(statusState.productionStatus, 'draft', 'the status updates after the autosave is confirmed');
+  assert.match(statusState.productionStatusUpdateContent, /状态写入并发验证/, 'the status mutation carries the latest confirmed editor content');
+  assert.match(statusState.content, /状态写入并发验证/, 'the latest editor content remains saved after the status transition');
+
+  await page.request.post(`${base}/__qa/hold-next-production-save`);
+  await pendingAutosaveEditor.click();
+  await pendingAutosaveEditor.press('End');
+  await pendingAutosaveEditor.pressSequentially('版本保存并发验证', { delay: 1 });
+  await page.waitForFunction(() => fetch('/__qa/state')
+    .then((response) => response.json())
+    .then((state) => state.productionSaveAttempts === 3), 2);
+  await page.getByRole('button', { name: '小修保存', exact: true }).click();
+  await page.getByRole('button', { name: '正在保存…', exact: true }).waitFor();
+  statusState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(statusState.productionVersionSaveAttempts, 0, 'a version save waits until the in-flight autosave is confirmed');
+  assert.match(statusState.content, /状态写入并发验证/, 'the current saved version remains intact while autosave is pending');
+  await page.request.post(`${base}/__qa/release-production-save`);
+  await page.waitForFunction(() => fetch('/__qa/state')
+    .then((response) => response.json())
+    .then((state) => state.productionVersionSaveAttempts === 1), 2);
+  statusState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.match(statusState.productionVersionSaveContent, /状态写入并发验证.*版本保存并发验证/, 'the version save includes the latest content after autosave confirmation');
+  await page.getByText('小修已保存', { exact: true }).waitFor();
+
+  await page.request.post(`${base}/__qa/reset-review-fixture`);
+  await page.reload();
+  await page.getByRole('button', { name: '提交审核', exact: true }).first().waitFor();
+
   const toolbarContext = await browser.newContext({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   const toolbarPage = await toolbarContext.newPage();
   toolbarPage.setDefaultTimeout(5000);

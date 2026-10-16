@@ -13,14 +13,13 @@ import {
   type Retrospective,
   type RetrospectiveStatus,
 } from '../api/retrospectives';
-import { getUsers } from '../api/users';
-import type { User } from '../types';
 import { useAppStore, useAuthStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
 import { ActionButton, GlassPanel, PageHeader, PageShell } from '../components/studio';
 import MyRetroActionsPanel from '../components/retrospectives/MyRetroActionsPanel';
 import RetroCreateDialog from '../components/retrospectives/RetroCreateDialog';
 import RetroList from '../components/retrospectives/RetroList';
+import { useRetroAssigneeDirectory } from '../components/retrospectives/useRetroAssigneeDirectory';
 import { retroCategoryLabels, toFriendlyRetroError } from '../components/retrospectives/retroLabels';
 
 const statusOptions: Array<{ value: RetrospectiveStatus | 'all'; label: string }> = [
@@ -54,14 +53,22 @@ export default function RetrospectivesPage() {
   const navigate = useNavigate();
   const addNotification = useAppStore((state) => state.addNotification);
   const currentUser = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.token);
   const currentUserId = currentUser?.id;
-  const { hasPermission } = usePermission();
+  const permissionState = usePermission();
+  const { hasPermission } = permissionState;
   const canCreate = currentUser?.role === 'admin' || currentUser?.role === 'director' || hasPermission('analytics:retro:create');
+  const assigneeDirectory = useRetroAssigneeDirectory({
+    currentUser,
+    token,
+    canViewUsers: hasPermission('user:view'),
+    permissionsLoading: permissionState.loading,
+    refreshPermissions: permissionState.refreshPermissions,
+  });
 
   const [retrospectives, setRetrospectives] = useState<Retrospective[]>([]);
   const [myActions, setMyActions] = useState<RetroAction[]>([]);
   const [templates, setTemplates] = useState<RetroTemplate[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
   const [status, setStatus] = useState<RetrospectiveStatus | 'all'>('all');
   const [category, setCategory] = useState<RetroTemplateCategory | 'all'>('all');
   const [start, setStart] = useState(daysAgo(30));
@@ -146,10 +153,7 @@ export default function RetrospectivesPage() {
       .then((result) => setTemplates(result.templates))
       .catch((error) => addNotification({ title: '加载复盘模板失败', message: toFriendlyRetroError(error), type: 'warning' }));
 
-    getUsers({ page: 1, limit: 200 })
-      .then((result) => setUsers(result.data || []))
-      .catch(() => setUsers(currentUser ? [currentUser] : []));
-  }, [addNotification, currentUser]);
+  }, [addNotification]);
 
   const handleCreate = async (payload: CreateRetrospectivePayload) => {
     if (createInFlightRef.current) return;
@@ -238,9 +242,12 @@ export default function RetrospectivesPage() {
       <RetroCreateDialog
         open={createOpen}
         templates={templates}
-        users={users}
+        users={assigneeDirectory.users}
         currentUserId={currentUser?.id}
         loading={creating}
+        usersStatus={assigneeDirectory.status}
+        usersError={assigneeDirectory.error}
+        onRetryUsers={assigneeDirectory.retry}
         onClose={() => setCreateOpen(false)}
         onSubmit={handleCreate}
       />

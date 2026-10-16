@@ -56,6 +56,8 @@ let fixturePermissions = ['analytics:view', 'export:data'];
 let fixtureRole = user.role;
 let personalReportPresent = true;
 let teamDailyReads = 0;
+let failNextTeamDailyRead = false;
+let delayedTeamDailyDate: string | null = null;
 const app = express();
 
 app.get('/__qa', (_req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','analytics-read-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/analytics');</script>`));
@@ -65,6 +67,14 @@ app.get('/__qa/report-center', (req, res) => {
 });
 app.post('/__qa/grant-daily-team-permission', (_req, res) => {
   fixturePermissions = [...new Set([...fixturePermissions, 'report:daily:view_team'])];
+  res.json({ ok: true });
+});
+app.post('/__qa/fail-next-team-daily-read', (_req, res) => {
+  failNextTeamDailyRead = true;
+  res.json({ ok: true });
+});
+app.post('/__qa/delay-team-daily-date', (req, res) => {
+  delayedTeamDailyDate = typeof req.body?.date === 'string' ? req.body.date : null;
   res.json({ ok: true });
 });
 app.post('/__qa/clear-personal-report', (_req, res) => {
@@ -103,9 +113,21 @@ app.get('/api/daily-reports/me', (_req, res) => res.json({ success: true, data: 
     items: [{ sectionKey: 'today', title: '今日工作', contentMd: '仅查看的已有日报', sortOrder: 0 }],
   } : null,
 } }));
-app.get('/api/daily-reports/team', (_req, res) => {
+app.get('/api/daily-reports/team', async (req, res) => {
   teamDailyReads += 1;
-  return res.json({ success: true, data: { reportDate: '2026-10-14', status: 'submitted', reports: [] } });
+  if (failNextTeamDailyRead) {
+    failNextTeamDailyRead = false;
+    return res.status(503).json({ success: false, message: '模拟团队日报读取失败' });
+  }
+  const requestedDate = typeof req.query.date === 'string' ? req.query.date : '2026-10-14';
+  if (delayedTeamDailyDate === requestedDate) {
+    delayedTeamDailyDate = null;
+    await new Promise<void>((resolve) => setTimeout(resolve, 350));
+  }
+  return res.json({ success: true, data: { reportDate: requestedDate, status: 'submitted', reports: [{
+    id: 991, userId: 48, userName: '日报成员甲', reportDate: requestedDate, status: 'submitted', manualSummaryMd: `团队日报已确认内容 ${requestedDate}`, riskLevel: 'normal', version: 1,
+    items: [{ sectionKey: 'today', title: '今日工作', contentMd: '已完成隔离验收', sortOrder: 0 }],
+  }] } });
 });
 app.get('/api/analytics/team', (req, res) => {
   teamReads += 1;
@@ -411,10 +433,53 @@ try {
   await teamRead;
   await allowedTeamPage.getByRole('heading', { name: '团队日报', exact: true }).waitFor();
   assert.equal(teamDailyReads, 1, 'an explicit team permission exposes a working shortcut and makes one read');
+  const teamBoard = allowedTeamPage.getByTestId('team-daily-report-board');
+  await teamBoard.getByText(/团队日报已确认内容 2026-10-\d{2}/).waitFor();
+  await allowedTeamPage.request.post(`${base}/__qa/fail-next-team-daily-read`);
+  await teamBoard.getByRole('button', { name: '刷新', exact: true }).click();
+  await teamBoard.getByRole('alert').getByText(/仍显示上次成功读取的团队日报，可能不是最新/).waitFor();
+  await teamBoard.getByText(/团队日报已确认内容 2026-10-\d{2}/).waitFor();
+  assert.equal(await teamBoard.getByText('日报成员甲', { exact: true }).count(), 1, 'a failed refresh keeps the last successful team report visible');
+  await allowedTeamPage.screenshot({ path: '/tmp/xmt-team-daily-stale-390.png', fullPage: false });
+  await teamBoard.getByRole('button', { name: '重新加载团队日报', exact: true }).click();
+  await teamBoard.getByText(/团队日报已确认内容 2026-10-\d{2}/).waitFor();
+  assert.equal(await teamBoard.getByRole('alert').count(), 0, 'a successful read clears the stale-data warning');
+  assert.equal(teamDailyReads, 3, 'the explicit retry performs one additional read after the injected failure');
+  await allowedTeamPage.request.post(`${base}/__qa/fail-next-team-daily-read`);
+  const changedDateFailure = allowedTeamPage.waitForResponse((response) => response.url().includes('/api/daily-reports/team') && response.status() === 503);
+  await teamBoard.locator('input[type="date"]').fill('2026-10-13');
+  await changedDateFailure;
+  await teamBoard.getByRole('alert').getByText('模拟团队日报读取失败', { exact: true }).waitFor();
+  assert.equal(await teamBoard.getByText(/团队日报已确认内容/).count(), 0, 'a different date never displays reports from the previous query');
+  assert.equal(await teamBoard.getByRole('alert').getByText(/仍显示上次成功读取的团队日报/).count(), 0, 'stale-data wording is reserved for the same query scope');
+  await allowedTeamPage.screenshot({ path: '/tmp/xmt-team-daily-date-scope-390.png', fullPage: false });
+  await teamBoard.getByRole('button', { name: '重新加载团队日报', exact: true }).click();
+  await teamBoard.getByText('团队日报已确认内容 2026-10-13', { exact: true }).waitFor();
+  assert.equal(teamDailyReads, 5, 'changing the date and retrying each performs one read');
+  await allowedTeamPage.request.post(`${base}/__qa/delay-team-daily-date`, { data: { date: '2026-10-12' } });
+  const olderDateRequest = allowedTeamPage.waitForRequest((request) => {
+    if (!request.url().includes('/api/daily-reports/team')) return false;
+    return new URL(request.url()).searchParams.get('date') === '2026-10-12';
+  });
+  const teamDateFilter = teamBoard.locator('input[type="date"]');
+  await teamDateFilter.fill('2026-10-12');
+  await olderDateRequest;
+  const newerDateResponse = allowedTeamPage.waitForResponse((response) => {
+    if (!response.url().includes('/api/daily-reports/team') || response.status() !== 200) return false;
+    return new URL(response.url()).searchParams.get('date') === '2026-10-11';
+  });
+  await teamDateFilter.fill('2026-10-11');
+  await newerDateResponse;
+  await teamBoard.getByText('团队日报已确认内容 2026-10-11', { exact: true }).waitFor();
+  await allowedTeamPage.waitForTimeout(400);
+  await teamBoard.getByText('团队日报已确认内容 2026-10-11', { exact: true }).waitFor();
+  assert.equal(await teamBoard.getByText('团队日报已确认内容 2026-10-12', { exact: true }).count(), 0, 'a late response for the previous date cannot overwrite the active report list');
+  assert.equal(await teamBoard.getByRole('alert').count(), 0, 'an obsolete response cannot set an error for the active date');
+  assert.equal(teamDailyReads, 7, 'each date change performs one read and the latest request wins');
   await allowedTeamPage.close();
 
   assert.equal(apiWrites, 0, 'all analytics retries remain read-only');
-  assert.equal(expectedHttpErrors.length, 7, 'the browser records only the seven intentionally injected read failures');
+  assert.equal(expectedHttpErrors.length, 7, 'the analytics browser records only the seven intentionally injected read failures on its primary page');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true, 'the analytics view fits a 390px viewport');
   assert.deepEqual(errors, [], 'the analytics page has no unexpected browser errors');
 

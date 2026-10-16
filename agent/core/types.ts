@@ -53,4 +53,5 @@ export type CreatorSnapshot = {
   official_data?: Array<Record<string, unknown>>;
 };
 
-export type SyncResult = { taskId: string; collectedAt: string; snapshot: CreatorSnapshot; exportReceipts: ExportReceipt[]; local?: unknown; upload: { success: boolean; snapshot_id?: number; source?: string; modules?: unknown } };
+export type OfficialExportQualityReport = { source_rows: number; accepted_rows: number; duplicate_rows: number; rejected_rows: number; warnings: string[] };
+export type SyncResult = { taskId: string; collectedAt: string; snapshot: CreatorSnapshot; exportReceipts: ExportReceipt[]; local?: unknown; upload: { success: boolean; snapshot_id?: number; source?: string; modules?: unknown; official_export_quality?: OfficialExportQualityReport } };

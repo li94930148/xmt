@@ -29,6 +29,7 @@ export default function TemplateManagement() {
     if (operationLockRef.current) return;
     operationLockRef.current = true;
     setBusy(true);
+    setNotice('正在重新加载模板列表…');
     try {
       await refresh();
       setRefreshFailed(false);
@@ -71,6 +72,7 @@ export default function TemplateManagement() {
     operationLockRef.current = true;
     setRefreshFailed(false);
     setBusy(true);
+    setNotice(editingId === null ? '正在创建模板…' : '正在保存模板…');
     const payload = { ...form, name: form.name.trim(), platform: form.platform.trim(), description: form.description.trim() };
     try {
       if (editingId === null) await createTemplate(payload);
@@ -107,6 +109,7 @@ export default function TemplateManagement() {
     operationLockRef.current = true;
     setRefreshFailed(false);
     setBusy(true);
+    setNotice('正在删除模板…');
     try {
       await deleteTemplate(template.id);
     } catch {
@@ -138,12 +141,14 @@ export default function TemplateManagement() {
     <div className="grid gap-6 lg:grid-cols-2">
       <GlassPanel className="studio-sheen p-6">
         <h2 className="mb-5 text-lg font-semibold text-studio-text-primary">{editingId === null ? '新建模板' : '编辑模板'}</h2>
-        <form onSubmit={(event) => void save(event)} className="space-y-4">
-          <label className="block text-sm text-studio-text-secondary">名称<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="xmt-field mt-2 w-full" /></label>
-          <label className="block text-sm text-studio-text-secondary">平台<input value={form.platform} onChange={(event) => setForm({ ...form, platform: event.target.value })} placeholder="留空表示通用" className="xmt-field mt-2 w-full" /></label>
-          <label className="block text-sm text-studio-text-secondary">说明<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={2} className="xmt-field mt-2 w-full" /></label>
-          <label className="block text-sm text-studio-text-secondary">模板正文<textarea required value={form.template_data} onChange={(event) => setForm({ ...form, template_data: event.target.value })} rows={8} className="xmt-field mt-2 w-full" /></label>
-          <div className="flex flex-wrap gap-3"><ActionButton disabled={busy} type="submit" variant="primary">保存模板</ActionButton>{editingId !== null ? <ActionButton type="button" onClick={() => { setEditingId(null); setForm(emptyForm); }}>取消编辑</ActionButton> : null}</div>
+        <form onSubmit={(event) => void save(event)} className="space-y-4" aria-busy={busy}>
+          <fieldset disabled={busy} className="m-0 min-w-0 space-y-4 border-0 p-0">
+            <label className="block text-sm text-studio-text-secondary">名称<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="xmt-field mt-2 w-full" /></label>
+            <label className="block text-sm text-studio-text-secondary">平台<input value={form.platform} onChange={(event) => setForm({ ...form, platform: event.target.value })} placeholder="留空表示通用" className="xmt-field mt-2 w-full" /></label>
+            <label className="block text-sm text-studio-text-secondary">说明<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={2} className="xmt-field mt-2 w-full" /></label>
+            <label className="block text-sm text-studio-text-secondary">模板正文<textarea required value={form.template_data} onChange={(event) => setForm({ ...form, template_data: event.target.value })} rows={8} className="xmt-field mt-2 w-full" /></label>
+            <div className="flex flex-wrap gap-3"><ActionButton disabled={busy} type="submit" variant="primary">保存模板</ActionButton>{editingId !== null ? <ActionButton type="button" disabled={busy} onClick={() => { setEditingId(null); setForm(emptyForm); }}>取消编辑</ActionButton> : null}</div>
+          </fieldset>
         </form>
       </GlassPanel>
       <GlassPanel className="studio-sheen p-6">

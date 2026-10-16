@@ -3,10 +3,43 @@ import http from 'node:http';
 import { chromium } from 'playwright';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
+import { defaultSystemSettings } from '../../src/lib/systemSettings';
 
 const app = express();
 app.use(express.json());
 let v1LegacyMeRequests = 0;
+let loginLayout: 'style1' | 'style2' | 'style3' = 'style1';
+
+function parseCssColor(value: string) {
+  const normalized = value.trim();
+  if (/^#[\da-f]{6}$/i.test(normalized)) {
+    return {
+      channels: [1, 3, 5].map((offset) => Number.parseInt(normalized.slice(offset, offset + 2), 16)),
+      alpha: 1,
+    };
+  }
+  const values = normalized.match(/[\d.]+/g)?.map(Number) ?? [];
+  assert.ok(values.length >= 3, `Could not parse CSS color: ${value}`);
+  return { channels: values.slice(0, 3), alpha: values[3] ?? 1 };
+}
+
+function contrastRatio(foregroundCss: string, backgroundCss: string) {
+  const background = parseCssColor(backgroundCss).channels;
+  const foreground = parseCssColor(foregroundCss);
+  const composite = foreground.channels.map((channel, index) => channel * foreground.alpha + background[index] * (1 - foreground.alpha));
+  const luminance = (channels: number[]) => channels.reduce((sum, channel, index) => {
+    const normalized = channel / 255;
+    const linear = normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+    return sum + linear * [0.2126, 0.7152, 0.0722][index];
+  }, 0);
+  const lighter = Math.max(luminance(composite), luminance(background));
+  const darker = Math.min(luminance(composite), luminance(background));
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+app.get('/api/system-settings/public', (_request, response) => {
+  response.json({ ...defaultSystemSettings, login: { ...defaultSystemSettings.login, layout: loginLayout } });
+});
 
 app.post('/api/auth/login', (request, response) => {
   const { username } = request.body as { username?: unknown };
@@ -96,7 +129,8 @@ app.use(vite.middlewares);
 const projectChromiumPath = chromium.executablePath();
 const browser = await chromium.launch({ headless: true, executablePath: projectChromiumPath });
 
-async function loginAndAssert(username: string, expectedV1: boolean) {
+async function loginAndAssert(username: string, expectedV1: boolean, layout: 'style1' | 'style2' | 'style3') {
+  loginLayout = layout;
   const context = await browser.newContext();
   const page = await context.newPage();
   const traceEvents: string[] = [];
@@ -112,9 +146,25 @@ async function loginAndAssert(username: string, expectedV1: boolean) {
   });
   try {
     await page.goto(`${baseUrl}/login`);
-    await page.getByPlaceholder('输入用户名').fill(username);
-    await page.getByPlaceholder('输入密码').fill('test-password');
-    await page.getByRole('button', { name: '登录', exact: true }).click();
+    const usernameLabel = layout === 'style1' ? '用户名' : '账号';
+    const usernameInput = page.getByLabel(usernameLabel, { exact: true });
+    const passwordInput = page.getByLabel('密码', { exact: true });
+    await page.waitForTimeout(500);
+    const usernameInputCount = await usernameInput.count();
+    assert.equal(usernameInputCount, 1, `${layout} exposes one programmatically labelled username input`);
+    assert.equal(await passwordInput.count(), 1, `${layout} exposes one programmatically labelled password input`);
+    const footerLink = page.locator('a[href^="https://beian.miit.gov.cn/"]');
+    const footerColors = await footerLink.evaluate((element) => {
+      const scope = element.closest('.xmt-theme-scope') ?? document.documentElement;
+      return {
+        foreground: getComputedStyle(element).color,
+        background: getComputedStyle(scope).getPropertyValue('--xmt-app-bg').trim(),
+      };
+    });
+    assert.ok(contrastRatio(footerColors.foreground, footerColors.background) >= 4.5, `${layout} footer filing link meets 4.5:1 against the theme background`);
+    await usernameInput.fill(username);
+    await passwordInput.fill('test-password');
+    await page.locator('form button[type="submit"]').click();
     await page.waitForURL(`${baseUrl}/`, { timeout: 8_000 });
     await page.waitForTimeout(250);
     assert.equal(new URL(page.url()).pathname, '/');
@@ -146,8 +196,9 @@ async function loginAndAssert(username: string, expectedV1: boolean) {
 }
 
 try {
-  await loginAndAssert('legacy-navigation-user', false);
-  await loginAndAssert('v1-navigation-user', true);
+  await loginAndAssert('legacy-navigation-user', false, 'style1');
+  await loginAndAssert('v1-navigation-user', true, 'style2');
+  await loginAndAssert('legacy-navigation-user', false, 'style3');
   assert.equal(v1LegacyMeRequests, 0);
   console.log('Auth login navigation browser tests passed');
 } finally {

@@ -16,6 +16,7 @@ import { setCurrentContentDocument } from '../content/orchestrator/currentConten
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 import { celebrateMilestone } from '../utils/confetti';
 import { useCompactEditorToolbar } from '../hooks/useCompactEditorToolbar';
 import { getWorkflowStatusLabel } from '../platform/workflow-status-labels';
@@ -55,6 +56,7 @@ export default function ShootingDetail() {
   currentShootingIdRef.current = id;
   const navigate = useNavigate();
   const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
   const styles = useThemeStyles();
   const compactEditorToolbar = useCompactEditorToolbar();
   const { hasPermission } = usePermission();
@@ -62,6 +64,7 @@ export default function ShootingDetail() {
   const [shooting, setShooting] = useState<ShootingDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const detailRequestSequenceRef = useRef(0);
+  const scriptVersionRequestSequenceRef = useRef(0);
   const hasLocalScript = shooting?.script_content !== null && shooting?.script_content !== undefined;
   const sourceProductionId = shooting
     ? hasLocalScript ? shooting.script_source_production_id : shooting.production?.id
@@ -77,6 +80,8 @@ export default function ShootingDetail() {
   // 剧本编辑状态
   const [scriptContent, setScriptContent] = useState('');
   const [scriptVersions, setScriptVersions] = useState<WorkflowDocumentVersion[]>([]);
+  const [scriptVersionsLoading, setScriptVersionsLoading] = useState(false);
+  const [scriptVersionsLoadError, setScriptVersionsLoadError] = useState(false);
   const [savingScriptVersion, setSavingScriptVersion] = useState(false);
   const [archiveSyncPending, setArchiveSyncPending] = useState(false);
   const [archiveSyncRetrying, setArchiveSyncRetrying] = useState(false);
@@ -86,6 +91,28 @@ export default function ShootingDetail() {
   const activeDocId = shooting ? getCollaborationRoomId('shooting', shooting.id) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
   const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
+  const loadScriptVersions = useCallback(async (recordId: number, detailRequestId?: number) => {
+    const requestId = ++scriptVersionRequestSequenceRef.current;
+    const isCurrent = () => requestId === scriptVersionRequestSequenceRef.current
+      && Number(currentShootingIdRef.current) === recordId
+      && (detailRequestId === undefined || detailRequestId === detailRequestSequenceRef.current);
+    setScriptVersionsLoading(true);
+    setScriptVersionsLoadError(false);
+    try {
+      const versions = await getShootingScriptVersions(recordId);
+      if (!isCurrent()) return null;
+      setScriptVersions(versions);
+      return versions;
+    } catch {
+      if (isCurrent()) {
+        setScriptVersionsLoadError(true);
+        setScriptVersions([]);
+      }
+      return null;
+    } finally {
+      if (isCurrent()) setScriptVersionsLoading(false);
+    }
+  }, []);
   const {
     requestLeave,
     retry: retryLeave,
@@ -98,7 +125,10 @@ export default function ShootingDetail() {
     runtimeHandleRef.current = handle;
   }, []);
 
+  const pendingRouteStayRef = useRef<(() => void) | null>(null);
   const handleContinueEditing = useCallback(() => {
+    pendingRouteStayRef.current?.();
+    pendingRouteStayRef.current = null;
     setLeaveFailureDialogDismissed(true);
   }, []);
 
@@ -106,35 +136,49 @@ export default function ShootingDetail() {
 
   const handleDiscardAndLeave = useCallback(() => discardAndLeave(), [discardAndLeave]);
 
-  const handleGuardedNavigate = useCallback(async (to: string) => {
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    let continued = false;
+    const continueOnce = () => {
+      if (continued) return;
+      continued = true;
+      pendingRouteStayRef.current = null;
+      proceed();
+    };
+    pendingRouteStayRef.current = stay;
     setLeaveFailureDialogDismissed(false);
-    const leaveResult = await requestLeave({
-      reason: 'route_transition',
-      continuation: () => navigate(to, { state: { mobileReturnTo: `/shooting/${id}` } }),
-    });
+    void requestLeave({ reason: 'route_transition', continuation: continueOnce })
+      .then((leaveResult) => {
+        if (leaveResult.decision === 'proceeded') continueOnce();
+        if (leaveResult.warning === 'collaboration_unconfirmed') {
+          appStore.addNotification({
+            title: '内容已保存',
+            message: '协作交接尚未确认，已按安全保存结果继续导航。',
+            type: 'warning',
+          });
+        }
+      })
+      .catch(stay);
+  }, [appStore, requestLeave]);
+  useRouteNavigationGuard(Boolean(shooting), handleRouteNavigationAttempt);
 
-    if (leaveResult.warning === 'collaboration_unconfirmed') {
-      appStore.addNotification({
-        title: '内容已保存',
-        message: '协作交接尚未确认，已按安全保存结果继续导航。',
-        type: 'warning',
-      });
-    }
-  }, [appStore, id, navigate, requestLeave]);
+  const navigateFromShooting = useCallback((to: string) => {
+    navigate(to, { state: { mobileReturnTo: `/shooting/${id}` } });
+  }, [id, navigate]);
 
   useEffect(() => {
     const requestId = ++detailRequestSequenceRef.current;
+    scriptVersionRequestSequenceRef.current += 1;
     const fetchData = async () => {
       setLoading(true);
       setShooting(null);
       setScriptVersions([]);
+      setScriptVersionsLoading(false);
+      setScriptVersionsLoadError(false);
       try {
         const result = await getShootingById(parseInt(id!));
         if (requestId !== detailRequestSequenceRef.current || Number(currentShootingIdRef.current) !== Number(id)) return;
-        const versions = await getShootingScriptVersions(result.id).catch(() => []);
-        if (requestId !== detailRequestSequenceRef.current || Number(currentShootingIdRef.current) !== Number(id)) return;
         setShooting(result);
-        setScriptVersions(versions);
+        void loadScriptVersions(result.id, requestId);
         setArchiveSyncPending(result.published_archive_script_sync_pending === true);
         setCurrentContentDocument(
           getCollaborationRoomId('shooting', result.id),
@@ -146,7 +190,7 @@ export default function ShootingDetail() {
         setScriptContent(content);
       } catch (error) {
         if (requestId === detailRequestSequenceRef.current && Number(currentShootingIdRef.current) === Number(id)) {
-          appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
         }
       } finally {
         if (requestId === detailRequestSequenceRef.current && Number(currentShootingIdRef.current) === Number(id)) setLoading(false);
@@ -154,8 +198,11 @@ export default function ShootingDetail() {
     };
 
     void fetchData();
-    return () => { detailRequestSequenceRef.current += 1; };
-  }, [id]);
+    return () => {
+      detailRequestSequenceRef.current += 1;
+      scriptVersionRequestSequenceRef.current += 1;
+    };
+  }, [addNotification, id, loadScriptVersions]);
 
   const shootingEditorAdapter = useMemo(() => {
     if (!shooting) return undefined;
@@ -236,12 +283,11 @@ export default function ShootingDetail() {
         script_source_production_id: source.script_source_production_id ?? current.script_source_production_id,
         script_source_version: source.script_source_version ?? current.script_source_version,
       } : current);
-      const refreshedVersions = await getShootingScriptVersions(requestedShootingId).catch(() => null);
+      const refreshedVersions = await loadScriptVersions(requestedShootingId);
       if (Number(currentShootingIdRef.current) !== requestedShootingId) {
         appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
         return;
       }
-      if (refreshedVersions) setScriptVersions(refreshedVersions);
       appStore.addNotification({
         title: refreshedVersions ? '版本已保存' : '版本已保存，历史列表未刷新',
         message: refreshedVersions
@@ -393,7 +439,7 @@ export default function ShootingDetail() {
             <button
               type="button"
               aria-label="返回制作列表"
-              onClick={() => void handleGuardedNavigate('/shooting')}
+              onClick={() => navigateFromShooting('/shooting')}
               className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
             >
               <ChevronLeft className={`w-5 h-5 ${styles.textSecondary}`} />
@@ -528,7 +574,7 @@ export default function ShootingDetail() {
             type="button"
             variant="secondary"
             className="min-h-10 w-full shrink-0 px-3 py-2 text-xs sm:w-auto"
-            onClick={() => void handleGuardedNavigate(`/production/${sourceProductionId}?version=${encodeURIComponent(sourceVersion)}`)}
+            onClick={() => navigateFromShooting(`/production/${sourceProductionId}?version=${encodeURIComponent(sourceVersion)}`)}
           >
             查看创作版本 {sourceVersion}
           </ActionButton>
@@ -575,7 +621,7 @@ export default function ShootingDetail() {
                 <button
                   onClick={() => {
                     if (sourceProductionId && sourceVersion) {
-                      void handleGuardedNavigate(`/production/${sourceProductionId}?version=${encodeURIComponent(sourceVersion)}`);
+                      navigateFromShooting(`/production/${sourceProductionId}?version=${encodeURIComponent(sourceVersion)}`);
                     }
                   }}
                   disabled={!sourceProductionId || !sourceVersion}
@@ -634,7 +680,14 @@ export default function ShootingDetail() {
           <h2 className="text-sm font-semibold text-studio-text-primary">剧本版本历史</h2>
           <p className="mt-1 text-xs text-studio-text-muted">自动保存更新当前稿；仅小版本和大版本操作会留档。</p>
         </div>
-        {scriptVersions.length > 0 ? (
+        {scriptVersionsLoadError ? (
+          <div role="alert" data-testid="shooting-script-history-error" className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-studio-danger/30 bg-studio-danger/10 p-3 text-sm text-studio-danger">
+            <span>版本历史读取失败，列表可能不完整；已保存的剧本仍可正常使用，请重试读取。</span>
+            <ActionButton type="button" disabled={scriptVersionsLoading || savingScriptVersion} onClick={() => shooting && void loadScriptVersions(shooting.id)} className="px-3 py-2">重新加载版本历史</ActionButton>
+          </div>
+        ) : scriptVersionsLoading ? (
+          <p role="status" className="mt-3 text-sm text-studio-text-muted">正在加载版本历史…</p>
+        ) : scriptVersions.length > 0 ? (
           <ol className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {scriptVersions.map((version) => (
               <li key={version.id} className="rounded-xl border border-studio-border-soft bg-studio-surface-soft/60 p-3">
@@ -643,7 +696,7 @@ export default function ShootingDetail() {
                 {Number(version.source_production_id) > 0 && version.source_production_version ? (
                   <button
                     type="button"
-                    onClick={() => void handleGuardedNavigate(`/production/${version.source_production_id}?version=${encodeURIComponent(version.source_production_version!)}`)}
+                    onClick={() => navigateFromShooting(`/production/${version.source_production_id}?version=${encodeURIComponent(version.source_production_version!)}`)}
                     className="mt-2 inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-medium text-studio-cyan-contrast hover:bg-studio-surface-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring"
                   >
                     来源创作稿：{version.source_production_version} · 查看

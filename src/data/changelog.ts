@@ -11,6 +11,16 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.4.1',
+    date: '2026-10-26',
+    title: '通知偏好保存结果安全核实',
+    impactScope: ['系统通知设置', '移动端通知设置'],
+    changes: [
+      { type: 'fix', description: '通知设置保存遇到网络中断或服务异常时，会先只读核实服务器结果；确认已保存后提示成功，不会自动重复提交。' },
+      { type: 'security', description: '服务器设置与本地草稿不一致时保留草稿并锁定编辑，用户可载入服务器设置或明确确认覆盖；核实不可用时仅开放只读重试。' },
+    ],
+  },
+  {
     version: '9.4.0',
     date: '2026-10-26',
     title: '备份恢复与内容洞察体验完善',

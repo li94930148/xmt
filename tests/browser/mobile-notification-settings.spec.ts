@@ -9,8 +9,12 @@ process.env.VITE_APP_PLATFORM = 'android';
 const preferences = [{ id: 1, channel: 'web', event_type: 'review', enabled: false }];
 let persistedPreferences = structuredClone(preferences);
 let failNextSave: string | null = null;
+let failNextRead: string | null = null;
 let saveDelayMs = 0;
 let saveRequests = 0;
+let preferenceReadRequests = 0;
+let dropNextSaveResponseAfterCommit = false;
+let saveResponseLossInjected = false;
 
 const app = express();
 app.use(express.json());
@@ -21,7 +25,16 @@ app.post('/__qa/options', (req, res) => {
   if (typeof req.body?.failNextSave === 'string') failNextSave = req.body.failNextSave || null;
   res.json({ ready: true });
 });
-app.get('/api/notifications/preferences', (_req, res) => res.json(persistedPreferences));
+app.get('/api/notifications/preferences', (_req, res) => {
+  preferenceReadRequests += 1;
+  if (failNextRead) {
+    const message = failNextRead;
+    failNextRead = null;
+    res.status(503).json({ message });
+    return;
+  }
+  res.json(persistedPreferences);
+});
 app.get('/api/notifications/channels', (_req, res) => res.json([{ id: 'web', name: '站内消息', description: 'XMT 站内提醒' }]));
 app.get('/api/notifications/events', (_req, res) => res.json([{ id: 'review', name: '审核结果', description: '选题审核完成时提醒' }]));
 app.put('/api/notifications/preferences', async (req, res) => {
@@ -56,11 +69,29 @@ try {
   const page = await context.newPage();
   const errors: string[] = [];
   const expectedHttpErrors: string[] = [];
+  const expectedSaveRequestFailures: string[] = [];
+  const expectedSaveConsoleErrors: string[] = [];
+  await page.route('**/api/notifications/preferences', async (route) => {
+    if (!dropNextSaveResponseAfterCommit || route.request().method() !== 'PUT') {
+      await route.continue();
+      return;
+    }
+    dropNextSaveResponseAfterCommit = false;
+    await route.fetch();
+    saveResponseLossInjected = true;
+    await route.abort('failed');
+  });
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    else if (message.text().includes('net::ERR_FAILED') && saveResponseLossInjected) expectedSaveConsoleErrors.push(message.text());
     else errors.push(message.text());
+  });
+  page.on('requestfailed', (request) => {
+    if (request.method() === 'PUT' && request.url().endsWith('/api/notifications/preferences')) {
+      expectedSaveRequestFailures.push(request.failure()?.errorText || 'request failed');
+    }
   });
 
   await page.goto(`${base}/__qa`);
@@ -98,18 +129,42 @@ try {
   saveDelayMs = 100;
   failNextSave = '通知偏好暂时无法保存，请重试。';
   await save.click();
-  await page.getByText('通知偏好暂时无法保存，请重试。', { exact: true }).waitFor();
+  await page.getByText('服务器当前通知偏好与本页设置不同。为避免覆盖其他设备的更新，系统没有自动重复保存。', { exact: true }).waitFor();
   assert.equal(persistedPreferences[0]?.enabled, true, 'a failed write does not mutate the server fixture');
+  assert.equal(saveRequests, 2, 'an ambiguous 503 is verified without an automatic retry');
 
   saveDelayMs = 0;
-  await save.click();
+  await page.getByRole('button', { name: '确认覆盖服务器设置', exact: true }).click();
   await page.getByText('通知偏好已保存。', { exact: true }).waitFor();
-  assert.equal(persistedPreferences[0]?.enabled, false, 'an explicit retry persists the retained selection');
+  assert.equal(persistedPreferences[0]?.enabled, false, 'the explicit overwrite action persists the retained selection');
   assert.equal(saveRequests, 3, 'only the single initial save, failed attempt, and explicit retry reach the server');
-  assert.equal(expectedHttpErrors.length, 1, 'the only expected browser network error is the injected 503');
+  await toggle.click();
+  const readsBeforeLostResponse = preferenceReadRequests;
+  dropNextSaveResponseAfterCommit = true;
+  await save.click();
+  await page.getByText('已核实通知偏好已保存。', { exact: true }).waitFor();
+  assert.equal(persistedPreferences[0]?.enabled, true, 'read-back confirms a committed save whose response was lost');
+  assert.equal(saveRequests, 4, 'response-loss recovery does not issue a second PUT');
+  assert.equal(preferenceReadRequests, readsBeforeLostResponse + 1, 'response-loss recovery performs one read-only GET');
+
+  await toggle.click();
+  dropNextSaveResponseAfterCommit = true;
+  failNextRead = '通知偏好核实暂时不可用。';
+  await save.click();
+  await page.getByRole('button', { name: '只读重新核实', exact: true }).waitFor();
+  assert.equal(await toggle.isDisabled(), true, 'an unknown outcome locks preference edits');
+  assert.equal(await save.isDisabled(), true, 'an unknown outcome locks repeated saves');
+  assert.equal(saveRequests, 5, 'a failed verification does not resend the PUT');
+  await page.getByRole('button', { name: '只读重新核实', exact: true }).click();
+  await page.getByText('已核实通知偏好已保存。', { exact: true }).waitFor();
+  assert.equal(persistedPreferences[0]?.enabled, false, 'a read-only retry resolves the unknown outcome');
+  assert.equal(saveRequests, 5, 'read-only recovery never sends another PUT');
+  assert.equal(expectedSaveRequestFailures.length, 2, 'both injected response losses are observed');
+  assert.equal(expectedSaveConsoleErrors.length, 2, 'both injected response losses are expected browser errors');
+  assert.equal(expectedHttpErrors.length, 2, 'the expected HTTP errors are the failed save and failed verification GET');
   assert.deepEqual(errors, [], 'mobile notification settings have no browser runtime errors');
   await context.close();
-  console.log('Mobile notification settings browser test passed: 390px, duplicate save protection, disabled in-flight toggles, 503 retention and explicit retry.');
+  console.log('Mobile notification settings browser test passed: 390px, duplicate protection, uncertain-result read-back, explicit conflict resolution and no automatic retries.');
 } finally {
   await browser.close();
   await vite.close();

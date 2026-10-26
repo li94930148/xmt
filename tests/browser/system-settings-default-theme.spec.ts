@@ -83,8 +83,11 @@ let settingsSaveDelayMs = 0;
 const settingsSaveRequests: unknown[] = [];
 let notificationPreferences = [{ id: 1, channel: 'email', event_type: 'review', enabled: true }];
 let failNextNotificationSave: string | null = null;
+let failNextNotificationRead: string | null = null;
 let notificationSaveDelayMs = 0;
 let notificationSaveRequests = 0;
+let notificationPreferenceReadRequests = 0;
+let dropNextNotificationSaveResponseAfterCommit = false;
 let profile = { ...admin };
 let failNextProfileSave: string | null = null;
 let profileSaveDelayMs = 0;
@@ -105,7 +108,6 @@ let backupListDelayMs = 0;
 let backupCreateDelayMs = 0;
 let backupDeleteDelayMs = 0;
 let dropNextBackupDeleteResponseAfterCommit = false;
-let backupDeleteResponseLossInjected = false;
 const app = express();
 app.use(express.json());
 app.get('/__qa', (req, res) => {
@@ -186,7 +188,16 @@ app.put('/api/system-settings', async (req, res) => {
   };
   res.json({ ...settings, version });
 });
-app.get('/api/notifications/preferences', (_req, res) => res.json(notificationPreferences));
+app.get('/api/notifications/preferences', (_req, res) => {
+  notificationPreferenceReadRequests += 1;
+  if (failNextNotificationRead) {
+    const message = failNextNotificationRead;
+    failNextNotificationRead = null;
+    res.status(503).json({ message });
+    return;
+  }
+  res.json(notificationPreferences);
+});
 app.put('/api/notifications/preferences', async (req, res) => {
   notificationSaveRequests += 1;
   if (notificationSaveDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, notificationSaveDelayMs));
@@ -305,6 +316,11 @@ try {
   const expectedPasswordConsoleErrors: string[] = [];
   const expectedBackupDeleteConsoleErrors: string[] = [];
   const expectedBackupDeleteRequestFailures: string[] = [];
+  const expectedNotificationSaveConsoleErrors: string[] = [];
+  const expectedNotificationSaveRequestFailures: string[] = [];
+  let pendingPasswordResponseLossConsoleErrors = 0;
+  let pendingBackupDeleteResponseLossConsoleErrors = 0;
+  let pendingNotificationSaveResponseLossConsoleErrors = 0;
   await notificationPage.route('**/api/auth/change-password', async (route) => {
     if (!dropNextPasswordChangeResponseAfterCommit) {
       await route.continue();
@@ -312,6 +328,17 @@ try {
     }
     dropNextPasswordChangeResponseAfterCommit = false;
     await route.fetch(); // Let the isolated server commit, then withhold its response from the page.
+    pendingPasswordResponseLossConsoleErrors += 1;
+    await route.abort('failed');
+  });
+  await notificationPage.route('**/api/notifications/preferences', async (route) => {
+    if (!dropNextNotificationSaveResponseAfterCommit || route.request().method() !== 'PUT') {
+      await route.continue();
+      return;
+    }
+    dropNextNotificationSaveResponseAfterCommit = false;
+    await route.fetch();
+    pendingNotificationSaveResponseLossConsoleErrors += 1;
     await route.abort('failed');
   });
   await notificationPage.route('**/api/backup/*', async (route) => {
@@ -323,7 +350,7 @@ try {
     }
     dropNextBackupDeleteResponseAfterCommit = false;
     await route.fetch();
-    backupDeleteResponseLossInjected = true;
+    pendingBackupDeleteResponseLossConsoleErrors += 1;
     await route.abort('failed');
   });
   notificationPage.on('pageerror', (error) => errors.push(error.message));
@@ -331,12 +358,25 @@ try {
     if (message.type() !== 'error') return;
     if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
     else if (message.text().includes('401 (Unauthorized)') && !expectedPasswordConsoleErrors.some((text) => text.includes('401 (Unauthorized)'))) expectedPasswordConsoleErrors.push(message.text());
-    else if (message.text().includes('net::ERR_FAILED') && backupDeleteResponseLossInjected) expectedBackupDeleteConsoleErrors.push(message.text());
-    else if (message.text().includes('net::ERR_FAILED') && !expectedPasswordConsoleErrors.some((text) => text.includes('net::ERR_FAILED'))) expectedPasswordConsoleErrors.push(message.text());
+    else if (message.text().includes('net::ERR_FAILED') && pendingNotificationSaveResponseLossConsoleErrors > 0) {
+      pendingNotificationSaveResponseLossConsoleErrors -= 1;
+      expectedNotificationSaveConsoleErrors.push(message.text());
+    }
+    else if (message.text().includes('net::ERR_FAILED') && pendingBackupDeleteResponseLossConsoleErrors > 0) {
+      pendingBackupDeleteResponseLossConsoleErrors -= 1;
+      expectedBackupDeleteConsoleErrors.push(message.text());
+    }
+    else if (message.text().includes('net::ERR_FAILED') && pendingPasswordResponseLossConsoleErrors > 0) {
+      pendingPasswordResponseLossConsoleErrors -= 1;
+      expectedPasswordConsoleErrors.push(message.text());
+    }
     else errors.push(message.text());
   });
   const expectedPasswordRequestFailures: string[] = [];
   notificationPage.on('requestfailed', (request) => {
+    if (request.method() === 'PUT' && request.url().endsWith('/api/notifications/preferences')) {
+      expectedNotificationSaveRequestFailures.push(request.failure()?.errorText || 'request failed');
+    }
     if (request.url().endsWith('/api/auth/change-password')) {
       expectedPasswordRequestFailures.push(request.failure()?.errorText || 'request failed');
     }
@@ -388,11 +428,14 @@ try {
   await notificationPage.getByRole('button', { name: '已启用', exact: true }).click();
   assert.equal(await notificationPage.getByRole('button', { name: '已关闭', exact: true }).count(), 1, 'preference change is visible before save');
   failNextNotificationSave = '通知偏好暂时无法保存，请重试。';
+  const savesBeforeRefusal = notificationSaveRequests;
   await notificationPage.getByRole('button', { name: '保存设置', exact: true }).click();
-  await notificationPage.getByText('通知偏好暂时无法保存，请重试。', { exact: true }).waitFor();
+  await notificationPage.getByText('服务器当前通知偏好与本页设置不同。为避免覆盖其他设备的更新，系统没有自动重复保存。', { exact: true }).waitFor();
   assert.equal(notificationPreferences[0].enabled, true, 'failed save leaves the persisted notification preference unchanged');
   assert.equal(await notificationPage.getByRole('button', { name: '已关闭', exact: true }).count(), 1, 'failed save keeps the requested preference available for retry');
-  await notificationPage.getByRole('button', { name: '保存设置', exact: true }).click();
+  assert.equal(notificationSaveRequests, savesBeforeRefusal + 1, 'an ambiguous 503 never triggers an automatic second PUT');
+  assert.equal(await notificationPage.getByRole('button', { name: '保存设置', exact: true }).isDisabled(), true, 'ordinary save stays locked until the conflict is resolved');
+  await notificationPage.getByRole('button', { name: '确认覆盖服务器设置', exact: true }).click();
   await notificationPage.getByText('通知偏好已更新', { exact: true }).waitFor();
   assert.equal(notificationPreferences[0].enabled, false, 'explicit retry persists the changed notification preference');
   await notificationPage.getByRole('button', { name: '已关闭', exact: true }).click();
@@ -404,6 +447,30 @@ try {
   notificationSaveDelayMs = 0;
   assert.equal(notificationPreferences[0].enabled, true, 'a repeated notification save persists the selected value');
   assert.equal(notificationSaveRequests, 3, 'failed attempt, explicit retry, and rapid double click issue only three total saves');
+
+  await notificationPage.getByRole('button', { name: '已启用', exact: true }).click();
+  const readsBeforeLostResponse = notificationPreferenceReadRequests;
+  const savesBeforeLostResponse = notificationSaveRequests;
+  dropNextNotificationSaveResponseAfterCommit = true;
+  await notificationPage.getByRole('button', { name: '保存设置', exact: true }).click();
+  await notificationPage.getByText('已核实通知偏好已保存', { exact: true }).waitFor();
+  assert.equal(notificationPreferences[0].enabled, false, 'read-back confirms a committed save whose response was lost');
+  assert.equal(notificationSaveRequests, savesBeforeLostResponse + 1, 'response-loss recovery performs no second PUT');
+  assert.equal(notificationPreferenceReadRequests, readsBeforeLostResponse + 1, 'response-loss recovery uses one read-only GET');
+  assert.equal(expectedNotificationSaveRequestFailures.length, 1, 'the injected response loss is observed as one failed browser request');
+
+  await notificationPage.getByRole('button', { name: '已关闭', exact: true }).click();
+  dropNextNotificationSaveResponseAfterCommit = true;
+  failNextNotificationRead = '通知偏好核实暂时不可用。';
+  await notificationPage.getByRole('button', { name: '保存设置', exact: true }).click();
+  await notificationPage.getByRole('button', { name: '只读重新核实', exact: true }).waitFor();
+  assert.equal(await notificationPage.getByRole('button', { name: '已启用', exact: true }).isDisabled(), true, 'unknown outcome locks further edits');
+  assert.equal(notificationSaveRequests, savesBeforeLostResponse + 2, 'verification failure does not resend the write');
+  await notificationPage.getByRole('button', { name: '只读重新核实', exact: true }).click();
+  await notificationPage.getByText('已核实通知偏好已保存', { exact: true }).waitFor();
+  assert.equal(notificationPreferences[0].enabled, true, 'a read-only retry resolves the prior unknown outcome');
+  assert.equal(notificationSaveRequests, savesBeforeLostResponse + 2, 'read-only verification retry sends no additional PUT');
+  assert.equal(expectedNotificationSaveConsoleErrors.length, 2, 'both injected response losses are the only expected notification request errors');
 
   await notificationPage.getByRole('button', { name: '个人资料', exact: true }).click();
   const profileInputs = notificationPage.locator('input');
@@ -518,7 +585,8 @@ try {
   assert.deepEqual(backupRequestsDuringRestore, ['GET /api/backup/list'], 'refresh performs the read-only backup-list verification before any delete');
   assert.equal(backupDeleteRequests, 1, 'refresh recovery never automatically resends the unresolved delete');
   assert.equal(await notificationPage.evaluate(() => Object.keys(sessionStorage).some((key) => key.startsWith('xmt:backup-delete-pending:v1:actor:91:'))), false, 'a successful list read clears the recovery marker after confirming the backup still exists');
-  assert.match(await notificationPage.getByRole('alert').innerText(), /仍在当前清单中/);
+  // The open destructive confirmation makes the background alert aria-hidden; inspect its DOM text directly.
+  assert.match(await notificationPage.locator('[role="alert"]').innerText(), /仍在当前清单中/);
 
   failNextBackupListRead = '隔离删除后的备份清单暂时无法读取';
   backupDeleteDelayMs = 160;
@@ -557,7 +625,7 @@ try {
   assert.equal(expectedBackupDeleteRequestFailures.length, 1, 'the committed delete response is withheld exactly once in the isolated browser fixture');
   assert.equal(expectedBackupDeleteConsoleErrors.length, 1, 'the only backup network console error is the intentional response-loss fixture');
   assert.equal(backupListRequests, 9, 'response-loss recovery uses one list GET and does not repeat DELETE');
-  assert.equal(expectedHttpErrors.length, 7, 'system, notification, profile, backup create/list/delete fixtures each produce the expected isolated 503 responses');
+  assert.equal(expectedHttpErrors.length, 8, 'system, notification, profile, backup create/list/delete fixtures each produce the expected isolated 503 responses');
   assert.deepEqual(errors, [], 'notification preference feedback has no browser runtime or unexpected console errors');
   await notificationPage.goto(`${base}/__qa?theme=dark`);
   await notificationPage.getByRole('button', { name: '通知偏好', exact: true }).click();

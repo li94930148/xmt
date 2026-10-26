@@ -1,5 +1,17 @@
 # Changelog
 
+## v9.4.1 - 2026-10-26
+
+### Safe notification preference recovery
+
+- Desktop and mobile saves now verify ambiguous network, HTTP 408/429, and server-error outcomes with a read-only request; a matching value confirms success without replaying the write.
+- Conflicts preserve the draft and lock edits until the user loads server settings or explicitly confirms an overwrite. When verification itself fails, the draft remains locked and only a read-only check is offered.
+
+### Validation
+
+- Focused unit tests, mobile browser automation, desktop/mobile Playwright MCP fixture checks, type checking, version governance, production dependency audit, and build are recorded in `docs/UPGRADE_PROGRESS.md`. The desktop settings suite reached and passed its notification recovery assertions, then failed later in the appearance ReactBits preview visibility assertion; it is not reported as a full-suite pass.
+- No API, permission, database, or real business data changed. Android metadata is synchronized to 9.4.1 / 90401; no APK was built.
+
 ## v9.4.0 - 2026-10-26
 
 ### 新增

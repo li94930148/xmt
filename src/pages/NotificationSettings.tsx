@@ -23,7 +23,14 @@ import ConfirmModal from '../components/common/ConfirmModal';
 import PageShell from '../components/studio/PageShell';
 import PageHeader from '../components/studio/PageHeader';
 import GlassPanel from '../components/studio/GlassPanel';
-import { getNotificationSettings, NotificationChannel, NotificationEvent, NotificationPreference } from '../api/notificationSettings';
+import {
+  getNotificationSettings,
+  saveNotificationPreferences,
+  verifyNotificationPreferences,
+  NotificationChannel,
+  NotificationEvent,
+  NotificationPreference,
+} from '../api/notificationSettings';
 import { changelog, getChangeTypeLabel, getChangeTypeColor } from '../data/changelog';
 import {
   applyDocumentBranding,
@@ -76,6 +83,9 @@ const tabMeta = {
 
 type TabKey = keyof typeof tabMeta;
 type BackupDeleteRecoveryMarker = { version: 1; actorId: number; name: string };
+type NotificationPreferenceRecovery =
+  | { kind: 'unknown'; draft: NotificationPreference[]; message: string }
+  | { kind: 'conflict'; draft: NotificationPreference[]; currentPreferences: NotificationPreference[] };
 
 const BACKUP_DELETE_RECOVERY_PREFIX = 'xmt:backup-delete-pending:v1:actor:';
 
@@ -166,6 +176,7 @@ export default function NotificationSettings() {
   const [notifyLoaded, setNotifyLoaded] = useState(false);
   const [notifyLoadError, setNotifyLoadError] = useState('');
   const [notifySaving, setNotifySaving] = useState(false);
+  const [notifyRecovery, setNotifyRecovery] = useState<NotificationPreferenceRecovery | null>(null);
   const notifySaveLockRef = useRef(false);
   const logoReaderRef = useRef<FileReader | null>(null);
 
@@ -375,6 +386,7 @@ export default function NotificationSettings() {
   }
 
   function handleTogglePreference(channelId: string, eventId: string) {
+    if (notifySaving || notifyRecovery) return;
     setPreferences((current) => {
       const existing = current.find((item) => item.channel === channelId && item.event_type === eventId);
       if (!existing) {
@@ -389,32 +401,68 @@ export default function NotificationSettings() {
     });
   }
 
-  async function handleSaveNotifications() {
-    if (!token || !notifyLoaded || notifyLoading || notifyLoadError || notifySaveLockRef.current) {
+  function applyNotificationSaveResult(
+    result: Awaited<ReturnType<typeof saveNotificationPreferences>>,
+    draft: NotificationPreference[],
+  ) {
+    if (result.kind === 'saved') {
+      setPreferences(result.preferences);
+      setNotifyRecovery(null);
+      appStore.addNotification({
+        title: '保存成功',
+        message: result.recovered ? '已核实通知偏好已保存' : '通知偏好已更新',
+        type: 'success',
+      });
+      return;
+    }
+    if (result.kind === 'rejected') {
+      appStore.addNotification({ title: '保存失败', message: result.message, type: 'error' });
+      return;
+    }
+    if (result.kind === 'conflict') {
+      setNotifyRecovery({ kind: 'conflict', draft, currentPreferences: result.currentPreferences });
+      return;
+    }
+    setNotifyRecovery({ kind: 'unknown', draft, message: result.message });
+  }
+
+  async function handleSaveNotifications(confirmOverwrite = false) {
+    if (!token || !notifyLoaded || notifyLoading || notifyLoadError || notifySaveLockRef.current
+      || (notifyRecovery && !confirmOverwrite)) {
       return;
     }
 
+    const draft = (notifyRecovery?.draft ?? preferences).map((preference) => ({ ...preference }));
     notifySaveLockRef.current = true;
     setNotifySaving(true);
     try {
-      const response = await fetch('/api/notifications/preferences', {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({ message: '保存失败' }));
-        throw new Error(data.message || '保存失败');
-      }
-
-      appStore.addNotification({ title: '保存成功', message: '通知偏好已更新', type: 'success' });
-    } catch (error) {
-      appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+      const result = await saveNotificationPreferences(token, draft);
+      applyNotificationSaveResult(result, draft);
     } finally {
       notifySaveLockRef.current = false;
       setNotifySaving(false);
     }
+  }
+
+  async function verifyNotificationRecovery() {
+    if (!token || !notifyRecovery || notifySaveLockRef.current) return;
+    const recovery = notifyRecovery;
+    notifySaveLockRef.current = true;
+    setNotifySaving(true);
+    try {
+      const result = await verifyNotificationPreferences(token, recovery.draft);
+      applyNotificationSaveResult(result, recovery.draft);
+    } finally {
+      notifySaveLockRef.current = false;
+      setNotifySaving(false);
+    }
+  }
+
+  function restoreCurrentNotificationPreferences() {
+    if (notifyRecovery?.kind !== 'conflict') return;
+    setPreferences(notifyRecovery.currentPreferences);
+    setNotifyRecovery(null);
+    appStore.addNotification({ title: '已载入服务器设置', message: '页面现在显示服务器当前保存的通知偏好。', type: 'info' });
   }
 
   async function handleSaveProfile() {
@@ -812,14 +860,43 @@ export default function NotificationSettings() {
                   <p className={`mt-1 text-sm ${styles.textSecondary}`}>管理消息提醒方式、桌面通知与测试提醒。</p>
                 </div>
                 <button
-                  onClick={handleSaveNotifications}
-                  disabled={notifySaving || notifyLoading || !notifyLoaded || Boolean(notifyLoadError)}
+                  onClick={() => void handleSaveNotifications()}
+                  disabled={notifySaving || notifyLoading || !notifyLoaded || Boolean(notifyLoadError) || Boolean(notifyRecovery)}
                   className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
                 >
                   {notifySaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   {notifySaving ? '保存中...' : '保存设置'}
                 </button>
               </div>
+
+              {notifyRecovery ? (
+                <div
+                  role={notifyRecovery.kind === 'unknown' ? 'alert' : 'status'}
+                  className={`space-y-3 rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm ${styles.textPrimary}`}
+                >
+                  <p>
+                    {notifyRecovery.kind === 'unknown'
+                      ? notifyRecovery.message
+                      : '服务器当前通知偏好与本页设置不同。为避免覆盖其他设备的更新，系统没有自动重复保存。'}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {notifyRecovery.kind === 'unknown' ? (
+                      <button type="button" onClick={() => void verifyNotificationRecovery()} disabled={notifySaving} className={`rounded-xl px-4 py-2 ${styles.buttonSecondary} disabled:opacity-60`}>
+                        {notifySaving ? '正在核实…' : '只读重新核实'}
+                      </button>
+                    ) : (
+                      <>
+                        <button type="button" onClick={restoreCurrentNotificationPreferences} disabled={notifySaving} className={`rounded-xl px-4 py-2 ${styles.buttonSecondary} disabled:opacity-60`}>
+                          载入服务器设置
+                        </button>
+                        <button type="button" onClick={() => void handleSaveNotifications(true)} disabled={notifySaving} className={`rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>
+                          {notifySaving ? '正在保存…' : '确认覆盖服务器设置'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : null}
 
               <div className={`rounded-2xl ${styles.bgTertiary} p-5`}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
@@ -907,6 +984,7 @@ export default function NotificationSettings() {
                               <td key={`${event.id}-${channel.id}`} className="px-6 py-4">
                                 <button
                                   onClick={() => handleTogglePreference(channel.id, event.id)}
+                                  disabled={notifySaving || Boolean(notifyRecovery)}
                                   className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${
                                     isEnabled(channel.id, event.id)
                                       ? 'bg-studio-success/10 text-studio-success-contrast'

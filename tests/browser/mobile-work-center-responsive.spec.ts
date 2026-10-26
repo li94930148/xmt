@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import express from 'express';
+import { Server as SocketServer } from 'socket.io';
 import { chromium, type Page } from 'playwright';
 import { createServer as createViteServer } from 'vite';
 
@@ -996,14 +997,13 @@ fixtureApi.use('/api', async (request, response) => {
   }
   return response.status(404).json({ message: `Unexpected fixture API request: ${request.method} ${request.path}` });
 });
-fixtureApi.use('/socket.io', (request, response) => {
-  if (request.method === 'GET') {
-    return response.type('text/plain').send('0{"sid":"mobile-qa","upgrades":[],"pingInterval":25000,"pingTimeout":20000,"maxPayload":1000000}');
-  }
-  return response.type('text/plain').send('ok');
-});
-
 const server = http.createServer(fixtureApi);
+const fixtureSocketServer = new SocketServer(server, {
+  cors: { origin: true, credentials: true },
+});
+fixtureSocketServer.on('connection', () => {
+  // The fixture needs a protocol-correct connection, but emits no business events.
+});
 fixtureApi.get('/__qa/topic-create-recovery', (request, response) => {
   if (request.query.scenario === 'rejection') {
     topicCreateRejectedTitles.add('MCP选题拒绝恢复验收');
@@ -1131,7 +1131,7 @@ if (mcpFixtureMode) {
     process.once('SIGTERM', resolve);
   });
   await vite.close();
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  await new Promise<void>((resolve) => fixtureSocketServer.close(() => resolve()));
 } else {
 const browser = await chromium.launch({ headless: true });
 
@@ -5127,6 +5127,6 @@ try {
 } finally {
   await browser.close();
   await vite.close();
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  await new Promise<void>((resolve) => fixtureSocketServer.close(() => resolve()));
 }
 }

@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.4.2',
+    date: '2026-10-26',
+    title: '移动端验收连接稳定性修复',
+    impactScope: ['移动工作区本地验收'],
+    changes: [
+      { type: 'fix', description: '移动工作区的本地验收环境现使用协议正确的实时连接，不再因测试连接反复重连而干扰加载状态检查；不改变产品页面、业务数据或权限。' },
+    ],
+  },
+  {
     version: '9.4.1',
     date: '2026-10-26',
     title: '通知偏好保存结果安全核实',

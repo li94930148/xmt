@@ -1,5 +1,16 @@
 # Changelog
 
+## v9.4.2 - 2026-10-26
+
+### Mobile accessibility fixture
+
+- Replaced the mobile browser fixture's invalid Socket.IO handshake stub with a real in-memory Socket.IO server. The fixture accepts its isolated test connection without emitting business events, preventing rapid polling reconnects during loading-status acceptance.
+
+### Validation
+
+- Targeted checks and Chrome DevTools MCP fixture results are recorded in `docs/UPGRADE_PROGRESS.md`. Actual VoiceOver speech output was not captured and remains unverified.
+- No product API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.2 / 90402; no APK was built.
+
 ## v9.4.1 - 2026-10-26
 
 ### Notification preference recovery

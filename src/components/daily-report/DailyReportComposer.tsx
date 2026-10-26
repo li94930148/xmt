@@ -5,10 +5,12 @@ import { DailyReportStatusPill } from './DailyReportStatusPill';
 import DailyReportRichSection from './DailyReportRichSection';
 
 type DailyReportComposerProps = {
-  status?: DailyReportStatus;
+  status?: DailyReportStatus | null;
   canEdit?: boolean;
   items: DailyReportItem[];
   submitting: boolean;
+  submissionLocked?: boolean;
+  busyLabel?: string;
   onItemsChange: (items: DailyReportItem[]) => void;
   onSubmit: () => void;
 };
@@ -19,8 +21,9 @@ const fields = [
   { key: 'coordination', title: '需要协调事项', placeholder: '记录需要他人或团队协助的事项' },
 ] as const;
 
-export default function DailyReportComposer({ status = 'draft', canEdit = true, items, submitting, onItemsChange, onSubmit }: DailyReportComposerProps) {
-  const readonly = !canEdit || status === 'approved' || status === 'archived';
+export default function DailyReportComposer({ status = 'draft', canEdit = true, items, submitting, submissionLocked = false, busyLabel, onItemsChange, onSubmit }: DailyReportComposerProps) {
+  const readonly = !canEdit || (status !== 'draft' && status !== 'rejected');
+  const interactionLocked = submitting || submissionLocked;
   const getItem = (key: string) => items.find((item) => item.sectionKey === key);
   const update = (key: string, contentMd: string) => {
     const next = fields.map((field, index) => {
@@ -37,13 +40,14 @@ export default function DailyReportComposer({ status = 'draft', canEdit = true, 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft px-5 py-4">
         <DailyReportStatusPill status={status} />
         <div className="flex flex-wrap gap-2">
-          {canEdit ? <ActionButton onClick={onSubmit} variant="primary" disabled={readonly || submitting}>
+          {canEdit ? <ActionButton onClick={onSubmit} variant="primary" disabled={readonly || interactionLocked}>
             <Send className="h-4 w-4" />
-            {submitting ? '提交中' : '提交日报'}
+            {busyLabel || (submitting ? '提交中' : submissionLocked ? '状态待核实' : '提交日报')}
           </ActionButton> : null}
         </div>
       </div>
       {!canEdit ? <p role="status" className="border-b border-studio-border-soft px-5 py-3 text-sm text-studio-text-secondary">当前日报为只读；如需填写或提交，请联系管理员开通日报权限。</p> : null}
+      {canEdit && status === 'submitted' ? <p role="status" className="border-b border-studio-border-soft px-5 py-3 text-sm text-studio-text-secondary">日报已提交，审核完成前为只读状态。</p> : null}
       {canEdit && status === 'rejected' ? <p className="border-b border-studio-coral/25 bg-studio-coral/10 px-5 py-3 text-sm text-studio-coral-contrast">日报已退回，请修改后重新提交。</p> : null}
       <div className="grid gap-5 p-5">
         {fields.map((field) => {
@@ -51,7 +55,7 @@ export default function DailyReportComposer({ status = 'draft', canEdit = true, 
           return (
             <label key={field.key} className="block">
               <span className="mb-2 block text-sm font-semibold text-studio-text-primary">{field.title}</span>
-              <DailyReportRichSection value={item?.contentMd || ''} onChange={(value) => update(field.key, value)} disabled={readonly || submitting} placeholder={field.placeholder} />
+              <DailyReportRichSection value={item?.contentMd || ''} onChange={(value) => update(field.key, value)} disabled={readonly || interactionLocked} placeholder={field.placeholder} />
             </label>
           );
         })}

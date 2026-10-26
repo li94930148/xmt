@@ -94,7 +94,7 @@ export default function ExportPage() {
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-semibold text-studio-text-primary">日报</h2>
-              <p className="mt-1 text-sm text-studio-text-muted">填写日报，查看有权限访问的团队日报和总结归档。</p>
+              <p className="mt-1 text-sm text-studio-text-secondary">填写日报，查看有权限访问的团队日报和总结归档。</p>
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -136,7 +136,7 @@ export default function ExportPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <h3 className="text-base font-semibold text-studio-text-primary">{card.title}</h3>
-                    <p className="mt-1 text-sm text-studio-text-muted">{card.description}</p>
+                    <p className="mt-1 text-sm text-studio-text-secondary">{card.description}</p>
                     <ActionButton type="button" onClick={() => void handleExport(card.id)} disabled={loading !== null} className="mt-4">
                       {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                       {isLoading ? '导出中...' : '导出 JSON'}

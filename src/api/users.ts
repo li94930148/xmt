@@ -34,6 +34,53 @@ export async function getUsers(params?: { page?: number; limit?: number; search?
   return response.json();
 }
 
+export async function getUser(id: number): Promise<User | null> {
+  const response = await fetch(`${BASE_URL}/users/${id}`, {
+    headers: getAuthHeader(),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to load user'));
+  return response.json();
+}
+
+export type UserCreateRequestStatus =
+  | { state: 'created'; userId: number }
+  | { state: 'not_found' };
+
+export async function getUserCreateRequestStatus(requestId: string): Promise<UserCreateRequestStatus> {
+  const response = await fetch(`${BASE_URL}/users/create-requests/${encodeURIComponent(requestId)}`, {
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to verify user creation'));
+  return response.json();
+}
+
+export type UserUpdateRequestStatus =
+  | { state: 'updated' }
+  | { state: 'not_found' };
+
+export async function getUserUpdateRequestStatus(requestId: string, targetUserId: number): Promise<UserUpdateRequestStatus> {
+  const response = await fetch(
+    `${BASE_URL}/users/update-requests/${encodeURIComponent(requestId)}/${encodeURIComponent(String(targetUserId))}`,
+    { headers: getAuthHeader() },
+  );
+  if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to verify user update'));
+  return response.json();
+}
+
+export type UserDeleteRequestStatus =
+  | { state: 'deleted' }
+  | { state: 'not_found' };
+
+export async function getUserDeleteRequestStatus(requestId: string, targetUserId: number): Promise<UserDeleteRequestStatus> {
+  const response = await fetch(
+    `${BASE_URL}/users/delete-requests/${encodeURIComponent(requestId)}/${encodeURIComponent(String(targetUserId))}`,
+    { headers: getAuthHeader() },
+  );
+  if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to verify user deletion'));
+  return response.json();
+}
+
 export async function getAssignableRoles(): Promise<AssignableRole[]> {
   const response = await fetch(`${BASE_URL}/users/assignable-roles`, {
     headers: getAuthHeader()
@@ -42,32 +89,50 @@ export async function getAssignableRoles(): Promise<AssignableRole[]> {
   return response.json();
 }
 
-export async function createUser(data: { username: string; password: string; email?: string; role?: string; name?: string }): Promise<{ message: string; userId: number }> {
+export async function createUser(data: { username: string; password: string; email?: string; role?: string; name?: string; client_request_id?: string }): Promise<{ message: string; userId: number; idempotent_replay?: boolean }> {
   const response = await fetch(`${BASE_URL}/users`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to create user'));
+  if (!response.ok) {
+    const error = new Error(await getErrorMessage(response, 'Failed to create user')) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
-export async function updateUser(id: number, data: Partial<User>): Promise<{ message: string }> {
+export async function updateUser(
+  id: number,
+  data: Partial<User> & { password?: string; client_request_id?: string },
+): Promise<{ message: string; idempotent_replay?: boolean }> {
   const response = await fetch(`${BASE_URL}/users/${id}`, {
     method: 'PUT',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to update user'));
+  if (!response.ok) {
+    const error = new Error(await getErrorMessage(response, 'Failed to update user')) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
-export async function deleteUser(id: number): Promise<{ message: string }> {
+export async function deleteUser(id: number, clientRequestId?: string): Promise<{ message: string; idempotent_replay?: boolean }> {
   const response = await fetch(`${BASE_URL}/users/${id}`, {
     method: 'DELETE',
-    headers: getAuthHeader()
+    headers: clientRequestId
+      ? { ...getAuthHeader(), 'Content-Type': 'application/json' }
+      : getAuthHeader(),
+    ...(clientRequestId ? { body: JSON.stringify({ client_request_id: clientRequestId }) } : {}),
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, 'Failed to delete user'));
+  if (!response.ok) {
+    const error = new Error(await getErrorMessage(response, 'Failed to delete user')) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 

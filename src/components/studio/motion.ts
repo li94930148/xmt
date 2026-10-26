@@ -3,7 +3,8 @@ import type { TargetAndTransition, Variants } from 'motion/react';
 export const easeOutExpo = [0.22, 1, 0.36, 1] as const;
 
 export const pageVariants: Variants = {
-  initial: { opacity: 0, y: 10 },
+  // Keep the page readable even if the entrance animation cannot be scheduled.
+  initial: { opacity: 1, y: 4 },
   animate: {
     opacity: 1,
     y: 0,

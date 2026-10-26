@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import http from 'node:http';
 import { Server as SocketServer } from 'socket.io';
-import { chromium } from 'playwright';
+import { chromium, type Locator } from 'playwright';
 import { createServer as createViteServer } from 'vite';
 import { readFileSync } from 'node:fs';
 
@@ -56,6 +56,13 @@ let fixturePermissions = ['analytics:view', 'export:data'];
 let fixtureRole = user.role;
 let personalReportPresent = true;
 let teamDailyReads = 0;
+let failNextTeamDailyRead = false;
+let delayedTeamDailyDate: string | null = null;
+let emptyNextTeamDailyRead = false;
+let holdNextTeamDailyRead = false;
+let teamDailyReadStarted: (() => void) | null = null;
+let releaseHeldTeamDailyRead: (() => void) | null = null;
+let nextTeamDailyReadStarted: Promise<void> | null = null;
 const app = express();
 
 app.get('/__qa', (_req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','analytics-read-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/analytics');</script>`));
@@ -65,6 +72,34 @@ app.get('/__qa/report-center', (req, res) => {
 });
 app.post('/__qa/grant-daily-team-permission', (_req, res) => {
   fixturePermissions = [...new Set([...fixturePermissions, 'report:daily:view_team'])];
+  res.json({ ok: true });
+});
+app.post('/__qa/fail-next-team-daily-read', (_req, res) => {
+  failNextTeamDailyRead = true;
+  res.json({ ok: true });
+});
+app.post('/__qa/empty-next-team-daily-read', (_req, res) => {
+  emptyNextTeamDailyRead = true;
+  res.json({ ok: true });
+});
+app.post('/__qa/hold-next-team-daily-read', (_req, res) => {
+  holdNextTeamDailyRead = true;
+  nextTeamDailyReadStarted = new Promise<void>((resolve) => { teamDailyReadStarted = resolve; });
+  res.json({ ok: true });
+});
+app.post('/__qa/wait-team-daily-read-started', async (_req, res) => {
+  await nextTeamDailyReadStarted;
+  res.json({ ok: true });
+});
+app.post('/__qa/release-team-daily-read', (_req, res) => {
+  releaseHeldTeamDailyRead?.();
+  releaseHeldTeamDailyRead = null;
+  teamDailyReadStarted = null;
+  nextTeamDailyReadStarted = null;
+  res.json({ ok: true });
+});
+app.post('/__qa/delay-team-daily-date', (req, res) => {
+  delayedTeamDailyDate = typeof req.body?.date === 'string' ? req.body.date : null;
   res.json({ ok: true });
 });
 app.post('/__qa/clear-personal-report', (_req, res) => {
@@ -103,9 +138,29 @@ app.get('/api/daily-reports/me', (_req, res) => res.json({ success: true, data: 
     items: [{ sectionKey: 'today', title: '今日工作', contentMd: '仅查看的已有日报', sortOrder: 0 }],
   } : null,
 } }));
-app.get('/api/daily-reports/team', (_req, res) => {
+app.get('/api/daily-reports/team', async (req, res) => {
   teamDailyReads += 1;
-  return res.json({ success: true, data: { reportDate: '2026-10-14', status: 'submitted', reports: [] } });
+  if (failNextTeamDailyRead) {
+    failNextTeamDailyRead = false;
+    return res.status(503).json({ success: false, message: '模拟团队日报读取失败' });
+  }
+  const requestedDate = typeof req.query.date === 'string' ? req.query.date : '2026-10-14';
+  if (delayedTeamDailyDate === requestedDate) {
+    delayedTeamDailyDate = null;
+    await new Promise<void>((resolve) => setTimeout(resolve, 350));
+  }
+  if (holdNextTeamDailyRead) {
+    holdNextTeamDailyRead = false;
+    const released = new Promise<void>((resolve) => { releaseHeldTeamDailyRead = resolve; });
+    teamDailyReadStarted?.();
+    await released;
+  }
+  const reports = emptyNextTeamDailyRead ? [] : [{
+    id: 991, userId: 48, userName: '日报成员甲', reportDate: requestedDate, status: 'submitted', manualSummaryMd: `团队日报已确认内容 ${requestedDate}`, riskLevel: 'normal', version: 1,
+    items: [{ sectionKey: 'today', title: '今日工作', contentMd: '已完成隔离验收', sortOrder: 0 }],
+  }];
+  emptyNextTeamDailyRead = false;
+  return res.json({ success: true, data: { reportDate: requestedDate, status: 'submitted', reports } });
 });
 app.get('/api/analytics/team', (req, res) => {
   teamReads += 1;
@@ -192,12 +247,229 @@ await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 const address = server.address();
 assert(address && typeof address !== 'string');
 const base = `http://127.0.0.1:${address.port}`;
-const browser = await chromium.launch({ headless: true });
 
+const analyticsViewportCases = [
+  { width: 320, height: 720, label: 'mobile 320px' },
+  { width: 390, height: 844, label: 'mobile 390px' },
+  ...[
+    { width: 1366, height: 768 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+  ].flatMap(({ width, height }) => [80, 90, 100, 110, 125].map((zoom) => ({
+    width: Math.round(width * 100 / zoom),
+    height: Math.round(height * 100 / zoom),
+    label: `${width}x${height} @ ${zoom}% (CSS viewport equivalent)`,
+  }))),
+];
+
+async function assertControlVisibleAndFocusable(page: import('playwright').Page, control: Locator, label: string, viewportLabel: string) {
+  assert.equal(await control.count(), 1, `${viewportLabel}: ${label} exists exactly once`);
+  assert.equal(await control.isVisible(), true, `${viewportLabel}: ${label} is visible`);
+  const box = await control.boundingBox();
+  const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  assert.ok(box && box.width > 0 && box.height > 0, `${viewportLabel}: ${label} has a visible box`);
+  assert.ok(box!.width >= 40 && box!.height >= 40,
+    `${viewportLabel}: ${label} meets the 40×40px minimum target size: ${JSON.stringify(box)}`);
+  assert.ok(box!.x >= -1 && box!.y >= -1 && box!.x + box!.width <= viewport.width + 1 && box!.y + box!.height <= viewport.height + 1,
+    `${viewportLabel}: ${label} stays within the viewport: ${JSON.stringify({ box, viewport })}`);
+  const unobscured = await control.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return Boolean(hit && (hit === node || node.contains(hit)));
+  });
+  assert.equal(unobscured, true, `${viewportLabel}: ${label} is not covered at its center`);
+  await control.focus();
+  assert.equal(await control.evaluate((node) => document.activeElement === node), true, `${viewportLabel}: ${label} can receive keyboard focus`);
+}
+
+async function resetViewportScroll(page: import('playwright').Page) {
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    for (const element of document.querySelectorAll<HTMLElement>('*')) {
+      const style = window.getComputedStyle(element);
+      if (/(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight) element.scrollTop = 0;
+      if (/(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth) element.scrollLeft = 0;
+    }
+  });
+}
+
+async function assertHorizontalScrollRegionKeyboardAccess(
+  region: Locator,
+  endContentSelector: string,
+  label: string,
+  viewportLabel: string,
+) {
+  assert.equal(await region.count(), 1, `${viewportLabel}: ${label} exists exactly once`);
+  assert.equal(await region.isVisible(), true, `${viewportLabel}: ${label} is visible`);
+  assert.equal(await region.getAttribute('tabindex'), '0', `${viewportLabel}: ${label} participates in keyboard focus order`);
+  await region.scrollIntoViewIfNeeded();
+  await region.focus();
+  assert.equal(await region.evaluate((node) => document.activeElement === node), true,
+    `${viewportLabel}: ${label} can receive keyboard focus`);
+
+  const start = await region.evaluate((node) => ({
+    left: node.scrollLeft,
+    max: node.scrollWidth - node.clientWidth,
+  }));
+  assert.ok(start.max >= 0, `${viewportLabel}: ${label} has a valid horizontal scroll range`);
+  assert.ok(start.left <= 1, `${viewportLabel}: ${label} starts at the left edge`);
+
+  let currentLeft = start.left;
+  for (let press = 0; press < 64 && currentLeft < start.max - 1; press += 1) {
+    await region.press('ArrowRight');
+    currentLeft = await region.evaluate((node) => node.scrollLeft);
+  }
+  if (start.max > 0) {
+    assert.ok(currentLeft > start.left, `${viewportLabel}: ${label} moves with ArrowRight`);
+    assert.ok(currentLeft >= start.max - 1,
+      `${viewportLabel}: ${label} reaches its scroll end by keyboard (left=${currentLeft}, max=${start.max})`);
+  } else {
+    assert.ok(currentLeft >= start.max - 1, `${viewportLabel}: ${label} is already at its non-overflowing end`);
+  }
+
+  const endContent = await region.evaluate((node, selector) => {
+    const content = node.querySelector<HTMLElement>(selector);
+    if (!content) return { found: false, fullyVisible: false };
+    const viewportRect = node.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+    return {
+      found: true,
+      fullyVisible: contentRect.left >= viewportRect.left - 1 && contentRect.right <= viewportRect.right + 1,
+    };
+  }, endContentSelector);
+  assert.equal(endContent.found, true, `${viewportLabel}: ${label} end content exists`);
+  assert.equal(endContent.fullyVisible, true, `${viewportLabel}: ${label} end content is visible at the keyboard-reachable end`);
+
+  if (start.max > 0) {
+    await region.press('ArrowLeft');
+    assert.ok(await region.evaluate((node) => node.scrollLeft) < currentLeft,
+      `${viewportLabel}: ${label} also moves back with ArrowLeft`);
+  }
+}
+
+async function assertPageHeadingsAndCopyContrast(page: import('playwright').Page) {
+  const headings = await page.locator('main h1, main h2, main h3, main h4, main h5, main h6').evaluateAll((nodes) =>
+    nodes.filter((node) => {
+      const style = window.getComputedStyle(node);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    }).map((node) => ({ level: Number(node.tagName.slice(1)), text: node.textContent?.trim() || '' })),
+  );
+  assert.equal(headings[0]?.level, 1, 'page content starts with a page-level heading');
+  assert.equal(headings.filter(({ level }) => level === 1).length, 1, 'page content has exactly one page-level heading');
+  for (let index = 1; index < headings.length; index += 1) {
+    assert.ok(headings[index].level <= headings[index - 1].level + 1,
+      `page headings do not skip levels: ${JSON.stringify(headings)}`);
+  }
+
+  const lowContrastCopy = await page.locator('main .text-theme-text-muted, main .text-studio-text-muted').evaluateAll((nodes) =>
+    nodes.filter((node) => {
+      const style = window.getComputedStyle(node);
+      return style.display !== 'none' && style.visibility !== 'hidden' && Boolean(node.textContent?.trim());
+    }).map((node) => node.textContent?.trim()),
+  );
+  assert.deepEqual(lowContrastCopy, [], 'ordinary page copy uses the accessible Studio secondary-text token');
+}
+
+async function assertAnalyticsControlViewportMatrix(page: import('playwright').Page) {
+  const firstViewportControls = [
+    [page.getByRole('button', { name: '打开报告中心', exact: true }), '打开报告中心入口'],
+    [page.getByRole('button', { name: '前往发布管理补充', exact: true }), '前往发布管理入口'],
+    [page.getByLabel('统计年份'), '统计年份筛选'],
+    [page.getByLabel('统计月份'), '统计月份筛选'],
+  ] as const;
+  const topicFilter = page.getByLabel('选择已完成选题');
+  const rankingScrollRegion = page.getByRole('region', { name: '个人统计排行（可横向滚动）', exact: true });
+  const heatmapScrollRegion = page.getByRole('region', { name: '协作热力图（可横向滚动）', exact: true });
+
+  for (const viewportCase of analyticsViewportCases) {
+    await page.setViewportSize({ width: viewportCase.width, height: viewportCase.height });
+    await resetViewportScroll(page);
+    const pageWidth = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+    assert.ok(pageWidth.scrollWidth <= pageWidth.clientWidth + 1,
+      `${viewportCase.label}: analytics page has no horizontal overflow: ${JSON.stringify(pageWidth)}`);
+
+    for (const [control, label] of firstViewportControls) {
+      await assertControlVisibleAndFocusable(page, control, label, viewportCase.label);
+    }
+
+    await topicFilter.scrollIntoViewIfNeeded();
+    await assertControlVisibleAndFocusable(page, topicFilter, '已完成选题筛选', viewportCase.label);
+    await assertHorizontalScrollRegionKeyboardAccess(
+      rankingScrollRegion,
+      'table thead th:last-child',
+      '个人统计排行滚动区',
+      viewportCase.label,
+    );
+    await assertHorizontalScrollRegionKeyboardAccess(
+      heatmapScrollRegion,
+      '[title^="周日 23:00 - "]',
+      '协作热力图滚动区',
+      viewportCase.label,
+    );
+    const postFocusPageWidth = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+    assert.ok(postFocusPageWidth.scrollWidth <= postFocusPageWidth.clientWidth + 1,
+      `${viewportCase.label}: focusing controls and reaching inner scroll ends does not create page overflow: ${JSON.stringify(postFocusPageWidth)}`);
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await resetViewportScroll(page);
+}
+
+async function assertAnalyticsMobileViewportControls(page: import('playwright').Page) {
+  const viewports = [
+    { width: 320, height: 720, label: 'mobile shell 320px' },
+    { width: 390, height: 844, label: 'mobile shell 390px' },
+  ];
+  const controls = [
+    [page.getByRole('button', { name: '打开报告中心', exact: true }), '打开报告中心入口'],
+    [page.getByRole('button', { name: '前往发布管理补充', exact: true }), '前往发布管理入口'],
+    [page.getByLabel('统计年份'), '统计年份筛选'],
+    [page.getByLabel('统计月份'), '统计月份筛选'],
+  ] as const;
+  const topicFilter = page.getByLabel('选择已完成选题');
+
+  for (const viewport of viewports) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await resetViewportScroll(page);
+    const mobileNavigation = page.getByRole('navigation', { name: '移动主导航', exact: true });
+    assert.equal(await mobileNavigation.count(), 1, `${viewport.label}: a mobile-width browser uses the mobile shell`);
+    const pageWidth = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+    assert.ok(pageWidth.scrollWidth <= pageWidth.clientWidth + 1,
+      `${viewport.label}: analytics page has no horizontal overflow: ${JSON.stringify(pageWidth)}`);
+
+    for (const [control, label] of controls) {
+      await assertControlVisibleAndFocusable(page, control, label, viewport.label);
+    }
+
+    await topicFilter.scrollIntoViewIfNeeded();
+    await assertControlVisibleAndFocusable(page, topicFilter, '已完成选题筛选', viewport.label);
+    const navTop = await mobileNavigation.evaluate((node) => node.getBoundingClientRect().top);
+    const topicBox = await topicFilter.boundingBox();
+    assert.ok(topicBox && topicBox.y + topicBox.height <= navTop,
+      `${viewport.label}: the topic filter stays above the fixed bottom navigation: ${JSON.stringify({ topicBox, navTop })}`);
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await resetViewportScroll(page);
+}
+
+let browser: import('playwright').Browser | undefined;
+
+if (process.argv.includes('--mcp-fixture')) {
+  console.log(`Analytics MCP fixture ready: ${base}/__qa`);
+  await new Promise<void>((resolve) => {
+    process.once('SIGINT', resolve);
+    process.once('SIGTERM', resolve);
+  });
+  await vite.close();
+  await new Promise<void>((resolve) => io.close(() => resolve()));
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+} else {
 try {
+  browser = await chromium.launch({ headless: true });
   const errors: string[] = [];
   const expectedHttpErrors: string[] = [];
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  const page = await browser!.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
@@ -207,6 +479,7 @@ try {
 
   await page.goto(`${base}/__qa`);
   await page.getByRole('heading', { name: '数据复盘', exact: true }).waitFor();
+  await assertPageHeadingsAndCopyContrast(page);
   const identity = await page.evaluate(() => ({
     path: window.location.pathname,
     title: document.title,
@@ -228,13 +501,14 @@ try {
   assert.equal(topicListReads, 1, 'the initial topic-list request makes one GET');
   await page.waitForTimeout(250);
   assert.equal(teamReads, 1, 'global feedback updates do not retrigger the failed read');
-  await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: '/tmp/xmt-analytics-read-recovery-390.png' });
 
   await page.getByRole('button', { name: '重新加载统计', exact: true }).click();
   await page.locator('[data-analytics-metric="本月完成"]').getByText('6', { exact: true }).waitFor();
+  await assertPageHeadingsAndCopyContrast(page);
   await page.locator('[data-analytics-metric="播放量"]').scrollIntoViewIfNeeded();
   await page.waitForFunction(() => document.querySelector('[data-analytics-metric="播放量"]')?.textContent?.replace(/\D/g, '') === '12345');
+  await assertAnalyticsControlViewportMatrix(page);
   assert.equal(await page.getByRole('button', { name: '打开报告中心', exact: true }).isEnabled(), true, 'report center access is independent of the currently selected analytics period');
   assert.equal(teamReads, 2, 'the main retry performs one additional read');
   assert.equal(monthlyReads, 2, 'the main retry reads monthly metrics once');
@@ -276,6 +550,7 @@ try {
   assert.equal(await page.getByRole('button', { name: '日报', exact: true }).count(), 0, 'report-only permission does not expose unavailable daily-report shortcuts');
   await page.getByRole('button', { name: '周报', exact: true }).click();
   await page.getByRole('heading', { name: '周报生成', exact: true }).waitFor();
+  await assertPageHeadingsAndCopyContrast(page);
   await page.getByRole('alert').getByText(/周报暂时无法读取/).waitFor();
   await page.screenshot({ path: '/tmp/xmt-weekly-report-read-recovery-390.png' });
   const weeklyRefreshBox = await page.getByRole('button', { name: '刷新', exact: true }).boundingBox();
@@ -287,6 +562,7 @@ try {
   assert.equal(await page.getByRole('button', { name: '一键复制', exact: true }).isDisabled(), true, 'an unavailable weekly report cannot be copied');
   await page.getByRole('button', { name: '重试周报', exact: true }).click();
   await page.getByText('隔离周报选题', { exact: true }).waitFor();
+  await assertPageHeadingsAndCopyContrast(page);
   assert.equal(weeklyReportReads, 2, 'weekly report retry performs one additional read');
 
   await page.evaluate(async () => { await fetch('/__qa/fail-next-weekly-report-read', { method: 'POST' }); });
@@ -317,6 +593,7 @@ try {
   assert.equal(await page.locator('textarea[aria-hidden="true"]').count(), 0, 'the temporary fallback textarea is removed after a successful copy');
 
   await page.getByRole('button', { name: '导出', exact: true }).click();
+  await assertPageHeadingsAndCopyContrast(page);
   await page.evaluate(async () => { await fetch('/__qa/fail-next-topics-export', { method: 'POST' }); });
   await page.getByRole('button', { name: '开始导出', exact: true }).dblclick({ delay: 50 });
   assert.equal(await page.getByRole('button', { name: '导出中...', exact: true }).isDisabled(), true, 'the export action locks while the request is in flight');
@@ -373,7 +650,7 @@ try {
   assert.equal(analyticsJson.userActivity[0].pomodoros_completed, 2, 'the analytics JSON backup preserves its actual grouped fields');
   assert.equal(analyticsExportReads, 2, 'the analytics JSON backup performs one additional GET');
 
-  const readonlyDailyPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  const readonlyDailyPage = await browser!.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
   readonlyDailyPage.on('pageerror', (error) => errors.push(error.message));
   await readonlyDailyPage.goto(`${base}/__qa/report-center`);
   await readonlyDailyPage.getByRole('heading', { name: '报告中心', exact: true }).waitFor();
@@ -392,7 +669,7 @@ try {
   assert.equal(teamDailyReads, 0, 'unavailable team views do not fetch data or masquerade as empty reports');
   await readonlyDailyPage.close();
 
-  const revokedDirectorPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  const revokedDirectorPage = await browser!.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
   revokedDirectorPage.on('pageerror', (error) => errors.push(error.message));
   await revokedDirectorPage.goto(`${base}/__qa/report-center?role=director`);
   await revokedDirectorPage.getByRole('heading', { name: '报告中心', exact: true }).waitFor();
@@ -402,32 +679,111 @@ try {
   await revokedDirectorPage.close();
 
   await page.request.post(`${base}/__qa/grant-daily-team-permission`);
-  const allowedTeamPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  const allowedTeamPage = await browser!.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   allowedTeamPage.on('pageerror', (error) => errors.push(error.message));
   await allowedTeamPage.goto(`${base}/__qa/report-center`);
   await allowedTeamPage.getByRole('button', { name: '日报', exact: true }).click();
-  const teamRead = allowedTeamPage.waitForResponse((response) => response.url().includes('/api/daily-reports/team') && response.status() === 200);
+  await allowedTeamPage.request.post(`${base}/__qa/empty-next-team-daily-read`);
+  await allowedTeamPage.request.post(`${base}/__qa/hold-next-team-daily-read`);
   await allowedTeamPage.getByRole('link', { name: '查看团队日报', exact: true }).click();
-  await teamRead;
+  await allowedTeamPage.request.post(`${base}/__qa/wait-team-daily-read-started`);
   await allowedTeamPage.getByRole('heading', { name: '团队日报', exact: true }).waitFor();
+  const teamBoard = allowedTeamPage.getByTestId('team-daily-report-board');
+  await teamBoard.getByRole('status').getByText('正在加载团队日报…', { exact: true }).waitFor();
+  assert.equal(await teamBoard.getByText('当前日期没有已提交日报。', { exact: true }).count(), 0,
+    'an unresolved initial team report read is announced as loading rather than an empty date');
+  await allowedTeamPage.request.post(`${base}/__qa/release-team-daily-read`);
+  await teamBoard.getByRole('heading', { name: '暂无团队日报', exact: true }).waitFor();
+  assert.equal(await teamBoard.getByRole('status').count(), 0, 'the loading announcement ends when the empty result arrives');
   assert.equal(teamDailyReads, 1, 'an explicit team permission exposes a working shortcut and makes one read');
+  const teamDateFilter = teamBoard.getByLabel('团队日报日期');
+  assert.equal(await teamDateFilter.count(), 1, 'team report date filter has a stable accessible name');
+  await teamBoard.getByRole('button', { name: '刷新', exact: true }).click();
+  await teamBoard.getByText(/团队日报已确认内容 2026-10-\d{2}/).waitFor();
+  assert.equal(teamDailyReads, 2, 'refreshing after the empty result performs one GET');
+  await allowedTeamPage.request.post(`${base}/__qa/fail-next-team-daily-read`);
+  await teamBoard.getByRole('button', { name: '刷新', exact: true }).click();
+  await teamBoard.getByRole('alert').getByText(/仍显示上次成功读取的团队日报，可能不是最新/).waitFor();
+  await teamBoard.getByText(/团队日报已确认内容 2026-10-\d{2}/).waitFor();
+  assert.equal(await teamBoard.getByText('日报成员甲', { exact: true }).count(), 1, 'a failed refresh keeps the last successful team report visible');
+  await allowedTeamPage.screenshot({ path: '/tmp/xmt-team-daily-stale-390.png', fullPage: false });
+  await teamBoard.getByRole('button', { name: '重新加载团队日报', exact: true }).click();
+  await teamBoard.getByText(/团队日报已确认内容 2026-10-\d{2}/).waitFor();
+  assert.equal(await teamBoard.getByRole('alert').count(), 0, 'a successful read clears the stale-data warning');
+  assert.equal(teamDailyReads, 4, 'the explicit retry performs one additional read after the injected failure');
+  await allowedTeamPage.request.post(`${base}/__qa/fail-next-team-daily-read`);
+  const changedDateFailure = allowedTeamPage.waitForResponse((response) => response.url().includes('/api/daily-reports/team') && response.status() === 503);
+  await teamDateFilter.fill('2026-10-13');
+  await changedDateFailure;
+  await teamBoard.getByRole('alert').getByText('模拟团队日报读取失败', { exact: true }).waitFor();
+  assert.equal(await teamBoard.getByText(/团队日报已确认内容/).count(), 0, 'a different date never displays reports from the previous query');
+  assert.equal(await teamBoard.getByRole('alert').getByText(/仍显示上次成功读取的团队日报/).count(), 0, 'stale-data wording is reserved for the same query scope');
+  await allowedTeamPage.screenshot({ path: '/tmp/xmt-team-daily-date-scope-390.png', fullPage: false });
+  await teamBoard.getByRole('button', { name: '重新加载团队日报', exact: true }).click();
+  await teamBoard.getByText('团队日报已确认内容 2026-10-13', { exact: true }).waitFor();
+  assert.equal(teamDailyReads, 6, 'changing the date and retrying each performs one read');
+  await allowedTeamPage.request.post(`${base}/__qa/delay-team-daily-date`, { data: { date: '2026-10-12' } });
+  const olderDateRequest = allowedTeamPage.waitForRequest((request) => {
+    if (!request.url().includes('/api/daily-reports/team')) return false;
+    return new URL(request.url()).searchParams.get('date') === '2026-10-12';
+  });
+  await teamDateFilter.fill('2026-10-12');
+  await olderDateRequest;
+  const newerDateResponse = allowedTeamPage.waitForResponse((response) => {
+    if (!response.url().includes('/api/daily-reports/team') || response.status() !== 200) return false;
+    return new URL(response.url()).searchParams.get('date') === '2026-10-11';
+  });
+  await teamDateFilter.fill('2026-10-11');
+  await newerDateResponse;
+  await teamBoard.getByText('团队日报已确认内容 2026-10-11', { exact: true }).waitFor();
+  await allowedTeamPage.waitForTimeout(400);
+  await teamBoard.getByText('团队日报已确认内容 2026-10-11', { exact: true }).waitFor();
+  assert.equal(await teamBoard.getByText('团队日报已确认内容 2026-10-12', { exact: true }).count(), 0, 'a late response for the previous date cannot overwrite the active report list');
+  assert.equal(await teamBoard.getByRole('alert').count(), 0, 'an obsolete response cannot set an error for the active date');
+  assert.equal(teamDailyReads, 8, 'each date change performs one read and the latest request wins');
   await allowedTeamPage.close();
 
+  const narrowDesktopAnalyticsPage = await browser!.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'no-preference' });
+  narrowDesktopAnalyticsPage.on('pageerror', (error) => errors.push(error.message));
+  await narrowDesktopAnalyticsPage.goto(`${base}/__qa`);
+  await narrowDesktopAnalyticsPage.getByRole('heading', { name: '数据复盘', exact: true }).waitFor();
+  await narrowDesktopAnalyticsPage.setViewportSize({ width: 320, height: 720 });
+  await narrowDesktopAnalyticsPage.waitForFunction(() => {
+    const page = document.querySelector('[data-page-transition]');
+    const heading = document.querySelector('main h1');
+    return page !== null
+      && Number(getComputedStyle(page).opacity) > 0
+      && heading !== null
+      && heading.getClientRects().length > 0;
+  });
+  await narrowDesktopAnalyticsPage.close();
+
+  const mobileAnalyticsPage = await browser!.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'no-preference' });
+  mobileAnalyticsPage.on('pageerror', (error) => errors.push(error.message));
+  await mobileAnalyticsPage.goto(`${base}/__qa`);
+  await mobileAnalyticsPage.getByRole('heading', { name: '数据复盘', exact: true }).waitFor();
+  assert.equal(await mobileAnalyticsPage.getByRole('heading', { name: '数据复盘', exact: true }).isVisible(), true,
+    'the mobile shell keeps its heading visible without the desktop page-transition wrapper');
+  await mobileAnalyticsPage.locator('[data-analytics-metric="本月完成"]').getByText('6', { exact: true }).waitFor();
+  await assertAnalyticsMobileViewportControls(mobileAnalyticsPage);
+  await mobileAnalyticsPage.close();
+
   assert.equal(apiWrites, 0, 'all analytics retries remain read-only');
-  assert.equal(expectedHttpErrors.length, 7, 'the browser records only the seven intentionally injected read failures');
+  assert.equal(expectedHttpErrors.length, 7, 'the analytics browser records only the seven intentionally injected read failures on its primary page');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true, 'the analytics view fits a 390px viewport');
   assert.deepEqual(errors, [], 'the analytics page has no unexpected browser errors');
 
   await page.evaluate(async () => { await fetch('/__qa/remove-export-permission', { method: 'POST' }); });
-  const restrictedPage = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const restrictedPage = await browser!.newPage({ viewport: { width: 1280, height: 800 } });
   await restrictedPage.goto(`${base}/__qa/report-center`);
   await restrictedPage.getByRole('heading', { name: '你暂时没有访问这个页面的权限', exact: true }).waitFor();
   assert.equal(await restrictedPage.getByRole('heading', { name: '报告中心', exact: true }).count(), 0, 'analytics:view alone does not grant access to report exports');
   await restrictedPage.close();
   console.log('Analytics browser test passed: read failures recover truthfully, weekly clipboard fallback reports actual results, and topic/analytics CSV exports preserve failure, retry, and download feedback without writes.');
 } finally {
-  await browser.close();
+  await browser?.close();
   await vite.close();
   await new Promise<void>((resolve) => io.close(() => resolve()));
   await new Promise<void>((resolve) => server.close(() => resolve()));
+}
 }

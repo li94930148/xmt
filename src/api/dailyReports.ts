@@ -19,6 +19,8 @@ export type DailyReportItem = {
 export type DailyReport = {
   id: number;
   userId: number;
+  teamId?: number | null;
+  templateId?: number | null;
   userName?: string;
   username?: string;
   reportDate: string;
@@ -83,8 +85,8 @@ export type DailyReportArchiveResponse = {
   reports: DailyReport[];
 };
 
-export type MonthlyRecord = { id?: number; year: number; month: number; work_summary_md: string; key_projects_md: string; issues_plan_md: string; display_content_md: string; user_name?: string; username?: string; created_at?: string | null; updated_at?: string | null };
-export type YearlyRecord = { id?: number; year: number; annual_summary_md: string; achievements_md: string; shortcomings_md: string; next_year_plan_md: string; display_content_md: string; user_name?: string; username?: string; created_at?: string | null; updated_at?: string | null };
+export type MonthlyRecord = { id?: number; year: number; month: number; work_summary_md: string; key_projects_md: string; issues_plan_md: string; display_content_md: string; baseline_fingerprint?: string; user_name?: string; username?: string; created_at?: string | null; updated_at?: string | null };
+export type YearlyRecord = { id?: number; year: number; annual_summary_md: string; achievements_md: string; shortcomings_md: string; next_year_plan_md: string; display_content_md: string; baseline_fingerprint?: string; user_name?: string; username?: string; created_at?: string | null; updated_at?: string | null };
 export type SummaryArchive = { year: number; monthly: MonthlyRecord[]; yearly: YearlyRecord[] };
 export type ReportTemplate = { id: number; name: string; description?: string; sections: Array<{ key: string; title: string }>; isDefault?: boolean; sortOrder?: number; userId?: number | null };
 
@@ -175,12 +177,46 @@ export async function getDailyReportArchive(params: { start: string; end: string
 }
 
 async function summaryRequest<T>(path: string, options?: RequestInit) {
-  const response = await fetch(`/api/report-summaries${path}`, { ...options, headers: { ...getAuthHeader(), ...(options?.body ? { 'Content-Type': 'application/json' } : {}) } });
+  const method = options?.method ?? 'GET';
+  const response = await fetch(`/api/report-summaries${path}`, { ...options, cache: options?.cache ?? (method === 'GET' ? 'no-store' : undefined), headers: { ...getAuthHeader(), ...(options?.body ? { 'Content-Type': 'application/json' } : {}) } });
   return readEnvelope<T>(response, '加载日报总结失败');
 }
 export const getMonthlyRecord = (year: number, month: number) => summaryRequest<MonthlyRecord>(`/monthly${buildQuery({ year, month })}`);
-export const saveMonthlyRecord = (year: number, month: number, payload: Partial<MonthlyRecord>) => summaryRequest<MonthlyRecord>(`/monthly${buildQuery({ year, month })}`, { method: 'PUT', body: JSON.stringify(payload) });
+export type MonthlySummaryWritePayload = { content_md: string; work_summary_md: string; key_projects_md: string; issues_plan_md: string };
+export type YearlySummaryWritePayload = { content_md: string; annual_summary_md: string; achievements_md: string; shortcomings_md: string; next_year_plan_md: string };
+export type ReportSummaryUpdateRequest = { client_request_id: string; base_fingerprint: string };
+export const saveMonthlyRecord = (year: number, month: number, payload: MonthlySummaryWritePayload, request: ReportSummaryUpdateRequest) => summaryRequest<MonthlyRecord>(`/monthly${buildQuery({ year, month })}`, { method: 'PUT', body: JSON.stringify({ ...payload, ...request }) });
 export const getYearlyRecord = (year: number) => summaryRequest<YearlyRecord>(`/yearly${buildQuery({ year })}`);
-export const saveYearlyRecord = (year: number, payload: Partial<YearlyRecord>) => summaryRequest<YearlyRecord>(`/yearly${buildQuery({ year })}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const saveYearlyRecord = (year: number, payload: YearlySummaryWritePayload, request: ReportSummaryUpdateRequest) => summaryRequest<YearlyRecord>(`/yearly${buildQuery({ year })}`, { method: 'PUT', body: JSON.stringify({ ...payload, ...request }) });
+
+export type ReportSummaryMutationStatus<T> =
+  | { status: 'processed'; data: T }
+  | { status: 'not_found' }
+  | { status: 'conflict' };
+
+async function getReportSummaryMutationStatus<T>(kind: 'monthly' | 'yearly', year: number, month: number | null, requestId: string, fingerprint: string): Promise<ReportSummaryMutationStatus<T>> {
+  const params = { year, ...(kind === 'monthly' ? { month: month ?? undefined } : {}), fingerprint };
+  const response = await fetch(`/api/report-summaries/${kind}/requests/${encodeURIComponent(requestId)}${buildQuery(params)}`, {
+    headers: getAuthHeader(),
+    cache: 'no-store',
+  });
+  const payload = await response.json().catch(() => null) as ({ status?: string; data?: T; success?: boolean; message?: string; code?: string } | null);
+  if (response.status === 409 && payload?.status === 'conflict') return { status: 'conflict' };
+  if (!response.ok) {
+    const error = new Error(payload?.message || '核实总结保存结果失败') as Error & { status?: number; code?: string };
+    error.status = response.status;
+    error.code = payload?.code;
+    throw error;
+  }
+  if (payload?.status === 'processed' && payload.data) return { status: 'processed', data: payload.data };
+  if (payload?.status === 'not_found') return { status: 'not_found' };
+  if (payload?.status === 'conflict') return { status: 'conflict' };
+  throw new Error('总结保存状态无法识别');
+}
+
+export const getMonthlyRecordUpdateStatus = (year: number, month: number, requestId: string, fingerprint: string) =>
+  getReportSummaryMutationStatus<MonthlyRecord>('monthly', year, month, requestId, fingerprint);
+export const getYearlyRecordUpdateStatus = (year: number, requestId: string, fingerprint: string) =>
+  getReportSummaryMutationStatus<YearlyRecord>('yearly', year, null, requestId, fingerprint);
 export const getSummaryArchive = (year: number, userId?: number) => summaryRequest<SummaryArchive>(`/archive${buildQuery({ year, userId })}`);
 export const getSummaryArchiveDetail = (kind: 'monthly' | 'yearly', id: number) => summaryRequest<MonthlyRecord | YearlyRecord>(`/archive/${kind}/${id}`);

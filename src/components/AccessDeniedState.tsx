@@ -54,7 +54,7 @@ export default function AccessDeniedState({
 
             <button
               onClick={() => navigate('/')}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-studio-primary-button px-5 py-3 text-sm font-medium text-white transition hover:bg-studio-primary-button"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-medium text-white transition xmt-btn-primary"
             >
               <Home className="h-4 w-4" />
               回到首页

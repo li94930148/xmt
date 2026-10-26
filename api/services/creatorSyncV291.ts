@@ -3,7 +3,7 @@ import zlib from 'node:zlib';
 import bcrypt from 'bcrypt';
 import { execute, queryOne, runInTransaction } from '../database/utils.js';
 import { creatorInsightService } from './creatorInsights.js';
-import { persistDouyinContractV2102, persistNormalizedDouyinSync } from './douyinDataCenter.js';
+import { isOfficialCalendarDate, officialCollectionTimeIsValid, officialDailyWindowIsValid, persistDouyinContractV2102, persistNormalizedDouyinSync, type OfficialDailyPeriod } from './douyinDataCenter.js';
 import { requireCreatorAgentV1 } from './creatorAgentProtocol.js';
 import { resolveCoverUrl } from '../utils/coverResolver.js';
 import { CREATOR_SYNC_MAX_PAYLOAD_BYTES, CREATOR_SYNC_MAX_PAYLOAD_MB } from '../utils/limits.js';
@@ -65,6 +65,7 @@ const canonical = (body: JsonRecord) => [body.protocol_version, body.agent_id, b
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const metricCodes = new Set(['views','likes','comments','shares','favorites','profile_visits','followers_gained','completion_rate','five_second_completion_rate','cover_click_rate','two_second_bounce_rate','watch_time_seconds','sound_wave_amount']);
 const accountDailyMetricCodes = new Set(['posts','views','likes','comments','shares','five_second_completion_rate','two_second_bounce_rate','cover_click_rate','watch_time_seconds']);
+const requiredAccountDailyMetricCodes = ['posts','views','likes','comments','shares'] as const;
 const accountDailyPeriods = new Set(['yesterday','7d','30d']);
 const ratioMetricCodes = new Set(['completion_rate','five_second_completion_rate','cover_click_rate','two_second_bounce_rate']);
 const dateKey = (value: unknown) => { const textValue = text(value); const parsed = Date.parse(textValue); return /^\d{4}-\d{2}-\d{2}(?:T|\s|$)/.test(textValue) && Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : null; };
@@ -72,6 +73,15 @@ const fallbackKey = (value: unknown) => /^[a-f0-9]{64}$/i.test(text(value));
 const coverUrl = (item: JsonRecord) => resolveCoverUrl({ douyinCoverUrl: item.cover_url ?? item.cover, creatorRawJson: item.raw_json ?? item });
 const normalizedOfficialTitle = (value: unknown) => text(value).normalize('NFKC').toLocaleLowerCase('zh-CN').replace(/[^\p{Letter}\p{Number}]+/gu, '');
 const optionalNumber = (value: unknown) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
+const officialDailyMetricNumber = (value: unknown): number | null | undefined => {
+  if (value === null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
 
 async function openEnvelope(body: JsonRecord, authorization?: string) {
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -100,7 +110,10 @@ async function openEnvelope(body: JsonRecord, authorization?: string) {
   catch { throw Object.assign(new Error('上传数据解密失败'), { statusCode: 400 }); }
 }
 
-async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snapshotTime: string) {
+async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snapshotTime: string, requestTime: string) {
+  if (!officialCollectionTimeIsValid(snapshotTime) || !officialCollectionTimeIsValid(requestTime) || Date.parse(snapshotTime) > Date.parse(requestTime)) {
+    throw Object.assign(new Error('官方导出采集时间无效或晚于已签名上传请求时间'), { statusCode: 422 });
+  }
   const batchId = text(payload.batch_id);
   const parserVersion = text(payload.parser_version);
   const platformAccountId = text(payload.platform_account_id);
@@ -128,20 +141,49 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
   for (const item of accountDailyMetrics) {
     const period = text(item.period);
     const metrics = item.metrics && typeof item.metrics === 'object' ? item.metrics as JsonRecord : null;
-    if (dateKey(item.metric_date) === null || !accountDailyPeriods.has(period) || !metrics || !Object.prototype.hasOwnProperty.call(metrics, 'posts') || !Object.prototype.hasOwnProperty.call(metrics, 'views')) throw Object.assign(new Error('官方导出账号日指标日期、周期或必填值无效'), { statusCode: 422 });
+    if (!isOfficialCalendarDate(item.metric_date) || !accountDailyPeriods.has(period) || !metrics || requiredAccountDailyMetricCodes.some(code => !Object.prototype.hasOwnProperty.call(metrics, code))) throw Object.assign(new Error('官方导出账号日指标日期、周期或必填值无效'), { statusCode: 422 });
     for (const [code, value] of Object.entries(metrics)) {
-      const numeric = Number(value);
-      if (!accountDailyMetricCodes.has(code) || !Number.isFinite(numeric) || (ratioMetricCodes.has(code) && (numeric < 0 || numeric > 1))) throw Object.assign(new Error('官方导出账号日指标无效'), { statusCode: 422 });
+      const numeric = officialDailyMetricNumber(value);
+      if (!accountDailyMetricCodes.has(code)
+        || numeric === undefined
+        || (requiredAccountDailyMetricCodes.includes(code as typeof requiredAccountDailyMetricCodes[number]) && numeric === null)
+        || (numeric !== null && (!Number.isFinite(numeric) || (ratioMetricCodes.has(code) && (numeric < 0 || numeric > 1))))) throw Object.assign(new Error('官方导出账号日指标无效'), { statusCode: 422 });
     }
   }
+  let dataQuality: { source_rows: number; accepted_rows: number; duplicate_rows: number; rejected_rows: number; warnings: string[] } | undefined;
   if (parserVersion === 'douyin-export-v3') {
+    const quality = payload.quality && typeof payload.quality === 'object' ? payload.quality as JsonRecord : null;
+    const warnings = quality?.warnings;
+    if (!quality || !Array.isArray(warnings) || warnings.length > 200 || warnings.some(warning => typeof warning !== 'string' || warning.length > 120)) {
+      throw Object.assign(new Error('官方导出质量摘要无效'), { statusCode: 422 });
+    }
+    const fatalWarnings = warnings.filter(warning => warning === 'HEADER_UNRECOGNIZED'
+      || warning === 'ACCOUNT_DAILY_PERIOD_MISSING'
+      || warning === 'ACCOUNT_DAILY_DATE_DUPLICATE'
+      || warning === 'ALL_ROWS_REJECTED'
+      || warning.startsWith('PARSE_FAILED:'));
+    if (fatalWarnings.length > 0) {
+      throw Object.assign(new Error('官方导出文件解析未通过质量校验，本批次未入库；请检查导出文件并重新同步。'), { statusCode: 422 });
+    }
+    const qualityCounts = ['source_rows', 'accepted_rows', 'duplicate_rows', 'rejected_rows'].map(field => quality[field]);
+    if (qualityCounts.some(value => typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)) throw Object.assign(new Error('官方导出质量摘要无效'), { statusCode: 422 });
+    const [sourceRows, acceptedRows, duplicateRows, rejectedRows] = qualityCounts as number[];
+    const qualityMessages = new Set<string>();
+    if (rejectedRows! > 0) qualityMessages.add(`采集器报告 ${rejectedRows} 行未通过解析；本次入库仅包含已接受的行。`);
+    if (duplicateRows! > 0) qualityMessages.add(`采集器报告 ${duplicateRows} 行为重复数据。`);
+    if (warnings.includes('FALLBACK_IDENTITY_COLLISION')) qualityMessages.add('作品列表存在重复身份记录，相关行已跳过。');
+    if (warnings.includes('ACCOUNT_DAILY_DATE_DUPLICATE')) qualityMessages.add('账号日指标存在重复日期记录，相关行已跳过。');
+    if (warnings.length > 0 && qualityMessages.size === 0) qualityMessages.add('采集器报告存在解析提示，请核对本机采集诊断。');
+    dataQuality = { source_rows: sourceRows!, accepted_rows: acceptedRows!, duplicate_rows: duplicateRows!, rejected_rows: rejectedRows!, warnings: [...qualityMessages] };
     const sourceKeys = new Set(sourceFiles.map(file => `${text(file.dataset_type)}:${text(file.period)}`));
     const required = ['content_list:', 'account_daily:yesterday', 'account_daily:7d', 'account_daily:30d'];
     if (required.some(value => !sourceKeys.has(value))) throw Object.assign(new Error('官方导出文件不完整，需同时包含作品列表及昨天、近7天、近30天'), { statusCode: 422 });
-    const expectedDays: Record<string, number> = { yesterday: 1, '7d': 7, '30d': 30 };
-    for (const [period, expected] of Object.entries(expectedDays)) {
-      const actual = new Set(accountDailyMetrics.filter(item => text(item.period) === period).map(item => dateKey(item.metric_date))).size;
-      if (actual !== expected) throw Object.assign(new Error(`官方导出 ${period} 周期日数无效：期望 ${expected}，实际 ${actual}`), { statusCode: 422 });
+  }
+  const periodsToValidate: OfficialDailyPeriod[] = ['yesterday', '7d', '30d'];
+  for (const period of periodsToValidate) {
+    const periodDates = accountDailyMetrics.filter(item => text(item.period) === period).map(item => item.metric_date);
+    if (!officialDailyWindowIsValid(period, periodDates, snapshotTime)) {
+      throw Object.assign(new Error(`官方导出 ${period} 周期日期无效：必须是采集日对应的北京时间完整自然日窗口`), { statusCode: 422 });
     }
   }
   return runInTransaction(async tx => {
@@ -223,12 +265,13 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       for (const [code, value] of Object.entries(item.metrics as JsonRecord)) {
         const unit = ratioMetricCodes.has(code) ? 'ratio' : code === 'watch_time_seconds' ? 'seconds' : 'count';
         const valueText = text(value);
+        const valueNumber = officialDailyMetricNumber(value)!;
         const previous = await tx.queryOne<{value_text:string;collected_at:string}>('SELECT value_text,collected_at FROM creator_official_daily_metrics WHERE account_id=? AND metric_date=? AND source_period=? AND metric_code=?', [account.id,metricDate,period,code]);
         if (previous && Date.parse(previous.collected_at) > Date.parse(snapshotTime)) { staleIgnored++; continue; }
         if (previous?.value_text === valueText) dailyUnchanged++; else if (previous) dailyUpdated++; else dailyInserted++;
         await tx.execute(`INSERT INTO creator_official_daily_metrics(account_id,metric_date,source_period,metric_code,value_text,value_number,unit,source_file_sha256,parser_version,collected_at)
           VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(account_id,metric_date,source_period,metric_code) DO UPDATE SET value_text=excluded.value_text,value_number=excluded.value_number,unit=excluded.unit,source_file_sha256=excluded.source_file_sha256,parser_version=excluded.parser_version,collected_at=excluded.collected_at,updated_at=CURRENT_TIMESTAMP`,
-        [account.id,metricDate,period,code,valueText,Number(value),unit,sha,parserVersion,snapshotTime]);
+        [account.id,metricDate,period,code,valueText,valueNumber,unit,sha,parserVersion,snapshotTime]);
       }
     }
     for (const item of incomeMetrics) await store(null,dateKey(item.metric_date)!,text(item.metric_code),item.value,text(item.unit),sourceSha('income'));
@@ -245,7 +288,7 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
       ...(unmatchedContentRows ? [`${unmatchedContentRows} 条官方作品未找到标题与发布日期完全一致的本地记录，已保留官方汇总但未覆盖作品明细`] : []),
       ...(ambiguousContentRows ? [`${ambiguousContentRows} 条官方作品存在多个标题与发布日期相同的本地候选，已保留官方汇总并等待人工确认`] : []),
     ];
-    const result={result:{inserted,updated,unchanged,rejected,stale_ignored:staleIgnored,daily_inserted:dailyInserted,daily_updated:dailyUpdated,daily_unchanged:dailyUnchanged,reconciled_content_rows:reconciledContentRows,reconciled_work_rows:reconciledWorkRows,unmatched_content_rows:unmatchedContentRows,ambiguous_content_rows:ambiguousContentRows},warnings}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[JSON.stringify(result),batch.id]);
+    const result={result:{inserted,updated,unchanged,rejected,stale_ignored:staleIgnored,daily_inserted:dailyInserted,daily_updated:dailyUpdated,daily_unchanged:dailyUnchanged,reconciled_content_rows:reconciledContentRows,reconciled_work_rows:reconciledWorkRows,unmatched_content_rows:unmatchedContentRows,ambiguous_content_rows:ambiguousContentRows},warnings,...(dataQuality ? { data_quality: dataQuality } : {})}; await tx.execute('UPDATE creator_ingest_batches SET result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',[JSON.stringify(result),batch.id]);
     return {success:true,batch_id:batchId,duplicate_batch:false,...result};
   });
 }
@@ -253,7 +296,7 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
 export async function acceptCreatorDataSync(body: JsonRecord, authorization?: string) {
   if (Buffer.byteLength(JSON.stringify(body)) > CREATOR_SYNC_MAX_PAYLOAD_BYTES) throw Object.assign(new Error(`Creator Agent 同步数据包超过 ${CREATOR_SYNC_MAX_PAYLOAD_MB}MB 限制`), { statusCode: 413 });
   const { agent, payload } = await openEnvelope(body, authorization);
-  if (payload.schema_version === 2) return acceptOfficialExportV2(agent, payload, text(body.collected_at, new Date().toISOString()));
+  if (payload.schema_version === 2) return acceptOfficialExportV2(agent, payload, text(body.collected_at), text(body.timestamp));
   if (payload.schema_version !== undefined && payload.schema_version !== 1) throw Object.assign(new Error('Creator Agent 数据协议版本不兼容'), { statusCode: 422 });
   if (payload.platform !== agent.platform) throw Object.assign(new Error('同步数据平台与 Agent 绑定不匹配'), { statusCode: 403 });
   const account = payload.account && typeof payload.account === 'object' ? payload.account as JsonRecord : {};

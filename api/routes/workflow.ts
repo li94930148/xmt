@@ -1,19 +1,27 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿import express from 'express';
 import { beijingNow, beijingToday, queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
+import { createHash } from 'node:crypto';
 import { authenticate } from '../middleware/auth';
 import { requireAllPermissions, requirePermission, userHasPermission } from '../middleware/permissions';
-import { canEditProduction, canViewAllContent, canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, resolveCommentTopicScope } from '../utils/access';
+import { canEditAllContent, canEditProduction, canViewAllContent, canAccessTopic, getTopicScopeById, getTopicScopeByProductionId, getTopicScopeByPublishingId, getTopicScopeByShootingId, resolveCommentTopicScope } from '../utils/access';
 import { hasPublishedArchiveScriptDrift, syncPublishedArchive } from '../services/publishedArchive';
 import { resolveProductionVersionAction } from '../services/productionVersionAction';
 import { advancePublishingTopicIfResolved } from '../modules/topics/publishing-completion';
+import { canTransitionTopicStatus, isTopicAtOrBeyondStage } from '@shared/workflow/topic-state-machine';
 import { insertTopicOutlineOriginSnapshot } from '../modules/topics/production-origin-snapshot';
 import { publishingMetricJoins, publishingMetricSelect } from '../services/publishingMetrics';
 import {
   createProductionReviewReply,
+  createProductionReviewReplyWithRequest,
   createProductionReviewThread,
+  createProductionReviewThreadWithRequest,
+  getProductionReviewReplyRequestStatus,
+  getProductionReviewStatusRequestStatus,
+  getProductionReviewThreadRequestStatus,
   getProductionReviewThread,
   listProductionReviewThreads,
   updateProductionReviewStatus,
+  updateProductionReviewStatusWithRequest,
   type ProductionReviewKind,
   type ProductionReviewStatus,
 } from '../services/productionReview';
@@ -55,36 +63,31 @@ type VersionRow = {
 
 const LIST_PAGE_SIZE_DEFAULT = 50;
 const LIST_PAGE_SIZE_MAX = 100;
-const SHOOTING_STATUSES = new Set(['planned', 'in_progress', 'completed', 'cancelled']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/i;
 const SHOOTING_STATUS_TEXT: Record<string, string> = {
   planned: '计划中',
   in_progress: '制作中',
   completed: '已完成',
   cancelled: '已取消',
 };
+const SHOOTING_STATUSES = new Set(Object.keys(SHOOTING_STATUS_TEXT));
 const PRODUCTION_STATUS_TEXT: Record<string, string> = {
   draft: '草稿',
   review: '审核中',
   approved: '已通过',
   rejected: '已驳回',
 };
-const PUBLISHING_STATUSES = new Set(['pending', 'published', 'failed', 'scheduled']);
+const PRODUCTION_STATUSES = new Set(Object.keys(PRODUCTION_STATUS_TEXT));
 const PUBLISHING_STATUS_TEXT: Record<string, string> = {
   pending: '待发布',
   published: '已发布',
   failed: '发布异常',
   scheduled: '已定时',
 };
+const PUBLISHING_STATUSES = new Set(Object.keys(PUBLISHING_STATUS_TEXT));
 const PUBLISHING_METRIC_FIELDS = ['views', 'likes', 'shares', 'comments'] as const;
 const DOUYIN_AUTHORITATIVE_FIELDS = ['platform', 'status', 'publish_time'] as const;
-const TOPIC_STAGE_ORDER: Record<string, number> = {
-  pending: 0,
-  approved: 1,
-  production: 2,
-  shooting: 3,
-  publishing: 4,
-  completed: 5,
-};
 const TOPIC_STAGE_TEXT: Record<string, string> = {
   pending: '待审核',
   approved: '已通过',
@@ -120,12 +123,6 @@ type WorkflowTransaction = {
   execute(sql: string, params?: unknown[]): Promise<number>;
   executeInsert(sql: string, params?: unknown[]): Promise<number>;
 };
-
-function isTopicAtOrBeyondStage(status: unknown, expected: string) {
-  const actualOrder = TOPIC_STAGE_ORDER[String(status)];
-  const expectedOrder = TOPIC_STAGE_ORDER[expected];
-  return actualOrder !== undefined && expectedOrder !== undefined && actualOrder >= expectedOrder;
-}
 
 function workflowStageConflictMessage(actualStatus: unknown, expectedStatus: string, action: string) {
   const actual = TOPIC_STAGE_TEXT[String(actualStatus)] || '未知阶段';
@@ -274,6 +271,9 @@ async function completeShootingHandoff(
   }
 
   if (topic.status === 'shooting') {
+    if (!canTransitionTopicStatus(topic.status, 'publishing')) {
+      return { ok: false as const, status: topic.status };
+    }
     const recordedAt = beijingNow();
     const changed = await tx.execute(
       `UPDATE topics SET status='publishing', stage_entered_at=?, updated_at=? WHERE id=? AND status='shooting'`,
@@ -743,12 +743,44 @@ router.get('/production', authenticate, async (req, res) => {
   }
 });
 
+router.get('/production/create-request/:requestId', authenticate, async (req, res) => {
+  try {
+    const requestId = String(req.params.requestId || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return res.status(400).json({ message: '创作请求编号无效' });
+    }
+    const request = await queryOne<{ production_id: number; topic_id: number | null }>(
+      `SELECT k.production_id,p.topic_id
+       FROM production_create_request_keys k
+       LEFT JOIN production p ON p.id=k.production_id
+       WHERE k.client_request_id=? AND k.creator_id=?`,
+      [requestId, Number(req.user?.id)],
+    );
+    if (!request) return res.status(404).json({ message: '尚未找到对应创作记录' });
+    if (request.topic_id === null) return res.status(410).json({ deleted: true, message: '对应创作记录已删除' });
+    const topic = await getTopicScopeByProductionId(request.production_id);
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该创作请求状态' });
+    return res.json({ productionId: Number(request.production_id) });
+  } catch {
+    return res.status(500).json({ message: '核实创作记录创建状态失败' });
+  }
+});
+
 router.post('/production', authenticate, requirePermission('production:update'), async (req, res) => {
   try {
     const { topic_id, version, content, status = 'draft' } = req.body;
+    if (typeof status !== 'string' || !PRODUCTION_STATUSES.has(status)) {
+      return res.status(400).json({ message: '创作状态无效' });
+    }
     const originType = req.body.origin_type;
+    const rawClientRequestId = req.body?.client_request_id;
+    const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId.trim().toLowerCase() : '';
     if (originType !== undefined && originType !== 'topic_outline') {
       return res.status(400).json({ message: '创作来源类型无效' });
+    }
+    if (rawClientRequestId !== undefined && rawClientRequestId !== null
+      && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientRequestId)) {
+      return res.status(400).json({ message: '创作请求编号无效' });
     }
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
     const topic = await getTopicScopeById(topic_id);
@@ -762,7 +794,35 @@ router.post('/production', authenticate, requirePermission('production:update'),
     }
     const contentMarkdown = req.body.contentMarkdown || content;
     const contentJson = req.body.contentJson || content;
+    const requestFingerprint = clientRequestId
+      ? createHash('sha256').update(JSON.stringify([
+        Number(topic_id), version ?? null, content ?? null, contentMarkdown ?? null, contentJson ?? null,
+        String(status), originType ?? null,
+      ])).digest('hex')
+      : '';
     const creation = await runInTransaction(async (tx) => {
+      if (clientRequestId) {
+        const existing = await tx.queryOne<{
+          production_id: number;
+          creator_id: number;
+          request_fingerprint: string;
+        }>(
+          `SELECT production_id,creator_id,request_fingerprint FROM production_create_request_keys WHERE client_request_id=?`,
+          [clientRequestId],
+        );
+        if (existing) {
+          if (Number(existing.creator_id) !== Number(req.user?.id) || existing.request_fingerprint !== requestFingerprint) {
+            return { conflict: true as const };
+          }
+          const existingProduction = await tx.queryOne<{ id: number }>(
+            'SELECT id FROM production WHERE id=?',
+            [existing.production_id],
+          );
+          return existingProduction
+            ? { ok: true as const, id: Number(existing.production_id), created: false }
+            : { deleted: true as const };
+        }
+      }
       const currentTopic = await tx.queryOne<{ status: string; title: string; outline: string | null }>(
         'SELECT status,title,outline FROM topics WHERE id=?',
         [topic_id],
@@ -779,6 +839,9 @@ router.post('/production', authenticate, requirePermission('production:update'),
         return { ok: false as const, reason: 'invalid-stage' as const, status: currentTopic.status };
       }
       if (status === 'approved' && currentTopic.status === 'approved') {
+        if (!canTransitionTopicStatus(currentTopic.status, 'production')) {
+          return { ok: false as const, reason: 'invalid-stage' as const, status: currentTopic.status };
+        }
         const recordedAt = beijingNow();
         const advanced = await tx.execute(
           `UPDATE topics SET status='production', stage_entered_at=?, updated_at=? WHERE id=? AND status='approved'`,
@@ -793,8 +856,21 @@ router.post('/production', authenticate, requirePermission('production:update'),
         [topic_id, version, content, contentMarkdown, contentJson, status, req.user?.id],
       );
       if (originOutlineSnapshot !== null) await insertTopicOutlineOriginSnapshot(tx, id, Number(topic_id), originOutlineSnapshot);
-      return { ok: true as const, id };
+      if (clientRequestId) {
+        await tx.execute(
+          `INSERT INTO production_create_request_keys(client_request_id,creator_id,production_id,request_fingerprint,created_at)
+           VALUES(?,?,?,?,?)`,
+          [clientRequestId, Number(req.user?.id), id, requestFingerprint, beijingNow()],
+        );
+      }
+      return { ok: true as const, id, created: true };
     });
+    if ('conflict' in creation) {
+      return res.status(409).json({ message: '创作请求编号已用于其他内容，请先核实原请求状态。', code: 'PRODUCTION_CREATE_REQUEST_CONFLICT' });
+    }
+    if ('deleted' in creation) {
+      return res.status(410).json({ message: '该请求对应的创作记录已删除，不会因为重试而重新创建。', deleted: true });
+    }
     if (!creation.ok) {
       if (creation.reason === 'topic-missing') return res.status(404).json({ message: '选题不存在' });
       if (creation.reason === 'outline-changed') {
@@ -807,8 +883,12 @@ router.post('/production', authenticate, requirePermission('production:update'),
         code: 'WORKFLOW_STAGE_CONFLICT',
       });
     }
-    broadcastToRoom('production', 'production:created', { id: creation.id, topic_id: req.body.topic_id });
-    res.json({ message: '创作记录添加成功', productionId: creation.id });
+    if (creation.created) broadcastToRoom('production', 'production:created', { id: creation.id, topic_id: req.body.topic_id });
+    res.json({
+      message: '创作记录添加成功',
+      productionId: creation.id,
+      ...(clientRequestId ? { idempotent_replay: !creation.created } : {}),
+    });
   } catch {
     res.status(500).json({ message: '添加创作记录失败' });
   }
@@ -838,6 +918,9 @@ router.put('/production/:id', authenticate, requirePermission('production:update
       version_action,
       expected_content,
     } = req.body;
+    if (status !== undefined && (typeof status !== 'string' || !PRODUCTION_STATUSES.has(status))) {
+      return res.status(400).json({ message: '创作状态无效' });
+    }
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
     const existingProduction = await queryOne(`SELECT * FROM production WHERE id = ?`, [id]);
     if (!existingProduction) return res.status(404).json({ message: '创作记录不存在' });
@@ -937,6 +1020,9 @@ router.put('/production/:id', authenticate, requirePermission('production:update
         );
         if (!topic || !isTopicAtOrBeyondStage(topic.status, 'production')) {
           return { ok: false as const, code: 'WORKFLOW_STAGE_CONFLICT', status: topic?.status };
+        }
+        if (topic.status === 'production' && !canTransitionTopicStatus(topic.status, 'shooting')) {
+          return { ok: false as const, code: 'WORKFLOW_STAGE_CONFLICT', status: topic.status };
         }
         const changed = await tx.execute(updateProductionSql, updateProductionParams);
         if (guarded && changed === 0) {
@@ -1223,6 +1309,34 @@ router.get('/production/:id/review-threads', authenticate, async (req, res) => {
   }
 });
 
+router.get('/production/:id/review-threads/requests/:requestId', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, async (req, res) => {
+  try {
+    const productionId = parsePositiveId(req.params.id);
+    const requestId = String(req.params.requestId || '').trim().toLowerCase();
+    const rawFingerprint = req.query.fingerprint;
+    if (!productionId) return res.status(400).json({ message: '创作记录编号无效' });
+    if (!UUID_PATTERN.test(requestId)) return res.status(400).json({ message: '批注请求编号无效' });
+    if (typeof rawFingerprint !== 'string' || !SHA256_FINGERPRINT_PATTERN.test(rawFingerprint)) {
+      return res.status(400).json({ message: '批注载荷指纹无效' });
+    }
+    const status = await getProductionReviewThreadRequestStatus({
+      clientRequestId: requestId,
+      actorId: req.user!.id,
+      productionId,
+      fingerprint: rawFingerprint.toLowerCase(),
+    });
+    if (status.status === 'conflict') {
+      return res.status(409).json({ message: '批注请求编号与原始内容不一致，请核实原请求状态。' });
+    }
+    return res.json(status);
+  } catch {
+    return res.status(500).json({ message: '核实批注或建议创建状态失败' });
+  }
+});
+
 router.post('/production/:id/review-threads', authenticate, requirePermission('workflow:comment'), async (req, res) => {
   try {
     const productionId = parsePositiveId(req.params.id);
@@ -1237,7 +1351,7 @@ router.post('/production/:id/review-threads', authenticate, requirePermission('w
 
     const currentVersion = String(production.version || 'v1.0');
     const { version, kind, anchor, summary, proposed_text: proposedText } = req.body ?? {};
-    if (String(version ?? '') !== currentVersion) return res.status(409).json({ message: '历史版本为只读，请切换到当前版本后添加批注或建议' });
+    if (typeof version !== 'string' || !version.trim() || version.length > 32) return res.status(400).json({ message: '版本编号无效' });
     if (kind !== 'comment' && kind !== 'suggestion') return res.status(400).json({ message: '批注类型无效' });
     const quote = typeof anchor?.quote === 'string' ? anchor.quote.trim() : '';
     const context = typeof anchor?.context === 'string' ? anchor.context.trim() : '';
@@ -1255,18 +1369,72 @@ router.post('/production/:id/review-threads', authenticate, requirePermission('w
       return res.status(400).json({ message: '修改建议内容无效或过长' });
     }
 
-    const id = await createProductionReviewThread({
+    const rawClientRequestId = req.body?.client_request_id;
+    const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId.trim().toLowerCase() : '';
+    if (rawClientRequestId !== undefined && (typeof rawClientRequestId !== 'string' || !UUID_PATTERN.test(clientRequestId))) {
+      return res.status(400).json({ message: '批注请求编号无效' });
+    }
+
+    const threadInput = {
       productionId,
-      version: currentVersion,
+      version,
       kind: kind as ProductionReviewKind,
       anchor: { quote, context, from, to },
       summary: cleanSummary,
       proposedText: kind === 'suggestion' ? proposedText as string : null,
       authorId: req.user!.id,
-    });
+    };
+    if (clientRequestId) {
+      const result = await createProductionReviewThreadWithRequest({ ...threadInput, clientRequestId });
+      if (result.kind === 'created' || result.kind === 'replayed') {
+        return res.status(result.kind === 'replayed' ? 200 : 201).json({
+          message: kind === 'comment' ? '批注已添加' : '修改建议已提交',
+          id: result.threadId,
+          replayed: result.kind === 'replayed',
+        });
+      }
+      if (result.kind === 'request-conflict') return res.status(409).json({ message: '批注请求编号已被其他内容或稿件使用，请核实原请求状态。' });
+      if (result.kind === 'production-missing') return res.status(404).json({ message: '创作记录不存在' });
+      if (result.kind === 'historical') return res.status(409).json({ message: '历史版本为只读，请切换到当前版本后添加批注或建议' });
+      return res.status(409).json({ message: '批注请求无法完成，请核实原请求状态。' });
+    }
+
+    if (version !== currentVersion) return res.status(409).json({ message: '历史版本为只读，请切换到当前版本后添加批注或建议' });
+
+    const id = await createProductionReviewThread(threadInput);
     return res.status(201).json({ message: kind === 'comment' ? '批注已添加' : '修改建议已提交', id });
   } catch {
     return res.status(500).json({ message: '添加批注或建议失败' });
+  }
+});
+
+router.get('/production/:id/review-threads/:threadId/replies/requests/:requestId', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, async (req, res) => {
+  try {
+    const productionId = parsePositiveId(req.params.id);
+    const threadId = parsePositiveId(req.params.threadId);
+    const requestId = String(req.params.requestId || '').trim().toLowerCase();
+    const rawFingerprint = req.query.fingerprint;
+    if (!productionId || !threadId) return res.status(400).json({ message: '稿件或批注编号无效' });
+    if (!UUID_PATTERN.test(requestId)) return res.status(400).json({ message: '回复请求编号无效' });
+    if (typeof rawFingerprint !== 'string' || !SHA256_FINGERPRINT_PATTERN.test(rawFingerprint)) {
+      return res.status(400).json({ message: '回复载荷指纹无效' });
+    }
+    const status = await getProductionReviewReplyRequestStatus({
+      clientRequestId: requestId,
+      actorId: req.user!.id,
+      productionId,
+      threadId,
+      fingerprint: rawFingerprint.toLowerCase(),
+    });
+    if (status.status === 'conflict') {
+      return res.status(409).json({ message: '回复请求编号与原始内容不一致，请核实原请求状态。' });
+    }
+    return res.json(status);
+  } catch {
+    return res.status(500).json({ message: '核实批注回复状态失败' });
   }
 });
 
@@ -1279,16 +1447,75 @@ router.post('/production/:id/review-threads/:threadId/replies', authenticate, re
     if (!production) return res.status(404).json({ message: '创作记录不存在' });
     const topic = await getTopicScopeByProductionId(productionId);
     if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限回复该稿件批注' });
+    const rawClientRequestId = req.body?.client_request_id;
+    const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId.trim().toLowerCase() : '';
+    if (rawClientRequestId !== undefined && (typeof rawClientRequestId !== 'string' || !UUID_PATTERN.test(clientRequestId))) {
+      return res.status(400).json({ message: '回复请求编号无效' });
+    }
+    const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
+    if (!content || Array.from(content).length > 4000) return res.status(400).json({ message: '回复不能为空且不能超过 4000 个字符' });
+
+    if (clientRequestId) {
+      const result = await createProductionReviewReplyWithRequest({
+        clientRequestId,
+        productionId,
+        threadId,
+        authorId: req.user!.id,
+        content,
+      });
+      if (result.kind === 'created' || result.kind === 'replayed') {
+        return res.status(result.kind === 'replayed' ? 200 : 201).json({
+          message: '回复已添加',
+          id: result.replyId,
+          replayed: result.kind === 'replayed',
+        });
+      }
+      if (result.kind === 'request-conflict') return res.status(409).json({ message: '回复请求编号已被其他内容或对象使用，请核实原请求状态。' });
+      if (result.kind === 'production-missing') return res.status(404).json({ message: '创作记录不存在' });
+      if (result.kind === 'thread-missing') return res.status(404).json({ message: '批注线程不存在' });
+      if (result.kind === 'historical') return res.status(409).json({ message: '历史版本批注为只读' });
+      if (result.kind === 'closed') return res.status(409).json({ message: '该讨论已结束，不能继续回复' });
+      return res.status(409).json({ message: '回复请求无法完成，请核实原请求状态。' });
+    }
+
     const thread = await getProductionReviewThread(threadId, productionId);
     if (!thread) return res.status(404).json({ message: '批注线程不存在' });
     if (thread.version !== String(production.version || 'v1.0')) return res.status(409).json({ message: '历史版本批注为只读' });
     if (thread.status !== 'open') return res.status(409).json({ message: '该讨论已结束，不能继续回复' });
-    const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
-    if (!content || Array.from(content).length > 4000) return res.status(400).json({ message: '回复不能为空且不能超过 4000 个字符' });
     const id = await createProductionReviewReply(threadId, req.user!.id, content);
     return res.status(201).json({ message: '回复已添加', id });
   } catch {
     return res.status(500).json({ message: '添加回复失败' });
+  }
+});
+
+router.get('/production/:id/review-threads/:threadId/status-requests/:requestId', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, async (req, res) => {
+  try {
+    const productionId = parsePositiveId(req.params.id);
+    const threadId = parsePositiveId(req.params.threadId);
+    const requestId = String(req.params.requestId || '').trim().toLowerCase();
+    const status = req.query.status;
+    if (!productionId || !threadId) return res.status(400).json({ message: '稿件或批注编号无效' });
+    if (!UUID_PATTERN.test(requestId)) return res.status(400).json({ message: '批注状态请求编号无效' });
+    if (status !== 'resolved' && status !== 'accepted' && status !== 'rejected') {
+      return res.status(400).json({ message: '批注状态请求目标无效' });
+    }
+    const result = await getProductionReviewStatusRequestStatus({
+      clientRequestId: requestId,
+      actorId: req.user!.id,
+      productionId,
+      threadId,
+      status,
+    });
+    if (result.status === 'conflict') {
+      return res.status(409).json({ message: '状态请求编号与原操作不一致，请核实稿件当前状态。' });
+    }
+    return res.json(result);
+  } catch {
+    return res.status(500).json({ message: '核实批注或建议状态失败' });
   }
 });
 
@@ -1303,10 +1530,14 @@ router.patch('/production/:id/review-threads/:threadId/status', authenticate, as
     if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限更新该稿件批注' });
     const thread = await getProductionReviewThread(threadId, productionId);
     if (!thread) return res.status(404).json({ message: '批注线程不存在' });
-    if (thread.version !== String(production.version || 'v1.0')) return res.status(409).json({ message: '历史版本批注为只读' });
 
     const status = req.body?.status as ProductionReviewStatus;
     const userId = req.user!.id;
+    const rawClientRequestId = req.body?.client_request_id;
+    const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId.trim().toLowerCase() : '';
+    if (rawClientRequestId !== undefined && (typeof rawClientRequestId !== 'string' || !UUID_PATTERN.test(clientRequestId))) {
+      return res.status(400).json({ message: '批注状态请求编号无效' });
+    }
     const canComment = await userHasPermission(userId, 'workflow:comment');
     const canModerate = await userHasPermission(userId, 'comment:delete');
     if (thread.kind === 'comment') {
@@ -1321,6 +1552,28 @@ router.patch('/production/:id/review-threads/:threadId/status', authenticate, as
         return res.status(403).json({ message: '只有有权编辑该稿件的成员可以接受修改建议' });
       }
     }
+    if (clientRequestId) {
+      const result = await updateProductionReviewStatusWithRequest({
+        clientRequestId,
+        productionId,
+        threadId,
+        status,
+        reviewerId: userId,
+      });
+      if (result.kind === 'updated' || result.kind === 'replayed') {
+        return res.json({
+          message: status === 'resolved' ? '讨论已结束' : status === 'accepted' ? '建议已接受' : '建议已拒绝',
+          replayed: result.kind === 'replayed',
+        });
+      }
+      if (result.kind === 'request-conflict') return res.status(409).json({ message: '状态请求编号已被其他操作者或操作使用，请核实原请求状态。' });
+      if (result.kind === 'production-missing') return res.status(404).json({ message: '创作记录不存在' });
+      if (result.kind === 'thread-missing') return res.status(404).json({ message: '批注线程不存在' });
+      if (result.kind === 'historical') return res.status(409).json({ message: '历史版本批注为只读' });
+      return res.status(409).json({ message: '该批注或建议已被其他协作者处理' });
+    }
+
+    if (thread.version !== String(production.version || 'v1.0')) return res.status(409).json({ message: '历史版本批注为只读' });
     if (thread.status !== 'open') return res.status(409).json({ message: '该批注或建议已处理' });
     const changed = await updateProductionReviewStatus(threadId, status, userId);
     if (!changed) return res.status(409).json({ message: '该批注或建议已被其他协作者处理' });
@@ -1348,6 +1601,29 @@ router.get('/shooting', authenticate, async (req, res) => {
     res.json({ data, total: total?.total || 0, page, limit });
   } catch {
     res.status(500).json({ message: '获取拍摄列表失败' });
+  }
+});
+
+router.get('/shooting/create-request/:requestId', authenticate, async (req, res) => {
+  try {
+    const requestId = String(req.params.requestId || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return res.status(400).json({ message: '成片制作请求编号无效' });
+    }
+    const request = await queryOne<{ shooting_id: number; topic_id: number | null }>(
+      `SELECT k.shooting_id,s.topic_id
+       FROM shooting_create_request_keys k
+       LEFT JOIN shooting s ON s.id=k.shooting_id
+       WHERE k.client_request_id=? AND k.creator_id=?`,
+      [requestId, Number(req.user?.id)],
+    );
+    if (!request) return res.status(404).json({ message: '尚未找到对应制作计划' });
+    if (request.topic_id === null) return res.status(410).json({ deleted: true, message: '对应制作计划已删除' });
+    const topic = await getTopicScopeByShootingId(request.shooting_id);
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该制作计划请求状态' });
+    return res.json({ shootingId: Number(request.shooting_id) });
+  } catch {
+    return res.status(500).json({ message: '核实制作计划创建状态失败' });
   }
 });
 
@@ -1455,7 +1731,7 @@ router.put('/shooting/:id', authenticate, requirePermission('workflow:shooting')
     if (scriptSourceParse.kind === 'invalid' || (scriptSourceParse.kind === 'valid' && script_content === undefined)) {
       return res.status(400).json({ message: '剧本来源版本信息无效' });
     }
-    if (status !== undefined && !SHOOTING_STATUSES.has(String(status))) {
+    if (status !== undefined && (typeof status !== 'string' || !SHOOTING_STATUSES.has(status))) {
       return res.status(400).json({ message: '成片制作状态无效' });
     }
     const updateFields: string[] = [];
@@ -1704,33 +1980,81 @@ router.delete('/shooting/:id', authenticate, requirePermission('workflow:shootin
 router.post('/shooting', authenticate, requirePermission('workflow:shooting'), async (req, res) => {
   try {
     const { topic_id, plan_date, location, equipment, status = 'planned' } = req.body;
+    const rawClientRequestId = req.body?.client_request_id;
+    const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId.trim().toLowerCase() : '';
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
-    if (!SHOOTING_STATUSES.has(String(status))) return res.status(400).json({ message: '成片制作状态无效' });
+    if (rawClientRequestId !== undefined && rawClientRequestId !== null
+      && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientRequestId)) {
+      return res.status(400).json({ message: '成片制作请求编号无效' });
+    }
+    if (typeof status !== 'string' || !SHOOTING_STATUSES.has(status)) return res.status(400).json({ message: '成片制作状态无效' });
+    const requestFingerprint = clientRequestId
+      ? createHash('sha256').update(JSON.stringify([
+        Number(topic_id), plan_date ?? null, location ?? null, equipment ?? null, String(status),
+      ])).digest('hex')
+      : '';
     const topic = await getTopicScopeById(topic_id);
     if (!topic) return res.status(404).json({ message: '选题不存在' });
     if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限操作该选题的成片制作记录' });
-    if (status === 'completed') {
-      const result = await runInTransaction(async (tx) => {
+    const result = await runInTransaction(async (tx) => {
+      if (clientRequestId) {
+        const existing = await tx.queryOne<{
+          shooting_id: number;
+          creator_id: number;
+          request_fingerprint: string;
+        }>(
+          `SELECT shooting_id,creator_id,request_fingerprint FROM shooting_create_request_keys WHERE client_request_id=?`,
+          [clientRequestId],
+        );
+        if (existing) {
+          if (Number(existing.creator_id) !== Number(req.user?.id) || existing.request_fingerprint !== requestFingerprint) {
+            return { conflict: true as const };
+          }
+          const existingShooting = await tx.queryOne<{ id: number }>(
+            'SELECT id FROM shooting WHERE id=?',
+            [existing.shooting_id],
+          );
+          return existingShooting
+            ? { ok: true as const, shootingId: Number(existing.shooting_id), created: false }
+            : { deleted: true as const };
+        }
+      }
+
+      if (status === 'completed') {
         const transition = await completeShootingHandoff(tx, topic_id, req.user?.id, null);
         if (!transition.ok) return transition;
-        const shootingId = await tx.executeInsert(
-          `INSERT INTO shooting (topic_id, plan_date, location, equipment, status, operator_id) VALUES (?, ?, ?, ?, ?, ?)`,
-          [topic_id, plan_date, location, equipment, status, req.user?.id],
-        );
-        return { ok: true as const, shootingId };
-      });
-      if (!result.ok) {
-        return res.status(409).json({
-          message: workflowStageConflictMessage(result.status, 'shooting', '创建已完成的成片记录'),
-          code: 'WORKFLOW_STAGE_CONFLICT',
-        });
       }
-      broadcastToRoom('shooting', 'shooting:created', { id: result.shootingId, topic_id: req.body.topic_id });
-      return res.json({ message: '成片制作计划添加成功', shootingId: result.shootingId });
+      const shootingId = await tx.executeInsert(
+        `INSERT INTO shooting (topic_id, plan_date, location, equipment, status, operator_id) VALUES (?, ?, ?, ?, ?, ?)`,
+        [topic_id, plan_date, location, equipment, status, req.user?.id],
+      );
+      if (clientRequestId) {
+        await tx.execute(
+          `INSERT INTO shooting_create_request_keys(client_request_id,creator_id,shooting_id,request_fingerprint,created_at)
+           VALUES(?,?,?,?,?)`,
+          [clientRequestId, Number(req.user?.id), shootingId, requestFingerprint, beijingNow()],
+        );
+      }
+      return { ok: true as const, shootingId, created: true };
+    });
+    if ('conflict' in result) {
+      return res.status(409).json({ message: '成片制作请求编号已用于其他内容，请先核实原请求状态。', code: 'SHOOTING_CREATE_REQUEST_CONFLICT' });
     }
-    const shootingId = await executeInsert(`INSERT INTO shooting (topic_id, plan_date, location, equipment, status, operator_id) VALUES (?, ?, ?, ?, ?, ?)`, [topic_id, plan_date, location, equipment, status, req.user?.id]);
-    broadcastToRoom('shooting', 'shooting:created', { id: shootingId, topic_id: req.body.topic_id });
-    res.json({ message: '成片制作计划添加成功', shootingId });
+    if ('deleted' in result) {
+      return res.status(410).json({ message: '该请求对应的制作计划已删除，不会因为重试而重新创建。', deleted: true });
+    }
+    if (!result.ok) {
+      return res.status(409).json({
+        message: workflowStageConflictMessage(result.status, 'shooting', '创建已完成的成片记录'),
+        code: 'WORKFLOW_STAGE_CONFLICT',
+      });
+    }
+    if (result.created) broadcastToRoom('shooting', 'shooting:created', { id: result.shootingId, topic_id });
+    return res.json({
+      message: '成片制作计划添加成功',
+      shootingId: result.shootingId,
+      ...(clientRequestId ? { idempotent_replay: !result.created } : {}),
+    });
   } catch {
     res.status(500).json({ message: '添加成片制作计划失败' });
   }
@@ -1761,12 +2085,19 @@ router.post(
     requireAllPermissions('workflow:publishing', 'creator:data:view'),
     async (req, res) => {
     try {
-      const result = await reconcilePublishingDouyinLinks({ createdBy: req.user?.id });
+      const result = await reconcilePublishingDouyinLinks({
+        createdBy: req.user?.id,
+        ...(canEditAllContent(req.user)
+          ? { scope: 'all' as const }
+          : { scope: 'editable' as const, editableBy: req.user!.id }),
+      });
       const { topicIds, ...summary } = result;
+      let archiveSyncPending = 0;
       for (const topicId of topicIds) {
         try {
           await syncPublishedArchive(topicId, req.user?.id);
         } catch (error) {
+          archiveSyncPending += 1;
           apiLogger.error({
             module: 'publishing',
             operation: 'archive.sync_after_reconcile_failed',
@@ -1774,7 +2105,7 @@ router.post(
           }, 'api.publishing.archive_sync_failed');
         }
       }
-      res.json({ message: '抖音作品关联已刷新', ...summary });
+      res.json({ message: '抖音作品关联已刷新', ...summary, archiveSyncPending });
     } catch {
       res.status(500).json({ message: '刷新抖音作品关联失败' });
     }
@@ -1966,8 +2297,14 @@ router.get('/publishing', authenticate, async (req, res) => {
 router.post('/publishing', authenticate, requirePermission('workflow:publishing'), async (req, res) => {
   try {
     const { topic_id, platform, url, status = 'pending', publish_time, views, likes, shares, comments } = req.body;
+    const rawClientRequestId = req.body?.client_request_id;
+    const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId.trim().toLowerCase() : '';
     if (!topic_id) return res.status(400).json({ message: '选题ID不能为空' });
-    if (!PUBLISHING_STATUSES.has(String(status))) return res.status(400).json({ message: '发布状态无效' });
+    if (rawClientRequestId !== undefined && rawClientRequestId !== null
+      && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientRequestId)) {
+      return res.status(400).json({ message: '发布请求编号无效' });
+    }
+    if (typeof status !== 'string' || !PUBLISHING_STATUSES.has(status)) return res.status(400).json({ message: '发布状态无效' });
     if (!publishingDateKey(publish_time)) return res.status(400).json({ message: '发布时间格式无效' });
     const rawMetrics = { views, likes, shares, comments };
     const normalizedMetrics = Object.fromEntries(
@@ -1976,10 +2313,39 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
     if (PUBLISHING_METRIC_FIELDS.some((field) => rawMetrics[field] != null && rawMetrics[field] !== '' && normalizedMetrics[field] === null)) {
       return res.status(400).json({ message: '播放、点赞、分享和评论必须是非负整数' });
     }
+    const requestFingerprint = clientRequestId
+      ? createHash('sha256').update(JSON.stringify([
+        Number(topic_id), platform ?? null, url ?? null, String(status), publish_time ?? null,
+        normalizedMetrics.views, normalizedMetrics.likes, normalizedMetrics.shares, normalizedMetrics.comments,
+      ])).digest('hex')
+      : '';
     const topic = await getTopicScopeById(topic_id);
     if (!topic) return res.status(404).json({ message: '选题不存在' });
     if (!canEditProduction(req.user, topic)) return res.status(403).json({ message: '无权限操作该选题的发布记录' });
     const result = await runInTransaction(async (tx) => {
+      if (clientRequestId) {
+        const existing = await tx.queryOne<{
+          publishing_id: number;
+          creator_id: number;
+          request_fingerprint: string;
+        }>(
+          `SELECT publishing_id,creator_id,request_fingerprint FROM publishing_create_request_keys WHERE client_request_id=?`,
+          [clientRequestId],
+        );
+        if (existing) {
+          if (Number(existing.creator_id) !== Number(req.user?.id) || existing.request_fingerprint !== requestFingerprint) {
+            return { conflict: true as const };
+          }
+          const existingPublishing = await tx.queryOne<{ id: number }>(
+            'SELECT id FROM publishing WHERE id=?',
+            [existing.publishing_id],
+          );
+          return existingPublishing
+            ? { ok: true as const, publishingId: Number(existing.publishing_id), created: false }
+            : { deleted: true as const };
+        }
+      }
+
       const currentTopic = await tx.queryOne<{ status: string; title: string }>(
         'SELECT status,title FROM topics WHERE id=?',
         [topic_id],
@@ -1995,9 +2361,22 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
           normalizedMetrics.views, normalizedMetrics.likes, normalizedMetrics.shares, normalizedMetrics.comments,
           hasManualMetrics ? beijingNow() : null, hasManualMetrics ? req.user?.id : null],
       );
+      if (clientRequestId) {
+        await tx.execute(
+          `INSERT INTO publishing_create_request_keys(client_request_id,creator_id,publishing_id,request_fingerprint,created_at)
+           VALUES(?,?,?,?,?)`,
+          [clientRequestId, Number(req.user?.id), id, requestFingerprint, beijingNow()],
+        );
+      }
       await advancePublishingTopicIfResolved(tx, topic_id, req.user?.id);
-      return { ok: true as const, publishingId: id };
+      return { ok: true as const, publishingId: id, created: true };
     });
+    if ('conflict' in result) {
+      return res.status(409).json({ message: '发布请求编号已用于其他内容，请先核实原请求状态。', code: 'PUBLISHING_CREATE_REQUEST_CONFLICT' });
+    }
+    if ('deleted' in result) {
+      return res.status(410).json({ message: '该请求对应的发布记录已删除，不会因为重试而重新创建。', deleted: true });
+    }
     if (!result.ok) {
       return res.status(409).json({
         message: workflowStageConflictMessage(result.status, 'publishing', '登记发布完成'),
@@ -2005,7 +2384,7 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
       });
     }
     const publishingId = result.publishingId;
-    if (status === 'published') {
+    if (result.created && status === 'published') {
       try {
         await syncPublishedArchive(Number(topic_id), req.user?.id);
       } catch (error) {
@@ -2016,10 +2395,38 @@ router.post('/publishing', authenticate, requirePermission('workflow:publishing'
         }, 'api.publishing.archive_sync_failed');
       }
     }
-    broadcastToRoom('publishing', 'publishing:created', { id: publishingId, topic_id: req.body.topic_id });
-    res.json({ message: '发布记录添加成功', publishingId });
+    if (result.created) broadcastToRoom('publishing', 'publishing:created', { id: publishingId, topic_id: req.body.topic_id });
+    res.json({
+      message: '发布记录添加成功',
+      publishingId,
+      ...(clientRequestId ? { idempotent_replay: !result.created } : {}),
+    });
   } catch {
     res.status(500).json({ message: '添加发布记录失败' });
+  }
+});
+
+// GET /publishing/create-request/:requestId - read back a create result without writing.
+router.get('/publishing/create-request/:requestId', authenticate, async (req, res) => {
+  try {
+    const requestId = String(req.params.requestId || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return res.status(400).json({ message: '发布请求编号无效' });
+    }
+    const request = await queryOne<{ publishing_id: number; topic_id: number | null }>(
+      `SELECT k.publishing_id,p.topic_id
+       FROM publishing_create_request_keys k
+       LEFT JOIN publishing p ON p.id=k.publishing_id
+       WHERE k.client_request_id=? AND k.creator_id=?`,
+      [requestId, Number(req.user?.id)],
+    );
+    if (!request) return res.status(404).json({ message: '尚未找到对应发布记录' });
+    if (request.topic_id === null) return res.status(410).json({ deleted: true, message: '对应发布记录已删除' });
+    const topic = await getTopicScopeByPublishingId(request.publishing_id);
+    if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该发布请求状态' });
+    return res.json({ publishingId: Number(request.publishing_id) });
+  } catch {
+    return res.status(500).json({ message: '核实发布记录创建状态失败' });
   }
 });
 
@@ -2066,7 +2473,7 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
     if (linkedWork && DOUYIN_AUTHORITATIVE_FIELDS.some((field) => req.body[field] !== undefined)) {
       return res.status(409).json({ message: '已关联抖音作品，平台、状态和发布时间由抖音作品决定' });
     }
-    if (status !== undefined && !PUBLISHING_STATUSES.has(String(status))) {
+    if (status !== undefined && (typeof status !== 'string' || !PUBLISHING_STATUSES.has(status))) {
       return res.status(400).json({ message: '发布状态无效' });
     }
     const suppliedMetrics = Object.fromEntries(

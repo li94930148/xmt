@@ -59,13 +59,13 @@ export default function CreatorProfileCard({
       <div className="min-w-0">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-studio-cyan-contrast">Creator profile</p>
         <h2 className="mt-2 truncate text-2xl font-semibold text-studio-text">{name}</h2>
-        <p className="mt-2 text-sm text-studio-text-muted">抖音 UID：{uid || '—'}</p>
+        <p className="mt-2 text-sm text-studio-text-secondary">抖音 UID：{uid || '—'}</p>
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">粉丝</span><p className="mt-2 text-xl font-semibold">{fansCount == null ? '暂无数据' : compactNumber.format(fansCount)}</p></div>
-          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">入库作品</span><p className="mt-2 text-xl font-semibold">{compactNumber.format(worksCount)}</p></div>
-          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-muted">累计播放</span><p className="mt-2 text-xl font-semibold">{compactNumber.format(playCount)}</p></div>
+          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-secondary">粉丝</span><p className="mt-2 text-xl font-semibold">{fansCount == null ? '暂无数据' : compactNumber.format(fansCount)}</p></div>
+          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-secondary">入库作品</span><p className="mt-2 text-xl font-semibold">{compactNumber.format(worksCount)}</p></div>
+          <div className="rounded-xl bg-studio-surface p-4"><span className="text-xs text-studio-text-secondary">累计播放</span><p className="mt-2 text-xl font-semibold">{compactNumber.format(playCount)}</p></div>
         </div>
-        <p className="mt-4 text-xs leading-5 text-studio-text-muted">仅展示 Creator Dashboard 已同步的真实账号与内容数据。</p>
+        <p className="mt-4 text-xs leading-5 text-studio-text-secondary">仅展示 Creator Dashboard 已同步的真实账号与内容数据。</p>
       </div>
     </section>
   );

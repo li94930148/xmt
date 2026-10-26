@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MessageSquareText } from 'lucide-react';
 import FormModal from './common/FormModal';
 import LoadingState from './common/LoadingState';
@@ -32,15 +32,21 @@ export default function AnonymousFeedbackModal({
   const [needReply, setNeedReply] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const addNotification = useAppStore((state) => state.addNotification);
+  const submitLockRef = useRef(false);
+  const feedbackRequestSequenceRef = useRef(0);
 
   const loadFeedback = useCallback(async () => {
+    const requestSequence = ++feedbackRequestSequenceRef.current;
     setLoading(true);
     try {
-      setFeedback(await getPublicAnonymousFeedback());
+      const nextFeedback = await getPublicAnonymousFeedback();
+      if (requestSequence === feedbackRequestSequenceRef.current) setFeedback(nextFeedback);
     } catch (error) {
-      addNotification({ title: '加载失败', message: error instanceof Error ? error.message : '无法获取意见列表', type: 'error' });
+      if (requestSequence === feedbackRequestSequenceRef.current) {
+        addNotification({ title: '加载失败', message: error instanceof Error ? error.message : '无法获取意见列表', type: 'error' });
+      }
     } finally {
-      setLoading(false);
+      if (requestSequence === feedbackRequestSequenceRef.current) setLoading(false);
     }
   }, [addNotification]);
 
@@ -49,25 +55,37 @@ export default function AnonymousFeedbackModal({
   }, [loadFeedback, open]);
 
   const handleClose = () => {
+    if (submitLockRef.current) return;
     setType(''); setContent(''); setNeedReply(false); onClose();
   };
 
   const handleSubmit = async () => {
+    if (submitLockRef.current) return;
     if (!type || !content.trim()) {
       addNotification({ title: '请完善意见', message: '意见类型和意见内容均为必填项', type: 'warning' });
       return;
     }
+    const payload = { type, content: content.trim(), needReply };
+    submitLockRef.current = true;
     setSubmitting(true);
     try {
-      await submitAnonymousFeedback({ type, content: content.trim(), needReply });
-      setType(''); setContent(''); setNeedReply(false);
-      await loadFeedback();
-      await onSubmitted?.();
-      addNotification({ title: '提交成功', message: '感谢你的声音，意见已匿名发布', type: 'success' });
+      await submitAnonymousFeedback(payload);
     } catch (error) {
-      addNotification({ title: '提交失败', message: error instanceof Error ? error.message : '请稍后重试', type: 'error' });
-    } finally {
       setSubmitting(false);
+      submitLockRef.current = false;
+      addNotification({ title: '提交失败', message: error instanceof Error ? error.message : '请稍后重试', type: 'error' });
+      return;
+    }
+
+    setType(''); setContent(''); setNeedReply(false);
+    setSubmitting(false);
+    submitLockRef.current = false;
+    addNotification({ title: '提交成功', message: '感谢你的声音，意见已匿名发布', type: 'success' });
+    void loadFeedback();
+    try {
+      await onSubmitted?.();
+    } catch (error) {
+      addNotification({ title: '意见已提交，页面暂未刷新', message: error instanceof Error ? error.message : '稍后可重新加载列表', type: 'warning' });
     }
   };
 
@@ -113,14 +131,14 @@ export default function AnonymousFeedbackModal({
           <div className="space-y-4">
             <label className="block text-sm font-medium text-studio-text-secondary">
               意见类型 <span className="text-studio-coral-contrast">*</span>
-              <select value={type} onChange={(event) => setType(event.target.value as AnonymousFeedbackType)} className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-studio-text-primary outline-none transition focus:border-studio-border-active">
+              <select value={type} onChange={(event) => setType(event.target.value as AnonymousFeedbackType)} className="xmt-field mt-2 w-full">
                 <option value="">请选择意见类型</option>
                 {types.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
             <label className="block text-sm font-medium text-studio-text-secondary">
               意见内容 <span className="text-studio-coral-contrast">*</span>
-              <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={4} placeholder="请输入你的想法..." className="mt-2 w-full resize-y rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2.5 text-studio-text-primary outline-none transition placeholder:text-studio-text-muted focus:border-studio-border-active" />
+              <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={4} placeholder="请输入你的想法..." className="xmt-field mt-2 w-full resize-y" />
               <span className="mt-1 block text-right text-xs text-studio-text-muted">{content.length}/2000</span>
             </label>
             <label className="flex cursor-pointer items-center gap-3 text-sm text-studio-text-secondary">

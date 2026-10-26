@@ -38,6 +38,11 @@ export type UpdateRetrospectiveInput = {
   version?: number;
 };
 
+export type RetrospectiveUpdateRequestStatus =
+  | { state: 'processed' }
+  | { state: 'not_found' }
+  | { state: 'conflict' };
+
 export type GenerateSnapshotInput = {
   mode?: 'replace';
 };
@@ -47,6 +52,7 @@ export type CreateRetroActionInput = {
   descriptionMd?: string;
   ownerId?: number | null;
   dueDate?: string | null;
+  client_request_id?: string;
 };
 
 export type UpdateRetroActionInput = {

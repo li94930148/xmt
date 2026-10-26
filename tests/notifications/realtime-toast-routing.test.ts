@@ -13,7 +13,7 @@ assert.doesNotMatch(realtimeToast, /notifyDesktop|showDesktopNotification/, '房
 assert.match(realtimeToast, /toastListener\?\.\(\{ \.\.\.item, id \}\)/, '房间实时事件仍须显示页面内 toast');
 assert.match(socketHook, /nextSocket\.on\('new_message',[\s\S]*?notifyDesktop\(/, '持久化个人消息仍统一负责桌面通知');
 assert.match(socketHook, /buildMessageDesktopNotification\(message, desktopMessageGroups\)/, '个人消息桌面提醒须经过聚合与站内链接校验');
-assert.match(socketHook, /nextSocket\.on\('connect',[\s\S]*?getUnreadCount\(\)[\s\S]*?xmt-messages-refresh/, 'socket reconnect must refresh missed unread count and persisted message state');
+assert.match(socketHook, /nextSocket\.on\('connect',[\s\S]*?void refreshUnreadCount\(\)[\s\S]*?xmt-messages-refresh/, 'socket reconnect must refresh missed unread count and persisted message state');
 assert.match(socketHook, /nextSocket\.on\('new_message',[\s\S]*?xmt-messages-refresh/, 'a realtime message must refresh the visible message list');
 assert.match(messagesPage, /addEventListener\('xmt-messages-refresh'/, 'desktop message list reloads persisted notifications after realtime events or reconnect');
 assert.match(mobileMessagesPage, /addEventListener\('xmt-messages-refresh'/, 'mobile message list reloads persisted notifications after realtime events or reconnect');

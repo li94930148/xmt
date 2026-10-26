@@ -48,25 +48,32 @@ export default function CollaborationHeatmap({ topics }: CollaborationHeatmapPro
     return styles.isDark ? 'bg-studio-primary' : 'bg-studio-primary';
   };
 
-  // 只显示部分小时标签（每3小时）
-  const hourLabels = HOURS.filter(h => h % 3 === 0);
-
   return (
     <div className={`${styles.bgSecondary} rounded-xl p-6 ${styles.border}`}>
       <div className="flex items-center gap-2 mb-5">
         <Activity className="w-5 h-5 text-studio-primary" />
-        <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>协作热力图</h3>
-        <span className={`text-xs ${styles.textMuted} ml-2`}>一周 7 天 × 24 小时产出分布</span>
+        <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>协作热力图</h2>
+        <span className="ml-2 text-xs text-studio-text-secondary">一周 7 天 × 24 小时产出分布</span>
       </div>
 
-      <div className="overflow-x-auto">
+      <div
+        role="region"
+        aria-label="协作热力图（可横向滚动）"
+        tabIndex={0}
+        className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring"
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          event.currentTarget.scrollBy({ left: event.key === 'ArrowRight' ? 120 : -120 });
+        }}
+      >
         <div className="min-w-[700px]">
           {/* 小时标签 */}
           <div className="flex ml-12 mb-1">
             {HOURS.map(h => (
               <div key={h} className="flex-1 text-center">
                 {h % 3 === 0 && (
-                  <span className={`text-[10px] ${styles.textMuted}`}>{h}时</span>
+                  <span className="text-[10px] text-studio-text-secondary">{h}时</span>
                 )}
               </div>
             ))}
@@ -102,7 +109,7 @@ export default function CollaborationHeatmap({ topics }: CollaborationHeatmapPro
 
           {/* 图例 */}
           <div className="flex items-center justify-end gap-2 mt-4">
-            <span className={`text-[10px] ${styles.textMuted}`}>少</span>
+            <span className="text-[10px] text-studio-text-secondary">少</span>
             {[0, 0.25, 0.5, 0.75, 1].map((intensity, i) => (
               <div
                 key={i}
@@ -119,7 +126,7 @@ export default function CollaborationHeatmap({ topics }: CollaborationHeatmapPro
                 }`}
               />
             ))}
-            <span className={`text-[10px] ${styles.textMuted}`}>多</span>
+            <span className="text-[10px] text-studio-text-secondary">多</span>
           </div>
         </div>
       </div>

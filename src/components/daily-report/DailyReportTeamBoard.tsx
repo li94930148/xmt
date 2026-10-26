@@ -7,12 +7,13 @@ type Props = {
   reports: DailyReport[];
   loading: boolean;
   error?: string;
+  stale?: boolean;
   onDateChange: (date: string) => void;
   onRefresh: () => void;
   onView: (report: DailyReport) => void;
 };
 
-export default function DailyReportTeamBoard({ date, reports, loading, error, onDateChange, onRefresh, onView }: Props) {
+export default function DailyReportTeamBoard({ date, reports, loading, error, stale = false, onDateChange, onRefresh, onView }: Props) {
   return (
     <GlassPanel className="overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-border-soft px-5 py-4">
@@ -21,11 +22,14 @@ export default function DailyReportTeamBoard({ date, reports, loading, error, on
           <p className="mt-1 text-sm text-studio-text-muted">查看成员公开的日报内容。</p>
         </div>
         <div className="flex gap-2">
-          <input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none" />
+          <label htmlFor="team-daily-report-date" className="sr-only">团队日报日期</label>
+          <input id="team-daily-report-date" type="date" value={date} onChange={(event) => onDateChange(event.target.value)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none" />
           <ActionButton onClick={onRefresh} disabled={loading}>刷新</ActionButton>
         </div>
       </div>
-      {error ? <div className="p-5"><EmptyState icon={Users} title="无法查看团队日报" description={error} /></div> : reports.length === 0 ? <div className="p-5"><EmptyState icon={Users} title={loading ? '加载中' : '暂无团队日报'} description="当前日期没有已提交日报。" /></div> : (
+      {error ? <div role="alert" className="mx-5 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-button border border-studio-coral/30 bg-studio-coral-soft px-4 py-3 text-sm text-studio-coral-contrast"><span>{stale ? `${error} 仍显示上次成功读取的团队日报，可能不是最新。` : error}</span><ActionButton type="button" variant="ghost" disabled={loading} onClick={onRefresh}>重新加载团队日报</ActionButton></div> : null}
+      {loading ? <p role="status" aria-live="polite" className="px-5 pt-3 text-sm text-studio-text-secondary">{reports.length > 0 ? '正在更新团队日报…' : '正在加载团队日报…'}</p> : null}
+      {!error && !loading && reports.length === 0 ? <div className="p-5"><EmptyState icon={Users} title="暂无团队日报" description="当前日期没有已提交日报。" /></div> : reports.length === 0 ? null : (
         <div className="divide-y divide-studio-border-soft">
           {reports.map((report) => (
             <div key={report.id} className="grid gap-3 px-5 py-4 md:grid-cols-[160px_140px_minmax(0,1fr)_90px] md:items-center">

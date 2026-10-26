@@ -30,6 +30,40 @@ import { productionMaterialHistorySnapshotMigration } from './028_production_mat
 import { workflowDocumentVersionsMigration } from './029_workflow_document_versions';
 import { productionOutlineSourceVersionMigration } from './030_production_outline_source_version';
 import { creatorSyncClaimLeaseMigration } from './031_creator_sync_claim_lease';
+import { pomodoroCancellationLedgerMigration } from './032_pomodoro_cancellation_state';
+import { inspirationCommentIdempotencyMigration } from './033_inspiration_comment_idempotency';
+import { inspirationCreateIdempotencyMigration } from './034_inspiration_create_idempotency';
+import { publishingCreateIdempotencyMigration } from './035_publishing_create_idempotency';
+import { shootingCreateIdempotencyMigration } from './036_shooting_create_idempotency';
+import { productionCreateIdempotencyMigration } from './037_production_create_idempotency';
+import { calendarEventCreateIdempotencyMigration } from './038_calendar_event_create_idempotency';
+import { userUpdateIdempotencyMigration } from './039_user_update_idempotency';
+import { userCreateIdempotencyMigration } from './040_user_create_idempotency';
+import { userDeleteIdempotencyMigration } from './041_user_delete_idempotency';
+import { messageClearIdempotencyMigration } from './042_message_clear_idempotency';
+import { retrospectiveCreateIdempotencyMigration } from './043_retrospective_create_idempotency';
+import { messageReadAllIdempotencyMigration } from './044_message_read_all_idempotency';
+import { workflowTemplateCreateIdempotencyMigration } from './045_workflow_template_create_idempotency';
+import { anonymousFeedbackDeleteIdempotencyMigration } from './046_anonymous_feedback_delete_idempotency';
+import { retroActionCreateIdempotencyMigration } from './047_retro_action_create_idempotency';
+import { announcementCreateIdempotencyMigration } from './048_announcement_create_idempotency';
+import { productionReviewReplyIdempotencyMigration } from './049_production_review_reply_idempotency';
+import { productionReviewThreadIdempotencyMigration } from './050_production_review_thread_idempotency';
+import { productionReviewStatusIdempotencyMigration } from './051_production_review_status_idempotency';
+import { creatorAgentBindingCodeRecoveryMigration } from './052_creator_agent_binding_code_recovery';
+import { creatorAgentBindResultRecoveryMigration } from './053_creator_agent_bind_result_recovery';
+import { inspirationVoteIdempotencyMigration } from './054_inspiration_vote_idempotency';
+import { retroActionUpdateIdempotencyMigration } from './055_retro_action_update_idempotency';
+import { retroActionUpdateOutcomeMigration } from './056_retro_action_update_outcome';
+import { retrospectiveUpdateIdempotencyMigration } from './057_retrospective_update_idempotency';
+import { topicCreateIdempotencyMigration } from './058_topic_create_idempotency';
+import { resourceCreateIdempotencyMigration } from './059_resource_create_idempotency';
+import { resourceUpdateIdempotencyMigration } from './060_resource_update_idempotency';
+import { workflowTemplateUpdateIdempotencyMigration } from './061_workflow_template_update_idempotency';
+import { resourceCategoryMutationIdempotencyMigration } from './062_resource_category_mutation_idempotency';
+import { anonymousFeedbackUpdateIdempotencyMigration } from './063_anonymous_feedback_update_idempotency';
+import { topicTemplateMutationIdempotencyMigration } from './064_topic_template_mutation_idempotency';
+import { reportSummaryUpdateIdempotencyMigration } from './065_report_summary_update_idempotency';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -63,4 +97,38 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   workflowDocumentVersionsMigration,
   productionOutlineSourceVersionMigration,
   creatorSyncClaimLeaseMigration,
+  pomodoroCancellationLedgerMigration,
+  inspirationCommentIdempotencyMigration,
+  inspirationCreateIdempotencyMigration,
+  publishingCreateIdempotencyMigration,
+  shootingCreateIdempotencyMigration,
+  productionCreateIdempotencyMigration,
+  calendarEventCreateIdempotencyMigration,
+  userUpdateIdempotencyMigration,
+  userCreateIdempotencyMigration,
+  userDeleteIdempotencyMigration,
+  messageClearIdempotencyMigration,
+  retrospectiveCreateIdempotencyMigration,
+  messageReadAllIdempotencyMigration,
+  workflowTemplateCreateIdempotencyMigration,
+  anonymousFeedbackDeleteIdempotencyMigration,
+  retroActionCreateIdempotencyMigration,
+  announcementCreateIdempotencyMigration,
+  productionReviewReplyIdempotencyMigration,
+  productionReviewThreadIdempotencyMigration,
+  productionReviewStatusIdempotencyMigration,
+  creatorAgentBindingCodeRecoveryMigration,
+  creatorAgentBindResultRecoveryMigration,
+  inspirationVoteIdempotencyMigration,
+  retroActionUpdateIdempotencyMigration,
+  retroActionUpdateOutcomeMigration,
+  retrospectiveUpdateIdempotencyMigration,
+  topicCreateIdempotencyMigration,
+  resourceCreateIdempotencyMigration,
+  resourceUpdateIdempotencyMigration,
+  workflowTemplateUpdateIdempotencyMigration,
+  resourceCategoryMutationIdempotencyMigration,
+  anonymousFeedbackUpdateIdempotencyMigration,
+  topicTemplateMutationIdempotencyMigration,
+  reportSummaryUpdateIdempotencyMigration,
 ];

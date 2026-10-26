@@ -165,7 +165,7 @@ export default function Analytics() {
                   aria-label="统计年份"
                   value={year}
                   onChange={(event) => setYear(parseInt(event.target.value, 10))}
-                  className={`rounded-lg px-3 py-1 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
+                  className={`min-h-10 rounded-lg px-3 py-1 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
                 >
                   {years.map((item) => (
                     <option key={item.value} value={item.value}>
@@ -177,7 +177,7 @@ export default function Analytics() {
                   aria-label="统计月份"
                   value={month}
                   onChange={(event) => setMonth(parseInt(event.target.value, 10))}
-                  className={`rounded-lg px-3 py-1 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
+                  className={`min-h-10 rounded-lg px-3 py-1 text-sm ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
                 >
                   {months.map((item) => (
                     <option key={item.value} value={item.value}>
@@ -201,7 +201,7 @@ export default function Analytics() {
               </ActionButton>
             </div>
           ) : loading && hasLoadedData ? (
-            <p role="status" className={`text-sm ${styles.textMuted}`}>
+            <p role="status" className="text-sm text-studio-text-secondary">
               正在读取 {year}年{month}月统计；当前仍显示 {loadedPeriod?.year}年{loadedPeriod?.month}月最近一次成功结果。
             </p>
           ) : null}
@@ -217,7 +217,7 @@ export default function Analytics() {
                 >
                   <div className="flex items-start justify-between">
                     <div>
-                      <p className={`${styles.textMuted} text-xs font-semibold uppercase tracking-wider`}>{card.title}</p>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-studio-text-secondary">{card.title}</p>
                       <p data-analytics-metric={card.title} className={`mt-3 text-3xl font-bold tracking-tight ${styles.textPrimary}`}>
                         {card.value === '—' ? '—' : <ReactBitsMetricSlot value={typeof card.value === 'number' ? card.value : undefined}>{String(card.value)}</ReactBitsMetricSlot>}
                       </p>
@@ -237,7 +237,7 @@ export default function Analytics() {
             })}
           </div>
 
-          <p className={`-mt-3 text-xs ${styles.textMuted}`}>
+          <p className="-mt-3 text-xs text-studio-text-secondary">
             {monthlyStats ? (
               <>
                 {loadedPeriod?.year}年{loadedPeriod?.month}月含 {monthlyStats.publication_count || 0} 条已发布作品；逐作品汇总，不再把同一选题的多条发布数据相加混算。
@@ -250,7 +250,7 @@ export default function Analytics() {
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div className={`${styles.bgSecondary} rounded-xl p-6 ${styles.border}`}>
-              <h3 className={`mb-4 text-lg font-semibold ${styles.textPrimary}`}>数据概览</h3>
+              <h2 className={`mb-4 text-lg font-semibold ${styles.textPrimary}`}>数据概览</h2>
               <div className="grid grid-cols-2 gap-4">
                 {metricCards.map((item) => {
                   const Icon = item.icon;
@@ -271,7 +271,7 @@ export default function Analytics() {
 
             <div className={`${styles.bgSecondary} rounded-xl p-6 ${styles.border}`}>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>作品表现与历史数据</h3>
+                <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>作品表现与历史数据</h2>
                 {selectedTopic && topicAnalytics.length > 0 && !topicAnalyticsError ? (
                   <ActionButton type="button" variant="secondary" disabled={topicAnalyticsLoading} onClick={() => setTopicAnalyticsRetry((attempt) => attempt + 1)}>
                     <RefreshCw className={`h-4 w-4 ${topicAnalyticsLoading ? 'animate-spin' : ''}`} />
@@ -288,7 +288,7 @@ export default function Analytics() {
                     setTopicAnalyticsError(null);
                     setSelectedTopic(event.target.value);
                   }}
-                  className={`w-full rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
+                  className={`min-h-10 w-full scroll-mb-28 rounded-lg px-4 py-2 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary} ${styles.focusRing}`}
                 >
                   <option value="">选择一个已完成选题</option>
                   {topics.map((topic) => (
@@ -307,7 +307,7 @@ export default function Analytics() {
                   </div>
                 ) : null}
                 {topicAnalyticsLoading ? (
-                  <p role="status" className={`${styles.textMuted} py-3 text-center`}>
+                  <p role="status" className="py-3 text-center text-studio-text-secondary">
                     {topicAnalytics.length > 0 ? '正在更新该选题的数据；仍显示最近一次成功读取的记录。' : '正在读取该选题的数据…'}
                   </p>
                 ) : null}
@@ -316,7 +316,7 @@ export default function Analytics() {
                     {topicAnalytics.map((item) => (
                       <div key={`${item.record_type || 'legacy'}-${item.id}`} className={`${styles.bgTertiary} rounded-lg p-4`}>
                         <p className={`text-sm font-medium ${styles.textPrimary}`}>{item.data_date}</p>
-                        <p className={`mt-1 text-xs ${styles.textMuted}`}>
+                        <p className="mt-1 text-xs text-studio-text-secondary">
                           {item.record_type === 'publishing'
                             ? `发布记录 · ${Array.from(new Set([item.views_source, item.likes_source, item.shares_source, item.comments_source])).map((source) => ({
                               douyin_official_export: '抖音官方', manual: '手工补充', douyin_creator_collection: '运营采集',
@@ -345,8 +345,18 @@ export default function Analytics() {
           </div>
 
           <div className={`${styles.bgSecondary} rounded-xl p-6 ${styles.border}`}>
-            <h3 className={`mb-4 text-lg font-semibold ${styles.textPrimary}`}>个人统计排行</h3>
-            <div className="overflow-x-auto">
+            <h2 className={`mb-4 text-lg font-semibold ${styles.textPrimary}`}>个人统计排行</h2>
+            <div
+              role="region"
+              aria-label="个人统计排行（可横向滚动）"
+              tabIndex={0}
+              className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring"
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                event.currentTarget.scrollBy({ left: event.key === 'ArrowRight' ? 120 : -120 });
+              }}
+            >
               <table className="w-full">
                 <thead>
                   <tr className={styles.tableHeader}>

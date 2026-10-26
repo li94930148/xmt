@@ -6,6 +6,17 @@ import { chromium, type Page } from 'playwright';
 import { createServer as createViteServer } from 'vite';
 
 const screenshotDir = '/tmp/xmt-mobile-work-center-responsive';
+const mcpMessageReadAllFixtureMode = process.argv.includes('--mcp-message-read-all-fixture');
+const mcpMessageLoadingFixtureMode = process.argv.includes('--mcp-message-loading-fixture');
+const mcpMobileLoadingStatusesFixtureMode = process.argv.includes('--mcp-mobile-loading-statuses-fixture');
+const mcpTopicLoadingFixtureMode = process.argv.includes('--mcp-topic-loading-fixture');
+const mcpTouchTargetFixtureMode = process.argv.includes('--mcp-touch-targets-fixture');
+const mcpContentLabFixtureMode = process.argv.includes('--mcp-content-lab-fixture');
+const mcpTopicCreateRecoveryFixtureMode = process.argv.includes('--mcp-topic-create-recovery-fixture');
+const mcpFixtureMode = process.argv.includes('--mcp-fixture') || mcpMessageReadAllFixtureMode || mcpMessageLoadingFixtureMode || mcpMobileLoadingStatusesFixtureMode || mcpTopicLoadingFixtureMode || mcpTouchTargetFixtureMode || mcpContentLabFixtureMode || mcpTopicCreateRecoveryFixtureMode;
+const mobileViewportFilter = process.env.XMT_MOBILE_WORK_CENTER_WIDTH;
+const mobileResponsiveWidths = mobileViewportFilter ? [Number(mobileViewportFilter)] : [320, 390];
+assert(mobileResponsiveWidths.every((width) => width === 320 || width === 390), 'XMT_MOBILE_WORK_CENTER_WIDTH must be 320 or 390');
 const appVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version as string;
 const user = {
   id: 1,
@@ -119,9 +130,20 @@ const linkedCalendarEvent = {
 };
 const createdCalendarEvents: typeof linkedCalendarEvent[] = [];
 const createAttempts = new Map<string, number>();
+const submittedCalendarRequestIdsByTitle = new Map<string, string[]>();
+const calendarCreateEventsByRequest = new Map<string, typeof linkedCalendarEvent>();
+const calendarCreateStatusFailuresByRequest = new Map<string, number>();
+const calendarCommitThenLoseResponseTitles = new Set<string>();
+const calendarCommitThenLoseResponseAndStatusTitles = new Set<string>();
 let failNextCalendarRead = false;
 let calendarReadRequests = 0;
 const topicCreateAttempts = new Map<string, number>();
+const topicCreateRequestIds = new Map<string, string[]>();
+const topicCreateReceipts = new Map<string, { actorId: number; topicId: number }>();
+const topicCreateRejectedTitles = new Set<string>();
+const topicCommitAfterFailureTitles = new Set<string>();
+let topicStatusReadFailures = 0;
+let topicStatusReadAttempts = 0;
 const topicSearchAttempts = new Map<string, number>();
 let mobileMessagesFixture: Array<{ id: number; title: string; content: string; read: boolean; link?: string; type?: string; created_at?: string }> = [];
 let usersListFixture: Array<{ id: number; username: string; name: string; email: string; role: string; enabled: boolean; created_at: string; updated_at: string }> = [];
@@ -143,12 +165,36 @@ let messageReadFailures = 0;
 let messageReadAttempts = 0;
 const messageReadFailureIds = new Set<number>();
 let messageReadDelayMs = 0;
+let messageReadHold = false;
+let messageReadStarted: (() => void) | null = null;
+let releaseMessageRead: (() => void) | null = null;
 let messageBulkReadAttempts = 0;
+let messageBulkReadFailures = 0;
+let messageReadAllStatusAttempts = 0;
+let messageReadAllStatusFailures = 0;
+let loseNextMessageBulkReadResponseAfterCommit = false;
 let messageClearFailures = 0;
 let messageClearAttempts = 0;
+let messageClearStatusAttempts = 0;
+let messageClearStatusFailures = 0;
+let loseNextMessageClearResponseAfterCommit = false;
+let nextMessageAfterClearCommit: { id: number; title: string; content: string; read: boolean; type: string; created_at: string } | null = null;
+let nextMessageAfterBulkReadCommit: { id: number; title: string; content: string; read: boolean; type: string; created_at: string } | null = null;
+const messageClearRequestRecords = new Map<string, { actorId: number; deletedCount: number }>();
+const messageReadAllRequestRecords = new Map<string, { actorId: number; updatedCount: number }>();
+const messageBulkReadRequestIds: string[] = [];
 let messageListReadHold = false;
 let messageListReadStarted: (() => void) | null = null;
 let releaseMessageListRead: (() => void) | null = null;
+let homeAttentionReadHold = false;
+let homeAttentionReadStarted: (() => void) | null = null;
+let releaseHomeAttentionRead: (() => void) | null = null;
+let homeInspirationReadHold = false;
+let homeInspirationReadStarted: (() => void) | null = null;
+let releaseHomeInspirationRead: (() => void) | null = null;
+let topicListReadHold = false;
+let topicListReadStarted: (() => void) | null = null;
+let releaseTopicListRead: (() => void) | null = null;
 let passwordChangeFailures = 0;
 let passwordChangeAttempts = 0;
 let profileUpdateAttempts = 0;
@@ -191,9 +237,22 @@ const mobileProductionFixture = {
   updated_at: '2026-09-27T00:00:00.000Z',
 };
 let mobileCreatedProduction: typeof mobileProductionFixture | null = null;
+let mobileExistingProduction = { ...mobileProductionFixture };
+let mobileProductionUpdateAttempts = 0;
+let mobileProductionUpdateWrites = 0;
+let mobileProductionDetailReads = 0;
+let failNextMobileProductionUpdate = false;
+let failAfterCommitNextMobileProductionUpdate = false;
+let failNextMobileProductionDetailRead = false;
 let mobileProductionCreateAttempts = 0;
+let mobileProductionCreateWrites = 0;
+let mobileProductionCreateStatusAttempts = 0;
+let mobileProductionCreateRequestId: string | null = null;
+const mobileProductionCreateRequestIds: string[] = [];
 let mobileProductionCreateDelayMs = 0;
 let failNextMobileProductionCreate = false;
+let failNextMobileProductionCreateStatusRead = false;
+let failAfterCommitNextMobileProductionCreate = false;
 let failNextMobileProductionTopicList = false;
 let mobileStageTransitionAttempts = 0;
 let mobileProductionHandoffEvents: string[] = [];
@@ -256,6 +315,60 @@ fixtureApi.use(express.json());
 fixtureApi.use('/api', async (request, response) => {
   if (request.path === '/auth/me') return response.json(fixtureUser);
   if (request.path === '/permissions/my') return response.json(fixturePermissions);
+  if (request.path === '/__qa/mobile-production-state' && request.method === 'GET') {
+    return response.json({
+      createAttempts: mobileProductionCreateAttempts,
+      createWrites: mobileProductionCreateWrites,
+      statusReads: mobileProductionCreateStatusAttempts,
+      requestIds: mobileProductionCreateRequestIds,
+      production: mobileCreatedProduction,
+    });
+  }
+  if (request.path === '/__qa/topic-create-state' && request.method === 'GET') {
+    return response.json({
+      createAttempts: [...topicCreateAttempts.entries()].reduce((sum, [, count]) => sum + count, 0),
+      statusReads: topicStatusReadAttempts,
+      requestIds: [...topicCreateRequestIds.values()].flat(),
+      receipts: [...topicCreateReceipts.entries()].map(([requestId, receipt]) => ({ requestId, ...receipt })),
+    });
+  }
+  if (request.path === '/__qa/mobile-production-write-state' && request.method === 'GET') {
+    return response.json({
+      updateAttempts: mobileProductionUpdateAttempts,
+      updateWrites: mobileProductionUpdateWrites,
+      detailReads: mobileProductionDetailReads,
+      production: mobileExistingProduction,
+    });
+  }
+  if (request.path === '/__qa/reset-mobile-production-write' && request.method === 'POST') {
+    const scenario = String(request.body?.scenario ?? 'committed-response-loss');
+    mobileExistingProduction = {
+      ...mobileProductionFixture,
+      content: '<p>只读范围验收稿件</p>',
+      status: scenario === 'approve-committed' ? 'review' : 'draft',
+    };
+    mobileProductionUpdateAttempts = 0;
+    mobileProductionUpdateWrites = 0;
+    mobileProductionDetailReads = 0;
+    failNextMobileProductionUpdate = scenario === 'missing-after-failure';
+    failAfterCommitNextMobileProductionUpdate = scenario === 'committed-response-loss' || scenario === 'approve-committed';
+    failNextMobileProductionDetailRead = false;
+    return response.json({ ok: true, scenario });
+  }
+  if (request.path === '/__qa/reset-mobile-production' && request.method === 'POST') {
+    const scenario = request.body?.scenario === 'missing-after-failure' ? 'missing-after-failure' : 'committed-response-loss';
+    mobileCreatedProduction = null;
+    mobileProductionCreateAttempts = 0;
+    mobileProductionCreateWrites = 0;
+    mobileProductionCreateStatusAttempts = 0;
+    mobileProductionCreateRequestId = null;
+    mobileProductionCreateRequestIds.length = 0;
+    mobileProductionCreateDelayMs = 0;
+    failNextMobileProductionCreate = scenario === 'missing-after-failure';
+    failNextMobileProductionCreateStatusRead = scenario === 'missing-after-failure';
+    failAfterCommitNextMobileProductionCreate = scenario === 'committed-response-loss';
+    return response.json({ ok: true, scenario });
+  }
   if (request.path === '/auth/profile' && request.method === 'PUT') {
     profileUpdateAttempts += 1;
     await new Promise((resolve) => setTimeout(resolve, 120));
@@ -267,7 +380,30 @@ fixtureApi.use('/api', async (request, response) => {
     return response.json(fixtureUser);
   }
   if (/^\/topics\/\d+\/asset-dimensions$/.test(request.path) && request.method === 'GET') return response.json({ data: [] });
+  if (request.path === '/announcements' && request.method === 'GET') return response.json({ data: [] });
   if (request.path === '/messages/unread') return response.json({ unreadCount: mobileMessagesFixture.filter((message) => !message.read).length });
+  if (/^\/messages\/read-all-requests\/[0-9a-f-]+$/i.test(request.path) && request.method === 'GET') {
+    messageReadAllStatusAttempts += 1;
+    if (messageReadAllStatusFailures > 0) {
+      messageReadAllStatusFailures -= 1;
+      return response.status(503).json({ message: '暂时无法核实批量已读结果' });
+    }
+    const requestId = request.path.split('/').at(-1) ?? '';
+    const record = messageReadAllRequestRecords.get(requestId);
+    if (!record || record.actorId !== fixtureUser.id) return response.json({ state: 'not_found' });
+    return response.json({ state: 'processed', updatedCount: record.updatedCount });
+  }
+  if (/^\/messages\/clear-requests\/[0-9a-f-]+$/i.test(request.path) && request.method === 'GET') {
+    messageClearStatusAttempts += 1;
+    if (messageClearStatusFailures > 0) {
+      messageClearStatusFailures -= 1;
+      return response.status(503).json({ message: '暂时无法核实清空结果' });
+    }
+    const requestId = request.path.split('/').at(-1) ?? '';
+    const record = messageClearRequestRecords.get(requestId);
+    if (!record || record.actorId !== fixtureUser.id) return response.json({ state: 'not_found' });
+    return response.json({ state: 'cleared', deletedCount: record.deletedCount });
+  }
   if (request.path === '/auth/change-password' && request.method === 'POST') {
     passwordChangeAttempts += 1;
     await new Promise((resolve) => setTimeout(resolve, 120));
@@ -275,11 +411,31 @@ fixtureApi.use('/api', async (request, response) => {
     return response.json({ message: '密码已更新' });
   }
   if (request.path === '/system-settings/public' || request.path === '/system-settings') return response.json({});
+  if (/^\/topics\/create-requests\/[0-9a-f-]+$/i.test(request.path) && request.method === 'GET') {
+    topicStatusReadAttempts += 1;
+    if (topicStatusReadFailures > 0) {
+      topicStatusReadFailures -= 1;
+      return response.status(503).json({ message: '模拟选题创建状态读取失败' });
+    }
+    const requestId = request.path.split('/').at(-1)?.toLowerCase() ?? '';
+    const receipt = topicCreateReceipts.get(requestId);
+    if (!receipt || receipt.actorId !== fixtureUser.id) return response.json({ state: 'not_found' });
+    return response.json({ state: 'created', topicId: receipt.topicId });
+  }
   if (request.path === '/topics' && request.method === 'POST') {
     const title = String(request.body?.title ?? '');
     const attempts = (topicCreateAttempts.get(title) ?? 0) + 1;
     topicCreateAttempts.set(title, attempts);
-    if (attempts === 1) return response.status(503).json({ message: '选题服务暂不可用，已保留本次输入' });
+    const requestId = String(request.body?.client_request_id ?? '').toLowerCase();
+    const ids = topicCreateRequestIds.get(title) ?? [];
+    ids.push(requestId);
+    topicCreateRequestIds.set(title, ids);
+    if (topicCreateRejectedTitles.has(title)) return response.status(403).json({ message: '模拟无提报权限' });
+    if (attempts === 1) {
+      if (topicCommitAfterFailureTitles.has(title) && requestId) topicCreateReceipts.set(requestId, { actorId: fixtureUser.id, topicId: 906 });
+      return response.status(503).json({ message: '选题服务暂不可用，已保留本次输入' });
+    }
+    if (requestId) topicCreateReceipts.set(requestId, { actorId: fixtureUser.id, topicId: 906 });
     return response.json({ message: '选题创建成功', data: { topicId: 906 } });
   }
   if (request.path === `/topics/${editableTopic.id}` && request.method === 'PUT') {
@@ -332,6 +488,13 @@ fixtureApi.use('/api', async (request, response) => {
     failNextMobileProductionTopicList = false;
     return response.status(503).json({ message: '模拟选题列表读取失败' });
   }
+  if (request.path === '/topics' && request.method === 'GET' && topicListReadHold) {
+    topicListReadHold = false;
+    const markReadStarted = topicListReadStarted;
+    topicListReadStarted = null;
+    markReadStarted?.();
+    await new Promise<void>((resolve) => { releaseTopicListRead = resolve; });
+  }
   if (request.path === '/topics') {
     const search = String(request.query.search ?? '');
     if (search) topicSearchAttempts.set(search, (topicSearchAttempts.get(search) ?? 0) + 1);
@@ -357,13 +520,30 @@ fixtureApi.use('/api', async (request, response) => {
     return response.json({ data: [{ id: 916, title: '隔离验收关联资料', summary: '仅用于移动网页读取恢复' }] });
   }
   if ([linkedTopic.id, editableTopic.id, auditableTopic.id, unknownStatusTopic.id, approvedMobileTopic.id, stageRepairTopic.id].some((id) => request.path === `/topics/${id}/resources`)) return response.json({ data: [] });
+  if (/^\/workflow\/production\/create-request\/[0-9a-f-]+$/i.test(request.path) && request.method === 'GET') {
+    mobileProductionCreateStatusAttempts += 1;
+    if (failNextMobileProductionCreateStatusRead) {
+      failNextMobileProductionCreateStatusRead = false;
+      return response.status(503).json({ message: '模拟创作状态读取失败' });
+    }
+    const requestId = decodeURIComponent(request.path.split('/').at(-1) || '').toLowerCase();
+    if (requestId === mobileProductionCreateRequestId && mobileCreatedProduction) {
+      return response.json({ productionId: mobileCreatedProduction.id });
+    }
+    return response.status(404).json({ message: '尚未找到对应创作记录' });
+  }
   if (request.path === '/workflow/production' && request.method === 'POST') {
     mobileProductionCreateAttempts += 1;
     mobileProductionHandoffEvents.push('create');
+    const requestId = String(request.body?.client_request_id ?? '').toLowerCase();
+    mobileProductionCreateRequestIds.push(requestId);
     if (mobileProductionCreateDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, mobileProductionCreateDelayMs));
     if (failNextMobileProductionCreate) {
       failNextMobileProductionCreate = false;
       return response.status(503).json({ message: '模拟创作保存失败' });
+    }
+    if (mobileCreatedProduction && requestId && requestId === mobileProductionCreateRequestId) {
+      return response.json({ message: '创作记录添加成功', productionId: mobileCreatedProduction.id, idempotent_replay: true });
     }
     mobileCreatedProduction = {
       ...mobileProductionFixture,
@@ -373,6 +553,12 @@ fixtureApi.use('/api', async (request, response) => {
       content: String(request.body?.content ?? ''),
       status: String(request.body?.status ?? 'draft'),
     };
+    mobileProductionCreateRequestId = requestId;
+    mobileProductionCreateWrites += 1;
+    if (failAfterCommitNextMobileProductionCreate) {
+      failAfterCommitNextMobileProductionCreate = false;
+      return response.status(503).json({ message: '模拟已创建但响应丢失' });
+    }
     return response.json({ message: '创作记录添加成功', productionId: mobileCreatedProduction.id });
   }
   if (request.path === '/workflow/production' && request.method === 'GET') {
@@ -381,6 +567,12 @@ fixtureApi.use('/api', async (request, response) => {
     if (topicId === approvedMobileTopic.id) {
       mobileProductionHandoffEvents.push('list');
       return response.json(mobileCreatedProduction ? [mobileCreatedProduction] : []);
+    }
+    if (request.query.page !== undefined || request.query.limit !== undefined) {
+      const page = Math.max(1, Number(request.query.page) || 1);
+      const limit = Math.max(1, Number(request.query.limit) || 20);
+      const data = [unknownStatusProductionFixture];
+      return response.json({ data: data.slice((page - 1) * limit, page * limit), total: data.length, page, limit });
     }
     return response.json([unknownStatusProductionFixture]);
   }
@@ -401,8 +593,37 @@ fixtureApi.use('/api', async (request, response) => {
       updated_at: null,
     } });
   }
+  if (request.path === `/workflow/production/${mobileProductionFixture.id}` && request.method === 'PUT') {
+    mobileProductionUpdateAttempts += 1;
+    if (failNextMobileProductionUpdate) {
+      failNextMobileProductionUpdate = false;
+      failNextMobileProductionDetailRead = true;
+      return response.status(503).json({ message: '模拟稿件更新失败' });
+    }
+    if (String(request.body?.expected_content ?? '') !== String(mobileExistingProduction.content ?? '')) {
+      return response.status(409).json({ message: '模拟稿件正文已变化' });
+    }
+    mobileExistingProduction = {
+      ...mobileExistingProduction,
+      topic_id: Number(request.body?.topic_id ?? mobileExistingProduction.topic_id),
+      version: String(request.body?.version ?? mobileExistingProduction.version),
+      content: String(request.body?.content ?? mobileExistingProduction.content),
+      status: String(request.body?.status ?? mobileExistingProduction.status),
+    };
+    mobileProductionUpdateWrites += 1;
+    if (failAfterCommitNextMobileProductionUpdate) {
+      failAfterCommitNextMobileProductionUpdate = false;
+      return response.status(503).json({ message: '模拟稿件已更新但响应丢失' });
+    }
+    return response.json({ message: '创作稿件已更新', version: mobileExistingProduction.version });
+  }
   if (request.path === `/workflow/production/${mobileProductionFixture.id}` && request.method === 'GET') {
-    return response.json({ ...mobileProductionFixture, can_edit: fixtureUser.role === 'editor' });
+    mobileProductionDetailReads += 1;
+    if (failNextMobileProductionDetailRead) {
+      failNextMobileProductionDetailRead = false;
+      return response.status(503).json({ message: '模拟稿件详情读取失败' });
+    }
+    return response.json({ ...mobileExistingProduction, can_edit: fixtureUser.role === 'editor' });
   }
   if (/^\/workflow\/production\/\d+\/review-threads$/.test(request.path) && request.method === 'GET') {
     return response.json({ data: [] });
@@ -443,25 +664,79 @@ fixtureApi.use('/api', async (request, response) => {
     return response.json(publishingStatusFixture);
   }
   if (request.path === '/dashboard/home-attention' && request.method === 'GET') {
+    if (homeAttentionReadHold) {
+      homeAttentionReadHold = false;
+      const markReadStarted = homeAttentionReadStarted;
+      homeAttentionReadStarted = null;
+      markReadStarted?.();
+      await new Promise<void>((resolve) => { releaseHomeAttentionRead = resolve; });
+    }
     return response.json({
       scope: 'personal',
       generated_at: '2026-10-09T00:00:00.000Z',
       stale_stage_days: 2,
-      counts: { overdue: 0, due_soon: 0, stalled: 0, total: 0 },
+      active_topics: { total: 1, topics: [{ id: unknownStatusTopic.id, title: unknownStatusTopic.title, status: unknownStatusTopic.status }] },
+      counts: { overdue: 1, due_soon: 0, stalled: 0, stage_time_unknown: 0, total: 1 },
       today_publishing: { total: 0, tasks: [] },
       sync_anomalies: { available: false, total: 0, tasks: [] },
       production_reviews: { available: false, total: 0, tasks: [] },
       retrospectives: { available: true, total: 0, tasks: [] },
-      topics: [],
+      topics: [{
+        id: unknownStatusTopic.id,
+        title: unknownStatusTopic.title,
+        status: unknownStatusTopic.status,
+        deadline: '2026-09-27T00:00:00.000Z',
+        stage_entered_at: '2026-09-28T00:00:00.000Z',
+        assignee_name: '移动验收',
+        is_overdue: true,
+        is_due_soon: false,
+        is_stalled: false,
+      }],
+      topic_stages: {
+        pending: { total: 0, topics: [] },
+        production: { total: 0, topics: [] },
+        shooting: { total: 0, topics: [] },
+        publishing: { total: 0, topics: [] },
+        completed: { total: 0, topics: [] },
+      },
+      my_drafts: { tasks: [] },
     });
+  }
+  if (request.path === '/dashboard/home-activity' && request.method === 'GET') {
+    return response.json({ scope: 'personal', generated_at: '2026-10-09T00:00:00.000Z', events: [] });
+  }
+  if (/^\/calendar\/create-request\/[0-9a-f-]+$/i.test(request.path) && request.method === 'GET') {
+    const requestId = request.path.split('/').at(-1) || '';
+    const remainingFailures = calendarCreateStatusFailuresByRequest.get(requestId) || 0;
+    if (remainingFailures > 0) {
+      calendarCreateStatusFailuresByRequest.set(requestId, remainingFailures - 1);
+      return response.status(503).json({ message: '模拟创建状态读取失败' });
+    }
+    const event = calendarCreateEventsByRequest.get(requestId);
+    if (!event) return response.status(404).json({ message: '尚未找到对应日历事件' });
+    return response.json({ eventId: event.id });
   }
   if (request.path === '/calendar' && request.method === 'POST') {
     const title = String(request.body?.title ?? '');
     const attempts = (createAttempts.get(title) ?? 0) + 1;
     createAttempts.set(title, attempts);
-    if (attempts === 1) return response.status(503).json({ message: '测试创建失败' });
+    const clientRequestId = String(request.body?.client_request_id ?? '');
+    submittedCalendarRequestIdsByTitle.set(title, [...(submittedCalendarRequestIdsByTitle.get(title) || []), clientRequestId]);
+    const replayed = calendarCreateEventsByRequest.get(clientRequestId);
+    if (replayed) return response.json({ message: '日历事件创建成功', id: replayed.id, idempotent_replay: true });
+    if (attempts === 1 && !calendarCommitThenLoseResponseTitles.has(title) && !calendarCommitThenLoseResponseAndStatusTitles.has(title)) {
+      return response.status(503).json({ message: '测试创建失败' });
+    }
     const event = { ...linkedCalendarEvent, ...request.body, id: 991 + createdCalendarEvents.length, topic_id: request.body?.topic_id, topic_title: request.body?.topic_id ? linkedTopic.title : undefined };
+    calendarCreateEventsByRequest.set(clientRequestId, event);
     createdCalendarEvents.push(event);
+    if (attempts === 1 && calendarCommitThenLoseResponseTitles.has(title)) {
+      return response.status(503).json({ message: '测试：服务器已写入但响应丢失' });
+    }
+    if (attempts === 1 && calendarCommitThenLoseResponseAndStatusTitles.has(title)) {
+      calendarCreateStatusFailuresByRequest.set(clientRequestId, 2);
+      return response.status(503).json({ message: '测试：服务器已写入但响应丢失' });
+    }
     failNextCalendarRead = true;
     return response.json({ message: '日历事件创建成功', id: event.id });
   }
@@ -506,7 +781,14 @@ fixtureApi.use('/api', async (request, response) => {
     dailyReport = { ...dailyReport, status: 'submitted', version: dailyReport.version + 1 };
     return response.json({ success: true, data: dailyReport });
   }
-  if (request.path === '/inspirations') {
+  if (request.path === '/inspirations' && request.method === 'GET') {
+    if (homeInspirationReadHold) {
+      homeInspirationReadHold = false;
+      const markReadStarted = homeInspirationReadStarted;
+      homeInspirationReadStarted = null;
+      markReadStarted?.();
+      await new Promise<void>((resolve) => { releaseHomeInspirationRead = resolve; });
+    }
     const currentInspiration = promotedInspirationTopicId === null
       ? inspiration
       : { ...inspiration, status: 'promoted', topic_id: promotedInspirationTopicId };
@@ -558,6 +840,9 @@ fixtureApi.use('/api', async (request, response) => {
       page: 1,
       limit: 100,
     });
+  }
+  if (/^\/users\/delete-requests\/[0-9a-f-]+\/\d+$/.test(request.path) && request.method === 'GET') {
+    return response.json({ state: 'not_found' });
   }
   if (request.path === '/users/assignable-roles' && request.method === 'GET') {
     return response.json([{ id: 1, code: 'admin', name: '管理员' }, { id: 2, code: 'member', name: '普通成员' }]);
@@ -637,6 +922,14 @@ fixtureApi.use('/api', async (request, response) => {
   }
   if (/^\/messages\/\d+$/.test(request.path) && request.method === 'PUT') {
     messageReadAttempts += 1;
+    if (messageReadHold) {
+      messageReadHold = false;
+      await new Promise<void>((resolve) => {
+        releaseMessageRead = resolve;
+        messageReadStarted?.();
+        messageReadStarted = null;
+      });
+    }
     if (messageReadDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, messageReadDelayMs));
     const messageId = Number(request.path.split('/').at(-1));
     if (messageReadFailureIds.delete(messageId)) return response.status(503).json({ message: '消息服务暂不可用，标记失败' });
@@ -650,13 +943,55 @@ fixtureApi.use('/api', async (request, response) => {
       messageClearFailures -= 1;
       return response.status(503).json({ message: '消息服务暂不可用' });
     }
+    const requestId = typeof request.body?.client_request_id === 'string' ? request.body.client_request_id : null;
+    if (requestId) {
+      const existing = messageClearRequestRecords.get(requestId);
+      if (existing) {
+        if (existing.actorId !== fixtureUser.id) return response.status(409).json({ message: '清空请求编号已被使用' });
+        return response.json({ message: '消息已清空', deletedCount: existing.deletedCount, replayed: true });
+      }
+      const deletedCount = mobileMessagesFixture.length;
+      messageClearRequestRecords.set(requestId, { actorId: fixtureUser.id, deletedCount });
+      mobileMessagesFixture = [];
+      if (nextMessageAfterClearCommit) {
+        mobileMessagesFixture = [nextMessageAfterClearCommit];
+        nextMessageAfterClearCommit = null;
+      }
+      if (loseNextMessageClearResponseAfterCommit) {
+        loseNextMessageClearResponseAfterCommit = false;
+        return response.status(503).json({ message: '清空已提交，但响应丢失' });
+      }
+      return response.json({ message: '消息已清空', deletedCount, replayed: false });
+    }
     mobileMessagesFixture = [];
     return response.json({ message: '消息已清空' });
   }
   if (request.path === '/messages/read-all' && request.method === 'POST') {
     messageBulkReadAttempts += 1;
+    const requestId = typeof request.body?.client_request_id === 'string' ? request.body.client_request_id.toLowerCase() : null;
+    if (requestId) {
+      messageBulkReadRequestIds.push(requestId);
+      const existing = messageReadAllRequestRecords.get(requestId);
+      if (existing) {
+        if (existing.actorId !== fixtureUser.id) return response.status(409).json({ message: '批量已读请求编号已被使用' });
+        return response.json({ message: '所有消息已标记为已读', updatedCount: existing.updatedCount, replayed: true });
+      }
+    }
+    if (messageBulkReadFailures > 0) {
+      messageBulkReadFailures -= 1;
+      return response.status(503).json({ message: '消息服务暂不可用，批量标记失败' });
+    }
     const updatedCount = mobileMessagesFixture.filter((message) => !message.read).length;
     mobileMessagesFixture = mobileMessagesFixture.map((message) => ({ ...message, read: true }));
+    if (requestId) messageReadAllRequestRecords.set(requestId, { actorId: fixtureUser.id, updatedCount });
+    if (nextMessageAfterBulkReadCommit) {
+      mobileMessagesFixture = [...mobileMessagesFixture, nextMessageAfterBulkReadCommit];
+      nextMessageAfterBulkReadCommit = null;
+    }
+    if (loseNextMessageBulkReadResponseAfterCommit) {
+      loseNextMessageBulkReadResponseAfterCommit = false;
+      return response.status(503).json({ message: '批量已读已提交，但响应丢失' });
+    }
     return response.json({ message: '所有消息已标记为已读', updatedCount });
   }
   return response.status(404).json({ message: `Unexpected fixture API request: ${request.method} ${request.path}` });
@@ -669,15 +1004,135 @@ fixtureApi.use('/socket.io', (request, response) => {
 });
 
 const server = http.createServer(fixtureApi);
+fixtureApi.get('/__qa/topic-create-recovery', (request, response) => {
+  if (request.query.scenario === 'rejection') {
+    topicCreateRejectedTitles.add('MCP选题拒绝恢复验收');
+    topicStatusReadFailures = 0;
+  }
+  return response.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','topic-create-recovery-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(appVersion)});location.replace('/topics/add');</script>`);
+});
+fixtureApi.get('/__qa/mobile-message-loading', (_request, response) => {
+  messageListReadHold = true;
+  messageListReadStarted = () => console.log('Initial /api/messages GET is held for status inspection.');
+  return response.type('html').send(
+    `<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','mobile-message-loading-fixture');localStorage.setItem('xmt_theme','dark');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(appVersion)});location.replace('/messages');</script>`,
+  );
+});
+fixtureApi.post('/__qa/release-message-list-read', (_request, response) => {
+  releaseMessageListRead?.();
+  releaseMessageListRead = null;
+  return response.json({ released: true });
+});
+fixtureApi.get('/__qa/mobile-loading-statuses', (_request, response) => {
+  return response.type('html').send(
+    `<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','mobile-loading-statuses-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(appVersion)});location.replace('/');</script>`,
+  );
+});
+fixtureApi.post('/__qa/release-home-loading-statuses', (_request, response) => {
+  releaseHomeAttentionRead?.();
+  releaseHomeAttentionRead = null;
+  releaseHomeInspirationRead?.();
+  releaseHomeInspirationRead = null;
+  return response.json({ released: true });
+});
+fixtureApi.get('/__qa/mobile-topic-loading', (_request, response) => {
+  return response.type('html').send(
+    `<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','mobile-topic-loading-fixture');localStorage.setItem('xmt_theme','dark');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(appVersion)});location.replace('/topics');</script>`,
+  );
+});
+fixtureApi.post('/__qa/release-topic-list-read', (_request, response) => {
+  releaseTopicListRead?.();
+  releaseTopicListRead = null;
+  return response.json({ released: true });
+});
+const inspectionPort = Number(process.env.XMT_BROWSER_MCP_PORT) || 0;
 await new Promise<void>((resolve, reject) => {
   server.once('error', reject);
-  server.listen(0, '127.0.0.1', resolve);
+  server.listen(inspectionPort, '127.0.0.1', resolve);
 });
 const address = server.address();
 assert(address && typeof address !== 'string');
 const baseUrl = `http://127.0.0.1:${address.port}`;
-const vite = await createViteServer({ root: process.cwd(), server: { middlewareMode: true, hmr: false }, appType: 'spa', logLevel: 'error' });
+const vite = await createViteServer({ root: process.cwd(), server: { middlewareMode: true, hmr: { server } }, appType: 'spa', logLevel: 'error' });
 fixtureApi.use(vite.middlewares);
+
+if (mcpFixtureMode) {
+  if (mcpMessageLoadingFixtureMode) {
+    fixtureUser = { ...user, id: 8, username: 'mobile-message-loading', name: '消息加载状态验收', role: 'member' };
+    fixturePermissions = [];
+    mobileMessagesFixture = [{ id: 993, title: '延迟返回的消息', content: '正在读取时应能被辅助技术感知', read: false, link: `/topics/${linkedTopic.id}` }];
+    messageListReadHold = true;
+    messageListReadStarted = () => console.log('Initial /api/messages GET is held for status inspection.');
+    console.log(`Mobile message loading MCP fixture ready: ${baseUrl}/__qa/mobile-message-loading (in-memory API; release through /__qa/release-message-list-read)`);
+  } else if (mcpMobileLoadingStatusesFixtureMode) {
+    fixtureUser = { ...user, id: 68, username: 'mobile-loading-statuses', name: '移动加载状态验收', role: 'member' };
+    fixturePermissions = [];
+    homeAttentionReadHold = true;
+    homeAttentionReadStarted = () => console.log('Initial /api/dashboard/home-attention GET is held for status inspection.');
+    homeInspirationReadHold = true;
+    homeInspirationReadStarted = () => console.log('Initial /api/inspirations GET is held for status inspection.');
+    console.log(`Mobile loading status MCP fixture ready: ${baseUrl}/__qa/mobile-loading-statuses (in-memory API; release both reads through /__qa/release-home-loading-statuses)`);
+  } else if (mcpTopicLoadingFixtureMode) {
+    fixtureUser = { ...user, id: 69, username: 'mobile-topic-loading', name: '移动选题加载状态验收', role: 'member' };
+    fixturePermissions = ['topic:view'];
+    topicListReadHold = true;
+    topicListReadStarted = () => console.log('Initial /api/topics GET is held for status inspection.');
+    console.log(`Mobile topic loading MCP fixture ready: ${baseUrl}/__qa/mobile-topic-loading (in-memory API; release through /__qa/release-topic-list-read)`);
+  } else if (mcpContentLabFixtureMode) {
+    fixtureUser = user;
+    fixturePermissions = ['workflow:shooting', 'workflow:publishing', 'analytics:view'];
+    console.log(`Content lab MCP fixture ready: ${baseUrl} (isolated app API; no business database)`);
+  } else if (mcpTouchTargetFixtureMode) {
+    fixtureUser = { ...user, id: 37, username: 'mobile-touch-targets', name: '移动触控尺寸隔离验收', role: 'member' };
+    fixturePermissions = ['topic:view'];
+    failNextTopicResourcesRead = true;
+    topicResourcesReadAttempts = 0;
+    console.log(`Mobile touch-target MCP fixture ready: ${baseUrl} (isolated app API; no business database)`);
+  } else if (mcpMessageReadAllFixtureMode) {
+    fixtureUser = { ...user, id: 11, username: 'desktop-message-read-all', name: '桌面消息恢复验收', role: 'member' };
+    fixturePermissions = [];
+    mobileMessagesFixture = [
+      { id: 1244, title: '结果不明前的未读消息一', content: '批量已读提交后若响应丢失，应先只读核实。', read: false, type: 'info', created_at: '2026-10-09T10:00:00.000Z' },
+      { id: 1245, title: '结果不明前的未读消息二', content: '刷新后不能重复发送原写请求。', read: false, type: 'info', created_at: '2026-10-09T09:00:00.000Z' },
+    ];
+    messageBulkReadAttempts = 0;
+    messageBulkReadRequestIds.length = 0;
+    messageReadAllRequestRecords.clear();
+    messageReadAllStatusAttempts = 0;
+    messageReadAllStatusFailures = 1;
+    nextMessageAfterBulkReadCommit = { id: 1246, title: '事务提交后到达的未读消息', content: '这条新消息不属于原回执，应继续保持未读。', read: false, type: 'info', created_at: '2026-10-09T11:00:00.000Z' };
+    loseNextMessageBulkReadResponseAfterCommit = true;
+    console.log(`Desktop message read-all MCP fixture ready: ${baseUrl} (in-memory API; response-loss and status-read failure are injected)`);
+  } else if (mcpTopicCreateRecoveryFixtureMode) {
+    fixtureUser = { ...user, id: 44, username: 'topic-create-recovery-fixture', name: '选题恢复隔离验收', role: 'member' };
+    fixturePermissions = ['topic:create'];
+    topicCreateAttempts.clear();
+    topicCreateRequestIds.clear();
+    topicCreateReceipts.clear();
+    topicCreateRejectedTitles.clear();
+    topicStatusReadAttempts = 0;
+    topicStatusReadFailures = 1;
+    topicCommitAfterFailureTitles.add('MCP选题创建恢复验收');
+    console.log(`Topic create recovery MCP fixture ready: ${baseUrl}/__qa/topic-create-recovery (in-memory API; committed response loss and one status-read failure are injected)`);
+  } else {
+    fixtureUser = { ...user, id: 32, username: 'mobile-production-author', name: '移动创作隔离验收', role: 'editor' };
+    fixturePermissions = ['production:update', 'production:view'];
+    mobileCreatedProduction = null;
+    mobileProductionCreateAttempts = 0;
+    mobileProductionCreateWrites = 0;
+    mobileProductionCreateStatusAttempts = 0;
+    mobileProductionCreateRequestId = null;
+    mobileProductionCreateRequestIds.length = 0;
+    failAfterCommitNextMobileProductionCreate = true;
+    console.log(`Mobile production MCP fixture ready: ${baseUrl} (isolated app API; no business database)`);
+  }
+  await new Promise<void>((resolve) => {
+    process.once('SIGINT', resolve);
+    process.once('SIGTERM', resolve);
+  });
+  await vite.close();
+  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+} else {
 const browser = await chromium.launch({ headless: true });
 
 function luminance(channel: number) {
@@ -725,11 +1180,16 @@ async function openMobilePage(width: number, authUser = user, theme?: 'light' | 
       expectedConsoleFailures -= 1;
       return;
     }
+    if (/^Failed to load resource: the server responded with a status of \d{3} \(/.test(message.text())) return;
     errors.push(message.text());
   });
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('response', (response) => {
-    if (response.status() >= 400 && !(response.status() === 503 && (response.url().includes('/api/calendar') || response.url().includes('/api/daily-reports') || response.url().includes('/api/topics') || response.url().includes('/api/messages') || response.url().includes('/api/auth/change-password') || response.url().includes('/api/auth/profile') || response.url().includes('/api/resource-center/content-topics') || response.url().includes('/api/workflow/production') || response.url().includes('/api/workflow/shooting') || response.url().includes('/api/users') || response.url().includes('/api/backup/inventory')))) errors.push(`HTTP ${response.status()} ${response.url()}`);
+    const status = response.status();
+    const url = response.url();
+    const expectedNotFound = status === 404 && /\/api\/(?:calendar|workflow\/(?:production|shooting|publishing))\/create-request\//.test(url);
+    const expectedUnavailable = status === 503 && ['/api/calendar', '/api/daily-reports', '/api/topics', '/api/messages', '/api/auth/change-password', '/api/auth/profile', '/api/resource-center/content-topics', '/api/workflow/production', '/api/workflow/shooting', '/api/users', '/api/backup/inventory'].some((path) => url.includes(path));
+    if (status >= 400 && !expectedNotFound && !expectedUnavailable) errors.push(`HTTP ${status} ${url}`);
   });
   return { context, page, errors, expectConsoleFailure: () => { expectedConsoleFailures += 1; } };
 }
@@ -750,7 +1210,32 @@ async function assertMobileLayout(page: Page, width: number, screenshotName: str
 }
 
 try {
-  for (const width of [320, 390]) {
+  for (const theme of ['light', 'dark'] as const) {
+    const { context, page, errors } = await openMobilePage(390, user, theme);
+    try {
+      await page.goto(`${baseUrl}/production`, { waitUntil: 'domcontentloaded' });
+      await page.getByText('移动工作中心', { exact: true }).waitFor();
+      assert.ok(await textContrast(page.getByText('移动工作中心', { exact: true })) >= 4.5, `${theme} work-center heading meets 4.5:1 text contrast`);
+      for (const description of ['查看排期与重要节点', '跟进选题流程与待办状态', '快速记录新的内容想法']) {
+        assert.ok(await textContrast(page.getByText(description, { exact: true })) >= 4.5, `${theme} work-center shortcut description "${description}" meets 4.5:1 text contrast`);
+      }
+      await assertMobileLayout(page, 390, `work-hub-contrast-${theme}`);
+      assert.deepEqual(errors, [], `${theme} mobile work hub contrast check has no browser errors`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  for (const width of mobileResponsiveWidths) {
+    createdCalendarEvents.length = 0;
+    createAttempts.clear();
+    submittedCalendarRequestIdsByTitle.clear();
+    calendarCreateEventsByRequest.clear();
+    calendarCreateStatusFailuresByRequest.clear();
+    calendarCommitThenLoseResponseTitles.clear();
+    calendarCommitThenLoseResponseAndStatusTitles.clear();
+    calendarReadRequests = 0;
+    failNextCalendarRead = false;
     promotedInspirationTopicId = null;
     inspirationPromoteAttempts = 0;
     const { context, page, errors, expectConsoleFailure } = await openMobilePage(width);
@@ -789,14 +1274,16 @@ try {
       const failedCreate = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes('/api/calendar') && response.status() === 503);
       await page.getByRole('button', { name: '创建', exact: true }).click();
       await failedCreate;
+      await page.getByRole('button', { name: '确认重试创建', exact: true }).waitFor();
       assert.equal(createAttempts.get(createTitle), 1, 'one failed submit produces one create request');
       assert.equal(await page.getByPlaceholder('事件标题').isVisible(), true, 'failed create keeps the form available for retry');
-      assert.equal(await page.getByRole('button', { name: '创建', exact: true }).isEnabled(), true, 'submit control unlocks after failure');
+      assert.equal(await page.getByRole('button', { name: '确认重试创建', exact: true }).isEnabled(), true, 'a missing request can only be explicitly retried with its original ID');
       if (width === 320) await page.screenshot({ path: '/tmp/xmt-calendar-create-retry-320.png', fullPage: true });
       const successfulRetry = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes('/api/calendar') && response.status() === 200);
       expectConsoleFailure();
-      await page.getByRole('button', { name: '创建', exact: true }).click();
+      await page.getByRole('button', { name: '确认重试创建', exact: true }).click();
       await successfulRetry;
+      assert.equal(new Set(submittedCalendarRequestIdsByTitle.get(createTitle)).size, 1, 'safe retry reuses the original request ID');
       await page.getByRole('heading', { name: '事件已创建，日历未刷新' }).waitFor();
       assert.equal(await page.getByText(new RegExp(`“${createTitle}”已由服务器确认创建。重新加载只会读取日历，不会重复创建事件。`)).isVisible(), true);
       assert.equal(await page.getByRole('button', { name: '重新加载日历' }).isVisible(), true);
@@ -809,6 +1296,55 @@ try {
       assert.equal(createAttempts.get(createTitle), createsBeforeRetry, 'calendar refresh retry never repeats the confirmed create');
       assert.equal(calendarReadRequests, readsBeforeRetry + 1, 'calendar refresh retry performs one read');
       assert.equal(createdCalendarEvents.filter((event) => event.title === createTitle).length, 1, 'retry creates one event after a failed request');
+
+      const lostResponseTitle = `日历已写入但创建响应丢失 ${width}`;
+      calendarCommitThenLoseResponseTitles.add(lostResponseTitle);
+      await page.getByRole('button', { name: '新增' }).click();
+      await page.getByPlaceholder('事件标题').fill(lostResponseTitle);
+      const lostResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/calendar') && response.status() === 503);
+      await page.getByRole('button', { name: '创建', exact: true }).click();
+      await lostResponse;
+      await page.getByRole('heading', { name: lostResponseTitle, exact: true }).waitFor();
+      assert.equal(createAttempts.get(lostResponseTitle), 1, 'an inserted event with a lost POST response is verified without a second POST');
+      assert.equal(createdCalendarEvents.filter((event) => event.title === lostResponseTitle).length, 1, 'lost-response recovery leaves one event');
+      assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:calendar-create-pending:v1:user:1')), null, 'confirmed create clears its session recovery marker');
+
+      const refreshRecoveryTitle = `日历创建核实失败后刷新恢复 ${width}`;
+      calendarCommitThenLoseResponseAndStatusTitles.add(refreshRecoveryTitle);
+      await page.getByRole('button', { name: '新增' }).click();
+      await page.getByPlaceholder('事件标题').fill(refreshRecoveryTitle);
+      const initialRefreshStatusFailure = page.waitForResponse((response) => response.request().method() === 'GET' && /\/api\/calendar\/create-request\/[0-9a-f-]+$/i.test(response.url()) && response.status() === 503);
+      const refreshLostResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/calendar') && response.status() === 503);
+      await page.getByRole('button', { name: '创建', exact: true }).click();
+      await refreshLostResponse;
+      await initialRefreshStatusFailure;
+      await page.getByRole('button', { name: '重新核实', exact: true }).waitFor();
+      assert.equal(createAttempts.get(refreshRecoveryTitle), 1, 'uncertain create is not automatically resubmitted');
+      const refreshRequestId = submittedCalendarRequestIdsByTitle.get(refreshRecoveryTitle)?.[0];
+      assert(refreshRequestId, 'refresh recovery keeps its original request ID');
+      await page.getByRole('button', { name: '取消', exact: true }).click();
+      const reloadRecoveryStatus = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().endsWith(`/api/calendar/create-request/${refreshRequestId}`) && [200, 503].includes(response.status()));
+      const reloadCalendarRead = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/calendar' && [200, 503].includes(response.status()));
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.getByRole('heading', { name: '排期日历' }).waitFor();
+      const reloadStatus = await reloadRecoveryStatus;
+      if (reloadStatus.status() === 503) {
+        await page.getByRole('button', { name: '重新核实', exact: true }).waitFor();
+        const confirmedRefreshRecovery = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().endsWith(`/api/calendar/create-request/${refreshRequestId}`) && response.status() === 200);
+        await page.getByRole('button', { name: '重新核实', exact: true }).click();
+        await confirmedRefreshRecovery;
+      }
+      const calendarRead = await reloadCalendarRead;
+      if (calendarRead.status() === 503) {
+        await page.getByRole('heading', { name: '事件已创建，日历未刷新' }).waitFor();
+        const refreshedCalendar = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/calendar' && response.status() === 200);
+        await page.getByRole('button', { name: '重新加载日历' }).click();
+        await refreshedCalendar;
+      }
+      await page.getByRole('heading', { name: refreshRecoveryTitle, exact: true }).waitFor();
+      assert.equal(createAttempts.get(refreshRecoveryTitle), 1, 'refresh recovery reads the original request and never repeats POST');
+      assert.equal(createdCalendarEvents.filter((event) => event.title === refreshRecoveryTitle).length, 1, 'refresh recovery keeps a single event');
+      assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:calendar-create-pending:v1:user:1')), null, 'refresh recovery clears the marker after server confirmation');
       await page.getByRole('button', { name: '查看关联选题' }).click();
       await page.waitForURL(`**/topics/${linkedTopic.id}`);
       await page.getByRole('button', { name: '返回日历' }).click();
@@ -825,13 +1361,15 @@ try {
       await page.waitForURL('**/');
       await page.getByRole('button', { name: '工作' }).click();
       await page.waitForURL('**/production');
+      await page.getByRole('button', { name: '首页' }).click();
+      await page.waitForURL('**/');
 
-      await page.getByRole('button', { name: /灵感/ }).click();
+      await page.getByRole('button', { name: '记灵感', exact: true }).click();
       await page.waitForURL('**/inspirations');
       await page.getByRole('heading', { name: '灵感池' }).waitFor();
       await page.getByText(inspiration.title, { exact: true }).waitFor();
       const ideas = await assertMobileLayout(page, width, 'inspirations');
-      const inspirationCard = page.getByRole('heading', { name: inspiration.title }).locator('xpath=ancestor::div[@role="button"]');
+      const inspirationCard = page.getByRole('heading', { name: inspiration.title }).locator('xpath=ancestor::article');
       const submitIdea = page.getByRole('button', { name: '提交灵感', exact: true });
       assert.equal(await submitIdea.locator('span').evaluate((element) => getComputedStyle(element).whiteSpace), 'nowrap');
       const promoteButton = inspirationCard.getByRole('button', { name: '转为选题', exact: true });
@@ -852,7 +1390,7 @@ try {
       await page.waitForURL(`**/topics/${linkedTopic.id}`);
       await page.getByRole('button', { name: '返回灵感' }).click();
       await page.waitForURL('**/inspirations');
-      const promotedIdeaCard = page.getByRole('heading', { name: inspiration.title }).locator('xpath=ancestor::div[@role="button"]');
+      const promotedIdeaCard = page.getByRole('heading', { name: inspiration.title }).locator('xpath=ancestor::article');
       if (width === 320) await page.screenshot({ path: '/tmp/xmt-inspiration-promoted-link-320.png', fullPage: true });
       await promotedIdeaCard.getByRole('button', { name: '查看关联选题' }).click();
       await page.waitForURL(`**/topics/${linkedTopic.id}`);
@@ -861,7 +1399,7 @@ try {
       await submitIdea.click();
       await page.getByRole('button', { name: '取消' }).waitFor();
       await page.getByRole('button', { name: '取消' }).click();
-      const promotedCard = page.getByRole('heading', { name: promotedInspiration.title }).locator('xpath=ancestor::div[@role="button"]');
+      const promotedCard = page.getByRole('heading', { name: promotedInspiration.title }).locator('xpath=ancestor::article');
       await promotedCard.getByRole('button', { name: '查看关联选题' }).click();
       await page.waitForURL(`**/topics/${linkedTopic.id}`);
       await page.getByRole('button', { name: '返回灵感' }).click();
@@ -905,7 +1443,10 @@ try {
       await page.getByRole('button', { name: '提交日报' }).click();
       await page.getByText('日报已提交', { exact: true }).waitFor();
       await page.getByText('审核中', { exact: true }).waitFor();
-      await page.getByText('日报已提交，审核前仍可修改并再次提交。', { exact: true }).waitFor();
+      await page.getByText('日报已提交，审核完成前为只读状态。', { exact: true }).waitFor();
+      assert.equal(await page.getByPlaceholder('记录今天完成或推进的工作').isDisabled(), true, 'submitted reports remain read-only while awaiting review');
+      assert.equal(await page.getByRole('button', { name: '保存草稿', exact: true }).isDisabled(), true, 'submitted reports cannot be saved as drafts');
+      assert.equal(await page.getByRole('button', { name: '提交日报', exact: true }).isDisabled(), true, 'submitted reports cannot be submitted again from the UI');
       assert.deepEqual(dailyDraftVersions, [5, 6], 'retry uses the version returned by the successful draft save');
       const daily = await assertMobileLayout(page, width, 'daily-report');
       const reviewComment = '请补充今天完成工作的具体进展。';
@@ -938,7 +1479,7 @@ try {
     }
   }
 
-  for (const width of [320, 390]) {
+  for (const width of mobileResponsiveWidths) {
     const previousPermissions = fixturePermissions;
     fixturePermissions = ['workflow:shooting'];
     shootingStatusFixture.status = 'legacy_transcoding';
@@ -970,9 +1511,11 @@ try {
         const failedComplete = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith(`/api/workflow/shooting/${shootingStatusFixture.id}`) && response.status() === 503);
         await page.getByRole('button', { name: '确认完成', exact: true }).click();
         await failedComplete;
-        await page.getByText('操作失败', { exact: true }).waitFor();
+        await page.getByRole('status').getByText('服务器确认“状态映射拍摄任务”当前状态为“状态待确认”；本次没有重复提交完成操作。请核对后，再由你决定是否重新确认。 模拟完成失败', { exact: true }).waitFor();
         assert.equal(shootingStatusFixture.status, 'legacy_transcoding', 'failed completion leaves the isolated shooting state unchanged');
-        assert.equal(await page.getByRole('heading', { name: '确认完成', exact: true }).count(), 1, 'failed completion keeps its confirmation open for retry');
+        assert.equal(await page.getByRole('heading', { name: '确认完成', exact: true }).count(), 0, 'uncertain completion closes the dialog after a read-only status check');
+        await page.getByRole('button', { name: '完成', exact: true }).click();
+        await page.getByRole('heading', { name: '确认完成', exact: true }).waitFor();
         const successfulComplete = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith(`/api/workflow/shooting/${shootingStatusFixture.id}`) && response.ok());
         failNextShootingListRead = true;
         expectConsoleFailure();
@@ -1057,12 +1600,176 @@ try {
     }
   }
 
+  for (const { width, theme } of [{ width: 320, theme: 'light' }, { width: 390, theme: 'dark' }] as const) {
+    const { context, page, errors } = await openMobilePage(width, user, theme);
+    let releaseTopicRead!: () => void;
+    let markTopicReadStarted!: () => void;
+    const topicReadGate = new Promise<void>((resolve) => { releaseTopicRead = resolve; });
+    const topicReadStarted = new Promise<void>((resolve) => { markTopicReadStarted = resolve; });
+    const businessWrites: string[] = [];
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname.startsWith('/api/') && request.method() !== 'GET') businessWrites.push(`${request.method()} ${url.pathname}`);
+    });
+    await page.route('**/api/topics?*', async (route) => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+      markTopicReadStarted();
+      await topicReadGate;
+      await route.continue();
+    });
+    try {
+      const topicResponse = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/topics' && response.status() === 200);
+      await page.goto(`${baseUrl}/topics`, { waitUntil: 'domcontentloaded' });
+      await topicReadStarted;
+      const loadingStatus = page.getByRole('status').filter({ hasText: '正在加载选题…' });
+      await loadingStatus.waitFor();
+      assert.equal(await loadingStatus.getAttribute('aria-live'), 'polite', `${theme} ${width}px mobile topic loading status is politely announced`);
+      releaseTopicRead();
+      await topicResponse;
+      await page.getByText(unknownStatusTopic.title, { exact: true }).waitFor();
+      await loadingStatus.waitFor({ state: 'detached' });
+      assert.deepEqual(businessWrites, [], 'mobile topic loading fixture performs no business writes');
+      await assertMobileLayout(page, width, `topic-loading-status-${theme}`);
+      assert.deepEqual(errors, [], `${theme} ${width}px mobile topic loading: ${errors.join('\n')}`);
+    } finally {
+      releaseTopicRead();
+      await context.close();
+    }
+  }
+
+  {
+    const { context, page, errors } = await openMobilePage(390, user, 'light');
+    let releaseAttentionRead!: () => void;
+    let releaseInspirationRead!: () => void;
+    let markAttentionReadStarted!: () => void;
+    let markInspirationReadStarted!: () => void;
+    const attentionReadGate = new Promise<void>((resolve) => { releaseAttentionRead = resolve; });
+    const inspirationReadGate = new Promise<void>((resolve) => { releaseInspirationRead = resolve; });
+    const attentionReadStarted = new Promise<void>((resolve) => { markAttentionReadStarted = resolve; });
+    const inspirationReadStarted = new Promise<void>((resolve) => { markInspirationReadStarted = resolve; });
+    const businessWrites: string[] = [];
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname.startsWith('/api/') && request.method() !== 'GET') businessWrites.push(`${request.method()} ${url.pathname}`);
+    });
+    await page.route('**/api/dashboard/home-attention', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      markAttentionReadStarted();
+      await attentionReadGate;
+      await route.continue();
+    });
+    await page.route('**/api/inspirations?*', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      markInspirationReadStarted();
+      await inspirationReadGate;
+      await route.continue();
+    });
+    try {
+      const attentionResponse = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/dashboard/home-attention' && response.status() === 200);
+      const inspirationResponse = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/inspirations' && response.status() === 200);
+      await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+      await Promise.all([attentionReadStarted, inspirationReadStarted]);
+      const taskStatus = page.getByRole('status').filter({ hasText: '正在整理今日任务…' });
+      const inspirationStatus = page.getByRole('status').filter({ hasText: '正在读取灵感数量…' });
+      await Promise.all([taskStatus.waitFor(), inspirationStatus.waitFor()]);
+      assert.equal(await taskStatus.getAttribute('aria-live'), 'polite', 'mobile home task loading status is politely announced');
+      assert.equal(await inspirationStatus.getAttribute('aria-live'), 'polite', 'mobile home inspiration loading status is politely announced');
+      releaseAttentionRead();
+      releaseInspirationRead();
+      await Promise.all([attentionResponse, inspirationResponse]);
+      await Promise.all([taskStatus.waitFor({ state: 'detached' }), inspirationStatus.waitFor({ state: 'detached' })]);
+      await page.getByTestId('mobile-home-active-topic-summary').waitFor();
+      assert.deepEqual(businessWrites, [], 'mobile home loading fixture performs no business writes');
+      await assertMobileLayout(page, 390, 'home-loading-status-light');
+      assert.deepEqual(errors, [], `mobile home loading statuses: ${errors.join('\n')}`);
+    } finally {
+      releaseAttentionRead();
+      releaseInspirationRead();
+      await context.close();
+    }
+  }
+
+  {
+    const desktopMessageRefreshUser = { ...user, id: 9, username: 'desktop-message-refresh-recovery', name: '桌面消息刷新恢复', role: 'member' };
+    fixtureUser = desktopMessageRefreshUser;
+    fixturePermissions = [];
+    mobileMessagesFixture = [{ id: 991, title: '保留的桌面消息', content: '刷新失败后仍应留在消息中心。', read: false, type: 'info', created_at: '2026-09-28T09:00:00.000Z' }];
+    const { context, page, errors, expectConsoleFailure } = await openMobilePage(1440, desktopMessageRefreshUser);
+    try {
+      await page.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+      assert.ok((await page.title()).trim().length > 0, 'the desktop message page must have a document title');
+      const retainedMessage = page.getByRole('button', { name: /保留的桌面消息/ });
+      await retainedMessage.waitFor();
+
+      messageLoadFailures = 1;
+      expectConsoleFailure();
+      const failedMessageRefresh = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 503);
+      await page.evaluate(() => window.dispatchEvent(new Event('xmt-messages-refresh')));
+      await failedMessageRefresh;
+      await page.getByText('刷新失败，仍显示上次成功加载的消息', { exact: true }).waitFor();
+      assert.equal(await retainedMessage.count(), 1, 'a failed refresh must retain the last successful same-scope message');
+      assert.equal(await page.getByText('暂无消息', { exact: true }).count(), 0, 'a failed refresh must not present the retained inbox as empty');
+      await page.screenshot({ path: '/tmp/xmt-desktop-message-refresh-stale-1440.png', fullPage: true });
+
+      const recoveredMessageRefresh = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+      await page.getByRole('button', { name: '重新加载', exact: true }).click();
+      await recoveredMessageRefresh;
+      assert.equal(await page.getByText('刷新失败，仍显示上次成功加载的消息', { exact: true }).count(), 0, 'a successful retry clears the stale warning');
+      assert.equal(await retainedMessage.count(), 1, 'a successful retry continues to show the latest message result');
+      assert.equal(await page.locator('vite-error-overlay, #webpack-dev-server-client-overlay, [data-nextjs-dialog]').count(), 0, 'the desktop message page must not show a framework error overlay');
+
+      messageLoadFailures = 1;
+      expectConsoleFailure();
+      const failedScopeChange = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.url().includes('link=present') && response.status() === 503);
+      await page.getByRole('button', { name: '待处理', exact: true }).click();
+      await failedScopeChange;
+      await page.getByRole('heading', { name: '消息加载失败' }).waitFor();
+      assert.equal(await retainedMessage.count(), 0, 'a failed filter change must not display an old query result as current');
+      const recoveredScopeChange = page.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.url().includes('link=present') && response.status() === 200);
+      await page.getByRole('button', { name: '重试加载', exact: true }).click();
+      await recoveredScopeChange;
+      await page.getByText('暂无消息', { exact: true }).waitFor();
+      assert.deepEqual(errors, [], errors.join('\n'));
+      console.log('Desktop message refresh recovery checks passed at 1440px');
+    } finally {
+      messageLoadFailures = 0;
+      fixtureUser = user;
+      fixturePermissions = [];
+      mobileMessagesFixture = [];
+      await context.close();
+    }
+  }
+
+  {
+    const desktopHomeUser = { ...user, id: 50, username: 'desktop-home-status', name: '桌面状态验收', role: 'member' };
+    fixtureUser = desktopHomeUser;
+    fixturePermissions = [];
+    const { context, page, errors } = await openMobilePage(1440, desktopHomeUser);
+    try {
+      await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+      const unknownStatusAttention = page.getByRole('button', { name: /^未知状态移动选题/ });
+      await unknownStatusAttention.waitFor();
+      assert.equal(await unknownStatusAttention.getByText('状态待确认').count(), 1, 'desktop home must label unknown topic states for confirmation');
+      assert.equal(await page.getByText('legacy_review', { exact: true }).count(), 0, 'desktop home must not expose an unknown topic status code');
+      assert.equal(await page.locator('vite-error-overlay, #webpack-dev-server-client-overlay, [data-nextjs-dialog]').count(), 0, 'desktop home must not show a framework error overlay');
+      assert.deepEqual(errors, [], `desktop home unknown state: ${errors.join('\n')}`);
+    } finally {
+      fixtureUser = user;
+      fixturePermissions = [];
+      await context.close();
+    }
+  }
+
   {
     const { context, page, errors } = await openMobilePage(320);
     try {
       await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
-      await page.getByText(unknownStatusTopic.title, { exact: true }).waitFor();
-      await page.getByText('状态待确认', { exact: true }).waitFor();
+      const overdueTopicTask = page.getByTestId('mobile-home-task').filter({ hasText: unknownStatusTopic.title });
+      await overdueTopicTask.getByText('已逾期', { exact: true }).waitFor();
+      await page.getByRole('button', { name: `${unknownStatusTopic.title} 状态待确认`, exact: true }).waitFor();
       assert.equal(await page.getByText('legacy_review', { exact: true }).count(), 0, 'mobile home must not expose an unknown topic status');
       await assertMobileLayout(page, 320, 'home-unknown-status');
       await page.goto(`${baseUrl}/topics`, { waitUntil: 'domcontentloaded' });
@@ -1087,9 +1794,15 @@ try {
   }
 
   {
-    const visualTopic = { ...linkedTopic, updated_at: '2026-10-12T03:00:00.000Z', deadline: '2026-10-20T00:00:00.000Z' };
-    for (const width of [320, 390]) {
-      const { context, page, errors } = await openMobilePage(width);
+    const visualTopic = {
+      ...linkedTopic,
+      updated_at: '2026-10-12T03:00:00.000Z',
+      deadline: '2026-10-20T00:00:00.000Z',
+      history: [{ id: 1, action: 'created', comment: '移动端验收协作备注', operator_name: '移动验收', created_at: '2026-10-12T03:00:00.000Z' }],
+    };
+    for (const width of mobileResponsiveWidths) {
+      for (const theme of ['light', 'dark'] as const) {
+      const { context, page, errors } = await openMobilePage(width, user, theme);
       try {
       await page.route(/\/api\/topics\?/, async (route) => route.fulfill({
         status: 200,
@@ -1120,14 +1833,25 @@ try {
       const topicCard = page.getByRole('button', { name: new RegExp(visualTopic.title) });
       await topicCard.waitFor();
       await topicCard.getByText('2026/10/20', { exact: true }).waitFor();
+      const listAssignee = topicCard.getByText(visualTopic.assignee_name, { exact: true });
+      const listAssigneeContrast = await textContrast(listAssignee);
+      assert(listAssigneeContrast >= 4.5, `${theme} ${width}px mobile topic-list assignee contrast is ${listAssigneeContrast.toFixed(2)}:1`);
       assert.equal(await page.getByText('2026-10-20T00:00:00.000Z', { exact: true }).count(), 0, 'mobile topic list formats ISO deadlines as local dates');
       await assertMobileLayout(page, width, `topic-date-list-${width}`);
       await topicCard.click();
       await page.waitForURL(`**/topics/${visualTopic.id}`);
       await page.getByRole('button', { name: '保存修改' }).waitFor();
+      assert.equal(await page.getByLabel('选题标题').getAttribute('id'), 'mobile-topic-title');
+      assert.equal(await page.getByLabel('选题标题').getAttribute('name'), 'topicTitle');
+      assert.equal(await page.getByLabel('选题说明').getAttribute('id'), 'mobile-topic-description');
+      assert.equal(await page.getByLabel('选题说明').getAttribute('name'), 'topicDescription');
       await page.getByText('2026/10/12', { exact: true }).waitFor();
       await page.getByText('2026/10/20', { exact: true }).waitFor();
       assert.equal(await page.getByText(/2026-10-(12|20)T/, { exact: false }).count(), 0, 'mobile topic detail does not expose raw ISO timestamps');
+      for (const label of ['当前状态', '创建人', '更新时间', '负责人', '截止日期', '暂无关联资料', '明确登记后用于主题内容资产归类；不会自动关联历史资料。', '暂未登记城市、人物或项目。', '移动端验收协作备注']) {
+        const labelContrast = await textContrast(page.getByText(label, { exact: true }));
+        assert(labelContrast >= 4.5, `${theme} ${width}px mobile topic-detail label "${label}" contrast is ${labelContrast.toFixed(2)}:1`);
+      }
       const actionAndNavigationBounds = await page.evaluate(() => {
         const nav = document.querySelector('nav[aria-label="移动主导航"]')?.getBoundingClientRect();
         const save = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('保存修改'));
@@ -1140,6 +1864,7 @@ try {
       assert.deepEqual(errors, [], `mobile topic detail date/action layout: ${errors.join('\n')}`);
       } finally {
         await context.close();
+      }
       }
     }
   }
@@ -1167,46 +1892,322 @@ try {
     const listReader = { ...user, id: 17, username: 'mobile-production-list-reader', name: '创作列表恢复验收', role: 'member' };
     fixtureUser = listReader;
     fixturePermissions = ['production:view'];
-    const { context, page, errors, expectConsoleFailure } = await openMobilePage(390, listReader);
-    let listReads = 0;
-    const latestList = { ...mobileProductionFixture, id: 783, topic_title: '恢复后的最新创作稿件' };
-    await page.route('**/api/workflow/production*', async (route) => {
-      if (route.request().method() !== 'GET' || new URL(route.request().url()).pathname !== '/api/workflow/production') {
-        await route.continue();
-        return;
+    try {
+      for (const theme of ['light', 'dark'] as const) {
+        const { context, page, errors, expectConsoleFailure } = await openMobilePage(390, listReader, theme);
+        let listReads = 0;
+        const latestList = { ...mobileProductionFixture, id: 783, topic_title: '恢复后的最新创作稿件' };
+        await page.route('**/api/workflow/production*', async (route) => {
+          if (route.request().method() !== 'GET' || new URL(route.request().url()).pathname !== '/api/workflow/production') {
+            await route.continue();
+            return;
+          }
+          listReads += 1;
+          if (listReads === 1) {
+            await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ ...mobileProductionFixture, id: 782, topic_title: '上次成功读取的创作稿件' }], total: 1, page: 1, limit: 20 }) });
+            return;
+          }
+          if (listReads === 2) {
+            await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '模拟创作列表刷新失败' }) });
+            return;
+          }
+          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [latestList], total: 1, page: 1, limit: 20 }) });
+        });
+        try {
+          await page.goto(`${baseUrl}/production/content`, { waitUntil: 'domcontentloaded' });
+          await page.getByText('上次成功读取的创作稿件', { exact: true }).waitFor();
+          assert.equal(listReads, 1, `${theme} mobile production list makes one initial GET`);
+          expectConsoleFailure();
+          const failedRefresh = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 503);
+          await page.getByRole('button', { name: '刷新创作列表', exact: true }).click();
+          await failedRefresh;
+          const listError = page.getByRole('alert').getByText('获取创作列表失败', { exact: true });
+          await listError.waitFor();
+          assert.ok(await textContrast(listError) >= 4.5, `${theme} mobile production error text contrast is at least 4.5:1`);
+          await page.getByRole('status').getByText('仍显示上次成功读取的第 1 页 1 条稿件；当前列表可能不是最新。', { exact: true }).waitFor();
+          assert.equal(await page.getByText('还没有创作稿件', { exact: true }).count(), 0, 'a failed refresh cannot be mistaken for an empty list');
+          const recoveredRefresh = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 200 && listReads === 3);
+          await page.getByRole('button', { name: '重新加载创作列表', exact: true }).click();
+          await recoveredRefresh;
+          await page.getByText(latestList.topic_title, { exact: true }).waitFor();
+          assert.equal(await page.getByText('上次成功读取的创作稿件', { exact: true }).count(), 0, 'successful retry replaces the stale list');
+          assert.equal(await page.getByText('仍显示上次成功读取的第 1 页 1 条稿件；当前列表可能不是最新。', { exact: true }).count(), 0, 'stale-data notice clears after a successful retry');
+          assert.equal(listReads, 3, 'recovery uses one explicit read retry, without any write');
+          await assertMobileLayout(page, 390, `production-list-refresh-recovery-${theme}`);
+          assert.deepEqual(errors, [], `${theme} production list recovery viewport: ${errors.join('\n')}`);
+        } finally {
+          await context.close();
+        }
       }
-      listReads += 1;
-      if (listReads === 1) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ ...mobileProductionFixture, id: 782, topic_title: '上次成功读取的创作稿件' }]) });
-        return;
+    } finally {
+      fixtureUser = previousUser;
+      fixturePermissions = previousPermissions;
+    }
+  }
+
+  {
+    const previousUser = fixtureUser;
+    const previousPermissions = fixturePermissions;
+    const paginationUser = { ...user, id: 18, username: 'mobile-production-pagination', name: '移动创作分页验收', role: 'member' };
+    fixtureUser = paginationUser;
+    fixturePermissions = ['production:view'];
+    const { context, page, errors, expectConsoleFailure } = await openMobilePage(320, paginationUser, 'light');
+    const records = Array.from({ length: 41 }, (_, index) => ({
+      ...unknownStatusProductionFixture,
+      id: 1800 + index,
+      topic_title: `移动分页稿件 ${index + 1}`,
+    }));
+    const requestedPages: number[] = [];
+    let failPageTwoOnce = true;
+    let listWrites = 0;
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/workflow/production' && request.method() !== 'GET') listWrites += 1;
+    });
+    await page.route('**/api/workflow/production?*', async (route) => {
+      const request = route.request();
+      if (request.method() !== 'GET') return route.continue();
+      const url = new URL(request.url());
+      const targetPage = Number(url.searchParams.get('page'));
+      const limit = Number(url.searchParams.get('limit'));
+      requestedPages.push(targetPage);
+      assert.equal(limit, 20, 'mobile production list requests a bounded page size');
+      if (targetPage === 2 && failPageTwoOnce) {
+        failPageTwoOnce = false;
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '模拟第 2 页读取失败' }) });
       }
-      if (listReads === 2) {
-        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '模拟创作列表刷新失败' }) });
-        return;
-      }
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([latestList]) });
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: records.slice((targetPage - 1) * limit, targetPage * limit), total: records.length, page: targetPage, limit }),
+      });
     });
     try {
       await page.goto(`${baseUrl}/production/content`, { waitUntil: 'domcontentloaded' });
-      await page.getByText('上次成功读取的创作稿件', { exact: true }).waitFor();
-      assert.equal(listReads, 1, 'the mobile production list makes one initial GET');
+      await page.getByText('移动分页稿件 1', { exact: true }).waitFor();
+      assert.deepEqual(requestedPages, [1], 'initial mobile load reads only the first server page');
+      assert.equal(await page.locator('main button').filter({ hasText: /^移动分页稿件/ }).count(), 20, 'the first page renders exactly 20 manuscript rows');
+      assert.equal(await page.getByText('移动分页稿件 21', { exact: true }).count(), 0, 'second-page records are not loaded in the first response');
+      await page.getByText('共 41 条，第 1/3 页', { exact: true }).waitFor();
+
       expectConsoleFailure();
-      const failedRefresh = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 503);
-      await page.getByRole('button', { name: '刷新创作列表', exact: true }).click();
-      await failedRefresh;
+      const failedPageTwo = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/workflow/production'
+        && new URL(response.url()).searchParams.get('page') === '2'
+        && response.status() === 503);
+      await page.getByRole('button', { name: '下一页', exact: true }).click();
+      await failedPageTwo;
       await page.getByRole('alert').getByText('获取创作列表失败', { exact: true }).waitFor();
-      await page.getByRole('status').getByText('仍显示上次成功读取的 1 条稿件；当前列表可能不是最新。', { exact: true }).waitFor();
-      assert.equal(await page.getByText('还没有创作稿件', { exact: true }).count(), 0, 'a failed refresh cannot be mistaken for an empty list');
-      const recoveredRefresh = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 200 && listReads === 3);
+      assert.equal(await page.getByText('移动分页稿件 1', { exact: true }).count(), 1, 'failed next-page read retains the last successful page');
+      assert.equal(await page.getByText('移动分页稿件 21', { exact: true }).count(), 0, 'failed next-page read does not show missing rows');
+      await page.getByRole('status').getByText('仍显示上次成功读取的第 1 页 20 条稿件；当前列表可能不是最新。', { exact: true }).waitFor();
+
+      const recoveredPageTwo = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/workflow/production'
+        && new URL(response.url()).searchParams.get('page') === '2'
+        && response.status() === 200);
       await page.getByRole('button', { name: '重新加载创作列表', exact: true }).click();
-      await recoveredRefresh;
-      await page.getByText(latestList.topic_title, { exact: true }).waitFor();
-      assert.equal(await page.getByText('上次成功读取的创作稿件', { exact: true }).count(), 0, 'successful retry replaces the stale list');
-      assert.equal(await page.getByText('仍显示上次成功读取的 1 条稿件；当前列表可能不是最新。', { exact: true }).count(), 0, 'stale-data notice clears after a successful retry');
-      assert.equal(listReads, 3, 'recovery uses one explicit read retry, without any write');
-      await assertMobileLayout(page, 390, 'production-list-refresh-recovery');
-      assert.deepEqual(errors, [], `production list recovery viewport: ${errors.join('\n')}`);
+      await recoveredPageTwo;
+      await page.getByText('移动分页稿件 21', { exact: true }).waitFor();
+      assert.equal(await page.getByText('移动分页稿件 1', { exact: true }).count(), 0, 'successful retry replaces the list with the requested page');
+      await page.getByText('共 41 条，第 2/3 页', { exact: true }).waitFor();
+
+      const lastPage = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/workflow/production'
+        && new URL(response.url()).searchParams.get('page') === '3'
+        && response.status() === 200);
+      await page.getByRole('button', { name: '下一页', exact: true }).click();
+      await lastPage;
+      await page.getByText('移动分页稿件 41', { exact: true }).waitFor();
+      assert.equal(await page.locator('main button').filter({ hasText: /^移动分页稿件/ }).count(), 1, 'last page renders only the remaining row');
+      await page.getByText('共 41 条，第 3/3 页', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: '下一页', exact: true }).isDisabled(), true, 'next-page control is disabled at the end');
+
+      const previousPage = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/workflow/production'
+        && new URL(response.url()).searchParams.get('page') === '2'
+        && response.status() === 200);
+      await page.getByRole('button', { name: '上一页', exact: true }).click();
+      await previousPage;
+      await page.getByText('移动分页稿件 21', { exact: true }).waitFor();
+      assert.deepEqual(requestedPages, [1, 2, 2, 3, 2], 'manual retry repeats the intended page and does not issue writes');
+      assert.equal(listWrites, 0, 'pagination and retry remain read-only');
+      await assertMobileLayout(page, 320, 'production-pagination-retry');
+      assert.deepEqual(errors, [], `mobile production pagination: ${errors.join('\n')}`);
     } finally {
+      fixtureUser = previousUser;
+      fixturePermissions = previousPermissions;
+      await context.close();
+    }
+  }
+
+  {
+    const previousUser = fixtureUser;
+    const previousPermissions = fixturePermissions;
+    const shrinkingUser = { ...user, id: 21, username: 'mobile-production-shrinking-total', name: '分页收敛验收', role: 'member' };
+    fixtureUser = shrinkingUser;
+    fixturePermissions = ['production:view'];
+    const { context, page, errors } = await openMobilePage(390, shrinkingUser, 'light');
+    const originalRecords = Array.from({ length: 41 }, (_, index) => ({
+      ...unknownStatusProductionFixture,
+      id: 2100 + index,
+      topic_title: `收敛分页稿件 ${index + 1}`,
+    }));
+    const requestedPages: number[] = [];
+    let totalHasShrunk = false;
+    let failCorrectedPageOnce = false;
+    await page.route('**/api/workflow/production?*', async (route) => {
+      const request = route.request();
+      if (request.method() !== 'GET') return route.continue();
+      const url = new URL(request.url());
+      if (url.pathname !== '/api/workflow/production') return route.continue();
+      const targetPage = Number(url.searchParams.get('page'));
+      const limit = Number(url.searchParams.get('limit'));
+      requestedPages.push(targetPage);
+      if (totalHasShrunk && targetPage === 1 && failCorrectedPageOnce) {
+        failCorrectedPageOnce = false;
+        return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '模拟修正页读取失败' }) });
+      }
+      const currentTotal = totalHasShrunk ? 20 : originalRecords.length;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: originalRecords.slice((targetPage - 1) * limit, Math.min(targetPage * limit, currentTotal)), total: currentTotal, page: targetPage, limit }),
+      });
+    });
+    try {
+      await page.goto(`${baseUrl}/production/content`, { waitUntil: 'domcontentloaded' });
+      await page.getByText('收敛分页稿件 1', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '下一页', exact: true }).click();
+      await page.getByText('收敛分页稿件 21', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '下一页', exact: true }).click();
+      await page.getByText('收敛分页稿件 41', { exact: true }).waitFor();
+      await page.getByText('共 41 条，第 3/3 页', { exact: true }).waitFor();
+
+      totalHasShrunk = true;
+      failCorrectedPageOnce = true;
+      const failedCorrection = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/workflow/production'
+        && new URL(response.url()).searchParams.get('page') === '1'
+        && response.status() === 503);
+      await page.getByRole('button', { name: '刷新创作列表', exact: true }).click();
+      await failedCorrection;
+      await page.getByRole('alert').getByText('获取创作列表失败', { exact: true }).waitFor();
+      await page.getByRole('status').getByText('仍显示上次成功读取的第 3 页 1 条稿件；当前列表可能不是最新。', { exact: true }).waitFor();
+      await page.getByText('共 41 条，第 3/3 页', { exact: true }).waitFor();
+      assert.equal(await page.getByText('收敛分页稿件 41', { exact: true }).count(), 1, 'failed correction keeps both the last successful page and its matching pager state');
+
+      const successfulCorrection = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/workflow/production'
+        && new URL(response.url()).searchParams.get('page') === '1'
+        && response.status() === 200);
+      await page.getByRole('button', { name: '重新加载创作列表', exact: true }).click();
+      await successfulCorrection;
+      await page.getByText('收敛分页稿件 1', { exact: true }).waitFor();
+      await page.getByText('收敛分页稿件 20', { exact: true }).waitFor();
+      assert.equal(await page.locator('main button').filter({ hasText: /^收敛分页稿件/ }).count(), 20, 'corrected first page contains exactly 20 current rows');
+      assert.equal(await page.getByRole('navigation', { name: '分页' }).count(), 0, 'single-page result hides unnecessary pagination controls');
+      assert.equal(await page.getByText('收敛分页稿件 41', { exact: true }).count(), 0, 'successful correction replaces the out-of-range page');
+      assert.deepEqual(requestedPages, [1, 2, 3, 3, 1, 3, 1], 'out-of-range corrections stay within the same read cycle and retry without writes');
+      await assertMobileLayout(page, 390, 'production-pagination-total-shrink');
+      assert.deepEqual(errors, [], `mobile production page correction: ${errors.join('\n')}`);
+    } finally {
+      fixtureUser = previousUser;
+      fixturePermissions = previousPermissions;
+      await context.close();
+    }
+  }
+
+  {
+    const previousUser = fixtureUser;
+    const previousPermissions = fixturePermissions;
+    const actorA = { ...user, id: 19, username: 'mobile-production-page-actor-a', name: '稿件分页账号甲', role: 'member' };
+    const actorB = { ...user, id: 20, username: 'mobile-production-page-actor-b', name: '稿件分页账号乙', role: 'member' };
+    fixtureUser = actorA;
+    fixturePermissions = ['production:view'];
+    const { context, page, errors } = await openMobilePage(390, actorA, 'dark');
+    let releaseActorAPage: (() => void) | null = null;
+    let releaseActorBPage: (() => void) | null = null;
+    let resolveActorAPageStarted!: () => void;
+    const actorAPageStarted = new Promise<void>((resolve) => { resolveActorAPageStarted = resolve; });
+    let resolveActorBPageLoaded!: () => void;
+    const actorBPageLoaded = new Promise<void>((resolve) => { resolveActorBPageLoaded = resolve; });
+    const actorARecords = Array.from({ length: 21 }, (_, index) => ({
+      ...unknownStatusProductionFixture,
+      id: 1900 + index,
+      topic_title: `账号甲分页稿件 ${index + 1}`,
+    }));
+    const actorBRecords = Array.from({ length: 21 }, (_, index) => ({
+      ...unknownStatusProductionFixture,
+      id: 2000 + index,
+      topic_title: `账号乙分页稿件 ${index + 1}`,
+    }));
+    await page.route('**/api/workflow/production?*', async (route) => {
+      const request = route.request();
+      if (request.method() !== 'GET') return route.continue();
+      const url = new URL(request.url());
+      if (url.pathname !== '/api/workflow/production') return route.continue();
+      const targetPage = Number(url.searchParams.get('page'));
+      const limit = Number(url.searchParams.get('limit'));
+      const actorBRequest = request.headers().authorization === 'Bearer actor-b-pagination-token';
+      const records = actorBRequest ? actorBRecords : actorARecords;
+      if (!actorBRequest && targetPage === 2) {
+        resolveActorAPageStarted();
+        await new Promise<void>((resolve) => { releaseActorAPage = resolve; });
+      }
+      if (actorBRequest && targetPage === 1) {
+        await new Promise<void>((resolve) => {
+          releaseActorBPage = resolve;
+          resolveActorBPageLoaded();
+        });
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: records.slice((targetPage - 1) * limit, targetPage * limit), total: records.length, page: targetPage, limit }),
+      });
+    });
+    try {
+      await page.goto(`${baseUrl}/production/content`, { waitUntil: 'domcontentloaded' });
+      await page.getByText('账号甲分页稿件 1', { exact: true }).waitFor();
+      const staleActorPage = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/workflow/production'
+        && new URL(response.url()).searchParams.get('page') === '2'
+        && response.request().headers()['authorization'] === 'Bearer local-browser-fixture');
+      await page.getByRole('button', { name: '下一页', exact: true }).click();
+      await actorAPageStarted;
+
+      fixtureUser = actorB;
+      const actorBResponse = page.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/workflow/production'
+        && new URL(response.url()).searchParams.get('page') === '1'
+        && response.request().headers()['authorization'] === 'Bearer actor-b-pagination-token');
+      await page.evaluate(async (nextUser) => {
+        const { useAuthStore } = await import('/src/store/index.ts');
+        useAuthStore.getState().login(nextUser, 'actor-b-pagination-token', { persist: 'memory' });
+      }, actorB);
+      await actorBPageLoaded;
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      assert.equal(await page.getByText('账号甲分页稿件 1', { exact: true }).count(), 0, 'previous account rows clear while the new account request is still pending');
+      assert.equal(await page.getByText('账号乙分页稿件 1', { exact: true }).count(), 0, 'new account rows wait for its own response');
+      releaseActorBPage?.();
+      releaseActorBPage = null;
+      await actorBResponse;
+      await page.getByText('账号乙分页稿件 1', { exact: true }).waitFor();
+      await page.getByText('共 21 条，第 1/2 页', { exact: true }).waitFor();
+      assert.equal(await page.getByText('账号甲分页稿件 1', { exact: true }).count(), 0, 'account switch clears the previous account first page');
+
+      releaseActorAPage?.();
+      releaseActorAPage = null;
+      await staleActorPage;
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      assert.equal(await page.getByText('账号乙分页稿件 1', { exact: true }).count(), 1, 'late page-two response cannot replace the new account first page');
+      assert.equal(await page.getByText('账号甲分页稿件 21', { exact: true }).count(), 0, 'late page-two response cannot leak old account manuscripts');
+      assert.equal(await page.getByText('共 21 条，第 1/2 页', { exact: true }).count(), 1, 'new account starts on page one after switch');
+      await assertMobileLayout(page, 390, 'production-pagination-account-switch');
+      assert.deepEqual(errors, [], `mobile production account switch pagination: ${errors.join('\n')}`);
+    } finally {
+      releaseActorAPage?.();
+      releaseActorBPage?.();
       fixtureUser = previousUser;
       fixturePermissions = previousPermissions;
       await context.close();
@@ -1309,15 +2310,16 @@ try {
     releaseMobileCreate();
     await mobileCreateClick;
     await failedCreate;
-    await creatorPage.getByText('选题服务暂不可用，已保留本次输入', { exact: true }).waitFor();
+    await creatorPage.getByText('服务器尚未找到这次创建请求', { exact: false }).waitFor();
     assert.equal(await titleInput.inputValue(), title, 'failed create keeps the entered topic title');
-    assert.equal(await titleInput.isDisabled(), false, 'a failed mobile topic submission restores editing and retry');
+    assert.equal(await titleInput.isDisabled(), true, 'a not-found receipt keeps the original submitted payload locked until explicit same-key retry');
     assert.equal(topicCreateAttempts.get(title), 1);
     const successfulCreate = creatorPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/topics') && response.status() === 200);
-    await creatorPage.getByRole('button', { name: '提交选题' }).click();
+    await creatorPage.getByRole('button', { name: '确认用原内容和同一编号重试', exact: true }).click();
     await successfulCreate;
     await creatorPage.waitForURL('**/topics');
     assert.equal(topicCreateAttempts.get(title), 2, 'retry submits exactly once after the failure');
+    assert.equal(topicCreateRequestIds.get(title)?.[0], topicCreateRequestIds.get(title)?.[1], 'explicit retry reuses the original idempotency key');
     assert.equal(topicSearchAttempts.get('移动'), searchCountAfterReview, 'a failed mutation retry does not repeat the similarity search');
     assert.deepEqual(creatorErrors, [], creatorErrors.join('\n'));
   } finally {
@@ -1353,14 +2355,20 @@ try {
 
   mobileCreatedProduction = null;
   mobileProductionCreateAttempts = 0;
+  mobileProductionCreateWrites = 0;
+  mobileProductionCreateStatusAttempts = 0;
+  mobileProductionCreateRequestId = null;
+  mobileProductionCreateRequestIds.length = 0;
   mobileProductionCreateDelayMs = 450;
   failNextMobileProductionCreate = true;
+  failNextMobileProductionCreateStatusRead = true;
   failNextMobileProductionTopicList = true;
   const mobileProductionAuthor = { ...user, id: 32, username: 'mobile-production-author', name: '移动创作保存验收', role: 'editor' };
   fixtureUser = mobileProductionAuthor;
   fixturePermissions = ['production:update'];
   const { context: productionAuthorContext, page: productionAuthorPage, errors: productionAuthorErrors, expectConsoleFailure: expectCreateFailure } = await openMobilePage(390, mobileProductionAuthor);
   try {
+    expectCreateFailure();
     expectCreateFailure();
     productionAuthorPage.setDefaultTimeout(5000);
     await productionAuthorPage.goto(`${baseUrl}/production/content/new`, { waitUntil: 'domcontentloaded' });
@@ -1370,7 +2378,7 @@ try {
     const topicSelector = productionAuthorPage.getByLabel('关联选题');
     await topicSelector.waitFor();
     await topicSelector.selectOption(String(linkedTopic.id));
-    const editor = productionAuthorPage.locator('.ProseMirror[contenteditable="true"]');
+    const editor = productionAuthorPage.locator('.ProseMirror');
     await editor.waitFor();
     const draftContent = '移动创作稿快速双击与失败重试验收';
     await editor.fill(draftContent);
@@ -1381,32 +2389,182 @@ try {
     await createRequest;
     await productionAuthorPage.waitForFunction(() => document.querySelector('.ProseMirror')?.getAttribute('contenteditable') === 'false');
     assert.equal(await productionAuthorPage.locator('.ProseMirror').getAttribute('contenteditable'), 'false', 'editing is temporarily locked while the save result is pending');
-    assert.equal(await productionAuthorPage.getByRole('button', { name: '提交审核' }).isDisabled(), true, 'submit cannot race with a pending draft save');
+    assert.equal(await productionAuthorPage.getByRole('button', { name: '提交审核', exact: true }).count(), 0, 'new submit actions disappear while the create result is under verification');
     await doubleClickSave;
     await failedCreate;
-    await productionAuthorPage.getByRole('status').getByText('模拟创作保存失败', { exact: true }).waitFor();
+    await productionAuthorPage.getByRole('alert').filter({ hasText: '创作结果仍无法确认' }).waitFor();
     assert.equal(mobileProductionCreateAttempts, 1, 'a rapid double-click during a delayed mobile production create sends one POST');
+    assert.equal(mobileProductionCreateWrites, 0, 'the failed first create did not create a server record');
+    assert.equal(await productionAuthorPage.locator('.ProseMirror').getAttribute('contenteditable'), 'false', 'an unknown create result keeps the draft editor read-only');
     assert.equal(await editor.innerText(), draftContent, 'failed mobile production save keeps the editor content available for retry');
     assert.equal(new URL(productionAuthorPage.url()).pathname, '/production/content/new', 'failed create keeps the author on the draft form');
 
-    mobileProductionCreateDelayMs = 0;
+    await productionAuthorPage.reload({ waitUntil: 'domcontentloaded' });
+    await productionAuthorPage.getByRole('alert').filter({ hasText: '服务器暂未找到这条稿件' }).waitFor();
+    assert.equal(await editor.innerText(), draftContent, 'refresh restores the original local safe draft');
+    assert.equal(mobileProductionCreateAttempts, 1, 'read-only status recovery after refresh does not automatically repeat create');
+    assert.equal(mobileProductionCreateStatusAttempts, 2, 'the first failed status read is followed by one read-only GET after refresh');
+    assert.equal(mobileProductionCreateWrites, 0, 'read-only recovery has not created a server record');
+    assert.ok(await productionAuthorPage.evaluate(() => localStorage.getItem('xmt:safe-draft:v1:user:32:production:new')), 'the original local safe draft remains available until the create outcome is confirmed');
+
     const successfulCreate = productionAuthorPage.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 200);
-    await productionAuthorPage.getByRole('button', { name: '保存草稿' }).click();
+    await productionAuthorPage.getByRole('button', { name: '使用同一请求编号安全重试', exact: true }).click();
     await successfulCreate;
     await productionAuthorPage.waitForURL('**/production/content/912');
+    await productionAuthorPage.waitForFunction(() => localStorage.getItem('xmt:safe-draft:v1:user:32:production:new') === null);
     assert.equal(mobileProductionCreateAttempts, 2, 'explicit retry sends one additional create after the failed attempt');
+    assert.equal(mobileProductionCreateWrites, 1, 'the explicit retry creates exactly one server record');
+    assert.equal(new Set(mobileProductionCreateRequestIds).size, 1, 'the retry reuses the original server idempotency request ID');
+    assert.match(mobileProductionCreateRequestIds[0], /^[0-9a-f-]{36}$/i);
     assert.ok(mobileCreatedProduction?.content.includes(draftContent), 'successful retry persists the preserved editor content');
+    assert.deepEqual(productionAuthorErrors, [], productionAuthorErrors.join('\n'));
+
+    mobileProductionCreateAttempts = 0;
+    mobileProductionCreateWrites = 0;
+    mobileProductionCreateStatusAttempts = 0;
+    mobileProductionCreateRequestId = null;
+    mobileProductionCreateRequestIds.length = 0;
+    mobileCreatedProduction = null;
+    failAfterCommitNextMobileProductionCreate = true;
+    await productionAuthorPage.goto(`${baseUrl}/production/content/new`, { waitUntil: 'domcontentloaded' });
+    await productionAuthorPage.getByLabel('关联选题').selectOption(String(linkedTopic.id));
+    await productionAuthorPage.locator('.ProseMirror[contenteditable="true"]').fill('移动端已提交审核但响应丢失');
+    expectCreateFailure();
+    const committedButLost = productionAuthorPage.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 503);
+    await productionAuthorPage.getByRole('button', { name: '提交审核', exact: true }).click();
+    await committedButLost;
+    await productionAuthorPage.waitForURL('**/production/content/912');
+    await productionAuthorPage.waitForFunction(() => localStorage.getItem('xmt:safe-draft:v1:user:32:production:new') === null);
+    assert.equal(mobileProductionCreateAttempts, 1, 'a committed create with a lost response is not automatically resubmitted');
+    assert.equal(mobileProductionCreateWrites, 1, 'read-only status confirmation observes exactly one committed write');
+    assert.equal(mobileProductionCreateStatusAttempts, 1, 'the committed response-loss branch resolves through one read-only GET');
+    assert.equal(mobileCreatedProduction?.status, 'review', 'the confirmed record preserves the original submit-for-review intent');
+    assert.equal(mobileProductionCreateRequestIds.length, 1);
     assert.deepEqual(productionAuthorErrors, [], productionAuthorErrors.join('\n'));
   } finally {
     mobileProductionCreateDelayMs = 0;
     failNextMobileProductionCreate = false;
+    failNextMobileProductionCreateStatusRead = false;
+    failAfterCommitNextMobileProductionCreate = false;
     failNextMobileProductionTopicList = false;
     await productionAuthorContext.close();
+  }
+
+  fixtureUser = { ...user, id: 32, username: 'mobile-production-author', name: '移动创作保存验收', role: 'editor' };
+  fixturePermissions = ['production:update', 'production:view'];
+  const resetMobileProductionWrite = async (scenario: string) => {
+    const response = await fetch(`${baseUrl}/api/__qa/reset-mobile-production-write`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario }),
+    });
+    assert.equal(response.status, 200);
+  };
+  const readMobileProductionWriteState = async () => {
+    const response = await fetch(`${baseUrl}/api/__qa/mobile-production-write-state`);
+    assert.equal(response.status, 200);
+    return response.json() as Promise<{ updateAttempts: number; updateWrites: number; detailReads: number; production: typeof mobileProductionFixture }>;
+  };
+
+  await resetMobileProductionWrite('committed-response-loss');
+  const { context: committedWriteContext, page: committedWritePage, errors: committedWriteErrors, expectConsoleFailure: expectCommittedWriteFailure } = await openMobilePage(390, fixtureUser);
+  try {
+    await committedWritePage.goto(`${baseUrl}/production/content/${mobileProductionFixture.id}`, { waitUntil: 'domcontentloaded' });
+    const editor = committedWritePage.locator('.ProseMirror');
+    await editor.waitFor();
+    expectCommittedWriteFailure();
+    const committedWrite = committedWritePage.waitForResponse((response) => response.request().method() === 'PUT'
+      && new URL(response.url()).pathname === `/api/workflow/production/${mobileProductionFixture.id}`
+      && response.status() === 503);
+    await editor.fill('移动端正文已保存但响应丢失');
+    await committedWrite;
+    await committedWritePage.getByText('服务器已确认保存结果，没有重复提交。', { exact: true }).waitFor();
+    await committedWritePage.waitForTimeout(500);
+    const committedState = await readMobileProductionWriteState();
+    assert.equal(committedState.updateAttempts, 1, 'a committed save with a lost response is never submitted twice');
+    assert.equal(committedState.updateWrites, 1, 'the response-loss recovery observes one committed write');
+    assert.match(committedState.production.content, /移动端正文已保存但响应丢失/);
+    assert.deepEqual(committedWriteErrors, [], committedWriteErrors.join('\n'));
+  } finally {
+    await committedWriteContext.close();
+  }
+
+  await resetMobileProductionWrite('missing-after-failure');
+  const { context: pendingWriteContext, page: pendingWritePage, errors: pendingWriteErrors, expectConsoleFailure: expectPendingWriteFailure } = await openMobilePage(390, fixtureUser);
+  try {
+    await pendingWritePage.goto(`${baseUrl}/production/content/${mobileProductionFixture.id}`, { waitUntil: 'domcontentloaded' });
+    const editor = pendingWritePage.locator('.ProseMirror');
+    await editor.waitFor();
+    expectPendingWriteFailure();
+    expectPendingWriteFailure();
+    const failedWrite = pendingWritePage.waitForResponse((response) => response.request().method() === 'PUT'
+      && new URL(response.url()).pathname === `/api/workflow/production/${mobileProductionFixture.id}`
+      && response.status() === 503);
+    await editor.fill('移动端待核实保存正文');
+    await failedWrite;
+    await pendingWritePage.getByRole('alert').filter({ hasText: '稿件写入结果仍无法确认' }).waitFor();
+    assert.equal(await editor.getAttribute('contenteditable'), 'false', 'an unknown existing-manuscript result locks further edits');
+    let writeState = await readMobileProductionWriteState();
+    assert.equal(writeState.updateAttempts, 1);
+    assert.equal(writeState.updateWrites, 0);
+
+    await pendingWritePage.reload({ waitUntil: 'domcontentloaded' });
+    await pendingWritePage.getByRole('button', { name: '使用原正文明确重试保存', exact: true }).waitFor();
+    assert.equal(await editor.innerText(), '移动端待核实保存正文', 'the original local safe draft survives reload');
+    writeState = await readMobileProductionWriteState();
+    assert.equal(writeState.updateAttempts, 1, 'refresh performs only a read and does not auto-resend the update');
+    assert.equal(writeState.updateWrites, 0);
+
+    const explicitRetry = pendingWritePage.waitForResponse((response) => response.request().method() === 'PUT'
+      && new URL(response.url()).pathname === `/api/workflow/production/${mobileProductionFixture.id}`
+      && response.status() === 200);
+    await pendingWritePage.getByRole('button', { name: '使用原正文明确重试保存', exact: true }).click();
+    await explicitRetry;
+    await pendingWritePage.getByText('已保存草稿', { exact: true }).waitFor();
+    await pendingWritePage.waitForTimeout(500);
+    writeState = await readMobileProductionWriteState();
+    assert.equal(writeState.updateAttempts, 2, 'only the explicit retry sends the second update');
+    assert.equal(writeState.updateWrites, 1, 'the explicit retry creates one server write');
+    assert.match(writeState.production.content, /移动端待核实保存正文/);
+    assert.deepEqual(pendingWriteErrors, [], pendingWriteErrors.join('\n'));
+  } finally {
+    await pendingWriteContext.close();
+  }
+
+  await resetMobileProductionWrite('approve-committed');
+  const { context: approvalContext, page: approvalPage, errors: approvalErrors, expectConsoleFailure: expectApprovalFailure } = await openMobilePage(390, fixtureUser);
+  try {
+    await approvalPage.goto(`${baseUrl}/production/content/${mobileProductionFixture.id}`, { waitUntil: 'domcontentloaded' });
+    expectApprovalFailure();
+    const approvedWrite = approvalPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && new URL(response.url()).pathname === `/api/workflow/production/${mobileProductionFixture.id}`
+      && response.status() === 503);
+    await approvalPage.getByRole('button', { name: '审核通过', exact: true }).click();
+    await approvedWrite;
+    await approvalPage.getByText('服务器已确认审核通过，没有重复提交。', { exact: true }).waitFor();
+    const approvalState = await readMobileProductionWriteState();
+    assert.equal(approvalState.updateAttempts, 1, 'a confirmed approval response loss is not repeated');
+    assert.equal(approvalState.updateWrites, 1);
+    assert.equal(approvalState.production.status, 'approved');
+    assert.deepEqual(approvalErrors, [], approvalErrors.join('\n'));
+  } finally {
+    await approvalContext.close();
+    mobileExistingProduction = { ...mobileProductionFixture };
+    mobileProductionUpdateAttempts = 0;
+    mobileProductionUpdateWrites = 0;
+    mobileProductionDetailReads = 0;
+    failNextMobileProductionUpdate = false;
+    failAfterCommitNextMobileProductionUpdate = false;
+    failNextMobileProductionDetailRead = false;
   }
 
   approvedMobileTopic = { ...approvedMobileTopic, status: 'approved' };
   mobileCreatedProduction = null;
   mobileProductionCreateAttempts = 0;
+  mobileProductionCreateWrites = 0;
+  mobileProductionCreateStatusAttempts = 0;
+  mobileProductionCreateRequestId = null;
+  mobileProductionCreateRequestIds.length = 0;
   mobileStageTransitionAttempts = 0;
   mobileProductionHandoffEvents = [];
   const productionStarter = { ...user, id: 3, username: 'mobile-production-starter', name: '移动创作验收', role: 'editor' };
@@ -1551,7 +2709,10 @@ try {
   });
   try {
     await editorPage.goto(`${baseUrl}/topics/${editableTopic.id}`, { waitUntil: 'domcontentloaded' });
-    await editorPage.getByRole('button', { name: '保存修改' }).waitFor();
+    const saveTopicButton = editorPage.getByRole('button', { name: '保存修改' });
+    await saveTopicButton.waitFor();
+    const saveTopicBounds = await saveTopicButton.boundingBox();
+    assert.ok(saveTopicBounds && saveTopicBounds.width >= 40 && saveTopicBounds.height >= 40, 'mobile topic editor save action is at least 40×40px');
     const titleInput = editorPage.getByLabel('选题标题');
     await editorPage.waitForTimeout(250);
     assert(editableTopicDetailReads <= 3, `topic permission/load updates must settle instead of refetching indefinitely (reads=${editableTopicDetailReads})`);
@@ -1565,7 +2726,7 @@ try {
     const failedUpdate = editorPage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith(`/api/topics/${editableTopic.id}`) && response.status() === 503);
     await editorPage.getByRole('button', { name: '保存修改' }).click();
     await failedUpdate;
-    await editorPage.getByText('保存服务暂不可用，请稍后重试', { exact: true }).waitFor();
+    await editorPage.getByText('只读核实确认服务端内容仍是原版本；本次没有保存，也没有自动重发。请核对本地修改后再明确点击保存。', { exact: true }).waitFor();
     await editorPage.reload({ waitUntil: 'domcontentloaded' });
     await editorPage.getByText('已恢复未提交的本地修改；确认后再保存到服务器。', { exact: true }).waitFor();
     assert.equal(await titleInput.inputValue(), changedTitle, 'failed update draft survives reload for an authorized owner');
@@ -1581,22 +2742,31 @@ try {
   const resourceViewer = { ...user, id: 16, username: 'mobile-topic-resource-viewer', name: '资料读取恢复验收' };
   fixtureUser = resourceViewer;
   fixturePermissions = ['topic:view'];
-  failNextTopicResourcesRead = true;
-  topicResourcesReadAttempts = 0;
-  const { context: topicResourcesContext, page: topicResourcesPage, errors: topicResourcesErrors, expectConsoleFailure: expectTopicResourcesFailure } = await openMobilePage(390, resourceViewer);
-  try {
-    expectTopicResourcesFailure();
-    await topicResourcesPage.goto(`${baseUrl}/topics/${resourceRecoveryTopic.id}`, { waitUntil: 'domcontentloaded' });
-    await topicResourcesPage.getByRole('alert').getByText(/关联资料读取失败/).waitFor();
-    assert.equal(await topicResourcesPage.getByText('暂无关联资料', { exact: true }).count(), 0, 'a failed resource read is not presented as an empty relationship list');
-    assert.equal(topicResourcesReadAttempts, 1, 'initial resource failure performs one read and no write');
-    await topicResourcesPage.getByRole('button', { name: '重新加载资料', exact: true }).click();
-    await topicResourcesPage.getByText('隔离验收关联资料', { exact: true }).waitFor();
-    assert.equal(topicResourcesReadAttempts, 2, 'the recovery control retries only the resource GET');
-    assert.equal(await topicResourcesPage.getByRole('alert').count(), 0, 'successful retry clears the resource error');
-    assert.deepEqual(topicResourcesErrors, [], topicResourcesErrors.join('\n'));
-  } finally {
-    await topicResourcesContext.close();
+  for (const width of mobileResponsiveWidths) {
+    failNextTopicResourcesRead = true;
+    topicResourcesReadAttempts = 0;
+    const { context: topicResourcesContext, page: topicResourcesPage, errors: topicResourcesErrors, expectConsoleFailure: expectTopicResourcesFailure } = await openMobilePage(width, resourceViewer);
+    try {
+      expectTopicResourcesFailure();
+      await topicResourcesPage.goto(`${baseUrl}/topics/${resourceRecoveryTopic.id}`, { waitUntil: 'domcontentloaded' });
+      await topicResourcesPage.getByRole('alert').getByText(/关联资料读取失败/).waitFor();
+      assert.equal(await topicResourcesPage.getByText('暂无关联资料', { exact: true }).count(), 0, 'a failed resource read is not presented as an empty relationship list');
+      assert.equal(topicResourcesReadAttempts, 1, 'initial resource failure performs one read and no write');
+      const returnToTopics = topicResourcesPage.locator('main').getByRole('button', { name: '返回选题', exact: true });
+      const returnBounds = await returnToTopics.boundingBox();
+      assert.ok(returnBounds && returnBounds.width >= 40 && returnBounds.height >= 40, `${width}px topic detail return action is at least 40×40px`);
+      const retryResources = topicResourcesPage.getByRole('button', { name: '重新加载资料', exact: true });
+      const retryBounds = await retryResources.boundingBox();
+      assert.ok(retryBounds && retryBounds.width >= 40 && retryBounds.height >= 40, `${width}px resource retry target is at least 40×40px`);
+      await assertMobileLayout(topicResourcesPage, width, `topic-resources-retry-${width}`);
+      await retryResources.click();
+      await topicResourcesPage.getByText('隔离验收关联资料', { exact: true }).waitFor();
+      assert.equal(topicResourcesReadAttempts, 2, 'the recovery control retries only the resource GET');
+      assert.equal(await topicResourcesPage.getByRole('alert').count(), 0, 'successful retry clears the resource error');
+      assert.deepEqual(topicResourcesErrors, [], topicResourcesErrors.join('\n'));
+    } finally {
+      await topicResourcesContext.close();
+    }
   }
 
   const topicAuditor = { ...user, id: 6, username: 'mobile-topic-auditor', name: '独立审核验收', role: 'director' };
@@ -1605,18 +2775,28 @@ try {
   const { context: auditorContext, page: auditorPage, errors: auditorErrors, expectConsoleFailure: expectAuditorFailure } = await openMobilePage(390, topicAuditor);
   try {
     await auditorPage.goto(`${baseUrl}/topics/${auditableTopic.id}`, { waitUntil: 'domcontentloaded' });
-    await auditorPage.getByRole('button', { name: '开始审核' }).click();
+    const startAudit = auditorPage.getByRole('button', { name: '开始审核' });
+    const startAuditBounds = await startAudit.boundingBox();
+    assert.ok(startAuditBounds && startAuditBounds.width >= 40 && startAuditBounds.height >= 40, 'mobile audit entry is at least 40×40px');
+    await startAudit.click();
     assert.equal(await auditorPage.getByRole('button', { name: '保存修改' }).count(), 0, 'audit permission does not grant content editing');
-    await auditorPage.getByRole('button', { name: '驳回', exact: true }).click();
+    const rejectDecision = auditorPage.getByRole('button', { name: '驳回', exact: true });
+    const rejectDecisionBounds = await rejectDecision.boundingBox();
+    assert.ok(rejectDecisionBounds && rejectDecisionBounds.width >= 40 && rejectDecisionBounds.height >= 40, 'mobile audit decision is at least 40×40px');
+    await rejectDecision.click();
     const comment = '请补充选题依据后再提交';
     await auditorPage.getByPlaceholder('填写通过说明或需要修改的内容').fill(comment);
     expectAuditorFailure();
+    const confirmReject = auditorPage.getByRole('button', { name: '确认驳回选题' });
+    const confirmRejectBounds = await confirmReject.boundingBox();
+    assert.ok(confirmRejectBounds && confirmRejectBounds.width >= 40 && confirmRejectBounds.height >= 40, 'mobile audit confirmation is at least 40×40px');
     const failedAudit = auditorPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith(`/api/topics/${auditableTopic.id}/audit`) && response.status() === 503);
-    await auditorPage.getByRole('button', { name: '确认驳回选题' }).click();
+    await confirmReject.click();
     await failedAudit;
-    await auditorPage.getByText('审核服务暂不可用，请稍后重试', { exact: true }).waitFor();
+    await auditorPage.getByText('只读核实确认选题仍为待审核；本次未改变状态，如需重试请再次明确点击。', { exact: true }).waitFor();
     assert.equal(await auditorPage.getByPlaceholder('填写通过说明或需要修改的内容').inputValue(), comment, 'failed audit keeps the decision and review comment available');
-    await auditorPage.getByText('审核服务暂不可用，请稍后重试', { exact: true }).scrollIntoViewIfNeeded();
+    assert.equal(topicAuditAttempts, 1, 'uncertain audit result is verified without automatically resubmitting');
+    await auditorPage.getByText('只读核实确认选题仍为待审核；本次未改变状态，如需重试请再次明确点击。', { exact: true }).scrollIntoViewIfNeeded();
     await auditorPage.screenshot({ path: '/tmp/xmt-mobile-topic-audit-failure-390.png' });
     failNextAuditRefresh = true;
     expectAuditorFailure();
@@ -1702,17 +2882,20 @@ try {
     await mobileDraftPage.screenshot({ path: '/tmp/xmt-topic-draft-mobile-restored-390.png', fullPage: true });
 
     expectMobileDraftFailure();
+    topicCommitAfterFailureTitles.add(mobileDraftTitle);
+    topicStatusReadFailures = 1;
+    const topicStatusReadsBefore = topicStatusReadAttempts;
     const failedCreate = mobileDraftPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/topics') && response.status() === 503);
     await mobileDraftPage.getByRole('button', { name: '提交选题' }).click();
     await failedCreate;
-    await mobileDraftPage.getByText('选题服务暂不可用，已保留本次输入', { exact: true }).waitFor();
+    await mobileDraftPage.getByRole('button', { name: '只读重新核实创建状态', exact: true }).waitFor();
     assert.equal(await mobileDraftPage.getByPlaceholder('输入清晰、可执行的选题标题').inputValue(), mobileDraftTitle, 'failed mobile submit keeps its editable content');
     assert.equal(await mobileDraftPage.evaluate((key) => Boolean(localStorage.getItem(key)), mobileDraftKey), true, 'failed mobile submit keeps the saved draft');
-
-    const successfulCreate = mobileDraftPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/topics') && response.status() === 200);
-    await mobileDraftPage.getByRole('button', { name: '提交选题' }).click();
-    await successfulCreate;
+    assert.equal(topicCreateAttempts.get(mobileDraftTitle), 1, 'a failed status read does not issue another create request');
+    await mobileDraftPage.reload({ waitUntil: 'domcontentloaded' });
     await mobileDraftPage.waitForURL((url) => url.pathname === '/topics');
+    assert.equal(topicCreateAttempts.get(mobileDraftTitle), 1, 'refresh recovers the committed creation through a read-only status request');
+    assert.equal(topicStatusReadAttempts, topicStatusReadsBefore + 2, 'initial failure and reload each perform one status read');
     assert.equal(await mobileDraftPage.evaluate((key) => localStorage.getItem(key), mobileDraftKey), null, 'successful mobile submit clears only its own draft');
     assert.deepEqual(mobileDraftErrors, [], mobileDraftErrors.join('\n'));
   } finally {
@@ -1720,27 +2903,39 @@ try {
   }
 
   const storageFailureUser = { ...user, id: 10, username: 'mobile-topic-storage-failure', name: '移动存储失败验收', role: 'member' };
+  const previousUser = fixtureUser;
+  const previousPermissions = fixturePermissions;
   fixtureUser = storageFailureUser;
   fixturePermissions = ['topic:create'];
-  const { context: storageFailureContext, page: storageFailurePage, errors: storageFailureErrors } = await openMobilePage(390, storageFailureUser);
   try {
-    await storageFailureContext.addInitScript(() => {
-      const originalSetItem = Storage.prototype.setItem;
-      Storage.prototype.setItem = function (key, value) {
-        if (key === 'xmt:safe-draft:v1:user:10:topic:new') throw new Error('storage quota exceeded');
-        originalSetItem.call(this, key, value);
-      };
-    });
-    await storageFailurePage.goto(`${baseUrl}/topics/add`, { waitUntil: 'domcontentloaded' });
-    await storageFailurePage.getByPlaceholder('输入清晰、可执行的选题标题').fill('移动存储失败必须明确提示');
-    await storageFailurePage.getByText('本机存储不可用，草稿未能保存；请检查设备存储后重试。', { exact: true }).waitFor();
-    await storageFailurePage.getByRole('button', { name: '存本地草稿' }).click();
-    await storageFailurePage.getByText('本机存储不可用，草稿未能保存；请检查设备存储后重试。', { exact: true }).waitFor();
-    await storageFailurePage.screenshot({ path: '/tmp/xmt-topic-draft-storage-error-390.png', fullPage: true });
-    assert.equal(topicCreateAttempts.get('移动存储失败必须明确提示') ?? 0, 0, 'storage failure does not submit a topic');
-    assert.deepEqual(storageFailureErrors, [], storageFailureErrors.join('\n'));
+    for (const theme of ['light', 'dark'] as const) {
+      const { context: storageFailureContext, page: storageFailurePage, errors: storageFailureErrors } = await openMobilePage(390, storageFailureUser, theme);
+      try {
+        await storageFailureContext.addInitScript(() => {
+          const originalSetItem = Storage.prototype.setItem;
+          Storage.prototype.setItem = function (key, value) {
+            if (key === 'xmt:safe-draft:v1:user:10:topic:new') throw new Error('storage quota exceeded');
+            originalSetItem.call(this, key, value);
+          };
+        });
+        await storageFailurePage.goto(`${baseUrl}/topics/add`, { waitUntil: 'domcontentloaded' });
+        await storageFailurePage.getByPlaceholder('输入清晰、可执行的选题标题').fill('移动存储失败必须明确提示');
+        const storageError = storageFailurePage.getByText('本机存储不可用，草稿未能保存；请检查设备存储后重试。', { exact: true });
+        await storageError.waitFor();
+        assert.ok(await textContrast(storageError) >= 4.5, `${theme} mobile topic draft storage error contrast is at least 4.5:1`);
+        await storageFailurePage.getByRole('button', { name: '存本地草稿' }).click();
+        await storageError.waitFor();
+        assert.ok(await textContrast(storageError) >= 4.5, `${theme} mobile topic draft storage retry error contrast is at least 4.5:1`);
+        if (theme === 'light') await storageFailurePage.screenshot({ path: '/tmp/xmt-topic-draft-storage-error-390.png', fullPage: true });
+        assert.equal(topicCreateAttempts.get('移动存储失败必须明确提示') ?? 0, 0, 'storage failure does not submit a topic');
+        assert.deepEqual(storageFailureErrors, [], `${theme} storage failure viewport: ${storageFailureErrors.join('\n')}`);
+      } finally {
+        await storageFailureContext.close();
+      }
+    }
   } finally {
-    await storageFailureContext.close();
+    fixtureUser = previousUser;
+    fixturePermissions = previousPermissions;
   }
 
   const messageUser = { ...user, id: 8, username: 'mobile-message-recovery', name: '消息恢复验收', role: 'member' };
@@ -1762,6 +2957,36 @@ try {
     assert.deepEqual(messageErrorErrors, [], messageErrorErrors.join('\n'));
   } finally {
     await messageErrorContext.close();
+  }
+
+  mobileMessagesFixture = [{ id: 993, title: '延迟返回的消息', content: '正在读取时应能被辅助技术感知', read: false, link: `/topics/${linkedTopic.id}` }];
+  messageListReadHold = true;
+  messageListReadStarted = null;
+  releaseMessageListRead = null;
+  let markMessageListReadStarted!: () => void;
+  const messageListReadStartedSignal = new Promise<void>((resolve) => { markMessageListReadStarted = resolve; });
+  messageListReadStarted = markMessageListReadStarted;
+  const { context: messageLoadingContext, page: messageLoadingPage, errors: messageLoadingErrors } = await openMobilePage(390, messageUser, 'dark');
+  try {
+    const messageListResponse = messageLoadingPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+    await messageLoadingPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+    await messageListReadStartedSignal;
+    const loadingStatus = messageLoadingPage.getByRole('status').filter({ hasText: '正在同步消息…' });
+    await loadingStatus.waitFor();
+    assert.equal(await loadingStatus.innerText(), '正在同步消息…', '首屏消息读取中应显示明确状态');
+    assert.equal(await loadingStatus.getAttribute('aria-live'), 'polite', '首屏消息读取状态应礼貌播报');
+    assert.equal(typeof releaseMessageListRead, 'function', '消息夹具已暂停 GET，确保读取状态可见');
+    releaseMessageListRead?.();
+    await messageListResponse;
+    await messageLoadingPage.getByText('延迟返回的消息', { exact: true }).waitFor();
+    await loadingStatus.waitFor({ state: 'detached' });
+    assert.deepEqual(messageLoadingErrors, [], messageLoadingErrors.join('\n'));
+  } finally {
+    releaseMessageListRead?.();
+    messageListReadHold = false;
+    messageListReadStarted = null;
+    releaseMessageListRead = null;
+    await messageLoadingContext.close();
   }
 
   mobileMessagesFixture = [{ id: 992, title: '需重试的工作提醒', content: '标记失败时应保留在消息页', read: false, link: `/topics/${linkedTopic.id}` }];
@@ -1875,31 +3100,204 @@ try {
     await messageReadContext.close();
   }
 
-  mobileMessagesFixture = [
-    { id: 994, title: '批量已读成功提醒', content: '成功项应保留已读状态。', read: false },
-    { id: 995, title: '批量已读失败提醒', content: '失败项应保留未读并允许重试。', read: false },
-  ];
+  mobileMessagesFixture = Array.from({ length: 45 }, (_, index) => ({
+    id: 994 + index,
+    title: `移动分页消息 ${index + 1}`,
+    content: '检查移动消息分页、全局未读摘要和账号级全部已读。',
+    read: index % 3 === 0,
+    type: 'info',
+  }));
   messageReadFailures = 0;
   messageReadFailureIds.clear();
-  messageReadFailureIds.add(995);
   messageReadAttempts = 0;
+  messageBulkReadAttempts = 0;
+  messageBulkReadRequestIds.length = 0;
+  messageReadAllRequestRecords.clear();
+  messageReadAllStatusAttempts = 0;
+  messageReadAllStatusFailures = 0;
+  nextMessageAfterBulkReadCommit = null;
+  loseNextMessageBulkReadResponseAfterCommit = false;
+  messageBulkReadFailures = 0;
   const { context: mobileBulkReadContext, page: mobileBulkReadPage, errors: mobileBulkReadErrors, expectConsoleFailure: expectMobileBulkReadFailure } = await openMobilePage(390, messageUser);
   try {
     await mobileBulkReadPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
-    await mobileBulkReadPage.getByRole('button', { name: /批量已读成功提醒/ }).waitFor();
+    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 1(?:\s|$)/ }).waitFor();
+    await mobileBulkReadPage.getByText('未读 30 条', { exact: true }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByLabel('移动主导航').getByText('9+', { exact: true }).count(), 1, 'mobile navigation badge uses the account-wide unread summary rather than the first page count');
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 45 条）', exact: true }).waitFor();
+    messageLoadFailures = 1;
     expectMobileBulkReadFailure();
+    const failedNextPage = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).searchParams.get('page') === '2' && response.status() === 503);
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 45 条）', exact: true }).click();
+    await failedNextPage;
+    await mobileBulkReadPage.getByRole('button', { name: '重试加载更多', exact: true }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 1(?:\s|$)/ }).count(), 1, 'failed next page retains the already loaded first page');
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 21(?:\s|$)/ }).count(), 0, 'failed next page does not render incomplete data');
+    await mobileBulkReadPage.getByRole('button', { name: '重试加载更多', exact: true }).click();
+    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 21(?:\s|$)/ }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 21(?:\s|$)/ }).count(), 1, 'retry appends the next page exactly once');
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 40 / 45 条）', exact: true }).click();
+    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 45(?:\s|$)/ }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByText('未读 30 条', { exact: true }).count(), 1, 'loading additional pages does not replace the account-wide unread count with a page count');
+
+    await mobileBulkReadPage.getByRole('button', { name: '未读', exact: true }).click();
+    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 2(?:\s|$)/ }).waitFor();
+    const individualRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/messages/995') && response.status() === 200);
+    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 2(?:\s|$)/ }).click();
+    await individualRead;
+    await mobileBulkReadPage.getByText('未读 29 条', { exact: true }).waitFor();
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 29 条）', exact: true }).waitFor();
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 29 条）', exact: true }).click();
+    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 44(?:\s|$)/ }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /移动分页消息/ }).count(), 29, 'marking one unread item refreshes the first server page and loads all remaining rows without a pagination gap');
+    messageReadAttempts = 0;
+
+    messageBulkReadFailures = 1;
+    expectMobileBulkReadFailure();
+    const failedBulkRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 503);
     await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).click();
-    await mobileBulkReadPage.getByText('1 条已标记为已读，1 条仍未读，可重试。', { exact: true }).waitFor();
-    assert.equal(mobileMessagesFixture.find((message) => message.id === 994)?.read, true, 'successful messages are reflected as read after partial completion');
-    assert.equal(mobileMessagesFixture.find((message) => message.id === 995)?.read, false, 'failed messages remain unread after partial completion');
+    await failedBulkRead;
+    const firstRequestId = messageBulkReadRequestIds.at(-1) ?? '';
+    assert.equal(messageBulkReadRequestIds.length, 1, 'the fixture parsed exactly one generated client_request_id from the initial POST');
+    assert.match(firstRequestId, /^[0-9a-f-]{36}$/i, 'all-read sends a generated client_request_id');
+    const savedBeforePost = await mobileBulkReadPage.evaluate((requestId) => {
+      const key = 'xmt:message-read-all-pending:v1:actor:8';
+      const value = JSON.parse(sessionStorage.getItem(key) ?? 'null') as { actorId?: number; requestId?: string } | null;
+      return value?.actorId === 8 && value.requestId === requestId;
+    }, firstRequestId);
+    assert.equal(savedBeforePost, true, 'the actor-scoped session marker is persisted before the POST is sent');
+    await mobileBulkReadPage.getByText('服务器尚未找到这次批量已读的完成记录。请求编号已保留；读取当前未读数后，可明确点击“确认重试全部已读”安全重试。', { exact: true }).waitFor();
+    await mobileBulkReadPage.getByText('未读 29 条', { exact: true }).waitFor();
+    assert.ok(mobileMessagesFixture.some((message) => !message.read), 'failed all-read keeps server unread states unchanged');
+    assert.equal(messageReadAllStatusAttempts, 1, 'a failed POST is followed by one read-only request-status lookup');
+    const uncertainBulkRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 503);
+    const retryBulkReadRequest = mobileBulkReadPage.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/messages/read-all'));
+    nextMessageAfterBulkReadCommit = { id: 1039, title: '批量期间到达的消息', content: '事务提交后的消息必须继续显示为未读。', read: false, type: 'info', created_at: '2026-10-09T10:00:00.000Z' };
+    loseNextMessageBulkReadResponseAfterCommit = true;
+    messageReadAllStatusFailures = 1;
+    expectMobileBulkReadFailure();
+    expectMobileBulkReadFailure();
+    await mobileBulkReadPage.getByRole('button', { name: '确认重试全部已读', exact: true }).click();
+    await uncertainBulkRead;
+    await retryBulkReadRequest;
+    const retryRequestId = messageBulkReadRequestIds.at(-1) ?? '';
+    assert.equal(retryRequestId, firstRequestId, 'an explicit not-found retry reuses the original idempotency key');
+    await mobileBulkReadPage.getByText('暂时无法核实上次批量已读结果。请求编号已保留；核实前不会重发。请点击“只读核实”重试查询。', { exact: true }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: '结果待核实', exact: true }).isDisabled(), true, 'an uncertain result stays write-locked when read-only verification also fails');
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: '只读核实', exact: true }).isDisabled(), false, 'status-unavailable recovery exposes only a read-only recheck');
+    assert.equal(messageBulkReadAttempts, 2, 'uncertain bulk-read response is not automatically resubmitted');
+    assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 1, 'server committed prior reads and kept the concurrent arrival unread');
+    const recoveredStatus = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages/read-all-requests/') && response.status() === 200);
+    const recoveredList = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+    await mobileBulkReadPage.reload({ waitUntil: 'domcontentloaded' });
+    const recoveredStatusResponse = await recoveredStatus;
+    assert.deepEqual(await recoveredStatusResponse.json(), { state: 'processed', updatedCount: 29 }, 'reload recovers the committed result through the read-only status endpoint');
+    await recoveredList;
+    await mobileBulkReadPage.getByText('已核实上次批量已读：处理了 29 条消息，正在读取最新状态。', { exact: true }).waitFor();
+    const arrivalMessage = mobileBulkReadPage.getByRole('button', { name: /批量期间到达的消息/ });
+    for (const pageNumber of [2, 3]) {
+      if (await arrivalMessage.count() > 0) break;
+      const nextPage = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/messages'
+        && new URL(response.url()).searchParams.get('page') === String(pageNumber)
+        && response.status() === 200);
+      await mobileBulkReadPage.getByRole('button', { name: /^加载更多（已显示 \d+ \/ \d+ 条）$/ }).click();
+      await nextPage;
+    }
+    await arrivalMessage.waitFor();
+    assert.equal(await mobileBulkReadPage.evaluate(() => sessionStorage.getItem('xmt:message-read-all-pending:v1:actor:8')), null, 'processed status clears only the resolved actor marker');
+    assert.equal(messageBulkReadAttempts, 2, 'reload status recovery never repeats POST');
+    assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 1, 'message arriving after the all-read transaction remains unread');
+    const sameKeyReplayResponse = await mobileBulkReadPage.evaluate(async (requestId) => {
+      const response = await fetch('/api/messages/read-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_request_id: requestId }),
+      });
+      return { status: response.status, body: await response.json() };
+    }, firstRequestId);
+    assert.deepEqual(sameKeyReplayResponse.body, { message: '所有消息已标记为已读', updatedCount: 29, replayed: true }, 'same-key replay returns the original result without applying the operation again');
+    assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 1, 'same-key replay leaves messages that arrived after the original commit unread');
+    assert.equal(messageBulkReadAttempts, 3, 'the explicit replay contract check is the only request beyond the two user submissions');
+    assert.equal(messageReadAttempts, 0, 'bulk read uses the atomic account endpoint instead of per-message requests');
+    assert.equal(messageBulkReadAttempts, 3, 'failed bulk read is explicitly retried once with its original ID');
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).isDisabled(), false, 'authoritative refresh keeps all-read available for a newly arrived message');
+    const recoveredReadRequest = mobileBulkReadPage.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith('/api/messages/read-all'));
+    const finalBulkRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 200);
+    await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).click();
+    await finalBulkRead;
+    await recoveredReadRequest;
+    const finalRequestId = messageBulkReadRequestIds.at(-1) ?? '';
+    assert.notEqual(finalRequestId, firstRequestId, 'a later, new user action gets a new id after prior success was verified');
+    await mobileBulkReadPage.getByText('未读 0 条', { exact: true }).waitFor();
+    assert.ok(mobileMessagesFixture.every((message) => message.read), 'a second explicit all-read processes the newly arrived message');
+    assert.equal(messageBulkReadAttempts, 4, 'one pre-commit failure, one committed retry, one direct replay check, and one explicit new action produce exactly four POSTs');
+
+    mobileMessagesFixture = [
+      { id: 1040, title: '已确认批量已读的消息一', content: '成功写入后首个只读请求失败。', read: false, type: 'info' },
+      { id: 1041, title: '已确认批量已读的消息二', content: '旧摘要仍保留时不得重复提交。', read: false, type: 'info' },
+    ];
+    messageBulkReadAttempts = 0;
+    const postWriteInitialRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+    await mobileBulkReadPage.getByRole('button', { name: '刷新', exact: true }).click();
+    await postWriteInitialRead;
+    await mobileBulkReadPage.getByText('未读 2 条', { exact: true }).waitFor();
+    nextMessageAfterBulkReadCommit = { id: 1042, title: '批量提交后新到的消息', content: '首个核实刷新失败时不能被旧摘要带入再次批量。', read: false, type: 'info', created_at: '2026-10-09T10:05:00.000Z' };
+    messageLoadFailures = 1;
+    expectMobileBulkReadFailure();
+    const confirmedBulkRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 200);
+    const failedPostWriteRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 503);
+    await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).click();
+    await confirmedBulkRead;
+    await failedPostWriteRead;
+    await mobileBulkReadPage.getByText('上次批量已读已由服务器确认；最新消息暂时无法同步，当前未读数仍未知，可刷新重试。', { exact: true }).waitFor();
+    await mobileBulkReadPage.getByText('未读数暂不可用', { exact: true }).waitFor();
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).isDisabled(), true, 'confirmed POST keeps the actor locked while its authoritative GET is unavailable');
+    assert.equal(messageBulkReadAttempts, 1, 'failed post-write GET does not trigger a second bulk-read POST');
+    assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 1, 'only the message arriving after the successful transaction remains unread');
+
+    const verifiedPostWriteRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+    await mobileBulkReadPage.getByRole('button', { name: '刷新', exact: true }).click();
+    await verifiedPostWriteRead;
     await mobileBulkReadPage.getByText('未读 1 条', { exact: true }).waitFor();
-    assert.equal(messageReadAttempts, 2, 'bulk read sends one individual request for each unread message');
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).isDisabled(), false, 'successful read-only refresh clears the actor lock for the confirmed write');
+    assert.equal(messageBulkReadAttempts, 1, 'read-only verification does not retry the confirmed write');
+
+    const explicitPostWriteRetry = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 200);
     await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).click();
-    await mobileBulkReadPage.getByText('所有消息已标记为已读', { exact: true }).waitFor();
-    assert.ok(mobileMessagesFixture.every((message) => message.read), 'a successful retry eventually marks all messages read');
-    assert.equal(messageReadAttempts, 3, 'retry submits only the one message that remained unread');
+    await explicitPostWriteRetry;
+    await mobileBulkReadPage.getByText('未读 0 条', { exact: true }).waitFor();
+    assert.ok(mobileMessagesFixture.every((message) => message.read), 'the new message is processed only after verified state and an explicit click');
+    assert.equal(messageBulkReadAttempts, 2, 'one explicit user retry follows the confirmed write and read-only verification');
+
+    mobileMessagesFixture = [{ id: 1043, title: '存储失败时不得提交', content: '必须先保存恢复编号。', read: false, type: 'info' }];
+    const storageFailureInitialRead = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+    await mobileBulkReadPage.getByRole('button', { name: '刷新', exact: true }).click();
+    await storageFailureInitialRead;
+    await mobileBulkReadPage.getByText('未读 1 条', { exact: true }).waitFor();
+    await mobileBulkReadPage.evaluate(() => {
+      const windowWithOriginal = window as Window & { __xmtOriginalStorageSetItem?: typeof Storage.prototype.setItem };
+      windowWithOriginal.__xmtOriginalStorageSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (key.startsWith('xmt:message-read-all-pending:')) throw new DOMException('session storage blocked', 'QuotaExceededError');
+        return windowWithOriginal.__xmtOriginalStorageSetItem!.call(this, key, value);
+      };
+    });
+    const requestsBeforeStorageFailure = messageBulkReadAttempts;
+    await mobileBulkReadPage.getByRole('button', { name: '全部已读', exact: true }).click();
+    await mobileBulkReadPage.getByText('当前浏览器无法安全保存批量已读请求编号', { exact: true }).waitFor();
+    assert.equal(messageBulkReadAttempts, requestsBeforeStorageFailure, 'sessionStorage persistence failure prevents POST');
+    await mobileBulkReadPage.evaluate(() => {
+      const windowWithOriginal = window as Window & { __xmtOriginalStorageSetItem?: typeof Storage.prototype.setItem };
+      if (windowWithOriginal.__xmtOriginalStorageSetItem) Storage.prototype.setItem = windowWithOriginal.__xmtOriginalStorageSetItem;
+      delete windowWithOriginal.__xmtOriginalStorageSetItem;
+    });
     assert.deepEqual(mobileBulkReadErrors, [], mobileBulkReadErrors.join('\n'));
   } finally {
+    releaseMessageListRead?.();
+    releaseMessageListRead = null;
+    messageListReadHold = false;
+    messageListReadStarted = null;
     await mobileBulkReadContext.close();
   }
 
@@ -1944,6 +3342,105 @@ try {
     await desktopMessageContext.close();
   }
 
+  const messageReadRaceUser = { ...user, id: 13, username: 'desktop-message-read-race', name: '消息已读查询竞态验收', role: 'member' };
+  fixtureUser = messageReadRaceUser;
+  fixturePermissions = [];
+  mobileMessagesFixture = [
+    { id: 980, title: '筛选竞态目标', content: '已读回包不能覆盖当前筛选结果。', read: false, type: 'info', created_at: '2026-10-09T09:00:00.000Z' },
+    { id: 981, title: '筛选后保留的未读消息', content: '当前筛选结果应保留服务端返回的记录。', read: false, type: 'info', created_at: '2026-10-09T08:00:00.000Z' },
+  ];
+  messageReadAttempts = 0;
+  messageReadFailures = 0;
+  messageReadFailureIds.clear();
+  messageReadHold = false;
+  messageListReadHold = false;
+  const { context: messageReadRaceContext, page: messageReadRacePage, errors: messageReadRaceErrors } = await openMobilePage(1440, messageReadRaceUser);
+  try {
+    await messageReadRacePage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+    await messageReadRacePage.getByRole('heading', { name: '筛选竞态目标', exact: true }).waitFor();
+
+    let resolveFirstReadStarted!: () => void;
+    const firstReadStarted = new Promise<void>((resolve) => { resolveFirstReadStarted = resolve; });
+    messageReadStarted = resolveFirstReadStarted;
+    messageReadHold = true;
+    const firstReadResponse = messageReadRacePage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/messages/980'));
+    await messageReadRacePage.getByRole('button', { name: /筛选竞态目标/ }).click();
+    await firstReadStarted;
+
+    const unreadResponseBeforeWrite = messageReadRacePage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.url().includes('read=unread'));
+    await messageReadRacePage.getByRole('button', { name: '未读', exact: true }).click();
+    await unreadResponseBeforeWrite;
+    await messageReadRacePage.getByRole('button', { name: /筛选竞态目标/ }).waitFor();
+
+    const unreadRefreshAfterWrite = messageReadRacePage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.url().includes('read=unread'));
+    releaseMessageRead?.();
+    releaseMessageRead = null;
+    await firstReadResponse;
+    await unreadRefreshAfterWrite;
+    assert.equal(await messageReadRacePage.getByRole('button', { name: /筛选竞态目标/ }).count(), 0, 'a successful read refreshes the currently selected unread query when its first GET resolved before the write');
+    assert.equal(await messageReadRacePage.getByRole('button', { name: /筛选后保留的未读消息/ }).count(), 1, 'refreshing after a write keeps the other unread result visible');
+    assert.equal(messageReadAttempts, 1, 'changing filters during a pending read still issues exactly one PUT');
+
+    mobileMessagesFixture = [
+      ...Array.from({ length: 25 }, (_, index) => ({
+        id: 982 + index,
+        title: index === 0 ? '迟到读取竞态目标' : `分页竞态未读消息 ${index + 1}`,
+        content: '更早发起的查询回包不能覆盖新读取。',
+        read: false,
+        type: 'info',
+        created_at: new Date(Date.UTC(2026, 9, 9, 9, 0, 0) - index * 60_000).toISOString(),
+      })),
+    ];
+    messageReadAttempts = 0;
+    await messageReadRacePage.reload({ waitUntil: 'domcontentloaded' });
+    await messageReadRacePage.getByRole('heading', { name: '迟到读取竞态目标', exact: true }).waitFor();
+
+    let resolveSecondReadStarted!: () => void;
+    const secondReadStarted = new Promise<void>((resolve) => { resolveSecondReadStarted = resolve; });
+    messageReadStarted = resolveSecondReadStarted;
+    messageReadHold = true;
+    const secondReadResponse = messageReadRacePage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/messages/982'));
+    await messageReadRacePage.getByRole('button', { name: /迟到读取竞态目标/ }).click();
+    await secondReadStarted;
+
+    await messageReadRacePage.getByRole('button', { name: '未读', exact: true }).click();
+    await messageReadRacePage.getByRole('heading', { name: '分页竞态未读消息 20', exact: true }).waitFor();
+    let resolveHeldPageReadStarted!: () => void;
+    const heldPageReadStarted = new Promise<void>((resolve) => { resolveHeldPageReadStarted = resolve; });
+    messageListReadStarted = resolveHeldPageReadStarted;
+    messageListReadHold = true;
+    const delayedPageRead = messageReadRacePage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && new URL(response.url()).searchParams.get('page') === '2' && new URL(response.url()).searchParams.get('read') === 'unread');
+    await messageReadRacePage.getByRole('button', { name: '下一页', exact: true }).click();
+    await heldPageReadStarted;
+
+    const currentPageRead = messageReadRacePage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && new URL(response.url()).searchParams.get('page') === '2' && new URL(response.url()).searchParams.get('read') === 'unread');
+    releaseMessageRead?.();
+    releaseMessageRead = null;
+    await secondReadResponse;
+    await currentPageRead;
+    await messageReadRacePage.getByRole('heading', { name: '分页竞态未读消息 22', exact: true }).waitFor();
+    assert.equal(await messageReadRacePage.getByRole('button', { name: /迟到读取竞态目标/ }).count(), 0, 'the active second page reflects the current unread query while an older page GET is still pending');
+
+    releaseMessageListRead?.();
+    releaseMessageListRead = null;
+    await delayedPageRead;
+    await messageReadRacePage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    assert.equal(await messageReadRacePage.getByRole('heading', { name: '分页竞态未读消息 22', exact: true }).count(), 1, 'a delayed pre-write GET cannot overwrite the refreshed current page');
+    assert.equal(await messageReadRacePage.getByRole('button', { name: /迟到读取竞态目标/ }).count(), 0, 'the current page remains free of the prior page row after the delayed response');
+    assert.equal(messageReadAttempts, 1, 'the delayed-response race still issues exactly one PUT');
+    assert.deepEqual(messageReadRaceErrors, [], messageReadRaceErrors.join('\n'));
+  } finally {
+    releaseMessageRead?.();
+    releaseMessageRead = null;
+    releaseMessageListRead?.();
+    releaseMessageListRead = null;
+    messageReadHold = false;
+    messageReadStarted = null;
+    messageListReadHold = false;
+    messageListReadStarted = null;
+    await messageReadRaceContext.close();
+  }
+
   const paginationUser = { ...user, id: 11, username: 'desktop-message-pagination', name: '消息分页验收', role: 'member' };
   fixtureUser = paginationUser;
   fixturePermissions = [];
@@ -1957,8 +3454,20 @@ try {
     created_at: new Date(Date.UTC(2026, 8, 28, 12, 0, 0) - index * 60_000).toISOString(),
   }));
   messageBulkReadAttempts = 0;
+  messageBulkReadFailures = 1;
+  messageBulkReadRequestIds.length = 0;
+  messageReadAllRequestRecords.clear();
+  messageReadAllStatusAttempts = 0;
+  messageReadAllStatusFailures = 0;
+  nextMessageAfterBulkReadCommit = null;
+  loseNextMessageBulkReadResponseAfterCommit = false;
   messageClearFailures = 1;
   messageClearAttempts = 0;
+  messageClearStatusAttempts = 0;
+  messageClearStatusFailures = 0;
+  loseNextMessageClearResponseAfterCommit = false;
+  nextMessageAfterClearCommit = null;
+  messageClearRequestRecords.clear();
   const { context: messagePaginationContext, page: messagePaginationPage, errors: messagePaginationErrors, expectConsoleFailure: expectMessageClearFailure } = await openMobilePage(1440, paginationUser);
   try {
     await messagePaginationPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
@@ -2004,15 +3513,74 @@ try {
     await messagePaginationPage.getByText('本页 20 条，共 45 条', { exact: true }).waitFor();
     await messagePaginationPage.getByRole('button', { name: '下一页' }).click();
     await messagePaginationPage.getByRole('heading', { name: '分页消息 21', exact: true }).waitFor();
-    const bulkReadResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all'));
+    expectMessageClearFailure();
+    const failedBulkReadResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'POST'
+      && response.url().endsWith('/api/messages/read-all') && response.status() === 503);
     await messagePaginationPage.getByRole('button', { name: '全部已读', exact: true }).click();
-    await bulkReadResponse;
-    assert.equal(messageBulkReadAttempts, 1, 'all-read is one server request, not one request per visible row');
-    assert.ok(mobileMessagesFixture.every((message) => message.read), 'bulk read applies to messages on every page');
-    await messagePaginationPage.getByText('已将 30 条未读消息标记为已读', { exact: true }).waitFor();
-    await messagePaginationPage.screenshot({ path: '/tmp/xmt-desktop-message-bulk-read-1440.png', fullPage: true });
-    assert.equal(await messagePaginationPage.getByRole('button', { name: '全部已读', exact: true }).isDisabled(), true, 'global unread summary updates after bulk read');
-    assert.equal(await messagePaginationPage.getByText('共 45 条，第 2 / 3 页', { exact: true }).count(), 1, 'mark all read preserves the current page for the all filter');
+    assert.equal((await failedBulkReadResponse).status(), 503, 'desktop all-read can encounter a pre-commit response failure');
+    const firstBulkReadRequestId = messageBulkReadRequestIds.at(-1) ?? '';
+    assert.equal(messageBulkReadAttempts, 1, 'the failed desktop action sends one request for the whole account');
+    assert.match(firstBulkReadRequestId, /^[0-9a-f-]{36}$/i, 'desktop all-read sends a generated client_request_id');
+    assert.equal(await messagePaginationPage.evaluate((requestId) => {
+      const value = JSON.parse(sessionStorage.getItem('xmt:message-read-all-pending:v1:actor:11') ?? 'null') as { actorId?: number; requestId?: string } | null;
+      return value?.actorId === 11 && value.requestId === requestId;
+    }, firstBulkReadRequestId), true, 'desktop persists the actor-scoped recovery marker before POST');
+    await messagePaginationPage.getByText('服务器尚未找到这次批量已读的完成记录。请求编号已保留；读取当前消息后，可明确确认并使用同一编号重试。', { exact: true }).waitFor();
+    await messagePaginationPage.getByRole('button', { name: '确认重试全部已读', exact: true }).waitFor();
+    assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 30, 'pre-commit failure keeps all original unread states unchanged');
+    assert.equal(messageReadAllStatusAttempts, 1, 'failed POST is followed by a read-only status lookup');
+
+    nextMessageAfterBulkReadCommit = { id: 1245, title: '批量回包前到达的消息', content: '恢复后仍应保持未读。', read: false, type: 'info', created_at: '2026-10-09T10:00:00.000Z' };
+    loseNextMessageBulkReadResponseAfterCommit = true;
+    messageReadAllStatusFailures = 1;
+    expectMessageClearFailure();
+    expectMessageClearFailure();
+    const committedButLostBulkReadResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'POST'
+      && response.url().endsWith('/api/messages/read-all') && response.status() === 503);
+    await messagePaginationPage.getByRole('button', { name: '确认重试全部已读', exact: true }).click();
+    assert.equal((await committedButLostBulkReadResponse).status(), 503, 'the explicit same-key retry can commit while its response is lost');
+    assert.equal(messageBulkReadRequestIds.at(-1), firstBulkReadRequestId, 'explicit retry reuses the original request ID');
+    await messagePaginationPage.getByText('暂时无法核实上次批量已读结果。请求编号已保留；核实前不会重发，请只读重新核实。', { exact: true }).waitFor();
+    assert.equal(await messagePaginationPage.getByRole('button', { name: '结果待核实', exact: true }).isDisabled(), true, 'uncertain outcome locks another bulk-write submission');
+    assert.equal(await messagePaginationPage.getByRole('button', { name: '只读核实', exact: true }).isDisabled(), false, 'only read-only recovery remains available while status is unknown');
+    assert.equal(messageBulkReadAttempts, 2, 'desktop does not automatically resubmit after an uncertain response');
+    assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 1, 'a message arriving after commit stays unread');
+
+    const recoveredBulkReadStatus = messagePaginationPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().includes('/api/messages/read-all-requests/') && response.status() === 200);
+    const recoveredBulkReadList = messagePaginationPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().includes('/api/messages?') && response.status() === 200);
+    await messagePaginationPage.reload({ waitUntil: 'domcontentloaded' });
+    assert.deepEqual(await (await recoveredBulkReadStatus).json(), { state: 'processed', updatedCount: 30 }, 'reload verifies the committed desktop request through its status receipt');
+    await recoveredBulkReadList;
+    await messagePaginationPage.getByText('已核实上次批量已读：处理了 30 条消息，正在读取最新状态。', { exact: true }).waitFor();
+    await messagePaginationPage.getByRole('button', { name: '全部已读', exact: true }).waitFor();
+    assert.equal(await messagePaginationPage.evaluate(() => sessionStorage.getItem('xmt:message-read-all-pending:v1:actor:11')), null, 'processed status clears the resolved desktop marker');
+    assert.equal(messageBulkReadAttempts, 2, 'reload recovery is GET-only and never repeats the write');
+
+    await messagePaginationPage.getByRole('button', { name: '未读', exact: true }).click();
+    await messagePaginationPage.getByRole('heading', { name: '批量回包前到达的消息', exact: true }).waitFor();
+    await messagePaginationPage.getByText('本页 1 条，共 1 条', { exact: true }).waitFor();
+    let resolveDesktopFinalRefreshStarted!: () => void;
+    const desktopFinalRefreshStarted = new Promise<void>((resolve) => { resolveDesktopFinalRefreshStarted = resolve; });
+    messageListReadStarted = resolveDesktopFinalRefreshStarted;
+    messageListReadHold = true;
+    const finalBulkReadResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'POST'
+      && response.url().endsWith('/api/messages/read-all') && response.status() === 200);
+    await messagePaginationPage.getByRole('button', { name: '全部已读', exact: true }).click();
+    await finalBulkReadResponse;
+    const finalBulkReadRequestId = messageBulkReadRequestIds.at(-1) ?? '';
+    assert.notEqual(finalBulkReadRequestId, firstBulkReadRequestId, 'a new explicit action after recovery uses a fresh request ID');
+    await desktopFinalRefreshStarted;
+    assert.equal(await messagePaginationPage.getByRole('button', { name: '处理中', exact: true }).isDisabled(), true, 'confirmed write remains locked while its latest summary is being read');
+    releaseMessageListRead?.();
+    releaseMessageListRead = null;
+    await messagePaginationPage.getByText('未读 0 条', { exact: true }).waitFor();
+    assert.equal(mobileMessagesFixture.filter((message) => !message.read).length, 0, 'the later explicit request processes the new message');
+    assert.equal(messageBulkReadAttempts, 3, 'one failed attempt, one explicit same-key recovery, and one later new action produce three writes');
+
+    await messagePaginationPage.getByRole('button', { name: '全部', exact: true }).click();
+    await messagePaginationPage.getByText('本页 20 条，共 46 条', { exact: true }).waitFor();
 
     let resolveStaleListReadStarted!: () => void;
     const staleListReadStarted = new Promise<void>((resolve) => { resolveStaleListReadStarted = resolve; });
@@ -2028,18 +3596,62 @@ try {
     expectMessageClearFailure();
     await messagePaginationPage.getByRole('button', { name: '确认清空', exact: true }).click();
     assert.equal((await failedClearResponse).status(), 503);
-    await messagePaginationPage.getByText('清空消息失败', { exact: true }).waitFor();
-    assert.equal(await messagePaginationPage.getByRole('heading', { name: '确认清空消息' }).count(), 1, 'clear failure keeps confirmation open for a safe retry');
-    assert.equal(mobileMessagesFixture.length, 45, 'clear failure leaves all fixture messages intact');
+    await messagePaginationPage.getByRole('button', { name: '同编号安全重试', exact: true }).waitFor();
+    assert.equal(await messagePaginationPage.getByRole('heading', { name: '核实清空消息结果' }).count(), 1, 'a failed uncommitted clear keeps its request ID and requires explicit same-ID retry');
+    assert.equal(mobileMessagesFixture.length, 46, 'clear failure leaves all original and concurrently arrived fixture messages intact');
     await messagePaginationPage.screenshot({ path: '/tmp/xmt-desktop-message-clear-failed-1440.png', fullPage: true });
 
     const successfulClearResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().endsWith('/api/messages') && response.status() === 200);
-    await messagePaginationPage.getByRole('button', { name: '确认清空', exact: true }).click();
+    await messagePaginationPage.getByRole('button', { name: '同编号安全重试', exact: true }).click();
     await successfulClearResponse;
-    await messagePaginationPage.getByText('消息已清空', { exact: true }).waitFor();
+    await messagePaginationPage.getByText('清空请求已确认（处理 46 条原有消息）；正在重新读取，以保留之后到达的新消息。', { exact: true }).waitFor();
     await messagePaginationPage.getByText('暂无消息', { exact: true }).waitFor();
     assert.equal(messageClearAttempts, 2, 'clear retries exactly once after the injected failure');
     assert.equal(mobileMessagesFixture.length, 0, 'clear retry removes the fixture messages only after server success');
+
+    const staleBulkReadActor = { ...user, id: 12, username: 'desktop-stale-bulk-read-actor', name: '迟到批量已读账号', role: 'member' };
+    const currentBulkReadActor = { ...user, id: 13, username: 'desktop-current-bulk-read-actor', name: '当前批量已读账号', role: 'member' };
+    fixtureUser = staleBulkReadActor;
+    mobileMessagesFixture = [{ id: 1246, title: '旧账号待批量处理消息', content: '账号切换时的迟到响应不可污染新会话。', read: false, type: 'info' }];
+    await messagePaginationPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'stale-bulk-read-actor-token', { persist: 'memory' });
+    }, staleBulkReadActor);
+    await messagePaginationPage.getByRole('heading', { name: '旧账号待批量处理消息', exact: true }).waitFor();
+    let resolveStaleBulkReadStarted!: () => void;
+    const staleBulkReadStarted = new Promise<void>((resolve) => { resolveStaleBulkReadStarted = resolve; });
+    let releaseStaleBulkReadResponse!: () => void;
+    const staleBulkReadResponseGate = new Promise<void>((resolve) => { releaseStaleBulkReadResponse = resolve; });
+    await messagePaginationPage.route('**/api/messages/read-all', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      resolveStaleBulkReadStarted();
+      await staleBulkReadResponseGate;
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '旧账号批量已读响应迟到' }) });
+    });
+    expectMessageClearFailure();
+    const staleBulkReadResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'POST'
+      && response.url().endsWith('/api/messages/read-all') && response.status() === 503);
+    await messagePaginationPage.getByRole('button', { name: '全部已读', exact: true }).click();
+    await staleBulkReadStarted;
+
+    fixtureUser = currentBulkReadActor;
+    mobileMessagesFixture = [{ id: 1247, title: '当前账号未读消息', content: '当前账号的未读摘要独立加载。', read: false, type: 'info' }];
+    const currentActorMessageRead = messagePaginationPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().includes('/api/messages?') && response.status() === 200);
+    await messagePaginationPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'current-bulk-read-actor-token', { persist: 'memory' });
+    }, currentBulkReadActor);
+    await currentActorMessageRead;
+    await messagePaginationPage.getByRole('heading', { name: '当前账号未读消息', exact: true }).waitFor();
+    await messagePaginationPage.getByText('未读 1 条', { exact: true }).waitFor();
+    releaseStaleBulkReadResponse();
+    await staleBulkReadResponse;
+    await messagePaginationPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    assert.equal(await messagePaginationPage.getByText('批量已读结果待核实', { exact: true }).count(), 0, 'a stale actor failure does not notify the current actor');
+    assert.equal(await messagePaginationPage.getByRole('button', { name: '全部已读', exact: true }).isDisabled(), false, 'a stale actor finally block cannot lock the current actor bulk action');
+    assert.equal(await messagePaginationPage.getByRole('heading', { name: '旧账号待批量处理消息', exact: true }).count(), 0, 'a stale actor response cannot restore its message list');
+    await messagePaginationPage.unroute('**/api/messages/read-all');
 
     const assertEmptyMessageMetrics = async () => {
       for (const title of ['未读消息', '待处理跳转', '消息总量']) {
@@ -2053,11 +3665,37 @@ try {
     await messagePaginationPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await assertEmptyMessageMetrics();
     await messagePaginationPage.screenshot({ path: '/tmp/xmt-desktop-message-clear-success-1440.png', fullPage: true });
+
+    mobileMessagesFixture = [{ id: 1299, title: '清空之后到达的消息', content: '结果恢复不得再次删除此消息。', read: false, type: 'info', created_at: new Date().toISOString() }];
+    messageClearStatusFailures = 1;
+    loseNextMessageClearResponseAfterCommit = true;
+    nextMessageAfterClearCommit = { id: 1299, title: '清空之后到达的消息', content: '结果恢复不得再次删除此消息。', read: false, type: 'info', created_at: new Date().toISOString() };
+    await messagePaginationPage.getByRole('button', { name: '清空', exact: true }).click();
+    await messagePaginationPage.getByRole('heading', { name: '确认清空消息' }).waitFor();
+    const lostCommittedClear = messagePaginationPage.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().endsWith('/api/messages') && response.status() === 503);
+    expectMessageClearFailure();
+    await messagePaginationPage.getByRole('button', { name: '确认清空', exact: true }).click();
+    await lostCommittedClear;
+    const unavailableStatus = messagePaginationPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages/clear-requests/') && response.status() === 503);
+    await unavailableStatus;
+    await messagePaginationPage.getByRole('button', { name: '只读重新核实', exact: true }).waitFor();
+    const deleteAttemptsBeforeRecoveryReload = messageClearAttempts;
+    const recoveredClearStatus = messagePaginationPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages/clear-requests/') && response.status() === 200);
+    await messagePaginationPage.reload({ waitUntil: 'domcontentloaded' });
+    const recoveredStatusResponse = await recoveredClearStatus;
+    assert.deepEqual(await recoveredStatusResponse.json(), { state: 'cleared', deletedCount: 1 }, 'reload confirms the committed operation through its read-only status endpoint');
+    await messagePaginationPage.getByRole('heading', { name: '清空之后到达的消息', exact: true }).waitFor();
+    assert.equal(messageClearAttempts, deleteAttemptsBeforeRecoveryReload, 'committed-response-loss recovery never repeats DELETE after reload');
+    assert.equal(mobileMessagesFixture.length, 1, 'a message arriving after the committed clear remains in the server fixture');
+    assert.equal(await messagePaginationPage.getByRole('dialog').count(), 0, 'confirmed recovery closes the pending clear dialog');
+    assert.equal(await messagePaginationPage.evaluate(() => Object.keys(sessionStorage).some((key) => key.startsWith('xmt:message-clear-pending:'))), false, 'verified recovery removes only the resolved session marker');
+    assert.ok(messageClearStatusAttempts >= 3, 'status endpoint was used for not-found, unavailable, and recovered outcomes');
     assert.deepEqual(messagePaginationErrors, [], messagePaginationErrors.join('\n'));
   } finally {
     releaseMessageListRead?.();
     releaseMessageListRead = null;
     messageListReadHold = false;
+    messageListReadStarted = null;
     await messagePaginationContext.close();
   }
 
@@ -2214,13 +3852,13 @@ try {
     const failedUserDelete = userGuardPage.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().endsWith('/api/users/1401') && response.status() === 503);
     await userGuardPage.getByRole('button', { name: '确认删除', exact: true }).dblclick();
     await failedUserDelete;
-    await userGuardPage.getByText('删除失败', { exact: true }).waitFor();
-    assert.equal(await userGuardPage.getByRole('heading', { name: '确认删除用户' }).count(), 1, 'failed user deletion leaves the confirmation open for retry');
+    await userGuardPage.getByText('暂未找到删除完成记录；可用同一请求编号安全重试，服务端会避免重复删除。', { exact: true }).waitFor();
+    assert.equal(await userGuardPage.getByRole('heading', { name: '确认删除用户' }).count(), 0, 'an uncommitted delete is resolved into a dedicated same-ID retry state');
     assert.equal(await userGuardPage.getByText('guarded-user', { exact: true }).count(), 1, 'failed user deletion retains the original row');
     assert.equal(userActionAttempts.delete, 1, 'double confirmation during pending delete sends one request');
 
     const confirmedUserDelete = userGuardPage.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().endsWith('/api/users/1401') && response.status() === 200);
-    await userGuardPage.getByRole('button', { name: '确认删除', exact: true }).click();
+    await userGuardPage.getByRole('button', { name: '安全重试上次删除', exact: true }).click();
     await confirmedUserDelete;
     await userGuardPage.getByText('guarded-user', { exact: true }).waitFor({ state: 'hidden' });
     assert.equal(userActionAttempts.delete, 2, 'explicit user delete retry sends one additional request');
@@ -2370,6 +4008,27 @@ try {
 
   const profileUser = { ...user, id: 12, username: 'mobile-profile-recovery', name: '资料恢复验收', role: 'member' };
   fixtureUser = profileUser;
+  for (const { width, theme } of [{ width: 320, theme: 'light' }, { width: 390, theme: 'dark' }] as const) {
+    const { context: fontSizeContext, page: fontSizePage, errors: fontSizeErrors } = await openMobilePage(width, profileUser, theme);
+    try {
+      await fontSizePage.goto(`${baseUrl}/me`, { waitUntil: 'domcontentloaded' });
+      await fontSizePage.getByText('普通人员', { exact: true }).waitFor();
+      const fontSizeButtons = fontSizePage.getByRole('button', { name: /^(14|16|18)$/ });
+      assert.equal(await fontSizeButtons.count(), 3, 'the mobile account page exposes all three font-size choices');
+      for (let index = 0; index < 3; index += 1) {
+        const bounds = await fontSizeButtons.nth(index).boundingBox();
+        assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40, `${theme} ${width}px font-size option ${index + 1} is at least 40×40px`);
+      }
+      await assertMobileLayout(fontSizePage, width, `mobile-me-font-size-${theme}-${width}`);
+      await fontSizePage.getByRole('button', { name: '18', exact: true }).click();
+      await fontSizePage.waitForFunction(() => localStorage.getItem('xmt_fontSize') === '18');
+      await assertMobileLayout(fontSizePage, width, `mobile-me-font-size-large-${theme}-${width}`);
+      assert.deepEqual(fontSizeErrors, [], `${theme} ${width}px font-size page has no browser errors`);
+    } finally {
+      await fontSizeContext.close();
+    }
+  }
+
   profileUpdateAttempts = 0;
   profileUpdateFailures = 1;
   const { context: profileContext, page: profilePage, errors: profileErrors, expectConsoleFailure: expectProfileFailure } = await openMobilePage(390, profileUser);
@@ -2404,15 +4063,15 @@ try {
   try {
     await passwordPage.goto(`${baseUrl}/me`, { waitUntil: 'domcontentloaded' });
     await passwordPage.getByRole('button', { name: '账号安全' }).click();
-    await passwordPage.getByPlaceholder('当前密码').waitFor();
+    await passwordPage.getByLabel('当前密码').waitFor();
     await passwordPage.getByRole('button', { name: '更新密码' }).click();
     await passwordPage.getByText('请输入当前密码。', { exact: true }).waitFor();
-    await passwordPage.getByPlaceholder('当前密码').fill('current-pass');
-    await passwordPage.getByPlaceholder('新密码（至少 6 位）').fill('12345');
+    await passwordPage.getByLabel('当前密码').fill('current-pass');
+    await passwordPage.getByLabel('新密码（至少 6 位）').fill('12345');
     await passwordPage.getByRole('button', { name: '更新密码' }).click();
     await passwordPage.getByText('新密码至少 6 位。', { exact: true }).waitFor();
     assert.equal(passwordChangeAttempts, 0, 'invalid password input must not call the service');
-    await passwordPage.getByPlaceholder('新密码（至少 6 位）').fill('123456');
+    await passwordPage.getByLabel('新密码（至少 6 位）').fill('123456');
     expectPasswordFailure();
     const failedPasswordUpdate = passwordPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/auth/change-password') && response.status() === 503);
     await passwordPage.getByRole('button', { name: '更新密码' }).dblclick();
@@ -2425,7 +4084,7 @@ try {
     await passwordPage.getByRole('button', { name: '更新密码' }).click();
     await successfulPasswordUpdate;
     await passwordPage.getByText('密码已更新。', { exact: true }).waitFor();
-    assert.equal(await passwordPage.getByPlaceholder('当前密码').isVisible(), true, 'the password form stays open so success feedback is visible');
+    assert.equal(await passwordPage.getByLabel('当前密码').isVisible(), true, 'the password form stays open so success feedback is visible');
     await passwordPage.getByText('密码已更新。', { exact: true }).scrollIntoViewIfNeeded();
     await passwordPage.screenshot({ path: '/tmp/xmt-mobile-password-success-390.png' });
     assert.equal(passwordChangeAttempts, 2, 'retry follows the single failed request');
@@ -2499,7 +4158,10 @@ try {
   fixturePermissions = ['topic:create', 'report:daily:submit'];
   mobileMessagesFixture = [];
   dailyReport = createDailyReport();
-  const { context: sharedContext, page: sharedPage, errors: sharedErrors } = await openMobilePage(390, secondUser);
+  const { context: sharedContext, page: sharedPage, errors: sharedErrors, expectConsoleFailure: expectSharedFailure } = await openMobilePage(390, secondUser);
+  let releaseActorReadSuccessGate: (() => void) | null = null;
+  let releaseActorReadFailureGate: (() => void) | null = null;
+  let releaseCurrentActorReadGate: (() => void) | null = null;
   try {
     await sharedPage.addInitScript((reportDate) => {
       localStorage.setItem('xmt:safe-draft:v1:messages:recent', JSON.stringify({ savedAt: Date.now(), value: [{ id: 998, title: '旧版账号私密消息', content: '不得显示', read: false }] }));
@@ -2512,6 +4174,265 @@ try {
     await sharedPage.getByText('暂无消息', { exact: true }).waitFor();
     assert.equal(await sharedPage.getByText('其他账号私密消息').count(), 0);
     assert.equal(await sharedPage.getByText('旧版账号私密消息').count(), 0);
+
+    // An uncertain bulk-read lock belongs to its actor: another account can work,
+    // while returning to the original account performs a read-only verification.
+    const uncertainActor = { ...user, id: 31, username: 'mobile-uncertain-read-actor', name: '待核实账号', role: 'member' };
+    const uncertainActorMessage = { id: 14031, title: '待核实账号的未读消息', content: '共享设备账号隔离验收。', read: false, type: 'info' };
+    fixtureUser = uncertainActor;
+    mobileMessagesFixture = [uncertainActorMessage];
+    messageBulkReadAttempts = 0;
+    messageBulkReadFailures = 0;
+    messageBulkReadRequestIds.length = 0;
+    messageReadAllRequestRecords.clear();
+    messageLoadFailures = 0;
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'uncertain-actor-test-token', { persist: 'memory' });
+    }, uncertainActor);
+    await sharedPage.getByText('未读 1 条', { exact: true }).waitFor();
+    messageBulkReadFailures = 1;
+    messageLoadFailures = 1;
+    expectSharedFailure();
+    expectSharedFailure();
+    const uncertainActorWrite = sharedPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 503);
+    const uncertainActorReadback = sharedPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 503);
+    await sharedPage.getByRole('button', { name: '全部已读', exact: true }).click();
+    await uncertainActorWrite;
+    await uncertainActorReadback;
+    await sharedPage.getByText('服务器尚未找到上次批量已读记录；当前消息暂时无法同步，请只读核实或稍后使用原编号安全重试。', { exact: true }).waitFor();
+    assert.equal(await sharedPage.getByRole('button', { name: '确认重试全部已读', exact: true }).isDisabled(), false, 'a not-found marker permits only an explicit same-key retry, even when the list summary is unavailable');
+    assert.equal(messageBulkReadAttempts, 1, 'the uncertain original-actor write is not automatically retried');
+    const actorRecoveryRequestId = messageBulkReadRequestIds.at(-1);
+    assert.ok(actorRecoveryRequestId, 'the uncertain actor request ID is recorded by the fixture');
+
+    fixtureUser = secondUser;
+    mobileMessagesFixture = Array.from({ length: 3 }, (_, index) => ({ id: 14072 + index, title: `第二账号的未读消息 ${index + 1}`, content: '另一个账号仍可独立处理。', read: false, type: 'info' }));
+    messageLoadFailures = 1;
+    expectSharedFailure();
+    const statusReadsBeforeSwitch = messageReadAllStatusAttempts;
+    const secondActorLoadFailure = sharedPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 503);
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'second-account-test-token', { persist: 'memory' });
+    }, secondUser);
+    await secondActorLoadFailure;
+    await sharedPage.getByText('未读数暂不可用', { exact: true }).waitFor();
+    assert.equal(await sharedPage.getByRole('button', { name: '全部已读', exact: true }).isDisabled(), true, 'actor B cannot inherit actor A unread count after its initial read fails');
+    assert.equal(messageReadAllStatusAttempts, statusReadsBeforeSwitch, 'actor B never checks actor A request ID');
+    const secondActorRefresh = sharedPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+    await sharedPage.getByRole('button', { name: '刷新', exact: true }).click();
+    await secondActorRefresh;
+    await sharedPage.getByText('第二账号的未读消息 1', { exact: true }).waitFor();
+    await sharedPage.getByText('未读 3 条', { exact: true }).waitFor();
+    assert.equal(await sharedPage.getByRole('button', { name: '全部已读', exact: true }).isDisabled(), false, 'actor B uses only its own freshly loaded unread count');
+    assert.equal(messageBulkReadAttempts, 1, 'switching actors does not resubmit either account write');
+
+    fixtureUser = uncertainActor;
+    mobileMessagesFixture = [uncertainActorMessage];
+    const returningActorStatus = sharedPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages/read-all-requests/') && response.status() === 200);
+    const returningActorVerification = sharedPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'uncertain-actor-test-token', { persist: 'memory' });
+    }, uncertainActor);
+    assert.deepEqual(await (await returningActorStatus).json(), { state: 'not_found' }, 'returning to actor A checks only its own request status');
+    await returningActorVerification;
+    await sharedPage.getByText('服务器尚未找到这次批量已读的完成记录。请求编号已保留；读取当前未读数后，可明确点击“确认重试全部已读”安全重试。', { exact: true }).waitFor();
+    assert.equal(await sharedPage.getByRole('button', { name: '确认重试全部已读', exact: true }).isDisabled(), false, 'returning to actor A offers an explicit same-key retry only after status not_found');
+    assert.equal(messageBulkReadAttempts, 1, 'returning to actor A performs only a GET, not a duplicate write');
+
+    // A not-found operation may be safely replayed with its original key even
+    // when an authoritative list refresh reports zero unread messages.
+    mobileMessagesFixture = [{ ...uncertainActorMessage, read: true }];
+    const zeroUnreadStatus = sharedPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages/read-all-requests/') && response.status() === 200);
+    const zeroUnreadList = sharedPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().includes('/api/messages?') && response.status() === 200);
+    await sharedPage.getByRole('button', { name: '只读核实', exact: true }).click();
+    assert.deepEqual(await (await zeroUnreadStatus).json(), { state: 'not_found' });
+    await zeroUnreadList;
+    await sharedPage.getByText('未读 0 条', { exact: true }).waitFor();
+    assert.equal(await sharedPage.getByRole('button', { name: '确认重试全部已读', exact: true }).isDisabled(), false, 'zero unread count does not disable explicit same-ID recovery after not_found');
+    const zeroCountRetryResponse = sharedPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/messages/read-all') && response.status() === 200);
+    await sharedPage.getByRole('button', { name: '确认重试全部已读', exact: true }).click();
+    await zeroCountRetryResponse;
+    assert.equal(messageBulkReadRequestIds.at(-1), actorRecoveryRequestId, 'zero-count recovery reuses the original request ID parsed by the fixture');
+    assert.deepEqual(mobileMessagesFixture.map((message) => message.read), [true], 'zero-count same-ID retry does not modify already-read messages');
+
+    fixtureUser = secondUser;
+    mobileMessagesFixture = [];
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'second-account-test-token', { persist: 'memory' });
+    }, secondUser);
+    await sharedPage.getByText('暂无消息', { exact: true }).waitFor();
+
+    // Late single-message read replies must not write feedback, navigate, or
+    // clear another actor's in-flight indicator after an account switch.
+    const staleReadSuccessId = 14200;
+    const sharedReadFailureId = 14202;
+    fixtureUser = uncertainActor;
+    mobileMessagesFixture = [{
+      id: staleReadSuccessId,
+      title: '账号A迟到成功消息',
+      content: '成功回包晚于账号切换时不能导航。',
+      read: false,
+      link: `/topics/${linkedTopic.id}`,
+      type: 'info',
+    }];
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'actor-a-delayed-read-success-token', { persist: 'memory' });
+    }, uncertainActor);
+    await sharedPage.getByRole('button', { name: /账号A迟到成功消息/ }).waitFor();
+
+    const staleReadSuccessGate = new Promise<void>((resolve) => { releaseActorReadSuccessGate = resolve; });
+    let resolveStaleReadSuccessStarted!: () => void;
+    const staleReadSuccessStarted = new Promise<void>((resolve) => { resolveStaleReadSuccessStarted = resolve; });
+    await sharedPage.route(`**/api/messages/${staleReadSuccessId}`, async (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      const authorization = route.request().headers().authorization ?? '';
+      if (authorization !== 'Bearer actor-a-delayed-read-success-token') return route.continue();
+      resolveStaleReadSuccessStarted();
+      await staleReadSuccessGate;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: '消息已标记为已读' }) });
+    });
+    const staleReadSuccessResponse = sharedPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${staleReadSuccessId}`) && response.status() === 200);
+    await sharedPage.getByRole('button', { name: /账号A迟到成功消息/ }).click();
+    await staleReadSuccessStarted;
+    fixtureUser = secondUser;
+    mobileMessagesFixture = [{ id: 14201, title: '账号B当前消息', content: '页面仍属于账号B。', read: false, type: 'info' }];
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'second-account-test-token', { persist: 'memory' });
+    }, secondUser);
+    await sharedPage.getByRole('button', { name: /账号B当前消息/ }).waitFor();
+    releaseActorReadSuccessGate?.();
+    releaseActorReadSuccessGate = null;
+    await staleReadSuccessResponse;
+    await sharedPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    assert.equal(sharedPage.url(), `${baseUrl}/messages`, 'actor A success does not navigate actor B to actor A message link');
+    assert.equal(await sharedPage.getByText('消息已标记为已读', { exact: true }).count(), 0, 'actor A success feedback is not shown in actor B inbox');
+
+    fixtureUser = uncertainActor;
+    mobileMessagesFixture = [{
+      id: sharedReadFailureId,
+      title: '账号A迟到失败消息',
+      content: '失败回包晚于账号切换时不能覆盖新账号提示。',
+      read: false,
+      link: `/topics/${linkedTopic.id}`,
+      type: 'info',
+    }];
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'actor-a-delayed-read-failure-token', { persist: 'memory' });
+    }, uncertainActor);
+    await sharedPage.getByRole('button', { name: /账号A迟到失败消息/ }).waitFor();
+    const staleReadFailureGate = new Promise<void>((resolve) => { releaseActorReadFailureGate = resolve; });
+    let resolveStaleReadFailureStarted!: () => void;
+    const staleReadFailureStarted = new Promise<void>((resolve) => { resolveStaleReadFailureStarted = resolve; });
+    const currentActorReadGate = new Promise<void>((resolve) => { releaseCurrentActorReadGate = resolve; });
+    let resolveCurrentActorReadStarted!: () => void;
+    const currentActorReadStarted = new Promise<void>((resolve) => { resolveCurrentActorReadStarted = resolve; });
+    await sharedPage.route(`**/api/messages/${sharedReadFailureId}`, async (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      const authorization = route.request().headers().authorization ?? '';
+      if (authorization === 'Bearer actor-a-delayed-read-failure-token') {
+        resolveStaleReadFailureStarted();
+        await staleReadFailureGate;
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '账号A消息服务暂不可用' }) });
+        return;
+      }
+      if (authorization === 'Bearer actor-b-delayed-read-token') {
+        resolveCurrentActorReadStarted();
+        await currentActorReadGate;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: '消息已标记为已读' }) });
+        return;
+      }
+      await route.continue();
+    });
+    const staleReadFailureResponse = sharedPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${sharedReadFailureId}`) && response.status() === 503);
+    await sharedPage.getByRole('button', { name: /账号A迟到失败消息/ }).click();
+    await staleReadFailureStarted;
+    fixtureUser = secondUser;
+    mobileMessagesFixture = [{ id: sharedReadFailureId, title: '账号B同编号消息', content: '账号B可独立标记同编号消息。', read: false, type: 'info' }];
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'actor-b-delayed-read-token', { persist: 'memory' });
+    }, secondUser);
+    const actorBMessage = sharedPage.getByRole('button', { name: /账号B同编号消息/ });
+    await actorBMessage.waitFor();
+    assert.equal(await actorBMessage.isDisabled(), false, 'actor A in-flight state does not disable the same message ID for actor B');
+    const currentActorReadResponse = sharedPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${sharedReadFailureId}`) && response.status() === 200);
+    await actorBMessage.click();
+    await currentActorReadStarted;
+    assert.equal(await actorBMessage.isDisabled(), true, 'actor B keeps its own in-flight read indicator');
+    releaseActorReadFailureGate?.();
+    releaseActorReadFailureGate = null;
+    await staleReadFailureResponse;
+    await sharedPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    assert.equal(await actorBMessage.isDisabled(), true, 'actor A finally cleanup cannot clear actor B in-flight state for the same message ID');
+    assert.equal(await sharedPage.getByText('标记消息失败', { exact: true }).count(), 0, 'actor A failure feedback is not shown in actor B inbox');
+    assert.equal(sharedPage.url(), `${baseUrl}/messages`, 'actor A failure does not navigate actor B');
+    releaseCurrentActorReadGate?.();
+    releaseCurrentActorReadGate = null;
+    await currentActorReadResponse;
+    await sharedPage.getByText('消息已标记为已读', { exact: true }).waitFor();
+    await sharedPage.unroute(`**/api/messages/${staleReadSuccessId}`);
+    await sharedPage.unroute(`**/api/messages/${sharedReadFailureId}`);
+
+    // A delayed page-two response from actor A must not append to actor B's
+    // messages or replace B's unread summary after the account changes.
+    fixtureUser = uncertainActor;
+    mobileMessagesFixture = Array.from({ length: 21 }, (_, index) => ({
+      id: 14100 + index,
+      title: `账号切换分页消息 ${index + 1}`,
+      content: '旧账号分页回包不得写入新账号消息列表。',
+      read: false,
+      type: 'info',
+    }));
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'uncertain-actor-test-token', { persist: 'memory' });
+    }, uncertainActor);
+    await sharedPage.getByText('未读 21 条', { exact: true }).waitFor();
+    const actorPageMore = sharedPage.getByRole('button', { name: '加载更多（已显示 20 / 21 条）', exact: true });
+    await actorPageMore.waitFor();
+    let resolveStaleActorPageStarted!: () => void;
+    const staleActorPageStarted = new Promise<void>((resolve) => { resolveStaleActorPageStarted = resolve; });
+    messageListReadStarted = resolveStaleActorPageStarted;
+    messageListReadHold = true;
+    const staleActorPage = sharedPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().includes('/api/messages?') && new URL(response.url()).searchParams.get('page') === '2');
+    await actorPageMore.click();
+    await staleActorPageStarted;
+
+    fixtureUser = secondUser;
+    mobileMessagesFixture = Array.from({ length: 3 }, (_, index) => ({
+      id: 14190 + index,
+      title: `新账号切换后消息 ${index + 1}`,
+      content: '新账号消息和摘要以自己的权威查询为准。',
+      read: false,
+      type: 'info',
+    }));
+    const actorBMessages = sharedPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().includes('/api/messages?') && new URL(response.url()).searchParams.get('page') === '1');
+    await sharedPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'second-account-test-token', { persist: 'memory' });
+    }, secondUser);
+    await actorBMessages;
+    await sharedPage.getByText('未读 3 条', { exact: true }).waitFor();
+    releaseMessageListRead?.();
+    releaseMessageListRead = null;
+    await staleActorPage;
+    await sharedPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    assert.equal(await sharedPage.getByRole('button', { name: /新账号切换后消息 1/ }).count(), 1, 'actor B retains its own first page after actor A pagination resolves');
+    assert.equal(await sharedPage.getByRole('button', { name: /账号切换分页消息 21/ }).count(), 0, 'actor A page-two response is discarded after account switch');
+    assert.equal(await sharedPage.getByText('未读 3 条', { exact: true }).count(), 1, 'stale pagination cannot overwrite actor B unread summary');
+
     await sharedPage.goto(`${baseUrl}/topics/add`, { waitUntil: 'domcontentloaded' });
     const sharedTopicTitle = sharedPage.getByPlaceholder('输入清晰、可执行的选题标题');
     await sharedTopicTitle.waitFor();
@@ -2522,6 +4443,16 @@ try {
     await assertMobileLayout(sharedPage, 390, 'shared-device-account-isolation');
     assert.deepEqual(sharedErrors, [], sharedErrors.join('\n'));
   } finally {
+    releaseActorReadSuccessGate?.();
+    releaseActorReadSuccessGate = null;
+    releaseActorReadFailureGate?.();
+    releaseActorReadFailureGate = null;
+    releaseCurrentActorReadGate?.();
+    releaseCurrentActorReadGate = null;
+    releaseMessageListRead?.();
+    releaseMessageListRead = null;
+    messageListReadHold = false;
+    messageListReadStarted = null;
     await sharedContext.close();
   }
 
@@ -2584,6 +4515,31 @@ try {
       await mobileTopicsAccessibility.context.close();
     }
 
+    for (const { width, theme } of [{ width: 320, theme: 'light' }, { width: 390, theme: 'dark' }] as const) {
+      const emptyTopics = await openMobilePage(width, user, theme);
+      await emptyTopics.page.route('**/api/topics?*', async (route) => {
+        if (route.request().method() !== 'GET') {
+          await route.continue();
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: [], total: 0, page: 1, limit: 20 }),
+        });
+      });
+      try {
+        await emptyTopics.page.goto(`${baseUrl}/topics`, { waitUntil: 'domcontentloaded' });
+        const emptyState = emptyTopics.page.getByText('没有符合条件的选题', { exact: true });
+        await emptyState.waitFor();
+        assert.ok(await textContrast(emptyState) >= 4.5, `${theme}主题${width}px 选题空状态文字对比度应不低于 4.5:1`);
+        await assertMobileLayout(emptyTopics.page, width, `mobile-topics-empty-${theme}-${width}`);
+        assert.deepEqual(emptyTopics.errors, [], `${theme} ${width}px empty topics: ${emptyTopics.errors.join('\n')}`);
+      } finally {
+        await emptyTopics.context.close();
+      }
+    }
+
     const systemGroupButton = navigationPage.locator('aside nav').getByRole('button', { name: '系统管理' });
     await systemGroupButton.click();
     const systemItems = systemGroupButton.locator('xpath=following-sibling::ul');
@@ -2599,6 +4555,110 @@ try {
     await navigationPage.waitForURL((url) => url.pathname === '/content-lab' && url.searchParams.get('tab') === 'generation');
     await navigationPage.getByRole('heading', { name: '内容生成助手' }).waitFor();
     await navigationPage.screenshot({ path: '/tmp/xmt-content-lab-generation.png', fullPage: true });
+
+    const contentLabHoverPanels = [
+      { tab: '内容运行', heading: '内容操作系统', action: '调度' },
+      { tab: '内容洞察', heading: '内容智能理解', action: '分析' },
+      { tab: '创作建议', heading: '内容生成助手', action: '生成' },
+      { tab: '协作动态', heading: '协作控制台', action: '刷新' },
+      { tab: '协作体验', heading: '协作故事线', action: '生成' },
+    ] as const;
+    for (const theme of ['light', 'dark'] as const) {
+      const contentLabHover = await openMobilePage(1440, user, theme);
+      const mutationRequests: string[] = [];
+      contentLabHover.page.on('request', (request) => {
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) {
+          mutationRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+        }
+      });
+      try {
+        await contentLabHover.page.goto(`${baseUrl}/content-lab`, { waitUntil: 'domcontentloaded' });
+        await contentLabHover.page.getByRole('heading', { name: '内容实验室', exact: true }).waitFor();
+        for (const panel of contentLabHoverPanels) {
+          const tab = contentLabHover.page.getByRole('button', { name: panel.tab, exact: true });
+          if ((await tab.getAttribute('aria-pressed')) !== 'true') await tab.click();
+          await contentLabHover.page.getByRole('heading', { name: panel.heading, exact: true }).waitFor();
+          const action = contentLabHover.page.getByRole('button', { name: panel.action, exact: true });
+          await action.waitFor();
+          const defaultBackground = await action.evaluate((element) => getComputedStyle(element).backgroundImage);
+          await action.hover();
+          const hoverBackground = await action.evaluate((element) => getComputedStyle(element).backgroundImage);
+          assert.notEqual(hoverBackground, defaultBackground, `${theme}主题${panel.tab}的“${panel.action}”按钮悬停时应有可见状态变化`);
+        }
+        assert.deepEqual(mutationRequests, [], `${theme}主题内容实验室悬停检查不应触发写入请求`);
+        assert.deepEqual(contentLabHover.errors, [], `${theme}主题内容实验室悬停检查无浏览器错误`);
+      } finally {
+        await contentLabHover.context.close();
+      }
+    }
+
+    for (const theme of ['light', 'dark'] as const) {
+      for (const width of [320, 390, 1440] as const) {
+        const contentInsights = await openMobilePage(width, user, theme);
+        const mutationRequests: string[] = [];
+        contentInsights.page.on('request', (request) => {
+          const url = new URL(request.url());
+          if (url.pathname.startsWith('/api/') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) {
+            mutationRequests.push(`${request.method()} ${url.pathname}`);
+          }
+        });
+        try {
+          await contentInsights.page.goto(`${baseUrl}/content-lab?tab=insights`, { waitUntil: 'domcontentloaded' });
+          await contentInsights.page.getByRole('heading', { name: '内容智能理解', exact: true }).waitFor();
+          await contentInsights.page.getByRole('combobox', { name: '选择最近协作文档' }).waitFor();
+          await contentInsights.page.evaluate(async (modulePath) => {
+            const { recordEditorTelemetry } = await import(modulePath);
+            recordEditorTelemetry('remote edit', { docId: 'production:1', userId: 'fixture-editor', bytes: 900 });
+          }, '/src/editor/telemetry/editorTelemetry.ts');
+          await contentInsights.page.getByRole('button', { name: '分析', exact: true }).click();
+          const impactRow = contentInsights.page.locator('main table tbody tr').filter({ hasText: 'fixture-editor' });
+          await impactRow.waitFor();
+          const tableScroll = await contentInsights.page.locator('main table').evaluate((table) => {
+            const scroller = table.parentElement;
+            const judgement = table.querySelector('thead th:last-child');
+            const judgementCell = table.querySelector('tbody tr:first-child td:last-child');
+            if (!scroller || !judgement || !judgementCell) return null;
+            scroller.scrollLeft = 0;
+            const initial = judgement.getBoundingClientRect();
+            const scrollerBounds = scroller.getBoundingClientRect();
+            const initiallyVisible = initial.left >= scrollerBounds.left && initial.right <= scrollerBounds.right;
+            scroller.scrollLeft = scroller.scrollWidth;
+            const final = judgement.getBoundingClientRect();
+            const finalCell = judgementCell.getBoundingClientRect();
+            return {
+              pageWidth: document.documentElement.scrollWidth,
+              viewportWidth: window.innerWidth,
+              scrollWidth: scroller.scrollWidth,
+              clientWidth: scroller.clientWidth,
+              overflowX: getComputedStyle(scroller).overflowX,
+              initiallyVisible,
+              judgementVisible: final.left >= scrollerBounds.left && final.right <= scrollerBounds.right,
+              judgementText: judgement.textContent?.trim(),
+              judgementCellVisible: finalCell.left >= scrollerBounds.left && finalCell.right <= scrollerBounds.right,
+              judgementCellText: judgementCell.textContent?.trim(),
+            };
+          });
+          assert.ok(tableScroll, `${theme}主题${width}px 应渲染用户影响力表格`);
+          assert.equal(tableScroll.pageWidth, width, `${theme}主题${width}px 页面不应横向溢出`);
+          if (width < 720) {
+            assert.ok(tableScroll.scrollWidth > tableScroll.clientWidth, `${theme}主题${width}px 表格应在内部横向滚动`);
+            assert.ok(['auto', 'scroll'].includes(tableScroll.overflowX), `${theme}主题${width}px 表格容器应允许横向滚动`);
+            assert.equal(tableScroll.initiallyVisible, false, `${theme}主题${width}px 初始视口应保留最右列的滚动边界`);
+          } else {
+            assert.ok(tableScroll.scrollWidth <= tableScroll.clientWidth, `${theme}主题${width}px 桌面表格列应完整显示`);
+            assert.equal(tableScroll.initiallyVisible, true, `${theme}主题${width}px 桌面初始视口应显示最右列`);
+          }
+          assert.equal(tableScroll.judgementVisible, true, `${theme}主题${width}px 横向滚动后应完整显示“判断”列`);
+          assert.equal(tableScroll.judgementText, '判断');
+          assert.equal(tableScroll.judgementCellVisible, true, `${theme}主题${width}px 横向滚动后应完整显示“判断”列内容`);
+          assert.match(tableScroll.judgementCellText, /主要影响内容结构/);
+          assert.deepEqual(mutationRequests, [], `${theme}主题${width}px 洞察布局检查不应触发写入请求`);
+          assert.deepEqual(contentInsights.errors, [], `${theme}主题${width}px 洞察布局无浏览器错误`);
+        } finally {
+          await contentInsights.context.close();
+        }
+      }
+    }
 
     await contentGroupButton.click();
     await contentItems.getByRole('button', { name: '创作管理', exact: true }).click();
@@ -2715,17 +4775,18 @@ try {
     releaseDesktopCreate();
     await desktopCreateClick;
     await failedCreate;
-    await desktopDraftPage.getByText('选题服务暂不可用，已保留本次输入', { exact: true }).waitFor();
+    await desktopDraftPage.getByText('服务器尚未找到这次创建请求', { exact: false }).waitFor();
     assert.equal(await desktopDraftPage.evaluate((key) => Boolean(localStorage.getItem(key)), desktopDraftKey), true, 'failed desktop submit keeps the saved draft');
     assert.equal(await titleInput.inputValue(), desktopDraftTitle, 'failed desktop submit keeps its editable content');
-    assert.equal(await titleInput.isDisabled(), false, 'a failed desktop submit restores the same draft for editing');
-    await desktopDraftPage.waitForFunction(() => document.querySelector('.ProseMirror')?.getAttribute('contenteditable') === 'true');
+    assert.equal(await titleInput.isDisabled(), true, 'the not-found receipt keeps the exact submitted draft locked');
+    await desktopDraftPage.waitForFunction(() => document.querySelector('.ProseMirror')?.getAttribute('contenteditable') === 'false');
     assert.equal(topicCreateAttempts.get(desktopDraftTitle), 1, 'a double-clicked desktop submission sends one write');
 
     const successfulCreate = desktopDraftPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/topics') && response.status() === 200);
-    await desktopDraftPage.getByRole('button', { name: '提报选题' }).click();
+    await desktopDraftPage.getByRole('button', { name: '确认用原内容和同一编号重试', exact: true }).click();
     await successfulCreate;
     await desktopDraftPage.waitForURL('**/topics/906');
+    assert.equal(topicCreateRequestIds.get(desktopDraftTitle)?.[0], topicCreateRequestIds.get(desktopDraftTitle)?.[1], 'desktop safe retry reuses the original idempotency key');
     assert.deepEqual(await desktopDraftPage.evaluate((key) => JSON.parse(localStorage.getItem(key) || 'null')?.value?.drafts?.map((entry) => entry.draft.title), desktopDraftKey), [retainedDraftTitle], 'successful submit clears only the submitted draft');
     assert.equal(await desktopDraftPage.evaluate((key) => localStorage.getItem(key), legacyDesktopDraftKey), null, 'successful submit also clears a leftover legacy key');
     assert.deepEqual(desktopDraftErrors, [], desktopDraftErrors.join('\n'));
@@ -2758,11 +4819,12 @@ try {
     await desktopStorageFailurePage.getByRole('button', { name: '提报选题' }).click();
     await failedCreate;
     await desktopStorageFailurePage.getByText('本机草稿未能保存，请勿关闭此页', { exact: false }).waitFor();
+    await desktopStorageFailurePage.getByText('服务器尚未找到这次创建请求', { exact: false }).waitFor();
     assert.equal(await titleInput.inputValue(), title, 'failed desktop submit keeps editable content in the current page');
     assert.equal(await desktopStorageFailurePage.evaluate((key) => localStorage.getItem(key), 'xmt:safe-draft:v1:user:13:topic:new'), null, 'quota failure does not claim a stored copy');
 
     const successfulCreate = desktopStorageFailurePage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/topics') && response.status() === 200);
-    await desktopStorageFailurePage.getByRole('button', { name: '提报选题' }).click();
+    await desktopStorageFailurePage.getByRole('button', { name: '确认用原内容和同一编号重试', exact: true }).click();
     await successfulCreate;
     await desktopStorageFailurePage.waitForURL('**/topics/906');
     assert.deepEqual(desktopStorageFailureErrors, [], desktopStorageFailureErrors.join('\n'));
@@ -2790,11 +4852,10 @@ try {
     const failedCreate = cleanupPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/topics') && response.status() === 503);
     await cleanupPage.getByRole('button', { name: '提报选题' }).click();
     await failedCreate;
-    await cleanupPage.getByText('选题服务暂不可用，已保留本次输入', { exact: true }).waitFor();
-    await cleanupPage.getByRole('button', { name: '提报选题' }).click();
+    await cleanupPage.getByText('服务器尚未找到这次创建请求', { exact: false }).waitFor();
+    await cleanupPage.getByRole('button', { name: '确认用原内容和同一编号重试', exact: true }).click();
     await cleanupPage.waitForURL('**/topics/906');
-    await cleanupPage.getByText('草稿清理失败', { exact: true }).waitFor();
-    await cleanupPage.getByText('选题已提交成功，但本机草稿未能清理；请勿重复提报。', { exact: true }).waitFor();
+    await cleanupPage.getByText('本机草稿已保留', { exact: true }).waitFor();
     assert.equal(await cleanupPage.evaluate(({ key, title }) => localStorage.getItem(key)?.includes(title), { key: cleanupKey, title }), true, 'failed deletion leaves a recoverable copy and reports that it was not cleared');
     assert.equal(topicCreateAttempts.get(title), 2, 'cleanup failure does not trigger another server submission');
     assert.deepEqual(cleanupErrors, [], cleanupErrors.join('\n'));
@@ -2841,25 +4902,27 @@ try {
     const failedCreate = desktopCreatorPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/topics') && response.status() === 503);
     await desktopCreatorPage.getByRole('button', { name: '仍然提报' }).click();
     await failedCreate;
-    await desktopCreatorPage.getByText('选题服务暂不可用，已保留本次输入', { exact: true }).waitFor();
+    await desktopCreatorPage.getByText('服务器尚未找到这次创建请求', { exact: false }).waitFor();
     const successfulCreate = desktopCreatorPage.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/topics') && response.status() === 200);
-    await desktopCreatorPage.getByRole('button', { name: '提报选题' }).click();
+    await desktopCreatorPage.getByRole('button', { name: '确认用原内容和同一编号重试', exact: true }).click();
     await successfulCreate;
     await desktopCreatorPage.waitForURL('**/topics/906');
     assert.equal(topicCreateAttempts.get(title), 2, 'desktop retry submits exactly once after the failure');
+    assert.equal(topicCreateRequestIds.get(title)?.[0], topicCreateRequestIds.get(title)?.[1], 'desktop retry preserves the original idempotency key');
     assert.equal(topicSearchAttempts.get('桌面'), searchCountAfterReview, 'desktop retry reuses its similarity review');
     assert.deepEqual(desktopCreatorErrors, [], desktopCreatorErrors.join('\n'));
   } finally {
     await desktopCreatorContext.close();
   }
 
+  fixtureUser = user;
   fixturePermissions = ['resource:view', 'topic:view', 'analytics:view'];
   const topicAssetFixture = [
     {
       id: 931, title: '夜市主题内容资产', status: 'completed', platform: 'douyin',
       created_at: '2026-09-20T00:00:00.000Z', updated_at: '2026-09-27T00:00:00.000Z',
       production_count: 2, latest_production_id: 932, latest_production_version: 'v2.0', latest_production_updated_at: '2026-09-26T00:00:00.000Z',
-      shooting_count: 1, publishing_count: 1, resource_count: 3,
+      shooting_count: 1, publishing_count: 1, resource_count: 3, linked_resources: [], referenced_resources: [],
       dimensions: [], can_manage_dimensions: true,
       latest_analytics: {
         data_date: '2026-09-27', views: 5200, likes: 120, shares: 20, comments: 15,
@@ -2870,13 +4933,14 @@ try {
       id: 933, title: '早餐铺传承故事', status: 'production', platform: 'xiaohongshu',
       created_at: '2026-09-19T00:00:00.000Z', updated_at: '2026-09-25T00:00:00.000Z',
       production_count: 1, latest_production_id: 934, latest_production_version: 'v1.0', latest_production_updated_at: '2026-09-24T00:00:00.000Z',
-      shooting_count: 0, publishing_count: 0, resource_count: 1, dimensions: [], can_manage_dimensions: true, latest_analytics: null,
+      shooting_count: 0, publishing_count: 0, resource_count: 1, linked_resources: [], referenced_resources: [], dimensions: [], can_manage_dimensions: true, latest_analytics: null,
     },
   ];
   const { context: topicAssetsContext, page: topicAssetsPage, errors: topicAssetsErrors, expectConsoleFailure: expectTopicAssetConsoleFailure } = await openMobilePage(390);
   try {
     let topicAssetRetryAttempts = 0;
     let dimensionAddAttempts = 0;
+    const topicAssetListMethods: string[] = [];
     let registeredDimensions: Array<{ id: number; type: 'city' | 'person' | 'project'; value: string }> = [];
     await topicAssetsPage.route('**/api/topics/931/asset-dimensions', async (route) => {
       if (route.request().method() !== 'POST') return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ message: 'not found' }) });
@@ -2890,6 +4954,7 @@ try {
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ message: '维度已登记', id: 1 }) });
     });
     await topicAssetsPage.route('**/api/resource-center/content-topics*', async (route) => {
+      topicAssetListMethods.push(route.request().method());
       const url = new URL(route.request().url());
       const keyword = url.searchParams.get('keyword')?.toLowerCase() || '';
       const dimensionType = url.searchParams.get('dimension_type') || '';
@@ -2906,6 +4971,10 @@ try {
         ? [allItems[0]]
         : allItems.filter((item) => (!keyword || item.title.toLowerCase().includes(keyword))
           && (!dimensionType || item.dimensions.some((dimension) => dimension.type === dimensionType && (!dimensionValue || dimension.value === dimensionValue)))));
+      const registeredTopicCounts = Object.fromEntries((['city', 'person', 'project'] as const).map((type) => [
+        type,
+        new Set(allItems.filter((item) => item.dimensions.some((dimension) => dimension.type === type)).map((item) => item.id)).size,
+      ]));
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -2915,6 +4984,7 @@ try {
           analytics_visible: true,
           available_dimensions: registeredDimensions.map(({ type, value }) => ({ dimension_type: type, value })),
           dimension_summaries: registeredDimensions.map(({ type, value }) => ({ dimension_type: type, value, topic_count: 1, production_count: 2, resource_count: 3, shooting_count: 1, publishing_count: 1 })),
+          dimension_coverage: { visible_topics_total: allItems.length, registered_topic_counts: registeredTopicCounts },
         }),
       });
     });
@@ -2922,6 +4992,11 @@ try {
     assert.equal(new URL(topicAssetsPage.url()).pathname, '/asset-center/content-topics', 'topic assets route identity is preserved');
     assert((await topicAssetsPage.title()).trim().length > 0, 'topic assets page title is present');
     await topicAssetsPage.getByRole('heading', { name: '主题内容资产' }).waitFor();
+    const topicDimensionCoverage = topicAssetsPage.getByRole('region', { name: '内容维度登记范围' });
+    await topicDimensionCoverage.getByRole('heading', { name: '城市' }).waitFor();
+    await topicDimensionCoverage.getByText('0 / 2 个当前可见选题已登记', { exact: true }).waitFor();
+    await topicDimensionCoverage.getByText('仅表示存在显式登记，不代表每个选题都必须登记。', { exact: true }).waitFor();
+    assert.equal(await topicDimensionCoverage.getByRole('button').count(), 0, 'coverage summaries are read-only displays');
     assert.equal(await topicAssetsPage.locator('vite-error-overlay, #webpack-dev-server-client-overlay, [data-nextjs-dialog]').count(), 0, 'topic assets has no framework error overlay');
     await topicAssetsPage.getByRole('link', { name: '夜市主题内容资产' }).waitFor();
     await topicAssetsPage.getByText(/最近发布 .*播放 5,200 · 点赞 120 · 评论 15/).waitFor();
@@ -2939,6 +5014,7 @@ try {
       topicAssetsPage.getByRole('button', { name: '添加维度' }).first().click(),
     ]);
     await topicAssetsPage.getByText('城市杭州', { exact: false }).waitFor();
+    await topicDimensionCoverage.getByText('1 / 2 个当前可见选题已登记', { exact: true }).waitFor();
     await topicAssetsPage.getByRole('status').getByText('城市“杭州”已登记。', { exact: true }).waitFor();
     assert.equal(dimensionAddAttempts, 2, 'dimension recovery requires one explicit retry and submits exactly twice');
     const cityFilterResponse = topicAssetsPage.waitForResponse((response) => {
@@ -2968,6 +5044,7 @@ try {
     await assetRetryResponse;
     await topicAssetsPage.getByRole('link', { name: '夜市主题内容资产' }).waitFor();
     assert.equal(topicAssetRetryAttempts, 2, 'one explicit retry causes exactly one second content assets request');
+    assert(topicAssetListMethods.length > 0 && topicAssetListMethods.every((method) => method === 'GET'), 'coverage reads never submit a mutation');
     await topicAssetsPage.screenshot({ path: '/tmp/xmt-topic-assets-mobile-390.png', fullPage: true });
     assert.deepEqual(topicAssetsErrors, [], topicAssetsErrors.join('\n'));
   } finally {
@@ -2979,10 +5056,11 @@ try {
     await topicAssetsNarrowPage.route('**/api/resource-center/content-topics*', async (route) => route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ data: [{ ...topicAssetFixture[0], can_manage_dimensions: true }], pagination: { page: 1, page_size: 12, total: 1, total_pages: 1 }, analytics_visible: true, available_dimensions: [], dimension_summaries: [] }),
+      body: JSON.stringify({ data: [{ ...topicAssetFixture[0], can_manage_dimensions: true }], pagination: { page: 1, page_size: 12, total: 1, total_pages: 1 }, analytics_visible: true, available_dimensions: [], dimension_summaries: [], dimension_coverage: { visible_topics_total: 1, registered_topic_counts: { city: 0, person: 0, project: 0 } } }),
     }));
     await topicAssetsNarrowPage.goto(`${baseUrl}/asset-center/content-topics`, { waitUntil: 'domcontentloaded' });
     await topicAssetsNarrowPage.getByRole('link', { name: '夜市主题内容资产' }).waitFor();
+    await topicAssetsNarrowPage.getByRole('region', { name: '内容维度登记范围' }).getByText('0 / 1 个当前可见选题已登记', { exact: true }).waitFor();
     await topicAssetsNarrowPage.getByText('抖音 · 更新于 2026/9/27').waitFor();
     await assertMobileLayout(topicAssetsNarrowPage, 320, 'topic-assets');
     assert.deepEqual(topicAssetsNarrowErrors, [], topicAssetsNarrowErrors.join('\n'));
@@ -2995,12 +5073,13 @@ try {
     await topicAssetsDesktopPage.route('**/api/resource-center/content-topics*', async (route) => route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ data: topicAssetFixture, pagination: { page: 1, page_size: 12, total: topicAssetFixture.length, total_pages: 1 }, analytics_visible: true, available_dimensions: [], dimension_summaries: [] }),
+      body: JSON.stringify({ data: topicAssetFixture, pagination: { page: 1, page_size: 12, total: topicAssetFixture.length, total_pages: 1 }, analytics_visible: true, available_dimensions: [], dimension_summaries: [], dimension_coverage: { visible_topics_total: topicAssetFixture.length, registered_topic_counts: { city: 0, person: 0, project: 0 } } }),
     }));
     await topicAssetsDesktopPage.goto(`${baseUrl}/asset-center/content-topics`, { waitUntil: 'domcontentloaded' });
     assert.equal(new URL(topicAssetsDesktopPage.url()).pathname, '/asset-center/content-topics', 'desktop topic assets route identity is preserved');
     assert.equal(await topicAssetsDesktopPage.locator('vite-error-overlay, #webpack-dev-server-client-overlay, [data-nextjs-dialog]').count(), 0, 'desktop topic assets has no framework error overlay');
     await topicAssetsDesktopPage.getByRole('link', { name: '夜市主题内容资产' }).waitFor();
+    await topicAssetsDesktopPage.getByRole('region', { name: '内容维度登记范围' }).getByText('0 / 2 个当前可见选题已登记', { exact: true }).waitFor();
     await assertMobileLayout(topicAssetsDesktopPage, 1440, 'topic-assets');
     await topicAssetsDesktopPage.screenshot({ path: '/tmp/xmt-topic-assets-desktop-1440.png', fullPage: true });
     assert.deepEqual(topicAssetsDesktopErrors, [], topicAssetsDesktopErrors.join('\n'));
@@ -3049,4 +5128,5 @@ try {
   await browser.close();
   await vite.close();
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
 }

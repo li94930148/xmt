@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAppStore } from '../store';
-import { getProduction, createProduction, getTopics, updateProduction } from '../api';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useAppStore, useAuthStore } from '../store';
+import { getProduction, createProduction, getProductionCreateStatus, getTopics, updateProduction } from '../api';
 import { Production as ProductionType, Topic } from '../types';
 import { Plus, Search, FileText, Edit3, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ActionButton, ResponsiveTableShell } from '@/components/studio';
@@ -9,9 +9,94 @@ import BaseModal from '../components/common/BaseModal';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useSocket } from '../hooks/useSocket';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
+import { usePermission } from '../hooks/usePermission';
 import { formatBeijingDate } from '../lib/utils';
 
 const PAGE_SIZE = 20;
+const PRODUCTION_CREATE_REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type ProductionCreatePayload = { topic_id: number; version: string; content: string; status: string };
+type PendingProductionCreateVerification = {
+  clientRequestId: string;
+  userId: number;
+  payload: ProductionCreatePayload;
+  topicTitle: string;
+  page: number;
+  status: 'uncertain' | 'ready' | 'checking';
+  readError: string | null;
+};
+
+function productionCreateVerificationKey(userId: number | undefined) {
+  return userId ? `xmt:production-create-pending:v1:user:${userId}` : null;
+}
+
+function loadPendingProductionCreateVerification(userId: number | undefined): PendingProductionCreateVerification | null {
+  const key = productionCreateVerificationKey(userId);
+  if (!key || userId === undefined || typeof window === 'undefined') return null;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(key) || 'null') as Partial<PendingProductionCreateVerification> | null;
+    const payload = value?.payload as Partial<ProductionCreatePayload> | undefined;
+    if (!value || value.userId !== userId || typeof value.clientRequestId !== 'string'
+      || !PRODUCTION_CREATE_REQUEST_ID.test(value.clientRequestId)
+      || !payload || !Number.isSafeInteger(payload.topic_id) || Number(payload.topic_id) <= 0
+      || typeof payload.version !== 'string' || typeof payload.content !== 'string'
+      || typeof payload.status !== 'string'
+      || typeof value.topicTitle !== 'string'
+      || !Number.isSafeInteger(value.page) || Number(value.page) <= 0) return null;
+    return {
+      clientRequestId: value.clientRequestId,
+      userId,
+      payload: {
+        topic_id: Number(payload.topic_id),
+        version: payload.version,
+        content: payload.content,
+        status: payload.status,
+      },
+      topicTitle: value.topicTitle,
+      page: Number(value.page),
+      // Always read the server before offering a retry after a reload.
+      status: 'uncertain',
+      readError: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistPendingProductionCreateVerification(pending: PendingProductionCreateVerification) {
+  const key = productionCreateVerificationKey(pending.userId);
+  if (!key || typeof window === 'undefined') throw new Error('当前账号尚未确认，无法安全保存创作恢复状态');
+  sessionStorage.setItem(key, JSON.stringify({
+    clientRequestId: pending.clientRequestId,
+    userId: pending.userId,
+    payload: pending.payload,
+    topicTitle: pending.topicTitle,
+    page: pending.page,
+    status: pending.status,
+  }));
+  const stored = loadPendingProductionCreateVerification(pending.userId);
+  if (!stored || stored.clientRequestId !== pending.clientRequestId || stored.userId !== pending.userId
+    || stored.payload.topic_id !== pending.payload.topic_id || stored.payload.version !== pending.payload.version
+    || stored.payload.content !== pending.payload.content || stored.payload.status !== pending.payload.status) {
+    throw new Error('创作恢复状态未能完整保存，本次未发送创建请求');
+  }
+}
+
+function removeStoredProductionCreateVerification(userId: number, clientRequestId: string) {
+  const key = productionCreateVerificationKey(userId);
+  if (!key || typeof window === 'undefined') return;
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(key) || 'null') as { clientRequestId?: unknown } | null;
+    if (stored?.clientRequestId === clientRequestId) sessionStorage.removeItem(key);
+  } catch {
+    // The server-side request key still prevents duplicates if local cleanup fails.
+  }
+}
+
+function isDefinitiveProductionCreateRejection(error: unknown) {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && ![404, 408, 425, 429].includes(status);
+}
 
 const useAutoResizeTextarea = (value: string, minHeight = 100, maxHeight = 300) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -48,6 +133,7 @@ const useAutoResizeTextarea = (value: string, minHeight = 100, maxHeight = 300) 
 };
 
 export default function Production() {
+  const authUserId = useAuthStore((store) => store.user?.id);
   const [productions, setProductions] = useState<ProductionType[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -56,52 +142,87 @@ export default function Production() {
   const [listLoadAttempt, setListLoadAttempt] = useState(0);
   const [savingRecord, setSavingRecord] = useState(false);
   const [page, setPage] = useState(1);
+  const pageRef = useRef(page);
+  pageRef.current = page;
   const [total, setTotal] = useState(0);
+  const totalRef = useRef(total);
+  totalRef.current = total;
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [formData, setFormData] = useState({ topic_id: '', version: '', content: '', status: 'draft' });
   const [editingProduction, setEditingProduction] = useState<ProductionType | null>(null);
+  const [pendingCreateVerification, setPendingCreateVerification] = useState<PendingProductionCreateVerification | null>(
+    () => loadPendingProductionCreateVerification(authUserId),
+  );
+  const [createVerificationLoading, setCreateVerificationLoading] = useState(false);
+  const initialPendingCreateVerificationRef = useRef(pendingCreateVerification);
+  const restoredCreateVerificationStartedRef = useRef(false);
+  const createVerificationLockRef = useRef(false);
+  const createWritesLocked = Boolean(pendingCreateVerification && pendingCreateVerification.userId === authUserId);
   const pendingRefreshContextRef = useRef<string | null>(null);
+  const pendingDeletedProductionIdsRef = useRef(new Set<number>());
   const saveInFlightRef = useRef(false);
+  const productionListRequestIdRef = useRef(0);
   
   const createTextareaRef = useAutoResizeTextarea(formData.content, 100, 300);
   const editTextareaRef = useAutoResizeTextarea(formData.content, 100, 300);
   
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const addNotification = useAppStore((store) => store.addNotification);
+  const { hasPermission, loading: permissionsLoading } = usePermission();
   const styles = useThemeStyles();
   const closeCreateModal = useCallback(() => {
-    if (!savingRecord) setShowCreateModal(false);
-  }, [savingRecord]);
+    if (!savingRecord && !createWritesLocked) setShowCreateModal(false);
+  }, [savingRecord, createWritesLocked]);
   const closeEditModal = useCallback(() => {
-    if (savingRecord) return;
+    if (savingRecord || createWritesLocked) return;
     setShowEditModal(false);
     setEditingProduction(null);
-  }, [savingRecord]);
+  }, [savingRecord, createWritesLocked]);
 
   const fetchProductionPage = useCallback(async (nextPage: number) => {
     return getProduction({ page: nextPage, limit: PAGE_SIZE });
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+  const confirmedWriteRefreshError = (fallback: string) => {
     const refreshContext = pendingRefreshContextRef.current;
-    pendingRefreshContextRef.current = null;
+    return refreshContext
+      ? `服务端已确认${refreshContext}，但列表刷新失败；请重新加载列表确认，不要重复提交。`
+      : fallback;
+  };
+
+  useEffect(() => {
+    const requestId = ++productionListRequestIdRef.current;
     setLoading(true);
-    setListError('');
     void fetchProductionPage(page).then((result) => {
-      if (cancelled) return;
+      if (productionListRequestIdRef.current !== requestId) return;
+      totalRef.current = result.total;
+      const lastPage = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+      if (page > lastPage) {
+        // The server total can shrink after a delete from another client.
+        // Keep this read from clearing loading; the corrected page owns the next read.
+        productionListRequestIdRef.current += 1;
+        pageRef.current = lastPage;
+        setPage(lastPage);
+        return;
+      }
       setProductions(result.data);
       setTotal(result.total);
+      pendingRefreshContextRef.current = null;
+      pendingDeletedProductionIdsRef.current.clear();
+      setListError('');
     }).catch(() => {
-      if (cancelled) return;
-      setListError(refreshContext
-        ? `服务端已确认${refreshContext}，但列表刷新失败；请重新加载列表确认，不要重复提交。`
-        : '创作列表读取失败，请重新加载列表。');
+      if (productionListRequestIdRef.current !== requestId) return;
+      setListError(confirmedWriteRefreshError('创作列表读取失败，请重新加载列表。'));
     }).finally(() => {
-      if (!cancelled) setLoading(false);
+      if (productionListRequestIdRef.current === requestId) setLoading(false);
     });
-    return () => { cancelled = true; };
+    return () => {
+      // Invalidate every read from this page/refresh scope, including a socket
+      // refresh that may have superseded this effect's own request.
+      productionListRequestIdRef.current += 1;
+    };
   }, [page, listLoadAttempt, fetchProductionPage]);
 
   useEffect(() => {
@@ -115,18 +236,194 @@ export default function Production() {
     return () => { cancelled = true; };
   }, [addNotification]);
 
+  useEffect(() => {
+    if (permissionsLoading || searchParams.get('action') !== 'write') return;
+    const canWrite = hasPermission('production:update');
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete('action');
+    setSearchParams(nextSearchParams, { replace: true });
+    if (canWrite && !createWritesLocked) {
+      setFormData({ topic_id: '', version: '', content: '', status: 'draft' });
+      setShowCreateModal(true);
+    }
+  }, [createWritesLocked, hasPermission, permissionsLoading, searchParams, setSearchParams]);
+
   const retryProductionList = () => {
-    pendingRefreshContextRef.current = null;
+    productionListRequestIdRef.current += 1;
     setListLoadAttempt((attempt) => attempt + 1);
   };
 
-  const refreshAfterConfirmedWrite = (context: string, targetPage = page) => {
+  const refreshAfterConfirmedWrite = useCallback((context: string, targetPage = pageRef.current) => {
+    productionListRequestIdRef.current += 1;
     pendingRefreshContextRef.current = context;
     if (targetPage !== page) setPage(targetPage);
     else setListLoadAttempt((attempt) => attempt + 1);
-  };
+  }, [page]);
+
+  const finishProductionCreate = useCallback((pending: PendingProductionCreateVerification, productionId: number, verified: boolean) => {
+    removeStoredProductionCreateVerification(pending.userId, pending.clientRequestId);
+    setPendingCreateVerification(null);
+    setShowCreateModal(false);
+    setFormData({ topic_id: '', version: '', content: '', status: 'draft' });
+    setPage(1);
+    addNotification(verified
+      ? { title: '创建结果已核实', message: `服务器确认「${pending.topicTitle}」的创作记录 #${productionId} 已创建，没有重复提交。`, type: 'success' }
+      : { title: '创建成功', message: `「${pending.topicTitle}」的创作记录已添加，没有重复创建。`, type: 'success' });
+    refreshAfterConfirmedWrite(`创作记录「${pending.topicTitle}」已创建`, 1);
+  }, [addNotification, refreshAfterConfirmedWrite]);
+
+  const resolvePendingProductionCreate = useCallback(async (pending: PendingProductionCreateVerification) => {
+    try {
+      const result = await getProductionCreateStatus(pending.clientRequestId);
+      if (result.status === 'created') {
+        finishProductionCreate(pending, result.productionId, true);
+      } else if (result.status === 'deleted') {
+        removeStoredProductionCreateVerification(pending.userId, pending.clientRequestId);
+        setPendingCreateVerification(null);
+        setShowCreateModal(false);
+        addNotification({ title: '原请求对应记录已删除', message: '已核实原创作记录已删除，不会因为重试而重新创建。', type: 'info' });
+      } else {
+        const ready: PendingProductionCreateVerification = { ...pending, status: 'ready', readError: null };
+        try {
+          persistPendingProductionCreateVerification(ready);
+          setPendingCreateVerification(ready);
+          setShowCreateModal(false);
+          addNotification({
+            title: '创建结果尚未确认',
+            message: '服务器暂未找到这条创作记录；原表单和请求编号已保留，只有使用同一编号才能安全重试。',
+            type: 'warning',
+          });
+        } catch (storageError) {
+          setPendingCreateVerification({
+            ...pending,
+            status: 'uncertain',
+            readError: `服务器暂未找到创作记录，但恢复信息无法保存（${storageError instanceof Error ? storageError.message : '存储不可用'}）；请先只读核实，不要重新创建。`,
+          });
+        }
+      }
+    } catch (error) {
+      const readError = error instanceof Error ? error.message : '读取失败';
+      setPendingCreateVerification({
+        ...pending,
+        status: 'uncertain',
+        readError: `创作记录创建结果尚未确认，状态读取失败（${readError}）。请只读核实，不要另建一条。`,
+      });
+      setShowCreateModal(false);
+      addNotification({
+        title: '创建结果待确认',
+        message: '写入状态暂时无法读取。已暂停创作列表的其它写入，请先只读核实，避免重复创建。',
+        type: 'warning',
+      });
+    }
+  }, [addNotification, finishProductionCreate]);
+
+  const verifyPendingProductionCreate = useCallback(async (pending: PendingProductionCreateVerification) => {
+    if (createVerificationLockRef.current || saveInFlightRef.current || pending.userId !== authUserId) return;
+    createVerificationLockRef.current = true;
+    setCreateVerificationLoading(true);
+    setPendingCreateVerification({ ...pending, status: 'checking', readError: null });
+    try {
+      await resolvePendingProductionCreate(pending);
+    } finally {
+      createVerificationLockRef.current = false;
+      setCreateVerificationLoading(false);
+    }
+  }, [authUserId, resolvePendingProductionCreate]);
+
+  const submitPendingProductionCreate = useCallback(async (pending: PendingProductionCreateVerification) => {
+    if (saveInFlightRef.current || createVerificationLockRef.current || authUserId !== pending.userId) return;
+    saveInFlightRef.current = true;
+    setSavingRecord(true);
+    try {
+      const checking: PendingProductionCreateVerification = { ...pending, status: 'checking', readError: null };
+      try {
+        persistPendingProductionCreateVerification({ ...pending, status: 'uncertain' });
+      } catch (storageError) {
+        if (pendingCreateVerification?.clientRequestId === pending.clientRequestId) {
+          setPendingCreateVerification({ ...pending, status: 'ready', readError: storageError instanceof Error ? storageError.message : '恢复信息保存失败' });
+        } else {
+          setShowCreateModal(true);
+          addNotification({ title: '创建未发送', message: storageError instanceof Error ? storageError.message : '恢复信息保存失败，请检查后重试。', type: 'error' });
+        }
+        return;
+      }
+
+      setPendingCreateVerification(checking);
+      setShowCreateModal(false);
+      try {
+        const result = await createProduction(pending.payload, pending.clientRequestId);
+        const productionId = Number(result.productionId);
+        if (!Number.isSafeInteger(productionId) || productionId <= 0) throw new Error('创建响应未包含有效的创作记录编号');
+        finishProductionCreate(pending, productionId, false);
+      } catch (error) {
+        if (isDefinitiveProductionCreateRejection(error)) {
+          removeStoredProductionCreateVerification(pending.userId, pending.clientRequestId);
+          setPendingCreateVerification(null);
+          setFormData({
+            topic_id: String(pending.payload.topic_id),
+            version: pending.payload.version,
+            content: pending.payload.content,
+            status: pending.payload.status,
+          });
+          setShowCreateModal(true);
+          addNotification({ title: '创建失败', message: (error as Error).message, type: 'error' });
+        } else {
+          await resolvePendingProductionCreate(checking);
+        }
+      }
+    } finally {
+      saveInFlightRef.current = false;
+      setSavingRecord(false);
+    }
+  }, [addNotification, authUserId, finishProductionCreate, pendingCreateVerification, resolvePendingProductionCreate]);
+
+  useEffect(() => {
+    if (initialPendingCreateVerificationRef.current || authUserId === undefined) return;
+    const pending = loadPendingProductionCreateVerification(authUserId);
+    if (!pending) return;
+    initialPendingCreateVerificationRef.current = pending;
+    setPendingCreateVerification(pending);
+  }, [authUserId]);
+
+  useEffect(() => {
+    const pending = initialPendingCreateVerificationRef.current;
+    if (restoredCreateVerificationStartedRef.current || !pending) return;
+    restoredCreateVerificationStartedRef.current = true;
+    initialPendingCreateVerificationRef.current = null;
+    setPendingCreateVerification(pending);
+    void verifyPendingProductionCreate(pending);
+  }, [verifyPendingProductionCreate]);
 
   const socket = useSocket();
+
+  const refreshProductionListFromSocket = (requestedPage = pageRef.current) => {
+    const requestId = ++productionListRequestIdRef.current;
+    setLoading(true);
+    // Socket callbacks can outlive the render that created them (for example,
+    // while a socket reconnects or the page is updated during HMR). Read the
+    // latest rendered pagination target instead of the callback's old page.
+    void fetchProductionPage(requestedPage).then((result) => {
+      if (productionListRequestIdRef.current !== requestId) return;
+      totalRef.current = result.total;
+      const lastPage = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+      if (requestedPage > lastPage) {
+        productionListRequestIdRef.current += 1;
+        pageRef.current = lastPage;
+        setPage(lastPage);
+        return;
+      }
+      setProductions(result.data);
+      setTotal(result.total);
+      pendingRefreshContextRef.current = null;
+      pendingDeletedProductionIdsRef.current.clear();
+      setListError('');
+    }).catch(() => {
+      if (productionListRequestIdRef.current !== requestId) return;
+      setListError(confirmedWriteRefreshError('创作列表未能实时更新；当前内容可能不是最新的，请重新加载列表。'));
+    }).finally(() => {
+      if (productionListRequestIdRef.current === requestId) setLoading(false);
+    });
+  };
 
   // ===== 实时协作 =====
   useRealtimeSync({
@@ -134,57 +431,66 @@ export default function Production() {
     socket,
     events: {
       'production:created': () => {
-        void fetchProductionPage(page).then((result) => {
-          setProductions(result.data);
-          setTotal(result.total);
-          setListError('');
-        }).catch(() => {
-          setListError('创作列表未能实时更新；当前内容可能不是最新的，请重新加载列表。');
-        });
+        refreshProductionListFromSocket();
       },
       'production:updated': (data) => {
         setProductions(prev => prev.map(p => p.id === data.id ? { ...p, ...data } : p));
+        refreshProductionListFromSocket();
       },
       'production:deleted': (data) => {
+        if (pendingDeletedProductionIdsRef.current.has(data.id)) return;
+        pendingDeletedProductionIdsRef.current.add(data.id);
+        const wasVisible = productions.some((production) => production.id === data.id);
         setProductions(prev => prev.filter(p => p.id !== data.id));
+        if (wasVisible) {
+          totalRef.current = Math.max(0, totalRef.current - 1);
+          setTotal(totalRef.current);
+        }
+        const currentPage = pageRef.current;
+        const lastPage = Math.max(1, Math.ceil(totalRef.current / PAGE_SIZE));
+        if (currentPage > lastPage) {
+          productionListRequestIdRef.current += 1;
+          pageRef.current = lastPage;
+          setPage(lastPage);
+          setLoading(true);
+          return;
+        }
+        refreshProductionListFromSocket(currentPage);
       },
     },
   });
 
   const handleCreate = async () => {
-    if (saveInFlightRef.current) return;
+    if (saveInFlightRef.current || createWritesLocked) return;
     if (!formData.topic_id) {
       addNotification({ title: '创建失败', message: '请选择关联选题', type: 'error' });
       return;
     }
-
-    saveInFlightRef.current = true;
-    setSavingRecord(true);
-    try {
-      await createProduction({
-        topic_id: parseInt(formData.topic_id), 
-        version: formData.version, 
-        content: formData.content, 
-        status: formData.status,
-      });
-    } catch (error) {
-      addNotification({ title: '创建失败', message: (error as Error).message, type: 'error' });
+    if (authUserId === undefined) {
+      addNotification({ title: '创建暂不可用', message: '当前登录身份尚未确认，请刷新后再试。', type: 'error' });
       return;
-    } finally {
-      saveInFlightRef.current = false;
-      setSavingRecord(false);
     }
-
-    const topicTitle = topics.find((topic) => topic.id === Number(formData.topic_id))?.title ?? '当前选题';
-    const versionLabel = formData.version.trim() ? `（${formData.version.trim()}）` : '';
-    addNotification({ title: '创建成功', message: `创作记录「${topicTitle}」已添加`, type: 'success' });
-    setShowCreateModal(false);
-    setFormData({ topic_id: '', version: '', content: '', status: 'draft' });
-    setTotal((current) => current + 1);
-    refreshAfterConfirmedWrite(`创作记录「${topicTitle}」${versionLabel}已创建`, 1);
+    const topicId = Number.parseInt(formData.topic_id, 10);
+    const pending: PendingProductionCreateVerification = {
+      clientRequestId: crypto.randomUUID(),
+      userId: authUserId,
+      payload: {
+        topic_id: topicId,
+        version: formData.version,
+        content: formData.content,
+        status: formData.status,
+      },
+      topicTitle: topics.find((topic) => topic.id === topicId)?.title ?? '当前选题',
+      page: 1,
+      status: 'uncertain',
+      readError: null,
+    };
+    restoredCreateVerificationStartedRef.current = true;
+    await submitPendingProductionCreate(pending);
   };
 
   const handleEdit = (production: ProductionType) => {
+    if (createWritesLocked) return;
     setEditingProduction(production);
     setFormData({ 
       topic_id: production.topic_id.toString(), 
@@ -196,7 +502,7 @@ export default function Production() {
   };
 
   const handleUpdate = async () => {
-    if (saveInFlightRef.current) return;
+    if (saveInFlightRef.current || createWritesLocked) return;
     if (!editingProduction || !formData.topic_id) {
       addNotification({ title: '更新失败', message: '请选择关联选题', type: 'error' });
       return;
@@ -284,13 +590,37 @@ export default function Production() {
           <p className={`${styles.textSecondary} mt-1 text-sm`}>管理创作内容的版本和审核</p>
         </div>
         <button
-          onClick={() => setShowCreateModal(true)}
-          className={`flex items-center gap-2 px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]`}
+          onClick={() => { if (!createWritesLocked) setShowCreateModal(true); }}
+          disabled={loading || createWritesLocked}
+          className={`flex items-center gap-2 px-5 py-2.5 ${styles.buttonPrimary} rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50`}
         >
           <Plus className="w-4 h-4" />
           <span className="font-medium text-sm">添加创作</span>
         </button>
       </div>
+
+      {pendingCreateVerification && pendingCreateVerification.userId === authUserId ? (
+        <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-amber/25 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
+          <p className="min-w-0">
+            {pendingCreateVerification.status === 'ready'
+              ? `服务器暂未找到「${pendingCreateVerification.topicTitle}」的创作记录。原表单与请求编号已保留；只能使用同一编号安全重试，不能另建新请求。`
+              : pendingCreateVerification.readError || `「${pendingCreateVerification.topicTitle}」的创建结果正在核实；核实完成前，创作列表的其它写入操作已暂停。`}
+          </p>
+          <ActionButton
+            type="button"
+            variant="secondary"
+            className="self-start sm:self-auto"
+            disabled={savingRecord || createVerificationLoading || pendingCreateVerification.status === 'checking'}
+            onClick={() => pendingCreateVerification.status === 'ready'
+              ? void submitPendingProductionCreate(pendingCreateVerification)
+              : void verifyPendingProductionCreate(pendingCreateVerification)}
+          >
+            {savingRecord || createVerificationLoading
+              ? '正在处理…'
+              : pendingCreateVerification.status === 'ready' ? '使用原请求安全重试' : '只读核实创建状态'}
+          </ActionButton>
+        </div>
+      ) : null}
 
       <div className={`${styles.card} p-4`}>
         <div className="relative">
@@ -320,7 +650,10 @@ export default function Production() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                onClick={() => {
+                  productionListRequestIdRef.current += 1;
+                  setPage((current) => Math.max(1, current - 1));
+                }}
                 disabled={page <= 1 || loading}
                 className={`inline-flex min-h-10 items-center gap-1 rounded-button px-3 py-2 text-sm ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-45`}
               >
@@ -328,7 +661,10 @@ export default function Production() {
               </button>
               <button
                 type="button"
-                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                onClick={() => {
+                  productionListRequestIdRef.current += 1;
+                  setPage((current) => Math.min(totalPages, current + 1));
+                }}
                 disabled={page >= totalPages || loading}
                 className={`inline-flex min-h-10 items-center gap-1 rounded-button px-3 py-2 text-sm ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-45`}
               >
@@ -391,23 +727,29 @@ export default function Production() {
                     <td className={`px-6 py-4 ${styles.textSecondary}`}>{production.operator_name}</td>
                     <td className={`px-6 py-4 ${styles.textSecondary}`}>{formatBeijingDate(production.created_at)}</td>
                     <td className="sticky right-0 z-10 w-[104px] border-l border-studio-border-soft bg-studio-surface px-2 py-3 transition-colors group-hover:bg-studio-surface-soft">
-                      <div className="flex items-center gap-2">
-                        <button
+                      <div className="flex items-center gap-1">
+                        <ActionButton
+                          type="button"
+                          variant="icon"
                           onClick={() => navigate(`/production/${production.id}`)}
-                          className={`p-2 ${styles.buttonInfo} rounded-lg transition-colors`}
+                          className="h-10 w-10 min-h-10 min-w-10 p-2 text-studio-text-muted transition hover:bg-studio-surface-soft hover:text-studio-cyan-contrast"
                           title="查看详情"
                           aria-label={`查看创作记录 ${production.topic_title}`}
                         >
-                          <FileText className="w-5 h-5" />
-                        </button>
-                        <button
+                          <FileText className="h-4 w-4" />
+                        </ActionButton>
+                        <ActionButton
+                          type="button"
+                          variant="icon"
                           onClick={() => handleEdit(production)}
-                          className={`p-2 ${styles.buttonSecondary} rounded-lg transition-colors`}
+                          disabled={createWritesLocked}
+                          className="h-10 w-10 min-h-10 min-w-10 p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
                           title="编辑记录"
                           aria-label={`编辑创作记录 ${production.topic_title}`}
+                          aria-disabled={createWritesLocked}
                         >
-                          <Edit3 className="w-5 h-5" />
-                        </button>
+                          <Edit3 className="h-4 w-4" />
+                        </ActionButton>
                       </div>
                     </td>
                   </tr>
@@ -423,14 +765,14 @@ export default function Production() {
           onClose={closeCreateModal}
           title="添加创作记录"
           size="md"
-          closeOnOverlayClick={!savingRecord}
-          closeOnEscape={!savingRecord}
-          showCloseButton={!savingRecord}
+          closeOnOverlayClick={!savingRecord && !createWritesLocked}
+          closeOnEscape={!savingRecord && !createWritesLocked}
+          showCloseButton={!savingRecord && !createWritesLocked}
           footer={(
             <div className="flex gap-3">
               <button
                 type="button"
-                disabled={savingRecord}
+                disabled={savingRecord || createWritesLocked}
                 onClick={closeCreateModal}
                 className={`flex-1 rounded-button px-4 py-2 ${styles.buttonSecondary} transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
               >
@@ -438,7 +780,7 @@ export default function Production() {
               </button>
               <button
                 type="button"
-                disabled={savingRecord}
+                disabled={savingRecord || createWritesLocked}
                 onClick={handleCreate}
                 className={`flex-1 rounded-button px-4 py-2 ${styles.buttonPrimary} transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
               >
@@ -515,14 +857,14 @@ export default function Production() {
           onClose={closeEditModal}
           title="编辑创作记录"
           size="md"
-          closeOnOverlayClick={!savingRecord}
-          closeOnEscape={!savingRecord}
-          showCloseButton={!savingRecord}
+          closeOnOverlayClick={!savingRecord && !createWritesLocked}
+          closeOnEscape={!savingRecord && !createWritesLocked}
+          showCloseButton={!savingRecord && !createWritesLocked}
           footer={(
             <div className="flex gap-3">
               <button
                 type="button"
-                disabled={savingRecord}
+                disabled={savingRecord || createWritesLocked}
                 onClick={closeEditModal}
                 className={`flex-1 rounded-button px-4 py-2 ${styles.buttonSecondary} transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
               >
@@ -530,7 +872,7 @@ export default function Production() {
               </button>
               <button
                 type="button"
-                disabled={savingRecord}
+                disabled={savingRecord || createWritesLocked}
                 onClick={handleUpdate}
                 className={`flex-1 rounded-button px-4 py-2 ${styles.buttonPrimary} transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
               >

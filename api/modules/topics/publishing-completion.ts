@@ -1,4 +1,5 @@
 import { beijingNow } from '../../database/utils';
+import { canTransitionTopicStatus } from '@shared/workflow/topic-state-machine';
 
 export type PublishingCompletionOutcome = 'published' | 'all_failed';
 
@@ -35,7 +36,7 @@ export async function advancePublishingTopicIfResolved(
     'SELECT status,title FROM topics WHERE id=?',
     [topicId],
   );
-  if (!topic || topic.status !== 'publishing') return null;
+  if (!topic || !canTransitionTopicStatus(topic.status, 'completed')) return null;
 
   const publishingRows = await tx.queryAll<{ status: string | null }>(
     `SELECT CASE WHEN dw.id IS NOT NULL THEN 'published' ELSE p.status END AS status

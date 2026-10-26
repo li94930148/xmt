@@ -11,6 +11,2009 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.4.0',
+    date: '2026-10-26',
+    title: '备份恢复与内容洞察体验完善',
+    impactScope: ['备份管理', '系统设置', '内容洞察', '报表口径'],
+    changes: [
+      { type: 'fix', description: '备份创建遇到响应丢失时先只读核实；确认未找到后才允许用户使用原请求编号明确重试，避免重复备份。' },
+      { type: 'security', description: '结果状态按当前操作者隔离并禁止缓存；处理中或无法核实期间锁定新的备份创建。旧客户端仍可不带请求编号创建。' },
+      { type: 'improvement', description: '内容洞察的协作文档选择框提供辅助名称，移动端影响力表格可完整滚动查看“判断”列，桌面端列完整显示。' },
+      { type: 'improvement', description: '团队日报首读期间提供可访问的加载播报；仅在成功读取后才显示真实空状态。' },
+      { type: 'improvement', description: '缺失或无效官方周期文件时，日报、周报、月报发布数回退窗口均按北京时间包含报告当天；有效官方日报仍采用平台“昨天”文件窗口。' },
+      { type: 'security', description: '升级生产依赖安全版本并更新 Vite 6.x；OpenAPI 文档生成改用 Zod 4 元数据。生产依赖安全审计为零漏洞。' },
+    ],
+  },
+  {
+    version: '9.3.70',
+    date: '2026-10-26',
+    title: '移动端加载状态播报完善',
+    impactScope: ['移动首页', '移动选题'],
+    changes: [
+      { type: 'improvement', description: '移动首页今日任务、灵感摘要和选题列表首读提示提供礼貌播报状态，数据加载完成后自动消失。' },
+    ],
+  },
+  {
+    version: '9.3.69',
+    date: '2026-10-26',
+    title: '移动消息状态与作品详情操作完善',
+    impactScope: ['移动消息中心', '创作者作品详情', '抖音报告口径'],
+    changes: [
+      { type: 'improvement', description: '移动消息首次读取时明确提供可被辅助技术感知的加载状态。' },
+      { type: 'fix', description: '创作者作品详情封面在窄屏按内容宽度收缩，避免页面横向溢出；“返回作品库”入口在错误与正常状态均至少高 40px。' },
+      { type: 'improvement', description: '确认缺失或无效官方周期文件时，日报、周报、月报回退窗口均包含报告当天；有效官方日报仍遵循平台“昨天”文件。' },
+    ],
+  },
+  {
+    version: '9.3.68',
+    date: '2026-10-26',
+    title: '写入结果恢复与可访问性完善',
+    impactScope: ['选题/资料/模板写入', '匿名意见管理', '月报与年报', '日历与编辑器', '抖音报告'],
+    changes: [
+      { type: 'fix', description: '审批流模板、资料分类、匿名意见管理状态/回复、旧选题模板和月/年报摘要在写入结果不明时先只读核实，仅确认未处理后才允许以同一请求编号和原内容显式重试。' },
+      { type: 'security', description: '新增 SAFE_EXPAND 迁移 061–065，为上述写入保存操作者隔离的幂等回执；月/年报并发冲突保留本地草稿，不覆盖服务器新版本。' },
+      { type: 'improvement', description: '日历有事件日期提供日期、事件类型和标题描述；编辑器上下文菜单支持 Shift+F10、Context Menu 键以及键盘焦点导航。' },
+      { type: 'fix', description: '无有效官方抖音周期文件时，日报/周报/月报发布数使用包含报告当天的北京时间自然日 1/7/30 日回退窗口；完整官方日报仍按“昨天”窗口统计。' },
+    ],
+  },
+  {
+    version: '9.3.67',
+    date: '2026-10-24',
+    title: '桌面消息批量已读安全恢复',
+    impactScope: ['桌面消息中心', '请求结果恢复', '账号隔离'],
+    changes: [
+      { type: 'fix', description: '桌面全部已读写入前保存账号和请求编号；结果不明时只读核实，明确未处理后才允许同编号显式重试。' },
+      { type: 'security', description: '刷新后恢复已处理回执而不重复写入；账号切换隔离迟到结果和错误提示，提交后到达的新消息保持未读。' },
+    ],
+  },
+  {
+    version: '9.3.66',
+    date: '2026-10-24',
+    title: '选题覆盖摘要与报告日期口径',
+    impactScope: ['选题内容资产', '抖音分析报告', '日历排期', '公告管理'],
+    changes: [
+      { type: 'improvement', description: '主题资产按当前可见选题汇总城市、人物、项目的明确登记数；按选题去重，不代表完整率或质量评分。' },
+      { type: 'fix', description: '缺失或无效抖音官方周期文件时，发布作品数仍按日报昨天、周报含当天 7 日、月报含当天 30 日的北京时间自然日计算。' },
+      { type: 'fix', description: '抖音作品身份去重解析无时区发布时间时采用共享北京时间规则，结果不再随运行机器时区变化。' },
+      { type: 'security', description: '公告删除结果不明时只读核实并跨刷新保留写锁，不自动重发 DELETE。' },
+      { type: 'improvement', description: '日历会议与“其他”采用不同语义色，并新增六类事件的双主题静态对比度契约。' },
+    ],
+  },
+  {
+    version: '9.3.65',
+    date: '2026-10-24',
+    title: '稿件引用与写入结果恢复',
+    impactScope: ['主题内容资产', '选题阶段交接', '成片剧本', '日历语义颜色'],
+    changes: [
+      { type: 'improvement', description: '主题资产卡片展示当前正式稿件中明确引用的可访问资料，并保持去重和资料可见范围。' },
+      { type: 'fix', description: '开始创作遇到不确定阶段推进结果时先只读核实；未确认前不重复推进或创建稿件。' },
+      { type: 'fix', description: '成片剧本版本保存结果不明时只读核对详情和版本历史，保留未提交草稿并避免重复建版。' },
+      { type: 'security', description: '主题资产维度写入结果不确定时只读核实，恢复锁跨筛选和刷新保留，不会自动重发。' },
+      { type: 'improvement', description: '新增日历事件浅/深主题语义令牌对比度契约测试。' },
+    ],
+  },
+  {
+    version: '9.3.64',
+    date: '2026-10-24',
+    title: '复盘表单宽度与发布关联范围收口',
+    impactScope: ['内容复盘', '抖音发布关联', '权限边界'],
+    changes: [
+      { type: 'fix', description: '复盘行动项表单根据实际可用宽度自适应排布，避免窄栏内输入框被压缩。' },
+      { type: 'security', description: '抖音批量关联服务要求显式声明全库或逐条可编辑范围，避免漏传范围时扩大关联对象。' },
+    ],
+  },
+  {
+    version: '9.3.63',
+    date: '2026-10-24',
+    title: '全站主操作悬停反馈',
+    impactScope: ['内容实验室', '选题管理', '公告与通用状态', '主题视觉反馈'],
+    changes: [
+      { type: 'improvement', description: '11 个主操作统一使用 Studio 主按钮悬停反馈；内容实验室五项完成了双主题浏览器核验，其余六项沿用同一令牌样式。' },
+    ],
+  },
+  {
+    version: '9.3.62',
+    date: '2026-10-24',
+    title: '日历月份读屏播报与原生缩放复核',
+    impactScope: ['排期日历', '无障碍', '创作编辑器'],
+    changes: [
+      { type: 'improvement', description: '切换排期月份后会礼貌播报新的月份名称，跨年时同步更新年份。' },
+      { type: 'improvement', description: '创作详情页的编辑器工具弹层在 Chrome 原生放大显示时留在内容区内。' },
+    ],
+  },
+  {
+    version: '9.3.61',
+    date: '2026-10-24',
+    title: '日报审核只读与移动恢复验收',
+    impactScope: ['日报审核', '移动工作台', '消息恢复', '成片制作'],
+    changes: [
+      { type: 'improvement', description: '已提交日报在审核完成前保持只读，避免误改或重复提交。' },
+      { type: 'fix', description: '成片制作状态经只读核实后，用户明确重新确认时清除过期核实提示。' },
+      { type: 'improvement', description: '移动浏览器全流程在 320px 与 390px 验收通过，覆盖消息恢复、账号隔离和主题内容资产。' },
+    ],
+  },
+  {
+    version: '9.3.60',
+    date: '2026-10-24',
+    title: '回执保留只读盘点',
+    impactScope: ['幂等回执', '运维核查', '数据安全'],
+    changes: [
+      { type: 'improvement', description: '新增显式指定本地数据库的只读盘点工具，汇总回执数量和原始时间范围，不显示请求键或业务内容。' },
+      { type: 'security', description: '未获得延迟重试期限与统一时间口径证据前，不启用自动删除或保留期假设。' },
+    ],
+  },
+  {
+    version: '9.3.59',
+    date: '2026-10-24',
+    title: '复盘结论安全更新与恢复',
+    impactScope: ['复盘结论', '并发编辑', '结果恢复', '日报风险联动'],
+    changes: [
+      { type: 'security', description: '复盘标题与结论更新使用操作者/复盘隔离回执和稳定版本比较；结果不明时只读核实，避免重复写入。' },
+      { type: 'fix', description: '只有确认未处理时才可用原编号显式重试；并发冲突保留草稿和服务器当前值，本地恢复标记写入失败可重试修复。' },
+      { type: 'improvement', description: '日报风险转行动项在失败时保留表单、确认重试后清空，并为控件提供稳定可访问名称。' },
+      { type: 'improvement', description: '新增 SAFE_EXPAND 迁移 057，仅在隔离临时数据库验证；回执暂未配置自动清理。' },
+    ],
+  },
+  {
+    version: '9.3.58',
+    date: '2026-10-24',
+    title: '复盘行动项并发安全更新',
+    impactScope: ['复盘行动项', '并发编辑', '结果恢复', '数据库迁移'],
+    changes: [
+      { type: 'security', description: '更新使用操作者隔离请求回执和整行并发比较；旧客户端继续兼容，过期并发写入改为返回冲突而不覆盖新内容。' },
+      { type: 'fix', description: '响应不明时只读核实；确认冲突后保留本地草稿和服务器最新值，用户显式确认后以新请求保存。' },
+      { type: 'improvement', description: '新增 SAFE_EXPAND 迁移 055、056；仅在隔离数据库验证，回执尚无自动清理策略。' },
+    ],
+  },
+  {
+    version: '9.3.57',
+    date: '2026-10-24',
+    title: '移动改密表单可访问性',
+    impactScope: ['移动端账号安全', '表单可访问性'],
+    changes: [
+      { type: 'improvement', description: '当前密码和新密码字段增加持续可见的关联标签，读屏用户可准确识别输入项。' },
+      { type: 'fix', description: '改密回归按可访问名称定位字段，继续覆盖无效输入不请求及失败后显式重试。' },
+    ],
+  },
+  {
+    version: '9.3.56',
+    date: '2026-10-24',
+    title: '内容流程与统计边界持续改进',
+    impactScope: ['成片制作', '内容资产', 'Creator Analytics', '日报', '创作只读权限'],
+    changes: [
+      { type: 'improvement', description: '成片制作入口保留选题上下文，主题资产展示当前账号可访问的关联资料。' },
+      { type: 'fix', description: 'Creator Analytics 使用北京时间自然日窗口并排除未来数据；缺少粉丝基线时保持未知。' },
+      { type: 'security', description: '日报草稿结果不明时只读核实并锁定重写；只读创作正文展示真实原因并隐藏写入入口。' },
+    ],
+  },
+  {
+    version: '9.3.55',
+    date: '2026-10-24',
+    title: '灵感点赞结果安全恢复',
+    impactScope: ['灵感点赞', '请求结果恢复', '数据库迁移'],
+    changes: [
+      { type: 'security', description: '点赞/取消点赞新增操作者隔离的请求编号与目标状态；同编号重放不再重复切换，旧客户端仍兼容。' },
+      { type: 'fix', description: '响应不确定或刷新后可只读核实；明确未提交时沿用原编号安全重试，并隔离账号切换后的迟到回包。' },
+      { type: 'improvement', description: '新增 SAFE_EXPAND 迁移 054；回执暂不自动清理，避免延迟重试再次执行。' },
+    ],
+  },
+  {
+    version: '9.3.54',
+    date: '2026-10-24',
+    title: 'Creator Agent 绑定凭据响应恢复',
+    impactScope: ['Creator Agent 绑定', '凭据安全恢复', '设备重绑'],
+    changes: [
+      { type: 'security', description: '绑定结果回执需同时验证随机恢复能力；仅请求编号不能取回 token，绑定与确认响应均禁用缓存。' },
+      { type: 'fix', description: '服务端提交后响应丢失时可同请求恢复原凭据；已有设备的旧 token 保留至新版客户端安全保存并确认新凭据。' },
+      { type: 'improvement', description: '桌面端使用 Electron safeStorage 在请求前加密保存重试材料，并在本机持久化成功后清除绑定码和本地恢复标记。' },
+    ],
+  },
+  {
+    version: '9.3.53',
+    date: '2026-10-24',
+    title: 'Creator Agent 绑定码安全恢复',
+    impactScope: ['Creator Agent 绑定', '结果不确定恢复', '账号隔离'],
+    changes: [
+      { type: 'security', description: '绑定码创建支持按操作者、账号与规范化请求编号幂等恢复，专用加密密钥缺失或不匹配时拒绝服务。' },
+      { type: 'fix', description: '响应丢失或刷新后可找回同一有效绑定码；会话标记不保存绑定码，并隔离不同账号的迟到响应。' },
+      { type: 'improvement', description: '绑定码使用后的注册与元数据写入在同一事务完成；过期或消费后的恢复密文被清除。' },
+    ],
+  },
+  {
+    version: '9.3.52',
+    date: '2026-10-23',
+    title: '移动创作列表分页',
+    impactScope: ['移动 Web 创作管理', '列表性能', '账号数据隔离'],
+    changes: [
+      { type: 'improvement', description: '移动创作列表每页最多读取 20 条稿件，并显示当前页码和总数。' },
+      { type: 'fix', description: '切换账号时回到第一页并丢弃旧账号迟到回包；分页读取失败时保留上次成功内容并支持重试。' },
+      { type: 'fix', description: '稿件总数缩减导致末页失效时，在同一读取流程内校正页码；校正失败保留与旧页码对应的内容，避免重复请求。' },
+      { type: 'improvement', description: '复用现有服务端权限范围与分页接口，不改变稿件写入或授权规则。' },
+    ],
+  },
+  {
+    version: '9.3.51',
+    date: '2026-10-23',
+    title: '稿件批注状态安全恢复',
+    impactScope: ['稿件批注与建议', '状态处理恢复', '数据库迁移'],
+    changes: [
+      { type: 'security', description: '批注/建议状态更新加入操作者隔离的幂等请求回执，并维持现有权限检查。' },
+      { type: 'fix', description: '响应不确定时先只读核实，接受建议恢复仅重试状态写入，避免重复应用正文替换。' },
+      { type: 'improvement', description: '新增 SAFE_EXPAND 迁移 051，兼容未携带请求编号的旧客户端。' },
+    ],
+  },
+  {
+    version: '9.3.50',
+    date: '2026-10-23',
+    title: '活动日志动作对比度矩阵',
+    impactScope: ['活动日志', '明暗主题', '可访问性回归'],
+    changes: [
+      { type: 'improvement', description: '活动日志自动回归覆盖创建、更新、删除、登录、发布、审核、状态变更及未知动作在浅色和深色主题下的对比度。' },
+      { type: 'fix', description: '按实际渲染文字色和复合背景测量全部徽标均达到 4.5:1；现有颜色令牌无需调整。' },
+    ],
+  },
+  {
+    version: '9.3.49',
+    date: '2026-10-23',
+    title: '稿件批注与建议创建安全恢复',
+    impactScope: ['稿件批注与建议', '创建结果恢复', '数据库迁移'],
+    changes: [
+      { type: 'security', description: '批注与建议创建使用操作者、稿件和载荷指纹绑定的请求编号；线程与结果账本同事务提交，旧客户端继续兼容。' },
+      { type: 'fix', description: '创建结果不明时先只读核实；只有确认未找到才允许沿用相同编号和原载荷显式重试，避免重复线程。' },
+      { type: 'improvement', description: '新增 SAFE_EXPAND 迁移 050 及并发、权限隔离、状态查询和事务回滚回归。' },
+    ],
+  },
+  {
+    version: '9.3.48',
+    date: '2026-10-23',
+    title: 'React Bits 默认轻量',
+    impactScope: ['视觉外观', '动效性能', '预设配置'],
+    changes: [
+      { type: 'improvement', description: '首次使用和恢复默认关闭 OGL/粒子等装饰背景与 React Bits 动效，减少默认资源占用。' },
+      { type: 'fix', description: '命名视觉预设显式保留原有组件与页面应用范围，已有本地保存的用户偏好继续兼容。' },
+    ],
+  },
+  {
+    version: '9.3.47',
+    date: '2026-10-23',
+    title: '稿件批注回复安全恢复',
+    impactScope: ['稿件批注与建议', '回复恢复', '数据库迁移'],
+    changes: [
+      { type: 'security', description: '批注回复使用操作者、稿件、线程和内容指纹绑定的请求编号；回复和结果账本原子提交，旧客户端继续兼容。' },
+      { type: 'fix', description: '回复结果不明时先只读核实；只有确认未找到才允许沿用相同编号和原内容显式重试，避免重复回复。' },
+      { type: 'improvement', description: '新增 SAFE_EXPAND 迁移 049 及并发、权限隔离、状态查询和事务回滚回归。' },
+    ],
+  },
+  {
+    version: '9.3.46',
+    date: '2026-10-23',
+    title: '改密安全恢复与工作流窄屏操作',
+    impactScope: ['账号安全', '工作流设计器', '工作流运维文档'],
+    changes: [
+      { type: 'security', description: '改密请求结果不明时锁定表单、清空密码并阻止自动重放；只有确定拒绝才允许用户修正后重试。' },
+      { type: 'improvement', description: '工作流设计器的常用节点操作统一触控目标，并补充窄屏、键盘操作回归。' },
+      { type: 'improvement', description: '补充 strict 工作流运行模式、只读诊断边界及安全回退操作手册。' },
+    ],
+  },
+  {
+    version: '9.3.45',
+    date: '2026-10-23',
+    title: '交互语义、主题对比与创建安全恢复',
+    impactScope: ['审批流设计', '灵感池', '拍摄与发布详情', '复盘行动项', '公告板'],
+    changes: [
+      { type: 'improvement', description: '审批流模板和节点删除入口达到 40×40px，窄屏布局保持卡片内可见。' },
+      { type: 'improvement', description: '灵感卡片改为文章语义，提供独立、可键盘访问的详情按钮，点赞和评论等动作不再嵌套在按钮角色容器中。' },
+      { type: 'fix', description: '拍摄、发布详情的剧本历史读取失败提示采用亮暗主题安全文字色，实测对比度均高于 4.5:1。' },
+      { type: 'fix', description: '侧栏登出按钮悬停文字改用主题安全色。' },
+      { type: 'security', description: '复盘行动项创建以 SAFE_EXPAND 迁移 047 记录操作者隔离的请求结果；响应不明或刷新后先只读核实，安全重试复用原请求编号和内容。' },
+      { type: 'security', description: '公告创建以 SAFE_EXPAND 迁移 048 保存操作者隔离的请求结果；响应不明或刷新后先只读核实，只有明确未创建才允许同编号、同内容显式重试。' },
+    ],
+  },
+  {
+    version: '9.3.44',
+    date: '2026-10-23',
+    title: '首页待办准确性与匿名意见安全删除',
+    impactScope: ['首页待办', '复盘日报风险联动', '匿名意见管理'],
+    changes: [
+      { type: 'fix', description: '已退回选题不再计入逾期或即将到期；匿名意见删除目标被其他操作先行删除时，结果明确为未确认成功并释放写锁。' },
+      { type: 'security', description: '匿名意见删除以 SAFE_EXPAND 迁移 046 记录操作者隔离的请求结果；不重复删除，也不把外部删除当作本次成功。' },
+      { type: 'improvement', description: '复盘日报风险转行动项字段补齐可访问名称，并以 Playwright MCP 独立 mock 页面验收移动布局和恢复提示。' },
+    ],
+  },
+  {
+    version: '9.3.43',
+    date: '2026-10-23',
+    title: '审批流模板创建安全恢复',
+    impactScope: ['审批流设计', '模板创建', '安全恢复'],
+    changes: [
+      { type: 'fix', description: '创建结果不明或刷新后先按账号只读核实；确认未创建后才能复用相同编号和原内容安全重试。' },
+      { type: 'security', description: '服务端以事务账本保证同编号幂等，已删除模板不会因恢复重建；旧客户端仍兼容。' },
+      { type: 'improvement', description: '补充同编号并发/API 契约测试与 819×480 CSS 视口回归代码。' },
+    ],
+  },
+  {
+    version: '9.3.42',
+    date: '2026-10-23',
+    title: '移动消息安全恢复与账号隔离',
+    impactScope: ['移动消息中心', '消息恢复', '活动日志', 'CreatorReports'],
+    changes: [
+      { type: 'fix', description: '全部标记已读遇到响应不确定时可以只读核实并安全恢复；同一请求不会误改后来到达的消息。' },
+      { type: 'security', description: '账号切换后旧的单条已读回包不会覆盖新账号的消息、未读状态、提示或导航。' },
+      { type: 'improvement', description: '活动日志成员筛选器补齐辅助技术名称，CreatorReports 删除入口达到移动触控尺寸要求。' },
+    ],
+  },
+  {
+    version: '9.3.41',
+    date: '2026-10-23',
+    title: '全局选区可读性与复盘安全恢复',
+    impactScope: ['全站文字选区', '日历', '数据复盘', '失败恢复'],
+    changes: [
+      { type: 'improvement', description: '普通文字、表格和编辑器的选区在明暗主题下都使用清晰、达到对比度要求的颜色。' },
+      { type: 'fix', description: '复盘创建响应不明或刷新后先核实结果，再以原请求编号安全恢复，避免重复创建。' },
+      { type: 'improvement', description: '日历月视图在常见桌面宽度下完整显示七个日期列。' },
+    ],
+  },
+  {
+    version: '9.3.40',
+    date: '2026-10-23',
+    title: '抖音关联留痕与界面可访问性改进',
+    impactScope: ['发布管理', '日报归档', '移动端可读性', '弹窗键盘访问'],
+    changes: [
+      { type: 'feature', description: '抖音作品关联新增、更换和解除后可追溯；重复设置同一关系不增加历史记录。' },
+      { type: 'improvement', description: '日报归档、选题审核和灵感详情弹层补齐键盘焦点管理与背景隔离。' },
+      { type: 'fix', description: '移动创作和草稿存储错误提示在浅色、深色主题下均保持清晰可读。' },
+    ],
+  },
+  {
+    version: '9.3.39',
+    date: '2026-10-23',
+    title: '消息清空结果安全恢复',
+    impactScope: ['消息中心', '请求幂等', '失败恢复'],
+    changes: [
+      { type: 'fix', description: '清空结果不明时先按当前操作者只读核实，避免刷新或重试误删后来到达的消息。' },
+      { type: 'security', description: '同一请求编号的重放返回原清空结果，旧版不带编号的客户端仍兼容。' },
+    ],
+  },
+  {
+    version: '9.3.38',
+    date: '2026-10-22',
+    title: '编辑器工具栏颜色菜单文字对比度',
+    impactScope: ['创作详情', '编辑器工具栏', '主题可读性'],
+    changes: [
+      { type: 'improvement', description: '文字颜色与高亮颜色菜单标题统一使用 Studio 次级文字令牌，不再靠透明度降低字色。' },
+      { type: 'fix', description: '亮色和暗色主题的菜单标题均增加实际渲染对比度回归。' },
+    ],
+  },
+  {
+    version: '9.3.37',
+    date: '2026-10-22',
+    title: '人员创建撤权后的只读恢复',
+    impactScope: ['人员管理', '权限边界', '安全重试'],
+    changes: [
+      { type: 'fix', description: '人员创建结果不确定时，即使创建权限被撤销，仍可按操作者和请求编号只读核实。' },
+      { type: 'security', description: '无创建权限时保留恢复标记并锁定写入；401/403 不会被误判为原请求未提交。' },
+    ],
+  },
+  {
+    version: '9.3.36',
+    date: '2026-10-22',
+    title: 'Chrome 高缩放下编辑器菜单安全定位',
+    impactScope: ['创作详情', '编辑器工具栏', '响应式适配'],
+    changes: [
+      { type: 'fix', description: '编辑器下拉根据工具栏列边界定位，避免原生 Chrome 高缩放时文字和高亮色板被左侧导航覆盖。' },
+      { type: 'improvement', description: '回归测试现在检查工具栏列边界及文字色板色块的实际指针命中。' },
+    ],
+  },
+  {
+    version: '9.3.35',
+    date: '2026-10-22',
+    title: '人员启停恢复与弹窗可访问性',
+    impactScope: ['人员管理', '请求恢复', '会话安全', '弹窗可访问性'],
+    changes: [
+      { type: 'fix', description: '人员启停结果不确定时按原请求只读核实；未找到时只有编辑权限仍有效才可复用同一编号显式重试，不推断当前状态就是原请求结果。' },
+      { type: 'security', description: '启用字段严格接受布尔值，堵住畸形值绕过自禁用保护；并发删除已被其他操作移除的账号时，确认本次请求未执行后再清理界面。' },
+      { type: 'improvement', description: '共享弹窗统一处理初始焦点、Tab 焦点圈定、关闭后焦点恢复、嵌套弹窗与背景隔离。' },
+    ],
+  },
+  {
+    version: '9.3.34',
+    date: '2026-10-22',
+    title: '人员删除结果安全核实',
+    impactScope: ['人员管理', '用户删除', '结果核实'],
+    changes: [
+      { type: 'fix', description: '用户删除提交后若响应丢失，可按操作者与目标账号只读核实；未找到时复用同一请求编号安全重试，避免重复删除或重复记日志。' },
+    ],
+  },
+  {
+    version: '9.3.33',
+    date: '2026-10-22',
+    title: '人员资料刷新后安全恢复',
+    impactScope: ['人员管理', '用户更新', '结果核实'],
+    changes: [
+      { type: 'fix', description: '人员资料更新结果不确定后刷新，可按操作者和目标用户只读核实；未找到时用同一请求编号安全重试，密码不保存在浏览器恢复记录中。' },
+    ],
+  },
+  {
+    version: '9.3.32',
+    date: '2026-10-22',
+    title: '人员创建刷新后安全恢复',
+    impactScope: ['人员管理', '用户创建', '结果核实'],
+    changes: [
+      { type: 'fix', description: '人员创建遇到响应不确定后刷新页面，可用只读状态核实找回结果；未创建时保留同一请求编号，仅要求重新输入密码再安全重试，密码不会写入浏览器恢复记录。' },
+    ],
+  },
+  {
+    version: '9.3.31',
+    date: '2026-10-22',
+    title: '人员创建安全重试',
+    impactScope: ['人员管理', '用户创建', '活动日志'],
+    changes: [
+      { type: 'fix', description: '人员创建结果不确定时锁定原表单，用同一请求键安全重试；已提交的创建不会重复生成账号、分配角色或写入日志，密码不进入重放记录。' },
+    ],
+  },
+  {
+    version: '9.3.30',
+    date: '2026-10-22',
+    title: '人员资料安全重试',
+    impactScope: ['人员管理', '用户更新', '会话安全', '活动日志'],
+    changes: [
+      { type: 'fix', description: '人员编辑结果不确定时锁定原表单，用同一请求键安全重试；已提交的更新不会重复改密、改角色情况下再次撤销会话或重复记日志，密码不进入重放记录。' },
+      { type: 'security', description: '逐条抖音批量关联继续限制在创建人、负责人或发布操作人可编辑的记录范围内；范围外数据不写入、不计入结果。' },
+    ],
+  },
+  {
+    version: '9.3.29',
+    date: '2026-10-22',
+    title: '选题操作触控区域',
+    impactScope: ['选题管理', '窄屏触控', 'Studio 设计系统'],
+    changes: [
+      { type: 'improvement', description: '选题列表、看板及共享分页的主要操作统一达到至少 40×40px；手机分页保留前后翻页和相邻页入口。' },
+    ],
+  },
+  {
+    version: '9.3.28',
+    date: '2026-10-22',
+    title: '资料库列表触控区域',
+    impactScope: ['资料中心', '窄屏触控', 'Studio 设计系统'],
+    changes: [
+      { type: 'improvement', description: '资料库列表查看、编辑、删除与翻页操作以及共享对话框关闭按钮均达到至少 40×40px Studio 点击区；资料操作及权限规则保持不变。' },
+    ],
+  },
+  {
+    version: '9.3.27',
+    date: '2026-10-22',
+    title: '番茄钟控件触控区域',
+    impactScope: ['番茄钟', '窄屏触控', '错误恢复'],
+    changes: [
+      { type: 'improvement', description: '番茄钟完整页与紧凑卡片中的重置、统计重试和完成记录重试操作均有至少 40×40px Studio 命中区，排行榜在移动固定底栏上方可滚动触达。' },
+    ],
+  },
+  {
+    version: '9.3.26',
+    date: '2026-10-22',
+    title: '番茄钟移动导航收敛',
+    impactScope: ['番茄钟', '移动导航'],
+    changes: [
+      { type: 'improvement', description: '窄屏番茄钟不再重复显示移动壳层已有的“返回首页”；桌面端原入口保留。' },
+    ],
+  },
+  {
+    version: '9.3.25',
+    date: '2026-10-22',
+    title: '创作子状态输入校验',
+    impactScope: ['创作管理', '工作流数据完整性'],
+    changes: [
+      { type: 'fix', description: '审批模板保存、阶段先后判断及工作流状态输入统一遵循共享状态机与合法枚举，非法载荷不会写入工作流记录或阶段历史。' },
+    ],
+  },
+  {
+    version: '9.3.24',
+    date: '2026-10-22',
+    title: '窄屏页面动画安全可见',
+    impactScope: ['数据复盘', '窄屏兼容', '页面动效可访问性'],
+    changes: [
+      { type: 'fix', description: '页面入场动画无法调度时仍先保持内容可见；窄屏桌面布局与真实移动壳层分别回归。' },
+    ],
+  },
+  {
+    version: '9.3.23',
+    date: '2026-10-22',
+    title: '选题阶段转换规则收敛为共享真源',
+    impactScope: ['选题阶段', '审批流', '工作流状态一致性'],
+    changes: [
+      { type: 'improvement', description: '选题手动推进与严格审批策略共用同一状态转换矩阵，非法跳级和未知阶段不能写入；不改现有合法流转或历史记录。' },
+    ],
+  },
+  {
+    version: '9.3.22',
+    date: '2026-10-22',
+    title: '人员管理操作触控目标优化',
+    impactScope: ['人员管理', '移动端触控', 'Studio 设计系统'],
+    changes: [
+      { type: 'improvement', description: '用户列表的启用/禁用、编辑与删除操作现在至少达到 40×40px，窄屏固定操作列仍可直接点按。' },
+    ],
+  },
+  {
+    version: '9.3.21',
+    date: '2026-10-22',
+    title: '复盘中心筛选与操作触控优化',
+    impactScope: ['数据复盘', '移动端触控', '无障碍名称', 'Studio 设计系统'],
+    changes: [
+      { type: 'improvement', description: '复盘筛选字段补充读屏名称并达到至少 40px 高；列表标题详情入口对短标题也保持至少 40px 点击区。筛选条件先编辑后统一应用，单次应用仅读取一次，迟到的旧结果不会覆盖最新筛选。' },
+      { type: 'improvement', description: '复盘行动项详情抽屉统一使用 Studio 输入控件，单行字段至少 40px，说明和处理结果保留足够的可编辑空间。' },
+      { type: 'improvement', description: '公共顶部栏的消息中心、主题切换、导航菜单与窄屏侧栏关闭按钮统一达到 40×40px Studio 触控目标。' },
+    ],
+  },
+  {
+    version: '9.3.20',
+    date: '2026-10-22',
+    title: '复盘行动项表单触控尺寸优化',
+    impactScope: ['数据复盘', '日报风险联动', '移动端触控', 'Studio 设计系统'],
+    changes: [
+      { type: 'improvement', description: '复盘行动项创建、表格状态选择及日报风险联动字段统一达到至少 40px 高，并复用 Studio 输入控件；不改变保存和权限规则。' },
+    ],
+  },
+  {
+    version: '9.3.19',
+    date: '2026-10-22',
+    title: '数据复盘触控与视口验收',
+    impactScope: ['数据复盘筛选', '移动端触控', '浏览器回归'],
+    changes: [
+      { type: 'improvement', description: '年/月/选题筛选最小尺寸达到 40×40px，移动端定位选题筛选时避开固定底栏。' },
+      { type: 'fix', description: '修正数据复盘视口矩阵的执行顺序：先确认统计读取恢复，再检查完整数据页，避免把失败态按预期隐藏的热力图误报为缺陷。' },
+    ],
+  },
+  {
+    version: '9.3.18',
+    date: '2026-10-22',
+    title: '移动操作触控尺寸优化',
+    impactScope: ['移动我的页面', '移动选题详情', 'Studio 设计系统'],
+    changes: [
+      { type: 'improvement', description: '字号选项和关联资料读取失败后的重试操作均至少达到 40×40px；保持字号保存、资料读取和既有权限行为。' },
+    ],
+  },
+  {
+    version: '9.3.17',
+    date: '2026-10-22',
+    title: '内容操作触控尺寸优化',
+    impactScope: ['发布管理', '创作管理', '灵感池', 'Studio 设计系统', '移动端'],
+    changes: [
+      { type: 'improvement', description: '发布与创作管理列表、灵感卡片的主要操作统一提升至至少 40×40px Studio 控件；窄屏仍可达，固定列保持可用。' },
+    ],
+  },
+  {
+    version: '9.3.16',
+    date: '2026-10-22',
+    title: '选题操作触控尺寸优化',
+    impactScope: ['选题管理', 'Studio 设计系统'],
+    changes: [
+      { type: 'improvement', description: '桌面选题列表“查看/删除”图标入口使用共享 Studio 按钮，尺寸从 32×32px 提升至 40×40px；保持原有操作语义和权限规则。' },
+    ],
+  },
+  {
+    version: '9.3.15',
+    date: '2026-10-22',
+    title: '工作流详情手机触控优化',
+    impactScope: ['创作详情', '拍摄详情', '发布详情', '编辑器', '移动端'],
+    changes: [
+      { type: 'improvement', description: '创作/拍摄/发布详情的返回、关联与历史入口，以及拍摄信息栏、发布来源稿和编辑器复制全文操作均至少达到 40px 高度，手机上更容易触控。' },
+    ],
+  },
+  {
+    version: '9.3.14',
+    date: '2026-10-21',
+    title: '平台名称统一展示',
+    impactScope: ['发布管理', '选题管理', '工作台', '周报与资料中心'],
+    changes: [
+      { type: 'fix', description: '已知平台标识统一显示为易识别的平台名称，覆盖发布/选题/看板/任务/周报/资料视图，保留自定义平台名称。' },
+    ],
+  },
+  {
+    version: '9.3.13',
+    date: '2026-10-21',
+    title: '活动日志移动布局与触控优化',
+    impactScope: ['活动日志', '移动端'],
+    changes: [
+      { type: 'improvement', description: '窄屏标题和成员筛选分层显示，记录时间信息不再挤压正文；筛选、分页及只读恢复操作统一达到 40px 触控高度。' },
+    ],
+  },
+  {
+    version: '9.3.12',
+    date: '2026-10-21',
+    title: '内容动态手机触控优化',
+    impactScope: ['内容动态', '移动端'],
+    changes: [
+      { type: 'improvement', description: '文档选择框、“查看”和只读重试操作提升到 40px 高，方便手机触控。' },
+    ],
+  },
+  {
+    version: '9.3.11',
+    date: '2026-10-21',
+    title: '移动端资料中心返回路径修复',
+    impactScope: ['移动端', '资料中心导航'],
+    changes: [
+      { type: 'fix', description: '从资料中心打开资料库子页后，顶栏标题保持“资料中心”，返回操作回到资料中心总览，不再误返首页。' },
+    ],
+  },
+  {
+    version: '9.3.10',
+    date: '2026-10-21',
+    title: '资料中心总览响应式与键盘验收',
+    impactScope: ['资料中心', '浏览器验收'],
+    changes: [
+      { type: 'improvement', description: '隔离浏览器回归覆盖桌面与窄屏、浅色与深色主题、卡片边界、可见键盘焦点、四类资料库导航及桌面侧栏选中态，不改变产品行为。' },
+    ],
+  },
+  {
+    version: '9.3.9',
+    date: '2026-10-21',
+    title: '手动保存确认时机修复',
+    impactScope: ['编辑器', '发布管理'],
+    changes: [
+      { type: 'fix', description: '手动保存等待异步回调完成并取得确认；Meta/Ctrl+S 始终使用当前最新稿，失败或未确认时不提前显示保存成功。' },
+    ],
+  },
+  {
+    version: '9.3.8',
+    date: '2026-10-21',
+    title: '选题详情读取状态区分修复',
+    impactScope: ['选题详情', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '桌面及移动详情读取暂时失败时不再误报选题不存在或残留上一条内容；提供不泄漏服务端错误内容的只读重试，404 仍单独说明记录不可访问。' },
+    ],
+  },
+  {
+    version: '9.3.7',
+    date: '2026-10-21',
+    title: '修复窄屏编辑器选区工具栏裁切',
+    impactScope: ['编辑器', '移动端适配'],
+    changes: [
+      { type: 'fix', description: '选中文字后的工具栏在窄屏自动换行，文字颜色与高亮面板完整留在视口内，操作按钮和色块更适合触控；关联选题与目标字数输入具有稳定字段名。' },
+    ],
+  },
+  {
+    version: '9.3.6',
+    date: '2026-10-21',
+    title: '登录主题验收入口完善',
+    impactScope: ['登录页面', '测试验收'],
+    changes: [
+      { type: 'improvement', description: '登录主题测试新增本机合成夹具服务模式，在自动化浏览器启动受限时仍可使用已连接的浏览器工具检查主题、窄屏和首次改密键盘操作。' },
+    ],
+  },
+  {
+    version: '9.3.5',
+    date: '2026-10-21',
+    title: '手机选题筛选完整显示',
+    impactScope: ['移动网页选题', '窄屏适配', '可访问性'],
+    changes: [
+      { type: 'fix', description: '移动端选题筛选项在窄屏自动换行，五种筛选方式都能完整看到和点击；筛选结果与地址栏行为保持不变。' },
+    ],
+  },
+  {
+    version: '9.3.4',
+    date: '2026-10-21',
+    title: '编辑器状态与无障碍提示修复',
+    impactScope: ['创作管理', '选题管理', '可访问性'],
+    changes: [
+      { type: 'fix', description: '关闭“查找替换”后焦点返回打开面板前的按钮；通过快捷键打开时返回正文，避免键盘焦点丢失且不改动稿件内容。' },
+      { type: 'fix', description: '协作空闲时显示无人正在编辑的说明，避免与已同步状态同时出现“系统正在同步”。' },
+      { type: 'fix', description: '选题管理空结果和读取失败提示按页面标题层级呈现；共享空态的其他调用保持原有默认层级。' },
+    ],
+  },
+  {
+    version: '9.3.3',
+    date: '2026-10-21',
+    title: '移动首页关注事项完整展开',
+    impactScope: ['移动网页首页', '今日任务', '团队选题关注'],
+    changes: [
+      { type: 'fix', description: '移动首页将完整的关注选题预览交给任务排序；默认显示三项、展开最多六项，避免第 4–6 条关注事项被提前隐藏。' },
+    ],
+  },
+  {
+    version: '9.3.2',
+    date: '2026-10-21',
+    title: '移动选题保存结果安全恢复',
+    impactScope: ['移动网页选题', '内容保存', '防止覆盖并发修改'],
+    changes: [
+      { type: 'fix', description: '移动选题标题/说明保存遇到响应不明时先只读核实；已保存不重发，读回失败会锁定写入并在重开页面后恢复核实，并发变化时展示服务端内容并要求用户明确选择。' },
+    ],
+  },
+  {
+    version: '9.3.1',
+    date: '2026-10-21',
+    title: '移动创作写入结果安全恢复',
+    impactScope: ['移动网页创作', '保存与审核', '防止重复写入'],
+    changes: [
+      { type: 'fix', description: '已有稿件保存或审核结果不明时先只读核实；已应用不重发，读回失败则保留正文并暂停后续写入，刷新后只读恢复，仍为原状态时仅允许用户明确重试。' },
+    ],
+  },
+  {
+    version: '9.3.0',
+    date: '2026-10-21',
+    title: '移动创作新建结果安全恢复',
+    impactScope: ['移动网页创作', '结果核实', '防止重复创建'],
+    changes: [
+      { type: 'fix', description: '移动端新建稿件响应不明时以同一请求编号只读核实；已创建不重发，未创建仅允许用户明确确认后安全重试，读回失败会保留正文并暂停新建。' },
+    ],
+  },
+  {
+    version: '9.2.99',
+    date: '2026-10-21',
+    title: '移动选题操作结果安全核实',
+    impactScope: ['移动选题看板', '选题详情审核', '阶段推进'],
+    changes: [
+      { type: 'fix', description: '移动网页审核或状态推进响应不明确时先只读核实；已生效不重发，仍为原状态时要求用户明确重试，读回失败则锁定相关状态操作。' },
+    ],
+  },
+  {
+    version: '9.2.98',
+    date: '2026-10-21',
+    title: '选题审核与看板状态结果安全核实',
+    impactScope: ['选题批量审核', '选题看板', '防止重复操作'],
+    changes: [
+      { type: 'fix', description: '审核或状态更新响应不明时先只读读取服务器当前记录；不自动重发，读取失败会锁住该条记录的后续写入。' },
+    ],
+  },
+  {
+    version: '9.2.97',
+    date: '2026-10-21',
+    title: '选题审核结果安全核实',
+    impactScope: ['选题审核', '结果恢复', '防止重复操作'],
+    changes: [
+      { type: 'fix', description: '审核响应不明确时只读核实服务端状态；已生效不重发，仍待审时仅由用户明确重试，核实失败则锁定审核操作。' },
+    ],
+  },
+  {
+    version: '9.2.96',
+    date: '2026-10-21',
+    title: '选题删除结果安全核实',
+    impactScope: ['选题管理', '删除结果反馈', '防止重复操作'],
+    changes: [
+      { type: 'fix', description: '删除响应不明确时先只读核实同一条记录；状态未确认前锁定该记录，明确仍存在后才恢复用户可控重试。' },
+    ],
+  },
+  {
+    version: '9.2.95',
+    date: '2026-10-21',
+    title: '灵感删除结果安全核实',
+    impactScope: ['灵感库', '删除结果反馈', '防止重复操作'],
+    changes: [
+      { type: 'fix', description: '删除响应不明确时先只读核实；状态未确认前暂停再次删除，明确仍存在后才恢复用户可控重试。' },
+    ],
+  },
+  {
+    version: '9.2.94',
+    date: '2026-10-21',
+    title: '资料详情可读性回归',
+    impactScope: ['资料详情', '主题对比度', '窄屏布局'],
+    changes: [
+      { type: 'improvement', description: '增加资料详情普通文字明暗主题与窄屏对比度回归，保障 Studio 令牌调整后页面可读性。' },
+    ],
+  },
+  {
+    version: '9.2.93',
+    date: '2026-10-21',
+    title: '日历创建结果安全核实',
+    impactScope: ['排期日历', '创建幂等', '结果恢复'],
+    changes: [
+      { type: 'fix', description: '日历创建响应不明确时先核实原请求，已创建不重发；暂未找到时仅支持同编号显式重试。' },
+      { type: 'feature', description: '新增账号范围的创建请求账本和 SAFE_EXPAND 迁移 038，旧客户端保持兼容。' },
+    ],
+  },
+  {
+    version: '9.2.92',
+    date: '2026-10-20',
+    title: '深色弱化文字对比度优化',
+    impactScope: ['Studio 设计令牌', '侧栏', '创作详情', '可读性'],
+    changes: [
+      { type: 'improvement', description: '提升深色主题弱化文字对比度，并增加令牌表面及创作详情双主题回归。' },
+    ],
+  },
+  {
+    version: '9.2.91',
+    date: '2026-10-20',
+    title: '成就文字可读性优化',
+    impactScope: ['成就系统', '明暗主题', '可读性'],
+    changes: [
+      { type: 'improvement', description: '积分摘要、统计标签、进度与日期、排行榜和空状态普通文字统一使用 Studio 次级文字令牌。' },
+    ],
+  },
+  {
+    version: '9.2.90',
+    date: '2026-10-20',
+    title: '日历文字对比度优化',
+    impactScope: ['排期日历', '明暗主题', '可读性'],
+    changes: [
+      { type: 'improvement', description: '周标题、跨月日期、事件计数和溢出提示改用 Studio 次级文字令牌，提高明暗主题下的对比度。' },
+    ],
+  },
+  {
+    version: '9.2.89',
+    date: '2026-10-20',
+    title: '创作新建结果安全核实',
+    impactScope: ['创作管理', '新建结果恢复', '重复创建保护'],
+    changes: [
+      { type: 'fix', description: '创作记录新建响应不明确时按原请求编号只读核实；已创建不重发，尚未创建时只用同一编号安全重试。' },
+      { type: 'improvement', description: '核实失败时暂停创作列表其它写入并支持刷新后只读恢复，避免重复创建。' },
+    ],
+  },
+  {
+    version: '9.2.88',
+    date: '2026-10-20',
+    title: '创作删除结果安全核实',
+    impactScope: ['创作管理', '删除结果恢复', '重复删除保护'],
+    changes: [
+      { type: 'fix', description: '创作删除响应不明确时只读核实记录是否存在；已删除不重发，记录未变化时仅允许用户明确确认后重试。' },
+      { type: 'improvement', description: '核实读取失败时锁定当前稿件写入，并在刷新后继续只读恢复。' },
+    ],
+  },
+  {
+    version: '9.2.87',
+    date: '2026-10-20',
+    title: '创作版本保存结果安全核实',
+    impactScope: ['创作管理', '版本保存', '重复建版保护'],
+    changes: [
+      { type: 'fix', description: '小修保存或另开新版响应不明确时只读核实服务器版本和正文；已建版不会重复创建，未建版只在用户明确确认后重试。' },
+      { type: 'improvement', description: '首次核实失败时锁定创作写入并支持刷新后继续只读恢复。' },
+    ],
+  },
+  {
+    version: '9.2.86',
+    date: '2026-10-20',
+    title: '创作详情状态写入安全核实',
+    impactScope: ['创作管理', '审核提交恢复', '状态写入保护'],
+    changes: [
+      { type: 'fix', description: '提交审核或状态更新响应不明确时只读核实服务器状态和正文；已生效不重发，仍为原状态时仅在用户明确确认后重试。' },
+      { type: 'improvement', description: '核实失败时保留账号/稿件限定恢复标记并锁定后续写入；刷新后继续只读恢复，操作前确认正文已保存。' },
+    ],
+  },
+  {
+    version: '9.2.85',
+    date: '2026-10-20',
+    title: '成片详情状态更新安全核实',
+    impactScope: ['成片制作', '状态更新恢复', '剧本写入保护'],
+    changes: [
+      { type: 'fix', description: '成片详情状态更新响应不明确时只读核实；确认已生效不重发，仍为原状态时仅在用户明确确认后重试，服务器状态变化时采用最新读回结果。' },
+      { type: 'improvement', description: '状态未确认期间锁定剧本、版本与归档写入；状态操作前先确认剧本自动保存完成，刷新后支持只读恢复。' },
+    ],
+  },
+  {
+    version: '9.2.84',
+    date: '2026-10-20',
+    title: '制作计划创建防重复与安全恢复',
+    impactScope: ['成片制作', '创建恢复', '请求幂等'],
+    changes: [
+      { type: 'fix', description: '创建响应不明确时先只读核实，未创建后复用同一请求编号安全重试；状态暂不可读时暂停本页写入并支持刷新恢复。' },
+      { type: 'security', description: '新增创建者范围内的服务端原子幂等账本与删除墓碑，防止重放产生重复制作计划。' },
+    ],
+  },
+  {
+    version: '9.2.83',
+    date: '2026-10-20',
+    title: '制作计划完成状态安全核实',
+    impactScope: ['成片制作', '完成操作恢复', '操作反馈'],
+    changes: [
+      { type: 'fix', description: '完成响应不明确时只读核实制作计划状态；确认已完成不重发，状态暂不可读时暂停本页写入并允许安全恢复。' },
+    ],
+  },
+  {
+    version: '9.2.82',
+    date: '2026-10-20',
+    title: '制作计划删除状态安全核实',
+    impactScope: ['成片制作', '删除恢复', '操作反馈'],
+    changes: [
+      { type: 'fix', description: '删除响应不明确时只读核实制作计划是否仍存在；确认已删除不重发，状态不可读时暂停本页写入并允许安全恢复。' },
+      { type: 'improvement', description: '制作计划删除操作增加可访问名称，便于辅助技术识别具体记录。' },
+    ],
+  },
+  {
+    version: '9.2.81',
+    date: '2026-10-20',
+    title: '抖音自动同步关联范围收敛',
+    impactScope: ['Creator Agent 同步', '发布管理', '逐条编辑权限'],
+    changes: [
+      { type: 'fix', description: '旧格式与标准协议同步后的自动关联均按账号所属用户的逐条编辑范围处理；范围外发布稿件不关联、不推进选题状态。' },
+    ],
+  },
+  {
+    version: '9.2.80',
+    date: '2026-10-20',
+    title: '编辑器剪贴板结果反馈',
+    impactScope: ['创作编辑器', '复制与粘贴', '操作反馈'],
+    changes: [
+      { type: 'improvement', description: '编辑器右键菜单的复制、剪切和粘贴操作现在会说明是否成功；浏览器拒绝访问剪贴板时给出可行的替代操作。' },
+      { type: 'fix', description: '剪贴板操作失败不再静默关闭菜单，避免用户误以为正文或剪贴板已更新。' },
+    ],
+  },
+  {
+    version: '9.2.79',
+    date: '2026-10-20',
+    title: '抖音关联范围与命令面板键盘恢复',
+    impactScope: ['发布管理', '全局搜索', '键盘无障碍'],
+    changes: [
+      { type: 'fix', description: '抖音批量关联遵循逐条编辑范围；全局查看但未创建、负责或参与选题的成员不会写入范围外记录或看到其统计，全局编辑者仍可全量刷新。' },
+      { type: 'improvement', description: '命令面板打开时聚焦搜索框，关闭后恢复到打开前的可用控件，支持键盘用户继续原操作。' },
+      { type: 'fix', description: '新增键盘回归覆盖上下键边界、Enter 激活日报结果与 Escape 关闭后的焦点恢复。' },
+    ],
+  },
+  {
+    version: '9.2.78',
+    date: '2026-10-20',
+    title: '工作台恢复与发布归档反馈',
+    impactScope: ['移动工作台', '抖音关联', '发布归档恢复'],
+    changes: [
+      { type: 'fix', description: '移动首页复盘摘要读取失败时仍保留复盘阶段，以未知数量明确提示无法确认是否有记录，避免把失败误报为空。' },
+      { type: 'improvement', description: '复盘阶段提供单独的只读重试；读取恢复后同步还原计数与预览。' },
+      { type: 'fix', description: '抖音自动关联后若发布归档同步失败，明确报告部分完成数量，并引导用户在对应发布详情页重试归档。' },
+    ],
+  },
+  {
+    version: '9.2.77',
+    date: '2026-10-20',
+    title: '抖音关联异常结果安全核实',
+    impactScope: ['发布管理', '抖音作品关联', '异常操作恢复'],
+    changes: [
+      { type: 'fix', description: '手工关联或解除抖音作品时响应不明，先读取发布详情确认实际绑定；已生效不重复写入，未生效才恢复供用户手动重试。' },
+      { type: 'improvement', description: '关联状态读取失败时暂停发布页写入，并在刷新后继续只读核实，防止重复关联或误判。' },
+    ],
+  },
+  {
+    version: '9.2.76',
+    date: '2026-10-20',
+    title: '发布详情剧本保存结果安全核实',
+    impactScope: ['发布详情', '剧本版本历史', '异常保存恢复'],
+    changes: [
+      { type: 'fix', description: '发布剧本及显式版本保存结果不明时按记录读取正文与版本历史；确认已保存不会重复创建版本，确认未保存则恢复草稿供用户手动重试。' },
+      { type: 'improvement', description: '状态读取失败时将快照保存在当前账号标签会话、锁定编辑写入并在刷新后继续只读核实。' },
+    ],
+  },
+  {
+    version: '9.2.75',
+    date: '2026-10-20',
+    title: '发布记录更新结果核实与日期恢复',
+    impactScope: ['发布管理', '更新恢复', '北京时间日期'],
+    changes: [
+      { type: 'fix', description: '发布记录更新响应不明时先只读对照服务器状态；刷新后继续核实，确认已更新不重发，确认未更新则恢复草稿供用户手动决定。' },
+      { type: 'fix', description: '编辑表单从数据库时间戳恢复日期时按北京时间自然日提取，确保日期输入值有效且保留原日期。' },
+      { type: 'improvement', description: '官方数据日期窗口继续统一按北京时间自然日计算；昨天取采集日前一日，近 7/30 天包含当天。' },
+    ],
+  },
+  {
+    version: '9.2.74',
+    date: '2026-10-20',
+    title: '发布记录创建幂等与异常恢复',
+    impactScope: ['发布管理', '创建恢复', '重复操作保护'],
+    changes: [
+      { type: 'fix', description: '发布创建请求使用稳定编号和服务端原子账本；相同请求重放返回原记录，删除后的请求墓碑阻止迟到重试复活记录。' },
+      { type: 'improvement', description: '创建响应和首次状态读取都异常时暂停发布页写入并保留原请求，刷新后只读核实；确认未创建后仅允许用同一编号安全重试。' },
+    ],
+  },
+  {
+    version: '9.2.73',
+    date: '2026-10-20',
+    title: '发布记录删除结果只读核实',
+    impactScope: ['发布管理', '删除恢复', '重复操作保护'],
+    changes: [
+      { type: 'fix', description: '发布记录删除响应异常时按记录编号只读核实服务端状态；确认仍存在时由用户明确决定是否再次删除。' },
+      { type: 'improvement', description: '待核实记录在当前账号标签会话中保存，刷新后继续只读恢复，核实期间暂停发布页面写入。' },
+    ],
+  },
+  {
+    version: '9.2.72',
+    date: '2026-10-20',
+    title: '移动首页快捷操作铺满网格',
+    impactScope: ['手机工作台', 'Studio 操作按钮', '响应式布局'],
+    changes: [
+      { type: 'fix', description: '修复按钮动效外层包装忽略显式全宽要求的问题，移动首页快捷操作现在能填满两列网格。' },
+      { type: 'improvement', description: '为 390px 与 320px 手机布局增加快捷操作宽度和横向溢出回归。' },
+    ],
+  },
+  {
+    version: '9.2.71',
+    date: '2026-10-20',
+    title: '角色创建与删除结果安全核实',
+    impactScope: ['权限管理', '角色创建', '角色删除', '异常结果恢复'],
+    changes: [
+      { type: 'fix', description: '角色创建响应异常时暂停全部角色写入，并按唯一角色编码只读核实；刷新后恢复核实状态，不会自动重发。' },
+      { type: 'improvement', description: '确认创建未发生后恢复原表单供用户手动重试；发现同编码但资料不一致时展示服务器当前值供明确处理。' },
+      { type: 'fix', description: '角色删除响应异常时按角色编号只读核实；确认已删除后更新页面，仍存在时要求用户明确重新发起，避免重复删除。' },
+    ],
+  },
+  {
+    version: '9.2.70',
+    date: '2026-10-20',
+    title: '权限结果核实与剧本历史可读性',
+    impactScope: ['权限管理', '拍摄剧本历史', '响应式回归'],
+    changes: [
+      { type: 'fix', description: '角色更新响应异常时按角色编号只读核实；核实期间暂停所有角色写入，刷新后可继续恢复且不会重复提交。' },
+      { type: 'improvement', description: '拍摄剧本版本历史的说明、空状态和版本信息在明暗主题下保持清晰可读。' },
+      { type: 'improvement', description: '缩放相关浏览器回归使用等效真实 CSS 布局视口，避免根元素 zoom 假模拟媒体断点。' },
+    ],
+  },
+  {
+    version: '9.2.69',
+    date: '2026-10-20',
+    title: '人员状态安全恢复与阶段停留',
+    impactScope: ['人员管理', '工作台内容流', '创作详情响应式验收'],
+    changes: [
+      { type: 'fix', description: '用户启停响应不明确时先按编号只读核实；状态暂不可读时暂停重复修改，恢复不重发写请求。' },
+      { type: 'improvement', description: '首页已通过待开工选题显示可信阶段停留时间；未知时间不推算。' },
+      { type: 'improvement', description: '创作评审缩放回归改用等效 CSS 布局视口覆盖响应式断点，不再用根元素 CSS zoom 模拟浏览器缩放。' },
+    ],
+  },
+  {
+    version: '9.2.68',
+    date: '2026-10-20',
+    title: '灵感创建防重复恢复',
+    impactScope: ['灵感池', '灵感创建', '异常结果恢复'],
+    changes: [
+      { type: 'fix', description: '灵感创建使用客户端请求编号和服务端事务账本；同一请求重放返回原记录，原记录删除后保留墓碑以阻止迟到重试复活。' },
+      { type: 'improvement', description: '创建结果不明时先只读核实，读取失败后暂停再次提交；刷新后恢复原内容并继续核实。' },
+      { type: 'improvement', description: '官方日期窗口按北京时间自然日验证，近 7 天和近 30 天包含当天，并覆盖边界与未来日回归。' },
+    ],
+  },
+  {
+    version: '9.2.67',
+    date: '2026-10-20',
+    title: '灵感评论防重复恢复',
+    impactScope: ['灵感池', '评论提交', '异常结果恢复'],
+    changes: [
+      { type: 'fix', description: '评论请求增加唯一编号，重试复用同一编号；服务端已保存但响应丢失时按编号只读核实，避免重复评论。' },
+      { type: 'improvement', description: '核实读取暂不可用时暂停再次提交，当前浏览器标签刷新后仍可恢复原评论草稿并继续核实。' },
+      { type: 'improvement', description: '评论表采用兼容历史数据的可空唯一索引，重复请求回放原评论且不重复广播。' },
+    ],
+  },
+  {
+    version: '9.2.66',
+    date: '2026-10-20',
+    title: '灵感操作结果核实',
+    impactScope: ['灵感池', '转为选题', '操作结果恢复'],
+    changes: [
+      { type: 'fix', description: '点赞切换和灵感转选题请求异常后只读核实服务器状态，避免响应丢失时重复写入或停留在误报失败。' },
+      { type: 'improvement', description: '转化结果已关联选题时直接打开目标；状态无法读取时暂停重复操作并提供只读核实入口。' },
+      { type: 'improvement', description: '浏览器回归覆盖点赞/转化已写入但响应丢失、首次状态读取失败及只读恢复。' },
+    ],
+  },
+  {
+    version: '9.2.65',
+    date: '2026-10-20',
+    title: '用户删除后的列表恢复',
+    impactScope: ['人员管理'],
+    changes: [
+      { type: 'fix', description: '用户删除确认成功后刷新当前列表；刷新失败时提供只读重试，避免再次提交删除。' },
+    ],
+  },
+  {
+    version: '9.2.64',
+    date: '2026-10-20',
+    title: '移动首页选题总数',
+    impactScope: ['手机工作台', '选题概览'],
+    changes: [
+      { type: 'improvement', description: '手机工作台单独显示进行中选题总数与最近预览数量，并标明团队或个人范围。' },
+      { type: 'improvement', description: '最近选题卡片和查看全部入口使用共享按钮；总数非零但预览缺失时不会误报为空。' },
+    ],
+  },
+  {
+    version: '9.2.63',
+    date: '2026-10-20',
+    title: '桌面审核待办直达',
+    impactScope: ['桌面首页', '创作稿件审核', '权限安全边界'],
+    changes: [
+      { type: 'improvement', description: '桌面首页审核稿件待办直达当前审核动作，并在授权后聚焦“审核通过”；不会因打开任务自动审批。' },
+      { type: 'security', description: '只读审核权限与正文编辑能力分开；审批仍遵循服务端权限、当前版本与正文冲突检查。' },
+    ],
+  },
+  {
+    version: '9.2.62',
+    date: '2026-10-20',
+    title: '选题筛选地址状态同步',
+    impactScope: ['桌面选题列表/看板', '手机网页选题列表'],
+    changes: [
+      { type: 'fix', description: '桌面选题筛选变更后同步更新 status 地址参数，清除筛选后刷新仍保持一致。' },
+      { type: 'improvement', description: '手机网页选题筛选通过 status/topic_filter 记住当前选择，补充按钮选中状态语义。' },
+    ],
+  },
+  {
+    version: '9.2.61',
+    date: '2026-10-20',
+    title: '工作台创作阶段选题完整性',
+    impactScope: ['桌面工作台', '手机网页首页', '选题列表与看板'],
+    changes: [
+      { type: 'fix', description: '将已通过待开始创作的选题纳入工作台创作阶段数量与预览，并保留其实际状态。' },
+      { type: 'improvement', description: '工作台创作阶段入口提供已通过与创作中联合筛选，移动网页和桌面列表/看板均可继续处理。' },
+    ],
+  },
+  {
+    version: '9.2.60',
+    date: '2026-10-20',
+    title: '创作者首页稿件保存状态',
+    impactScope: ['桌面首页', '手机网页首页', '创作协作保存状态'],
+    changes: [
+      { type: 'improvement', description: '桌面首页与手机网页共用稿件保存状态提示，桌面创作者待办可看到最近编辑状态。' },
+      { type: 'security', description: '只接受当前账号的明确保存完成事件；协作同步和其他账号事件不会冒充本账号保存成功。' },
+      { type: 'fix', description: '状态订阅改为跟随完整编辑事件，连续保存确认即使状态类别相同也能及时刷新。' },
+    ],
+  },
+  {
+    version: '9.2.59',
+    date: '2026-10-19',
+    title: '创作者首页写稿快捷入口',
+    impactScope: ['桌面首页', '手机网页首页', '创作新建流程'],
+    changes: [
+      { type: 'improvement', description: '创作者首页新增“写两句”快捷入口，桌面直达现有新建弹窗，手机网页直达新稿编辑器。' },
+      { type: 'security', description: '沿用 production:update 权限；桌面导航参数在权限确认后消费，原生 Android 首页保持不变。' },
+      { type: 'improvement', description: '浏览器回归覆盖两端跳转、桌面弹窗和账号切换后的权限收敛。' },
+    ],
+  },
+  {
+    version: '9.2.58',
+    date: '2026-10-19',
+    title: '手机首页稿件审核直达',
+    impactScope: ['手机网页首页', '创作稿件审核', '协作保存确认'],
+    changes: [
+      { type: 'improvement', description: '手机网页首页“待审核稿件”现在直达当前审核页，底部提供“审核通过”操作，并可返回工作台。' },
+      { type: 'security', description: '沿用现有生产编辑权限与稿件范围校验；审核前先确认正文同步，离线或保存未确认时不发送审核。待审核状态已变化时页面保持只读，避免误提交。' },
+      { type: 'improvement', description: '新增手机工作台待审稿件审批、单次写入和过期任务只读回归。' },
+    ],
+  },
+  {
+    version: '9.2.57',
+    date: '2026-10-19',
+    title: '手机选题审核直达',
+    impactScope: ['手机网页选题详情', '首页审核待办', '权限安全'],
+    changes: [
+      { type: 'fix', description: '手机网页选题详情现识别首页审核待办的直达参数；待审且有审核权限时自动展开审核区，不需要再次点击“开始审核”。' },
+      { type: 'security', description: '审核直达参数仅用于打开审核面板并在读取权限/状态后清除，不自动提交；无权限或状态已变化时保持只读详情。' },
+      { type: 'improvement', description: '补充手机网页审核直达、参数消费和无权限边界回归。' },
+    ],
+  },
+  {
+    version: '9.2.56',
+    date: '2026-10-19',
+    title: '手机首页灵感快捷入口',
+    impactScope: ['手机网页首页', '灵感记录'],
+    changes: [
+      { type: 'improvement', description: '手机网页首页新增“记灵感”入口，直接打开现有灵感页。' },
+      { type: 'improvement', description: '该快捷入口仅用于响应式网页，原生 Android 首页保持不变。' },
+    ],
+  },
+  {
+    version: '9.2.55',
+    date: '2026-10-19',
+    title: '首页公告条与管理入口',
+    impactScope: ['首页工作台', '公告管理', '窄屏可用性'],
+    changes: [
+      { type: 'improvement', description: '首页顶部以紧凑公告条展示置顶或最新公告，保留原公告板展开入口。' },
+      { type: 'fix', description: '公告读取失败显示独立重试，不伪装为空；公告管理仍遵循原权限和确认流程。' },
+      { type: 'improvement', description: '新增 320px 公告条、展开/收起与只读权限边界回归。' },
+      { type: 'improvement', description: '公告条现覆盖响应式手机网页首页；原生 Android 移动首页保持不变。' },
+      { type: 'fix', description: '首页卡点任务摘要补充负责人/待认领信息，并提升亮暗主题文字对比度。' },
+    ],
+  },
+  {
+    version: '9.2.54',
+    date: '2026-10-19',
+    title: '工作台播放数据日期口径与可读性',
+    impactScope: ['工作台', '抖音运营数据', '明暗主题无障碍'],
+    changes: [
+      { type: 'improvement', description: '明确工作台近 7 天播放变化按北京时间自然日统计并包含当天。' },
+      { type: 'fix', description: '提升工作台播放指标标签和来源说明的明暗主题文字对比度。' },
+      { type: 'improvement', description: '增加统计口径说明与亮/暗主题对比度回归断言。' },
+    ],
+  },
+  {
+    version: '9.2.53',
+    date: '2026-10-19',
+    title: '报告中心可读性与标题层级',
+    impactScope: ['报告中心', '周报', '数据导出', '明暗主题无障碍'],
+    changes: [
+      { type: 'fix', description: '修复周报指标标签、成员/平台说明及数据导出格式提示在暗色主题下的低对比问题。' },
+      { type: 'fix', description: '修复报告中心周报和数据导出区域的页面标题跳级。' },
+      { type: 'improvement', description: '增加报告中心明暗主题普通文案及标题顺序回归断言。' },
+    ],
+  },
+  {
+    version: '9.2.52',
+    date: '2026-10-19',
+    title: '数据复盘文字可读性与标题层级',
+    impactScope: ['数据复盘', '协作热力图', '明暗主题无障碍'],
+    changes: [
+      { type: 'fix', description: '修复数据复盘指标标签、统计说明和协作热力图刻度在暗色主题下的低对比问题。' },
+      { type: 'fix', description: '修复数据复盘页面分区标题跳级，统一使用连续的页面标题层级。' },
+      { type: 'improvement', description: '增加数据复盘标题顺序及普通说明 Studio 令牌回归断言。' },
+    ],
+  },
+  {
+    version: '9.2.51',
+    date: '2026-10-19',
+    title: '创作者中心文字可读性与无障碍',
+    impactScope: ['创作者作品库', '创作者作品详情', '创作者运营概览', '明暗主题无障碍'],
+    changes: [
+      { type: 'fix', description: '修复创作者中心普通说明在暗色主题下的低对比文字，并提升作品评分在亮色主题下的可读性。' },
+      { type: 'fix', description: '修复运营概览资料卡标题层级跳级及“查看作品”按钮名称与可见文案不匹配。' },
+      { type: 'improvement', description: '增加创作者中心对比度、窄屏与标题顺序回归覆盖。' },
+    ],
+  },
+  {
+    version: '9.2.50',
+    date: '2026-10-19',
+    title: '创作者趋势页暗色可读性',
+    impactScope: ['创作者数据趋势', '周期切换', '明暗主题无障碍'],
+    changes: [
+      { type: 'fix', description: '修复未选周期按钮、周期合计与趋势状态/来源说明的暗色低对比问题，改用 Studio 次级文字令牌。' },
+      { type: 'improvement', description: '趋势页普通文字对比度回归覆盖 1440px、390px 和 320px 明暗主题与不完整周期状态。' },
+    ],
+  },
+  {
+    version: '9.2.49',
+    date: '2026-10-19',
+    title: '创作者报告暗色文字可读性',
+    impactScope: ['创作者运营报告', '创作者中心共享说明', '明暗主题无障碍'],
+    changes: [
+      { type: 'fix', description: '修复创作者报告普通说明、指标标签、日期与状态文案在暗色主题下的低对比问题，采用 Studio 次级文字令牌。' },
+      { type: 'improvement', description: '新增普通报告文案在桌面、移动、明暗主题及 320px 窄屏的对比度和横向溢出回归。' },
+    ],
+  },
+  {
+    version: '9.2.48',
+    date: '2026-10-19',
+    title: '运营报告周期边界校准',
+    impactScope: ['创作者运营日报', '创作者运营周报', '创作者运营月报', '北京时间日期窗口'],
+    changes: [
+      { type: 'fix', description: '发布作品数量按对应的北京时间日期闭区间计算，日报只含昨天，近7天和近30天包含窗口末日。' },
+      { type: 'fix', description: '排除窗口前的期初基线日及窗口结束日之后的未来作品，防止周期发布数多算或污染。' },
+      { type: 'improvement', description: '新增日报、周报、月报跨北京时间午夜的边界回归。' },
+    ],
+  },
+  {
+    version: '9.2.47',
+    date: '2026-10-19',
+    title: '选题信息可读性与字段识别',
+    impactScope: ['桌面选题列表与看板', '移动选题列表', '移动选题详情', '关联资料与主题维度', '亮暗主题无障碍'],
+    changes: [
+      { type: 'fix', description: '移动选题列表负责人/截止日期、加载/空结果态、详情普通元信息、关联资料/主题维度说明与空状态、协作动态备注统一使用 Studio 次级文字，修复暗色主题下 4.08:1 的对比度不足。' },
+      { type: 'improvement', description: '选题标题和说明输入框增加稳定的 id/name，改善浏览器表单识别与自动填充兼容。' },
+      { type: 'improvement', description: '增加 320/390px 移动视口明暗主题的元信息对比度和字段属性回归。' },
+      { type: 'fix', description: '桌面选题页指标、表格表头、行内元信息及分页文字统一使用 Studio 次级文字，改善亮暗主题对比度。' },
+      { type: 'fix', description: '选题看板总量、列计数、负责人/截止日期、空列与加载说明统一使用 Studio 次级文字，修复暗色主题低对比文字。' },
+    ],
+  },
+  {
+    version: '9.2.46',
+    date: '2026-10-19',
+    title: '资料删除状态安全核实',
+    impactScope: ['资料中心', '软删除恢复', '重复操作保护'],
+    changes: [
+      { type: 'fix', description: '资料删除响应未确认时只读核实服务端状态；状态不明时锁定写入，避免重复移入回收站。' },
+      { type: 'improvement', description: '回收状态在列表和详情中可辨识，已回收资料保持只读。' },
+      { type: 'improvement', description: '隔离浏览器回归覆盖响应丢失、只读读取失败与恢复。' },
+    ],
+  },
+  {
+    version: '9.2.45',
+    date: '2026-10-19',
+    title: '运营报告写入状态核实',
+    impactScope: ['创作者运营报告', '重复写入保护', '隔离浏览器回归'],
+    changes: [
+      { type: 'fix', description: '报告生成或删除响应未确认时按运营账号保存待核实状态，跨页面刷新仍锁定写入；核实后需用户明确确认才恢复操作。' },
+      { type: 'fix', description: '已确认报告写入但列表刷新失败时，按账号跨页面刷新锁定后续写入；只读重读成功后自动解除。' },
+      { type: 'improvement', description: '隔离回归覆盖生成/删除响应丢失、核实读取失败、页面重载状态保持及用户确认恢复流程。' },
+    ],
+  },
+  {
+    version: '9.2.44',
+    date: '2026-10-19',
+    title: '备份管理 Studio 体验与重复创建保护',
+    impactScope: ['备份管理', '响应式体验', '备份安全操作'],
+    changes: [
+      { type: 'improvement', description: '备份管理页统一使用 Studio Atelier 共享页面壳、指标卡、按钮、加载/空状态和来源状态组件。' },
+      { type: 'fix', description: '创建已确认但备份清单读回失败时，暂时禁止再次创建；成功重新核实清单后恢复操作。' },
+      { type: 'improvement', description: '增加明暗主题、320–1440px 响应式和不泄露绝对路径/SQLite 细节的页面回归。' },
+    ],
+  },
+  {
+    version: '9.2.43',
+    date: '2026-10-19',
+    title: '设置中心品牌说明可读性',
+    impactScope: ['设置中心', '亮暗主题', '响应式回归'],
+    changes: [
+      { type: 'fix', description: '关于系统的品牌说明使用 Studio 次级正文令牌，提升暗色主题下的对比度余量。' },
+      { type: 'improvement', description: '设置中心浏览器回归覆盖 320/390px 明暗主题，并兼容 Chromium CSS Color 4 颜色值。' },
+    ],
+  },
+  {
+    version: '9.2.42',
+    date: '2026-10-19',
+    title: '日报提交状态安全恢复',
+    impactScope: ['个人日报', '账号切换保护'],
+    changes: [
+      { type: 'fix', description: '日报提交响应异常时只读核实服务器状态，已提交不会被误报失败或重复提交。' },
+      { type: 'fix', description: '状态暂时无法确认时锁定编辑与重复提交，并提供只读状态核实入口。' },
+      { type: 'improvement', description: '桌面和移动网页均按草稿/退回状态开放编辑，异步日报回读按账号身份隔离。' },
+    ],
+  },
+  {
+    version: '9.2.41',
+    date: '2026-10-19',
+    title: '登录页触控与主内容无障碍',
+    impactScope: ['登录页', '移动端可访问性'],
+    changes: [
+      { type: 'improvement', description: '密码显隐按钮提供 40px 触控区与清晰键盘焦点环，保持图标尺寸及输入内容留白不变。' },
+      { type: 'fix', description: '登录页补充唯一主内容地标，便于屏幕阅读器直接定位页面主体。' },
+      { type: 'improvement', description: '登录页浏览器回归覆盖窄屏下的显隐按钮尺寸、密码遮罩切换和主内容地标。' },
+    ],
+  },
+  {
+    version: '9.2.40',
+    date: '2026-10-19',
+    title: '移动工作中心文字对比度',
+    impactScope: ['移动工作中心'],
+    changes: [
+      { type: 'fix', description: '移动工作中心说明和常用入口副标题统一使用 Studio 次级文字令牌，修复暗色主题下可读性不足。' },
+      { type: 'improvement', description: '增加 390px 明暗主题说明文字对比度与横向溢出回归。' },
+    ],
+  },
+  {
+    version: '9.2.39',
+    date: '2026-10-19',
+    title: '协作同步状态文字对比度',
+    impactScope: ['成片详情', '拍摄详情', '发布详情', '富文本编辑器'],
+    changes: [
+      { type: 'fix', description: '协作编辑器文档同步状态提示改用 Studio 次级文字令牌，提升暗色主题下的可读性。' },
+      { type: 'improvement', description: '补充同步状态提示在亮暗主题下的对比度回归。' },
+    ],
+  },
+  {
+    version: '9.2.38',
+    date: '2026-10-19',
+    title: '详情文字对比度',
+    impactScope: ['成片详情', '发布详情', '富文本编辑器'],
+    changes: [
+      { type: 'fix', description: '成片与发布详情的统计、字段和当前流程步骤文字改用 Studio 次级/高对比语义令牌，修正亮暗主题对比度不足。' },
+      { type: 'improvement', description: '增加 390px 移动端明暗主题文字对比度与横向溢出回归。' },
+    ],
+  },
+  {
+    version: '9.2.37',
+    date: '2026-10-19',
+    title: '编辑器工具栏避让应用顶栏',
+    impactScope: ['创作详情', '富文本编辑器', '移动网页'],
+    changes: [
+      { type: 'fix', description: '创作正文工具栏按当前应用顶栏实际高度定位，桌面缩放和移动页面滚动时不再被顶部导航遮挡；全屏编辑仍从屏幕顶部开始。' },
+      { type: 'improvement', description: '新增桌面和 320px 移动端的工具栏遮挡/真实命中目标回归检查。' },
+    ],
+  },
+  {
+    version: '9.2.36',
+    date: '2026-10-19',
+    title: '资料搜索可靠性与导航',
+    impactScope: ['资料搜索', '资料与资产导航'],
+    changes: [
+      { type: 'fix', description: '资料搜索以同步互斥拦截同一在途查询的重复提交；关键词或筛选变化后旧请求失效，迟到结果不会覆盖新查询。' },
+      { type: 'improvement', description: '资料搜索新增独立侧栏入口，搜索期间清晰显示处理中状态并保持关键词可编辑。' },
+    ],
+  },
+  {
+    version: '9.2.35',
+    date: '2026-10-19',
+    title: '数据可信与操作可访问性',
+    impactScope: ['发布归档', '数据复盘', '资料搜索', '资料中心', '团队日报', '人员管理', '备份清单', '匿名意见箱', '消息中心', '番茄钟', '成就视图', '活动日志分页', '首页数据可信度', '官方导入', '登录安全', '通知偏好', '选题模板'],
+    changes: [
+      { type: 'fix', description: '旧版发布归档可空字段安全降级，损坏结构不回显原始 JSON，发布异常使用珊瑚语义状态。' },
+      { type: 'improvement', description: '数据复盘支持键盘横向浏览并补齐行动项可访问名称；资料搜索提交按钮统一共享主按钮；日报账号切换隔离旧请求。' },
+      { type: 'fix', description: '消息中心单条已读与筛选/分页切换时保护当前查询，避免迟到写入回包覆盖新结果。' },
+      { type: 'improvement', description: '首页抖音指标分别标注来源、观测日期及有精确依据的官方采集时间，避免借用其他同步时间。' },
+      { type: 'fix', description: '抖音官方昨天/近 7 天/近 30 天日期按北京时间自然日验证，7/30 天含采集日；以签名采集时间锚定并拒绝不完整或失真的日期窗口。' },
+      { type: 'fix', description: '抖音 7/30 天逐日核心指标必须有效且完整；缺失、NULL 或畸形值在写入前拒绝，不补零生成周期合计，可选空值与负数修正保留原语义。' },
+      { type: 'fix', description: '抖音 90 天趋势验证北京时间连续日期和每日必需指标；不完整官方数据不补零或伪造周期合计，无官方历史则保留精确窗口的旧快照回退。' },
+      { type: 'improvement', description: '成就视图选择与活动日志翻页补齐屏幕阅读器状态；人员列表隔离筛选、分页切换期间的迟到读取及旧写入回调。' },
+      { type: 'fix', description: '备份清单与匿名意见列表采用读取代次保护，旧响应不能覆盖较新的确认数据、错误提示或加载状态。' },
+      { type: 'fix', description: '资料中心单库读取失败时仍保留其他可用计数，失败项不再误显示为零并可重试；登录安全状态页次要文字改用 Studio 次级令牌提升可读性。' },
+      { type: 'improvement', description: '番茄钟排行榜奖杯图标改用 Studio 彩色底前景令牌，修复暗色主题对比度不足。' },
+      { type: 'improvement', description: '强制改密对话框接管键盘焦点并圈定 Tab 顺序，背景登录页在弹窗期间不可操作，关闭后恢复焦点。' },
+      { type: 'fix', description: '移动网页通知偏好在已保存后再次编辑时清除过期成功提示，不会把未提交选择显示成已保存。' },
+      { type: 'fix', description: '选题模板初始列表读取完成前阻止提交与编辑，避免旧读取快照覆盖已确认的新建结果。' },
+    ],
+  },
+  {
+    version: '9.2.34',
+    date: '2026-10-17',
+    title: '内容动态恢复与流程可靠性',
+    impactScope: ['创作动态', '创作列表', '番茄钟', '成就初始化', '无障碍与响应式验收'],
+    changes: [
+      { type: 'fix', description: '区分内容动态读取失败与确认空结果，失败提供只读重试；修复创作列表实时新增计数竞态和末页删除后的页码越界。' },
+      { type: 'improvement', description: '成就预设初始化改为原子事务，番茄钟取消改用兼容旧查询语义的独立账本；团队日报日期筛选补齐可访问标签。' },
+      { type: 'improvement', description: '数据复盘新增手机/桌面及缩放等效视口回归矩阵；仓库 Chromium 启动受系统权限阻断，矩阵尚未执行。' },
+    ],
+  },
+  {
+    version: '9.2.33',
+    date: '2026-10-17',
+    title: '创作版本保存确认与读取恢复',
+    impactScope: ['创作详情', '版本保存', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '创作版本保存获服务端确认后立即保留新版本号与正文；详情或版本历史读取失败时，提示只重试读取，不诱导重复创建版本。' },
+      { type: 'improvement', description: '新增保存确认后详情读取失败的隔离浏览器回归，验证版本写入只发生一次，显式重试只读取详情。' },
+    ],
+  },
+  {
+    version: '9.2.32',
+    date: '2026-10-17',
+    title: '发布候选隔离与表单可访问性',
+    impactScope: ['发布管理', '审批流设计器', '匿名意见管理', '无障碍操作'],
+    changes: [
+      { type: 'fix', description: '隔离抖音候选列表的迟到响应；发布记录、搜索条件或弹窗变化后，旧结果不再覆盖当前状态，绑定仅能使用当前候选。' },
+      { type: 'improvement', description: '发布记录九个表单控件补齐标签关联；审批表单字段和图标操作、匿名意见图标操作提供明确可访问名称，并增加针对性浏览器回归。' },
+    ],
+  },
+  {
+    version: '9.2.31',
+    date: '2026-10-17',
+    title: '排期日历月份切换准确性',
+    impactScope: ['排期日历', '月份切换', '异步读取隔离'],
+    changes: [
+      { type: 'fix', description: '为日历排期和选题截止事项读取增加请求代次校验；迟到的旧月份响应或错误不能覆盖当前月份，离开页面后未完成请求也会失效。' },
+      { type: 'improvement', description: '新增旧月份成功/失败延迟回包竞态回归，补齐创建事件表单可访问标签并验证桌面/窄屏行为。' },
+    ],
+  },
+  {
+    version: '9.2.30',
+    date: '2026-10-17',
+    title: '成片列表确认操作状态保护',
+    impactScope: ['成片制作', '确认操作', '重复提交保护'],
+    changes: [
+      { type: 'fix', description: '成片列表确认完成/删除操作增加同步确认锁；同一事件周期重复触发不会提前解除处理中状态，底层写入仍保持单次执行。' },
+      { type: 'improvement', description: '新增延迟状态更新下重复确认的浏览器回归，验证确认按钮持续禁用并在服务端确认后关闭弹窗。' },
+    ],
+  },
+  {
+    version: '9.2.29',
+    date: '2026-10-17',
+    title: '灵感池写入反馈与重复提交保护',
+    impactScope: ['灵感池', '评论讨论', '选题转化'],
+    changes: [
+      { type: 'fix', description: '灵感删除、评论和转选题增加同步互斥，快速重复触发只发一条写入；失败时保留可重试内容/记录，服务端确认成功后才更新界面。' },
+      { type: 'improvement', description: '评论成功后明确提示已发布；扩充隔离浏览器回归并确保 Chromium 启动失败时也会关闭本地测试服务。' },
+    ],
+  },
+  {
+    version: '9.2.28',
+    date: '2026-10-17',
+    title: '复盘模块暗色文字对比度',
+    impactScope: ['数据复盘', '个人行动项', '暗色主题可读性'],
+    changes: [
+      { type: 'fix', description: '复盘中心列表、个人行动项和详情页的说明文字改用 Studio 次级文字令牌，提升暗色磨砂背景上的可读性。' },
+      { type: 'improvement', description: '补充复盘列表/详情表头、空状态和详情抽屉的暗色文字对比度回归，并覆盖移动与桌面宽度。' },
+    ],
+  },
+  {
+    version: '9.2.27',
+    date: '2026-10-17',
+    title: '成片状态写入保护与分类回归',
+    impactScope: ['成片制作', '知识库分类管理', '写入操作反馈'],
+    changes: [
+      { type: 'fix', description: '成片详情状态更新加入同步互斥并在请求期间禁用状态操作；服务端确认后详情刷新失败时保留已确认状态，提示只读重载并阻止重复提交。' },
+      { type: 'improvement', description: '补充分类新增失败重试与空分类删除在途双触发浏览器回归，确保快速重复操作只发一次写入。' },
+    ],
+  },
+  {
+    version: '9.2.26',
+    date: '2026-10-17',
+    title: '选题删除操作防重复',
+    impactScope: ['选题管理', '删除操作反馈'],
+    changes: [
+      { type: 'fix', description: '选题单条删除在服务端确认前使用同步互斥，重复确认只发送一次请求；失败继续保留确认与重试入口，成功后才移除选题。' },
+      { type: 'improvement', description: '增加延迟删除回包下的同任务双触发回归，验证写入去重及确认后列表反馈。' },
+    ],
+  },
+  {
+    version: '9.2.25',
+    date: '2026-10-17',
+    title: '成片与发布写入同步互斥',
+    impactScope: ['成片制作', '发布管理', '剧本版本历史', '发布归档'],
+    changes: [
+      { type: 'fix', description: '成片和发布的小版本、大版本保存，以及两个入口的归档重试增加同步互斥；同一事件周期重复触发只发送一次写入，避免重复建版和重复重试。' },
+      { type: 'improvement', description: '为版本保存和归档重试增加延迟响应下的同任务双触发回归。' },
+    ],
+  },
+  {
+    version: '9.2.24',
+    date: '2026-10-17',
+    title: '内容维度操作防重复提交',
+    impactScope: ['选题详情', '主题内容资产', '内容维度'],
+    changes: [
+      { type: 'fix', description: '城市、人物与项目维度登记及移除增加同步互斥；同一事件周期重复触发仅发送一次写入，仍保留失败重试与成功回显。' },
+      { type: 'improvement', description: '补充选题详情和主题内容资产两个入口的双提交浏览器回归。' },
+    ],
+  },
+  {
+    version: '9.2.23',
+    date: '2026-10-17',
+    title: '移动首页辅助名称与可见文字一致',
+    impactScope: ['移动首页', '无障碍体验'],
+    changes: [
+      { type: 'fix', description: '阶段计数按钮不再覆盖自身可见文字的辅助名称；稿件保存状态不重复播报状态前缀；异常摘要时隐藏说明不撑宽页面。' },
+      { type: 'improvement', description: '数量暂不可用时仍在按钮内提供辅助技术说明，并为阶段按钮、任务名称和 390px 无溢出补充回归。' },
+    ],
+  },
+  {
+    version: '9.2.22',
+    date: '2026-10-17',
+    title: '移动首页展示稿件保存状态',
+    impactScope: ['移动首页', '个人稿件', '保存状态'],
+    changes: [
+      { type: 'improvement', description: '个人稿件卡片区分保存中、已明确保存、待保存修改、协作同步中与冲突；本次会话没有当前账号的可信保存事件时，明确显示状态未确认。' },
+      { type: 'fix', description: '不再以稿件更新时间推断保存成功；内存中的编辑状态按当前账号隔离，不跨账号误显示。' },
+    ],
+  },
+  {
+    version: '9.2.21',
+    date: '2026-10-17',
+    title: '移动首页可查看各阶段最新内容',
+    impactScope: ['移动首页', '内容阶段概览'],
+    changes: [
+      { type: 'improvement', description: '增加可折叠的阶段最新内容预览，最多展示七个阶段各自三条；选题预览显示阶段停留时间，并可直达选题或复盘。' },
+      { type: 'improvement', description: '复用首页摘要权限范围，灵感预览限制为三条既有列表数据，保留原有阶段筛选跳转。' },
+    ],
+  },
+  {
+    version: '9.2.20',
+    date: '2026-10-17',
+    title: '移动首页最近变化可按需查看',
+    impactScope: ['移动首页', '近期活动'],
+    changes: [
+      { type: 'improvement', description: '新增默认折叠的最近变化区，按现有可见范围展示最近稿件版本、批注回复和选题状态变化，最多五条并可直达站内内容。' },
+      { type: 'improvement', description: '活动仅在展开时读取；失败可重试，刷新失败保留最近成功结果，收起或切换身份时可中止旧请求。' },
+    ],
+  },
+  {
+    version: '9.2.19',
+    date: '2026-10-17',
+    title: '首页任务按角色优先显示',
+    impactScope: ['桌面工作台', '移动首页', '内容阶段概览'],
+    changes: [
+      { type: 'improvement', description: '桌面与移动首页共享角色化任务顺序；移动首页默认显示三项并可展开至六项，同时展示灵感池至复盘的七阶段数量。' },
+      { type: 'improvement', description: '审核角色的任务上限优先保留个人稿件，避免重复审核事项挤掉待修改的退回稿。' },
+    ],
+  },
+  {
+    version: '9.2.18',
+    date: '2026-10-17',
+    title: '移动工作台可继续处理自己的稿件',
+    impactScope: ['移动工作台', '个人稿件任务'],
+    changes: [
+      { type: 'improvement', description: '移动首页展示现有摘要接口提供的个人草稿和退回稿，并可直接继续写稿或处理退回内容。' },
+    ],
+  },
+  {
+    version: '9.2.17',
+    date: '2026-10-17',
+    title: '选题看板更早进入视野',
+    impactScope: ['选题管理', '看板浏览效率'],
+    changes: [
+      { type: 'improvement', description: '选题看板不再显示列表专属概览指标和重点选题卡片，阶段列提前出现；列表模式摘要和重点选题照常保留。' },
+    ],
+  },
+  {
+    version: '9.2.16',
+    date: '2026-10-17',
+    title: '资料搜索支持组合筛选与排序',
+    impactScope: ['资料全文搜索', '资料库与分类筛选'],
+    changes: [
+      { type: 'improvement', description: '资料搜索支持按资料库、分类和标签组合筛选，并可选择相关度、最近更新或标题排序；无结果时提供清除筛选并保留关键词重试的建议。' },
+    ],
+  },
+  {
+    version: '9.2.15',
+    date: '2026-10-17',
+    title: '资料搜索会突出显示命中关键词',
+    impactScope: ['资料全文搜索', '安全文本呈现'],
+    changes: [
+      { type: 'improvement', description: '资料全文搜索结果重新突出显示 SQLite FTS 命中词；命中标记以语义元素呈现，其余片段保持为安全文本，并使用 Studio 主题令牌。' },
+    ],
+  },
+  {
+    version: '9.2.14',
+    date: '2026-10-17',
+    title: '资料搜索更清晰易用',
+    impactScope: ['资料搜索', '可访问性', '移动端浏览'],
+    changes: [
+      { type: 'improvement', description: '为资料搜索关键词框增加明确名称，提升暗色主题分类文字对比度，为资料列表翻页按钮补充名称，并覆盖 320/390px 布局。' },
+    ],
+  },
+  {
+    version: '9.2.13',
+    date: '2026-10-17',
+    title: '知识库分类树操作更明确',
+    impactScope: ['知识库', '辅助技术操作'],
+    changes: [
+      { type: 'improvement', description: '分类树只在有子项时展示展开/收起按钮，按钮名称包含分类名，叶子分类不再提供无效操作。' },
+    ],
+  },
+  {
+    version: '9.2.12',
+    date: '2026-10-17',
+    title: '知识库分类计数在暗色主题下更清晰',
+    impactScope: ['知识库', '暗色主题可读性'],
+    changes: [
+      { type: 'fix', description: '知识库分类数量改用 Studio 次级文字令牌，修复暗色磨砂面板上仅 4.22:1 的对比度问题，并补充亮暗主题实际合成对比度回归。' },
+    ],
+  },
+  {
+    version: '9.2.11',
+    date: '2026-10-17',
+    title: '知识库手机页面更紧凑',
+    impactScope: ['知识库', '移动端浏览体验'],
+    changes: [
+      { type: 'improvement', description: '移动端知识库分类面板按内容自然收缩，不再保留桌面最小高度；搜索与资料列表因此更早进入视野，并增加 320/390px 亮暗主题布局回归。' },
+    ],
+  },
+  {
+    version: '9.2.10',
+    date: '2026-10-16',
+    title: '消息中心计数在暗色主题下更清晰',
+    impactScope: ['消息中心', '亮暗主题可读性', '移动消息页'],
+    changes: [
+      { type: 'fix', description: '桌面消息列表计数改用 Studio 次级文字令牌；补充亮暗主题对比度和独立 320px 移动壳层回归，并确认取消清空不会发送写入请求。' },
+    ],
+  },
+  {
+    version: '9.2.9',
+    date: '2026-10-16',
+    title: '发布管理暗色文字更清晰',
+    impactScope: ['发布管理', '暗色主题可读性'],
+    changes: [
+      { type: 'fix', description: '发布表头、负责人说明和统计卡片标题使用更易辨认的 Studio 次级文字样式；共享统计卡片单位一并改进，并增加亮暗主题对比度回归。' },
+    ],
+  },
+  {
+    version: '9.2.8',
+    date: '2026-10-16',
+    title: '协作成员标记在不同颜色上都清晰可读',
+    impactScope: ['创作协作', '亮暗主题可读性'],
+    changes: [
+      { type: 'fix', description: '协作头像与光标名称会按成员背景色自动采用高对比文字，覆盖常见成员色；无法识别的颜色使用可读的默认组合。' },
+    ],
+  },
+  {
+    version: '9.2.7',
+    date: '2026-10-16',
+    title: '隐藏导航不再拦截键盘操作',
+    impactScope: ['桌面与窄窗导航', '辅助技术识别', '键盘操作'],
+    changes: [
+      { type: 'fix', description: '收起分组和关闭的窄窗导航抽屉不再接收键盘焦点，图标模式仍播报分组名称；点击图标分组会展开侧栏并打开该分组；抽屉打开后焦点会进入并限制在菜单内，关闭后归还触发按钮。' },
+    ],
+  },
+  {
+    version: '9.2.6',
+    date: '2026-10-16',
+    title: '桌面工作台任务更容易区分',
+    impactScope: ['桌面工作台', '辅助技术识别'],
+    changes: [
+      { type: 'improvement', description: '审核、发布和续写按钮的读屏名称会带上对应任务，重复操作名称不再混淆；显示文案与业务行为保持不变。' },
+    ],
+  },
+  {
+    version: '9.2.5',
+    date: '2026-10-16',
+    title: '移动首页的任务信息更容易看清和读懂',
+    impactScope: ['移动首页', '辅助技术识别', '亮暗主题可读性'],
+    changes: [
+      { type: 'improvement', description: '任务卡片按可见标题、状态和处理信息生成读屏名称；辅助文字和“查看全部”使用更清晰的主题色。' },
+    ],
+  },
+  {
+    version: '9.2.4',
+    date: '2026-10-16',
+    title: '手机创作页操作按钮不再被导航遮挡',
+    impactScope: ['移动创作编辑', '协作光标无障碍'],
+    changes: [
+      { type: 'fix', description: '保存和提交栏避开底部导航与系统键盘；协作光标头像组补齐辅助技术语义。' },
+    ],
+  },
+  {
+    version: '9.2.3',
+    date: '2026-10-16',
+    title: '让匿名意见回复更容易识别和填写',
+    impactScope: ['匿名意见管理', '输入辅助识别'],
+    changes: [
+      { type: 'improvement', description: '回复窗增加可见字段标签，输入框使用统一 Studio 样式并可调整高度。' },
+    ],
+  },
+  {
+    version: '9.2.2',
+    date: '2026-10-16',
+    title: '避免匿名意见列表旧结果覆盖新操作',
+    impactScope: ['匿名意见管理', '并发读取与写入'],
+    changes: [
+      { type: 'fix', description: '写入确认后使在途旧列表读取失效，防止迟到回包覆盖状态、公开、回复或删除结果。' },
+    ],
+  },
+  {
+    version: '9.2.1',
+    date: '2026-10-16',
+    title: '意见提交后立即收到确认',
+    impactScope: ['匿名意见箱', '重复提交保护', '列表刷新反馈'],
+    changes: [
+      { type: 'fix', description: '意见写入得到服务端确认后立即结束提交并清空表单；后续列表刷新失败不会再被误报为提交失败。' },
+      { type: 'improvement', description: '新增同步提交锁，阻止快速重复发送；写入失败保留输入，允许重试。' },
+    ],
+  },
+  {
+    version: '9.2.0',
+    date: '2026-10-16',
+    title: '资料详情可以直接编辑',
+    impactScope: ['资料详情', '资料分类', '正文与可见范围'],
+    changes: [
+      { type: 'feature', description: '资料详情支持修改标题、摘要、分类、可见范围和正文，沿用服务端权限范围与审计校验。' },
+      { type: 'improvement', description: '保存失败时保留输入；确认成功后立即回显，详情刷新失败可单独重试，不重复保存。' },
+    ],
+  },
+  {
+    version: '9.1.47',
+    date: '2026-10-16',
+    title: '让资料中心的写入与操作状态更清楚',
+    impactScope: ['资料创建', '资料详情操作入口', '重复提交保护'],
+    changes: [
+      { type: 'fix', description: '新增资料等待服务端确认期间锁定表单与关闭入口，防止重复创建或误以为内容已提交；失败后保留输入，可明确重试。' },
+      { type: 'improvement', description: '资料详情中尚未接入的在线编辑和文件上传入口明确标记为暂未开放并禁用，避免误点。' },
+    ],
+  },
+  {
+    version: '9.1.46',
+    date: '2026-10-16',
+    title: '让资料库导航与页面保持一致',
+    impactScope: ['项目资料库', '内容档案库', '素材归档', '资料详情导航'],
+    changes: [
+      { type: 'fix', description: '资料库列表和详情按 library_type 显示对应的侧栏、面包屑与返回位置；旧详情地址会从服务端资料类型补齐导航来源。' },
+    ],
+  },
+  {
+    version: '9.1.45',
+    date: '2026-10-16',
+    title: '保护系统设置保存中的修改',
+    impactScope: ['系统设置', '品牌设置', '登录页设置'],
+    changes: [
+      { type: 'fix', description: '系统、品牌和登录页设置在保存期间锁定字段并使用同步写入锁，避免改动被回包覆盖或重复提交；失败后仍可重试。' },
+    ],
+  },
+  {
+    version: '9.1.44',
+    date: '2026-10-16',
+    title: '让稿件审阅操作安全保存',
+    impactScope: ['批注与回复', '修改建议', '移动端稿件编辑'],
+    changes: [
+      { type: 'fix', description: '批注和回复失败时保留可重试输入；接受修改建议期间锁定正文和冲突操作，移动端同时阻止保存、审核与离页。' },
+    ],
+  },
+  {
+    version: '9.1.43',
+    date: '2026-10-16',
+    title: '避免自动保存与状态或版本写入争用',
+    impactScope: ['创作详情', '正文保存', '状态与版本操作'],
+    changes: [
+      { type: 'fix', description: '状态变更和小修/另开版本前先确认自动保存；未确认时不提交后续写入，确认后使用最新正文。' },
+    ],
+  },
+  {
+    version: '9.1.42',
+    date: '2026-10-16',
+    title: '保护审核中的稿件不被并发操作覆盖',
+    impactScope: ['创作详情', '审核提交', '版本与删除操作'],
+    changes: [
+      { type: 'fix', description: '审核等待服务端确认期间，正文、版本切换/保存、状态更新与删除统一锁定；快速重复操作不会产生并发稿件写入。' },
+    ],
+  },
+  {
+    version: '9.1.41',
+    date: '2026-10-16',
+    title: '让创作审核提交更可靠',
+    impactScope: ['创作详情', '正文保存', '审核反馈'],
+    changes: [
+      { type: 'fix', description: '提交审核前确认正文已保存；审核请求期间锁定正文并防止重复提交，失败保留草稿可重试，成功后立即更新审核状态。' },
+    ],
+  },
+  {
+    version: '9.1.40',
+    date: '2026-10-16',
+    title: '保护工作台免受不完整摘要回包影响',
+    impactScope: ['移动工作台', '摘要读取恢复'],
+    changes: [
+      { type: 'fix', description: '摘要 HTTP 200 回包缺少必需列表时显示可重试提示，避免移动首页渲染崩溃；正常回包后恢复首页。' },
+    ],
+  },
+  {
+    version: '9.1.39',
+    date: '2026-10-16',
+    title: '让官方导出部分解析遗漏可见',
+    impactScope: ['Creator Agent', '官方导出', '数据质量提示'],
+    changes: [
+      { type: 'improvement', description: '部分作品行未通过解析时，最近同步展示采集器报告的读取、接收、拒绝和重复数量及提示；质量摘要只作诊断，不覆盖指标事实。' },
+      { type: 'fix', description: '官方导出回执在上传队列中保留质量报告，重试后仍可读取。' },
+    ],
+  },
+  {
+    version: '9.1.38',
+    date: '2026-10-16',
+    title: '修复成就检查挂起与导出数据静默漏收',
+    impactScope: ['成就检查', '抖音官方导出', '数据质量'],
+    changes: [
+      { type: 'fix', description: '已获得的成就只跳过当前项目，接口继续检查并授予后续符合条件的成就。' },
+      { type: 'fix', description: '官方导出解析失败或所有数据行均被拒绝时整批失败关闭，避免部分数据成功入库造成静默漏收。' },
+    ],
+  },
+  {
+    version: '9.1.37',
+    date: '2026-10-16',
+    title: '选题操作防重复提交并提升登录可访问性',
+    impactScope: ['选题详情', '移动端操作', '登录页', '文字对比度'],
+    changes: [
+      { type: 'fix', description: '桌面阶段推进及移动端保存、阶段推进、补齐阶段记录和审核增加同步互斥，避免慢网下快速重复点击造成多次写入。' },
+      { type: 'improvement', description: '写入等待服务端确认期间禁用对应操作并显示处理中状态。' },
+      { type: 'fix', description: '登录页三个布局为账号、密码输入框补齐显式标签关联，备案链接切换到满足对比度的主题文字令牌。' },
+    ],
+  },
+  {
+    version: '9.1.36',
+    date: '2026-10-16',
+    title: '选题审核与看板操作支持防重复提交',
+    impactScope: ['选题审核', '桌面/移动看板', '重复提交保护'],
+    changes: [
+      { type: 'fix', description: '桌面审核和桌面/移动看板阶段操作增加同步互斥，避免慢网下重复写入。' },
+      { type: 'improvement', description: '提交期间锁定相关表单或同一选题操作，并显示处理中状态，服务端确认后再恢复。' },
+    ],
+  },
+  {
+    version: '9.1.35',
+    date: '2026-10-16',
+    title: '移动消息中心支持完整分页与全局已读',
+    impactScope: ['移动端消息中心', '全局未读数', '历史消息恢复'],
+    changes: [
+      { type: 'improvement', description: '移动端按页加载消息并使用服务端全账号摘要显示未读数量。' },
+      { type: 'fix', description: '全部已读覆盖所有账号消息；请求失败时保留状态并支持安全重试。' },
+    ],
+  },
+  {
+    version: '9.1.34',
+    date: '2026-10-16',
+    title: '首页待处理任务读取状态更准确',
+    impactScope: ['工作台', '待处理消息', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '消息尚未读取确认或读取失败时不再误显示空任务，错误提示保持至只读重试成功。' },
+      { type: 'improvement', description: '仅有消息任务的负责人首页显示明确的读取中状态。' },
+    ],
+  },
+  {
+    version: '9.1.33',
+    date: '2026-10-16',
+    title: '模板保存期间保护表单内容',
+    impactScope: ['选题模板', '保存与更新', '内容保护'],
+    changes: [
+      { type: 'fix', description: '模板写入等待服务端确认期间锁定字段与取消入口，避免已确认保存后清空等待期间的新输入。' },
+      { type: 'improvement', description: '模板表单公开忙碌状态，写入确认后再进入清空和列表恢复流程。' },
+    ],
+  },
+  {
+    version: '9.1.32',
+    date: '2026-10-16',
+    title: '知识库分类与资料独立恢复',
+    impactScope: ['知识库', '分类筛选', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '分类读取失败时知识库资料结果仍可使用，分类管理在目录恢复前保持关闭。' },
+      { type: 'improvement', description: '分类读取提供独立重试；搜索或筛选变化只刷新资料结果。' },
+    ],
+  },
+  {
+    version: '9.1.31',
+    date: '2026-10-16',
+    title: '资料分类列表读取恢复',
+    impactScope: ['资料列表', '分类筛选', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '分类读取失败不再使资料列表整体不可用；资料列表独立加载。' },
+      { type: 'improvement', description: '分类读取失败可只读重试，当前分类筛选不会被误显示为空或全部分类。' },
+    ],
+  },
+  {
+    version: '9.1.30',
+    date: '2026-10-16',
+    title: '资料详情审计记录读取恢复',
+    impactScope: ['资料详情', '审计记录', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '审计记录读取失败不再让资料详情整页不可用；详情主记录独立完成加载。' },
+      { type: 'improvement', description: '审计记录错误可见且可只读重试，不会重复读取详情或执行资料写入。' },
+    ],
+  },
+  {
+    version: '9.1.29',
+    date: '2026-10-16',
+    title: '选题提报负责人名单读取恢复',
+    impactScope: ['选题提报', '本机草稿', '负责人选择'],
+    changes: [
+      { type: 'fix', description: '负责人名单读取失败时不再静默退化，表单可继续使用且显示清晰的恢复提示。' },
+      { type: 'improvement', description: '负责人名单提供只读重试，已有草稿和负责人选择会保留。' },
+    ],
+  },
+  {
+    version: '9.1.28',
+    date: '2026-10-16',
+    title: '选题负责人名单读取恢复',
+    impactScope: ['选题详情', '负责人选择', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '负责人名单读取失败时，选题详情仍保持可用，不再误报为整页读取失败。' },
+      { type: 'improvement', description: '负责人名单状态可见并支持只读重试，当前负责人信息在名单暂不可用时仍会保留。' },
+    ],
+  },
+  {
+    version: '9.1.27',
+    date: '2026-10-16',
+    title: '发布/成片剧本历史读取恢复',
+    impactScope: ['发布详情', '成片详情', '剧本版本历史', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '剧本版本历史读取失败时不再误显示为空；详情主记录仍可用，并提供只重试历史读取的入口。' },
+      { type: 'improvement', description: '版本保存后的历史回读失败会明确说明，不会要求重复创建已确认版本。' },
+    ],
+  },
+  {
+    version: '9.1.26',
+    date: '2026-10-16',
+    title: '日报归档成员名单读取恢复',
+    impactScope: ['日报总结归档', '成员筛选', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '成员名单读取失败时明确说明筛选选项可能不完整，并提供只重新读取名单的重试。' },
+      { type: 'security', description: '归档筛选状态按账号与权限范围隔离；迟到的旧成员名单不会覆盖当前账号内容。' },
+    ],
+  },
+  {
+    version: '9.1.25',
+    date: '2026-10-16',
+    title: '复盘负责人名单读取恢复与账号隔离',
+    impactScope: ['复盘新建', '复盘行动项负责人', '权限范围', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '成员名单读取失败时明确说明负责人选项可能不完整，并提供重新加载入口。' },
+      { type: 'security', description: '仅在当前账号具备 user:view 时读取成员目录；账号切换后忽略旧账号的迟到响应。' },
+    ],
+  },
+  {
+    version: '9.1.24',
+    date: '2026-10-16',
+    title: '消息读取恢复与未知状态提示',
+    impactScope: ['消息中心', '工作台状态提示', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '消息中心同一账号、筛选和页码刷新失败时保留最近一次成功结果并提供重试；查询范围变化后不展示旧列表。' },
+      { type: 'improvement', description: '工作台未知选题状态显示“状态待确认”，避免与进行中状态混淆。' },
+    ],
+  },
+  {
+    version: '9.1.23',
+    date: '2026-10-16',
+    title: '团队日报刷新保护',
+    impactScope: ['团队日报', '读取失败恢复'],
+    changes: [
+      { type: 'fix', description: '团队日报刷新失败时保留同一查询范围内最近一次成功结果；日期切换后忽略旧请求迟到回包，避免误示为空或覆盖当前内容。' },
+      { type: 'improvement', description: '旧结果明确标注可能不是最新并支持只读重试；切换日期后不显示旧日期数据。' },
+    ],
+  },
+  {
+    version: '9.1.22',
+    date: '2026-10-16',
+    title: '首页最近变化刷新保护',
+    impactScope: ['工作台', '最近变化'],
+    changes: [
+      { type: 'fix', description: '最近变化刷新失败时保留最近一次成功读取的内容，并明确标注内容可能不是最新。' },
+      { type: 'improvement', description: '最近变化增加手动刷新入口；刷新期间旧内容仍可查看，失败后可只读重试。' },
+    ],
+  },
+  {
+    version: '9.1.21',
+    date: '2026-10-15',
+    title: '全站未保存修改离页保护',
+    impactScope: ['选题与复盘', '创作与发布', '侧栏导航', '浏览器后退与退出登录'],
+    changes: [
+      { type: 'fix', description: '侧栏导航、浏览器后退和退出登录遵循页面未保存保护；取消离开后仍可继续当前修改。' },
+      { type: 'fix', description: '保存或协作交接尚未完成时阻止离开；刷新/关闭页面提醒继续生效，窄屏网页编辑页纳入保护。' },
+    ],
+  },
+  {
     version: '9.1.20',
     date: '2026-10-15',
     title: '协作与同步异常恢复',

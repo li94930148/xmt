@@ -13,6 +13,7 @@ interface ConfirmModalProps {
   cancelText?: string;
   variant?: ConfirmVariant;
   loading?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
   className?: string;
@@ -44,6 +45,7 @@ export default function ConfirmModal({
   cancelText = '取消',
   variant = 'default',
   loading = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
   className = '',
@@ -77,7 +79,7 @@ export default function ConfirmModal({
           <button
             type="button"
             onClick={() => void onConfirm()}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             className={`flex-1 rounded-xl px-4 py-2.5 text-sm transition-colors disabled:opacity-60 ${config.buttonClass}`}
           >
             {loading ? '处理中...' : confirmText}

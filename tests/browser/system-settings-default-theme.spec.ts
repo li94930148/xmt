@@ -14,9 +14,21 @@ async function assertRenderedSettingsPage(page: Page) {
   assert.equal(await page.locator('vite-error-overlay, #vite-error-overlay, nextjs-portal').count(), 0, 'no framework error overlay is visible');
 }
 function parseColor(raw: string) {
-  const channels = raw.match(/[\d.]+/g)?.map(Number) || [];
-  return channels.length >= 3 ? channels.slice(0, 3) : null;
+  const srgb = raw.match(/^color\(\s*srgb\s+([^\s/]+)\s+([^\s/]+)\s+([^\s/]+)(?:\s*\/\s*([^\s)]+))?\s*\)/i);
+  if (srgb) {
+    const channels = srgb.slice(1, 4).map((value) => Number(value) * 255);
+    const alpha = srgb[4] === undefined ? 1 : Number(srgb[4]);
+    return [...channels, alpha].every(Number.isFinite) ? [...channels, alpha] : null;
+  }
+  const rgb = raw.match(/^rgba?\((.*)\)$/i);
+  const channels = rgb?.[1].match(/[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:e[-+]?\d+)?/gi)?.map(Number) || [];
+  return channels.length >= 3 ? [...channels.slice(0, 3), channels[3] ?? 1] : null;
 }
+assert.deepEqual(
+  parseColor('color(srgb 0.302118 0.395294 0.72)')?.slice(0, 3).map(Math.round),
+  [77, 101, 184],
+  'CSS Color 4 srgb channels are normalized to the same range as rgb() channels',
+);
 function relativeLuminance(rgb: number[]) {
   const channels = rgb.map((value) => value / 255 <= 0.03928 ? value / 255 / 12.92 : ((value / 255 + 0.055) / 1.055) ** 2.4);
   return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
@@ -38,15 +50,11 @@ async function composedTextContrastRatio(locator: import('playwright').Locator) 
     }
     return { foreground: getComputedStyle(element).color, backgrounds };
   });
-  const readColor = (value: string) => {
-    const channels = value.match(/[\d.]+/g)?.map(Number) || [];
-    return channels.length >= 3 ? [channels[0], channels[1], channels[2], channels[3] ?? 1] : null;
-  };
-  const foreground = readColor(colors.foreground);
+  const foreground = parseColor(colors.foreground);
   if (!foreground) return 0;
   const background = [255, 255, 255];
   for (const value of colors.backgrounds.reverse()) {
-    const layer = readColor(value);
+    const layer = parseColor(value);
     if (!layer) continue;
     for (let index = 0; index < 3; index += 1) background[index] = layer[index] * layer[3] + background[index] * (1 - layer[3]);
   }
@@ -71,6 +79,7 @@ let settings = {
   login: { layout: 'style1', welcomeTitle: '欢迎', welcomeMessage: '登录验收' },
 };
 let failNextSettingsSave: string | null = null;
+let settingsSaveDelayMs = 0;
 const settingsSaveRequests: unknown[] = [];
 let notificationPreferences = [{ id: 1, channel: 'email', event_type: 'review', enabled: true }];
 let failNextNotificationSave: string | null = null;
@@ -80,10 +89,12 @@ let profile = { ...admin };
 let failNextProfileSave: string | null = null;
 let profileSaveDelayMs = 0;
 let profileSaveRequests = 0;
-let failNextPasswordChange: string | null = null;
+let fixturePassword = 'current-pass';
 let passwordChangeDelayMs = 0;
 let passwordChangeRequests = 0;
+let passwordChangeCommittedCount = 0;
 let passwordChangeSucceeded = false;
+let dropNextPasswordChangeResponseAfterCommit = false;
 let settingsBackups = [{ name: 'xmt-settings-fixture.db', size: 1024, created: '2026-10-09T00:00:00.000Z' }];
 let backupListRequests = 0;
 let backupCreateRequests = 0;
@@ -93,6 +104,8 @@ let failNextBackupDelete: string | null = null;
 let backupListDelayMs = 0;
 let backupCreateDelayMs = 0;
 let backupDeleteDelayMs = 0;
+let dropNextBackupDeleteResponseAfterCommit = false;
+let backupDeleteResponseLossInjected = false;
 const app = express();
 app.use(express.json());
 app.get('/__qa', (req, res) => {
@@ -112,15 +125,15 @@ app.put('/api/auth/profile', async (req, res) => {
   profile = { ...profile, name: req.body?.name, email: req.body?.email };
   res.json(profile);
 });
-app.post('/api/auth/change-password', async (_req, res) => {
+app.post('/api/auth/change-password', async (req, res) => {
   passwordChangeRequests += 1;
   if (passwordChangeDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, passwordChangeDelayMs));
-  if (failNextPasswordChange) {
-    const message = failNextPasswordChange;
-    failNextPasswordChange = null;
-    res.status(503).json({ message });
+  if (req.body?.oldPassword !== fixturePassword) {
+    res.status(401).json({ message: '旧密码错误' });
     return;
   }
+  fixturePassword = String(req.body?.newPassword || '');
+  passwordChangeCommittedCount += 1;
   passwordChangeSucceeded = true;
   res.json({ message: '密码修改成功' });
 });
@@ -156,8 +169,9 @@ app.delete('/api/backup/:name', async (req, res) => {
 });
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({ ...settings, version }));
-app.put('/api/system-settings', (req, res) => {
+app.put('/api/system-settings', async (req, res) => {
   settingsSaveRequests.push(req.body);
+  if (settingsSaveDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, settingsSaveDelayMs));
   if (failNextSettingsSave) {
     const message = failNextSettingsSave;
     failNextSettingsSave = null;
@@ -240,6 +254,7 @@ try {
   assert.equal(await page.evaluate(() => localStorage.getItem('xmt_theme')), null, 'the system default remains effective after reload without persisting as a personal choice');
   await page.getByRole('button', { name: '关于系统', exact: true }).click();
   assert.ok(await contrastRatio(page.getByTestId('about-brand-mark')) >= 4.5, 'light-theme about-page brand mark has accessible contrast');
+  assert.ok(await composedTextContrastRatio(page.getByTestId('about-description')) >= 4.5, 'light-theme about-page description has accessible contrast');
 
   await context.close();
 
@@ -259,6 +274,11 @@ try {
   const mobileNavBounds = await preferencePage.getByRole('navigation', { name: '移动主导航' }).boundingBox();
   assert(controlBounds && mobileNavBounds && controlBounds.y + controlBounds.height < mobileNavBounds.y, 'mobile navigation does not cover the default theme control');
   assert(await preferencePage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'mobile-width settings surface has no horizontal overflow');
+  await preferencePage.getByRole('button', { name: '关于系统', exact: true }).click();
+  const lightAboutDescription = preferencePage.getByTestId('about-description');
+  await lightAboutDescription.scrollIntoViewIfNeeded();
+  assert.ok(await composedTextContrastRatio(lightAboutDescription) >= 4.5, '390px light-theme about description has accessible contrast');
+  assert(await preferencePage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'mobile about surface has no horizontal overflow');
   await preferencePage.screenshot({ path: '/tmp/xmt-system-default-theme-390.png' });
 
   await preferencePage.goto(`${base}/__qa?theme=dark`);
@@ -266,21 +286,63 @@ try {
   await assertMobileShellTextContrast(preferencePage, 'dark');
   assert.equal(await preferencePage.evaluate(() => localStorage.getItem('xmt_theme')), 'dark', 'system default never overwrites an explicit personal choice');
   assert(await preferencePage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'mobile-width settings surface has no horizontal overflow');
+  await preferencePage.getByRole('button', { name: '关于系统', exact: true }).click();
+  const darkAboutDescription = preferencePage.getByTestId('about-description');
+  await darkAboutDescription.scrollIntoViewIfNeeded();
+  assert.ok(await composedTextContrastRatio(darkAboutDescription) >= 4.5, '390px dark-theme about description has accessible contrast');
+  assert(await preferencePage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'dark mobile about surface has no horizontal overflow');
   await preferencePage.screenshot({ path: '/tmp/xmt-system-default-theme-390-preference.png', fullPage: true });
   await preferencePage.setViewportSize({ width: 1440, height: 960 });
   await preferencePage.getByRole('button', { name: '关于系统', exact: true }).click();
   assert.ok(await contrastRatio(preferencePage.getByTestId('about-brand-mark')) >= 4.5, 'dark-theme about-page brand mark has accessible contrast');
+  assert.ok(await composedTextContrastRatio(preferencePage.getByTestId('about-description')) >= 4.5, 'dark-theme about-page description has accessible contrast');
   assert.deepEqual(errors, [], 'no browser runtime or console errors');
   await preferenceContext.close();
   console.log('System default theme browser test passed: admin save → live/reload default → explicit local preference precedence; 1440/390px.');
 
   const notificationContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
   const notificationPage = await notificationContext.newPage();
+  const expectedPasswordConsoleErrors: string[] = [];
+  const expectedBackupDeleteConsoleErrors: string[] = [];
+  const expectedBackupDeleteRequestFailures: string[] = [];
+  await notificationPage.route('**/api/auth/change-password', async (route) => {
+    if (!dropNextPasswordChangeResponseAfterCommit) {
+      await route.continue();
+      return;
+    }
+    dropNextPasswordChangeResponseAfterCommit = false;
+    await route.fetch(); // Let the isolated server commit, then withhold its response from the page.
+    await route.abort('failed');
+  });
+  await notificationPage.route('**/api/backup/*', async (route) => {
+    const request = route.request();
+    if (!dropNextBackupDeleteResponseAfterCommit || request.method() !== 'DELETE'
+      || !request.url().endsWith('/api/backup/xmt-settings-lost-response-fixture.db')) {
+      await route.continue();
+      return;
+    }
+    dropNextBackupDeleteResponseAfterCommit = false;
+    await route.fetch();
+    backupDeleteResponseLossInjected = true;
+    await route.abort('failed');
+  });
   notificationPage.on('pageerror', (error) => errors.push(error.message));
   notificationPage.on('console', (message) => {
     if (message.type() !== 'error') return;
     if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    else if (message.text().includes('401 (Unauthorized)') && !expectedPasswordConsoleErrors.some((text) => text.includes('401 (Unauthorized)'))) expectedPasswordConsoleErrors.push(message.text());
+    else if (message.text().includes('net::ERR_FAILED') && backupDeleteResponseLossInjected) expectedBackupDeleteConsoleErrors.push(message.text());
+    else if (message.text().includes('net::ERR_FAILED') && !expectedPasswordConsoleErrors.some((text) => text.includes('net::ERR_FAILED'))) expectedPasswordConsoleErrors.push(message.text());
     else errors.push(message.text());
+  });
+  const expectedPasswordRequestFailures: string[] = [];
+  notificationPage.on('requestfailed', (request) => {
+    if (request.url().endsWith('/api/auth/change-password')) {
+      expectedPasswordRequestFailures.push(request.failure()?.errorText || 'request failed');
+    }
+    if (request.method() === 'DELETE' && request.url().endsWith('/api/backup/xmt-settings-lost-response-fixture.db')) {
+      expectedBackupDeleteRequestFailures.push(request.failure()?.errorText || 'request failed');
+    }
   });
   await notificationPage.goto(`${base}/__qa`);
   await notificationPage.getByRole('button', { name: '通知偏好', exact: true }).click();
@@ -363,22 +425,48 @@ try {
 
   await notificationPage.getByRole('button', { name: '账号安全', exact: true }).click();
   const passwordInputs = notificationPage.locator('input[type="password"]');
-  await passwordInputs.nth(0).fill('current-pass');
+  await passwordInputs.nth(0).fill('wrong-current-pass');
   await passwordInputs.nth(1).fill('updated-pass');
   await passwordInputs.nth(2).fill('updated-pass');
-  failNextPasswordChange = '密码服务暂时无法使用，请重试。';
   passwordChangeDelayMs = 160;
   await notificationPage.getByRole('button', { name: '更新密码', exact: true }).dblclick();
-  await notificationPage.getByText('密码服务暂时无法使用，请重试。', { exact: true }).waitFor();
+  await notificationPage.getByText('旧密码错误', { exact: true }).waitFor();
   passwordChangeDelayMs = 0;
   assert.equal(passwordChangeRequests, 1, 'rapid repeated password submission sends one request');
-  assert.equal(passwordChangeSucceeded, false, 'a failed password request is not reported as a successful change');
-  assert.deepEqual(await passwordInputs.evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value)), ['current-pass', 'updated-pass', 'updated-pass'], 'failed password input is retained for retry');
+  assert.equal(passwordChangeCommittedCount, 0, 'an explicit old-password rejection occurs before the password write');
+  assert.equal(passwordChangeSucceeded, false, 'a known rejected password request is not reported as a successful change');
+  assert.deepEqual(await passwordInputs.evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value)), ['wrong-current-pass', 'updated-pass', 'updated-pass'], 'a definite old-password rejection retains the inputs for correction');
+  await passwordInputs.nth(0).fill('current-pass');
   await notificationPage.getByRole('button', { name: '更新密码', exact: true }).click();
   await notificationPage.getByText('密码已更新', { exact: true }).waitFor();
   assert.equal(passwordChangeRequests, 2, 'password retry sends exactly one additional request');
+  assert.equal(passwordChangeCommittedCount, 1, 'the corrected password request commits once');
   assert.equal(passwordChangeSucceeded, true, 'the explicit retry completes the password change');
   assert.deepEqual(await passwordInputs.evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value)), ['', '', ''], 'password fields clear only after confirmed success');
+
+  await passwordInputs.nth(0).fill('updated-pass');
+  await passwordInputs.nth(1).fill('final-pass');
+  await passwordInputs.nth(2).fill('final-pass');
+  dropNextPasswordChangeResponseAfterCommit = true;
+  passwordChangeDelayMs = 160;
+  await notificationPage.getByRole('button', { name: '更新密码', exact: true }).dblclick();
+  await notificationPage.getByTestId('password-outcome-unknown').waitFor();
+  passwordChangeDelayMs = 0;
+  assert.equal(fixturePassword, 'final-pass', 'the isolated server commits the password before dropping the response');
+  assert.equal(passwordChangeRequests, 3, 'the response-loss path submits the password change exactly once');
+  assert.equal(passwordChangeCommittedCount, 2, 'the dropped response does not undo the committed password change');
+  assert.equal(expectedPasswordRequestFailures.length, 1, 'the fixture drops exactly one committed password-change response');
+  assert.equal(expectedPasswordConsoleErrors.length, 2, 'only the intentional old-password rejection and withheld response create network console errors');
+  assert.deepEqual(await passwordInputs.evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value)), ['', '', ''], 'unknown result clears all sensitive password fields');
+  assert.equal(await passwordInputs.evaluateAll((inputs) => inputs.every((input) => (input as HTMLInputElement).disabled)), true, 'unknown result locks password fields against replay');
+  const passwordUpdateButton = notificationPage.getByRole('button', { name: '结果待核实', exact: true });
+  assert.equal(await passwordUpdateButton.isDisabled(), true, 'unknown result disables another submission');
+  const unknownPasswordNotice = await notificationPage.getByTestId('password-outcome-unknown').innerText();
+  assert.match(unknownPasswordNotice, /结果尚未确认/);
+  assert.match(unknownPasswordNotice, /新密码重新登录/);
+  assert.doesNotMatch(unknownPasswordNotice, /修改失败/);
+  await passwordUpdateButton.click({ force: true });
+  assert.equal(passwordChangeRequests, 3, 'a forced click cannot replay an unknown password-change request');
 
   await notificationPage.getByRole('button', { name: '数据与备份', exact: true }).click();
   await notificationPage.getByRole('heading', { name: '数据与备份' }).waitFor();
@@ -406,13 +494,31 @@ try {
   assert.equal(backupDeleteRequests, 0, 'cancelling backup confirmation performs no delete');
   await notificationPage.getByRole('button', { name: `删除备份 ${fixtureBackupName}` }).click();
   failNextBackupDelete = '隔离备份删除暂时失败';
+  failNextBackupListRead = '隔离删除状态核实暂时无法读取';
   backupDeleteDelayMs = 160;
+  const failedDeleteVerification = notificationPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().endsWith('/api/backup/list') && response.status() === 503);
   await notificationPage.getByRole('button', { name: '删除备份', exact: true }).dblclick();
-  await notificationPage.getByText('删除失败', { exact: true }).first().waitFor();
+  await failedDeleteVerification;
+  await notificationPage.getByText(/删除结果仍待核实；暂时无法读取备份清单/).waitFor();
   backupDeleteDelayMs = 0;
   assert.equal(backupDeleteRequests, 1, 'double confirmation while a delete is pending sends one request');
-  assert.equal(await notificationPage.getByRole('button', { name: `删除备份 ${fixtureBackupName}` }).count(), 1, 'failed backup delete keeps the file in the list');
-  assert.equal(await notificationPage.getByRole('heading', { name: '确认删除备份？' }).count(), 1, 'failed backup delete keeps its confirmation available for explicit retry');
+  assert.equal(await notificationPage.locator(`button[aria-label="删除备份 ${fixtureBackupName}"]`).count(), 0, 'a failed verification hides the stale list rather than presenting it as current');
+  assert.equal(await notificationPage.getByRole('heading', { name: '确认删除备份？' }).count(), 0, 'failed status verification closes the destructive confirmation until a read-only check succeeds');
+  const storedDeleteRecovery = await notificationPage.evaluate(() => Object.entries(sessionStorage)
+    .find(([key]) => key.startsWith('xmt:backup-delete-pending:v1:actor:91:'))?.[1] || null);
+  assert.deepEqual(JSON.parse(storedDeleteRecovery || 'null'), { version: 1, actorId: 91, name: fixtureBackupName }, 'the unresolved delete marker is persisted by actor and backup filename');
+  const backupRequestsDuringRestore: string[] = [];
+  notificationPage.on('request', (request) => {
+    if (request.url().includes('/api/backup/')) backupRequestsDuringRestore.push(`${request.method()} ${new URL(request.url()).pathname}`);
+  });
+  const restoredDeleteVerification = notificationPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().endsWith('/api/backup/list') && response.status() === 200);
+  await notificationPage.reload();
+  await restoredDeleteVerification;
+  await notificationPage.getByRole('heading', { name: '确认删除备份？' }).waitFor();
+  assert.deepEqual(backupRequestsDuringRestore, ['GET /api/backup/list'], 'refresh performs the read-only backup-list verification before any delete');
+  assert.equal(backupDeleteRequests, 1, 'refresh recovery never automatically resends the unresolved delete');
+  assert.equal(await notificationPage.evaluate(() => Object.keys(sessionStorage).some((key) => key.startsWith('xmt:backup-delete-pending:v1:actor:91:'))), false, 'a successful list read clears the recovery marker after confirming the backup still exists');
+  assert.match(await notificationPage.getByRole('alert').innerText(), /仍在当前清单中/);
 
   failNextBackupListRead = '隔离删除后的备份清单暂时无法读取';
   backupDeleteDelayMs = 160;
@@ -432,9 +538,26 @@ try {
   await confirmedBackupListRetry;
   await notificationPage.getByText('暂无备份记录。', { exact: true }).count().then((count) => assert.equal(count, 0, 'the remaining confirmed fixture backup is still present'));
   assert.equal(backupDeleteRequests, 2, 'read-only backup list retry does not issue another delete');
-  assert.equal(backupListRequests, 5, 'delete confirmation and read-only recovery use only the expected list requests');
+  assert.equal(backupListRequests, 7, 'delete verification and read-only recovery use only the expected list requests');
   assert.equal(settingsBackups.some((backup) => backup.name === fixtureBackupName), false, 'the fixture confirms the requested backup is removed');
-  assert.equal(expectedHttpErrors.length, 7, 'system, notification, profile, password, backup create refresh, failed delete, and delete refresh fixtures each produce one intentional 503');
+  settingsBackups.push({ name: 'xmt-settings-lost-response-fixture.db', size: 3072, created: '2026-10-09T00:02:00.000Z' });
+  const refreshedFixtureList = notificationPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().endsWith('/api/backup/list') && response.status() === 200);
+  await notificationPage.getByRole('button', { name: '刷新列表', exact: true }).click();
+  await refreshedFixtureList;
+  await notificationPage.getByRole('button', { name: '删除备份 xmt-settings-lost-response-fixture.db' }).click();
+  dropNextBackupDeleteResponseAfterCommit = true;
+  const lostDeleteVerification = notificationPage.waitForResponse((response) => response.request().method() === 'GET' && response.url().endsWith('/api/backup/list') && response.status() === 200);
+  await notificationPage.getByRole('button', { name: '删除备份', exact: true }).click();
+  await lostDeleteVerification;
+  await notificationPage.getByText(/已核实：当前备份清单中不存在 xmt-settings-lost-response-fixture.db/).waitFor();
+  assert.equal(backupDeleteRequests, 3, 'a committed delete with a lost response is submitted once and recovered with GET');
+  assert.equal(settingsBackups.some((backup) => backup.name === 'xmt-settings-lost-response-fixture.db'), false, 'the isolated fixture commits the delete before its response is withheld');
+  assert.equal(await notificationPage.getByRole('heading', { name: '确认删除备份？' }).count(), 0, 'confirmed absence closes the stale destructive confirmation');
+  assert.equal(await notificationPage.getByText('xmt-settings-lost-response-fixture.db', { exact: true }).count(), 0, 'the read-back list removes the backup after response loss');
+  assert.equal(expectedBackupDeleteRequestFailures.length, 1, 'the committed delete response is withheld exactly once in the isolated browser fixture');
+  assert.equal(expectedBackupDeleteConsoleErrors.length, 1, 'the only backup network console error is the intentional response-loss fixture');
+  assert.equal(backupListRequests, 9, 'response-loss recovery uses one list GET and does not repeat DELETE');
+  assert.equal(expectedHttpErrors.length, 7, 'system, notification, profile, backup create/list/delete fixtures each produce the expected isolated 503 responses');
   assert.deepEqual(errors, [], 'notification preference feedback has no browser runtime or unexpected console errors');
   await notificationPage.goto(`${base}/__qa?theme=dark`);
   await notificationPage.getByRole('button', { name: '通知偏好', exact: true }).click();
@@ -682,11 +805,20 @@ try {
   await brandingPage.getByText('品牌设置暂时无法保存，请重试。', { exact: true }).waitFor();
   assert.equal(settings.branding.logo, '', 'failed save leaves the persisted brand logo unchanged');
   assert.equal(await logoPreview.getAttribute('src'), previewSource, 'failed save keeps the selected preview available for retry');
-  await brandingPage.getByRole('button', { name: '保存品牌设置', exact: true }).click();
+  settingsSaveDelayMs = 160;
+  const brandSaveRetry = brandingPage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/system-settings') && response.status() === 200);
+  const pendingBrandSave = brandingPage.waitForRequest((request) => request.method() === 'PUT' && request.url().endsWith('/api/system-settings'));
+  await brandingPage.getByRole('button', { name: '保存品牌设置', exact: true }).dblclick();
+  await pendingBrandSave;
+  assert.equal(await brandingPage.locator('input[type="text"]').first().isDisabled(), true, 'brand fields are locked while the server save is pending');
+  assert.equal(await logoInput.isDisabled(), true, 'logo selection is locked while the server save is pending');
+  assert.equal(await brandingPage.getByRole('button', { name: '保存品牌设置', exact: true }).isDisabled(), true, 'the save control remains locked while the request is pending');
+  await brandSaveRetry;
   await brandingPage.getByText('品牌设置已更新', { exact: true }).waitFor();
+  settingsSaveDelayMs = 0;
   assert.equal(settings.branding.logo, previewSource, 'logo is persisted only after the explicit save succeeds');
-  assert.equal(settingsSaveRequests.length, 2, 'logo persistence uses one failed save and one explicit retry');
-  assert.equal(expectedHttpErrors.length, 8, 'system, notification, profile, password, backup create/list/delete, and brand-save failures each produce one intentional fixture 503');
+  assert.equal(settingsSaveRequests.length, 2, 'logo persistence uses one failed save and one request for a rapid double-click retry');
+  assert.equal(expectedHttpErrors.length, 8, 'system, notification, profile, backup create/list/delete, and brand-save failures each produce one intentional fixture 503');
   await brandingPage.reload();
   await brandingPage.getByRole('button', { name: '品牌设置', exact: true }).click();
   assert.equal(await brandingPage.locator('img[alt="系统 Logo"]').getAttribute('src'), previewSource, 'successful save persists the logo for the next visit');

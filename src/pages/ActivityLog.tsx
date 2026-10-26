@@ -35,6 +35,16 @@ const actionColors: Record<string, string> = {
   status_change: 'var(--xmt-success)',
 };
 
+const actionContrastColors: Record<string, string> = {
+  create: 'var(--xmt-success-contrast)',
+  update: 'var(--xmt-primary-contrast)',
+  delete: 'var(--xmt-coral-contrast)',
+  login: 'var(--xmt-violet-contrast)',
+  publish: 'var(--xmt-amber-contrast)',
+  audit: 'var(--xmt-amber-contrast)',
+  status_change: 'var(--xmt-success-contrast)',
+};
+
 export default function ActivityLog() {
   const [logs, setLogs] = useState<ActivityLogType[]>([]);
   const [total, setTotal] = useState(0);
@@ -110,6 +120,11 @@ export default function ActivityLog() {
     return key ? actionColors[key] : (styles.isDark ? 'var(--xmt-text-muted)' : 'var(--xmt-text-secondary)');
   };
 
+  const getActionContrastColor = (action: string) => {
+    const key = Object.keys(actionContrastColors).find(k => action.toLowerCase().includes(k));
+    return key ? actionContrastColors[key] : (styles.isDark ? 'var(--xmt-text-primary)' : 'var(--xmt-text-secondary)');
+  };
+
   const getActionLabel = (action: string) => {
     const key = Object.keys(actionLabels).find(k => action.toLowerCase().includes(k));
     return key ? actionLabels[key] : action;
@@ -118,22 +133,24 @@ export default function ActivityLog() {
   return (
     <div className="space-y-6">
       {/* 页面标题 */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h1 className={styles.pageTitle}>活动日志</h1>
           <p className={`${styles.subtitle} mt-1`}>查看团队成员的操作记录</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center">
           {/* 用户筛选 */}
-          <div className={`flex items-center gap-2 ${styles.card} p-2`}>
-            <Filter className={`w-4 h-4 ${styles.textSecondary}`} />
+          <div className={`flex w-full min-w-0 items-center gap-2 ${styles.card} p-2 sm:w-auto`}>
+            <Filter className={`w-4 h-4 shrink-0 ${styles.textSecondary}`} />
             <select
+              id="activity-log-user-filter"
+              aria-label="筛选活动日志成员"
               value={selectedUser || ''}
               onChange={(e) => {
                 setSelectedUser(e.target.value ? Number(e.target.value) : undefined);
                 setPage(1);
               }}
-              className={`px-3 py-1 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} text-sm ${styles.focusRing}`}
+              className={`h-10 w-full min-w-0 flex-1 px-3 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} text-sm ${styles.focusRing} sm:w-auto sm:flex-none`}
             >
               <option value="">全部用户</option>
               {users.map(user => (
@@ -141,7 +158,7 @@ export default function ActivityLog() {
               ))}
             </select>
           </div>
-          {usersError ? <div role="status" className="flex flex-wrap items-center gap-2 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-3 py-2 text-xs text-studio-amber-contrast">
+          {usersError ? <div role="status" className="flex w-full flex-wrap items-center gap-2 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-3 py-2 text-xs text-studio-amber-contrast sm:w-auto">
             <span>成员筛选暂不可用。{usersError}</span>
             <ActionButton type="button" variant="secondary" disabled={usersLoading} onClick={() => void fetchUsers()}>{usersLoading ? '正在加载成员…' : '重试成员筛选'}</ActionButton>
           </div> : null}
@@ -149,7 +166,7 @@ export default function ActivityLog() {
       </div>
 
       {/* 时间线 */}
-      <div className={`${styles.card} p-6`}>
+      <div className={`${styles.card} p-4 sm:p-6`}>
         {logsError ? <div role="alert" className="mb-4 flex flex-col gap-3 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-4 py-3 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
           <span>{logs.length ? '活动日志刷新失败，仍显示最近一次成功读取的记录。' : '活动日志暂时无法读取。'} {logsError}</span>
           <ActionButton type="button" variant="secondary" disabled={loading} onClick={() => void fetchLogs()}>{loading ? '正在重新加载…' : '重新加载日志'}</ActionButton>
@@ -175,28 +192,30 @@ export default function ActivityLog() {
                 const label = getActionLabel(log.action);
 
                 return (
-                  <div key={log.id} className="relative flex gap-4 group animate-slide-in" style={{ animationDelay: `${index * 30}ms` }}>
+                  <div key={log.id} className="relative flex min-w-0 gap-3 group animate-slide-in sm:gap-4" style={{ animationDelay: `${index * 30}ms` }}>
                     {/* 时间线节点 */}
                     <div className="relative z-10 flex-shrink-0">
                       <div
+                        data-activity-action-marker
                         className="w-12 h-12 rounded-xl flex items-center justify-center transition-transform duration-200 group-hover:scale-110"
-                        style={{ backgroundColor: `${color}15` }}
+                        style={{ backgroundColor: `color-mix(in srgb, ${color} 8%, transparent)` }}
                       >
                         <Icon className="w-5 h-5" style={{ color }} />
                       </div>
                     </div>
 
                     {/* 内容 */}
-                    <div className={`flex-1 pb-6 ${styles.hoverBg} rounded-xl p-4 -m-1 transition-colors duration-200`}>
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
+                    <div className={`min-w-0 flex-1 pb-6 ${styles.hoverBg} rounded-xl p-4 -m-1 transition-colors duration-200`}>
+                      <div className="flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-2 flex-wrap">
                             <span className={`text-sm font-semibold ${styles.textPrimary}`}>
                               {log.user_name || `用户#${log.user_id}`}
                             </span>
                             <span
+                              data-activity-action-badge
                               className="text-xs px-2 py-0.5 rounded-full font-medium"
-                              style={{ backgroundColor: `${color}15`, color }}
+                              style={{ backgroundColor: `color-mix(in srgb, ${color} 8%, transparent)`, color: getActionContrastColor(log.action) }}
                             >
                               {label}
                             </span>
@@ -210,7 +229,7 @@ export default function ActivityLog() {
                             </p>
                           )}
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
+                        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
                           <Clock className={`w-3 h-3 ${styles.textMuted}`} />
                           <span className={`text-xs ${styles.textMuted} whitespace-nowrap`}>
                             {formatTime(log.created_at)}
@@ -228,15 +247,16 @@ export default function ActivityLog() {
 
       {/* 分页 */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className={`text-sm ${styles.textSecondary}`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className={`text-sm ${styles.textSecondary} sm:whitespace-nowrap`}>
             共 {total} 条记录，第 {page}/{totalPages} 页
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-center gap-2">
             <button
+              aria-label="上一页"
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className={`p-2 ${styles.buttonSecondary} rounded-lg disabled:opacity-30 transition-all duration-200`}
+              className="xmt-btn xmt-btn-secondary h-10 w-10 min-h-10 min-w-10 rounded-button p-0 disabled:opacity-30 transition-all duration-200"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -254,11 +274,12 @@ export default function ActivityLog() {
               return (
                 <button
                   key={pageNum}
+                  aria-current={page === pageNum ? 'page' : undefined}
                   onClick={() => setPage(pageNum)}
-                  className={`w-9 h-9 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  className={`xmt-btn h-10 w-10 min-h-10 min-w-10 rounded-button p-0 text-sm font-medium transition-all duration-200 ${
                     page === pageNum
-                      ? `${styles.buttonPrimary}`
-                      : `${styles.buttonSecondary}`
+                      ? 'xmt-btn-primary'
+                      : 'xmt-btn-secondary'
                   }`}
                 >
                   {pageNum}
@@ -266,9 +287,10 @@ export default function ActivityLog() {
               );
             })}
             <button
+              aria-label="下一页"
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className={`p-2 ${styles.buttonSecondary} rounded-lg disabled:opacity-30 transition-all duration-200`}
+              className="xmt-btn xmt-btn-secondary h-10 w-10 min-h-10 min-w-10 rounded-button p-0 disabled:opacity-30 transition-all duration-200"
             >
               <ChevronRight className="w-4 h-4" />
             </button>

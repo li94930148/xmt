@@ -56,14 +56,51 @@ let topics = [makeTopic(1, '部分审核成功主题'), makeTopic(2, '审核与�
 const auditFailures = new Set([2]);
 const deleteFailures = new Set([2]);
 const detailReads = new Map<number, number>();
+const topicDimensions = new Map<number, Array<{ id: number; type: string; value: string }>>();
+let nextDimensionId = 101;
+let dimensionAddRequests = 0;
+let dimensionAddGate: Promise<void> = Promise.resolve();
+let releaseDimensionAdd: (() => void) | null = null;
+let dimensionAddStarted: Promise<void> = Promise.resolve();
+let markDimensionAddStarted: (() => void) | null = null;
 const expectedFixtureFailures = new Set<string>();
 
-app.use('/api', (request, response) => {
+function holdDimensionAdd() {
+  dimensionAddGate = new Promise<void>((resolve) => { releaseDimensionAdd = resolve; });
+  dimensionAddStarted = new Promise<void>((resolve) => { markDimensionAddStarted = resolve; });
+}
+
+app.use('/api', async (request, response) => {
   if (request.path === '/auth/me') return response.json(user);
   if (request.path === '/messages/unread') return response.json({ unreadCount: 0 });
   if (request.path === '/system-settings' || request.path === '/system-settings/public') return response.json({});
   if (request.path === '/users') return response.json({ data: [], total: 0, page: 1, limit: 50 });
   if (request.path === '/topics' && request.method === 'GET') return response.json({ data: topics, total: topics.length, page: 1, limit: 15 });
+  if (request.path === '/resource-center/content-topics' && request.method === 'GET') {
+    const dimensions = topicDimensions.get(3) ?? [];
+    const data = [{ id: 3, title: '城市资产重复提交验收', status: 'pending', platform: '抖音', created_at: '2026-09-28T00:00:00.000Z', updated_at: '2026-09-28T00:00:00.000Z', production_count: 0, latest_production_id: null, latest_production_version: null, latest_production_updated_at: null, shooting_count: 0, publishing_count: 0, resource_count: 0, linked_resources: [], referenced_resources: [], dimensions, can_manage_dimensions: true, latest_analytics: null }];
+    const registeredTopicCounts = Object.fromEntries((['city', 'person', 'project'] as const).map((type) => [type, dimensions.some((dimension) => dimension.type === type) ? 1 : 0]));
+    return response.json({ data, pagination: { page: 1, page_size: 12, total: 1, total_pages: 1 }, analytics_visible: false, available_dimensions: [], dimension_summaries: [], dimension_coverage: { visible_topics_total: 1, registered_topic_counts: registeredTopicCounts } });
+  }
+
+  const dimensionsMatch = request.path.match(/^\/topics\/(\d+)\/asset-dimensions$/);
+  if (dimensionsMatch && request.method === 'GET') return response.json({ data: topicDimensions.get(Number(dimensionsMatch[1])) ?? [] });
+  if (dimensionsMatch && request.method === 'POST') {
+    dimensionAddRequests += 1;
+    markDimensionAddStarted?.();
+    const currentGate = dimensionAddGate;
+    await currentGate;
+    const topicId = Number(dimensionsMatch[1]);
+    const type = String(request.body.type);
+    const value = String(request.body.value).trim();
+    const existing = topicDimensions.get(topicId) ?? [];
+    if (existing.some((item) => item.type === type && item.value.toLocaleLowerCase() === value.toLocaleLowerCase())) {
+      return response.status(409).json({ message: '该选题已登记此维度' });
+    }
+    const dimension = { id: nextDimensionId++, type, value };
+    topicDimensions.set(topicId, [...existing, dimension]);
+    return response.status(201).json({ message: '维度已登记', id: dimension.id, data: dimension });
+  }
 
   const auditMatch = request.path.match(/^\/topics\/(\d+)\/audit$/);
   if (auditMatch && request.method === 'POST') {
@@ -106,8 +143,6 @@ app.use('/api', (request, response) => {
   }
   if (/^\/topics\/\d+\/resources$/.test(request.path)) return response.json({ data: [] });
   if (/^\/topics\/\d+\/versions$/.test(request.path)) return response.json({ data: [] });
-  if (/^\/topics\/\d+\/asset-dimensions$/.test(request.path)) return response.json({ data: [] });
-
   return response.status(404).json({ message: `No fixture for ${request.method} ${request.path}` });
 });
 app.use('/socket.io', (request, response) => {
@@ -199,11 +234,45 @@ try {
   await page.getByRole('heading', { name: '已提交保存但刷新失败的主题', exact: true }).waitFor();
   await page.screenshot({ path: `${screenshotDir}-edit-saved-refresh-failed.png`, fullPage: false });
 
+  holdDimensionAdd();
+  await page.getByLabel('维度名称-3').fill('杭州');
+  await page.evaluate(() => {
+    const form = document.getElementById('topic-dimension-value-3')?.closest('form');
+    if (!(form instanceof HTMLFormElement)) throw new Error('topic dimension form was not found');
+    form.requestSubmit();
+    form.requestSubmit();
+  });
+  await dimensionAddStarted;
+  await page.waitForTimeout(100);
+  const topicDetailDimensionRequestsWhilePending = dimensionAddRequests;
+  releaseDimensionAdd?.();
+  await page.getByRole('status').getByText('城市“杭州”已登记。', { exact: true }).waitFor();
+  assert.equal(topicDetailDimensionRequestsWhilePending, 1, 'same-event duplicate form submissions from topic detail issue one write');
+
+  holdDimensionAdd();
+  await page.goto(`${baseUrl}/asset-center/content-topics`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('heading', { name: '主题内容资产', exact: true }).waitFor();
+  await page.getByLabel('维度名称-3').fill('李明');
+  await page.evaluate(() => {
+    const form = document.getElementById('dimension-value-3')?.closest('form');
+    if (!(form instanceof HTMLFormElement)) throw new Error('content asset dimension form was not found');
+    form.requestSubmit();
+    form.requestSubmit();
+  });
+  await dimensionAddStarted;
+  await page.waitForTimeout(100);
+  const contentAssetsDimensionRequestsWhilePending = dimensionAddRequests - topicDetailDimensionRequestsWhilePending;
+  releaseDimensionAdd?.();
+  await page.getByRole('status').getByText('人物“李明”已登记。', { exact: true }).waitFor();
+  assert.equal(contentAssetsDimensionRequestsWhilePending, 1, 'same-event duplicate form submissions from content assets issue one write');
+  assert.equal(dimensionAddRequests, 2, 'both entry points each submit once');
+
   assert.equal(await page.getByText('页面出错了', { exact: true }).count(), 0, 'framework error boundary is not visible');
   assert.deepEqual(errors, [], errors.join('\n'));
   assert.equal(await page.evaluate(() => document.body.innerText.trim().length > 0), true, 'application content is rendered');
   console.log(`Topic mutation feedback browser test passed at ${baseUrl}; screenshots: ${screenshotDir}-*.png`);
 } finally {
+  releaseDimensionAdd?.();
   await context.close();
   await browser.close();
   await vite.close();

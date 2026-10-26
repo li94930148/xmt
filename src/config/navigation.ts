@@ -19,6 +19,7 @@ import {
   Lightbulb,
   PackageOpen,
   Send,
+  Search,
   Settings,
   Shield,
   Users,
@@ -93,6 +94,7 @@ export const navigationSections: NavigationSection[] = [
       { id: 'project-library', label: '项目资料库', icon: PackageOpen, path: '/asset-center/projects' },
       { id: 'content-archives', label: '内容档案库', icon: FileText, path: '/asset-center/resources?library_type=content_archive' },
       { id: 'published-archives', label: '发布归档', icon: Send, path: '/asset-center/published-archives' },
+      { id: 'resource-search', label: '资料搜索', icon: Search, path: '/asset-center/search' },
       { id: 'knowledge-base', label: '知识库', icon: BookOpen, path: '/asset-center/knowledge' },
       { id: 'media-archive', label: '素材归档', icon: Images, path: '/asset-center/media' },
     ],
@@ -137,8 +139,8 @@ export function canAccessNavigationSection(section: NavigationSection, role?: Us
   return !section.roles || (role ? section.roles.includes(role) : false);
 }
 
-export function findNavigationSectionByPath(pathname: string) {
-  return navigationSections.find((section) => section.items.some((item) => isNavigationItemActive(pathname, item.path))) || null;
+export function findNavigationSectionByPath(pathname: string, search = '') {
+  return navigationSections.find((section) => section.items.some((item) => isNavigationItemActive(pathname, item.path, search))) || null;
 }
 
 export function canAccessNavigationItem(
@@ -151,34 +153,66 @@ export function canAccessNavigationItem(
   return item.requireAllPermissions ? helpers.hasAllPermissions(item.permissions) : helpers.hasAnyPermission(item.permissions);
 }
 
-function navigationPathMatches(pathname: string, itemPath: string) {
+function isExactNavigationItemRoute(pathname: string, itemPath: string, search = '') {
+  const [normalizedItemPath, itemSearch = ''] = itemPath.split('?');
+  if (pathname === normalizedItemPath) {
+    const expectedParams = new URLSearchParams(itemSearch);
+    const currentParams = new URLSearchParams(search);
+    return [...expectedParams].every(([key, value]) => currentParams.get(key) === value);
+  }
+
+  if (pathname !== '/asset-center/resources') return false;
+  const libraryType = new URLSearchParams(search).get('library_type') || 'project';
+  return resourceLibraryTypeForNavigationItem(itemPath) === libraryType;
+}
+
+function resourceLibraryTypeForNavigationItem(itemPath: string) {
+  const [pathname, itemSearch = ''] = itemPath.split('?');
+  const queryLibraryType = new URLSearchParams(itemSearch).get('library_type');
+  if (queryLibraryType) return queryLibraryType;
+  if (pathname === '/asset-center/projects') return 'project';
+  if (pathname === '/asset-center/knowledge') return 'knowledge';
+  if (pathname === '/asset-center/media') return 'media';
+  return null;
+}
+
+function navigationPathMatches(pathname: string, itemPath: string, search = '') {
   const normalizedItemPath = itemPath.split('?')[0];
+  if (isExactNavigationItemRoute(pathname, itemPath, search)) return true;
+  if (pathname === normalizedItemPath) return false;
+  if (pathname.startsWith('/asset-center/resources/') && new URLSearchParams(search).has('library_type')) {
+    const resourceLibraryType = new URLSearchParams(search).get('library_type');
+    const itemLibraryType = resourceLibraryTypeForNavigationItem(itemPath);
+    if (itemLibraryType) return itemLibraryType === resourceLibraryType;
+  }
   if (itemPath === '/') return pathname === '/' || pathname === '/home' || pathname === '/dashboard';
   if (itemPath === '/analytics/creator-center') return pathname === itemPath;
   if (itemPath === '/analytics/creator-center/works' && /^\/analytics\/creator-center\/(work|content)\//.test(pathname)) return true;
   return pathname === normalizedItemPath || pathname.startsWith(`${normalizedItemPath}/`);
 }
 
-export function isNavigationItemActive(pathname: string, itemPath: string) {
-  if (!navigationPathMatches(pathname, itemPath)) return false;
+export function isNavigationItemActive(pathname: string, itemPath: string, search = '') {
+  if (!navigationPathMatches(pathname, itemPath, search)) return false;
   const itemDepth = itemPath.split('?')[0].length;
   return !allNavigationItems.some((candidate) => (
-    candidate.path.split('?')[0].length > itemDepth && navigationPathMatches(pathname, candidate.path)
+    candidate.path.split('?')[0].length > itemDepth && navigationPathMatches(pathname, candidate.path, search)
   ));
 }
 
-export function findNavigationItem(pathname: string) {
-  return allNavigationItems.find((item) => isNavigationItemActive(pathname, item.path)) || null;
+export function findNavigationItem(pathname: string, search = '') {
+  return allNavigationItems.find((item) => isNavigationItemActive(pathname, item.path, search)) || null;
 }
 
-export function buildBreadcrumbs(pathname: string) {
-  const activeSection = navigationSections.find((section) => section.items.some((item) => isNavigationItemActive(pathname, item.path)));
-  const activeItem = activeSection?.items.find((item) => isNavigationItemActive(pathname, item.path));
+export function buildBreadcrumbs(pathname: string, search = '') {
+  const activeSection = navigationSections.find((section) => section.items.some((item) => isNavigationItemActive(pathname, item.path, search)));
+  const activeItem = activeSection?.items.find((item) => isNavigationItemActive(pathname, item.path, search));
   const crumbs: Array<{ label: string; path?: string }> = [{ label: '首页', path: '/' }];
 
   if (pathname === '/') return crumbs;
   if (activeSection) crumbs.push({ label: activeSection.label });
   if (activeItem) crumbs.push({ label: activeItem.label, path: activeItem.path });
-  if (pathname.split('/').filter(Boolean).length >= 2 && activeItem?.path.split('?')[0] !== pathname) crumbs.push({ label: '详情' });
+  if (pathname.split('/').filter(Boolean).length >= 2 && (!activeItem || !isExactNavigationItemRoute(pathname, activeItem.path, search))) {
+    crumbs.push({ label: '详情' });
+  }
   return crumbs;
 }

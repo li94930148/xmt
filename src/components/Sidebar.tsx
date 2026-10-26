@@ -47,12 +47,13 @@ export default function Sidebar({
   const navigate = useNavigate();
   const location = useLocation();
   const isDebugMode = authStore.user?.role === 'admin' && new URLSearchParams(location.search).has('debug');
-  const initialRouteGroup = findNavigationSectionByPath(location.pathname)?.id ?? null;
+  const initialRouteGroup = findNavigationSectionByPath(location.pathname, location.search)?.id ?? null;
   const [expandedGroup, setExpandedGroup] = useState<string | null>(() => {
     const storedGroup = readExpandedGroup(location.pathname);
     return storedGroup === undefined ? initialRouteGroup : storedGroup;
   });
-  const previousPathname = useRef(location.pathname);
+  const previousLocation = useRef({ pathname: location.pathname, search: location.search });
+  const mobileCloseButtonRef = useRef<HTMLButtonElement>(null);
 
   const handleNavigate = (path: string) => {
     navigate(path);
@@ -60,9 +61,8 @@ export default function Sidebar({
   };
 
   const handleLogout = () => {
-    authStore.logout();
     onMobileClose?.();
-    navigate('/login');
+    navigate('/logout', { replace: true });
   };
 
   const visibleSections = navigationSections
@@ -81,15 +81,19 @@ export default function Sidebar({
     .filter((section) => section.items.length > 0);
 
   useEffect(() => {
-    if (previousPathname.current === location.pathname) {
+    if (previousLocation.current.pathname === location.pathname && previousLocation.current.search === location.search) {
       return;
     }
 
-    previousPathname.current = location.pathname;
-    const nextGroup = findNavigationSectionByPath(location.pathname)?.id ?? null;
+    previousLocation.current = { pathname: location.pathname, search: location.search };
+    const nextGroup = findNavigationSectionByPath(location.pathname, location.search)?.id ?? null;
     setExpandedGroup(nextGroup);
     persistExpandedGroup(nextGroup, location.pathname);
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (mobileOpen) mobileCloseButtonRef.current?.focus();
+  }, [mobileOpen]);
 
   const desktopAsideClass = collapsed ? 'w-[72px]' : 'w-[240px]';
   const shellClass =
@@ -115,7 +119,8 @@ export default function Sidebar({
           <button
             type="button"
             onClick={onMobileClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-button text-studio-text-secondary transition hover:bg-studio-surface-soft hover:text-studio-text-primary"
+            ref={mobileCloseButtonRef}
+            className="xmt-btn xmt-btn-ghost inline-flex h-10 w-10 !p-0"
             aria-label="关闭导航菜单"
           >
             <X className="h-4 w-4" />
@@ -142,12 +147,13 @@ export default function Sidebar({
         {visibleSections.map((section, sectionIndex) => {
           const SectionIcon = section.icon;
           const expanded = expandedGroup === section.id;
-          const hasActiveItem = section.items.some((item) => isNavigationItemActive(location.pathname, item.path));
+          const sectionExpanded = expanded && (!collapsed || isMobile);
+          const hasActiveItem = section.items.some((item) => isNavigationItemActive(location.pathname, item.path, location.search));
           const isDirectEntry = section.id === 'home' && section.items.length === 1;
 
           if (isDirectEntry) {
             const item = section.items[0];
-            return <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}><button type="button" onClick={() => handleNavigate(item.path)} title={section.label} className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-3'} ${hasActiveItem ? 'bg-studio-primary/12 text-studio-text-primary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary'}`} style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}><SectionIcon className="shrink-0" style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />{(!collapsed || isMobile) && <span className="font-semibold">{section.label}</span>}</button></div>;
+            return <div key={section.label} className={sectionIndex > 0 ? 'mt-4' : ''}><button type="button" onClick={() => handleNavigate(item.path)} title={section.label} aria-label={collapsed && !isMobile ? section.label : undefined} className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-3 px-3'} ${hasActiveItem ? 'bg-studio-primary/12 text-studio-text-primary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary'}`} style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}><SectionIcon className="shrink-0" style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />{(!collapsed || isMobile) && <span className="font-semibold">{section.label}</span>}</button></div>;
           }
 
           return (
@@ -155,14 +161,22 @@ export default function Sidebar({
             <button
               type="button"
               onClick={() => {
+                if (collapsed && !isMobile) {
+                  setExpandedGroup(section.id);
+                  persistExpandedGroup(section.id, location.pathname);
+                  onToggle();
+                  return;
+                }
+
                 const nextGroup = expanded ? null : section.id;
                 setExpandedGroup(nextGroup);
                 persistExpandedGroup(nextGroup, location.pathname);
               }}
               title={section.label}
+              aria-label={collapsed && !isMobile ? section.label : undefined}
               className={`flex w-full items-center rounded-button text-left transition-colors ${collapsed && !isMobile ? 'justify-center px-2' : 'gap-2 px-3'} ${hasActiveItem ? 'text-studio-text-secondary' : 'text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-text-secondary'}`}
               style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-nav-font-size)' }}
-              aria-expanded={expanded}
+              aria-expanded={sectionExpanded}
             >
               <SectionIcon className="shrink-0" style={{ width: 'var(--sidebar-icon-size)', height: 'var(--sidebar-icon-size)' }} />
               {(!collapsed || isMobile) && <span className="flex-1 font-semibold">{section.label}</span>}
@@ -171,10 +185,16 @@ export default function Sidebar({
 
             {collapsed && !isMobile && sectionIndex > 0 ? <div className="mx-2 my-3 border-t border-studio-border-soft" /> : null}
 
-            <ul className={`mt-1 overflow-hidden transition-[max-height,opacity,transform] duration-200 ${expanded && (!collapsed || isMobile) ? 'max-h-[36rem] translate-y-0 space-y-1 opacity-100' : 'max-h-0 -translate-y-1 opacity-0'}`}>
+            <ul
+              aria-hidden={!sectionExpanded}
+              ref={(element) => {
+                if (element) (element as HTMLUListElement & { inert: boolean }).inert = !sectionExpanded;
+              }}
+              className={`mt-1 overflow-hidden transition-[max-height,opacity,transform] duration-200 ${sectionExpanded ? 'max-h-[36rem] translate-y-0 space-y-1 opacity-100' : 'max-h-0 -translate-y-1 opacity-0'}`}
+            >
               {section.items.map((item) => {
                 const Icon = item.icon;
-                const isActive = isNavigationItemActive(location.pathname, item.path);
+                const isActive = isNavigationItemActive(location.pathname, item.path, location.search);
                 const isMessages = item.path === '/messages';
 
                 return (
@@ -191,6 +211,7 @@ export default function Sidebar({
                           : 'border border-transparent text-studio-text-secondary hover:border-studio-border-soft hover:bg-studio-surface-soft hover:text-studio-text-primary'
                       }`}
                       style={{ minHeight: 'var(--sidebar-nav-item-height)', fontSize: 'var(--sidebar-subnav-font-size)' }}
+                      tabIndex={sectionExpanded ? 0 : -1}
                     >
                       {isActive ? <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-studio-cyan" /> : null}
 
@@ -220,7 +241,8 @@ export default function Sidebar({
         <button
           type="button"
           onClick={handleLogout}
-          className={`group flex w-full items-center gap-3 rounded-button py-2.5 text-studio-text-muted transition-all duration-200 hover:bg-studio-coral/10 hover:text-studio-coral ${
+          aria-label="退出登录"
+          className={`group flex w-full items-center gap-3 rounded-button py-2.5 text-studio-text-muted transition-all duration-200 hover:bg-studio-coral/10 hover:text-studio-coral-contrast ${
             collapsed && !isMobile ? 'justify-center' : ''
           } ${collapsed && !isMobile ? 'px-2' : 'px-3'}`}
         >
@@ -253,7 +275,45 @@ export default function Sidebar({
           mobileOpen ? 'pointer-events-auto bg-black/60 opacity-100' : 'pointer-events-none bg-black/0 opacity-0'
         }`}
         onClick={onMobileClose}
+        onKeyDown={(event) => {
+          if (!mobileOpen) return;
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            onMobileClose?.();
+            return;
+          }
+          if (event.key !== 'Tab') return;
+
+          const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          )).filter((element) => element.tabIndex >= 0 && element.getClientRects().length > 0);
+          if (!focusable.length) {
+            event.preventDefault();
+            return;
+          }
+
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          const active = document.activeElement;
+          if (!event.currentTarget.contains(active)) {
+            event.preventDefault();
+            first.focus();
+          } else if (event.shiftKey && active === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && active === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
         aria-hidden={!mobileOpen}
+        role={mobileOpen ? 'dialog' : undefined}
+        aria-label="移动导航菜单"
+        aria-modal={mobileOpen || undefined}
+        ref={(element) => {
+          if (element) (element as HTMLDivElement & { inert: boolean }).inert = !mobileOpen;
+        }}
       >
         <aside
           className={`h-full w-[88vw] max-w-sm border-r shadow-2xl transition-transform duration-300 ${shellClass} ${

@@ -12,14 +12,34 @@ function testTokensDefineSelectionVars() {
   const tokens = read('src/styles/tokens.css');
   assert.ok(tokens.includes('--editor-selection-bg'), 'tokens 需定义 --editor-selection-bg');
   assert.ok(tokens.includes('--editor-selection-fg'), 'tokens 需定义 --editor-selection-fg');
-  assert.ok(/html\.light[\s\S]*--editor-selection-bg:\s*#2F5BFF/.test(tokens), '亮色 selection 应为中深蓝实色');
-  assert.ok(/html\.light[\s\S]*--editor-selection-fg:\s*#FFFFFF/.test(tokens), '亮色 selection 文字应为白色');
-  assert.ok(/--editor-selection-bg:\s*#5B8CFF/.test(tokens), '暗色 selection 应为较亮蓝');
-  assert.ok(/--editor-selection-fg:\s*#FFFFFF/.test(tokens), '暗色 selection 文字应为近白');
+  const darkTheme = tokens.match(/:root,\s*html\.dark,\s*\.xmt-theme-scope\[data-theme='dark'\]\s*\{([\s\S]*?)\n\}/)?.[1];
+  const lightTheme = tokens.match(/html\.light,\s*\.xmt-theme-scope\[data-theme='light'\]\s*\{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(darkTheme, '需要暗色主题令牌块');
+  assert.ok(lightTheme, '需要亮色主题令牌块');
+  assert.match(darkTheme, /--xmt-selection-bg:\s*#5B8CFF;/, '暗色 selection 背景应为实色蓝');
+  assert.match(darkTheme, /--xmt-selection-fg:\s*var\(--xmt-text-on-color-dark\);/, '暗色 selection 应使用深色高对比文字');
+  assert.match(lightTheme, /--xmt-selection-bg:\s*#2F5BFF;/, '亮色 selection 背景应为中深蓝实色');
+  assert.match(lightTheme, /--xmt-selection-fg:\s*var\(--xmt-text-on-color-light\);/, '亮色 selection 应使用白色高对比文字');
+  assert.match(darkTheme, /--editor-selection-bg:\s*var\(--xmt-selection-bg\);/, '暗色编辑器选区需复用全局选区令牌');
+  assert.match(lightTheme, /--editor-selection-bg:\s*var\(--xmt-selection-bg\);/, '亮色编辑器选区需复用全局选区令牌');
+  assert.match(darkTheme, /--editor-selection-fg:\s*var\(--xmt-selection-fg\);/, '暗色编辑器选区文字需复用全局令牌');
+  assert.match(lightTheme, /--editor-selection-fg:\s*var\(--xmt-selection-fg\);/, '亮色编辑器选区文字需复用全局令牌');
+  const darkContrast = contrastRatio(
+    themeColorToken(darkTheme, 'xmt-selection-bg'),
+    themeColorToken(darkTheme, 'xmt-text-on-color-dark'),
+  );
+  const lightContrast = contrastRatio(
+    themeColorToken(lightTheme, 'xmt-selection-bg'),
+    themeColorToken(darkTheme, 'xmt-text-on-color-light'),
+  );
+  assert.ok(darkContrast >= 4.5, `暗色全局 selection 对比度为 ${darkContrast.toFixed(2)}:1，需达到 4.5:1`);
+  assert.ok(lightContrast >= 4.5, `亮色全局 selection 对比度为 ${lightContrast.toFixed(2)}:1，需达到 4.5:1`);
 }
 
-function testIndexCssUsesEditorScopedSelection() {
+function testIndexCssUsesGlobalAndEditorSelection() {
   const css = read('src/index.css');
+  assert.match(css, /::selection,\s*\*::selection\s*\{[^}]*background-color:\s*var\(--xmt-selection-bg\);[^}]*color:\s*var\(--xmt-selection-fg\);/, '全局 selection 需覆盖普通文字及嵌套元素');
+  assert.match(css, /::-moz-selection,\s*\*::-moz-selection\s*\{[^}]*background-color:\s*var\(--xmt-selection-bg\);[^}]*color:\s*var\(--xmt-selection-fg\);/, 'Firefox 全局 selection 需覆盖普通文字及嵌套元素');
   assert.ok(css.includes('.tiptap *::selection'), 'Tiptap 子节点需要 selection 规则');
   assert.ok(css.includes('.rich-text-editor *::selection'), 'RichTextEditor 子节点需要 selection 规则');
   assert.ok(css.includes('::-moz-selection'), '需要 Firefox selection 规则');
@@ -48,8 +68,26 @@ function testDoesNotMutateDocumentData() {
   assert.ok(!css.includes('span[style*="color: red"]'), '禁止按具体文档颜色硬编码处理');
 }
 
+function contrastRatio(background: string, foreground: string) {
+  const luminance = (color: string) => {
+    const channels = color.match(/[\da-f]{2}/gi)?.map((channel) => Number.parseInt(channel, 16) / 255);
+    assert.equal(channels?.length, 3, `无效颜色: ${color}`);
+    const linear = channels!.map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+  const backgroundLuminance = luminance(background);
+  const foregroundLuminance = luminance(foreground);
+  return (Math.max(backgroundLuminance, foregroundLuminance) + 0.05) / (Math.min(backgroundLuminance, foregroundLuminance) + 0.05);
+}
+
+function themeColorToken(theme: string, token: string) {
+  const match = theme.match(new RegExp(`--${token}:\\s*(#[\\da-f]{6});`, 'i'));
+  assert.ok(match, `主题需要提供 --${token} 实色令牌`);
+  return match[1];
+}
+
 testTokensDefineSelectionVars();
-testIndexCssUsesEditorScopedSelection();
+testIndexCssUsesGlobalAndEditorSelection();
 testTiptapInjectedStylesCoverSelection();
 testBubbleMenuKeepsSelectionFocus();
 testDoesNotMutateDocumentData();

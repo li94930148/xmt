@@ -83,7 +83,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
   };
 
   const btnClass = (active?: boolean) =>
-    `p-1.5 rounded transition-colors ${
+    `min-h-10 min-w-10 rounded p-1.5 transition-colors sm:min-h-0 sm:min-w-0 ${
       active
       ? 'bg-studio-primary-button text-white'
         : isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'
@@ -138,12 +138,12 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
         const { from, to } = state.selection;
         return shouldShowEditorBubbleMenu({ contextMenuOpen, codeBlock: e.isActive('codeBlock'), from, to });
       }}
-      className={`z-editor-menu flex items-center gap-0.5 px-2 py-1.5 rounded-lg shadow-xl border backdrop-blur-sm ${
+      className={`z-editor-menu flex flex-wrap items-center gap-0.5 px-2 py-1.5 rounded-lg shadow-xl border backdrop-blur-sm sm:flex-nowrap ${
         isDark
           ? 'bg-studio-surface-soft border-studio-border-soft text-studio-text-secondary'
           : 'bg-studio-surface-glass border-studio-border-soft text-studio-text-muted'
       }`}
-      style={{ minWidth: 'fit-content' }}
+      style={{ minWidth: 0, maxWidth: 'calc(100vw - 16px)' }}
     >
       {/* 文字格式 */}
       <button onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} onMouseDown={keepEditorSelection} title="加粗">
@@ -170,14 +170,14 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
         {showTextColor && (
           <div
             ref={textColorPopoverRef}
-            className={`absolute ${textColorLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} left-1/2 -translate-x-1/2 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
-            style={{ minWidth: '176px', maxHeight: `${textColorLayout.maxHeight}px`, maxWidth: 'calc(100vw - 16px)', overflowY: 'auto' }}
+            className={`absolute ${textColorLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} right-0 left-auto translate-x-0 z-50 p-3 rounded-lg shadow-xl border sm:left-1/2 sm:right-auto sm:-translate-x-1/2 ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
+            style={{ minWidth: '216px', maxHeight: `${textColorLayout.maxHeight}px`, maxWidth: 'calc(100vw - 16px)', overflowY: 'auto' }}
           >
             <div className="mb-2 text-xs font-medium text-studio-text-secondary">文字颜色</div>
             <div className="grid grid-cols-4 gap-2.5">
               {TEXT_COLORS.map((c) => (
                 <button key={c.value || 'default'} onClick={() => handleTextColor(c.value)}
-                  className="w-8 h-8 rounded-lg border-2 transition-all hover:scale-110 flex items-center justify-center"
+                  className="h-10 w-10 rounded-lg border-2 transition-all hover:scale-110 flex items-center justify-center sm:h-8 sm:w-8"
                   style={{ borderColor: 'var(--xmt-border-soft)' }} title={c.name}>
                   <span className="font-bold text-sm" style={{ color: c.value || 'var(--editor-fg)' }}>A</span>
                 </button>
@@ -196,21 +196,21 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
         {showHighlight && (
           <div
             ref={highlightPopoverRef}
-            className={`absolute ${highlightLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} left-1/2 -translate-x-1/2 z-50 p-3 rounded-lg shadow-xl border ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
-            style={{ minWidth: '176px', maxHeight: `${highlightLayout.maxHeight}px`, maxWidth: 'calc(100vw - 16px)', overflowY: 'auto' }}
+            className={`absolute ${highlightLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} right-0 left-auto translate-x-0 z-50 p-3 rounded-lg shadow-xl border sm:left-1/2 sm:right-auto sm:-translate-x-1/2 ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
+            style={{ minWidth: '216px', maxHeight: `${highlightLayout.maxHeight}px`, maxWidth: 'calc(100vw - 16px)', overflowY: 'auto' }}
           >
             <div className="mb-2 text-xs font-medium text-studio-text-secondary">高亮颜色</div>
             <div className="grid grid-cols-4 gap-2.5 mb-1">
               {HIGHLIGHT_COLORS.map((c) => (
                 <button key={c.value} onClick={() => handleHighlight(c.value)}
-                  className="w-8 h-8 rounded-lg border-2 transition-all hover:scale-110"
+                  className="h-10 w-10 rounded-lg border-2 transition-all hover:scale-110 sm:h-8 sm:w-8"
                   style={{ backgroundColor: c.bg, borderColor: editor.isActive('highlight', { color: c.value }) ? 'var(--xmt-primary)' : 'transparent' }}
                   title={c.name} />
               ))}
             </div>
             {editor.isActive('highlight') && (
               <button onClick={() => { editor.chain().focus().unsetHighlight().run(); setShowHighlight(false); }}
-                className={`w-full text-xs py-1 rounded flex items-center justify-center gap-1 ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
+                className={`min-h-10 w-full text-xs py-1 rounded flex items-center justify-center gap-1 ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                 <X className="w-3 h-3" /> 取消高亮
               </button>
             )}

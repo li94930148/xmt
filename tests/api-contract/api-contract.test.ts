@@ -127,6 +127,8 @@ function openApiTests() {
   assert.ok(homeAttentionSchema?.properties?.retrospectives);
   assert.ok(homeAttentionSchema?.properties?.topic_stages, 'the authenticated dashboard aggregate documents bounded pipeline previews');
   assert.ok(homeAttentionSchema?.properties?.my_drafts, 'the authenticated dashboard aggregate documents personal draft tasks');
+  const attentionCountsSchema = homeAttentionSchema.properties?.counts as { properties?: Record<string, unknown> };
+  assert.ok(attentionCountsSchema?.properties?.stage_time_unknown, 'the dashboard contract distinguishes unknown stage timestamps from confirmed stalled counts');
   const activeSchema = homeAttentionSchema.properties?.active_topics as { properties?: { topics?: { maxItems?: number } } };
   assert.equal(activeSchema?.properties?.topics?.maxItems, 3, 'active topic previews are bounded independently of their exact total');
   assert.ok(document.components?.schemas?.HomeAttentionError);
@@ -140,6 +142,72 @@ function openApiTests() {
   assert.equal(document.paths['/api/v1/auth/refresh']?.post?.['x-experimental'], true);
   assert.equal(document.paths['/api/v1/auth/logout']?.post?.['x-experimental'], true);
   assert.equal(document.paths['/api/v1/auth/sessions']?.get?.['x-experimental'], true);
+  const workflowTemplateCreate = document.paths['/api/workflow-templates']?.post;
+  assert.ok(workflowTemplateCreate);
+  assert.ok(workflowTemplateCreate.security?.some((scheme) => 'bearerAuth' in scheme));
+  assert.ok(document.components?.schemas?.WorkflowTemplateCreateInput);
+  assert.ok(document.components?.schemas?.WorkflowTemplateCreateResponse);
+  const workflowTemplateInputSchema = document.components?.schemas?.WorkflowTemplateCreateInput as {
+    properties?: {
+      client_request_id?: { nullable?: boolean; format?: string };
+      nodes?: { items?: { properties?: Record<string, unknown> } };
+    };
+  };
+  assert.equal(workflowTemplateInputSchema.properties?.client_request_id?.format, 'uuid');
+  assert.notEqual(workflowTemplateInputSchema.properties?.client_request_id?.nullable, true,
+    'the idempotency key may be omitted by old clients but explicit null is not part of the contract');
+  assert.ok(workflowTemplateInputSchema.properties?.nodes?.items?.properties?.node_order,
+    'the workflow template create contract accepts node_order sent by the existing designer form');
+  const workflowTemplateCreateStatus = document.paths['/api/workflow-templates/create-requests/{requestId}']?.get;
+  assert.ok(workflowTemplateCreateStatus);
+  assert.ok(workflowTemplateCreateStatus.security?.some((scheme) => 'bearerAuth' in scheme));
+  assert.ok(workflowTemplateCreateStatus.responses['410']);
+  assert.equal(workflowTemplateCreateStatus.responses['404']?.headers?.['Cache-Control']?.schema?.enum?.[0], 'no-store');
+  assert.ok(document.components?.schemas?.WorkflowTemplateCreateStatusResponse);
+  const workflowTemplateUpdate = document.paths['/api/workflow-templates/{id}']?.put;
+  assert.ok(workflowTemplateUpdate);
+  assert.ok(workflowTemplateUpdate.security?.some((scheme) => 'bearerAuth' in scheme));
+  assert.ok(workflowTemplateUpdate.responses['409']);
+  assert.ok(document.components?.schemas?.WorkflowTemplateUpdateConflictResponse);
+  const workflowTemplateUpdateConflict = document.components?.schemas?.WorkflowTemplateUpdateConflictResponse as {
+    properties?: { code?: { enum?: string[] }; base_fingerprint?: { pattern?: string } };
+  };
+  assert.ok(workflowTemplateUpdateConflict.properties?.code?.enum?.includes('WORKFLOW_TEMPLATE_UPDATE_BASE_CONFLICT'));
+  assert.ok(workflowTemplateUpdateConflict.properties?.code?.enum?.includes('WORKFLOW_TEMPLATE_UPDATE_REQUEST_CONFLICT'));
+  assert.equal(workflowTemplateUpdateConflict.properties?.base_fingerprint?.pattern, '^[0-9a-fA-F]{64}$');
+  assert.match(workflowTemplateUpdate.responses['409']?.description || '', /WORKFLOW_TEMPLATE_UPDATE_BASE_CONFLICT/);
+  assert.match(workflowTemplateUpdate.responses['409']?.description || '', /WORKFLOW_TEMPLATE_UPDATE_REQUEST_CONFLICT/);
+  const workflowTemplateUpdateInput = document.components?.schemas?.WorkflowTemplateUpdateInput as {
+    required?: string[];
+    properties?: {
+      client_request_id?: { format?: string };
+      base_fingerprint?: { pattern?: string };
+      nodes?: { items?: { properties?: Record<string, unknown> } };
+    };
+  };
+  assert.equal(workflowTemplateUpdateInput.properties?.client_request_id?.format, 'uuid');
+  assert.equal(workflowTemplateUpdateInput.properties?.base_fingerprint?.pattern, '^[0-9a-fA-F]{64}$');
+  for (const legacyField of ['name', 'description', 'nodes']) {
+    assert.ok(!workflowTemplateUpdateInput.required?.includes(legacyField),
+      `the legacy template update contract keeps ${legacyField} optional for partial updates`);
+  }
+  assert.ok(workflowTemplateUpdateInput.properties?.nodes?.items?.properties?.id,
+    'the update contract accepts node IDs returned by the existing detail endpoint');
+  const workflowTemplateDetail = document.paths['/api/workflow-templates/{id}']?.get;
+  assert.ok(workflowTemplateDetail);
+  assert.ok(workflowTemplateDetail.security?.some((scheme) => 'bearerAuth' in scheme));
+  assert.ok(document.components?.schemas?.WorkflowTemplateDetailResponse);
+  const workflowTemplateDetailSchema = document.components?.schemas?.WorkflowTemplateDetailResponse as {
+    properties?: { base_fingerprint?: { pattern?: string } };
+  };
+  assert.equal(workflowTemplateDetailSchema.properties?.base_fingerprint?.pattern, '^[0-9a-fA-F]{64}$');
+  const workflowTemplateUpdateStatus = document.paths['/api/workflow-templates/{id}/update-requests/{requestId}']?.get;
+  assert.ok(workflowTemplateUpdateStatus);
+  assert.ok(workflowTemplateUpdateStatus.security?.some((scheme) => 'bearerAuth' in scheme));
+  for (const status of ['200', '400', '401', '409', '500']) {
+    assert.equal(workflowTemplateUpdateStatus.responses[status]?.headers?.['Cache-Control']?.schema?.enum?.[0], 'no-store');
+  }
+  assert.ok(document.components?.schemas?.WorkflowTemplateUpdateStatusResponse);
   assert.ok(document.components?.schemas?.ApiError);
   assert.ok(document.components?.schemas?.Topic);
   assert.ok(document.components?.securitySchemes?.bearerAuth);

@@ -140,7 +140,15 @@ await createTopic({ title: '两天阈值前30秒不算卡点', creatorId: direct
 await createTopic({ title: '超过两天30秒算卡点', creatorId: directorId, assigneeId: directorId, status: 'shooting', deadline: shiftedDate(30), stageEnteredAt: formatBeijingTimestamp(exactlyTwoDaysAgo - 30_000) });
 await createTopic({ title: '其他成员的事项', creatorId: otherId, assigneeId: otherId, status: 'production', deadline: shiftedDate(-1), stageEnteredAt: twoDaysOldStage });
 await createTopic({ title: '已完成的旧事项', creatorId: directorId, assigneeId: directorId, status: 'completed', deadline: shiftedDate(-20), stageEnteredAt: `${shiftedDate(-30)} 09:00:00` });
+await createTopic({ title: '已退回且已逾期', creatorId: directorId, assigneeId: directorId, status: 'rejected', deadline: shiftedDate(-1), stageEnteredAt: now });
+await createTopic({ title: '已退回且临近截止', creatorId: directorId, assigneeId: directorId, status: 'rejected', deadline: shiftedDate(1), stageEnteredAt: now });
 await createTopic({ title: '个人逾期事项', creatorId: customId, assigneeId: customId, status: 'production', deadline: shiftedDate(-5), stageEnteredAt: now });
+await createTopic({ title: '团队阶段时间待确认', creatorId: directorId, assigneeId: directorId, status: 'approved', deadline: shiftedDate(30), stageEnteredAt: null });
+await createTopic({ title: '个人阶段时间待确认', creatorId: customId, assigneeId: customId, status: 'approved', deadline: shiftedDate(30), stageEnteredAt: null });
+await createTopic({ title: '范围外阶段时间待确认', creatorId: otherId, assigneeId: otherId, status: 'approved', deadline: shiftedDate(30), stageEnteredAt: null });
+await createTopic({ title: '无效阶段时间待确认', creatorId: directorId, assigneeId: directorId, status: 'approved', deadline: shiftedDate(30), stageEnteredAt: 'not-a-date' });
+await createTopic({ title: '已完成阶段时间待确认', creatorId: directorId, assigneeId: directorId, status: 'completed', deadline: shiftedDate(30), stageEnteredAt: null });
+await createTopic({ title: '已退回阶段时间待确认', creatorId: directorId, assigneeId: directorId, status: 'rejected', deadline: shiftedDate(30), stageEnteredAt: null });
 const todayPublishingTopicId = await createTopic({ title: '今日多平台发布', creatorId: directorId, assigneeId: directorId, status: 'publishing', deadline: shiftedDate(30), stageEnteredAt: now });
 await createPublishing(todayPublishingTopicId, directorId, '抖音', 'pending', `${beijingToday()} 13:00:00`);
 await createPublishing(todayPublishingTopicId, directorId, '小红书', 'scheduled', `${beijingToday()} 18:00:00`);
@@ -247,11 +255,14 @@ try {
   const unauthenticatedActivity = await fetch(activityBase);
   assert.equal(unauthenticatedActivity.status, 401, 'home activity requires authentication');
 
+  const approvedPipelineTopicId = await createTopic({ title: '首页内容流已通过待创作', creatorId: directorId, assigneeId: directorId, status: 'approved', deadline: shiftedDate(30), stageEnteredAt: now });
+  await execute("UPDATE topics SET created_at = '2090-01-01 12:00:00' WHERE id = ?", [approvedPipelineTopicId]);
+
   const directorResponse = await fetch(base, { headers: { authorization: `Bearer ${signToken({ userId: directorId })}` } });
   assert.equal(directorResponse.status, 200);
   const director = await directorResponse.json() as {
     scope: string;
-    counts: { overdue: number; due_soon: number; stalled: number; total: number };
+    counts: { overdue: number; due_soon: number; stalled: number; stage_time_unknown: number; total: number };
     topics: Array<{ title: string; is_overdue: boolean; is_due_soon: boolean; is_stalled: boolean }>;
     today_publishing: { total: number; tasks: Array<{ topic_title: string; platform: string; status: string }> };
     sync_anomalies: { available: boolean; total: number; tasks: Array<{ account_name: string; account_uid: string; status: string; failed_count: number; owner_name: string | null }> };
@@ -261,13 +272,14 @@ try {
     my_drafts: { tasks: Array<{ id: number; topic_id: number | null; topic_title: string | null; status: string; version: string | null; updated_at: string; content?: string }> };
   };
   assert.equal(director.scope, 'all-visible-content');
-  assert.deepEqual(director.counts, { overdue: 3, due_soon: 1, stalled: 4, total: 6 }, 'manager counts include all visible active items without double-counting topics');
+  assert.deepEqual(director.counts, { overdue: 3, due_soon: 1, stalled: 4, stage_time_unknown: 4, total: 6 }, 'manager counts include all visible active items without double-counting topics, while keeping null or invalid stage time separate');
   assert.ok(director.topics.length <= 8, 'home response remains bounded');
   assert.ok(director.topics.some((topic) => topic.title === '团队逾期且卡点' && topic.is_overdue && topic.is_stalled));
   assert.ok(director.topics.some((topic) => topic.title === '团队即将截止' && topic.is_due_soon));
   assert.ok(director.topics.some((topic) => topic.title === '超过两天30秒算卡点' && topic.is_stalled));
   assert.ok(!director.topics.some((topic) => topic.title === '两天阈值前30秒不算卡点'), 'a topic still short of the stalled threshold is excluded');
   assert.ok(!director.topics.some((topic) => topic.title === '已完成的旧事项'), 'completed work is excluded from attention');
+  assert.ok(!director.topics.some((topic) => topic.title === '已退回且已逾期' || topic.title === '已退回且临近截止'), 'rejected topics are excluded from overdue and due-soon attention rows');
   assert.equal(director.today_publishing.total, 13, 'today publishing count is per actionable platform record');
   assert.equal(director.today_publishing.tasks.length, 8, 'today publishing previews are bounded without truncating the total count');
   assert.deepEqual(director.today_publishing.tasks.slice(0, 2).map((task) => [task.topic_title, task.platform, task.status]), [
@@ -304,6 +316,8 @@ try {
   assert.deepEqual(director.topic_stages.pending.topics.map((topic) => topic.title), ['团队即将截止']);
   assert.ok(director.topic_stages.production.total > 3, 'the stage total is not truncated to the three preview rows');
   assert.equal(director.topic_stages.production.topics.length, 3, 'each topic stage returns at most three preview rows');
+  assert.equal(director.topic_stages.production.topics[0]?.id, approvedPipelineTopicId, 'the creation stage preview includes the newest approved topic');
+  assert.equal(director.topic_stages.production.topics[0]?.status, 'approved', 'creation-stage previews preserve the actual approved status');
   assert.ok(director.topic_stages.production.topics.every((topic) => !('content' in topic)), 'stage previews return only bounded topic metadata');
   assert.deepEqual(director.my_drafts.tasks, [], 'a manager with no personally-operated drafts receives an empty personal draft summary');
 
@@ -311,7 +325,7 @@ try {
   assert.equal(personalResponse.status, 200);
   const personal = await personalResponse.json() as {
     scope: string;
-    counts: { overdue: number; due_soon: number; stalled: number; total: number };
+    counts: { overdue: number; due_soon: number; stalled: number; stage_time_unknown: number; total: number };
     topics: Array<{ title: string }>;
     today_publishing: { total: number; tasks: Array<{ topic_title: string; platform: string }> };
     sync_anomalies: { available: boolean; total: number; tasks: Array<unknown> };
@@ -321,7 +335,9 @@ try {
     my_drafts: { tasks: Array<{ topic_title: string | null; status: string }> };
   };
   assert.equal(personal.scope, 'personal');
-  assert.deepEqual(personal.counts, { overdue: 1, due_soon: 0, stalled: 0, total: 1 });
+  assert.deepEqual(personal.counts, { overdue: 1, due_soon: 0, stalled: 0, stage_time_unknown: 1, total: 1 });
+  assert.equal(personal.counts.stalled, 0, 'a topic with unknown stage time is not inferred to be stalled');
+  assert.equal(personal.counts.stage_time_unknown, 1, 'the current user sees only unknown stage times in their existing topic scope');
   assert.deepEqual(personal.topics.map((topic) => topic.title), ['个人逾期事项'], 'personal response contains only topics owned or assigned to the caller');
   assert.equal(personal.today_publishing.total, 1, 'personal publishing scope also includes records operated by the caller');
   assert.deepEqual(personal.today_publishing.tasks.map((task) => [task.topic_title, task.platform]), [['发布操作人个人范围', '视频号']]);
@@ -333,8 +349,8 @@ try {
   assert.deepEqual(personal.production_reviews.tasks.map((task) => task.topic_title), ['成员范围的待审稿件']);
   assert.equal(personal.retrospectives.available, true);
   assert.equal(personal.retrospectives.total, 10, 'the member full-view permission preserves existing retrospective list visibility');
-  assert.equal(personal.topic_stages.production.total, 3, 'personal stage summaries use the same creator/assignee visibility boundary as topic lists');
-  assert.deepEqual(personal.topic_stages.production.topics.map((topic) => topic.title).sort(), ['个人逾期事项', '最近变化范围内选题', '成员范围的待审稿件'].sort(), 'stage previews are bounded and include only the caller-owned or assigned topics');
+  assert.equal(personal.topic_stages.production.total, 4, 'personal creation-stage totals include approved topics and use the same creator/assignee visibility boundary as topic lists');
+  assert.deepEqual(personal.topic_stages.production.topics.map((topic) => topic.title).sort(), ['个人阶段时间待确认', '最近变化范围内选题', '成员范围的待审稿件'].sort(), 'creation-stage previews combine approved/production topics and stay within the caller-owned or assigned scope');
   assert.ok(!personal.topic_stages.production.topics.some((topic) => topic.title === '团队逾期且卡点' || topic.title === '其他成员的事项'));
   assert.ok(personal.my_drafts.tasks.some((task) => task.topic_title === '最近变化范围内选题' && task.status === 'draft'));
   assert.ok(personal.my_drafts.tasks.some((task) => task.topic_title === '操作人参与的最近变化' && task.status === 'draft'), 'the personal draft summary preserves the existing production-operator access path');

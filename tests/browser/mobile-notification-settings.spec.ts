@@ -65,8 +65,14 @@ try {
 
   await page.goto(`${base}/__qa`);
   await page.getByRole('heading', { name: '消息通知偏好' }).waitFor();
+  const back = page.getByRole('button', { name: '返回个人设置' });
   const toggle = page.getByRole('button', { name: /审核结果/ });
   const save = page.getByRole('button', { name: '保存通知偏好', exact: true });
+  for (const [label, locator] of [['back', back], ['event toggle', toggle], ['save', save]] as const) {
+    const bounds = await locator.boundingBox();
+    assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40, `mobile notification ${label} target is at least 40×40px`);
+  }
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390, '390px notification preferences have no horizontal overflow');
   assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
 
   await toggle.click();
@@ -84,10 +90,13 @@ try {
   await page.getByText('通知偏好已保存。', { exact: true }).waitFor();
   assert.equal(persistedPreferences[0]?.enabled, true, 'the server-confirmed selection is persisted');
 
+  await toggle.click();
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'editing after a successful save updates the local selection');
+  assert.equal(await page.getByText('通知偏好已保存。', { exact: true }).count(), 0, 'editing clears the stale success notice');
+  assert.equal(saveRequests, 1, 'editing preferences does not issue a PUT');
+
   saveDelayMs = 100;
   failNextSave = '通知偏好暂时无法保存，请重试。';
-  await toggle.click();
-  assert.equal(await toggle.getAttribute('aria-pressed'), 'false', 'the failed save keeps the user selection available for retry');
   await save.click();
   await page.getByText('通知偏好暂时无法保存，请重试。', { exact: true }).waitFor();
   assert.equal(persistedPreferences[0]?.enabled, true, 'a failed write does not mutate the server fixture');

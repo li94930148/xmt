@@ -17,17 +17,17 @@ export type ReactBitsAppearanceConfig = {
 export type AppearancePage = keyof ReactBitsAppearanceConfig['applyTo'];
 
 export const defaultReactBitsAppearanceConfig: ReactBitsAppearanceConfig = {
-  presetId: 'aurora',
-  background: { component: 'aurora', intensity: 'medium' },
-  headingText: { component: 'split-text' },
-  numberText: { component: 'count-up' },
-  buttonSurface: { component: 'specular-button' },
-  buttonInteraction: { component: 'magnet' },
-  card: { component: 'magic-bento' },
-  reveal: { component: 'animated-content' },
+  presetId: 'custom',
+  background: { component: 'none', intensity: 'low' },
+  headingText: { component: 'none' },
+  numberText: { component: 'none' },
+  buttonSurface: { component: 'standard' },
+  buttonInteraction: { component: 'none' },
+  card: { component: 'standard' },
+  reveal: { component: 'none' },
   navigation: { component: 'standard' },
-  motionMode: 'balanced',
-  applyTo: { login: true, home: true, topics: false, creator: false, analytics: false, dailyReport: false, workflow: false, editor: false },
+  motionMode: 'off',
+  applyTo: { login: false, home: false, topics: false, creator: false, analytics: false, dailyReport: false, workflow: false, editor: false },
 };
 
 const allowed = {

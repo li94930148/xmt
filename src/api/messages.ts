@@ -32,6 +32,20 @@ export interface MessageReadResult {
   ignoredCount?: number;
 }
 
+export interface MessageClearResult {
+  message: string;
+  deletedCount: number;
+  replayed: boolean;
+}
+
+export type MessageClearRequestStatus =
+  | { state: 'cleared'; deletedCount: number }
+  | { state: 'not_found' };
+
+export type MessageReadAllRequestStatus =
+  | { state: 'processed'; updatedCount: number }
+  | { state: 'not_found' };
+
 function getAuthHeader(): Record<string, string> {
   const token = useAuthStore.getState().token;
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -66,20 +80,40 @@ export async function markMessageAsRead(id: number): Promise<{ message: string }
   return response.json();
 }
 
-export async function clearMessages(): Promise<{ message: string }> {
+export async function clearMessages(clientRequestId: string): Promise<MessageClearResult> {
   const response = await fetch(`${BASE_URL}/messages`, {
     method: 'DELETE',
-    headers: getAuthHeader()
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_request_id: clientRequestId }),
   });
   if (!response.ok) throw new Error('清空消息失败');
   return response.json();
 }
 
-export async function markAllAsRead(ids?: number[]): Promise<MessageReadResult> {
+export async function getMessageClearRequestStatus(requestId: string): Promise<MessageClearRequestStatus> {
+  const response = await fetch(`${BASE_URL}/messages/clear-requests/${encodeURIComponent(requestId)}`, {
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new Error('暂时无法核实清空结果');
+  return response.json();
+}
+
+export async function getMessageReadAllRequestStatus(requestId: string): Promise<MessageReadAllRequestStatus> {
+  const response = await fetch(`${BASE_URL}/messages/read-all-requests/${encodeURIComponent(requestId)}`, {
+    headers: getAuthHeader(),
+  });
+  if (!response.ok) throw new Error('暂时无法核实批量已读结果');
+  return response.json();
+}
+
+export async function markAllAsRead(ids?: number[], clientRequestId?: string): Promise<MessageReadResult> {
+  const body: { ids?: number[]; client_request_id?: string } = {};
+  if (ids !== undefined) body.ids = ids;
+  if (clientRequestId) body.client_request_id = clientRequestId;
   const response = await fetch(`${BASE_URL}/messages/read-all`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids })
+    body: JSON.stringify(body)
   });
   if (!response.ok) throw new Error('批量标记失败');
   return response.json();

@@ -9,10 +9,9 @@ async function responseJson(response: Response) {
     string,
     unknown
   >;
-  if (!response.ok)
-    throw new Error(
-      String(value.message || `请求失败 HTTP ${response.status}`),
-    );
+  if (!response.ok) {
+    throw Object.assign(new Error(String(value.message || `请求失败 HTTP ${response.status}`)), { statusCode: response.status });
+  }
   return value;
 }
 export async function loginXmt(
@@ -60,20 +59,41 @@ export async function bind(
   serverUrl: string,
   bindingCode: string,
   device: Record<string, unknown>,
+  recovery?: { requestId: string; recoverySecret: string },
 ) {
   const response = await fetch(
     `${serverUrl.replace(/\/$/, "")}/api/creator-agent/bind`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ binding_code: bindingCode, device }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15_000),
+      body: JSON.stringify({
+        binding_code: bindingCode,
+        device,
+        ...(recovery ? { request_id: recovery.requestId, recovery_secret: recovery.recoverySecret } : {}),
+      }),
     },
   );
   return responseJson(response) as Promise<{
     agent_id: number;
     agent_token: string;
     account_id: string;
+    recovery_supported?: true;
   }>;
+}
+export async function acknowledgeBind(serverUrl: string, recovery: { requestId: string; recoverySecret: string }) {
+  const response = await fetch(`${serverUrl.replace(/\/$/, '')}/api/creator-agent/bind/ack`, {
+    method: 'POST',
+    cache: 'no-store',
+    signal: AbortSignal.timeout(10_000),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ request_id: recovery.requestId, recovery_secret: recovery.recoverySecret }),
+  });
+  if (!response.ok) {
+    const value = await response.json().catch(() => ({})) as Record<string, unknown>;
+    throw new Error(String(value.message || `绑定结果确认失败 HTTP ${response.status}`));
+  }
 }
 export async function heartbeat(
   config: AgentConfig,
@@ -94,7 +114,7 @@ export async function heartbeat(
         account_id: config.accountId,
         device_name: state.deviceName,
         os: state.os,
-        agent_version: "2.14.5-agent",
+        agent_version: "2.14.7-agent",
         protocol_version: 1,
         browser_login_status: state.browserLoginStatus,
         browser_type: browser.type,

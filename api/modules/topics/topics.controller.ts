@@ -21,6 +21,7 @@ import { TopicService } from './topics.service';
 import { TopicServiceError, type TopicActor } from './topics.types';
 
 type TopicAction = 'get' | 'create' | 'update' | 'delete' | 'audit' | 'transition' | 'repair';
+const TOPIC_CREATE_REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const SERVER_ERROR_MESSAGES: Record<TopicAction, string> = {
   get: '获取选题详情失败',
@@ -36,6 +37,30 @@ function actor(req: Request): TopicActor {
   return { id: req.user!.id, role: req.user!.role };
 }
 
+function normalizeTopicCreateRequestId(value: unknown) {
+  const requestId = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!TOPIC_CREATE_REQUEST_ID_PATTERN.test(requestId)) {
+    throw new TopicServiceError('TOPIC_INVALID_INPUT', '选题请求编号无效');
+  }
+  return requestId;
+}
+
+function createRequestIdFromBody(req: Request) {
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+    ? req.body as Record<string, unknown>
+    : null;
+  const rawRequestId = body?.client_request_id;
+  if (rawRequestId === undefined || rawRequestId === null) return undefined;
+  return normalizeTopicCreateRequestId(rawRequestId);
+}
+
+function topicCreatePayloadBody(req: Request) {
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) return req.body;
+  const payload = { ...(req.body as Record<string, unknown>) };
+  delete payload.client_request_id;
+  return payload;
+}
+
 function legacyError(res: Response, error: unknown, action: TopicAction) {
   if (error instanceof ZodError) return sendError(res, '请求参数不合法', 400);
   if (error instanceof TopicServiceError) {
@@ -44,6 +69,7 @@ function legacyError(res: Response, error: unknown, action: TopicAction) {
     if (error.code === 'TOPIC_SUGGESTION_STALE' || error.code === 'TOPIC_STAGE_CONFLICT' || error.code === 'TOPIC_STAGE_NOT_REPAIRABLE') {
       return sendError(res, error.message, 409);
     }
+    if (error.code === 'TOPIC_CREATE_REQUEST_CONFLICT') return sendError(res, error.message, 409);
     if (error.code === 'TOPIC_VERSION_CONFLICT') return sendError(res, error.message, 409);
     return sendError(res, error.message);
   }
@@ -81,6 +107,13 @@ function v1Error(req: Request, res: Response, error: unknown) {
       }, 409);
     }
     if (error.code === 'TOPIC_VERSION_CONFLICT') {
+      return sendV1Error(req, res, {
+        code: 'CONFLICT',
+        message: error.message,
+        details: { domainCode: error.code },
+      }, 409);
+    }
+    if (error.code === 'TOPIC_CREATE_REQUEST_CONFLICT') {
       return sendV1Error(req, res, {
         code: 'CONFLICT',
         message: error.message,
@@ -137,16 +170,27 @@ export class TopicController {
     catch (error) { return legacyError(res, error, 'get'); }
   };
 
+  legacyTopicCreateRequestStatus = async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const requestId = normalizeTopicCreateRequestId(req.params.requestId);
+      return res.json(await this.service.getTopicCreateRequestStatus(actor(req), requestId));
+    } catch (error) {
+      return legacyError(res, error, 'get');
+    }
+  };
+
   legacyCreate = async (req: Request, res: Response) => {
     try {
-      const input = parse(createTopicInputSchema, req.body);
+      const clientRequestId = createRequestIdFromBody(req);
+      const input = parse(createTopicInputSchema, topicCreatePayloadBody(req));
       const result = await this.service.createTopic(actor(req), {
         ...input,
         description: input.description ?? '',
         platform: input.platform ?? '',
         deadline: input.deadline ?? '',
         outlineJson: typeof input.outlineJson === 'object' && input.outlineJson !== null ? JSON.stringify(input.outlineJson) : input.outlineJson,
-      });
+      }, clientRequestId);
       return sendSuccess(res, result, '选题提交成功');
     } catch (error) {
       return legacyError(res, error, 'create');
@@ -230,9 +274,18 @@ export class TopicController {
     catch (error) { return v1Error(req, res, error); }
   };
 
+  v1TopicCreateRequestStatus = async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const requestId = normalizeTopicCreateRequestId(req.params.requestId);
+      return sendV1Success(req, res, await this.service.getTopicCreateRequestStatus(actor(req), requestId));
+    } catch (error) { return v1Error(req, res, error); }
+  };
+
   v1Create = async (req: Request, res: Response) => {
     try {
-      const input = parse(createTopicInputSchema, req.body);
+      const clientRequestId = createRequestIdFromBody(req);
+      const input = parse(createTopicInputSchema, topicCreatePayloadBody(req));
       const normalized = {
         ...input,
         description: input.description ?? '',
@@ -242,7 +295,7 @@ export class TopicController {
           ? JSON.stringify(input.outlineJson)
           : input.outlineJson,
       };
-      return sendV1Success(req, res, await this.service.createTopic(actor(req), normalized));
+      return sendV1Success(req, res, await this.service.createTopic(actor(req), normalized, clientRequestId));
     } catch (error) { return v1Error(req, res, error); }
   };
 

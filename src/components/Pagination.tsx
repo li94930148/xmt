@@ -1,4 +1,4 @@
-import { useThemeStyles } from '../hooks/useThemeStyles';
+import ActionButton from './studio/ActionButton';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 interface PaginationProps {
@@ -9,33 +9,38 @@ interface PaginationProps {
 }
 
 export default function Pagination({ page, total, limit, onChange }: PaginationProps) {
-  const styles = useThemeStyles();
   const totalPages = Math.ceil(total / limit) || 1;
 
   if (total <= limit) return null;
 
   return (
-    <div className={`flex items-center justify-between px-4 py-3 border-t ${styles.divider}`}>
-      <span className={`text-xs ${styles.textMuted}`}>
+    <nav aria-label="分页" className="flex flex-col gap-2 border-t border-studio-border-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <span className="text-xs text-studio-text-secondary">
         共 {total} 条，第 {page}/{totalPages} 页
       </span>
-      <div className="flex items-center gap-1">
-        <button
+      <div role="group" aria-label="分页控制" className="flex w-full items-center justify-center gap-0 sm:w-auto sm:justify-end sm:gap-1">
+        <ActionButton
+          type="button"
           onClick={() => onChange(1)}
           disabled={page <= 1}
-          className={`p-1.5 rounded-lg transition-colors ${styles.hoverBg} disabled:opacity-30 disabled:cursor-not-allowed`}
+          variant="ghost"
+          className="hidden h-10 w-10 min-h-10 min-w-10 flex-none p-0 text-studio-text-secondary sm:inline-flex"
           title="首页"
+          aria-label="首页"
         >
-          <ChevronsLeft className={`w-4 h-4 ${styles.textMuted}`} />
-        </button>
-        <button
+          <ChevronsLeft className="h-4 w-4" />
+        </ActionButton>
+        <ActionButton
+          type="button"
           onClick={() => onChange(page - 1)}
           disabled={page <= 1}
-          className={`p-1.5 rounded-lg transition-colors ${styles.hoverBg} disabled:opacity-30 disabled:cursor-not-allowed`}
+          variant="ghost"
+          className="h-10 w-10 min-h-10 min-w-10 flex-none p-0 text-studio-text-secondary"
           title="上一页"
+          aria-label="上一页"
         >
-          <ChevronLeft className={`w-4 h-4 ${styles.textMuted}`} />
-        </button>
+          <ChevronLeft className="h-4 w-4" />
+        </ActionButton>
 
         {/* 页码按钮 */}
         {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
@@ -50,37 +55,49 @@ export default function Pagination({ page, total, limit, onChange }: PaginationP
             pageNum = page - 2 + i;
           }
           return (
-            <button
+            <ActionButton
               key={pageNum}
               onClick={() => onChange(pageNum)}
-              className={`w-8 h-8 rounded-lg text-xs font-medium transition-all duration-200 ${
+              type="button"
+              variant={pageNum === page ? 'primary' : 'ghost'}
+              aria-label={`第 ${pageNum} 页`}
+              aria-current={pageNum === page ? 'page' : undefined}
+              className={`h-10 w-10 min-h-10 min-w-10 flex-none p-0 text-xs xmt-data-number ${
+                Math.abs(pageNum - page) > 1 ? 'hidden sm:inline-flex' : ''
+              } ${
                 pageNum === page
                   ? 'bg-studio-primary-button text-white shadow-sm shadow-studio-primary/25'
-                  : `${styles.textMuted} ${styles.hoverBg}`
+                  : 'text-studio-text-secondary'
               }`}
             >
               {pageNum}
-            </button>
+            </ActionButton>
           );
         })}
 
-        <button
+        <ActionButton
+          type="button"
           onClick={() => onChange(page + 1)}
           disabled={page >= totalPages}
-          className={`p-1.5 rounded-lg transition-colors ${styles.hoverBg} disabled:opacity-30 disabled:cursor-not-allowed`}
+          variant="ghost"
+          className="h-10 w-10 min-h-10 min-w-10 flex-none p-0 text-studio-text-secondary"
           title="下一页"
+          aria-label="下一页"
         >
-          <ChevronRight className={`w-4 h-4 ${styles.textMuted}`} />
-        </button>
-        <button
+          <ChevronRight className="h-4 w-4" />
+        </ActionButton>
+        <ActionButton
+          type="button"
           onClick={() => onChange(totalPages)}
           disabled={page >= totalPages}
-          className={`p-1.5 rounded-lg transition-colors ${styles.hoverBg} disabled:opacity-30 disabled:cursor-not-allowed`}
+          variant="ghost"
+          className="hidden h-10 w-10 min-h-10 min-w-10 flex-none p-0 text-studio-text-secondary sm:inline-flex"
           title="末页"
+          aria-label="末页"
         >
-          <ChevronsRight className={`w-4 h-4 ${styles.textMuted}`} />
-        </button>
+          <ChevronsRight className="h-4 w-4" />
+        </ActionButton>
       </div>
-    </div>
+    </nav>
   );
 }

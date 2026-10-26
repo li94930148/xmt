@@ -5,6 +5,7 @@ import ActionButton from './studio/ActionButton';
 import { getWeeklyReport } from '../api/export';
 import { FileText, Video, Eye, Heart, Copy, Loader2, RefreshCw, Lightbulb } from 'lucide-react';
 import { formatBeijingTime } from '../lib/utils';
+import { getPlatformLabel } from '../platform/platform-labels';
 
 interface WeeklyReportData {
   period: { start: string; end: string };
@@ -89,7 +90,7 @@ export default function WeeklyReport() {
     if (details.publishedVideos.length > 0) {
       lines.push('🎬 本周发布的视频');
       details.publishedVideos.forEach((v, i) => {
-        lines.push(`${i + 1}. ${v.topic_title} [${v.platform}]`);
+        lines.push(`${i + 1}. ${v.topic_title} [${getPlatformLabel(v.platform)}]`);
       });
       lines.push('');
     }
@@ -162,8 +163,8 @@ export default function WeeklyReport() {
             <FileText className="w-5 h-5 text-studio-violet" />
           </div>
           <div>
-            <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>周报生成</h3>
-            <p className={`text-sm ${styles.textSecondary}`}>
+            <h2 className="text-lg font-semibold text-studio-text-primary">周报生成</h2>
+            <p className="text-sm text-studio-text-secondary">
               {data?.period ? `${data.period.start} ~ ${data.period.end}` : '自动生成本周工作摘要'}
             </p>
           </div>
@@ -200,7 +201,7 @@ export default function WeeklyReport() {
           </ActionButton>
         </div>
       ) : loading && data ? (
-        <p role="status" className={`mb-6 text-sm ${styles.textMuted}`}>
+        <p role="status" className="mb-6 text-sm text-studio-text-secondary">
           正在更新周报；当前仍显示 {data.period.start} 至 {data.period.end} 的最近一次成功结果。
         </p>
       ) : null}
@@ -226,7 +227,7 @@ export default function WeeklyReport() {
                 <div key={idx} className={`${styles.bgTertiary} rounded-xl p-4 text-center`}>
                   <Icon className="w-5 h-5 mx-auto mb-2" style={{ color: item.color }} />
                   <p className={`text-2xl font-bold ${styles.textPrimary}`}>{item.value}</p>
-                  <p className={`text-xs ${styles.textMuted} mt-1`}>{item.label}</p>
+                  <p className="mt-1 text-xs text-studio-text-secondary">{item.label}</p>
                 </div>
               );
             })}
@@ -236,32 +237,32 @@ export default function WeeklyReport() {
           <div className="grid grid-cols-3 gap-4">
             <div className={`${styles.bgTertiary} rounded-xl p-4 text-center`}>
               <p className={`text-lg font-bold ${styles.textPrimary}`}>{summary.newTopics}</p>
-              <p className={`text-xs ${styles.textMuted} mt-1`}>新增选题</p>
+              <p className="mt-1 text-xs text-studio-text-secondary">新增选题</p>
             </div>
             <div className={`${styles.bgTertiary} rounded-xl p-4 text-center`}>
               <p className={`text-lg font-bold ${styles.textPrimary}`}>{formatNumber(summary.totalShares)}</p>
-              <p className={`text-xs ${styles.textMuted} mt-1`}>总分享量</p>
+              <p className="mt-1 text-xs text-studio-text-secondary">总分享量</p>
             </div>
             <div className={`${styles.bgTertiary} rounded-xl p-4 text-center`}>
               <p className={`text-lg font-bold ${styles.textPrimary}`}>{formatNumber(summary.totalComments)}</p>
-              <p className={`text-xs ${styles.textMuted} mt-1`}>总评论量</p>
+              <p className="mt-1 text-xs text-studio-text-secondary">总评论量</p>
             </div>
           </div>
 
           {/* 完成的选题 */}
           {details.completedTopics.length > 0 && (
             <div>
-              <h4 className={`text-sm font-semibold ${styles.textPrimary} mb-3 flex items-center gap-2`}>
+              <h3 className={`mb-3 flex items-center gap-2 text-sm font-semibold ${styles.textPrimary}`}>
                 <FileText className="w-4 h-4 text-studio-success" />
                 本周完成的选题
-              </h4>
+              </h3>
               <div className="space-y-2">
                 {details.completedTopics.map((topic) => (
                   <div key={topic.id} className={`flex items-center gap-3 p-3 ${styles.bgTertiary} rounded-lg`}>
                     <div className="w-2 h-2 rounded-full bg-studio-success flex-shrink-0" />
                     <span className={`text-sm ${styles.textPrimary} flex-1`}>{topic.title}</span>
                     {topic.creator_name && (
-                      <span className={`text-xs ${styles.textMuted}`}>{topic.creator_name}</span>
+                      <span className="text-xs text-studio-text-secondary">{topic.creator_name}</span>
                     )}
                   </div>
                 ))}
@@ -272,16 +273,16 @@ export default function WeeklyReport() {
           {/* 发布的视频 */}
           {details.publishedVideos.length > 0 && (
             <div>
-              <h4 className={`text-sm font-semibold ${styles.textPrimary} mb-3 flex items-center gap-2`}>
+              <h3 className={`mb-3 flex items-center gap-2 text-sm font-semibold ${styles.textPrimary}`}>
                 <Video className="w-4 h-4 text-studio-primary" />
                 本周发布的视频
-              </h4>
+              </h3>
               <div className="space-y-2">
                 {details.publishedVideos.map((video) => (
                   <div key={video.id} className={`flex items-center gap-3 p-3 ${styles.bgTertiary} rounded-lg`}>
                     <div className="w-2 h-2 rounded-full bg-studio-primary flex-shrink-0" />
                     <span className={`text-sm ${styles.textPrimary} flex-1`}>{video.topic_title}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${styles.bgInput} ${styles.textMuted}`}>{video.platform}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${styles.bgInput} text-studio-text-secondary`}>{getPlatformLabel(video.platform)}</span>
                   </div>
                 ))}
               </div>
@@ -291,16 +292,16 @@ export default function WeeklyReport() {
           {/* 热门灵感 */}
           {details.topInspirations.length > 0 && (
             <div>
-              <h4 className={`text-sm font-semibold ${styles.textPrimary} mb-3 flex items-center gap-2`}>
+              <h3 className={`mb-3 flex items-center gap-2 text-sm font-semibold ${styles.textPrimary}`}>
                 <Lightbulb className="w-4 h-4 text-studio-amber" />
                 热门灵感
-              </h4>
+              </h3>
               <div className="space-y-2">
                 {details.topInspirations.map((insp) => (
                   <div key={insp.id} className={`flex items-center gap-3 p-3 ${styles.bgTertiary} rounded-lg`}>
                     <div className="w-2 h-2 rounded-full bg-studio-amber flex-shrink-0" />
                     <span className={`text-sm ${styles.textPrimary} flex-1`}>{insp.title}</span>
-                    <span className={`text-xs ${styles.textMuted}`}>{insp.votes}票</span>
+                    <span className="text-xs text-studio-text-secondary">{insp.votes}票</span>
                   </div>
                 ))}
               </div>
@@ -308,7 +309,7 @@ export default function WeeklyReport() {
           )}
 
           {details.completedTopics.length === 0 && details.publishedVideos.length === 0 && (
-            <p className={`text-center py-8 ${styles.textSecondary}`}>本周暂无完成的选题和发布的视频</p>
+            <p className="py-8 text-center text-studio-text-secondary">本周暂无完成的选题和发布的视频</p>
           )}
         </div>
       )}

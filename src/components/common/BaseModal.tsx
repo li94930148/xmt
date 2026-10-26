@@ -1,7 +1,8 @@
-import { useEffect, useId, type ReactNode } from 'react';
+import { useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useThemeStyles } from '../../hooks/useThemeStyles';
+import { useModalLifecycle } from './useModalLifecycle';
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -41,15 +42,8 @@ export default function BaseModal({
 }: BaseModalProps) {
   const styles = useThemeStyles();
   const titleId = useId();
-
-  useEffect(() => {
-    if (!open || !closeOnEscape) return;
-    const handleEscapeKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleEscapeKey);
-    return () => window.removeEventListener('keydown', handleEscapeKey);
-  }, [closeOnEscape, onClose, open]);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  useModalLifecycle(open, overlayRef, onClose, closeOnEscape);
 
   if (!open) {
     return null;
@@ -57,9 +51,11 @@ export default function BaseModal({
 
   return createPortal((
     <div
+      ref={overlayRef}
       className="xmt-overlay xmt-overlay-center px-4 py-6"
       role="dialog"
       aria-modal="true"
+      tabIndex={-1}
       aria-labelledby={title ? titleId : undefined}
       aria-label={title ? undefined : '对话框'}
       onClick={(event) => {
@@ -83,7 +79,7 @@ export default function BaseModal({
               <button
                 type="button"
                 onClick={onClose}
-                className={`rounded-lg p-2 transition-colors ${styles.hoverBg}`}
+                className={`xmt-btn xmt-btn-ghost h-10 w-10 shrink-0 !p-0 ${styles.hoverBg}`}
                 aria-label="关闭弹窗"
               >
                 <X className={`h-5 w-5 ${styles.textMuted}`} />

@@ -136,6 +136,28 @@ export type CreateRetroActionPayload = {
   dueDate?: string | null;
 };
 
+export type RetroActionCreateRequestStatus =
+  | { state: 'created'; actionId: number }
+  | { state: 'not_found' }
+  | { state: 'deleted' };
+
+export type RetroActionUpdateRequestStatus =
+  | { state: 'processed' }
+  | { state: 'not_found' }
+  | { state: 'conflict' };
+
+export type RetroActionUpdateRecoveryState =
+  | 'needs_check'
+  | 'posting'
+  | 'checking'
+  | 'not_found'
+  | 'unknown'
+  | 'processed_refresh'
+  | 'conflict_refresh'
+  | 'conflict_reedit'
+  | 'rejected_refresh'
+  | 'storage_error';
+
 export type UpdateRetroActionPayload = Partial<CreateRetroActionPayload> & {
   status?: RetroActionStatus;
   resultMd?: string;
@@ -245,11 +267,41 @@ export function getMyRetroActions(params: { status?: RetroActionStatus | 'open' 
   );
 }
 
-export function createRetrospective(payload: CreateRetrospectivePayload) {
+export function createRetrospective(payload: CreateRetrospectivePayload, clientRequestId?: string) {
   return requestJson<RetrospectiveDetail>('', '创建复盘失败', {
     method: 'POST',
     body: JSON.stringify(payload),
+    ...(clientRequestId ? { headers: { 'X-Idempotency-Key': clientRequestId } } : {}),
   });
+}
+
+export type RetrospectiveCreateRequestStatus =
+  | { state: 'created'; retrospectiveId: number }
+  | { state: 'not_found' };
+
+export type RetrospectiveUpdateRequestStatus =
+  | { state: 'processed' }
+  | { state: 'not_found' }
+  | { state: 'conflict' };
+
+export type RetrospectiveUpdateRecoveryState =
+  | 'needs_check'
+  | 'posting'
+  | 'checking'
+  | 'not_found'
+  | 'unknown'
+  | 'processed_refresh'
+  | 'superseded_reedit'
+  | 'conflict_refresh'
+  | 'conflict_reedit'
+  | 'rejected_refresh'
+  | 'storage_error';
+
+export function getRetrospectiveCreateRequestStatus(clientRequestId: string) {
+  return requestJson<RetrospectiveCreateRequestStatus>(
+    `/create-requests/${encodeURIComponent(clientRequestId)}`,
+    '核实复盘创建结果失败',
+  );
 }
 
 export function getRetrospectiveDetail(id: number) {
@@ -264,11 +316,20 @@ export function exportRetrospective(id: number, type: 'markdown' | 'html') {
   return requestJson<RetroExportResult>(`/${id}/export${buildQuery({ type })}`, '导出复盘失败');
 }
 
-export function updateRetrospective(id: number, payload: UpdateRetrospectivePayload) {
+export function updateRetrospective(id: number, payload: UpdateRetrospectivePayload, clientRequestId?: string) {
   return requestJson<RetrospectiveDetail>(`/${id}`, '保存复盘结论失败', {
     method: 'PUT',
     body: JSON.stringify(payload),
+    ...(clientRequestId ? { headers: { 'X-Idempotency-Key': clientRequestId } } : {}),
   });
+}
+
+export function getRetrospectiveUpdateRequestStatus(id: number, clientRequestId: string) {
+  return requestJson<RetrospectiveUpdateRequestStatus>(
+    `/${id}/update-requests/${encodeURIComponent(clientRequestId)}`,
+    '核实复盘结论更新结果失败',
+    { cache: 'no-store' },
+  );
 }
 
 export function generateRetroSnapshot(id: number, payload: { mode: 'replace' } = { mode: 'replace' }) {
@@ -286,16 +347,34 @@ export function archiveRetrospective(id: number) {
   return requestJson<RetrospectiveDetail>(`/${id}/archive`, '归档复盘失败', { method: 'POST' });
 }
 
-export function createRetroAction(id: number, payload: CreateRetroActionPayload) {
+export function createRetroAction(id: number, payload: CreateRetroActionPayload, clientRequestId?: string) {
   return requestJson<RetrospectiveDetail>(`/${id}/actions`, '创建行动项失败', {
     method: 'POST',
     body: JSON.stringify(payload),
+    ...(clientRequestId ? { headers: { 'X-Idempotency-Key': clientRequestId } } : {}),
   });
 }
 
-export function updateRetroAction(actionId: number, payload: UpdateRetroActionPayload) {
+export function getRetroActionCreateRequestStatus(id: number, clientRequestId: string) {
+  return requestJson<RetroActionCreateRequestStatus>(
+    `/${id}/actions/create-requests/${encodeURIComponent(clientRequestId)}`,
+    '核实行动项创建结果失败',
+    { cache: 'no-store' },
+  );
+}
+
+export function updateRetroAction(actionId: number, payload: UpdateRetroActionPayload, clientRequestId?: string) {
   return requestJson<RetrospectiveDetail>(`/actions/${actionId}`, '更新行动项失败', {
     method: 'PATCH',
     body: JSON.stringify(payload),
+    ...(clientRequestId ? { headers: { 'X-Idempotency-Key': clientRequestId } } : {}),
   });
+}
+
+export function getRetroActionUpdateRequestStatus(actionId: number, clientRequestId: string) {
+  return requestJson<RetroActionUpdateRequestStatus>(
+    `/actions/${actionId}/update-requests/${encodeURIComponent(clientRequestId)}`,
+    '核实行动项更新结果失败',
+    { cache: 'no-store' },
+  );
 }

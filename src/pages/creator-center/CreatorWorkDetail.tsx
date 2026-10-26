@@ -56,7 +56,7 @@ export default function CreatorWorkDetail() {
       <button
         type="button"
         onClick={() => navigate("/analytics/creator-center/works")}
-        className="inline-flex items-center gap-2 text-sm text-studio-text-muted hover:text-studio-text"
+        className="inline-flex min-h-10 min-w-10 items-center gap-2 rounded-button px-2 py-1 text-sm text-studio-text-secondary hover:text-studio-text"
       >
         <ArrowLeft className="h-4 w-4" />
         返回作品库
@@ -94,7 +94,7 @@ export default function CreatorWorkDetail() {
       <button
         type="button"
         onClick={() => navigate("/analytics/creator-center/works")}
-        className="inline-flex items-center gap-2 text-sm text-studio-text-muted hover:text-studio-text"
+        className="inline-flex min-h-10 min-w-10 items-center gap-2 rounded-button px-2 py-1 text-sm text-studio-text-secondary hover:text-studio-text"
       >
         <ArrowLeft className="h-4 w-4" />
         返回作品库
@@ -104,7 +104,7 @@ export default function CreatorWorkDetail() {
           work={work}
           accountUid={accountUid}
           loading="eager"
-          className="h-44 w-72 rounded-xl object-cover"
+          className="h-44 w-full max-w-72 rounded-xl object-cover sm:w-72"
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start gap-3">
@@ -117,7 +117,7 @@ export default function CreatorWorkDetail() {
               </span>
             ) : null}
           </div>
-          <p className="mt-3 text-sm text-studio-text-muted">
+          <p className="mt-3 text-sm text-studio-text-secondary">
             发布于 {formatDate(work.publish_time, true)} · 时长{" "}
             {work.duration ? `${work.duration.toFixed(1)} 秒` : "接口未返回"}
           </p>
@@ -187,25 +187,25 @@ export default function CreatorWorkDetail() {
       <Panel title="表现评分与爆款识别" description="综合播放与互动表现">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl bg-studio-surface p-4">
-            <span className="text-xs text-studio-text-muted">播放得分</span>
+            <span className="text-xs text-studio-text-secondary">播放得分</span>
             <p className="mt-2 font-semibold">
               {performance.score_components.play} / 50
             </p>
           </div>
           <div className="rounded-xl bg-studio-surface p-4">
-            <span className="text-xs text-studio-text-muted">互动得分</span>
+            <span className="text-xs text-studio-text-secondary">互动得分</span>
             <p className="mt-2 font-semibold">
               {performance.score_components.interaction} / 25
             </p>
           </div>
           <div className="rounded-xl bg-studio-surface p-4">
-            <span className="text-xs text-studio-text-muted">分享得分</span>
+            <span className="text-xs text-studio-text-secondary">分享得分</span>
             <p className="mt-2 font-semibold">
               {performance.score_components.share} / 15
             </p>
           </div>
           <div className="rounded-xl bg-studio-surface p-4">
-            <span className="text-xs text-studio-text-muted">完播得分</span>
+            <span className="text-xs text-studio-text-secondary">完播得分</span>
             <p className="mt-2 font-semibold">
               {performance.score_components.completion == null
                 ? "数据不可用"
@@ -214,13 +214,13 @@ export default function CreatorWorkDetail() {
           </div>
         </div>
         {performance.is_viral ? (
-          <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-studio-text-muted">
+          <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-studio-text-secondary">
             {performance.viral_reasons.map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
           </ul>
         ) : (
-          <p className="mt-4 text-sm text-studio-text-muted">
+          <p className="mt-4 text-sm text-studio-text-secondary">
             当前作品未同时满足播放分位、传播质量和综合评分三项爆款门槛。
           </p>
         )}
@@ -232,7 +232,7 @@ export default function CreatorWorkDetail() {
         >
           <LineChart values={data.snapshots.map((row) => row.play_count)} />
           {data.snapshots.length < 2 ? (
-            <p className="mt-3 text-sm text-studio-text-muted">
+            <p className="mt-3 text-sm text-studio-text-secondary">
               至少完成两次同步后才能形成增长曲线。
             </p>
           ) : null}
@@ -240,7 +240,7 @@ export default function CreatorWorkDetail() {
         <Panel title="互动曲线" description="点赞、评论、分享与收藏之和">
           <LineChart values={interactions} color="rgb(244 63 94)" />
           {data.snapshots.length < 2 ? (
-            <p className="mt-3 text-sm text-studio-text-muted">
+            <p className="mt-3 text-sm text-studio-text-secondary">
               当前只有一个真实快照，不生成推测趋势。
             </p>
           ) : null}
@@ -261,7 +261,7 @@ export default function CreatorWorkDetail() {
               </span>
             ))}
             {keywords.length === 0 ? (
-              <p className="text-sm text-studio-text-muted">暂无评论关键词</p>
+              <p className="text-sm text-studio-text-secondary">暂无评论关键词</p>
             ) : null}
           </div>
         </Panel>

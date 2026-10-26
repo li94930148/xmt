@@ -43,10 +43,19 @@ function testButtonsMayShrinkNotClip() {
 
 function testPermissionRulesPreserved() {
   assert.ok(
-    /const canEditSelectedVersion = canEditProduction && !requestedHistoryUnavailable && selectedVersionId === 'current'/.test(source),
-    '编辑操作必须保留原权限校验，并限制为可用的当前版本',
+    /const canEditProduction = production\?\.can_edit === true/.test(source),
+    '编辑范围应以详情 API 返回的服务端 can_edit 结果为准',
+  );
+  assert.ok(
+    /hasPermission\('production:update'\)/.test(source) && /selectedVersionId === 'current'/.test(source) && /!superseded/.test(source),
+    '正文写入必须同时要求 production:update、服务端编辑范围、当前版本且未被替代',
   );
   assert.ok(source.includes('!canEditSelectedVersion || superseded'), '保存操作仍须校验权限和过期状态');
+  assert.ok(source.includes('当前账号缺少创作更新权限'), '缺少 production:update 时要说明具体只读原因');
+  assert.ok(source.includes('当前显示的是历史版本，仅供查看'), '历史稿件要说明当前只读的是非当前版本');
+  assert.ok(source.includes('当前账号不在这篇稿件的编辑范围内'), '无服务端稿件编辑范围时要说明具体只读原因');
+  assert.ok(source.includes('当前版本已被替代，仅可查看'), '协作中被新版本替代的稿件要明确说明只读状态');
+  assert.ok(!source.includes('协同自动同步'), '只读稿件不能显示协同自动同步的保存承诺');
   assert.ok(source.includes("editData.status === 'draft'"), '保留提交审核状态判断');
   assert.ok(source.includes("handleVersionedSave('major')"), '保留另开新版业务入口');
 }

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { User } from '../types/index.js';
 import { beijingNow, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { createMessage } from '../utils/messageHelper.js';
@@ -22,6 +23,7 @@ const SCOPE_TYPES: RetrospectiveScopeType[] = ['team', 'project', 'topic', 'chan
 const RETRO_STATUSES: RetrospectiveStatus[] = ['draft', 'published', 'archived'];
 const ACTION_STATUSES: RetroActionStatus[] = ['todo', 'doing', 'done', 'cancelled'];
 const MAX_RETRO_RANGE_DAYS = 366;
+const REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const RETRO_STATUS_LABELS: Record<RetrospectiveStatus, string> = {
   draft: '草稿',
@@ -473,6 +475,165 @@ function parseId(value: number | string, field = 'id') {
   return id;
 }
 
+function normalizeCreateRequestId(value?: string) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return undefined;
+  }
+  const requestId = String(value).trim().toLowerCase();
+  if (!REQUEST_ID_RE.test(requestId)) {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', '复盘创建请求编号无效');
+  }
+  return requestId;
+}
+
+function normalizeRetroActionCreateRequestId(value?: string) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return undefined;
+  }
+  const requestId = String(value).trim().toLowerCase();
+  if (!REQUEST_ID_RE.test(requestId)) {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', '行动项创建请求编号无效');
+  }
+  return requestId;
+}
+
+function normalizeRetroActionUpdateRequestId(value?: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+  const requestId = String(value).trim().toLowerCase();
+  if (!REQUEST_ID_RE.test(requestId)) {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', '行动项更新请求编号无效');
+  }
+  return requestId;
+}
+
+function normalizeRetrospectiveUpdateRequestId(value?: string) {
+  if (value === undefined) return undefined;
+  const requestId = String(value).trim().toLowerCase();
+  if (!REQUEST_ID_RE.test(requestId)) {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', '复盘更新请求编号无效');
+  }
+  return requestId;
+}
+
+function retrospectiveUpdateFingerprint(input: UpdateRetrospectiveInput) {
+  const normalizedInput = {
+    title: input.title === undefined
+      ? { provided: false, value: null }
+      : { provided: true, value: String(input.title || '').trim() },
+    summaryMd: input.summaryMd === undefined
+      ? { provided: false, value: null }
+      : { provided: true, value: String(input.summaryMd || '') },
+    version: Number(input.version),
+  };
+  return createHash('sha256').update(JSON.stringify(normalizedInput)).digest('hex');
+}
+
+function retroActionUpdateFingerprint(input: UpdateRetroActionInput) {
+  const normalizedInput: Record<string, unknown> = {
+    status: parseActionStatus(input.status) || null,
+    resultMd: input.resultMd === undefined
+      ? { provided: false, value: null }
+      : { provided: true, value: String(input.resultMd || '') },
+    title: input.title === undefined
+      ? { provided: false, value: null }
+      : { provided: true, value: String(input.title || '').trim() },
+    descriptionMd: input.descriptionMd === undefined
+      ? { provided: false, value: null }
+      : { provided: true, value: String(input.descriptionMd || '') },
+    ownerId: input.ownerId === undefined
+      ? { provided: false, value: null }
+      : {
+        provided: true,
+        value: input.ownerId === null || !input.ownerId ? null : String(input.ownerId).trim(),
+      },
+    dueDate: input.dueDate === undefined
+      ? { provided: false, value: null }
+      : {
+        provided: true,
+        value: input.dueDate === null || !input.dueDate ? null : String(input.dueDate).trim(),
+      },
+  };
+
+  return createHash('sha256').update(JSON.stringify(normalizedInput)).digest('hex');
+}
+
+function retroActionCreateFingerprint(input: {
+  title: string;
+  descriptionMd: string;
+  ownerId: number;
+  dueDate: string | null;
+}) {
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex');
+}
+
+async function resolveExistingRetroActionCreateRequest(
+  query: (sql: string, params?: unknown[]) => Promise<Row | null>,
+  actorId: number,
+  retroId: number,
+  requestId: string,
+  fingerprint: string,
+) {
+  const existing = await query(
+    `SELECT actor_id, retro_id, action_id, request_fingerprint
+     FROM retro_action_create_request_keys WHERE client_request_id = ?`,
+    [requestId],
+  );
+  if (!existing) return null;
+  if (Number(existing.actor_id) !== actorId || Number(existing.retro_id) !== retroId
+    || String(existing.request_fingerprint) !== fingerprint) {
+    throw new RetrospectiveServiceError(409, 'RETRO_ACTION_CREATE_REQUEST_CONFLICT', '行动项创建请求编号已用于其他内容，请先核实原请求');
+  }
+
+  const action = await query(
+    'SELECT id FROM retro_actions WHERE id = ? AND retro_id = ?',
+    [Number(existing.action_id), retroId],
+  );
+  if (!action) {
+    throw new RetrospectiveServiceError(410, 'RETRO_ACTION_CREATE_REQUEST_DELETED', '该请求对应的行动项已不存在，不会因为重试而重新创建');
+  }
+  return Number(action.id);
+}
+
+function retrospectiveCreateFingerprint(input: {
+  title: string;
+  templateId: number | null;
+  scopeType: RetrospectiveScopeType;
+  scopeId: number | null;
+  periodStart: string;
+  periodEnd: string;
+  ownerId: number;
+}) {
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex');
+}
+
+async function resolveExistingRetrospectiveCreateRequest(
+  query: (sql: string, params?: unknown[]) => Promise<Row | null>,
+  actorId: number,
+  requestId: string,
+  fingerprint: string,
+) {
+  const existing = await query(
+    `SELECT actor_id, retrospective_id, request_fingerprint
+     FROM retrospective_create_request_keys WHERE client_request_id = ?`,
+    [requestId],
+  );
+  if (!existing) {
+    return null;
+  }
+  if (Number(existing.actor_id) !== actorId || String(existing.request_fingerprint) !== fingerprint) {
+    throw new RetrospectiveServiceError(409, 'RETRO_CREATE_REQUEST_CONFLICT', '复盘创建请求编号已用于其他内容，请核实后重试');
+  }
+
+  const retrospectiveId = Number(existing.retrospective_id);
+  const retrospective = await query('SELECT id FROM retrospectives WHERE id = ?', [retrospectiveId]);
+  if (!retrospective) {
+    throw new RetrospectiveServiceError(410, 'RETRO_CREATE_REQUEST_DELETED', '该请求对应的复盘已不存在，不会因为重试而重新创建');
+  }
+  return retrospectiveId;
+}
+
 function escapeHtml(value: unknown) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -804,9 +965,44 @@ export async function listRetrospectiveDailyRisks(user: User | undefined, retroI
   };
 }
 
-export async function createRetrospective(user: User | undefined, input: CreateRetrospectiveInput) {
+export async function getRetrospectiveCreateRequestStatus(user: User | undefined, requestIdValue: string) {
   assertAuthenticated(user);
-  if (!await canUsePermission(user, 'analytics:retro:create')) {
+  const requestId = normalizeCreateRequestId(requestIdValue);
+  if (!requestId) {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', '复盘创建请求编号无效');
+  }
+
+  const request = await queryOne<{ retrospective_id: number }>(
+    `SELECT retrospective_id FROM retrospective_create_request_keys
+     WHERE client_request_id = ? AND actor_id = ?`,
+    [requestId, user.id],
+  );
+  if (!request) {
+    return { state: 'not_found' as const };
+  }
+
+  const retrospective = await queryOne<{ id: number }>(
+    'SELECT id FROM retrospectives WHERE id = ?',
+    [request.retrospective_id],
+  );
+  if (!retrospective) {
+    return { state: 'not_found' as const };
+  }
+  return { state: 'created' as const, retrospectiveId: Number(retrospective.id) };
+}
+
+export async function createRetrospective(
+  user: User | undefined,
+  input: CreateRetrospectiveInput,
+  requestIdValue?: string,
+) {
+  assertAuthenticated(user);
+  const requestId = normalizeCreateRequestId(requestIdValue);
+
+  // Preserve the legacy no-key permission and validation order. A keyed replay is
+  // a read of the result already created by this actor, so it remains recoverable
+  // even if create permission was revoked after the original request.
+  if (!requestId && !await canUsePermission(user, 'analytics:retro:create')) {
     throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号没有创建复盘的权限');
   }
 
@@ -821,6 +1017,24 @@ export async function createRetrospective(user: User | undefined, input: CreateR
   const templateId = input.templateId ? parseId(input.templateId, 'templateId') : null;
   const ownerId = input.ownerId ? parseId(input.ownerId, 'ownerId') : user.id;
   const scopeId = input.scopeId === undefined || input.scopeId === null ? null : parseId(input.scopeId, 'scopeId');
+  const fingerprint = requestId
+    ? retrospectiveCreateFingerprint({ title, templateId, scopeType, scopeId, periodStart, periodEnd, ownerId })
+    : undefined;
+
+  if (requestId && fingerprint) {
+    const existingId = await resolveExistingRetrospectiveCreateRequest(
+      (sql, params) => queryOne<Row>(sql, params),
+      user.id,
+      requestId,
+      fingerprint,
+    );
+    if (existingId !== null) {
+      return getRetrospectiveDetail(user, existingId);
+    }
+    if (!await canUsePermission(user, 'analytics:retro:create')) {
+      throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号没有创建复盘的权限');
+    }
+  }
 
   if (templateId) {
     const template = await queryOne<Row>(`SELECT id FROM retro_templates WHERE id = ?`, [templateId]);
@@ -830,6 +1044,18 @@ export async function createRetrospective(user: User | undefined, input: CreateR
   }
 
   const retroId = await runInTransaction(async (tx) => {
+    if (requestId && fingerprint) {
+      const existingId = await resolveExistingRetrospectiveCreateRequest(
+        (sql, params) => tx.queryOne<Row>(sql, params),
+        user.id,
+        requestId,
+        fingerprint,
+      );
+      if (existingId !== null) {
+        return existingId;
+      }
+    }
+
     const createdId = await tx.executeInsert(
       `INSERT INTO retrospectives
          (template_id, title, scope_type, scope_id, period_start, period_end, status, summary_md, owner_id, created_by, created_at, updated_at, version)
@@ -837,6 +1063,14 @@ export async function createRetrospective(user: User | undefined, input: CreateR
       [templateId, title, scopeType, scopeId, periodStart, periodEnd, ownerId, user.id],
     );
     await recordAudit(tx, createdId, user.id, 'create', undefined, 'draft');
+    if (requestId && fingerprint) {
+      await tx.execute(
+        `INSERT INTO retrospective_create_request_keys
+           (client_request_id, actor_id, retrospective_id, request_fingerprint, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [requestId, user.id, createdId, fingerprint, beijingNow()],
+      );
+    }
     return createdId;
   });
   return getRetrospectiveDetail(user, retroId);
@@ -886,9 +1120,39 @@ export async function exportRetrospective(user: User | undefined, retroIdValue: 
   };
 }
 
-export async function updateRetrospective(user: User | undefined, retroIdValue: number, input: UpdateRetrospectiveInput) {
+export async function getRetrospectiveUpdateRequestStatus(
+  user: User | undefined,
+  retroIdValue: number,
+  requestIdValue: string,
+) {
   assertAuthenticated(user);
   const retroId = parseId(retroIdValue);
+  const requestId = normalizeRetrospectiveUpdateRequestId(requestIdValue);
+  if (!requestId) {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', '复盘更新请求编号无效');
+  }
+
+  const request = await queryOne<{ outcome: string }>(
+    `SELECT outcome FROM retrospective_update_request_keys
+     WHERE actor_id = ? AND retrospective_id = ? AND client_request_id = ?`,
+    [user.id, retroId, requestId],
+  );
+  if (!request) return { state: 'not_found' as const };
+  return { state: String(request.outcome) === 'conflict' ? 'conflict' as const : 'processed' as const };
+}
+
+export async function updateRetrospective(
+  user: User | undefined,
+  retroIdValue: number,
+  input: UpdateRetrospectiveInput,
+  requestIdValue?: string,
+) {
+  assertAuthenticated(user);
+  const retroId = parseId(retroIdValue);
+  const requestId = normalizeRetrospectiveUpdateRequestId(requestIdValue);
+  if (requestId && input.version === undefined) {
+    throw new RetrospectiveServiceError(400, 'VERSION_REQUIRED', '复盘结论更新需要提供当前版本号');
+  }
   const row = await getRetrospectiveRow(retroId);
   if (!row) {
     throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', '复盘不存在或不可访问');
@@ -896,7 +1160,8 @@ export async function updateRetrospective(user: User | undefined, retroIdValue: 
   if (!await userCanEdit(user, row)) {
     throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前复盘不可编辑');
   }
-  if (input.version !== undefined && Number(input.version) !== Number(row.version || 1)) {
+  const currentVersion = Number(row.version || 1);
+  if (!requestId && input.version !== undefined && Number(input.version) !== currentVersion) {
     throw new RetrospectiveServiceError(409, 'VERSION_CONFLICT', '复盘已被更新，请刷新后重试');
   }
 
@@ -904,19 +1169,78 @@ export async function updateRetrospective(user: User | undefined, retroIdValue: 
   if (!title) {
     throw new RetrospectiveServiceError(400, 'INVALID_TITLE', '请填写复盘标题');
   }
+  const summaryMd = input.summaryMd === undefined ? String(row.summary_md || '') : String(input.summaryMd || '');
+  const expectedVersion = input.version === undefined ? currentVersion : Number(input.version);
+  const requestFingerprint = requestId ? retrospectiveUpdateFingerprint(input) : undefined;
 
+  let conflictDetected = false;
   await runInTransaction(async (tx) => {
+    if (requestId && requestFingerprint) {
+      const existing = await tx.queryOne<{ request_fingerprint: string; outcome: string }>(
+        `SELECT request_fingerprint, outcome FROM retrospective_update_request_keys
+         WHERE actor_id = ? AND retrospective_id = ? AND client_request_id = ?`,
+        [user.id, retroId, requestId],
+      );
+      if (existing) {
+        if (String(existing.request_fingerprint) !== requestFingerprint) {
+          throw new RetrospectiveServiceError(409, 'RETROSPECTIVE_UPDATE_REQUEST_CONFLICT', '复盘更新请求编号已用于其他内容，请先核实原请求');
+        }
+        conflictDetected = String(existing.outcome) === 'conflict';
+        return;
+      }
+    }
+
     const changed = await tx.execute(
       `UPDATE retrospectives
        SET title = ?, summary_md = ?, version = version + 1, updated_at = datetime('now', '+8 hours')
        WHERE id = ? AND version = ?`,
-      [title, input.summaryMd === undefined ? row.summary_md || '' : String(input.summaryMd || ''), retroId, Number(row.version || 1)],
+      [title, summaryMd, retroId, expectedVersion],
     );
     if (changed !== 1) {
+      if (requestId && requestFingerprint) {
+        await tx.execute(
+          `INSERT INTO retrospective_update_request_keys
+            (actor_id, retrospective_id, client_request_id, request_fingerprint, outcome, created_at)
+           VALUES (?, ?, ?, ?, 'conflict', datetime('now', '+8 hours'))
+           ON CONFLICT (actor_id, retrospective_id, client_request_id) DO NOTHING`,
+          [user.id, retroId, requestId, requestFingerprint],
+        );
+        const receipt = await tx.queryOne<{ request_fingerprint: string; outcome: string }>(
+          `SELECT request_fingerprint, outcome FROM retrospective_update_request_keys
+           WHERE actor_id = ? AND retrospective_id = ? AND client_request_id = ?`,
+          [user.id, retroId, requestId],
+        );
+        if (!receipt || String(receipt.request_fingerprint) !== requestFingerprint) {
+          throw new RetrospectiveServiceError(409, 'RETROSPECTIVE_UPDATE_REQUEST_CONFLICT', '复盘更新请求编号已用于其他内容，请先核实原请求');
+        }
+        conflictDetected = String(receipt.outcome) === 'conflict';
+        return;
+      }
       throw new RetrospectiveServiceError(409, 'VERSION_CONFLICT', '复盘已被更新，请刷新后重试');
     }
     await recordAudit(tx, retroId, user.id, 'update', String(row.status), String(row.status));
+    if (requestId && requestFingerprint) {
+      await tx.execute(
+        `INSERT INTO retrospective_update_request_keys
+          (actor_id, retrospective_id, client_request_id, request_fingerprint, outcome, created_at)
+         VALUES (?, ?, ?, ?, 'processed', datetime('now', '+8 hours'))
+         ON CONFLICT (actor_id, retrospective_id, client_request_id) DO NOTHING`,
+        [user.id, retroId, requestId, requestFingerprint],
+      );
+      const receipt = await tx.queryOne<{ request_fingerprint: string; outcome: string }>(
+        `SELECT request_fingerprint, outcome FROM retrospective_update_request_keys
+         WHERE actor_id = ? AND retrospective_id = ? AND client_request_id = ?`,
+        [user.id, retroId, requestId],
+      );
+      if (!receipt || String(receipt.request_fingerprint) !== requestFingerprint) {
+        throw new RetrospectiveServiceError(409, 'RETROSPECTIVE_UPDATE_REQUEST_CONFLICT', '复盘更新请求编号已用于其他内容，请先核实原请求');
+      }
+      conflictDetected = String(receipt.outcome) === 'conflict';
+    }
   });
+  if (conflictDetected) {
+    throw new RetrospectiveServiceError(409, 'VERSION_CONFLICT', '复盘已被更新，请刷新并核对结论后再保存');
+  }
   return getRetrospectiveDetail(user, retroId);
 }
 
@@ -1148,7 +1472,8 @@ export async function createRetroAction(user: User | undefined, retroIdValue: nu
   if (!row) {
     throw new RetrospectiveServiceError(404, 'RETRO_NOT_FOUND', '复盘不存在或不可访问');
   }
-  if (String(row.status) === 'archived') {
+  const requestId = normalizeRetroActionCreateRequestId(input.client_request_id);
+  if (!requestId && String(row.status) === 'archived') {
     throw new RetrospectiveServiceError(409, 'RETRO_ARCHIVED', '复盘已归档，不能新增行动项');
   }
   if (!await userCanManageActions(user)) {
@@ -1161,22 +1486,101 @@ export async function createRetroAction(user: User | undefined, retroIdValue: nu
   }
   const dueDate = input.dueDate ? parseDate(input.dueDate, 'dueDate') : null;
   const ownerId = input.ownerId ? parseId(input.ownerId, 'ownerId') : user.id;
+  const descriptionMd = String(input.descriptionMd || '');
+  const fingerprint = retroActionCreateFingerprint({ title, descriptionMd, ownerId, dueDate });
+
+  let actionId = 0;
+  let created = false;
   await runInTransaction(async (tx) => {
-    const createdId = await tx.executeInsert(
+    if (requestId) {
+      const existingId = await resolveExistingRetroActionCreateRequest(
+        (sql, params) => tx.queryOne<Row>(sql, params), user.id, retroId, requestId, fingerprint,
+      );
+      if (existingId) {
+        actionId = existingId;
+        return;
+      }
+    }
+    if (String(row.status) === 'archived') {
+      throw new RetrospectiveServiceError(409, 'RETRO_ARCHIVED', '复盘已归档，不能新增行动项');
+    }
+
+    actionId = await tx.executeInsert(
       `INSERT INTO retro_actions
          (retro_id, title, description_md, owner_id, due_date, status, result_md, created_by, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 'todo', '', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))`,
-      [retroId, title, String(input.descriptionMd || ''), ownerId, dueDate, user.id],
+      [retroId, title, descriptionMd, ownerId, dueDate, user.id],
     );
-    await recordAudit(tx, retroId, user.id, 'action_create', String(row.status), String(row.status), `action=${createdId}`);
+    await recordAudit(tx, retroId, user.id, 'action_create', String(row.status), String(row.status), `action=${actionId}`);
+    if (requestId) {
+      await tx.execute(
+        `INSERT INTO retro_action_create_request_keys
+          (client_request_id, actor_id, retro_id, action_id, request_fingerprint, created_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now', '+8 hours'))`,
+        [requestId, user.id, retroId, actionId, fingerprint],
+      );
+    }
+    created = true;
   });
-  notifyActionAssigned(row, title, ownerId, user.id);
+  if (created) notifyActionAssigned(row, title, ownerId, user.id);
   return getRetrospectiveDetail(user, retroId);
 }
 
-export async function updateRetroAction(user: User | undefined, actionIdValue: number, input: UpdateRetroActionInput) {
+export async function getRetroActionCreateRequestStatus(user: User | undefined, retroIdValue: number, requestIdValue: string) {
+  assertAuthenticated(user);
+  const retroId = parseId(retroIdValue, 'retroId');
+  const requestId = normalizeRetroActionCreateRequestId(requestIdValue);
+  if (!requestId) {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', '行动项创建请求编号无效');
+  }
+  if (!await userCanManageActions(user)) {
+    throw new RetrospectiveServiceError(403, 'FORBIDDEN', '当前账号不能核实行动项创建结果');
+  }
+
+  const ledger = await queryOne<Row>(
+    `SELECT action_id FROM retro_action_create_request_keys
+     WHERE client_request_id = ? AND actor_id = ? AND retro_id = ?`,
+    [requestId, user.id, retroId],
+  );
+  if (!ledger) return { state: 'not_found' as const };
+  const action = await queryOne<Row>(
+    'SELECT id FROM retro_actions WHERE id = ? AND retro_id = ?',
+    [Number(ledger.action_id), retroId],
+  );
+  if (!action) return { state: 'deleted' as const };
+  return { state: 'created' as const, actionId: Number(action.id) };
+}
+
+export async function getRetroActionUpdateRequestStatus(
+  user: User | undefined,
+  actionIdValue: number,
+  requestIdValue: string,
+) {
   assertAuthenticated(user);
   const actionId = parseId(actionIdValue, 'actionId');
+  const requestId = normalizeRetroActionUpdateRequestId(requestIdValue);
+  if (!requestId) {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', '行动项更新请求编号无效');
+  }
+
+  const request = await queryOne<{ outcome: string }>(
+    `SELECT outcome FROM retro_action_update_request_keys
+     WHERE actor_id = ? AND action_id = ? AND client_request_id = ?`,
+    [user.id, actionId, requestId],
+  );
+  if (!request) return { state: 'not_found' as const };
+  return { state: String(request.outcome) === 'conflict' ? 'conflict' as const : 'processed' as const };
+}
+
+export async function updateRetroAction(
+  user: User | undefined,
+  actionIdValue: number,
+  input: UpdateRetroActionInput,
+  requestIdValue?: string,
+) {
+  assertAuthenticated(user);
+  const actionId = parseId(actionIdValue, 'actionId');
+  const requestId = normalizeRetroActionUpdateRequestId(requestIdValue);
   const action = await queryOne<Row>(
     `SELECT a.*, r.status AS retro_status, r.id AS parent_retro_id
      FROM retro_actions a
@@ -1205,17 +1609,42 @@ export async function updateRetroAction(user: User | undefined, actionIdValue: n
   const ownerId = input.ownerId === undefined || !canManage
     ? action.owner_id === null || action.owner_id === undefined ? null : Number(action.owner_id)
     : input.ownerId ? parseId(input.ownerId, 'ownerId') : null;
+  const requestFingerprint = requestId ? retroActionUpdateFingerprint(input) : undefined;
   const wasDone = String(action.status || '') === 'done';
   const closedAt = nextStatus === 'done'
     ? wasDone && action.closed_at ? String(action.closed_at) : beijingNow()
     : null;
 
   const retroId = Number(action.parent_retro_id);
+  let updated = false;
+  let conflictDetected = false;
   await runInTransaction(async (tx) => {
+    if (requestId && requestFingerprint) {
+      const existing = await tx.queryOne<{ request_fingerprint: string; outcome: string }>(
+        `SELECT request_fingerprint, outcome FROM retro_action_update_request_keys
+         WHERE actor_id = ? AND action_id = ? AND client_request_id = ?`,
+        [user.id, actionId, requestId],
+      );
+      if (existing) {
+        if (String(existing.request_fingerprint) !== requestFingerprint) {
+          throw new RetrospectiveServiceError(409, 'RETRO_ACTION_UPDATE_REQUEST_CONFLICT', '行动项更新请求编号已用于其他内容，请核实后重试');
+        }
+        conflictDetected = String(existing.outcome) === 'conflict';
+        return;
+      }
+    }
+
     const changed = await tx.execute(
       `UPDATE retro_actions
        SET title = ?, description_md = ?, owner_id = ?, due_date = ?, status = ?, result_md = ?, closed_at = ?, updated_at = datetime('now', '+8 hours')
-       WHERE id = ? AND status = ?`,
+       WHERE id = ?
+         AND status IS ?
+         AND title IS ?
+         AND description_md IS ?
+         AND owner_id IS ?
+         AND due_date IS ?
+         AND result_md IS ?
+         AND closed_at IS ?`,
       [
         title,
         input.descriptionMd === undefined || !canManage ? String(action.description_md || '') : String(input.descriptionMd || ''),
@@ -1225,14 +1654,44 @@ export async function updateRetroAction(user: User | undefined, actionIdValue: n
         input.resultMd === undefined ? String(action.result_md || '') : String(input.resultMd || ''),
         closedAt,
         actionId,
-        String(action.status || 'todo'),
+        action.status,
+        action.title,
+        action.description_md,
+        action.owner_id,
+        action.due_date,
+        action.result_md,
+        action.closed_at,
       ],
     );
     if (changed !== 1) {
+      if (requestId && requestFingerprint) {
+        await tx.execute(
+          `INSERT INTO retro_action_update_request_keys
+            (actor_id, action_id, client_request_id, request_fingerprint, outcome, created_at)
+           VALUES (?, ?, ?, ?, 'conflict', datetime('now', '+8 hours'))`,
+          [user.id, actionId, requestId, requestFingerprint],
+        );
+        conflictDetected = true;
+        return;
+      }
       throw new RetrospectiveServiceError(409, 'ACTION_CHANGED', '行动项状态已变化，请刷新后重试');
     }
     await recordAudit(tx, retroId, user.id, 'action_update', String(action.retro_status || ''), String(action.retro_status || ''), `action=${actionId}`);
+    if (requestId && requestFingerprint) {
+      await tx.execute(
+        `INSERT INTO retro_action_update_request_keys
+          (actor_id, action_id, client_request_id, request_fingerprint, outcome, created_at)
+         VALUES (?, ?, ?, ?, 'processed', datetime('now', '+8 hours'))`,
+        [user.id, actionId, requestId, requestFingerprint],
+      );
+    }
+    updated = true;
   });
-  void notifyActionUpdated(retroId, action, user.id, String(action.status || ''), nextStatus);
+  if (conflictDetected) {
+    throw new RetrospectiveServiceError(409, 'ACTION_CHANGED', '行动项内容已变化，请刷新并重新编辑');
+  }
+  if (updated) {
+    void notifyActionUpdated(retroId, action, user.id, String(action.status || ''), nextStatus);
+  }
   return getRetrospectiveDetail(user, retroId);
 }

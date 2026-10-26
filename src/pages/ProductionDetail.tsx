@@ -36,6 +36,7 @@ import { setCurrentContentDocument } from '../content/orchestrator/currentConten
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
 import { useEditorLeaveGuard } from '../hooks/useEditorLeaveGuard';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 import ProductionResourcesPanel from '../components/production/ProductionResourcesPanel';
 import ProductionMaterialHistorySnapshot from '../components/production/ProductionMaterialHistorySnapshot';
 import ProductionOriginPanel from '../components/production/ProductionOriginPanel';
@@ -61,8 +62,6 @@ const NEXT_STATUSES: Record<string, string> = {
   rejected: 'draft',
 };
 
-const CONTENT_EDIT_ROLES = new Set(['admin', 'editor', 'copywriter', 'post_production', 'camera']);
-
 type HistoryVersion = ProductionHistory & {
   content_markdown?: string;
   content_json?: string;
@@ -81,6 +80,97 @@ type VersionEntry = {
   versionState?: 'historical' | 'superseded';
   materialDraftSnapshotHtml?: string | null;
 };
+
+type ProductionTransitionOperation = 'review-submit' | 'status-update' | 'version-save' | 'delete';
+
+type ProductionTransitionRecovery = {
+  version: 1;
+  userId: number;
+  productionId: number;
+  operation: ProductionTransitionOperation;
+  previousStatus: string;
+  targetStatus: string;
+  contentFingerprint: string;
+  previousVersion?: string;
+  versionAction?: 'minor' | 'major';
+  phase: 'uncertain' | 'ready' | 'checking';
+};
+
+function productionTransitionRecoveryKey(id?: string) {
+  return id ? `xmt:production-transition-recovery:${id}` : null;
+}
+
+function readProductionTransitionRecovery(id?: string): ProductionTransitionRecovery | null {
+  const key = productionTransitionRecoveryKey(id);
+  if (!key || typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<ProductionTransitionRecovery>;
+    const validOperation = value.operation === 'review-submit'
+      ? value.previousStatus === 'draft' && value.targetStatus === 'review'
+      : value.operation === 'status-update'
+        ? typeof value.previousStatus === 'string'
+          && NEXT_STATUSES[value.previousStatus] === value.targetStatus
+          && value.previousStatus !== value.targetStatus
+        : value.operation === 'version-save'
+          ? typeof value.previousVersion === 'string'
+            && ['minor', 'major'].includes(String(value.versionAction))
+            && value.previousStatus === value.targetStatus
+          : value.operation === 'delete'
+            && typeof value.previousVersion === 'string'
+            && typeof value.previousStatus === 'string'
+            && value.targetStatus === 'deleted';
+    if (value.version !== 1 || !Number.isSafeInteger(value.userId) || !Number.isSafeInteger(value.productionId)
+      || Number(value.userId) < 1 || Number(value.productionId) < 1 || !validOperation
+      || typeof value.previousStatus !== 'string' || typeof value.targetStatus !== 'string'
+      || typeof value.contentFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.contentFingerprint)) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+    return {
+      version: 1,
+      userId: Number(value.userId),
+      productionId: Number(value.productionId),
+      operation: value.operation as ProductionTransitionOperation,
+      previousStatus: value.previousStatus,
+      targetStatus: value.targetStatus,
+      contentFingerprint: value.contentFingerprint,
+      previousVersion: value.previousVersion,
+      versionAction: value.versionAction === 'minor' || value.versionAction === 'major' ? value.versionAction : undefined,
+      phase: value.phase === 'ready' ? 'ready' : 'uncertain',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeProductionTransitionRecovery(id: string | undefined, recovery: ProductionTransitionRecovery | null) {
+  const key = productionTransitionRecoveryKey(id);
+  if (!key || typeof window === 'undefined') throw new Error('无法安全保存本次状态核实标记，请刷新后重试。');
+  try {
+    if (!recovery) {
+      try { window.sessionStorage.removeItem(key); } catch { /* A stale marker is safe: reload will reconcile it read-only. */ }
+      return;
+    }
+    window.sessionStorage.setItem(key, JSON.stringify({ ...recovery, phase: recovery.phase === 'ready' ? 'ready' : 'uncertain' }));
+  } catch {
+    throw new Error('浏览器暂时无法保存本次状态核实标记，操作未发送；请检查浏览器存储空间后重试。');
+  }
+}
+
+async function fingerprintProductionContent(content: string) {
+  if (!globalThis.crypto?.subtle || typeof TextEncoder === 'undefined') {
+    throw new Error('当前浏览器不支持安全的正文核实，状态操作未发送。');
+  }
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function isAmbiguousProductionTransitionError(error: unknown) {
+  const status = (error as Error & { status?: number } | null)?.status;
+  return typeof status !== 'number' || status === 0 || [404, 408, 425, 429].includes(status) || status >= 500;
+}
 
 function normalizeVersionContent(contentMarkdown?: string, content?: string) {
   return contentMarkdown || content || '<p class="text-studio-text-muted">暂无内容</p>';
@@ -122,13 +212,14 @@ function syncTone(syncStatus: string): 'cyan' | 'success' | 'coral' | 'muted' {
 export default function ProductionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const requestedVersion = searchParams.get('version')?.trim() || '';
+  const requestedAction = searchParams.get('action');
   const addNotification = useAppStore((state) => state.addNotification);
   const theme = useAppStore((state) => state.theme);
   const authUser = useAuthStore((state) => state.user);
   const isDark = theme === 'dark';
-  const { hasPermission } = usePermission();
+  const { hasPermission, loading: permissionsLoading } = usePermission();
   const socket = useSocket();
   const { focused: writingFocused, setFocused: setWritingFocused } = useWritingFocus();
 
@@ -140,6 +231,13 @@ export default function ProductionDetail() {
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [recoveryReadInFlight, setRecoveryReadInFlight] = useState(false);
+  const [confirmedVersionRefreshPending, setConfirmedVersionRefreshPending] = useState(false);
+  const [confirmedReviewRefreshPending, setConfirmedReviewRefreshPending] = useState(false);
+  const [confirmedStatusRefreshPending, setConfirmedStatusRefreshPending] = useState(false);
+  const [confirmedDeleteRefreshPending, setConfirmedDeleteRefreshPending] = useState(false);
+  const [pendingStatusTransition, setPendingStatusTransition] = useState<ProductionTransitionRecovery | null>(() => readProductionTransitionRecovery(id));
+  const [statusTransitionReadError, setStatusTransitionReadError] = useState('');
   const detailRequestRef = useRef(0);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -149,24 +247,44 @@ export default function ProductionDetail() {
     content: '',
     status: 'draft',
   });
+  const latestEditContentRef = useRef('');
+  const pendingStatusTransitionRef = useRef(pendingStatusTransition);
+  const statusTransitionVerificationLockRef = useRef(false);
+  const productionMutationLockRef = useRef(false);
+  const confirmedRefreshLockRef = useRef(false);
+  const [reviewSubmitPhase, setReviewSubmitPhase] = useState<'preparing' | 'submitting' | null>(null);
+  const [reviewSuggestionAccepting, setReviewSuggestionAccepting] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [versionSaving, setVersionSaving] = useState<'minor' | 'major' | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const hasConfirmedRefreshPending = confirmedVersionRefreshPending || confirmedReviewRefreshPending || confirmedStatusRefreshPending || confirmedDeleteRefreshPending;
+  const hasProductionMutation = reviewSubmitPhase !== null || reviewSuggestionAccepting || statusUpdating || versionSaving !== null || deleting || hasConfirmedRefreshPending || pendingStatusTransition !== null;
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
   const [leaveFailureDialogDismissed, setLeaveFailureDialogDismissed] = useState(false);
   const [superseded, setSuperseded] = useState<VersionSupersededPayload | null>(null);
   const displayedCurrentVersion = production?.version || 'v1.0';
 
-  const canEditProduction = Boolean(
-    production &&
-      (
-        CONTENT_EDIT_ROLES.has(authUser?.role || '') ||
-        Number(production.operator_id) === authUser?.id ||
-        Number(topic?.creator_id) === authUser?.id ||
-        Number(topic?.assignee_id) === authUser?.id
-      ),
-  );
+  // The detail API computes this from the same topic-scope ACL used by writes.
+  // Do not infer edit scope from operator/creator labels on the client.
+  const canEditProduction = production?.can_edit === true;
   const requestedHistoryUnavailable = Boolean(
     production && requestedVersion && requestedVersion !== displayedCurrentVersion && !linkedHistoryVersion,
   );
-  const canEditSelectedVersion = canEditProduction && !requestedHistoryUnavailable && selectedVersionId === 'current';
+  const canEditSelectedVersion = Boolean(
+    canEditProduction &&
+      hasPermission('production:update') &&
+      !requestedHistoryUnavailable &&
+      selectedVersionId === 'current' &&
+      !superseded,
+  );
+  const canReviewProduction = Boolean(
+    production?.status === 'review' &&
+      production.can_edit === true &&
+      hasPermission('production:update') &&
+      !requestedHistoryUnavailable &&
+      selectedVersionId === 'current' &&
+      !superseded,
+  );
   const canDelete = canEditSelectedVersion && hasPermission('production:delete');
   const activeDocId = production ? getProductionVersionRoomId(production.id, production.version) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
@@ -197,6 +315,30 @@ export default function ProductionDetail() {
     const handle = runtimeHandleRef.current;
     return handle ? handle.flush({ timeoutMs: 15_000 }) : { status: 'failed' };
   }, []);
+  const flushProductionEditorBeforeMutation = useCallback(async () => {
+    const result = await flushReviewEditor();
+    if (result.status === 'synced') return true;
+
+    const message = result.status === 'timed_out'
+      ? '编辑器仍在保存，当前操作未执行，请稍后重试。'
+      : result.status === 'cancelled'
+        ? '编辑器保存已中断，当前操作未执行，请刷新确认正文后重试。'
+        : '正文保存未确认，当前操作未执行；请检查保存提示并重试。';
+    addNotification({ title: '正文尚未确认保存', message, type: 'error' });
+    return false;
+  }, [addNotification, flushReviewEditor]);
+
+  const beginReviewSuggestionAccept = useCallback(() => {
+    if (productionMutationLockRef.current || confirmedRefreshLockRef.current || pendingStatusTransitionRef.current) return false;
+    productionMutationLockRef.current = true;
+    setReviewSuggestionAccepting(true);
+    return true;
+  }, []);
+
+  const endReviewSuggestionAccept = useCallback(() => {
+    productionMutationLockRef.current = false;
+    setReviewSuggestionAccepting(false);
+  }, []);
 
   useEffect(() => {
     if (!socket || !production || !authUser) return;
@@ -209,7 +351,10 @@ export default function ProductionDetail() {
     return () => { socket.off(COLLABORATION_EVENTS.VERSION_SUPERSEDED, handleSuperseded); };
   }, [authUser, production, socket]);
 
+  const pendingRouteStayRef = useRef<(() => void) | null>(null);
   const handleContinueEditing = useCallback(() => {
+    pendingRouteStayRef.current?.();
+    pendingRouteStayRef.current = null;
     setLeaveFailureDialogDismissed(true);
   }, []);
 
@@ -217,42 +362,51 @@ export default function ProductionDetail() {
 
   const handleDiscardAndLeave = useCallback(() => discardAndLeave(), [discardAndLeave]);
 
-  const handleGuardedNavigate = useCallback(async (to: string) => {
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    let continued = false;
+    const continueOnce = () => {
+      if (continued) return;
+      continued = true;
+      pendingRouteStayRef.current = null;
+      proceed();
+    };
+    pendingRouteStayRef.current = stay;
     setLeaveFailureDialogDismissed(false);
-    const leaveResult = await requestLeave({
-      reason: 'route_transition',
-      continuation: () => navigate(to),
-    });
+    void requestLeave({ reason: 'route_transition', continuation: continueOnce })
+      .then((leaveResult) => {
+        if (leaveResult.decision === 'waiting_confirmation') {
+          addNotification({
+            title: '最后修改尚未保存',
+            message: '已阻止离开当前页面，请留在此页后重试保存。',
+            type: 'warning',
+          });
+          return;
+        }
+        continueOnce();
+        if (leaveResult.warning === 'collaboration_unconfirmed') {
+          addNotification({
+            title: '内容已保存',
+            message: '协作交接尚未确认，已按安全保存结果继续导航。',
+            type: 'warning',
+          });
+        }
+      })
+      .catch(stay);
+  }, [addNotification, requestLeave]);
+  useRouteNavigationGuard(Boolean(production), handleRouteNavigationAttempt);
 
-    if (leaveResult.decision === 'waiting_confirmation') {
-      addNotification({
-        title: '最后修改尚未保存',
-        message: '已阻止离开当前页面，请留在此页后重试保存。',
-        type: 'warning',
-      });
-      return;
-    }
-
-    if (leaveResult.warning === 'collaboration_unconfirmed') {
-      addNotification({
-        title: '内容已保存',
-        message: '协作交接尚未确认，已按安全保存结果继续导航。',
-        type: 'warning',
-      });
-    }
-  }, [addNotification, navigate, requestLeave]);
-
-  const fetchData = useCallback(async () => {
-    if (!id) return;
+  const fetchData = useCallback(async (options?: { notifyOnFailure?: boolean; recovery?: boolean }) => {
+    if (!id) return 'stale' as const;
 
     const requestId = ++detailRequestRef.current;
+    if (options?.recovery) setRecoveryReadInFlight(true);
     setLoading(true);
     setHistoryLoading(false);
     setLinkedHistoryVersion(null);
 
     try {
       const productionData = await getProductionById(Number.parseInt(id, 10));
-      if (requestId !== detailRequestRef.current) return;
+      if (requestId !== detailRequestRef.current) return 'stale' as const;
 
       const currentVersion = productionData.version || 'v1.0';
       const exactHistoryRequest = requestedVersion && requestedVersion !== currentVersion
@@ -265,7 +419,7 @@ export default function ProductionDetail() {
         getProductionHistory(Number.parseInt(id, 10)),
         exactHistoryRequest,
       ]);
-      if (requestId !== detailRequestRef.current) return;
+      if (requestId !== detailRequestRef.current) return 'stale' as const;
 
       setProduction(productionData);
       persistedContentRef.current = productionData.content || '';
@@ -277,6 +431,7 @@ export default function ProductionDetail() {
         content: productionData.content || '',
         status: productionData.status,
       });
+      latestEditContentRef.current = productionData.content || '';
       setTopic(topicData);
       setHistory(historyData.data);
       setLinkedHistoryVersion(exactHistoryVersion);
@@ -284,20 +439,260 @@ export default function ProductionDetail() {
       setHistoryTotal(historyData.total);
       setSelectedVersionId(exactHistoryVersion ? `history-${exactHistoryVersion.id}` : 'current');
       setSuperseded(null);
+      confirmedRefreshLockRef.current = false;
+      setConfirmedVersionRefreshPending(false);
+      setConfirmedReviewRefreshPending(false);
+      setConfirmedStatusRefreshPending(false);
+      setConfirmedDeleteRefreshPending(false);
       if (requestedVersion && requestedVersion !== currentVersion && !exactHistoryVersion) {
         addNotification({ title: '创作来源版本暂不可用', message: `没有找到 ${requestedVersion}，当前创作稿仍可正常查看。`, type: 'warning' });
       }
+      return 'success' as const;
     } catch (error) {
-      if (requestId !== detailRequestRef.current) return;
-      addNotification({
-        title: '获取创作详情失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
+      if (requestId !== detailRequestRef.current) return 'stale' as const;
+      if (options?.notifyOnFailure !== false) {
+        addNotification({
+          title: '获取创作详情失败',
+          message: (error as Error).message,
+          type: 'error',
+        });
+      }
+      return 'failed' as const;
     } finally {
       if (requestId === detailRequestRef.current) setLoading(false);
+      if (options?.recovery) setRecoveryReadInFlight(false);
     }
   }, [addNotification, id, requestedVersion]);
+
+  const updatePendingStatusTransition = useCallback((recovery: ProductionTransitionRecovery | null) => {
+    writeProductionTransitionRecovery(id, recovery);
+    pendingStatusTransitionRef.current = recovery;
+    setPendingStatusTransition(recovery);
+  }, [id]);
+
+  const applyProductionSnapshot = useCallback((record: ProductionType) => {
+    const content = String(record.content || '');
+    setProduction(record);
+    persistedContentRef.current = content;
+    latestEditContentRef.current = content;
+    setEditData({ content, status: record.status });
+    setCurrentContentDocument(
+      getCollaborationRoomId('production', record.id),
+      record.topic_title || `创作 ${record.id}`,
+    );
+  }, []);
+
+  const prepareStatusTransition = useCallback(async (
+    operation: ProductionTransitionOperation,
+    previousStatus: string,
+    targetStatus: string,
+    content: string,
+    existing?: ProductionTransitionRecovery,
+    version?: { previousVersion: string; versionAction?: 'minor' | 'major' },
+  ) => {
+    if (!id || !production || !Number.isSafeInteger(authUser?.id)) {
+      throw new Error('当前账号或创作记录尚未确认，状态操作未发送。');
+    }
+    const validTransition = operation === 'review-submit'
+      ? previousStatus === 'draft' && targetStatus === 'review'
+      : operation === 'version-save'
+        ? Boolean(version?.versionAction && previousStatus === targetStatus)
+        : operation === 'delete'
+          ? Boolean(version && !version.versionAction && targetStatus === 'deleted')
+          : NEXT_STATUSES[previousStatus] === targetStatus && previousStatus !== targetStatus;
+    if (!validTransition) throw new Error('本次状态变更与当前流程不匹配，操作未发送。');
+    const contentFingerprint = await fingerprintProductionContent(content);
+    if (existing && (existing.userId !== authUser?.id || existing.productionId !== production.id
+      || existing.operation !== operation || existing.previousStatus !== previousStatus
+      || existing.targetStatus !== targetStatus || existing.contentFingerprint !== contentFingerprint
+      || existing.previousVersion !== version?.previousVersion || existing.versionAction !== version?.versionAction)) {
+      throw new Error('待重试内容或状态已变化；请先只读核实服务器状态。');
+    }
+    const recovery: ProductionTransitionRecovery = existing
+      ? { ...existing, phase: 'uncertain' }
+      : {
+        version: 1,
+        userId: authUser!.id,
+        productionId: production.id,
+        operation,
+        previousStatus,
+        targetStatus,
+        contentFingerprint,
+        previousVersion: version?.previousVersion,
+        versionAction: version?.versionAction,
+        phase: 'uncertain',
+      };
+    updatePendingStatusTransition(recovery);
+    return recovery;
+  }, [authUser, id, production, updatePendingStatusTransition]);
+
+  const verifyPendingStatusTransition = useCallback(async () => {
+    const recovery = pendingStatusTransitionRef.current;
+    if (!id || !recovery || recovery.phase === 'checking' || statusTransitionVerificationLockRef.current
+      || Number(recovery.productionId) !== Number.parseInt(id, 10) || !authUser) return;
+    if (recovery.userId !== authUser.id) {
+      updatePendingStatusTransition(null);
+      setStatusTransitionReadError('当前登录账号与发起操作的账号不同；已清除本机核实标记，请重新读取创作详情。');
+      await fetchData({ notifyOnFailure: false, recovery: true });
+      return;
+    }
+
+    statusTransitionVerificationLockRef.current = true;
+    setStatusTransitionReadError('');
+    setRecoveryReadInFlight(true);
+    pendingStatusTransitionRef.current = { ...recovery, phase: 'checking' };
+    setPendingStatusTransition({ ...recovery, phase: 'checking' });
+    try {
+      const serverRecord = await getProductionById(Number.parseInt(id, 10));
+      if (serverRecord.id !== recovery.productionId) throw new Error('服务器返回的创作记录与当前页面不一致。');
+      const serverContent = String(serverRecord.content || '');
+      const serverFingerprint = await fingerprintProductionContent(serverContent);
+      applyProductionSnapshot(serverRecord);
+
+      if (recovery.operation === 'delete') {
+        const currentVersion = serverRecord.version || 'v1.0';
+        if (serverRecord.status === recovery.previousStatus
+          && currentVersion === recovery.previousVersion
+          && serverFingerprint === recovery.contentFingerprint) {
+          updatePendingStatusTransition({ ...recovery, phase: 'ready' });
+          setShowDeleteModal(false);
+          addNotification({
+            title: '服务器仍保留该创作记录',
+            message: '版本、状态和正文已核实未变化；系统没有自动重试删除。确认后才会再次删除。',
+            type: 'warning',
+          });
+          await fetchData({ notifyOnFailure: false, recovery: true });
+          return;
+        }
+
+        updatePendingStatusTransition(null);
+        confirmedRefreshLockRef.current = true;
+        setConfirmedDeleteRefreshPending(true);
+        addNotification({
+          title: '创作记录内容已变化',
+          message: '回查发现服务器上的版本、状态或正文已变化，本次删除不会自动重试；请检查最新记录后再决定。',
+          type: 'warning',
+        });
+        const refreshed = await fetchData({ notifyOnFailure: false, recovery: true });
+        if (refreshed === 'failed') {
+          addNotification({ title: '详情尚未刷新', message: '已读取到创作记录仍存在；请检查当前稿件后再决定是否删除。', type: 'warning' });
+        }
+        return;
+      }
+
+      if (recovery.operation === 'version-save') {
+        const currentVersion = serverRecord.version || 'v1.0';
+        if (currentVersion !== recovery.previousVersion) {
+          updatePendingStatusTransition(null);
+          confirmedRefreshLockRef.current = true;
+          setConfirmedVersionRefreshPending(true);
+          addNotification({
+            title: '服务器已有新版本',
+            message: serverFingerprint === recovery.contentFingerprint
+              ? `已读取到 ${currentVersion}，正文与本次保存一致；不会重复创建版本。`
+              : `版本已从 ${recovery.previousVersion} 变化为 ${currentVersion}，已采用服务器当前稿件，不会重复创建版本。`,
+            type: 'success',
+          });
+          const refreshed = await fetchData({ notifyOnFailure: false, recovery: true });
+          if (refreshed === 'failed') {
+            setConfirmedVersionRefreshPending(true);
+            addNotification({ title: '新版本已确认，历史未刷新', message: '服务器当前版本已核实；请只重新读取详情，不要再次创建版本。', type: 'warning' });
+          }
+          return;
+        }
+
+        if (serverRecord.status === recovery.previousStatus && serverFingerprint === recovery.contentFingerprint) {
+          updatePendingStatusTransition({ ...recovery, phase: 'ready' });
+          addNotification({
+            title: '服务器仍为原版本',
+            message: '当前版本和正文已核实，尚未创建新版本；系统没有自动重试。确认后才会再次保存。',
+            type: 'warning',
+          });
+          await fetchData({ notifyOnFailure: false, recovery: true });
+          return;
+        }
+
+        updatePendingStatusTransition(null);
+        confirmedRefreshLockRef.current = false;
+        setConfirmedVersionRefreshPending(false);
+        addNotification({
+          title: '服务器内容已变化',
+          message: '回查发现当前版本或正文与本次保存不一致，已采用服务器最新稿件并取消重试。',
+          type: 'warning',
+        });
+        await fetchData({ notifyOnFailure: false, recovery: true });
+        return;
+      }
+
+      if (serverRecord.status === recovery.targetStatus && serverFingerprint === recovery.contentFingerprint) {
+        updatePendingStatusTransition(null);
+        confirmedRefreshLockRef.current = true;
+        setConfirmedStatusRefreshPending(true);
+        if (recovery.targetStatus === 'approved') celebrateMilestone();
+        addNotification({
+          title: '服务器已完成状态更新',
+          message: `只读回查确认状态为“${productionStatusLabel(recovery.targetStatus)}”，没有重复发送写入。`,
+          type: 'success',
+        });
+        const refreshed = await fetchData({ notifyOnFailure: false, recovery: true });
+        if (refreshed === 'failed') {
+          setConfirmedStatusRefreshPending(true);
+          addNotification({ title: '状态已确认，详情尚未刷新', message: '服务器状态与正文已核实；请只重试读取详情，不要再次提交状态操作。', type: 'warning' });
+        }
+        return;
+      }
+
+      if (serverRecord.status === recovery.previousStatus && serverFingerprint === recovery.contentFingerprint) {
+        const readyRecovery = { ...recovery, phase: 'ready' as const };
+        updatePendingStatusTransition(readyRecovery);
+        addNotification({
+          title: '服务器仍是原状态',
+          message: `正文已核实，但状态仍为“${productionStatusLabel(recovery.previousStatus)}”。系统没有自动重试；如确认继续，请使用页面中的明确重试按钮。`,
+          type: 'warning',
+        });
+        await fetchData({ notifyOnFailure: false, recovery: true });
+        return;
+      }
+
+      updatePendingStatusTransition(null);
+      confirmedRefreshLockRef.current = false;
+      setConfirmedStatusRefreshPending(false);
+      addNotification({
+        title: '服务器内容已变化',
+        message: '回查发现状态或正文与本次操作不一致，已采用服务器当前内容并取消自动重试；请检查后再决定下一步。',
+        type: 'warning',
+      });
+      await fetchData({ notifyOnFailure: false, recovery: true });
+    } catch (error) {
+      if (recovery.operation === 'delete' && (error as Error & { status?: number }).status === 404) {
+        updatePendingStatusTransition(null);
+        setShowDeleteModal(false);
+        addNotification({ title: '删除成功', message: '只读核实确认创作记录已删除，没有重复发送删除请求。', type: 'success' });
+        navigate('/production');
+        return;
+      }
+      const uncertainRecovery = { ...recovery, phase: 'uncertain' as const };
+      try { updatePendingStatusTransition(uncertainRecovery); } catch { /* Keep the in-memory write lock even if browser storage is unavailable. */ }
+      setStatusTransitionReadError((error as Error).message || '暂时无法只读核实服务器状态。');
+      addNotification({
+        title: recovery.operation === 'delete' ? '删除结果仍待核实' : '状态仍待核实',
+        message: recovery.operation === 'delete'
+          ? '服务器上的记录暂时无法确认，页面已锁定后续写入；请稍后只读核实删除结果。'
+          : '服务器状态暂时无法确认，页面已锁定后续写入；请稍后使用“只读核实状态”重试。',
+        type: 'warning',
+      });
+    } finally {
+      setLoading(false);
+      setRecoveryReadInFlight(false);
+      statusTransitionVerificationLockRef.current = false;
+      const current = pendingStatusTransitionRef.current;
+      if (current?.phase === 'checking') {
+        const uncertainRecovery = { ...current, phase: 'uncertain' as const };
+        pendingStatusTransitionRef.current = uncertainRecovery;
+        setPendingStatusTransition(uncertainRecovery);
+      }
+    }
+  }, [addNotification, applyProductionSnapshot, authUser, fetchData, id, navigate, updatePendingStatusTransition]);
 
   const loadMoreHistory = useCallback(async () => {
     if (!id || historyLoading || history.length >= historyTotal) return;
@@ -317,11 +712,46 @@ export default function ProductionDetail() {
   }, [addNotification, history.length, historyLoading, historyPage, historyTotal, id]);
 
   useEffect(() => {
-    void fetchData();
+    if (!readProductionTransitionRecovery(id)) void fetchData();
     return () => {
       detailRequestRef.current += 1;
     };
-  }, [fetchData]);
+  }, [fetchData, id]);
+
+  useEffect(() => {
+    const stored = readProductionTransitionRecovery(id);
+    if (statusTransitionVerificationLockRef.current) return;
+    pendingStatusTransitionRef.current = stored;
+    setPendingStatusTransition(stored);
+    setStatusTransitionReadError('');
+    if (!stored) return;
+    if (authUser && stored.userId !== authUser.id) {
+      updatePendingStatusTransition(null);
+      void fetchData({ notifyOnFailure: false, recovery: true });
+      return;
+    }
+    if (authUser) void verifyPendingStatusTransition();
+  }, [authUser, fetchData, id, updatePendingStatusTransition, verifyPendingStatusTransition]);
+
+  useEffect(() => {
+    if (requestedAction !== 'review' || loading || permissionsLoading) return;
+
+    if (canReviewProduction) {
+      const approvalAction = document.querySelector<HTMLButtonElement>('[data-testid="production-review-approve"]');
+      approvalAction?.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+        block: 'center',
+      });
+      approvalAction?.focus({ preventScroll: true });
+    }
+
+    setSearchParams((current) => {
+      if (current.get('action') !== 'review') return current;
+      const next = new URLSearchParams(current);
+      next.delete('action');
+      return next;
+    }, { replace: true });
+  }, [canReviewProduction, loading, permissionsLoading, requestedAction, setSearchParams]);
 
   const versionEntries = useMemo<VersionEntry[]>(() => {
     if (!production) {
@@ -364,7 +794,7 @@ export default function ProductionDetail() {
   }, [history, linkedHistoryVersion, production]);
 
   const selectedVersion = versionEntries.find((entry) => entry.id === selectedVersionId) || versionEntries[0] || null;
-  const canFocusWrite = Boolean(selectedVersion?.isCurrent && canEditSelectedVersion && !superseded);
+  const canFocusWrite = Boolean(selectedVersion?.isCurrent && canEditSelectedVersion && !superseded && !hasProductionMutation);
   const outlineHeadings = useMemo(() => extractOutlineHeadings(topic?.outline || ''), [topic?.outline]);
 
   useEffect(() => {
@@ -425,10 +855,11 @@ export default function ProductionDetail() {
   }, [selectedVersionId, versionEntries]);
 
   const startEditing = () => {
-    if (!production) return;
+    if (!production || pendingStatusTransitionRef.current) return;
     setSelectedVersionId('current');
+    latestEditContentRef.current = production.content || editData.content || '';
     setEditData({
-      content: production.content || editData.content || '',
+      content: latestEditContentRef.current,
       status: production.status,
     });
   };
@@ -454,7 +885,7 @@ export default function ProductionDetail() {
       documentId: room,
       collaborationRoom: room,
       initialContent: editData.content,
-      readonly: !canEditSelectedVersion || selectedVersionId !== 'current' || Boolean(superseded),
+      readonly: !canEditSelectedVersion || selectedVersionId !== 'current' || Boolean(superseded) || hasProductionMutation,
       capabilities: {
         collaboration: true,
         manualSave: false,
@@ -462,6 +893,12 @@ export default function ProductionDetail() {
         pageScroll: true,
       },
       persist: async (content) => {
+        if (pendingStatusTransitionRef.current) {
+          throw new Error('创作状态仍待核实，请先完成只读核实后再修改正文。');
+        }
+        if (confirmedRefreshLockRef.current) {
+          throw new Error('创作详情正在重新读取，请完成只读恢复后再修改正文。');
+        }
         try {
           await updateProduction(production.id, {
             topic_id: production.topic_id,
@@ -478,119 +915,327 @@ export default function ProductionDetail() {
         persistedContentRef.current = content;
       },
     });
-  }, [addNotification, canEditSelectedVersion, editData.content, editData.status, production, selectedVersionId, superseded]);
+  }, [addNotification, canEditSelectedVersion, editData.content, editData.status, hasProductionMutation, production, selectedVersionId, superseded]);
 
-  const handleVersionedSave = async (versionAction: 'minor' | 'major') => {
-    if (!production || !canEditSelectedVersion || superseded) return;
+  const handleVersionedSave = async (versionAction: 'minor' | 'major', confirmedRetry = false) => {
+    const pendingRecovery = pendingStatusTransitionRef.current;
+    const retryingRecovery = confirmedRetry && pendingRecovery?.phase === 'ready'
+      && pendingRecovery.operation === 'version-save' && pendingRecovery.versionAction === versionAction;
+    if (pendingRecovery && !retryingRecovery) return;
+    if (!production || !canEditSelectedVersion || superseded || productionMutationLockRef.current || confirmedRefreshLockRef.current) return;
+    if (retryingRecovery && ((production.version || 'v1.0') !== pendingRecovery.previousVersion
+      || production.status !== pendingRecovery.previousStatus || authUser?.id !== pendingRecovery.userId)) {
+      await verifyPendingStatusTransition();
+      return;
+    }
 
+    productionMutationLockRef.current = true;
+    setVersionSaving(versionAction);
+    let transitionWriteStarted = false;
     try {
+      if (!await flushProductionEditorBeforeMutation()) return;
+      const versionedContent = latestEditContentRef.current;
+      const baseVersion = production.version || 'v1.0';
+      await prepareStatusTransition(
+        'version-save',
+        production.status,
+        production.status,
+        versionedContent,
+        retryingRecovery ? pendingRecovery : undefined,
+        { previousVersion: baseVersion, versionAction },
+      );
+      transitionWriteStarted = true;
       const result = await updateProduction(production.id, {
         topic_id: production.topic_id,
         version: production.version,
-        content: editData.content,
+        content: versionedContent,
         expected_content: persistedContentRef.current,
         status: editData.status,
         change_type: versionAction,
         version_action: versionAction,
       });
 
+      updatePendingStatusTransition(null);
+      const savedVersion = result.version || production.version || 'v1.0';
+      confirmedRefreshLockRef.current = true;
+      setConfirmedVersionRefreshPending(true);
+      setProduction((current) => current?.id === production.id ? {
+        ...current,
+        version: savedVersion,
+        content: versionedContent,
+        content_markdown: versionedContent,
+        content_json: versionedContent,
+        status: editData.status,
+      } : current);
+      setEditData((current) => ({ ...current, content: versionedContent, status: editData.status }));
+      persistedContentRef.current = versionedContent;
+      latestEditContentRef.current = versionedContent;
+      setCurrentContentDocument(
+        getCollaborationRoomId('production', production.id),
+        production.topic_title || `创作 ${production.id}`,
+      );
+      setSelectedVersionId('current');
+      setSuperseded(null);
+
+      const refreshed = await fetchData({ notifyOnFailure: false });
+      if (refreshed === 'stale') return;
+      if (refreshed === 'failed') {
+        setConfirmedVersionRefreshPending(true);
+        addNotification({
+          title: '版本已保存，详情未刷新',
+          message: `服务端已确认版本 ${savedVersion}；当前正文已保留。请只重试读取详情，不要重复保存或创建版本。`,
+          type: 'warning',
+        });
+        return;
+      }
+
       addNotification({
         title: versionAction === 'major' ? '已另开新版' : '小修已保存',
-        message: `当前版本已更新为 ${result.version || production.version}`,
+        message: `当前版本已更新为 ${savedVersion}`,
         type: 'success',
       });
-
-      await fetchData();
     } catch (error) {
+      if (transitionWriteStarted && isAmbiguousProductionTransitionError(error)) {
+        await verifyPendingStatusTransition();
+        return;
+      }
+      if (transitionWriteStarted) updatePendingStatusTransition(null);
       addNotification({
         title: '保存失败',
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      productionMutationLockRef.current = false;
+      setVersionSaving(null);
     }
   };
 
-  const handleSubmitReview = async () => {
-    if (!production || !canEditSelectedVersion || superseded) return;
+  const handleSubmitReview = async (confirmedRetry = false) => {
+    const pendingRecovery = pendingStatusTransitionRef.current;
+    const retryingRecovery = confirmedRetry && pendingRecovery?.phase === 'ready'
+      && pendingRecovery.operation === 'review-submit' && pendingRecovery.targetStatus === 'review';
+    if (pendingRecovery && !retryingRecovery) return;
+    if (!production || !canEditSelectedVersion || superseded || productionMutationLockRef.current || confirmedRefreshLockRef.current) return;
+    if (retryingRecovery && (production.status !== pendingRecovery.previousStatus || authUser?.id !== pendingRecovery.userId)) {
+      await verifyPendingStatusTransition();
+      return;
+    }
 
+    productionMutationLockRef.current = true;
+    setReviewSubmitPhase('preparing');
+    let transitionWriteStarted = false;
     try {
+      const flushResult = await flushReviewEditor();
+      if (flushResult.status !== 'synced') {
+        const message = flushResult.status === 'timed_out'
+          ? '编辑器仍在保存，请稍后重试提交审核。'
+          : flushResult.status === 'cancelled'
+            ? '编辑器保存已中断，请刷新确认正文后再提交审核。'
+            : '正文保存未确认，请检查编辑器提示并重试后再提交审核。';
+        addNotification({ title: '正文尚未确认保存', message, type: 'error' });
+        return;
+      }
+
+      const submittedContent = latestEditContentRef.current;
+      await prepareStatusTransition(
+        'review-submit',
+        production.status,
+        'review',
+        submittedContent,
+        retryingRecovery ? pendingRecovery : undefined,
+      );
+      setReviewSubmitPhase('submitting');
+      transitionWriteStarted = true;
       await updateProduction(production.id, {
         topic_id: production.topic_id,
         version: production.version,
-        content: editData.content,
+        content: submittedContent,
         expected_content: persistedContentRef.current,
         status: 'review',
         version_action: 'none',
       });
+
+      updatePendingStatusTransition(null);
+      persistedContentRef.current = submittedContent;
+      latestEditContentRef.current = submittedContent;
+      setProduction((current) => current?.id === production.id ? {
+        ...current,
+        content: submittedContent,
+        content_markdown: submittedContent,
+        content_json: submittedContent,
+        status: 'review',
+      } : current);
+      setEditData((current) => ({ ...current, content: submittedContent, status: 'review' }));
+
+      confirmedRefreshLockRef.current = true;
+      setConfirmedReviewRefreshPending(true);
+      const refreshed = await fetchData({ notifyOnFailure: false });
+      if (refreshed === 'stale') return;
+      if (refreshed === 'failed') {
+        setConfirmedReviewRefreshPending(true);
+        addNotification({
+          title: '审核已提交，详情未刷新',
+          message: '服务端已确认提交审核，创作状态和正文已保留；详情或历史暂未刷新。请只重新读取确认，不要重复提交审核。',
+          type: 'warning',
+        });
+        return;
+      }
 
       addNotification({
         title: '提交成功',
         message: '创作内容已提交审核',
         type: 'success',
       });
-
-      await fetchData();
     } catch (error) {
+      if (transitionWriteStarted && isAmbiguousProductionTransitionError(error)) {
+        await verifyPendingStatusTransition();
+        return;
+      }
+      if (transitionWriteStarted) updatePendingStatusTransition(null);
       addNotification({
         title: '提交失败',
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      productionMutationLockRef.current = false;
+      setReviewSubmitPhase(null);
     }
   };
 
-  const handleStatusUpdate = async (status: string) => {
-    if (!production || !canEditSelectedVersion || superseded) return;
+  const handleStatusUpdate = async (status: string, confirmedRetry = false) => {
+    const canUpdateStatus = canEditSelectedVersion || (status === 'approved' && canReviewProduction);
+    const pendingRecovery = pendingStatusTransitionRef.current;
+    const retryingRecovery = confirmedRetry && pendingRecovery?.phase === 'ready'
+      && pendingRecovery.operation === 'status-update' && pendingRecovery.targetStatus === status;
+    if (pendingRecovery && !retryingRecovery) return;
+    if (!production || !canUpdateStatus || superseded || productionMutationLockRef.current || confirmedRefreshLockRef.current) return;
+    if (retryingRecovery && (production.status !== pendingRecovery.previousStatus || authUser?.id !== pendingRecovery.userId)) {
+      await verifyPendingStatusTransition();
+      return;
+    }
 
+    productionMutationLockRef.current = true;
+    setStatusUpdating(true);
+    let transitionWriteStarted = false;
     try {
+      const reviewOnlyApproval = status === 'approved' && canReviewProduction && !canEditSelectedVersion;
+      let statusUpdateContent = production.content || '';
+      if (!reviewOnlyApproval) {
+        if (!await flushProductionEditorBeforeMutation()) return;
+        statusUpdateContent = latestEditContentRef.current;
+      }
+      await prepareStatusTransition(
+        'status-update',
+        production.status,
+        status,
+        statusUpdateContent,
+        retryingRecovery ? pendingRecovery : undefined,
+      );
+      transitionWriteStarted = true;
       await updateProduction(production.id, {
         topic_id: production.topic_id,
         version: production.version,
-        content: production.content,
+        content: statusUpdateContent,
         expected_content: persistedContentRef.current,
         status,
         version_action: 'none',
       });
 
+      updatePendingStatusTransition(null);
+      confirmedRefreshLockRef.current = true;
+      setConfirmedStatusRefreshPending(true);
+      persistedContentRef.current = statusUpdateContent;
+      latestEditContentRef.current = statusUpdateContent;
+      setProduction((current) => current?.id === production.id ? {
+        ...current,
+        content: statusUpdateContent,
+        content_markdown: statusUpdateContent,
+        content_json: statusUpdateContent,
+        status,
+      } : current);
+      setEditData((current) => ({ ...current, content: statusUpdateContent, status }));
+
+      if (status === 'approved') celebrateMilestone();
+
+      const refreshed = await fetchData({ notifyOnFailure: false });
+      if (refreshed === 'stale') return;
+      if (refreshed === 'failed') {
+        setConfirmedStatusRefreshPending(true);
+        addNotification({
+          title: '状态已更新，详情未刷新',
+          message: `服务端已确认状态更新为“${productionStatusLabel(status)}”；正文已保留。请只重新读取详情，不要重复更新状态。`,
+          type: 'warning',
+        });
+        return;
+      }
       addNotification({
         title: '状态更新成功',
         message: '创作状态已同步',
         type: 'success',
       });
-
-      if (status === 'approved') celebrateMilestone();
-
-      await fetchData();
     } catch (error) {
+      if (transitionWriteStarted && isAmbiguousProductionTransitionError(error)) {
+        await verifyPendingStatusTransition();
+        return;
+      }
+      if (transitionWriteStarted) updatePendingStatusTransition(null);
       addNotification({
         title: '更新失败',
         message: (error as Error).message,
         type: 'error',
       });
+    } finally {
+      productionMutationLockRef.current = false;
+      setStatusUpdating(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!production) return;
+  const handleDelete = async (confirmedRetry = false) => {
+    const pendingRecovery = pendingStatusTransitionRef.current;
+    const retryingRecovery = confirmedRetry && pendingRecovery?.phase === 'ready' && pendingRecovery.operation === 'delete';
+    if (pendingRecovery && !retryingRecovery) return;
+    if (!production || productionMutationLockRef.current || confirmedRefreshLockRef.current) return;
+    if (retryingRecovery && ((production.version || 'v1.0') !== pendingRecovery.previousVersion
+      || production.status !== pendingRecovery.previousStatus || authUser?.id !== pendingRecovery.userId)) {
+      await verifyPendingStatusTransition();
+      return;
+    }
 
+    productionMutationLockRef.current = true;
+    setDeleting(true);
+    setShowDeleteModal(false);
+    let transitionWriteStarted = false;
     try {
+      if (!await flushProductionEditorBeforeMutation()) return;
+      await prepareStatusTransition(
+        'delete',
+        production.status,
+        'deleted',
+        latestEditContentRef.current,
+        retryingRecovery ? pendingRecovery : undefined,
+        { previousVersion: production.version || 'v1.0' },
+      );
+      transitionWriteStarted = true;
       await deleteProduction(production.id);
-      addNotification({
-        title: '删除成功',
-        message: '创作记录已删除',
-        type: 'success',
-      });
+      updatePendingStatusTransition(null);
+      addNotification({ title: '删除成功', message: '创作记录已删除', type: 'success' });
       navigate('/production');
     } catch (error) {
-      addNotification({
-        title: '删除失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
+      if (transitionWriteStarted && isAmbiguousProductionTransitionError(error)) {
+        await verifyPendingStatusTransition();
+        return;
+      }
+      if (transitionWriteStarted) updatePendingStatusTransition(null);
+      addNotification({ title: '删除失败', message: (error as Error).message, type: 'error' });
+    } finally {
+      productionMutationLockRef.current = false;
+      setDeleting(false);
     }
   };
 
-  if (loading) {
+  if (loading && !recoveryReadInFlight) {
     return (
       <PageShell>
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -603,6 +1248,21 @@ export default function ProductionDetail() {
   }
 
   if (!production) {
+    if (pendingStatusTransition) {
+      return (
+        <PageShell>
+          <GlassPanel className="flex flex-wrap items-center justify-between gap-3 border-studio-amber/30 bg-studio-amber/10 p-4" role="alert">
+            <div className="min-w-0">
+              <p className="font-semibold text-studio-amber-contrast">{pendingStatusTransition.operation === 'delete' ? '删除结果仍待核实' : '上次写入仍待核实'}</p>
+              <p className="mt-1 text-sm text-studio-text-secondary">{statusTransitionReadError || (pendingStatusTransition.operation === 'delete' ? '服务器记录状态尚未读取；为避免重复删除，当前页面保持只读。' : '服务器详情尚未读取；为避免重复提交，当前页面保持只读。')}</p>
+            </div>
+            <ActionButton onClick={() => void verifyPendingStatusTransition()} disabled={pendingStatusTransition.phase === 'checking'} aria-busy={pendingStatusTransition.phase === 'checking'} variant="primary" className="shrink-0">
+              {pendingStatusTransition.phase === 'checking' ? '正在只读核实…' : pendingStatusTransition.operation === 'delete' ? '只读核实删除结果' : '只读核实状态'}
+            </ActionButton>
+          </GlassPanel>
+        </PageShell>
+      );
+    }
     return (
       <PageShell>
         <EmptyState icon={FileText} title="创作记录不存在" description="该稿件可能已被删除或你暂时没有访问权限。" />
@@ -614,10 +1274,39 @@ export default function ProductionDetail() {
   const statusLabel = productionStatusLabel(production.status);
   const syncLabel = editorStateLabel(syncStatus);
   const editorLocked = Boolean(superseded);
+  const readOnlyReason = requestedHistoryUnavailable
+    ? `引用的历史版本 ${requestedVersion} 暂不可用，本页不会用当前正文替代它。`
+    : selectedVersion && !selectedVersion.isCurrent
+      ? '当前显示的是历史版本，仅供查看。返回当前版本后，页面会重新按编辑权限判断是否可修改。'
+      : editorLocked
+        ? null
+        : permissionsLoading
+          ? '正在确认创作更新权限；确认前只开放正文与版本信息查看。'
+          : !hasPermission('production:update')
+            ? '当前账号缺少创作更新权限；可以查看正文和版本信息，保存需由具备更新权限且有权操作关联选题的协作者完成。'
+            : production.can_edit === false
+              ? '当前账号不在这篇稿件的编辑范围内；可以查看正文和版本信息，需由有权操作关联选题的协作者保存。'
+              : !canEditProduction
+                ? '暂未确认这篇稿件的编辑范围；当前仅开放查看，请稍后重新读取详情。'
+                : null;
+  const saveMethodLabel = requestedHistoryUnavailable
+    ? '引用版本不可用'
+    : selectedVersion?.isCurrent
+      ? editorLocked
+        ? '当前版本已被替代，仅可查看'
+        : hasProductionMutation
+          ? '保存或状态处理中'
+          : permissionsLoading
+            ? '正在确认编辑权限'
+            : canEditSelectedVersion
+              ? '正文自动保存'
+              : '只读查看'
+      : '历史只读预览';
   const canManageProductionResources = canEditSelectedVersion
     && production?.status !== 'approved'
     && selectedVersionId === 'current'
     && !editorLocked
+    && !hasProductionMutation
     && hasPermission('production:update')
     && hasPermission('resource:view');
 
@@ -651,14 +1340,16 @@ export default function ProductionDetail() {
       <GlassPanel className={writingFocused ? 'hidden' : 'overflow-hidden'}>
         <div className="flex flex-col gap-4 border-b border-studio-border-soft bg-[var(--xmt-overlay-tint)] px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 items-start gap-3">
-            <button
+            <ActionButton
               type="button"
-              onClick={() => void handleGuardedNavigate('/production')}
-              className="mt-1 rounded-button border border-studio-border-soft bg-studio-surface-soft/70 p-2 text-studio-text-secondary transition hover:border-studio-border-active hover:text-studio-text-primary"
+              variant="icon"
+              onClick={() => navigate('/production')}
+              aria-label="返回创作管理"
+              className="mt-1 !h-10 !w-10 !min-h-10 !min-w-10 !p-2"
               title="返回创作管理"
             >
               <ChevronLeft className="h-5 w-5" />
-            </button>
+            </ActionButton>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="max-w-[48rem] text-xl font-bold leading-snug text-studio-text-primary">
@@ -669,13 +1360,13 @@ export default function ProductionDetail() {
                   <Wifi className="h-3.5 w-3.5" />
                   {syncLabel}
                 </StatusPill>
-                <StatusPill tone={editorLocked ? 'coral' : 'success'}>{editorLocked ? `检测到新大版本 ${superseded?.toVersion}` : `正在编辑当前最新版本 ${production.version || 'v1.0'}`}</StatusPill>
+                <StatusPill tone={editorLocked ? 'coral' : 'success'}>{editorLocked ? `检测到新大版本 ${superseded?.toVersion}` : `${canEditSelectedVersion && !hasProductionMutation ? '正在编辑' : '正在查看'}当前最新版本 ${production.version || 'v1.0'}`}</StatusPill>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-studio-text-muted">
                 <span>{production.version || 'v1.0'}</span>
-                <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="text-studio-cyan-contrast transition hover:text-studio-primary-contrast">
+                <ActionButton type="button" variant="ghost" onClick={() => navigate(`/topics/${production.topic_id}`)} className="min-h-10 !justify-start !px-0 text-xs font-normal text-studio-cyan-contrast hover:text-studio-primary-contrast">
                   {topic?.title || production.topic_title || '关联选题'}
-                </button>
+                </ActionButton>
                 <span className="inline-flex items-center gap-1">
                   <Clock className="h-3.5 w-3.5" />
                   {formatBeijingTime(production.updated_at)}
@@ -694,12 +1385,12 @@ export default function ProductionDetail() {
 
           <div className="flex flex-wrap items-center gap-2">
             {canFocusWrite && (
-              <ActionButton onClick={continueFromOutline} disabled={outlineHeadings.length === 0 || !outlineEditorReady} className="px-3 py-2" title={outlineHeadings.length === 0 ? '请先在选题大纲中设置标题' : `补入 ${outlineHeadings.length} 个大纲标题中尚未写入正文的小节`}>
+              <ActionButton onClick={continueFromOutline} disabled={outlineHeadings.length === 0 || !outlineEditorReady || hasProductionMutation} className="px-3 py-2" title={outlineHeadings.length === 0 ? '请先在选题大纲中设置标题' : `补入 ${outlineHeadings.length} 个大纲标题中尚未写入正文的小节`}>
                 按大纲续写
               </ActionButton>
             )}
             {canFocusWrite && (
-              <ActionButton onClick={() => setWritingFocused(true)} className="px-3 py-2">
+              <ActionButton onClick={() => setWritingFocused(true)} disabled={hasProductionMutation} className="px-3 py-2">
                 专注写作
               </ActionButton>
             )}
@@ -707,17 +1398,26 @@ export default function ProductionDetail() {
               {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
               版本历史
             </ActionButton>
-            {!requestedHistoryUnavailable ? <ActionButton onClick={startEditing} className="px-3 py-2">
+            {!requestedHistoryUnavailable && selectedVersion && !selectedVersion.isCurrent ? <ActionButton onClick={() => setSelectedVersionId('current')} disabled={hasProductionMutation} className="px-3 py-2">
               <FileText className="h-4 w-4" />
-              当前稿件
+              返回当前版本
             </ActionButton> : null}
-            {canEditSelectedVersion && production.status !== 'approved' ? (
-              <ActionButton onClick={() => handleStatusUpdate(NEXT_STATUSES[production.status])} variant="primary" className="px-3 py-2">
+            {(canEditSelectedVersion && production.status !== 'approved') || canReviewProduction ? (
+              <ActionButton
+                onClick={() => production.status === 'draft' ? void handleSubmitReview() : void handleStatusUpdate(NEXT_STATUSES[production.status])}
+                variant="primary"
+                className="px-3 py-2"
+                data-testid={production.status === 'review' ? 'production-review-approve' : undefined}
+                disabled={hasProductionMutation}
+                aria-busy={hasProductionMutation}
+              >
                 <ArrowRight className="h-4 w-4" />
-                {production.status === 'draft' ? '提交审核' : production.status === 'review' ? '审核通过' : '重新编辑'}
+                {production.status === 'draft'
+                  ? reviewSubmitPhase === 'preparing' ? '正在确认正文保存…' : reviewSubmitPhase === 'submitting' ? '正在提交审核…' : '提交审核'
+                  : statusUpdating ? '状态处理中…' : versionSaving ? '版本保存中…' : deleting ? '正在删除…' : production.status === 'review' ? '审核通过' : '重新编辑'}
               </ActionButton>
             ) : production.status === 'approved' ? (
-              <ActionButton onClick={() => void handleGuardedNavigate('/shooting')} variant="primary" className="px-3 py-2">
+              <ActionButton onClick={() => navigate(`/shooting?topicId=${encodeURIComponent(String(production.topic_id))}`)} variant="primary" disabled={hasProductionMutation} className="px-3 py-2">
                 <ArrowRight className="h-4 w-4" />
                 成片制作
               </ActionButton>
@@ -725,6 +1425,8 @@ export default function ProductionDetail() {
             {canDelete ? (
               <ActionButton
                 onClick={() => setShowDeleteModal(true)}
+                disabled={hasProductionMutation}
+                aria-busy={deleting}
                 className="border-studio-coral/35 px-3 py-2 text-studio-coral-contrast hover:bg-studio-coral/10"
                 title="删除创作记录"
               >
@@ -745,7 +1447,7 @@ export default function ProductionDetail() {
           </div>
           <div>
             <p className="text-studio-text-muted">保存方式</p>
-            <p className="mt-1 font-semibold text-studio-text-primary">{selectedVersion?.isCurrent ? '协同自动同步' : '历史只读预览'}</p>
+            <p className="mt-1 font-semibold text-studio-text-primary" data-testid="production-save-method">{saveMethodLabel}</p>
           </div>
           <div>
             <p className="text-studio-text-muted">审核状态</p>
@@ -776,17 +1478,126 @@ export default function ProductionDetail() {
       <div className={`grid items-start gap-6 ${writingFocused ? 'grid-cols-1' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}>
         <div className="min-w-0 space-y-5">
         <GlassPanel className="min-w-0 overflow-visible">
-          {superseded && canEditProduction ? (
+          {pendingStatusTransition ? (
+            <div data-testid="production-status-transition-recovery" role="alert" aria-live="polite" className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-amber/30 bg-studio-amber/10 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-studio-amber-contrast">
+                  {pendingStatusTransition.phase === 'ready'
+                    ? pendingStatusTransition.operation === 'version-save'
+                      ? `服务器仍为版本 ${pendingStatusTransition.previousVersion}`
+                      : pendingStatusTransition.operation === 'delete'
+                        ? '服务器仍保留该创作记录'
+                        : `服务器仍为“${productionStatusLabel(pendingStatusTransition.previousStatus)}”`
+                    : pendingStatusTransition.phase === 'checking'
+                      ? pendingStatusTransition.operation === 'delete' ? '正在只读核实删除结果' : '正在只读核实状态'
+                      : pendingStatusTransition.operation === 'delete' ? '上次删除仍待核实' : '上次状态操作仍待核实'}
+                </p>
+                <p className="mt-1 text-sm text-studio-text-secondary">
+                  {pendingStatusTransition.phase === 'ready'
+                    ? pendingStatusTransition.operation === 'version-save'
+                      ? '版本和正文已核实，尚未创建新版本。系统没有自动重试；确认后才会再次保存。'
+                      : pendingStatusTransition.operation === 'delete'
+                        ? '版本、状态和正文已核实未变化；系统没有自动重试删除。确认后才会再次删除。'
+                        : '正文已核实，系统没有自动重试。确认后才会再次发送状态操作。'
+                    : statusTransitionReadError || '为避免重复提交，编辑、保存和其他状态操作已锁定。'}
+                </p>
+              </div>
+              {pendingStatusTransition.phase === 'ready' ? (
+                <ActionButton
+                  data-testid="production-status-transition-confirm-retry"
+                  onClick={() => pendingStatusTransition.operation === 'review-submit'
+                    ? void handleSubmitReview(true)
+                    : pendingStatusTransition.operation === 'version-save'
+                      ? pendingStatusTransition.versionAction ? void handleVersionedSave(pendingStatusTransition.versionAction, true) : undefined
+                      : pendingStatusTransition.operation === 'delete'
+                        ? void handleDelete(true)
+                        : void handleStatusUpdate(pendingStatusTransition.targetStatus, true)}
+                  disabled={productionMutationLockRef.current || statusUpdating || reviewSubmitPhase !== null}
+                  variant="primary"
+                  className="shrink-0"
+                >
+                  {reviewSubmitPhase !== null
+                    ? reviewSubmitPhase === 'submitting' ? '正在提交审核…' : '正在准备提交…'
+                    : statusUpdating ? '正在更新状态…'
+                      : pendingStatusTransition.operation === 'review-submit'
+                        ? '确认后重试提交审核'
+                        : pendingStatusTransition.operation === 'version-save'
+                          ? `确认后重试：${pendingStatusTransition.versionAction === 'major' ? '另开新版' : '小修保存'}`
+                          : pendingStatusTransition.operation === 'delete'
+                            ? '确认后重试删除'
+                            : `确认后重试：${productionStatusLabel(pendingStatusTransition.targetStatus)}`}
+                </ActionButton>
+              ) : (
+                <ActionButton
+                  data-testid="production-status-transition-verify"
+                  onClick={() => void verifyPendingStatusTransition()}
+                  disabled={pendingStatusTransition.phase === 'checking' || statusUpdating || reviewSubmitPhase !== null || versionSaving !== null || deleting}
+                  aria-busy={pendingStatusTransition.phase === 'checking' || statusUpdating || reviewSubmitPhase !== null || versionSaving !== null || deleting}
+                  variant="primary"
+                  className="shrink-0"
+                >
+                  {pendingStatusTransition.phase === 'checking' ? '正在只读核实…' : reviewSubmitPhase === 'submitting' ? '正在提交审核…' : statusUpdating ? '正在更新状态…' : versionSaving ? '正在保存版本…' : deleting ? '正在删除…' : pendingStatusTransition.operation === 'delete' ? '只读核实删除结果' : '只读核实状态'}
+                </ActionButton>
+              )}
+            </div>
+          ) : null}
+          {superseded ? (
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-coral/30 bg-studio-coral/10 px-4 py-3" role="status" aria-live="polite">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-studio-coral-contrast">这份稿件已有更新版本</p>
                 <p className="mt-1 text-sm text-studio-text-secondary">
-                  {superseded.createdBy.name} 已创建 {superseded.toVersion}。当前 {superseded.fromVersion} 已转为只读，进入最新版本后可继续协作。
+                  {superseded.createdBy.name} 已创建 {superseded.toVersion}。当前 {superseded.fromVersion} 已转为只读；可进入最新版本查看，并按该版本权限继续操作。
                 </p>
               </div>
               <ActionButton onClick={() => void fetchData()} variant="primary" className="shrink-0">
-                进入最新版本
+                查看最新版本
               </ActionButton>
+            </div>
+          ) : null}
+          {confirmedVersionRefreshPending && production ? (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-amber/30 bg-studio-amber/10 px-4 py-3">
+              <p className="min-w-0 text-sm text-studio-amber-contrast">
+                服务端已确认版本 {production.version}，正文已保留；版本历史暂未刷新。请只重新读取详情，不要重复保存或创建版本。
+              </p>
+              <ActionButton onClick={() => void fetchData({ notifyOnFailure: false, recovery: true })} disabled={loading} aria-busy={loading} variant="primary" className="shrink-0">
+                {loading ? '正在重新读取…' : '只重试读取详情'}
+              </ActionButton>
+            </div>
+          ) : null}
+          {confirmedReviewRefreshPending && production ? (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-amber/30 bg-studio-amber/10 px-4 py-3">
+              <p className="min-w-0 text-sm text-studio-amber-contrast">
+                服务端已确认提交审核，当前状态为审核中，正文已保留；详情或历史暂未刷新。请只重新读取确认，不要重复提交审核。
+              </p>
+              <ActionButton onClick={() => void fetchData({ notifyOnFailure: false, recovery: true })} disabled={loading} aria-busy={loading} variant="primary" className="shrink-0">
+                {loading ? '正在重新读取…' : '只重试读取详情'}
+              </ActionButton>
+            </div>
+          ) : null}
+          {confirmedStatusRefreshPending && production ? (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-amber/30 bg-studio-amber/10 px-4 py-3">
+              <p className="min-w-0 text-sm text-studio-amber-contrast">
+                服务端已确认状态更新为“{statusLabel}”，正文已保留；详情暂未刷新。请只重新读取详情，不要重复更新状态。
+              </p>
+              <ActionButton onClick={() => void fetchData({ notifyOnFailure: false, recovery: true })} disabled={loading} aria-busy={loading} variant="primary" className="shrink-0">
+                {loading ? '正在重新读取…' : '只重试读取详情'}
+              </ActionButton>
+            </div>
+          ) : null}
+          {confirmedDeleteRefreshPending && production ? (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-amber/30 bg-studio-amber/10 px-4 py-3">
+              <p className="min-w-0 text-sm text-studio-amber-contrast">
+                服务器确认创作记录仍存在，但版本、状态或正文已变化；本次删除没有重试。请只重新读取详情，检查后再决定是否删除。
+              </p>
+              <ActionButton onClick={() => void fetchData({ notifyOnFailure: false, recovery: true })} disabled={loading} aria-busy={loading} variant="primary" className="shrink-0">
+                {loading ? '正在重新读取…' : '只重试读取详情'}
+              </ActionButton>
+            </div>
+          ) : null}
+          {readOnlyReason ? (
+            <div data-testid="production-readonly-reason" role="status" aria-live="polite" className="border-b border-studio-border-soft bg-studio-surface-soft px-4 py-3">
+              <p className="text-sm font-semibold text-studio-text-primary">仅查看</p>
+              <p className="mt-1 text-sm text-studio-text-secondary">{readOnlyReason}</p>
             </div>
           ) : null}
           {writingFocused && (
@@ -819,7 +1630,7 @@ export default function ProductionDetail() {
                 <p className="text-sm font-semibold text-studio-coral-contrast">引用的历史版本 {requestedVersion} 暂不可用</p>
                 <p className="mt-2 text-sm text-studio-text-secondary">为避免把当前稿误当作来源，本页不会替换显示当前正文。</p>
               </div>
-              <ActionButton onClick={() => void handleGuardedNavigate(`/production/${production.id}`)} variant="primary" className="px-3 py-2">
+              <ActionButton onClick={() => navigate(`/production/${production.id}`)} variant="primary" className="px-3 py-2">
                 返回当前版本
               </ActionButton>
             </div>
@@ -827,7 +1638,10 @@ export default function ProductionDetail() {
             <div className="min-h-[300px] bg-[var(--editor-bg)]">
               <ContentEditor
                 value={editData.content}
-                onChange={(content) => setEditData((prev) => ({ ...prev, content }))}
+                onChange={(content) => {
+                  latestEditContentRef.current = content;
+                  setEditData((prev) => ({ ...prev, content }));
+                }}
                 mode="rich"
                 collaborationKey={getProductionVersionRoomId(production.id, production.version)}
                 persistenceStatus={syncStatus}
@@ -835,6 +1649,7 @@ export default function ProductionDetail() {
                 focusMode={writingFocused}
                 pageScroll
                 adapter={productionEditorAdapter}
+              readOnly={hasProductionMutation}
                 onRuntimeHandleChange={handleRuntimeHandleChange}
                 onEditorCommandHandleChange={handleOutlineEditorChange}
               />
@@ -866,11 +1681,14 @@ export default function ProductionDetail() {
           version={selectedVersion?.version || production.version}
           currentVersion={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked)}
           canComment={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked && hasPermission('workflow:comment'))}
-          canAccept={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked && canEditSelectedVersion && hasPermission('production:update'))}
+          canAccept={Boolean(selectedVersion?.isCurrent && !requestedHistoryUnavailable && !editorLocked && !hasProductionMutation && canEditSelectedVersion && hasPermission('production:update'))}
           canModerate={hasPermission('comment:delete')}
           currentUserId={authUser?.id ?? null}
           editorHandle={reviewEditorHandle}
           flushEditor={flushReviewEditor}
+          mutationsLocked={hasProductionMutation}
+          beginAcceptingSuggestion={beginReviewSuggestionAccept}
+          endAcceptingSuggestion={endReviewSuggestionAccept}
           onNotice={(title, message, type) => addNotification({ title, message, type })}
         />
         </div>
@@ -881,14 +1699,16 @@ export default function ProductionDetail() {
               <p className="text-xs font-semibold text-studio-text-muted">版本历史</p>
               <h2 className="mt-1 text-sm font-semibold text-studio-text-primary">版本记录</h2>
             </div>
-            <button
+            <ActionButton
               type="button"
+              variant="icon"
               onClick={() => setShowSidebar((prev) => !prev)}
-              className="rounded-lg p-2 text-studio-text-muted transition hover:bg-studio-surface-elevated/70 hover:text-studio-text-primary"
+              className="!h-10 !w-10 !min-h-10 !min-w-10 !p-2"
+              aria-label={showSidebar ? '收起版本历史' : '展开版本历史'}
               title={showSidebar ? '收起版本历史' : '展开版本历史'}
             >
               {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
-            </button>
+            </ActionButton>
           </div>
 
           <div className="space-y-5 p-5">
@@ -898,7 +1718,7 @@ export default function ProductionDetail() {
                   key={entry.id}
                   type="button"
                   onClick={() => setSelectedVersionId(entry.id)}
-                  disabled={requestedHistoryUnavailable}
+                  disabled={requestedHistoryUnavailable || hasProductionMutation}
                   className={`w-full rounded-card border px-4 py-3 text-left transition ${
                     selectedVersionId === entry.id
                       ? 'border-studio-border-active bg-studio-primary/12 shadow-glow-primary'
@@ -916,7 +1736,7 @@ export default function ProductionDetail() {
                 </button>
               ))}
               {sidebarVersionEntries.length === 0 ? <EmptyState title="暂无版本历史" description="保存版本后会在这里形成时间线。" /> : null}
-              {history.length < historyTotal && <button type="button" disabled={historyLoading} onClick={() => void loadMoreHistory()} className="w-full rounded-lg border border-studio-border-soft px-3 py-2 text-sm text-studio-text-secondary disabled:opacity-50">{historyLoading ? '正在加载…' : '查看更多历史版本'}</button>}
+              {history.length < historyTotal && <ActionButton type="button" variant="secondary" disabled={historyLoading || hasProductionMutation} onClick={() => void loadMoreHistory()} className="min-h-10 w-full px-3 py-2 text-sm">{historyLoading ? '正在加载…' : '查看更多历史版本'}</ActionButton>}
             </div>
 
             <ProductionOriginPanel
@@ -928,34 +1748,40 @@ export default function ProductionDetail() {
 
             <div className="space-y-3 border-t border-studio-border-soft pt-5">
               <p className="text-xs font-semibold uppercase text-studio-text-muted">版本操作</p>
-              {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && <ActionButton onClick={startEditing} className="w-full">
+              {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && <ActionButton onClick={startEditing} disabled={hasProductionMutation} className="w-full">
                 当前版本查看 / 编辑
               </ActionButton>}
               {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && (
                 <div className="flex flex-wrap gap-2">
-                  <ActionButton onClick={() => handleVersionedSave('minor')} className="min-w-0 flex-1 px-3 py-2">
+                  <ActionButton onClick={() => handleVersionedSave('minor')} disabled={hasProductionMutation} aria-busy={versionSaving === 'minor'} className="min-w-0 flex-1 px-3 py-2">
                     <Save className="h-4 w-4" />
-                    小修保存
+                    {versionSaving === 'minor' ? '正在保存…' : '小修保存'}
                   </ActionButton>
-                  <ActionButton onClick={() => handleVersionedSave('major')} className="min-w-0 flex-1 px-3 py-2" variant="primary">
+                  <ActionButton onClick={() => handleVersionedSave('major')} disabled={hasProductionMutation} aria-busy={versionSaving === 'major'} className="min-w-0 flex-1 px-3 py-2" variant="primary">
                     <Save className="h-4 w-4" />
-                    另开新版
+                    {versionSaving === 'major' ? '正在保存…' : '另开新版'}
                   </ActionButton>
                 </div>
               )}
               {canEditSelectedVersion && !editorLocked && !requestedHistoryUnavailable && editData.status === 'draft' ? (
-                <ActionButton onClick={handleSubmitReview} variant="primary" className="w-full">
+                <ActionButton
+                  onClick={() => void handleSubmitReview()}
+                  variant="primary"
+                  className="w-full"
+                  disabled={hasProductionMutation}
+                  aria-busy={hasProductionMutation}
+                >
                   <ArrowRight className="h-4 w-4" />
-                  提交审核
+                  {reviewSubmitPhase === 'preparing' ? '正在确认正文保存…' : reviewSubmitPhase === 'submitting' ? '正在提交审核…' : '提交审核'}
                 </ActionButton>
               ) : null}
             </div>
 
             <div className="border-t border-studio-border-soft pt-5">
               <p className="text-xs font-semibold uppercase text-studio-text-muted">关联选题</p>
-              <button type="button" onClick={() => void handleGuardedNavigate(`/topics/${production.topic_id}`)} className="mt-2 text-left text-sm font-semibold text-studio-cyan-contrast transition hover:text-studio-primary-contrast">
+              <ActionButton type="button" variant="ghost" onClick={() => navigate(`/topics/${production.topic_id}`)} className="mt-2 min-h-10 !justify-start !px-0 text-left text-sm font-semibold text-studio-cyan-contrast hover:text-studio-primary-contrast">
                 {topic?.title || production.topic_title || '-'}
-              </button>
+              </ActionButton>
             </div>
           </div>
         </GlassPanel>
@@ -970,6 +1796,7 @@ export default function ProductionDetail() {
         variant="danger"
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteModal(false)}
+        loading={deleting}
       />
 
       <EditorLeaveFailureDialog

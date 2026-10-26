@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderTree, Pencil, Plus, Trash2 } from 'lucide-react';
-import { createResourceCategory, deleteResourceCategory, getResourceCategories, updateResourceCategory, type LibraryType, type ResourceCategory } from '@/api/resourceCenter';
+import { getResourceCategories, type LibraryType, type ResourceCategory } from '@/api/resourceCenter';
 import { BaseModal, ConfirmModal } from '@/components/common';
 import ActionButton from '@/components/studio/ActionButton';
+import { useResourceCategoryMutationRecovery } from '@/hooks/useResourceCategoryMutationRecovery';
+import { useAuthStore } from '@/store';
 
 interface ResourceCategoryManagementModalProps {
   open: boolean;
@@ -23,32 +25,66 @@ export default function ResourceCategoryManagementModal({
   onClose,
   onCategoriesChange,
 }: ResourceCategoryManagementModalProps) {
+  const actorId = useAuthStore((state) => state.user?.id);
   const [categories, setCategories] = useState(initialCategories);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [parentId, setParentId] = useState('');
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [refreshError, setRefreshError] = useState('');
-  const [blockedAfterWrite, setBlockedAfterWrite] = useState(false);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState<ResourceCategory | null>(null);
-  const categoriesRef = useRef(initialCategories);
   const busyRef = useRef(false);
-  categoriesRef.current = initialCategories;
 
-  useEffect(() => {
-    if (!open) return;
-    setCategories(categoriesRef.current);
+  const resetForm = useCallback(() => {
     setEditingId(null);
     setName('');
     setParentId('');
     setError('');
-    setNotice('');
+  }, []);
+
+  const onMutationCompleted = useCallback((operation: 'create' | 'update' | 'delete') => {
+    if (operation === 'create' || operation === 'update') resetForm();
+    if (operation === 'delete') setDeleting(null);
+  }, [resetForm]);
+
+  const recovery = useResourceCategoryMutationRecovery(open, actorId, libraryType, (next) => {
+    setCategories(next);
+    onCategoriesChange(next);
     setRefreshError('');
-    setBlockedAfterWrite(false);
+  }, onMutationCompleted);
+
+  useEffect(() => {
+    if (!open) return;
+    setCategories(initialCategories);
+    setEditingId(null);
+    setName('');
+    setParentId('');
+    setError('');
+    setRefreshError('');
     setDeleting(null);
-  }, [open, libraryType]);
+  }, [initialCategories, open, libraryType]);
+
+  useEffect(() => {
+    const pending = recovery.pending?.recovery;
+    if (!pending) return;
+    if (pending.operation === 'create') {
+      const payload = pending.payload as { name: string; parent_id: number | null };
+      setEditingId(null);
+      setName(payload.name);
+      setParentId(payload.parent_id == null ? '' : String(payload.parent_id));
+      return;
+    }
+    if (pending.operation === 'update') {
+      const payload = pending.payload as { name: string; parent_id: number | null };
+      setEditingId(Number(pending.categoryId));
+      setName(payload.name);
+      setParentId(payload.parent_id == null ? '' : String(payload.parent_id));
+      return;
+    }
+    const target = categories.find((category) => category.id === pending.categoryId);
+    if (target) setDeleting(target);
+  }, [categories, recovery.pending?.recovery]);
 
   const refreshCategories = useCallback(async () => {
     try {
@@ -56,7 +92,6 @@ export default function ResourceCategoryManagementModal({
       setCategories(response.data);
       onCategoriesChange(response.data);
       setRefreshError('');
-      setBlockedAfterWrite(false);
       return true;
     } catch (cause) {
       setRefreshError(cause instanceof Error ? cause.message : '读取分类失败');
@@ -87,15 +122,7 @@ export default function ResourceCategoryManagementModal({
   }, [categories, editingId]);
 
   const close = () => {
-    if (!busyRef.current && !blockedAfterWrite) onClose();
-  };
-
-  const resetForm = () => {
-    setEditingId(null);
-    setName('');
-    setParentId('');
-    setError('');
-    setNotice('');
+    if (!busyRef.current && (!recovery.pending || recovery.pending.phase === 'wrong_library')) onClose();
   };
 
   const saveCategory = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -109,27 +136,15 @@ export default function ResourceCategoryManagementModal({
       setError('分类名称不能超过 100 个字符');
       return;
     }
-    if (busyRef.current || blockedAfterWrite) return;
+    if (busyRef.current || recovery.locked || !recovery.ready) return;
 
     busyRef.current = true;
     setBusy(true);
     setError('');
-    setNotice('');
+    recovery.clearError();
     try {
-      const action = editingId === null ? '创建' : '更新';
-      if (editingId === null) {
-        await createResourceCategory({ library_type: libraryType, name: normalizedName, parent_id: parentId ? Number(parentId) : null });
-      } else {
-        await updateResourceCategory(editingId, { name: normalizedName, parent_id: parentId ? Number(parentId) : null });
-      }
-      resetForm();
-      setNotice(`服务端已确认分类${action}成功。`);
-      if (!(await refreshCategories())) {
-        setBlockedAfterWrite(true);
-        setNotice(`服务端已确认分类${action}成功，但列表刷新失败；请只重试读取，不要重复操作。`);
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '分类保存失败，请重试');
+      const payload = { name: normalizedName, parent_id: parentId ? Number(parentId) : null };
+      await recovery.mutate(editingId === null ? 'create' : 'update', editingId, payload);
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -138,27 +153,23 @@ export default function ResourceCategoryManagementModal({
 
   const deleteCategory = async () => {
     const target = deleting;
-    if (!target || busyRef.current || blockedAfterWrite) return;
+    if (!target || busyRef.current || recovery.locked || !recovery.ready) return;
     busyRef.current = true;
     setBusy(true);
     setError('');
-    setNotice('');
+    recovery.clearError();
     try {
-      await deleteResourceCategory(target.id);
-      setDeleting(null);
-      setNotice('服务端已确认分类删除成功。');
-      if (!(await refreshCategories())) {
-        setBlockedAfterWrite(true);
-        setNotice('服务端已确认分类删除成功，但列表刷新失败；请只重试读取，不要重复删除。');
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '分类删除失败，请重试');
-      setDeleting(null);
+      await recovery.mutate('delete', target.id, {});
     } finally {
       busyRef.current = false;
       setBusy(false);
     }
   };
+
+  const controlsLocked = busy || recovery.locked || !recovery.ready;
+  const phase = recovery.pending?.phase;
+  const blocksClose = Boolean(recovery.pending && phase !== 'wrong_library');
+  const canRetryStatus = recovery.pending && !['submitting', 'checking', 'wrong_library'].includes(recovery.pending.phase);
 
   return <>
     <BaseModal
@@ -167,31 +178,36 @@ export default function ResourceCategoryManagementModal({
       title={<span className="flex items-center gap-2"><FolderTree className="h-5 w-5 text-studio-cyan-contrast" />{libraryName}分类管理</span>}
       description="可创建分类、调整上级关系或删除空分类。含有资料或子分类的分类不能删除。"
       size="lg"
-      closeOnOverlayClick={!busy && !blockedAfterWrite}
-      showCloseButton={!busy && !blockedAfterWrite}
+      closeOnOverlayClick={!busy && !blocksClose}
+      showCloseButton={!busy && !blocksClose}
     >
       <div className="space-y-5">
         <form onSubmit={(event) => void saveCategory(event)} className="grid gap-3 rounded-card border border-studio-border-soft bg-studio-surface-soft p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
           <label className="block text-sm text-studio-text-secondary">分类名称
-            <input aria-label="分类名称" value={name} onChange={(event) => setName(event.target.value)} className={`mt-2 ${fieldClassName}`} maxLength={100} disabled={busy || blockedAfterWrite} />
+            <input aria-label="分类名称" value={name} onChange={(event) => setName(event.target.value)} className={`mt-2 ${fieldClassName}`} maxLength={100} disabled={controlsLocked} />
           </label>
           <label className="block text-sm text-studio-text-secondary">上级分类
-            <select aria-label="上级分类" value={parentId} onChange={(event) => setParentId(event.target.value)} className={`mt-2 ${fieldClassName}`} disabled={busy || blockedAfterWrite}>
+            <select aria-label="上级分类" value={parentId} onChange={(event) => setParentId(event.target.value)} className={`mt-2 ${fieldClassName}`} disabled={controlsLocked}>
               <option value="">一级分类</option>
               {categories.map((category) => <option key={category.id} value={category.id} disabled={disabledParentIds.has(category.id)}>{category.path || category.name}</option>)}
             </select>
           </label>
           <div className="flex gap-2">
-            {editingId !== null ? <ActionButton type="button" onClick={resetForm} disabled={busy || blockedAfterWrite}>取消</ActionButton> : null}
-            <ActionButton type="submit" variant="primary" disabled={busy || blockedAfterWrite}>
+            {editingId !== null ? <ActionButton type="button" onClick={resetForm} disabled={controlsLocked}>取消</ActionButton> : null}
+            <ActionButton type="submit" variant="primary" disabled={controlsLocked}>
               <span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" />{busy ? '保存中…' : editingId === null ? '新增分类' : '保存修改'}</span>
             </ActionButton>
           </div>
         </form>
 
         {error ? <p role="alert" className="text-sm text-studio-coral-contrast">{error}</p> : null}
-        {notice ? <p role={blockedAfterWrite ? 'alert' : 'status'} className={`text-sm ${blockedAfterWrite ? 'text-studio-amber-contrast' : 'text-studio-cyan-contrast'}`}>{notice}</p> : null}
-        {refreshError ? <div className="flex flex-col gap-3 rounded-button border border-studio-coral-soft bg-studio-coral-soft px-4 py-3 text-sm text-studio-coral-contrast sm:flex-row sm:items-center sm:justify-between"><span>分类列表读取失败：{refreshError}</span><ActionButton type="button" onClick={() => void refreshCategories()} disabled={busy}>{busy ? '正在重试…' : '只重试读取'}</ActionButton></div> : null}
+        {recovery.error ? <p role="alert" className="text-sm text-studio-coral-contrast">{recovery.error}</p> : null}
+        {recovery.message ? <div role={recovery.locked ? 'alert' : 'status'} className={`space-y-3 text-sm ${recovery.locked ? 'text-studio-amber-contrast' : 'text-studio-cyan-contrast'}`}>
+          <p>{recovery.message}</p>
+          {phase === 'not_found' ? <div className="flex flex-wrap gap-2"><ActionButton type="button" variant="primary" onClick={recovery.retry}>用原内容和原编号安全重试</ActionButton><ActionButton type="button" onClick={recovery.verify}>再次只读核实</ActionButton></div> : null}
+          {canRetryStatus && phase !== 'not_found' ? <ActionButton type="button" onClick={phase === 'confirmed_read_failed' ? recovery.retryRead : phase === 'cleanup_failed' || phase === 'rejected_cleanup_failed' ? recovery.retryCleanup : recovery.verify}>{phase === 'confirmed_read_failed' ? '只重试读取分类' : phase === 'cleanup_failed' || phase === 'rejected_cleanup_failed' ? '重试清理恢复记录' : '只读重新核实'}</ActionButton> : null}
+        </div> : null}
+        {refreshError ? <div className="flex flex-col gap-3 rounded-button border border-studio-coral-soft bg-studio-coral-soft px-4 py-3 text-sm text-studio-coral-contrast sm:flex-row sm:items-center sm:justify-between"><span>分类列表读取失败：{refreshError}</span><ActionButton type="button" onClick={() => void refreshCategories()} disabled={busy || recovery.locked}>{busy ? '正在重试…' : '只重试读取'}</ActionButton></div> : null}
 
         <div className="max-h-72 overflow-auto rounded-card border border-studio-border-soft">
           {categories.length ? <ul className="divide-y divide-studio-border-soft">
@@ -201,10 +217,10 @@ export default function ResourceCategoryManagementModal({
                 <p className="truncate text-xs text-studio-text-secondary">{category.path || category.name} · {category.resource_count ?? 0} 条资料</p>
               </div>
               <div className="flex shrink-0 gap-2">
-                <ActionButton type="button" aria-label={`编辑分类 ${category.name}`} disabled={busy || blockedAfterWrite} onClick={() => { setEditingId(category.id); setName(category.name); setParentId(category.parent_id == null ? '' : String(category.parent_id)); setError(''); setNotice(''); }}>
+                <ActionButton type="button" aria-label={`编辑分类 ${category.name}`} disabled={controlsLocked} onClick={() => { setEditingId(category.id); setName(category.name); setParentId(category.parent_id == null ? '' : String(category.parent_id)); setError(''); recovery.clearError(); }}>
                   <span className="inline-flex items-center gap-1.5"><Pencil className="h-4 w-4" />编辑</span>
                 </ActionButton>
-                <ActionButton type="button" variant="danger" aria-label={`删除分类 ${category.name}`} disabled={busy || blockedAfterWrite} onClick={() => setDeleting(category)}>
+                <ActionButton type="button" variant="danger" aria-label={`删除分类 ${category.name}`} disabled={controlsLocked} onClick={() => setDeleting(category)}>
                   <span className="inline-flex items-center gap-1.5"><Trash2 className="h-4 w-4" />删除</span>
                 </ActionButton>
               </div>
@@ -213,6 +229,6 @@ export default function ResourceCategoryManagementModal({
         </div>
       </div>
     </BaseModal>
-    <ConfirmModal open={!!deleting} title="删除分类" description={`确定删除分类“${deleting?.name || ''}”吗？含有资料或子分类时，服务端会拒绝删除。`} confirmText="删除分类" variant="danger" loading={busy} onCancel={() => setDeleting(null)} onConfirm={deleteCategory} />
+    <ConfirmModal open={!!deleting} title="删除分类" description={`确定删除分类“${deleting?.name || ''}”吗？含有资料或子分类时，服务端会拒绝删除。`} confirmText="删除分类" variant="danger" loading={busy || phase === 'checking'} onCancel={() => { if (!recovery.pending) setDeleting(null); }} onConfirm={deleteCategory} />
   </>;
 }

@@ -21,7 +21,8 @@ export default function ContentDocumentPicker({
   onPick,
   className,
 }: ContentDocumentPickerProps) {
-  const listId = useId();
+  const fieldId = useId();
+  const listId = `${fieldId}-documents`;
   const recentDocs = useMemo(() => getRecentContentDocuments(), []);
 
   const handleSelect = (input: string) => {
@@ -34,7 +35,10 @@ export default function ContentDocumentPicker({
 
   return (
     <>
+      <label htmlFor={fieldId} className="sr-only">选择最近协作文档</label>
       <input
+        id={fieldId}
+        name="contentDocument"
         list={listId}
         value={value}
         onChange={(event) => handleSelect(event.target.value)}

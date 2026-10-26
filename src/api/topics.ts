@@ -1,6 +1,6 @@
 import { useAuthStore } from '../store';
 import type { Topic } from '../types';
-import type { CreatorTopicSuggestionSource } from '../utils/creatorTopicSuggestionSource';
+import type { TopicCreatePayload } from '../utils/topicCreateRecovery';
 
 const BASE_URL = '/api';
 
@@ -83,6 +83,16 @@ export async function getTopic(id: number): Promise<Topic> {
   return result.data;
 }
 
+export async function getTopicDeleteStatus(id: number): Promise<'present' | 'missing'> {
+  try {
+    await getTopic(id);
+    return 'present';
+  } catch (error) {
+    if (error instanceof TopicApiError && error.status === 404) return 'missing';
+    throw error;
+  }
+}
+
 export async function repairCurrentTopicStageRecord(id: number): Promise<{ stage: 'production' | 'shooting' | 'publishing'; created: boolean }> {
   const response = await fetch(`${BASE_URL}/topics/${id}/repair-stage-record`, {
     method: 'POST',
@@ -93,15 +103,39 @@ export async function repairCurrentTopicStageRecord(id: number): Promise<{ stage
   return result.data;
 }
 
-export async function createTopic(data: { title: string; description: string; outline?: string; platform: string; deadline: string; assignee_id?: number | null; creator_suggestion_source?: CreatorTopicSuggestionSource }): Promise<{ message: string; topicId: number }> {
+export type TopicCreateRequestStatus =
+  | { state: 'not_found' }
+  | { state: 'created'; topicId: number };
+
+export async function createTopic(data: TopicCreatePayload & { client_request_id?: string }): Promise<{ message: string; topicId: number }> {
   const response = await fetch(`${BASE_URL}/topics`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '创建选题失败'));
+  if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '创建选题失败'), response.status);
   const result = await response.json();
   return { message: result.message, topicId: result.data.topicId };
+}
+
+export async function getTopicCreateRequestStatus(requestId: string): Promise<TopicCreateRequestStatus> {
+  const response = await fetch(`${BASE_URL}/topics/create-requests/${encodeURIComponent(requestId)}`, {
+    headers: getAuthHeader(),
+    cache: 'no-store',
+  });
+  if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '核实选题创建状态失败'), response.status);
+  const body: unknown = await response.json();
+  const envelope = body as { data?: unknown } | null;
+  const payload = envelope?.data && typeof envelope.data === 'object'
+    ? envelope.data as { state?: unknown; topicId?: unknown }
+    : body as { state?: unknown; topicId?: unknown } | null;
+  const state = payload?.state;
+  if (state === 'not_found') return { state };
+  const topicId = Number(payload?.topicId);
+  if (state !== 'created' || !Number.isSafeInteger(topicId) || topicId <= 0) {
+    throw new Error('选题创建状态响应格式无效');
+  }
+  return { state, topicId };
 }
 
 export async function updateTopic(id: number, data: Partial<Topic> & { version_action?: 'minor' | 'major' | 'none'; expected_content?: string }): Promise<{ message: string }> {
@@ -110,7 +144,7 @@ export async function updateTopic(id: number, data: Partial<Topic> & { version_a
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '更新选题失败'));
+  if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '更新选题失败'), response.status);
   return response.json();
 }
 
@@ -126,7 +160,7 @@ export async function deleteTopic(id: number): Promise<{ message: string }> {
     method: 'DELETE',
     headers: getAuthHeader()
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '删除选题失败'));
+  if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '删除选题失败'), response.status);
   return response.json();
 }
 
@@ -136,7 +170,10 @@ export async function auditTopic(id: number, data: { status: 'approved' | 'rejec
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '审核选题失败'));
+  if (!response.ok) {
+    const error = new TopicApiError(await getErrorMessage(response, '审核选题失败'), response.status);
+    throw error;
+  }
   return response.json();
 }
 
@@ -146,7 +183,7 @@ export async function updateTopicStatus(id: number, status: string): Promise<{ m
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ status })
   });
-  if (!response.ok) throw new Error('更新状态失败');
+  if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '更新状态失败'), response.status);
   return response.json();
 }
 

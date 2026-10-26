@@ -3,7 +3,7 @@
  * https://reactbits.dev/r/ProfileCard-TS-TW.json
  * Adapted for: XMT Platform (real creator data wrapper)
  */
-import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 
 const DEFAULT_INNER_GRADIENT = 'linear-gradient(145deg,#60496e8c 0%,#71C4FF44 100%)';
 
@@ -539,10 +539,10 @@ const ProfileCardComponent: React.FC<ProfileCardProps> = ({
               />
               {showUserInfo && (
                 <div
-                  className="absolute z-[2] flex items-center justify-between backdrop-blur-[30px] border border-white/10 pointer-events-auto"
+                  className="absolute z-[2] flex min-w-0 items-center justify-between backdrop-blur-[30px] border border-white/10 pointer-events-auto"
                   style={
                     {
-                      '--ui-inset': '20px',
+                      '--ui-inset': 'clamp(12px, 5vw, 20px)',
                       '--ui-radius-bias': '6px',
                       bottom: 'var(--ui-inset)',
                       left: 'var(--ui-inset)',
@@ -553,7 +553,7 @@ const ProfileCardComponent: React.FC<ProfileCardProps> = ({
                     } as React.CSSProperties
                   }
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div
                       className="rounded-full overflow-hidden border border-white/10 flex-shrink-0"
                       style={{ width: '48px', height: '48px' }}
@@ -571,17 +571,17 @@ const ProfileCardComponent: React.FC<ProfileCardProps> = ({
                         }}
                       />
                     </div>
-                    <div className="flex flex-col items-start gap-1.5">
+                    <div className="flex min-w-0 flex-col items-start gap-1.5">
                       <div className="text-sm font-medium text-white/90 leading-none">@{handle}</div>
                       <div className="text-sm text-white/70 leading-none">{status}</div>
                     </div>
                   </div>
                   <button
-                    className="border border-white/10 rounded-lg px-4 py-3 text-xs font-semibold text-white/90 cursor-pointer backdrop-blur-[10px] transition-all duration-200 ease-out hover:border-white/40 hover:-translate-y-px"
+                    className="shrink-0 whitespace-nowrap border border-white/10 rounded-lg px-3 py-3 text-xs font-semibold text-white/90 cursor-pointer backdrop-blur-[10px] transition-all duration-200 ease-out hover:border-white/40 hover:-translate-y-px"
                     onClick={handleContactClick}
                     style={{ pointerEvents: 'auto', display: 'block', gridArea: 'auto', borderRadius: '8px' }}
                     type="button"
-                    aria-label={`Contact ${name || 'user'}`}
+                    aria-label={contactText}
                   >
                     {contactText}
                   </button>
@@ -602,7 +602,8 @@ const ProfileCardComponent: React.FC<ProfileCardProps> = ({
               }}
             >
               <div className="w-full absolute flex flex-col" style={{ top: '3em', display: 'flex', gridArea: 'auto' }}>
-                <h3
+                <div
+                  aria-hidden="true"
                   className="font-semibold m-0"
                   style={{
                     fontSize: 'min(5svh, 3em)',
@@ -618,7 +619,7 @@ const ProfileCardComponent: React.FC<ProfileCardProps> = ({
                   }}
                 >
                   {name}
-                </h3>
+                </div>
                 <p
                   className="font-semibold whitespace-nowrap mx-auto w-min"
                   style={{

@@ -30,8 +30,8 @@ const riskTone: Record<string, StatusTone> = {
   high: 'coral',
 };
 
-export function DailyReportStatusPill({ status }: { status: DailyReportStatus }) {
-  const tone = Object.prototype.hasOwnProperty.call(statusTone, status) ? statusTone[status] : 'muted';
+export function DailyReportStatusPill({ status }: { status: DailyReportStatus | null | undefined }) {
+  const tone = status && Object.prototype.hasOwnProperty.call(statusTone, status) ? statusTone[status] : 'muted';
   return <StatusPill tone={tone}>{dailyReportStatusLabel(status)}</StatusPill>;
 }
 

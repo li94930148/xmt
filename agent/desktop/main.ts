@@ -36,7 +36,7 @@ import { collectorBrowserLaunch } from '../core/collector/browserLaunch.js';
 import { applyCollectorLoginRequired, heartbeatLoginStatus } from "./collectorAuthState.js";
 import { capabilities, mayConfirmLogin, profileAuthenticationFromBrowser, type LoginWindowState, type ProfileAuthentication } from "./loginState.js";
 import { coverInspectionFailureCode } from './coverInspectionState.js';
-import { bind, heartbeat, uploadCanonicalPayload } from "../core/uploader/client.js";
+import { acknowledgeBind, bind, heartbeat, uploadCanonicalPayload } from "../core/uploader/client.js";
 import { intervalMs, nextDailyDelay, usesExportFocusedSync } from "../core/scheduler/scheduler.js";
 import type { AgentConfig, SyncResult } from "../core/types.js";
 import type { DesktopState, SetupInput } from "./types.js";
@@ -47,8 +47,10 @@ import type { RebindInput } from "./types.js";
 import { rendererAccountIdentity, rendererSettings } from './mainOnlyAccountIdentity.js';
 import { sanitizeRendererState } from './browserSafeRendererContract.js';
 import { collectorCheckpointLog, safeErrorClass, serializeAgentRuntimeLog, type AgentRuntimeLogInput } from './runtimeLogger.js';
-const AGENT_VERSION = '2.14.5-agent';
+import { clearPendingBindingRecord, readPendingBindingRecord, savePendingBindingRecord, type PendingBindingRecord } from './bindingRecoveryStore.js';
+const AGENT_VERSION = '2.14.7-agent';
 const SYSTEM_VERSION = '3.1.0';
+const bindingActionError = (message: string) => Object.assign(new Error(message), { name: 'BindingActionError' });
 app.setName("XMT Creator Agent");
 const executableDirectory = path.dirname(app.getPath("exe"));
 const resourceDirectory = process.resourcesPath;
@@ -102,6 +104,7 @@ const paths = () => {
     root,
     config: path.join(root, "config.json"),
     token: path.join(root, "agent-token.bin"),
+    bindingRecovery: path.join(root, "binding-recovery.bin"),
     profile: path.join(root, "browser"),
     database: path.join(root, "creator.db"),
     logs: path.join(root, "logs"),
@@ -315,6 +318,74 @@ function protectToken(token: string) {
 async function saveToken(token: string) {
   await fs.writeFile(paths().token, protectToken(token), { mode: 0o600 });
 }
+async function readPendingBinding() {
+  return readPendingBindingRecord(paths().bindingRecovery, safeStorage);
+}
+async function confirmPendingBinding(record: Extract<PendingBindingRecord, { phase: 'ack' }>) {
+  await acknowledgeBind(record.serverUrl, { requestId: record.requestId, recoverySecret: record.recoverySecret });
+  await clearPendingBindingRecord(paths().bindingRecovery);
+}
+async function resumePendingBindingConfirmation() {
+  const record = await readPendingBinding();
+  if (record?.phase !== 'ack') return false;
+  await confirmPendingBinding(record);
+  return true;
+}
+async function prepareBindingAttempt(mode: 'setup' | 'rebind', serverUrl: string, bindingCode: string, device: Record<string, unknown>) {
+  const existing = await readPendingBinding();
+  if (existing?.phase === 'ack') {
+    try {
+      await confirmPendingBinding(existing);
+    } catch {
+      throw bindingActionError('上次绑定凭据已安全保存，但服务器确认仍待完成；请检查网络后重试。');
+    }
+    const codeHash=crypto.createHash('sha256').update(bindingCode).digest('hex');
+    if(existing.mode===mode&&existing.serverUrl===serverUrl&&existing.bindingCodeHash===codeHash)return null;
+  }
+  if (existing?.phase === 'bind') {
+    if (existing.mode !== mode || existing.serverUrl !== serverUrl || existing.bindingCode !== bindingCode) {
+      throw bindingActionError('存在尚未完成的绑定请求，请使用原服务器地址与原绑定码重试后再开始新绑定。');
+    }
+    return existing;
+  }
+  const record: PendingBindingRecord = {
+    version: 1,
+    phase: 'bind',
+    mode,
+    requestId: crypto.randomUUID(),
+    recoverySecret: crypto.randomBytes(32).toString('base64url'),
+    serverUrl,
+    bindingCode,
+    device,
+  };
+  await savePendingBindingRecord(paths().bindingRecovery, safeStorage, record);
+  return record;
+}
+async function submitBindingAttempt(attempt: Extract<PendingBindingRecord, { phase: 'bind' }>) {
+  try {
+    return await bind(attempt.serverUrl, attempt.bindingCode, attempt.device, { requestId: attempt.requestId, recoverySecret: attempt.recoverySecret });
+  } catch (error) {
+    const status = Number((error as { statusCode?: unknown })?.statusCode);
+    if (status === 400 || status === 410) {
+      await clearPendingBindingRecord(paths().bindingRecovery);
+      throw bindingActionError('绑定码无效或已过期，请在 XMT 重新创建一次性绑定码。');
+    }
+    if (status === 409) throw bindingActionError('该绑定请求与设备当前状态冲突，请使用原服务器地址和绑定码重试。');
+    throw bindingActionError('绑定结果暂不明确，请使用相同服务器地址和绑定码重试；系统会先安全核实上次结果。');
+  }
+}
+async function persistBoundAgent(record: Extract<PendingBindingRecord, { phase: 'bind' }>, bound: { agent_token: string; recovery_supported?: true }, config: AgentConfig) {
+  await saveToken(bound.agent_token);
+  await writeConfig(config);
+  if (bound.recovery_supported) {
+    const acknowledgement: PendingBindingRecord = { version: 1, phase: 'ack', mode: record.mode, bindingCodeHash: crypto.createHash('sha256').update(record.bindingCode).digest('hex'), requestId: record.requestId, recoverySecret: record.recoverySecret, serverUrl: record.serverUrl };
+    await savePendingBindingRecord(paths().bindingRecovery, safeStorage, acknowledgement);
+    await confirmPendingBinding(acknowledgement);
+  } else {
+    // A legacy server ignores the recovery fields. Its successful one-time response is still persisted before the local marker is removed.
+    await clearPendingBindingRecord(paths().bindingRecovery);
+  }
+}
 async function readToken() {
   if (packageContractToken) return packageContractToken;
   try {
@@ -353,6 +424,7 @@ function reconcileLoginWindowState() {
 }
 async function state(): Promise<DesktopState> {
   const config = await readConfig();
+  const pendingBinding = await readPendingBinding().catch(() => null);
   reconcileLoginWindowState();
   if (config && databaseReady) await refreshProfileAuthentication(config, true).catch(() => { profileAuthentication = "error"; });
   const found = discoverBrowsers(config?.browserConfig.type === "custom" ? { customPath: config.browserConfig.executablePath } : undefined);
@@ -363,6 +435,7 @@ async function state(): Promise<DesktopState> {
   const value = {
     connected: Boolean(config && fsSync.existsSync(paths().token)),
     configured: Boolean(config),
+    bindingAcknowledgementPending: pendingBinding?.phase === 'ack',
     syncing,
     lastSyncAt,
     account: rendererAccountIdentity(config || undefined, profileAuthentication === 'authenticated'),
@@ -618,13 +691,16 @@ function createTray() {
   );
   tray.on("double-click", () => mainWindow?.show());
 }
-ipcMain.handle("agent:get-state", () => state());
+ipcMain.handle("agent:get-state", async () => {
+  await resumePendingBindingConfirmation().catch(() => false);
+  return state();
+});
 ipcMain.handle("agent:setup", async (_event, input: SetupInput) => {
   const serverUrl = input.serverUrl.replace(/\/$/, "");
   assertSecureServerUrl(serverUrl);
   const deviceId = fingerprint(),
     browser = defaultBrowserConfig();
-  const bound = await bind(serverUrl, input.bindingCode, {
+  const proposedDevice = {
     device_id: deviceId,
     device_name: os.hostname(),
     os: `${os.platform()} ${os.arch()}`,
@@ -636,7 +712,10 @@ ipcMain.handle("agent:setup", async (_event, input: SetupInput) => {
     browser_runtime: browser.runtime,
     session_mode: browser.sessionMode,
     compatibility_status: "not_tested",
-  });
+  };
+  const attempt = await prepareBindingAttempt('setup', serverUrl, input.bindingCode, proposedDevice);
+  if (!attempt) return state();
+  const bound = await submitBindingAttempt(attempt);
   const config: AgentConfig = {
     serverUrl,
     agentId: bound.agent_id,
@@ -647,8 +726,7 @@ ipcMain.handle("agent:setup", async (_event, input: SetupInput) => {
     browserConfig: browser,
     syncConfig: { enabled: false, interval: "manual", dailyHour: 2 },
   };
-  await writeConfig(config);
-  await saveToken(bound.agent_token);
+  await persistBoundAgent(attempt, bound, config);
   await logRuntime({ event: "device.bound" });
   await startUploadQueueScheduler();
   return emit();
@@ -658,8 +736,7 @@ ipcMain.handle("agent:rebind", async (_event, input: RebindInput) => {
   assertSecureServerUrl(serverUrl);
   const config = await readConfig();
   if (!config) throw new Error("请先完成连接");
-  stopUploadQueueScheduler();
-  const bound = await bind(serverUrl, input.bindingCode, {
+  const proposedDevice = {
     device_id: config.deviceId,
     device_name: os.hostname(),
     os: `${os.platform()} ${os.arch()}`,
@@ -672,13 +749,13 @@ ipcMain.handle("agent:rebind", async (_event, input: RebindInput) => {
     session_mode: config.browserConfig.sessionMode,
     compatibility_status:
       config.browserConfig.compatibilityStatus || "not_tested",
-  });
-  config.serverUrl = serverUrl;
-  config.agentId = bound.agent_id;
-  config.accountId = bound.account_id;
-  config.accountName = bound.account_id;
-  await writeConfig(config);
-  await saveToken(bound.agent_token);
+  };
+  const attempt = await prepareBindingAttempt('rebind', serverUrl, input.bindingCode, proposedDevice);
+  if (!attempt) return state();
+  stopUploadQueueScheduler();
+  const bound = await submitBindingAttempt(attempt);
+  const nextConfig = { ...config, serverUrl, agentId: bound.agent_id, accountId: bound.account_id, accountName: bound.account_id };
+  await persistBoundAgent(attempt, bound, nextConfig);
   await logRuntime({ event: "server.rebound" });
   startHeartbeat();
   await startUploadQueueScheduler();
@@ -843,6 +920,7 @@ ipcMain.handle("agent:browser-profile-clear", async () => {
 app.whenReady().then(async () => {
   await logRuntime({ event: "agent.started", fields: { mode: portableMode ? "portable" : "standard" } }, true);
   globalThis.fetch = net.fetch as typeof fetch;
+  await resumePendingBindingConfirmation().catch(() => false);
   initializeDatabase();
   await initializePackageContractBootstrap();
   await initializePreloadSmokeBootstrap();

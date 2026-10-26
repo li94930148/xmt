@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import type { ResourceListItem } from '@/api/resourceCenter';
 import { EmptyState, ResponsiveTableShell } from '@/components/studio';
 import { formatBeijingDate } from '@/lib/utils';
+import { getResourceDetailPath } from '@/platform/resource-navigation';
+import { resourceStatusLabel } from './resourceLabels';
 
 export default function ResourceTable({ items, canEdit, canDelete, onDelete }: { items: ResourceListItem[]; canEdit: boolean; canDelete: boolean; onDelete?: (item: ResourceListItem) => void }) {
   if (items.length === 0) return <EmptyState title="暂无资料" />;
@@ -15,11 +17,11 @@ export default function ResourceTable({ items, canEdit, canDelete, onDelete }: {
         <tbody className="divide-y divide-studio-border-soft">
           {items.map((item) => (
             <tr key={item.id} className="group transition-colors hover:bg-studio-surface-soft">
-              <td className="px-5 py-4"><Link className="font-medium text-studio-text-primary hover:text-studio-cyan-contrast" to={`/asset-center/resources/${item.id}`}>{item.title}</Link></td>
+              <td className="px-5 py-4"><Link className="font-medium text-studio-text-primary hover:text-studio-cyan-contrast" to={getResourceDetailPath(item.id, item.library_type)}>{item.title}</Link>{item.status === 'deleted' ? <span className="mt-1 block text-xs text-studio-text-secondary">{resourceStatusLabel(item.status)}</span> : null}</td>
               <td className="px-4 py-4 text-studio-text-secondary">{item.category?.name || '—'}</td>
               <td className="px-4 py-4"><div className="flex max-w-56 flex-wrap gap-1.5">{item.tags.length ? item.tags.slice(0, 3).map((tag) => <span key={tag.id} className="rounded-button bg-studio-surface-elevated px-2 py-1 text-xs text-studio-text-secondary">{tag.name}</span>) : <span className="text-studio-text-muted">—</span>}</div></td>
               <td className="px-4 py-4 whitespace-nowrap text-studio-text-secondary">{formatBeijingDate(item.updated_at)}</td>
-              <td className="sticky right-0 z-10 border-l border-studio-border-soft bg-studio-surface px-5 py-4 transition-colors group-hover:bg-studio-surface-soft"><div className="flex justify-end gap-1"><Link aria-label={`查看资料 ${item.title}`} className="rounded-button p-2 text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-cyan-contrast" to={`/asset-center/resources/${item.id}`}><Eye className="h-4 w-4" /></Link>{canEdit ? <Link aria-label={`编辑资料 ${item.title}`} className="rounded-button p-2 text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-cyan-contrast" to={`/asset-center/resources/${item.id}?edit=1`}><Pencil className="h-4 w-4" /></Link> : null}{canDelete && onDelete ? <button type="button" aria-label={`删除资料 ${item.title}`} onClick={() => onDelete(item)} className="rounded-button p-2 text-studio-text-muted hover:bg-studio-coral-soft hover:text-studio-coral-contrast"><Trash2 className="h-4 w-4" /></button> : null}</div></td>
+              <td className="sticky right-0 z-10 border-l border-studio-border-soft bg-studio-surface px-5 py-4 transition-colors group-hover:bg-studio-surface-soft"><div className="flex justify-end gap-1"><Link aria-label={`查看资料 ${item.title}`} className="xmt-btn xmt-btn-ghost h-10 w-10 min-w-10 shrink-0 !p-0 text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-cyan-contrast" to={getResourceDetailPath(item.id, item.library_type)}><Eye className="h-4 w-4" /></Link>{item.status !== 'deleted' && canEdit ? <Link aria-label={`编辑资料 ${item.title}`} className="xmt-btn xmt-btn-ghost h-10 w-10 min-w-10 shrink-0 !p-0 text-studio-text-muted hover:bg-studio-surface-soft hover:text-studio-cyan-contrast" to={getResourceDetailPath(item.id, item.library_type, true)}><Pencil className="h-4 w-4" /></Link> : null}{item.status !== 'deleted' && canDelete && onDelete ? <button type="button" aria-label={`删除资料 ${item.title}`} onClick={() => onDelete(item)} className="xmt-btn xmt-btn-ghost h-10 w-10 min-w-10 shrink-0 !p-0 text-studio-text-muted hover:bg-studio-coral-soft hover:text-studio-coral-contrast"><Trash2 className="h-4 w-4" /></button> : null}</div></td>
             </tr>
           ))}
         </tbody>

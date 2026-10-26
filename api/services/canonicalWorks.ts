@@ -1,11 +1,12 @@
 import type { DouyinMetricsWork } from './douyinOperationsAnalytics.js';
 import { resolveCoverUrl } from '../utils/coverResolver.js';
+import { parseStoredBjt } from '../../shared/time/index.js';
 
 type RecordValue = Record<string, unknown>;
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 const validId = (value: unknown) => /^[A-Za-z0-9_-]{3,}$/.test(text(value));
 const normalizedTitle = (value: unknown) => text(value).replace(/\s+/g, ' ').toLocaleLowerCase('zh-CN');
-const published = (value: unknown) => { const date = new Date(text(value)); return Number.isFinite(date.getTime()) ? date.toISOString() : ''; };
+const published = (value: unknown) => parseStoredBjt(text(value))?.toISOString() ?? '';
 const timestamp = (row: RecordValue) => Date.parse(text(row.updated_at) || text(row.snapshot_time) || text(row.created_at)) || 0;
 const sourcePriority = (row: RecordValue) => ({ creator_center: 3, stable_api: 2, historical: 1 }[text(row.source_type || row.source)] || 0);
 const completeness = (row: RecordValue) => ['title', 'publish_time', 'cover_url', 'play_count', 'like_count', 'comment_count', 'share_count'].filter(key => text(row[key]) || Number.isFinite(Number(row[key]))).length;

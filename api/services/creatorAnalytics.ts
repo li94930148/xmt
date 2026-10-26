@@ -1,5 +1,6 @@
 import { execute, executeInsert, queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { getDouyinReportData } from './douyinDataCenter.js';
+import { dateKeyBjt, parseStoredBjt } from '../../shared/time/index.js';
 
 type JsonRecord = Record<string, unknown>;
 type Period = '7d' | '30d' | '90d';
@@ -11,7 +12,8 @@ type WorkRow = {
   play_count: number; like_count: number; comment_count: number; share_count: number;
   favorite_count: number; play_duration: number; completion_rate: number; metric_raw_json: string;
 };
-type AccountMetric = { snapshot_time: string; fans_count: number; play_count: number; interaction_count: number; profile_visit_count: number; growth_json: string; raw_json: string };
+type AccountMetric = { snapshot_time: string; fans_count: number | null; play_count: number | null; interaction_count: number | null; profile_visit_count: number | null; growth_json: string; raw_json: string };
+type CalendarWindow = { start: string; end: string };
 
 const parse = (value: unknown): JsonRecord => {
   try { return typeof value === 'string' ? JSON.parse(value) as JsonRecord : value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {}; }
@@ -25,6 +27,15 @@ const valueFrom = (sources: JsonRecord[], keys: string[]) => {
   for (const source of sources) for (const key of keys) if (source[key] != null && source[key] !== '') return number(source[key]);
   return 0;
 };
+const optionalValueFrom = (sources: JsonRecord[], keys: string[]) => {
+  for (const source of sources) for (const key of keys) {
+    const candidate = source[key];
+    if (candidate == null || candidate === '') continue;
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
 const objectFrom = (sources: JsonRecord[], keys: string[]) => {
   for (const source of sources) for (const key of keys) {
     const candidate = source[key];
@@ -37,8 +48,31 @@ const arrayFrom = (sources: JsonRecord[], keys: string[]) => {
   return [];
 };
 const daysFor = (period: Period | ReportType) => ({ '7d': 7, '30d': 30, '90d': 90, daily: 1, weekly: 7, monthly: 30 })[period];
-const cutoff = (days: number, latest?: string) => new Date(new Date(latest || Date.now()).getTime() - days * 86400000).getTime();
-const timestamp = (value: unknown) => { const time = new Date(text(value)).getTime(); return Number.isFinite(time) ? time : 0; };
+const timestamp = (value: unknown) => {
+  if (!(typeof value === 'string' || typeof value === 'number' || value instanceof Date)) return null;
+  return parseStoredBjt(value)?.getTime() ?? null;
+};
+function shiftDateKey(dateKey: string, offset: number) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + offset)).toISOString().slice(0, 10);
+}
+function calendarWindow(days: number, asOf: Date | number | string = new Date()): CalendarWindow {
+  const end = dateKeyBjt(asOf);
+  return { start: shiftDateKey(end, 1 - days), end };
+}
+function storedDateKey(value: unknown) {
+  const instant = timestamp(value);
+  return instant === null ? null : dateKeyBjt(instant);
+}
+function isInWindow(value: unknown, window: CalendarWindow) {
+  const dateKey = storedDateKey(value);
+  return dateKey !== null && dateKey >= window.start && dateKey <= window.end;
+}
+function finiteNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 function latestWorkSql(extra = '') {
   return `SELECT i.id,i.account_id,i.platform_item_id,i.title,i.cover_url,i.publish_time,i.duration,i.raw_json,
@@ -114,7 +148,8 @@ async function workRows(accountId: number) {
 }
 
 async function accountMetrics(accountId: number, limit = 1000) {
-  return queryAll<AccountMetric>('SELECT snapshot_time,fans_count,play_count,interaction_count,profile_visit_count,growth_json,raw_json FROM creator_account_metrics WHERE account_id=? ORDER BY snapshot_time ASC LIMIT ?', [accountId, limit]);
+  const rows = await queryAll<AccountMetric>('SELECT snapshot_time,fans_count,play_count,interaction_count,profile_visit_count,growth_json,raw_json FROM creator_account_metrics WHERE account_id=? ORDER BY snapshot_time DESC LIMIT ?', [accountId, limit]);
+  return rows.sort((left, right) => (timestamp(left.snapshot_time) ?? 0) - (timestamp(right.snapshot_time) ?? 0));
 }
 
 async function saveAnalysis(workId: number, analysis: JsonRecord & { score?: number; level?: string }) {
@@ -122,13 +157,20 @@ async function saveAnalysis(workId: number, analysis: JsonRecord & { score?: num
   await execute('DELETE FROM creator_work_analysis WHERE work_id=? AND id NOT IN (SELECT id FROM creator_work_analysis WHERE work_id=? ORDER BY created_at DESC,id DESC LIMIT 20)', [workId, workId]);
 }
 
-function healthFor(works: WorkRow[], metrics: AccountMetric[]) {
-  const latestTime = metrics.at(-1)?.snapshot_time || new Date().toISOString();
-  const published30 = works.filter((work) => timestamp(work.publish_time) >= cutoff(30, latestTime)).length;
+function healthFor(works: WorkRow[], metrics: AccountMetric[], asOf: Date | number | string = new Date()) {
+  const window = calendarWindow(30, asOf);
+  const published30 = works.filter((work) => isInWindow(work.publish_time, window)).length;
   const active = clamp(published30 / 12 * 100);
-  const fansFirst = number(metrics.find((row) => timestamp(row.snapshot_time) >= cutoff(30, latestTime))?.fans_count ?? metrics[0]?.fans_count);
-  const fansLast = number(metrics.at(-1)?.fans_count);
-  const fanGrowthRate = fansFirst ? (fansLast - fansFirst) / fansFirst * 100 : 0;
+  const observedFans = metrics
+    .filter((row) => isInWindow(row.snapshot_time, window))
+    .map((row) => ({ time: timestamp(row.snapshot_time), value: finiteNumber(row.fans_count) }))
+    .filter((row): row is { time: number; value: number } => row.time !== null && row.value !== null)
+    .sort((left, right) => left.time - right.time);
+  const fansFirst = observedFans[0];
+  const fansLast = observedFans.at(-1);
+  const fanGrowthRate = fansFirst && fansLast && fansFirst.time !== fansLast.time && fansFirst.value > 0
+    ? (fansLast.value - fansFirst.value) / fansFirst.value * 100
+    : null;
   const plays = works.reduce((sum, work) => sum + number(work.play_count), 0);
   const interactions = works.reduce((sum, work) => sum + number(work.like_count) + number(work.comment_count) + number(work.share_count) + number(work.favorite_count), 0);
   const engagementRate = plays ? interactions / plays * 100 : 0;
@@ -136,17 +178,21 @@ function healthFor(works: WorkRow[], metrics: AccountMetric[]) {
   const mean = values.reduce((sum, value) => sum + value, 0) / (values.length || 1);
   const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length || 1);
   const stability = mean ? clamp(100 - Math.sqrt(variance) / mean * 100) : 0;
-  const growthScore = clamp(50 + fanGrowthRate * 10);
+  const growthScore = fanGrowthRate === null ? null : clamp(50 + fanGrowthRate * 10);
   const interactionScore = clamp(engagementRate / 12 * 100);
+  const scoreParts = [active, growthScore, interactionScore, stability].filter((value): value is number => value !== null);
+  const fanGrowthBasis = fanGrowthRate === null || !fansFirst || !fansLast
+    ? '近30天缺少两条可比较的正值粉丝快照，增长率未知'
+    : `近30天窗口内首末可用粉丝快照 ${dateKeyBjt(fansFirst.time)} 至 ${dateKeyBjt(fansLast.time)}；不对缺失日期插值`;
   return {
-    score: round((active + growthScore + interactionScore + stability) / 4, 1),
-    content_activity: round(active, 1), fan_growth_rate: round(fanGrowthRate), interaction_rate: round(engagementRate), content_stability: round(stability, 1),
-    basis: { content_activity: `近30天发布 ${published30} 条，目标 12 条`, fan_growth_rate: '近30天粉丝净增长 / 期初粉丝', interaction_rate: '点赞评论分享收藏 / 播放', content_stability: '按作品播放量离散系数计算' },
+    score: round(scoreParts.reduce((sum, value) => sum + value, 0) / scoreParts.length, 1),
+    content_activity: round(active, 1), fan_growth_rate: fanGrowthRate === null ? null : round(fanGrowthRate), interaction_rate: round(engagementRate), content_stability: round(stability, 1),
+    basis: { content_activity: `近30天发布 ${published30} 条，目标 12 条`, fan_growth_rate: fanGrowthBasis, interaction_rate: '点赞评论分享收藏 / 播放', content_stability: '按作品播放量离散系数计算' },
   };
 }
 
 export class CreatorAnalyticsService {
-  async refresh(accountId: number) {
+  async refresh(accountId: number, asOf: Date | number | string = new Date()) {
     const [works, metrics] = await Promise.all([workRows(accountId), accountMetrics(accountId)]);
     const plays = works.map((work) => number(work.play_count)).sort((a, b) => a - b);
     const median = plays.length ? plays[Math.floor(plays.length / 2)] : 0;
@@ -158,25 +204,28 @@ export class CreatorAnalyticsService {
       }
       for (const period of ['7d','30d','90d'] as Period[]) {
         await tx.execute('DELETE FROM creator_trend_snapshots WHERE account_id=? AND period=?', [accountId, period]);
-        const selected = metrics.filter((row) => timestamp(row.snapshot_time) >= cutoff(daysFor(period), metrics.at(-1)?.snapshot_time));
+        const window = calendarWindow(daysFor(period), asOf);
+        const selected = metrics.filter((row) => isInWindow(row.snapshot_time, window));
         for (const row of selected) for (const [metric, value] of Object.entries({ plays: row.play_count, fans: row.fans_count, interactions: row.interaction_count })) {
-          await tx.execute('INSERT OR IGNORE INTO creator_trend_snapshots(account_id,period,metric,value,snapshot_time) VALUES(?,?,?,?,?)', [accountId, period, metric, number(value), row.snapshot_time]);
+          const observed = finiteNumber(value);
+          if (observed === null) continue;
+          await tx.execute('INSERT OR IGNORE INTO creator_trend_snapshots(account_id,period,metric,value,snapshot_time) VALUES(?,?,?,?,?)', [accountId, period, metric, observed, row.snapshot_time]);
         }
-        const publishes = works.filter((work) => timestamp(work.publish_time) >= cutoff(daysFor(period), metrics.at(-1)?.snapshot_time));
-        const publishDays = publishes.reduce<Record<string, number>>((result, work) => { const day=text(work.publish_time).slice(0,10); if(day) result[day]=(result[day]||0)+1; return result; }, {});
+        const publishes = works.filter((work) => isInWindow(work.publish_time, window));
+        const publishDays = publishes.reduce<Record<string, number>>((result, work) => { const day=storedDateKey(work.publish_time); if(day) result[day]=(result[day]||0)+1; return result; }, {});
         for (const [day, count] of Object.entries(publishDays)) await tx.execute('INSERT INTO creator_trend_snapshots(account_id,period,metric,value,snapshot_time) VALUES(?,?,?,?,?)', [accountId, period, 'publishes', count, `${day} 00:00:00`]);
       }
     });
-    return { health: healthFor(works, metrics), works: analyses.map(({ work, rating }) => ({ id: work.id, title: work.title, ...rating })) };
+    return { health: healthFor(works, metrics, asOf), works: analyses.map(({ work, rating }) => ({ id: work.id, title: work.title, ...rating })) };
   }
 
-  async overview(accountId: number) {
-    const refreshed = await this.refresh(accountId);
+  async overview(accountId: number, asOf: Date | number | string = new Date()) {
+    const refreshed = await this.refresh(accountId, asOf);
     const levels = refreshed.works.reduce<Record<string, number>>((result, work) => { result[work.level] = (result[work.level] || 0) + 1; return result; }, { viral: 0, excellent: 0, normal: 0, low: 0 });
     return { health: refreshed.health, levels, rated_works: refreshed.works };
   }
 
-  async work(accountId: number, workId: number, period: '24h'|'7d'|'30d' = '7d') {
+  async work(accountId: number, workId: number, period: '24h'|'7d'|'30d' = '7d', asOf: Date | number | string = new Date()) {
     const [work, allWorks] = await Promise.all([
       queryOne<WorkRow>(`${latestWorkSql('AND i.id=?')} LIMIT 1`, [accountId, workId]),
       workRows(accountId),
@@ -185,10 +234,24 @@ export class CreatorAnalyticsService {
     const plays = allWorks.map((item) => number(item.play_count)).sort((a, b) => a - b);
     const raw = parse(work.raw_json), metricRaw = parse(work.metric_raw_json), sources = [metricRaw, raw, parse(raw.metrics), parse(raw.data), parse(raw.detail)];
     const rating = ratingFor(work, plays[Math.floor(plays.length / 2)] || 0);
-    const days = period === '24h' ? 1 : period === '7d' ? 7 : 30;
     const rows = await queryAll<JsonRecord>('SELECT snapshot_time,play_count,like_count,comment_count,share_count,favorite_count,raw_json FROM creator_content_metrics WHERE content_id=? ORDER BY snapshot_time ASC', [workId]);
-    const selected = rows.filter((row) => timestamp(row.snapshot_time) >= cutoff(days, text(rows.at(-1)?.snapshot_time || work.snapshot_time)));
-    const trend = selected.map((row) => { const details = parse(row.raw_json); return { time: row.snapshot_time, plays: number(row.play_count), interactions: number(row.like_count)+number(row.comment_count)+number(row.share_count)+number(row.favorite_count), fans: valueFrom([details], ['fans_gained','follower_gain','new_fans','fans_increment']) }; });
+    const selected = period === '24h'
+      ? rows.filter((row) => {
+          const time = timestamp(row.snapshot_time);
+          const end = timestamp(asOf);
+          return time !== null && end !== null && time >= end - 86400000 && time <= end;
+        })
+      : rows.filter((row) => isInWindow(row.snapshot_time, calendarWindow(period === '7d' ? 7 : 30, asOf)));
+    const trend = selected.map((row) => {
+      const details = parse(row.raw_json);
+      const interactionValues = [row.like_count, row.comment_count, row.share_count, row.favorite_count].map(finiteNumber);
+      return {
+        time: text(row.snapshot_time),
+        plays: finiteNumber(row.play_count),
+        interactions: interactionValues.every((value): value is number => value !== null) ? interactionValues.reduce((sum, value) => sum + value, 0) : null,
+        fans: optionalValueFrom([details], ['fans_gained','follower_gain','new_fans','fans_increment']),
+      };
+    });
     const tags = Array.isArray(raw.tags) ? raw.tags.map(String) : text(work.title).match(/#[^#\s]+/g) || [];
     const analysis = {
       ...rating, period, trend, comments: extractComments(sources), traffic: extractTraffic(sources),
@@ -198,16 +261,16 @@ export class CreatorAnalyticsService {
     return analysis;
   }
 
-  async trends(accountId: number, period: Period = '30d') {
-    await this.refresh(accountId);
+  async trends(accountId: number, period: Period = '30d', asOf: Date | number | string = new Date()) {
+    await this.refresh(accountId, asOf);
     const rows = await queryAll<{ metric: string; value: number; snapshot_time: string }>('SELECT metric,value,snapshot_time FROM creator_trend_snapshots WHERE account_id=? AND period=? ORDER BY snapshot_time ASC', [accountId, period]);
     const grouped: Record<string, Array<{ time: string; value: number }>> = { plays: [], fans: [], interactions: [], publishes: [] };
     for (const row of rows) grouped[row.metric]?.push({ time: row.snapshot_time, value: number(row.value) });
     return { period, days: daysFor(period), series: grouped };
   }
 
-  async generateReport(accountId: number, type: ReportType) {
-    const unified = await getDouyinReportData(accountId, type);
+  async generateReport(accountId: number, type: ReportType, asOf: Date = new Date()) {
+    const unified = await getDouyinReportData(accountId, type, asOf);
     if (!unified) throw Object.assign(new Error('该账号尚未完成标准化抖音同步'), { statusCode: 404 });
     const growth = unified.growth;
     const health = unified.account_performance.health;
@@ -218,7 +281,7 @@ export class CreatorAnalyticsService {
     const content = {
       report_version: 2,
       type,
-      generated_at: new Date().toISOString(),
+      generated_at: asOf.toISOString(),
       ...unified,
       anomalies,
       methodology: '账号、作品、趋势与报告统一读取抖音运营中心标准化数据；累计值不会重复累加历史快照。',

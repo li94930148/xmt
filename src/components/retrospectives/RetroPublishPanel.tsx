@@ -13,19 +13,19 @@ type Props = {
 
 export default function RetroPublishPanel({ retrospective, permissions, loading, onPublish, onArchive }: Props) {
   return (
-    <GlassPanel className="p-5">
+    <GlassPanel data-testid="retro-publish-archive-panel" className="p-5">
       <h2 className="text-lg font-bold text-studio-text-primary">发布与归档</h2>
-      <p className="mt-2 text-sm leading-6 text-studio-text-muted">
+      <p className="mt-2 text-sm leading-6 text-studio-text-secondary">
         发布后基础信息和指标快照进入只读；归档后不再允许新增行动项。
       </p>
 
       <dl className="mt-4 space-y-2 text-sm">
         <div className="flex justify-between gap-3">
-          <dt className="text-studio-text-muted">发布时间</dt>
+          <dt className="text-studio-text-secondary">发布时间</dt>
           <dd className="text-right text-studio-text-secondary">{formatDateTime(retrospective.publishedAt)}</dd>
         </div>
         <div className="flex justify-between gap-3">
-          <dt className="text-studio-text-muted">归档时间</dt>
+          <dt className="text-studio-text-secondary">归档时间</dt>
           <dd className="text-right text-studio-text-secondary">{formatDateTime(retrospective.archivedAt)}</dd>
         </div>
       </dl>
@@ -44,13 +44,13 @@ export default function RetroPublishPanel({ retrospective, permissions, loading,
           </ActionButton>
         ) : null}
         {retrospective.status === 'archived' ? (
-          <span className="inline-flex items-center gap-2 rounded-button border border-studio-border-soft px-3 py-2 text-sm text-studio-text-muted">
+          <span className="inline-flex items-center gap-2 rounded-button border border-studio-border-soft px-3 py-2 text-sm text-studio-text-secondary">
             <Lock className="h-4 w-4" />
             已归档，只读
           </span>
         ) : null}
         {retrospective.status !== 'archived' && !permissions.canPublish && !permissions.canArchive ? (
-          <span className="inline-flex items-center gap-2 rounded-button border border-studio-border-soft px-3 py-2 text-sm text-studio-text-muted">
+          <span className="inline-flex items-center gap-2 rounded-button border border-studio-border-soft px-3 py-2 text-sm text-studio-text-secondary">
             <Lock className="h-4 w-4" />
             当前账号无发布/归档权限
           </span>

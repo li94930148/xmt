@@ -128,11 +128,7 @@ export function getDecision(ctx: WorkflowEngineFacadeContext): WorkflowDecisionR
 }
 
 export function checkTransition(ctx: WorkflowEngineFacadeContext): WorkflowTransitionCheckResult {
-  const policy = canTransition(getFromState(ctx), getToState(ctx), ctx.user, {
-    source: ctx.source,
-    topic: ctx.topic,
-    node: ctx.node,
-  });
+  const policy = canTransition(getFromState(ctx), getToState(ctx));
   const decision = getDecision(ctx);
   const allowed = policy.allowed && decision.allowed;
 
@@ -147,11 +143,7 @@ export function checkTransition(ctx: WorkflowEngineFacadeContext): WorkflowTrans
 }
 
 export function checkApproval(ctx: WorkflowEngineFacadeContext): WorkflowApprovalCheckResult {
-  const transition = canTransition(getFromState(ctx), getToState(ctx), ctx.user, {
-    source: ctx.source,
-    topic: ctx.topic,
-    node: ctx.node,
-  });
+  const transition = canTransition(getFromState(ctx), getToState(ctx));
   const approval = canApproveNode(ctx.user, ctx.node, ctx.topic);
   const decision = getDecision(ctx);
   const allowed = transition.allowed && approval.allowed && decision.allowed;

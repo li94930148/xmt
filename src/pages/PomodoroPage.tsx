@@ -23,7 +23,7 @@ export default function PomodoroPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
+      <div className="hidden items-center gap-4 md:flex">
         <button
           onClick={() => navigate('/')}
           className="flex items-center gap-2 text-theme-text-muted hover:text-theme-text transition-colors"
@@ -48,7 +48,7 @@ export default function PomodoroPage() {
         <div className="rounded-2xl bg-theme-secondary border border-theme-border p-6">
           <div className="flex items-center gap-2.5 mb-5">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-studio-amber to-studio-amber flex items-center justify-center shadow-md">
-              <Trophy className="w-4 h-4 text-white" />
+              <Trophy data-testid="pomodoro-ranking-icon" className="w-4 h-4 text-[color:var(--xmt-text-on-color-dark)]" />
             </div>
             <h3 className="text-base font-semibold text-theme-text">专注排行榜</h3>
           </div>

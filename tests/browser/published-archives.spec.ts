@@ -257,6 +257,59 @@ try {
   });
   await desktop.goto(`${base}/__qa`);
   await desktop.getByRole('heading', { name: '资料中心' }).waitFor();
+  const contentProductionGroup = desktop.locator('nav.flex-1 > div').filter({ has: desktop.getByRole('button', { name: '内容生产', exact: true }) });
+  const contentProductionToggle = contentProductionGroup.getByRole('button', { name: '内容生产', exact: true });
+  const collapsedContentLinks = contentProductionGroup.locator('ul');
+  await collapsedContentLinks.waitFor({ state: 'attached' });
+  assert.equal(await contentProductionToggle.getAttribute('aria-expanded'), 'false', 'a collapsed navigation group reports its collapsed state');
+  assert.equal(await collapsedContentLinks.getAttribute('aria-hidden'), 'true', 'collapsed navigation links are removed from the accessibility tree');
+  assert.equal(await collapsedContentLinks.evaluate((list) => (list as HTMLElement).inert), true, 'collapsed navigation links cannot receive keyboard focus');
+  const collapsedItems = await collapsedContentLinks.locator('button').evaluateAll((buttons) => buttons.map((button) => ({
+    label: button.textContent?.trim() || '',
+    tabIndex: (button as HTMLButtonElement).tabIndex,
+  })));
+  assert.ok(collapsedItems.some((item) => item.label.includes('选题管理')), 'the collapsed content-production group includes its topic link');
+  assert.ok(collapsedItems.every((item) => item.tabIndex === -1), 'collapsed content-production links are not tabbable');
+  await contentProductionToggle.click();
+  assert.equal(await contentProductionToggle.getAttribute('aria-expanded'), 'true', 'expanding a navigation group updates its state');
+  assert.equal(await collapsedContentLinks.getAttribute('aria-hidden'), 'false', 'expanded navigation links return to the accessibility tree');
+  assert.equal(await collapsedContentLinks.evaluate((list) => (list as HTMLElement).inert), false, 'expanded navigation links are no longer inert');
+  assert.ok((await collapsedContentLinks.locator('button').evaluateAll((buttons) => buttons.every((button) => (button as HTMLButtonElement).tabIndex === 0))), 'expanded content-production links return to the normal Tab order');
+  await contentProductionToggle.click();
+  await desktop.getByRole('button', { name: '收起侧边栏', exact: true }).click();
+  const compactSectionToggles = desktop.locator('nav.flex-1').first().locator('button[aria-expanded]');
+  const compactSectionLabels = await compactSectionToggles.evaluateAll((buttons) => buttons.map((button) => ({
+    title: button.getAttribute('title'),
+    accessibleName: button.getAttribute('aria-label'),
+  })));
+  assert.ok(compactSectionLabels.length > 0, 'the compact desktop sidebar keeps its section controls');
+  assert.ok(compactSectionLabels.every(({ title, accessibleName }) => title && accessibleName === title), 'icon-only section controls keep their accessible names');
+  await desktop.getByRole('button', { name: '内容生产', exact: true }).click();
+  assert.equal(await desktop.getByRole('button', { name: '收起侧边栏', exact: true }).count(), 1, 'activating an icon-only section expands the desktop sidebar');
+  assert.equal(await contentProductionToggle.getAttribute('aria-expanded'), 'true', 'activating an icon-only section opens that group');
+  assert.equal(await collapsedContentLinks.getAttribute('aria-hidden'), 'false', 'the selected group links become visible after expanding the sidebar');
+  const mobileNavigationDrawer = desktop.locator('div.fixed.inset-0[aria-hidden="true"]').filter({ has: desktop.locator('button[aria-label="关闭导航菜单"]') });
+  assert.equal(await mobileNavigationDrawer.evaluate((drawer) => (drawer as HTMLElement).inert), true, 'the closed mobile navigation drawer cannot receive keyboard focus');
+  await desktop.setViewportSize({ width: 390, height: 844 });
+  await desktop.getByRole('button', { name: '打开导航菜单', exact: true }).click();
+  assert.equal(await mobileNavigationDrawer.getAttribute('role'), 'dialog', 'the open mobile navigation drawer is exposed as a dialog');
+  assert.equal(await mobileNavigationDrawer.getAttribute('aria-modal'), 'true', 'the open mobile navigation drawer is identified as modal');
+  assert.equal(await mobileNavigationDrawer.getAttribute('aria-hidden'), 'false', 'opening the mobile drawer exposes it to assistive technology');
+  assert.equal(await mobileNavigationDrawer.evaluate((drawer) => (drawer as HTMLElement).inert), false, 'opening the mobile drawer restores its normal focus behavior');
+  assert.equal(await desktop.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('aria-label')), '关闭导航菜单', 'opening the mobile drawer moves focus inside it');
+  await desktop.keyboard.press('Shift+Tab');
+  assert.equal(await desktop.evaluate(() => (document.activeElement as HTMLElement | null)?.textContent?.trim()), '退出登录', 'Shift+Tab from the first drawer control wraps to the last control');
+  await desktop.keyboard.press('Tab');
+  assert.equal(await desktop.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('aria-label')), '关闭导航菜单', 'Tab from the last drawer control wraps back to the first control');
+  await desktop.keyboard.press('Escape');
+  assert.equal(await mobileNavigationDrawer.getAttribute('aria-hidden'), 'true', 'Escape closes and hides the mobile drawer');
+  assert.equal(await mobileNavigationDrawer.evaluate((drawer) => (drawer as HTMLElement).inert), true, 'Escape returns the closed drawer to an inert state');
+  assert.equal(await desktop.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('aria-label')), '打开导航菜单', 'closing the mobile drawer restores focus to its trigger');
+  await desktop.getByRole('button', { name: '打开导航菜单', exact: true }).click();
+  await desktop.getByRole('button', { name: '关闭导航菜单', exact: true }).click();
+  assert.equal(await mobileNavigationDrawer.getAttribute('aria-hidden'), 'true', 'closing the mobile drawer hides it from assistive technology');
+  assert.equal(await mobileNavigationDrawer.evaluate((drawer) => (drawer as HTMLElement).inert), true, 'closing the mobile drawer removes its descendants from keyboard interaction');
+  await desktop.setViewportSize({ width: 1440, height: 960 });
   const overviewEntry = desktop.locator('a[href="/asset-center/published-archives"]').last();
   await overviewEntry.waitFor();
   const archiveReadsBeforeRecovery = archiveListReads;
@@ -358,9 +411,20 @@ try {
     { width: 1440, height: 900 },
     { width: 1920, height: 1080 },
   ]) {
-    await desktop.setViewportSize(viewport);
     for (const zoom of [0.8, 0.9, 1, 1.1, 1.25]) {
-      await desktop.evaluate((value) => { document.documentElement.style.zoom = `${value * 100}%`; }, zoom);
+      const cssViewport = {
+        width: Math.round(viewport.width / zoom),
+        height: Math.round(viewport.height / zoom),
+      };
+      await desktop.setViewportSize(cssViewport);
+      const viewportMetrics = await desktop.evaluate(() => ({
+        width: innerWidth,
+        height: innerHeight,
+        documentWidth: document.documentElement.scrollWidth,
+      }));
+      assert.equal(viewportMetrics.width, cssViewport.width, `CSS viewport width matches ${viewport.width}px physical width at ${zoom * 100}% zoom`);
+      assert.equal(viewportMetrics.height, cssViewport.height, `CSS viewport height matches ${viewport.height}px physical height at ${zoom * 100}% zoom`);
+      assert.ok(viewportMetrics.documentWidth <= viewportMetrics.width + 1, `document has no horizontal overflow at ${viewport.width}px physical width / ${zoom * 100}% zoom: ${JSON.stringify(viewportMetrics)}`);
       for (const [label, locator] of [
         ['返回发布归档', desktop.getByRole('button', { name: '返回发布归档', exact: true })],
         ['来源选题链接', sourceTopicLink],
@@ -380,15 +444,14 @@ try {
           }
           return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, viewportWidth: innerWidth, viewportHeight: innerHeight, clippedBy, display: getComputedStyle(element).display, visibility: getComputedStyle(element).visibility };
         });
-        assert.ok(geometry.width > 0 && geometry.height > 0, `${label} has a layout box at ${viewport.width}px / ${zoom * 100}%: ${JSON.stringify(geometry)}`);
-        assert.notEqual(geometry.display, 'none', `${label} is not hidden at ${viewport.width}px / ${zoom * 100}%`);
-        assert.notEqual(geometry.visibility, 'hidden', `${label} is visible at ${viewport.width}px / ${zoom * 100}%`);
-        assert.deepEqual(geometry.clippedBy, [], `${label} is not clipped at ${viewport.width}px / ${zoom * 100}%`);
-        assert.ok(geometry.x >= -1 && geometry.x + geometry.width <= geometry.viewportWidth + 1, `${label} stays horizontally in the viewport at ${viewport.width}px / ${zoom * 100}%: ${JSON.stringify(geometry)}`);
+        assert.ok(geometry.width > 0 && geometry.height > 0, `${label} has a layout box at ${viewport.width}×${viewport.height}px physical size / ${zoom * 100}%: ${JSON.stringify(geometry)}`);
+        assert.notEqual(geometry.display, 'none', `${label} is not hidden at ${viewport.width}px physical width / ${zoom * 100}%`);
+        assert.notEqual(geometry.visibility, 'hidden', `${label} is visible at ${viewport.width}px physical width / ${zoom * 100}%`);
+        assert.deepEqual(geometry.clippedBy, [], `${label} is not clipped at ${viewport.width}px physical width / ${zoom * 100}%`);
+        assert.ok(geometry.x >= -1 && geometry.x + geometry.width <= geometry.viewportWidth + 1, `${label} stays horizontally in the CSS viewport at ${viewport.width}px physical width / ${zoom * 100}%: ${JSON.stringify(geometry)}`);
       }
     }
   }
-  await desktop.evaluate(() => { document.documentElement.style.zoom = ''; });
   await desktop.setViewportSize({ width: 1440, height: 960 });
   await desktop.screenshot({ path: '/tmp/xmt-published-archives-1440.png', fullPage: true });
 
@@ -503,12 +566,25 @@ try {
   await deleteButton.waitFor();
   await deleteButton.click();
   await adminPage.getByRole('heading', { name: '确认删除' }).waitFor();
-  await adminPage.setViewportSize({ width: 1024, height: 600 });
-  await adminPage.evaluate(() => { document.documentElement.style.zoom = '125%'; });
+  const physicalDeleteViewport = { width: 1024, height: 600 };
+  const deleteZoom = 1.25;
+  const deleteCssViewport = {
+    width: Math.round(physicalDeleteViewport.width / deleteZoom),
+    height: Math.round(physicalDeleteViewport.height / deleteZoom),
+  };
+  await adminPage.setViewportSize(deleteCssViewport);
+  const deleteViewportMetrics = await adminPage.evaluate(() => ({
+    width: innerWidth,
+    height: innerHeight,
+    documentWidth: document.documentElement.scrollWidth,
+  }));
+  assert.equal(deleteViewportMetrics.width, deleteCssViewport.width, 'delete confirmation uses the CSS viewport width for a 1024×600 physical window at 125% zoom');
+  assert.equal(deleteViewportMetrics.height, deleteCssViewport.height, 'delete confirmation uses the CSS viewport height for a 1024×600 physical window at 125% zoom');
+  assert.ok(deleteViewportMetrics.documentWidth <= deleteViewportMetrics.width + 1, `delete confirmation has no horizontal overflow at 1024×600 physical size / 125% zoom: ${JSON.stringify(deleteViewportMetrics)}`);
   for (const name of ['取消', '确认删除']) {
     const button = adminPage.getByRole('button', { name, exact: true });
     const bounds = await button.boundingBox();
-    assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= 1024 && bounds.y + bounds.height <= 600, `archive delete confirmation ${name} remains within 1024x600 at 125% zoom: ${JSON.stringify(bounds)}`);
+    assert.ok(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= deleteCssViewport.width && bounds.y + bounds.height <= deleteCssViewport.height, `archive delete confirmation ${name} remains within the ${deleteCssViewport.width}×${deleteCssViewport.height} CSS viewport for a 1024×600 physical window at 125% zoom: ${JSON.stringify(bounds)}`);
   }
   await adminPage.getByRole('button', { name: '取消', exact: true }).click();
   await adminPage.getByRole('button', { name: '删除', exact: true }).click();

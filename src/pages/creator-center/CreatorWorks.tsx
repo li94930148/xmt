@@ -83,7 +83,7 @@ export default function CreatorWorks({ reviewMode = false }: { reviewMode?: bool
     </div> : null}
 
     {loading && !works.length ? <LoadingState /> : null}
-    {error && !works.length ? <Panel title="作品数据暂不可用"><p className="text-sm text-studio-text-muted">尚未成功读取作品列表；恢复前不会显示为空库。</p></Panel> : null}
+    {error && !works.length ? <Panel title="作品数据暂不可用"><p className="text-sm text-studio-text-secondary">尚未成功读取作品列表；恢复前不会显示为空库。</p></Panel> : null}
     {!loading && !error && !works.length ? <EmptyState title="没有识别到合法抖音作品" /> : null}
     {works.length > 0 ? <Panel title={`已加载作品（${works.length}）`} description="按综合表现排序">
       <div className="grid gap-3 md:hidden">
@@ -97,21 +97,21 @@ export default function CreatorWorks({ reviewMode = false }: { reviewMode?: bool
             <WorkThumbnail work={work} />
             <div className="min-w-0 flex-1">
               <p className="line-clamp-2 font-medium">{work.title}</p>
-              <p className="mt-1 text-xs text-studio-text-muted">{work.content_category || '未分类'}{work.performance.is_viral ? ' · 爆款' : ''}</p>
+              <p className="mt-1 text-xs text-studio-text-secondary">{work.content_category || '未分类'}{work.performance.is_viral ? ' · 爆款' : ''}</p>
             </div>
-            <span className="shrink-0 text-right"><span className="block text-xs text-studio-text-muted">评分</span><strong className="mt-1 block text-studio-cyan">{work.performance.score}</strong></span>
+            <span className="shrink-0 text-right"><span className="block text-xs text-studio-text-secondary">评分</span><strong className="mt-1 block text-studio-cyan-contrast">{work.performance.score}</strong></span>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-studio-border pt-3 text-sm">
-            <span className="flex items-center justify-between gap-2"><span className="text-studio-text-muted">播放</span><strong>{formatNumber(work.play_count)}</strong></span>
-            <span className="flex items-center justify-between gap-2"><span className="text-studio-text-muted">点赞</span><strong>{formatNumber(work.like_count)}</strong></span>
-            <span className="flex items-center justify-between gap-2"><span className="text-studio-text-muted">互动率</span><strong>{(work.performance.interaction_rate * 100).toFixed(2)}%</strong></span>
-            <span className="flex items-center justify-between gap-2"><span className="text-studio-text-muted">完播率</span><strong>{work.performance.completion_rate_available ? `${(work.performance.completion_rate * 100).toFixed(2)}%` : '—'}</strong></span>
+            <span className="flex items-center justify-between gap-2"><span className="text-studio-text-secondary">播放</span><strong>{formatNumber(work.play_count)}</strong></span>
+            <span className="flex items-center justify-between gap-2"><span className="text-studio-text-secondary">点赞</span><strong>{formatNumber(work.like_count)}</strong></span>
+            <span className="flex items-center justify-between gap-2"><span className="text-studio-text-secondary">互动率</span><strong>{(work.performance.interaction_rate * 100).toFixed(2)}%</strong></span>
+            <span className="flex items-center justify-between gap-2"><span className="text-studio-text-secondary">完播率</span><strong>{work.performance.completion_rate_available ? `${(work.performance.completion_rate * 100).toFixed(2)}%` : '—'}</strong></span>
           </div>
         </button>)}
       </div>
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[1180px] text-left text-sm">
-          <thead className="border-b border-studio-border text-xs text-studio-text-muted">
+          <thead className="border-b border-studio-border text-xs text-studio-text-secondary">
             <tr>
               <th className="pb-3 font-medium">作品</th>
               <th className="pb-3 font-medium">发布时间</th>
@@ -139,10 +139,10 @@ export default function CreatorWorks({ reviewMode = false }: { reviewMode?: bool
                   onClick={event => event.stopPropagation()}
                   className="line-clamp-2 rounded-sm font-medium text-studio-text-primary transition hover:text-studio-cyan-contrast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-primary/40"
                 >{work.title}</Link>
-                <p className="mt-1 text-xs text-studio-text-muted">{work.content_category || '未分类'}{work.performance.is_viral ? ' · 爆款' : ''}</p>
+                <p className="mt-1 text-xs text-studio-text-secondary">{work.content_category || '未分类'}{work.performance.is_viral ? ' · 爆款' : ''}</p>
               </div>
             </div></td>
-            <td className="py-3 text-studio-text-muted">{formatDate(work.publish_time, true)}</td>
+            <td className="py-3 text-studio-text-secondary">{formatDate(work.publish_time, true)}</td>
             <td className="py-3 text-right font-semibold text-studio-cyan">{work.performance.score}</td>
             <td className="py-3 text-right font-medium">{formatNumber(work.play_count)}</td>
             <td className="py-3 text-right">{formatNumber(work.like_count)}</td>
@@ -161,7 +161,7 @@ export default function CreatorWorks({ reviewMode = false }: { reviewMode?: bool
           onClick={() => void load(failedCursor ?? nextCursor)}
           className="h-10 rounded-lg border border-studio-border bg-studio-surface px-5 text-sm font-medium transition hover:border-studio-cyan/60 disabled:opacity-60"
         >{loadingMore ? '加载中…' : failedCursor ? '重试加载下一页' : '下一页'}</button>
-      </div> : <p className="mt-5 text-center text-xs text-studio-text-muted">已加载全部作品</p>}
+      </div> : <p className="mt-5 text-center text-xs text-studio-text-secondary">已加载全部作品</p>}
     </Panel> : null}
   </div>;
 }

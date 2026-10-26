@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
-import { createTopic, getUsers } from '../api';
+import { getUsers } from '../api';
 import ContentEditor from '../components/ContentEditor';
 import { ChevronLeft, FileText, List, Send, Save, Eye, EyeOff } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { formatBeijingDate } from '../lib/utils';
+import { getPlatformLabel } from '../platform/platform-labels';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { celebrateMilestone } from '../utils/confetti';
@@ -17,7 +18,10 @@ import { creatorTopicSuggestionSourceFromDraft } from '../utils/creatorTopicSugg
 import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
 import { hasTopicDraftContent } from '../utils/topicDraft';
 import { useTopicDraftCollection } from '../hooks/useTopicDraftCollection';
+import { useTopicCreateRecovery } from '../hooks/useTopicCreateRecovery';
+import type { TopicCreatePayload, TopicCreateRecovery } from '../utils/topicCreateRecovery';
 import type { User } from '../types';
+import { ActionButton } from '../components/studio';
 
 export default function AddTopic() {
   const navigate = useNavigate();
@@ -33,9 +37,15 @@ export default function AddTopic() {
   const draftStorageUnavailable = draftState.storageUnavailable;
   
   const [users, setUsers] = useState<User[]>([]);
+  const [usersLoadState, setUsersLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const usersRequestSequenceRef = useRef(0);
+  const userDirectoryScope = `${userId ?? ''}:${authStore.user?.role ?? ''}:${authStore.token ?? ''}`;
+  const userDirectoryScopeRef = useRef(userDirectoryScope);
+  userDirectoryScopeRef.current = userDirectoryScope;
   const [submitting, setSubmitting] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [similarTopicReview, setSimilarTopicReview] = useState<{
+    actorId: number;
     title: string;
     topics: SimilarTopic[];
     checkFailed: boolean;
@@ -43,20 +53,59 @@ export default function AddTopic() {
   const reviewedTitle = useRef<string | null>(null);
   const submitInFlight = useRef(false);
 
+  const finishTopicCreation = useCallback((topicId: number, recovery: TopicCreateRecovery, recovered: boolean) => {
+    if (Number(useAuthStore.getState().user?.id) !== recovery.actorId) return;
+    const canSafelyRemoveDraft = Boolean(
+      recovery.draftId
+      && recovery.draftSnapshot
+      && draftState.activeDraftId === recovery.draftId
+      && JSON.stringify(draftState.form) === JSON.stringify(recovery.draftSnapshot)
+    );
+    const draftRemoved = canSafelyRemoveDraft && draftState.removeSubmittedDraft();
+    appStore.addNotification({ title: '提报成功', message: recovered ? '服务器已确认选题创建成功。' : '选题已成功提交审核', type: 'success' });
+    if (!draftRemoved) {
+      appStore.addNotification({
+        title: '本机草稿已保留',
+        message: '选题已成功创建；为避免删除可能更新过的内容，本机草稿未自动清理，请勿重复提报。',
+        type: 'warning',
+      });
+    }
+    celebrateMilestone();
+    navigate(`/topics/${topicId}`);
+  }, [appStore, draftState, navigate]);
+  const createRecovery = useTopicCreateRecovery(userId, finishTopicCreation);
+
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const userList = await getUsers();
-        setUsers(userList.data);
-      } catch (error) {
-        emitClientLog({ event: 'topics.user_list_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
-      }
-    };
-    fetchUsers();
+    setSimilarTopicReview(null);
+    reviewedTitle.current = null;
+  }, [userId]);
+
+  const loadUsers = useCallback(async (requestScope: string) => {
+    const requestId = ++usersRequestSequenceRef.current;
+    setUsersLoadState('loading');
+    try {
+      const userList = await getUsers();
+      if (requestId !== usersRequestSequenceRef.current || requestScope !== userDirectoryScopeRef.current) return;
+      setUsers(userList.data || []);
+      setUsersLoadState('ready');
+    } catch (error) {
+      if (requestId !== usersRequestSequenceRef.current || requestScope !== userDirectoryScopeRef.current) return;
+      emitClientLog({ event: 'topics.user_list_load_failed', level: 'error', fields: { errorClass: safeClientErrorClass(error) } });
+      setUsersLoadState('error');
+    }
   }, []);
 
+  useEffect(() => {
+    setUsers([]);
+    void loadUsers(userDirectoryScope);
+    return () => { usersRequestSequenceRef.current += 1; };
+  }, [loadUsers, userDirectoryScope]);
+
   const handleSubmit = async (confirmedTitle?: string) => {
-    if (submitInFlight.current) return;
+    if (submitInFlight.current || createRecovery.locked || !createRecovery.ready) return;
+    const submissionActorId = Number(userId);
+    if (!Number.isSafeInteger(submissionActorId) || submissionActorId <= 0) return;
+    const submittedForm = { ...formData };
     const title = (confirmedTitle ?? formData.title).trim();
     if (!title) {
       appStore.addNotification({ title: '提示', message: '请输入选题标题', type: 'warning' });
@@ -65,48 +114,41 @@ export default function AddTopic() {
 
     submitInFlight.current = true;
     setSubmitting(true);
-    let draftSaved = false;
     try {
-      draftSaved = hasTopicDraftContent(formData) && draftState.saveCurrentDraft().saved;
+      if (hasTopicDraftContent(submittedForm)) draftState.saveCurrentDraft();
       const normalizedTitle = normalizeTopicTitle(title);
       if (reviewedTitle.current !== normalizedTitle) {
         try {
           const topics = await findSimilarTopicsByTitle(title);
+          if (Number(useAuthStore.getState().user?.id) !== submissionActorId) return;
           if (topics.length > 0) {
-            setSimilarTopicReview({ title, topics, checkFailed: false });
+            setSimilarTopicReview({ actorId: submissionActorId, title, topics, checkFailed: false });
             return;
           }
         } catch {
-          setSimilarTopicReview({ title, topics: [], checkFailed: true });
+          if (Number(useAuthStore.getState().user?.id) !== submissionActorId) return;
+          setSimilarTopicReview({ actorId: submissionActorId, title, topics: [], checkFailed: true });
           return;
         }
         reviewedTitle.current = normalizedTitle;
       }
+      if (Number(useAuthStore.getState().user?.id) !== submissionActorId) return;
 
       // description 只存项目背景和目标受众
       const parts: string[] = [];
-      if (formData.projectBackground) parts.push(`【项目背景】\n${formData.projectBackground}`);
-      if (formData.targetAudience) parts.push(`【目标受众】\n${formData.targetAudience}`);
+      if (submittedForm.projectBackground) parts.push(`【项目背景】\n${submittedForm.projectBackground}`);
+      if (submittedForm.targetAudience) parts.push(`【目标受众】\n${submittedForm.targetAudience}`);
 
-      const result = await createTopic({
+      const payload: TopicCreatePayload = {
         title,
         description: parts.join('\n\n'),
-        outline: formData.outline || undefined,
-        platform: formData.platform,
-        deadline: formData.deadline,
-        assignee_id: formData.assignee_id ? parseInt(formData.assignee_id) : null,
-        creator_suggestion_source: creatorTopicSuggestionSourceFromDraft(location.search, formData.projectBackground),
-      });
-
-      appStore.addNotification({ title: '提报成功', message: '选题已成功提交审核', type: 'success' });
-      if (!draftState.removeSubmittedDraft()) {
-        appStore.addNotification({ title: '草稿清理失败', message: '选题已提交成功，但本机草稿未能清理；请勿重复提报。', type: 'warning' });
-      }
-      celebrateMilestone();
-      navigate(`/topics/${result.topicId}`);
-    } catch (error) {
-      const storageWarning = userId && !draftSaved ? '本机草稿未能保存，请勿关闭此页；当前输入仍保留在页面中。' : '';
-      appStore.addNotification({ title: '提报失败', message: [ (error as Error).message, storageWarning ].filter(Boolean).join('；'), type: 'error' });
+        outline: submittedForm.outline || undefined,
+        platform: submittedForm.platform,
+        deadline: submittedForm.deadline,
+        assignee_id: submittedForm.assignee_id ? parseInt(submittedForm.assignee_id) : null,
+        creator_suggestion_source: creatorTopicSuggestionSourceFromDraft(location.search, submittedForm.projectBackground),
+      };
+      await createRecovery.create(payload, draftState.activeDraftId, submittedForm);
     } finally {
       submitInFlight.current = false;
       setSubmitting(false);
@@ -115,6 +157,10 @@ export default function AddTopic() {
 
   const continueAfterSimilarityReview = () => {
     if (!similarTopicReview) return;
+    if (Number(useAuthStore.getState().user?.id) !== similarTopicReview.actorId) {
+      setSimilarTopicReview(null);
+      return;
+    }
     reviewedTitle.current = normalizeTopicTitle(similarTopicReview.title);
     const title = similarTopicReview.title;
     setSimilarTopicReview(null);
@@ -140,7 +186,38 @@ export default function AddTopic() {
   const draftOperationFailed = () => appStore.addNotification({ title: '草稿未能保存', message: '本机存储暂不可用，请检查浏览器存储空间后重试。', type: 'error' });
 
   return (
-    <fieldset disabled={submitting} aria-busy={submitting} className="min-w-0 space-y-6 border-0 p-0">
+    <>
+    {(createRecovery.message || createRecovery.pending) ? (
+      <section role="status" aria-live="polite" className="mb-5 rounded-xl border border-studio-amber/30 bg-studio-amber/10 px-4 py-3 text-sm text-studio-text-secondary">
+        <p>{createRecovery.message || '选题创建结果尚未核实；为避免重复创建，原表单已锁定。'}</p>
+        {createRecovery.pending?.phase === 'uncertain' || createRecovery.pending?.phase === 'rejected' ? (
+          <button type="button" onClick={() => void createRecovery.verify()} className="mt-3 rounded-lg border border-studio-border-soft px-3 py-2 font-medium text-studio-text-primary">
+            只读重新核实创建状态
+          </button>
+        ) : null}
+        {createRecovery.pending?.phase === 'rejected' && createRecovery.pending.confirmedNotFound ? (
+          <button type="button" onClick={createRecovery.releaseRejected} className="mt-3 ml-2 rounded-lg bg-studio-primary-button px-3 py-2 font-medium text-white">
+            确认服务端未创建并解除本次锁定
+          </button>
+        ) : null}
+        {createRecovery.pending?.phase === 'cleanup_failed' ? (
+          <button type="button" onClick={createRecovery.retryCleanup} className="mt-3 rounded-lg border border-studio-border-soft px-3 py-2 font-medium text-studio-text-primary">
+            重试清理恢复记录并继续
+          </button>
+        ) : null}
+        {createRecovery.pending?.phase === 'not_found' ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={() => void createRecovery.retry()} className="rounded-lg bg-studio-primary-button px-3 py-2 font-medium text-white">
+              确认用原内容和同一编号重试
+            </button>
+            <button type="button" onClick={() => void createRecovery.verify()} className="rounded-lg border border-studio-border-soft px-3 py-2 font-medium text-studio-text-primary">
+              再次只读核实
+            </button>
+          </div>
+        ) : null}
+      </section>
+    ) : null}
+    <fieldset disabled={submitting || createRecovery.locked} aria-busy={submitting || createRecovery.pending?.phase === 'checking'} className="min-w-0 space-y-6 border-0 p-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <button
@@ -175,7 +252,7 @@ export default function AddTopic() {
           <button
             onClick={() => void handleSubmit()}
             disabled={submitting}
-            className="flex shrink-0 items-center gap-2 whitespace-nowrap px-6 py-2 bg-studio-primary-button hover:bg-studio-primary-button disabled:bg-studio-surface-soft text-white rounded-lg transition-colors"
+            className="flex shrink-0 items-center gap-2 whitespace-nowrap px-6 py-2 disabled:bg-studio-surface-soft text-white rounded-lg transition-colors xmt-btn-primary"
           >
             <Send className="w-4 h-4" />
             {submitting ? '提交中...' : '提报选题'}
@@ -252,13 +329,28 @@ export default function AddTopic() {
                   <select
                     value={formData.assignee_id}
                     onChange={(e) => setFormData({ ...formData, assignee_id: e.target.value })}
+                    disabled={usersLoadState === 'loading'}
                     className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} ${styles.focusRing}`}
                   >
                     <option value="">选择负责人</option>
+                    {formData.assignee_id && !users.some(user => String(user.id) === formData.assignee_id) ? (
+                      <option value={formData.assignee_id}>
+                        已保存负责人（{usersLoadState === 'error' ? '名单暂不可用' : '暂未匹配'}）
+                      </option>
+                    ) : null}
                     {users.map(user => (
                       <option key={user.id} value={user.id}>{user.name}</option>
                     ))}
                   </select>
+                  {usersLoadState === 'loading' && users.length === 0 ? (
+                    <p role="status" className="mt-2 text-xs text-studio-text-secondary">正在读取负责人名单…</p>
+                  ) : null}
+                  {usersLoadState === 'error' ? (
+                    <div role="alert" className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-3 py-2 text-xs text-studio-amber-contrast">
+                      <span>负责人名单暂时无法读取，可重试后再选择；当前表单和已保存的负责人选择会保留。</span>
+                      <ActionButton type="button" variant="ghost" onClick={() => void loadUsers(userDirectoryScope)}>重新加载负责人名单</ActionButton>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -333,7 +425,7 @@ export default function AddTopic() {
               </div>
               <div>
                 <p className={`text-xs text-studio-text-muted mb-1`}>发布平台</p>
-                <p className={`${styles.textSecondary}`}>{formData.platform || '-'}</p>
+                <p className={`${styles.textSecondary}`}>{getPlatformLabel(formData.platform) || '-'}</p>
               </div>
               <div>
                 <p className={`text-xs text-studio-text-muted mb-1`}>截止日期</p>
@@ -343,7 +435,7 @@ export default function AddTopic() {
                 <p className={`text-xs text-studio-text-muted mb-1`}>负责人</p>
                 <p className={`${styles.textSecondary}`}>
                   {formData.assignee_id 
-                    ? users.find(u => u.id === parseInt(formData.assignee_id))?.name 
+                    ? users.find(u => u.id === parseInt(formData.assignee_id))?.name || '已选择负责人（姓名暂不可用）'
                     : '-'}
                 </p>
               </div>
@@ -423,5 +515,6 @@ export default function AddTopic() {
         onContinue={continueAfterSimilarityReview}
       />
     </fieldset>
+    </>
   );
 }

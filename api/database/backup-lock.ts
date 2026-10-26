@@ -6,6 +6,23 @@ export class BackupLockBusyError extends Error {
 }
 
 function lockDirectory(lockPath: string) { return `${lockPath}.d`; }
+function defaultLockPath() {
+  return process.env.XMT_BACKUP_LOCK_PATH || path.join(path.dirname(process.env.XMT_DB_PATH || path.join(process.cwd(), 'data/xmt.db')), '.xmt-backup.lock');
+}
+
+export function isBackupLockHeld(lockPath = defaultLockPath()): boolean {
+  const directory = lockDirectory(lockPath);
+  try {
+    const stat = fs.lstatSync(directory);
+    if (!stat.isDirectory()) return true;
+    const ownerFile = path.join(directory, 'owner');
+    if (fs.existsSync(ownerFile) && ownerIsStale(fs.readFileSync(ownerFile, 'utf8'))) return false;
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ENOENT';
+  }
+}
+
 function processStartTime(pid: number): string | undefined {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');

@@ -20,7 +20,7 @@ export default function RetroSummaryEditor({ value, status, canEdit, saving, loc
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-studio-text-primary">复盘结论</h2>
-          <p className="mt-1 text-sm text-studio-text-muted">
+          <p className="mt-1 text-sm text-studio-text-secondary">
             支持简单 Markdown。本轮不接富文本，避免影响编辑器主栈。
           </p>
         </div>
@@ -30,7 +30,7 @@ export default function RetroSummaryEditor({ value, status, canEdit, saving, loc
             {saving ? '保存中...' : '保存结论'}
           </ActionButton>
         ) : (
-          <span className="rounded-full border border-studio-border-soft px-3 py-1 text-xs text-studio-text-muted">只读</span>
+          <span className="rounded-full border border-studio-border-soft px-3 py-1 text-xs text-studio-text-secondary">只读</span>
         )}
       </div>
 

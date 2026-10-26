@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useId } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, useAppStore } from '../store';
-import { getTopic, getTopicOutlineVersions, repairCurrentTopicStageRecord, auditTopic, updateTopicStatus, updateTopic, getProduction, createProduction } from '../api';
+import { getTopic, getTopicOutlineVersions, repairCurrentTopicStageRecord, auditTopic, updateTopicStatus, updateTopic, getProduction, createProduction, TopicApiError } from '../api';
 import { celebrateMilestone } from '../utils/confetti';
 import { getUsers } from '../api';
 import { Topic, User } from '../types';
@@ -9,16 +10,19 @@ import type { WorkflowDocumentVersion } from '../api';
 import { ChevronLeft, Clock, User as UserIcon, Calendar, FileText, CheckCircle, XCircle, ArrowRight, Save, AlertTriangle, Camera, Scissors, Send, List, FileText as FileIcon } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
 import BaseModal from '../components/common/BaseModal';
+import { useModalLifecycle } from '../components/common/useModalLifecycle';
 import { createTopicDetailManualAdapter } from '../editor/adapters/topicDetailManualAdapter';
 import type { ContentEditorRuntimeHandle, ContentEditorSaveContext } from '../editor/contracts/contentEditorAdapter';
 import { getCurrentTopicEditorModePolicy } from '../editor/topic/topicEditorModePolicy';
 import { useTopicDetailLeaveGuard } from '../hooks/useTopicDetailLeaveGuard';
+import { useRouteNavigationGuard } from '../hooks/useRouteNavigationGuard';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 import { usePermission } from '../hooks/usePermission';
 import { STATUS_COLORS, STATUS_TEXT } from '../constants';
 import { formatBeijingTime, formatBeijingDate } from '../lib/utils';
+import { getPlatformLabel } from '../platform/platform-labels';
 import {
   TopicDetailAggregateSaveGate,
   buildTopicDetailDescription,
@@ -30,6 +34,15 @@ import {
   type TopicDetailFields,
   type TopicDetailParsedFields,
 } from './topicDetailAggregateDraft';
+import {
+  clearInvalidTopicDetailSaveRecovery,
+  markTopicDetailSaveRecoveryUncertain,
+  persistTopicDetailSaveRecovery,
+  readTopicDetailSaveRecovery,
+  removeTopicDetailSaveRecovery,
+  topicMatchesDetailSaveTarget,
+  type TopicDetailSaveRecovery,
+} from './topicDetailSaveRecovery';
 import { canSaveTopicDetailDraft, resolveTopicDetailEditorBranch, type TopicDetailEditorBranch } from './topicDetailEditorBranch';
 import TopicResourcesPanel from '../components/topic/TopicResourcesPanel';
 import TopicAssetDimensionsPanel from '../components/topics/TopicAssetDimensionsPanel';
@@ -43,13 +56,33 @@ export default function TopicDetail() {
   const topicEditorModePolicy = useMemo(() => getCurrentTopicEditorModePolicy(), []);
   const [topic, setTopic] = useState<Topic | null>(null);
   const detailRequestSequenceRef = useRef(0);
+  const [topicLoadFailure, setTopicLoadFailure] = useState<'not-found' | 'unavailable' | null>(null);
+  const [topicDetailReload, setTopicDetailReload] = useState(0);
+  const userDirectoryRequestSequenceRef = useRef(0);
   const [users, setUsers] = useState<User[]>([]);
+  const [userDirectoryLoadState, setUserDirectoryLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [loading, setLoading] = useState(true);
   const [showAuditModal, setShowAuditModal] = useState(false);
+  const [auditSubmitting, setAuditSubmitting] = useState(false);
+  const [auditNeedsVerification, setAuditNeedsVerification] = useState(false);
+  const [auditVerificationNotice, setAuditVerificationNotice] = useState('');
+  const [verifyingAudit, setVerifyingAudit] = useState(false);
+  const auditOverlayRef = useRef<HTMLDivElement>(null);
+  const auditDialogTitleId = useId();
+  const [statusUpdating, setStatusUpdating] = useState(false);
   const [startingProduction, setStartingProduction] = useState(false);
   const [repairingStageRecord, setRepairingStageRecord] = useState(false);
+  const auditSubmissionInFlightRef = useRef(false);
+  const auditVerificationInFlightRef = useRef(false);
+  const statusUpdateInFlightRef = useRef(false);
   const startProductionInFlight = useRef(false);
   const [auditData, setAuditData] = useState({ status: 'approved' as 'approved' | 'rejected', comment: '', assignee_id: 0 });
+  const auditDismissalAllowed = !auditSubmitting && !auditNeedsVerification && !verifyingAudit;
+  const closeAuditModal = useCallback(() => {
+    if (!auditDismissalAllowed) return;
+    setShowAuditModal(false);
+  }, [auditDismissalAllowed]);
+  useModalLifecycle(showAuditModal, auditOverlayRef, closeAuditModal, auditDismissalAllowed);
   
   const [editTitle, setEditTitle] = useState(false);
   const [editDetails, setEditDetails] = useState(false);
@@ -91,8 +124,35 @@ export default function TopicDetail() {
   
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const authStore = useAuthStore();
+  const currentUserId = useAuthStore((state) => state.user?.id);
+  const currentUserRole = useAuthStore((state) => state.user?.role);
+  const currentAuthToken = useAuthStore((state) => state.token);
   const appStore = useAppStore();
+  const [topicSaveRecoveryMode, setTopicSaveRecoveryModeState] = useState<'none' | 'unknown' | 'retryable' | 'conflict' | 'invalid'>('none');
+  const topicSaveRecoveryModeRef = useRef<'none' | 'unknown' | 'retryable' | 'conflict' | 'invalid'>('none');
+  const topicSaveRecoveryRef = useRef<TopicDetailSaveRecovery | null>(null);
+  const topicSaveConflictTopicRef = useRef<Topic | null>(null);
+  const topicSaveVerificationInFlightRef = useRef(false);
+  const retryingTopicSaveRef = useRef(false);
+  const [verifyingTopicSave, setVerifyingTopicSave] = useState(false);
+  const [topicSaveRecoveryNotice, setTopicSaveRecoveryNotice] = useState('');
+  const reconcileTopicSaveReadbackRef = useRef<(recovery: TopicDetailSaveRecovery, latest: Topic, saveRevision?: number) => 'confirmed' | 'retryable' | 'conflict'>(() => 'conflict');
+  const setTopicSaveRecovery = (recovery: TopicDetailSaveRecovery | null, mode: 'none' | 'unknown' | 'retryable' | 'conflict' | 'invalid') => {
+    topicSaveRecoveryRef.current = recovery;
+    topicSaveRecoveryModeRef.current = mode;
+    setTopicSaveRecoveryModeState(mode);
+  };
+  const applyDraft = (draft: TopicDetailAggregateDraft) => {
+    draftRef.current = cloneTopicDetailDraft(draft);
+    setTitle(draft.title);
+    setDescription(draft.description);
+    setDetails(draft.details);
+    setParsedFields(draft.parsedFields);
+    setScriptContent(draft.outline);
+  };
+  const userDirectoryScope = `${id ?? ''}:${currentUserId ?? ''}:${currentUserRole ?? ''}:${currentAuthToken ?? ''}`;
+  const userDirectoryScopeRef = useRef(userDirectoryScope);
+  userDirectoryScopeRef.current = userDirectoryScope;
   const styles = useThemeStyles();
   const { hasPermission, loading: permissionsLoading } = usePermission();
   const requestedOutlineVersion = searchParams.get('outlineVersion')?.trim() || '';
@@ -109,10 +169,92 @@ export default function TopicDetail() {
     setHasTopicManualRuntimeHandle(Boolean(handle?.manualSave));
   }, []);
 
+  const loadUserDirectory = useCallback(async (requestScope: string) => {
+    const requestId = ++userDirectoryRequestSequenceRef.current;
+    const requestedTopicId = Number(id);
+    setUserDirectoryLoadState('loading');
+    try {
+      const usersData = await getUsers();
+      if (requestId !== userDirectoryRequestSequenceRef.current || requestScope !== userDirectoryScopeRef.current || Number(currentTopicIdRef.current) !== requestedTopicId) return;
+      setUsers(usersData.data);
+      setUserDirectoryLoadState('ready');
+    } catch {
+      if (requestId !== userDirectoryRequestSequenceRef.current || requestScope !== userDirectoryScopeRef.current || Number(currentTopicIdRef.current) !== requestedTopicId) return;
+      setUserDirectoryLoadState('error');
+    }
+  }, [id]);
+
+  useEffect(() => {
+    setUsers([]);
+    void loadUserDirectory(userDirectoryScope);
+    return () => { userDirectoryRequestSequenceRef.current += 1; };
+  }, [loadUserDirectory, userDirectoryScope]);
+
+  const userDirectoryFeedback = userDirectoryLoadState === 'error' ? (
+    <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-3 py-2 text-xs text-studio-amber-contrast">
+      <span>负责人名单暂不可用。选题详情仍可使用，但负责人姓名或可选名单可能不完整。</span>
+      <ActionButton type="button" variant="ghost" onClick={() => void loadUserDirectory(userDirectoryScope)}>重新加载负责人名单</ActionButton>
+    </div>
+  ) : null;
+
+  const reconcileTopicSaveReadback = (recovery: TopicDetailSaveRecovery, latest: Topic, saveRevision?: number) => {
+    if (Number(currentTopicIdRef.current) !== recovery.topicId || Number(currentUserId) !== recovery.userId) return 'conflict' as const;
+    setTopic(latest);
+    const latestDraft = createTopicDetailDraft(latest);
+    baselineDraftRef.current = cloneTopicDetailDraft(latestDraft);
+    topicSaveConflictTopicRef.current = null;
+
+    if (topicMatchesDetailSaveTarget(latest, recovery.target)) {
+      removeTopicDetailSaveRecovery(recovery);
+      setTopicSaveRecovery(null, 'none');
+      setTopicSaveRecoveryNotice('');
+      setTopicSaveFeedback(null);
+      if (saveRevision === undefined || aggregateRevisionRef.current === saveRevision) {
+        applyDraft(latestDraft);
+        setIsTopicDirty(false);
+        setEditTitle(false);
+        setEditDetails(false);
+        setEditDescription(false);
+        setEditOutline(false);
+      } else {
+        setIsTopicDirty(!topicDetailDraftEquals(draftRef.current, latestDraft));
+      }
+      appStore.addNotification({
+        title: recovery.versionAction ? '版本已核实保存' : '选题信息已核实保存',
+        message: '只读核实已确认服务端保存成功；没有重复提交。',
+        type: 'success',
+      });
+      return 'confirmed' as const;
+    }
+
+    applyDraft(recovery.target);
+    setEditTitle(true);
+    setEditDetails(true);
+    setEditDescription(true);
+    setEditOutline(true);
+    setIsTopicDirty(true);
+
+    if (topicMatchesDetailSaveTarget(latest, recovery.baseline)) {
+      const retryable = { ...recovery, phase: 'uncertain' as const };
+      markTopicDetailSaveRecoveryUncertain(retryable);
+      setTopicSaveRecovery(retryable, 'retryable');
+      setTopicSaveRecoveryNotice('只读核实确认服务端仍是保存前内容。本次没有自动重发；核对本地修改后，点击“按原操作重试”才会再次提交。');
+      return 'retryable' as const;
+    }
+
+    topicSaveConflictTopicRef.current = latest;
+    setTopicSaveRecovery(recovery, 'conflict');
+    setTopicSaveRecoveryNotice('服务端内容已发生变化；本地修改已保留。请采用服务端内容，或明确保留本地修改后再决定是否保存。');
+    return 'conflict' as const;
+  };
+  reconcileTopicSaveReadbackRef.current = reconcileTopicSaveReadback;
+
   useEffect(() => {
     const requestId = ++detailRequestSequenceRef.current;
     const fetchData = async () => {
       setLoading(true);
+      setTopic(null);
+      setTopicLoadFailure(null);
       setOutlineVersionsLoadState('loading');
       try {
         const topicData = await getTopic(parseInt(id!));
@@ -135,43 +277,28 @@ export default function TopicDetail() {
           true,
           topicEditorModePolicy,
         ));
-        setTitle(topicData.title);
-        setDescription(topicData.description);
-
-        // 从 description 解析结构化字段（只存项目背景和目标受众）
-        const desc = topicData.description || '';
-        const bgMatch = desc.match(/【项目背景】\n([\s\S]*?)(?=\n\n【|$)/);
-        const audienceMatch = desc.match(/【目标受众】\n([\s\S]*?)(?=\n\n【|$)/);
-
-        setParsedFields({
-          projectBackground: bgMatch ? bgMatch[1].trim() : '',
-          targetAudience: audienceMatch ? audienceMatch[1].trim() : '',
-        });
-
-        setDetails({
-          assignee_id: topicData.assignee_id,
-          deadline: topicData.deadline,
-          platform: topicData.platform
-        });
-
-        const usersData = await getUsers();
-        if (requestId !== detailRequestSequenceRef.current || Number(currentTopicIdRef.current) !== Number(id)) return;
-        setUsers(usersData.data);
-
-        // 大纲内容从 topic 取
         const draft = createTopicDetailDraft(topicData);
         baselineDraftRef.current = cloneTopicDetailDraft(draft);
-        draftRef.current = cloneTopicDetailDraft(draft);
         aggregateRevisionRef.current = 0;
-        setTitle(draft.title);
-        setDescription(draft.description);
-        setDetails(draft.details);
-        setParsedFields(draft.parsedFields);
-        setScriptContent(draft.outline);
-        setIsTopicDirty(false);
+        const recovery = readTopicDetailSaveRecovery(currentUserId, topicData.id);
+        if (recovery === 'invalid') {
+          setTopicSaveRecovery(null, 'invalid');
+          setTopicSaveRecoveryNotice('上次保存核实记录无法读取。当前已载入服务端内容；请先重新读取并明确采用服务端版本，之后才能继续写入。');
+          applyDraft(draft);
+          setIsTopicDirty(false);
+        } else if (recovery) {
+          setTopicSaveRecovery(recovery, 'unknown');
+          setTopicSaveRecoveryNotice('正在只读核实上次选题保存结果；核实前不会再次写入。');
+          reconcileTopicSaveReadbackRef.current(recovery, topicData);
+        } else {
+          setTopicSaveRecovery(null, 'none');
+          setTopicSaveRecoveryNotice('');
+          applyDraft(draft);
+          setIsTopicDirty(false);
+        }
       } catch (error) {
         if (requestId === detailRequestSequenceRef.current && Number(currentTopicIdRef.current) === Number(id)) {
-          appStore.addNotification({ title: '获取选题详情失败', message: (error as Error).message, type: 'error' });
+          setTopicLoadFailure(error instanceof TopicApiError && error.status === 404 ? 'not-found' : 'unavailable');
         }
       } finally {
         if (requestId === detailRequestSequenceRef.current && Number(currentTopicIdRef.current) === Number(id)) setLoading(false);
@@ -180,7 +307,7 @@ export default function TopicDetail() {
     
     void fetchData();
     return () => { detailRequestSequenceRef.current += 1; };
-  }, [id]);
+  }, [currentUserId, id, topicDetailReload]);
 
   const reloadOutlineVersions = async () => {
     if (!topic || outlineVersionsLoadState === 'loading') return;
@@ -210,21 +337,12 @@ export default function TopicDetail() {
   useEffect(() => {
     if (!auditRequested || loading || permissionsLoading) return;
 
-    if (topic?.status === 'pending' && canAudit) setShowAuditModal(true);
+    if (topic?.status === 'pending' && canAudit) openAuditModal();
 
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('action');
     setSearchParams(nextParams, { replace: true });
   }, [auditRequested, canAudit, loading, permissionsLoading, searchParams, setSearchParams, topic?.status]);
-
-  const applyDraft = (draft: TopicDetailAggregateDraft) => {
-    draftRef.current = cloneTopicDetailDraft(draft);
-    setTitle(draft.title);
-    setDescription(draft.description);
-    setDetails(draft.details);
-    setParsedFields(draft.parsedFields);
-    setScriptContent(draft.outline);
-  };
 
   const recordDraftChange = (nextDraft: TopicDetailAggregateDraft) => {
     draftRef.current = cloneTopicDetailDraft(nextDraft);
@@ -262,57 +380,132 @@ export default function TopicDetail() {
     recordDraftChange(nextDraft);
   };
 
-  const handleAudit = async () => {
+  const verifyAuditStatus = async () => {
+    if (auditVerificationInFlightRef.current) return;
     const requestedTopicId = Number(id);
+    auditVerificationInFlightRef.current = true;
+    setVerifyingAudit(true);
     try {
-      await auditTopic(requestedTopicId, auditData);
-    } catch (error) {
-      appStore.addNotification({ title: '审核失败', message: (error as Error).message, type: 'error' });
+      const latest = await getTopic(requestedTopicId);
+      if (Number(currentTopicIdRef.current) !== requestedTopicId) return;
+      setTopic(latest);
+      if (latest.status === auditData.status) {
+        setAuditNeedsVerification(false);
+        setAuditVerificationNotice('');
+        setShowAuditModal(false);
+        appStore.addNotification({ title: '审核状态已核实', message: auditData.status === 'approved' ? '服务器已记录通过审核。' : '服务器已记录驳回结果。', type: 'success' });
+      } else if (latest.status === 'pending') {
+        setAuditNeedsVerification(false);
+        setAuditVerificationNotice('服务器仍显示待审核。未自动重发；请核对审核意见后，再次明确确认。');
+      } else {
+        setAuditNeedsVerification(false);
+        setAuditVerificationNotice(`服务器当前状态为“${STATUS_TEXT[latest.status] || '状态待确认'}”，本次不会重复提交审核。`);
+        setShowAuditModal(false);
+        appStore.addNotification({ title: '审核状态已变化', message: `服务器当前状态为“${STATUS_TEXT[latest.status] || '状态待确认'}”，未重复提交审核。`, type: 'warning' });
+      }
+    } catch {
+      if (Number(currentTopicIdRef.current) === requestedTopicId) {
+        setAuditNeedsVerification(true);
+        setAuditVerificationNotice('审核结果暂时无法确认。为避免重复提交，审核控件已锁定；请重新只读核实状态。');
+      }
+    } finally {
+      auditVerificationInFlightRef.current = false;
+      setVerifyingAudit(false);
+    }
+  };
+
+  const openAuditModal = () => {
+    setAuditVerificationNotice('');
+    setAuditNeedsVerification(false);
+    setShowAuditModal(true);
+  };
+
+  const handleAudit = async () => {
+    if (topicSaveRecoveryModeRef.current !== 'none') {
+      setTopicSaveRecoveryNotice('请先核实上一次选题内容保存结果；核实前不会执行审核或其它写入。');
       return;
     }
-
-    if (Number(currentTopicIdRef.current) === requestedTopicId) setShowAuditModal(false);
+    if (auditSubmissionInFlightRef.current || auditNeedsVerification || verifyingAudit) return;
+    const requestedTopicId = Number(id);
+    auditSubmissionInFlightRef.current = true;
+    setAuditSubmitting(true);
     try {
-      const refreshed = await getTopic(requestedTopicId);
-      if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
-      appStore.addNotification({
-        title: '审核成功',
-        message: auditData.status === 'approved' ? '选题已通过审核' : '选题已驳回',
-        type: 'success',
-      });
-    } catch {
-      setTopic((current) => current?.id === requestedTopicId ? { ...current, status: auditData.status } : current);
-      appStore.addNotification({ title: '审核已提交', message: '审核操作已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
+      try {
+        await auditTopic(requestedTopicId, auditData);
+      } catch (error) {
+        const status = error instanceof Error && 'status' in error ? Number((error as Error & { status?: unknown }).status) : 0;
+        if (status === 0 || status === 408 || status === 429 || status >= 500) {
+          setAuditVerificationNotice('审核请求未收到明确结果，正在只读核实；核实前不会再次提交。');
+          await verifyAuditStatus();
+          return;
+        }
+        appStore.addNotification({ title: '审核失败', message: (error as Error).message, type: 'error' });
+        return;
+      }
+
+      if (Number(currentTopicIdRef.current) === requestedTopicId) setShowAuditModal(false);
+      try {
+        const refreshed = await getTopic(requestedTopicId);
+        if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
+        appStore.addNotification({
+          title: '审核成功',
+          message: auditData.status === 'approved' ? '选题已通过审核' : '选题已驳回',
+          type: 'success',
+        });
+      } catch {
+        setTopic((current) => current?.id === requestedTopicId ? { ...current, status: auditData.status } : current);
+        appStore.addNotification({ title: '审核已提交', message: '审核操作已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
+      }
+    } finally {
+      auditSubmissionInFlightRef.current = false;
+      setAuditSubmitting(false);
     }
   };
 
   const handleUpdateStatus = async (status: string) => {
-    const requestedTopicId = Number(id);
-    try {
-      await updateTopicStatus(requestedTopicId, status);
-    } catch (error) {
-      appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+    if (topicSaveRecoveryModeRef.current !== 'none') {
+      setTopicSaveRecoveryNotice('请先核实上一次选题内容保存结果；核实前不会推进阶段。');
       return;
     }
-
-    if (status === 'shooting' || status === 'completed') celebrateMilestone();
+    if (statusUpdateInFlightRef.current) return;
+    const requestedTopicId = Number(id);
+    statusUpdateInFlightRef.current = true;
+    setStatusUpdating(true);
     try {
-      const refreshed = await getTopic(requestedTopicId);
-      if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
-      appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
-    } catch {
-      setTopic((current) => current?.id === requestedTopicId ? { ...current, status: status as Topic['status'] } : current);
-      appStore.addNotification({ title: '状态已更新', message: '状态更新已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
+      try {
+        await updateTopicStatus(requestedTopicId, status);
+      } catch (error) {
+        appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+        return;
+      }
+
+      if (status === 'shooting' || status === 'completed') celebrateMilestone();
+      try {
+        const refreshed = await getTopic(requestedTopicId);
+        if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
+        appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
+      } catch {
+        setTopic((current) => current?.id === requestedTopicId ? { ...current, status: status as Topic['status'] } : current);
+        appStore.addNotification({ title: '状态已更新', message: '状态更新已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
+      }
+    } finally {
+      statusUpdateInFlightRef.current = false;
+      setStatusUpdating(false);
     }
   };
 
   const handleStartProduction = async () => {
+    if (topicSaveRecoveryModeRef.current !== 'none') {
+      setTopicSaveRecoveryNotice('请先核实上一次选题内容保存结果；核实前不会开始创作。');
+      return;
+    }
     if (!topic || startProductionInFlight.current) return;
     startProductionInFlight.current = true;
     setStartingProduction(true);
     try {
       const result = await startOrResumeTopicProduction(topic, {
         advanceTopic: updateTopicStatus,
+        getTopicStatus: async (topicId) => (await getTopic(topicId)).status,
         listProductions: async (topicId) => getProduction({ topic_id: topicId }),
         createDraft: createProduction,
       });
@@ -336,6 +529,10 @@ export default function TopicDetail() {
   };
 
   const handleRepairStageRecord = async () => {
+    if (topicSaveRecoveryModeRef.current !== 'none') {
+      setTopicSaveRecoveryNotice('请先核实上一次选题内容保存结果；核实前不会补齐阶段记录。');
+      return;
+    }
     if (!topic || !canEditTopic || repairingStageRecord) return;
     const requestedTopicId = topic.id;
     setRepairingStageRecord(true);
@@ -367,22 +564,183 @@ export default function TopicDetail() {
     }
   };
 
+  const verifyTopicDetailSave = async (recoveryOverride?: TopicDetailSaveRecovery, saveRevision?: number) => {
+    if (topicSaveVerificationInFlightRef.current) return 'unknown' as const;
+    const recovery = recoveryOverride ?? topicSaveRecoveryRef.current;
+    if (!recovery) return 'unknown' as const;
+    topicSaveVerificationInFlightRef.current = true;
+    setVerifyingTopicSave(true);
+    try {
+      const latest = await getTopic(recovery.topicId);
+      if (Number(currentTopicIdRef.current) !== recovery.topicId || Number(currentUserId) !== recovery.userId) return 'unknown' as const;
+      return reconcileTopicSaveReadbackRef.current(recovery, latest, saveRevision);
+    } catch {
+      if (Number(currentTopicIdRef.current) === recovery.topicId && Number(currentUserId) === recovery.userId) {
+        setTopicSaveRecovery(recovery, 'unknown');
+        setTopicSaveRecoveryNotice('保存结果仍暂时无法确认。当前修改已保留，选题写入已锁定；请稍后再次只读核实。');
+      }
+      return 'unknown' as const;
+    } finally {
+      topicSaveVerificationInFlightRef.current = false;
+      setVerifyingTopicSave(false);
+    }
+  };
+
+  const adoptServerForUnreadableTopicRecovery = async () => {
+    if (topicSaveRecoveryModeRef.current !== 'invalid' || topicSaveVerificationInFlightRef.current) return;
+    const requestedTopicId = Number(id);
+    topicSaveVerificationInFlightRef.current = true;
+    setVerifyingTopicSave(true);
+    try {
+      const latest = await getTopic(requestedTopicId);
+      if (Number(currentTopicIdRef.current) !== requestedTopicId) return;
+      const latestDraft = createTopicDetailDraft(latest);
+      setTopic(latest);
+      baselineDraftRef.current = cloneTopicDetailDraft(latestDraft);
+      applyDraft(latestDraft);
+      aggregateRevisionRef.current = 0;
+      setIsTopicDirty(false);
+      setEditTitle(false);
+      setEditDetails(false);
+      setEditDescription(false);
+      setEditOutline(false);
+      clearInvalidTopicDetailSaveRecovery(currentUserId, requestedTopicId);
+      setTopicSaveRecovery(null, 'none');
+      setTopicSaveRecoveryNotice('已重新读取并采用服务端内容；之前无法读取的本地恢复记录已清除。');
+    } catch {
+      setTopicSaveRecoveryNotice('服务端内容暂时无法读取，恢复记录仍保留；核实完成前不会写入。');
+    } finally {
+      topicSaveVerificationInFlightRef.current = false;
+      setVerifyingTopicSave(false);
+    }
+  };
+
+  const adoptServerTopicSaveConflict = () => {
+    const latest = topicSaveConflictTopicRef.current;
+    const recovery = topicSaveRecoveryRef.current;
+    if (!latest || !recovery) return;
+    const latestDraft = createTopicDetailDraft(latest);
+    removeTopicDetailSaveRecovery(recovery);
+    setTopicSaveRecovery(null, 'none');
+    setTopicSaveRecoveryNotice('已采用服务端最新内容；本地修改已清除，没有发送写入。');
+    baselineDraftRef.current = cloneTopicDetailDraft(latestDraft);
+    applyDraft(latestDraft);
+    setIsTopicDirty(false);
+    setEditTitle(false);
+    setEditDetails(false);
+    setEditDescription(false);
+    setEditOutline(false);
+    topicSaveConflictTopicRef.current = null;
+  };
+
+  const continueWithLocalTopicSaveConflict = () => {
+    const latest = topicSaveConflictTopicRef.current;
+    const recovery = topicSaveRecoveryRef.current;
+    if (!latest || !recovery) return;
+    const rebased = {
+      ...recovery,
+      baseline: createTopicDetailDraft(latest),
+      versionAction: null,
+      phase: 'uncertain' as const,
+    };
+    try {
+      persistTopicDetailSaveRecovery(rebased);
+    } catch (error) {
+      setTopicSaveRecoveryNotice(error instanceof Error ? error.message : '本地恢复记录无法保存；写入仍保持锁定。');
+      return;
+    }
+    baselineDraftRef.current = cloneTopicDetailDraft(rebased.baseline);
+    applyDraft(rebased.target);
+    setIsTopicDirty(true);
+    setEditTitle(true);
+    setEditDetails(true);
+    setEditDescription(true);
+    setEditOutline(true);
+    topicSaveConflictTopicRef.current = null;
+    setTopicSaveRecovery(rebased, 'retryable');
+    setTopicSaveRecoveryNotice('已保留本地修改并以最新服务端内容为基线；只有点击“按当前本地内容保存”才会写入。');
+  };
+
+  const retryTopicDetailSaveExplicitly = async () => {
+    const recovery = topicSaveRecoveryRef.current;
+    if (!recovery || topicSaveRecoveryModeRef.current !== 'retryable' || isAggregateSaving) return;
+    retryingTopicSaveRef.current = true;
+    setTopicSaveFeedback(null);
+    try {
+      await persistTopicAggregate(recovery.target, aggregateRevisionRef.current, recovery.versionAction ?? undefined);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '请稍后再次核实保存结果。';
+      setTopicSaveFeedback(`保存未完成，本地修改仍保留：${detail}`);
+    } finally {
+      retryingTopicSaveRef.current = false;
+      pendingTopicVersionActionRef.current = null;
+    }
+  };
+
   const persistTopicAggregate = (saveSnapshot: TopicDetailAggregateDraft, saveRevision: number, versionAction?: 'minor' | 'major') => {
     const requestedTopicId = Number(id);
     return (
     aggregateSaveGateRef.current.run(async () => {
+      if (topicSaveRecoveryModeRef.current !== 'none' && !retryingTopicSaveRef.current) {
+        const message = '请先核实上一次保存结果；核实前不会再次提交。';
+        setTopicSaveRecoveryNotice(message);
+        throw new Error(message);
+      }
       setIsAggregateSaving(true);
       const payload = {
         ...buildTopicDetailUpdatePayload(saveSnapshot),
         ...(versionAction ? { version_action: versionAction, expected_content: topic?.outline ?? '' } : {}),
       };
+      const saveBaseline = baselineDraftRef.current;
+      if (!saveBaseline || !Number.isSafeInteger(currentUserId) || Number(currentUserId) <= 0) {
+        setIsAggregateSaving(false);
+        throw new Error('账号或选题基线尚未确认，本次没有提交。');
+      }
+      const recovery: TopicDetailSaveRecovery = {
+        version: 1,
+        userId: Number(currentUserId),
+        topicId: requestedTopicId,
+        baseline: cloneTopicDetailDraft(saveBaseline),
+        target: cloneTopicDetailDraft(saveSnapshot),
+        versionAction: versionAction ?? null,
+        phase: 'sending',
+      };
       try {
+        persistTopicDetailSaveRecovery(recovery);
+        setTopicSaveRecovery(recovery, 'unknown');
+        setTopicSaveRecoveryNotice('正在保存选题内容…');
         await updateTopic(requestedTopicId, payload);
       } catch (error) {
+        if (error instanceof Error && error.message.startsWith('本次选题修改未发送：')) {
+          setTopicSaveRecovery(null, 'none');
+          setTopicSaveRecoveryNotice('');
+          setIsAggregateSaving(false);
+          appStore.addNotification({ title: '保存未发送', message: error.message, type: 'error' });
+          throw error;
+        }
+        const status = error instanceof TopicApiError ? error.status : 0;
+        const definitelyRejected = status >= 400 && status < 500 && ![408, 409, 425, 429].includes(status);
+        if (definitelyRejected) {
+          removeTopicDetailSaveRecovery(recovery);
+          setTopicSaveRecovery(null, 'none');
+          setTopicSaveRecoveryNotice('');
+          setIsAggregateSaving(false);
+          appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+          throw error;
+        }
+        markTopicDetailSaveRecoveryUncertain(recovery);
+        setTopicSaveRecovery(recovery, 'unknown');
+        setTopicSaveRecoveryNotice('保存响应未能确认，正在只读核实；核实前不会再次提交。');
+        const result = await verifyTopicDetailSave(recovery, saveRevision);
         setIsAggregateSaving(false);
-        appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+        if (result === 'confirmed') return;
+        appStore.addNotification({ title: '保存结果待核实', message: '本地修改已保留；请查看页面提示并通过只读核实或明确重试。', type: 'warning' });
         throw error;
       }
+
+      removeTopicDetailSaveRecovery(recovery);
+      setTopicSaveRecovery(null, 'none');
+      setTopicSaveRecoveryNotice('');
 
       if (Number(currentTopicIdRef.current) !== requestedTopicId) {
         setIsAggregateSaving(false);
@@ -448,6 +806,10 @@ export default function TopicDetail() {
   aggregatePersistCommandRef.current = persistTopicAggregate;
 
   const performTopicManualSave = (): Promise<void> => {
+    if (topicSaveRecoveryModeRef.current !== 'none') {
+      setTopicSaveRecoveryNotice('请先核实上一次选题内容保存结果；核实前不会再次提交。');
+      return Promise.reject(new Error('请先核实上一次选题内容保存结果。'));
+    }
     setTopicSaveFeedback(null);
     const saveRevision = aggregateRevisionRef.current;
     const saveSnapshot = cloneTopicDetailDraft(draftRef.current);
@@ -485,6 +847,10 @@ export default function TopicDetail() {
   };
 
   const handleCreateOutlineVersion = async (versionAction: 'minor' | 'major') => {
+    if (topicSaveRecoveryModeRef.current !== 'none') {
+      setTopicSaveRecoveryNotice('请先核实上一次选题内容保存结果；核实前不会创建版本。');
+      return;
+    }
     if (!canEditTopic || isAggregateSaving || !editOutline) return;
     pendingTopicVersionActionRef.current = versionAction;
     try {
@@ -498,6 +864,7 @@ export default function TopicDetail() {
   };
 
   const handleCancel = () => {
+    if (topicSaveRecoveryModeRef.current !== 'none') return;
     const baseline = baselineDraftRef.current;
     if (baseline) {
       applyDraft(baseline);
@@ -521,9 +888,36 @@ export default function TopicDetail() {
     discard: handleCancel,
   });
 
+  const pendingRouteStayRef = useRef<(() => void) | null>(null);
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: { proceed: () => void; stay: () => void }) => {
+    let continued = false;
+    const continueOnce = () => {
+      if (continued) return;
+      continued = true;
+      pendingRouteStayRef.current = null;
+      proceed();
+    };
+    pendingRouteStayRef.current = stay;
+    void requestTopicLeave(continueOnce)
+      .then((result) => {
+        if (result.decision === 'proceeded') continueOnce();
+      })
+      .catch(stay);
+  }, [requestTopicLeave]);
+  useRouteNavigationGuard(
+    Boolean(topic && !loading && (isTopicDirty || isAggregateSaving || isCurrentDraftDirty())),
+    handleRouteNavigationAttempt,
+  );
+
+  const handleContinueTopicEditing = useCallback(() => {
+    continueTopicEditing();
+    pendingRouteStayRef.current?.();
+    pendingRouteStayRef.current = null;
+  }, [continueTopicEditing]);
+
   const handleReturnToTopics = useCallback(() => {
-    void requestTopicLeave(() => navigate('/topics'));
-  }, [navigate, requestTopicLeave]);
+    navigate('/topics');
+  }, [navigate]);
 
   const statusColors: Record<string, string> = {
     pending: 'bg-studio-amber-soft text-studio-amber-contrast border-studio-border-soft',
@@ -570,9 +964,9 @@ export default function TopicDetail() {
     !requestedOutlineVersion && topic &&
       canEditTopicPermission &&
       (
-        contentEditRoles.has(authStore.user?.role || '') ||
-        Number(topic.creator_id) === authStore.user?.id ||
-        Number(topic.assignee_id) === authStore.user?.id
+        contentEditRoles.has(currentUserRole || '') ||
+        Number(topic.creator_id) === currentUserId ||
+        Number(topic.assignee_id) === currentUserId
       ),
   );
   const currentStageRecord = topic
@@ -597,12 +991,16 @@ export default function TopicDetail() {
   const topicDetailManualAdapter = useMemo(() => createTopicDetailManualAdapter({
     documentId: `topic:${topic?.id ?? id ?? 'unbound'}`,
     initialContent: baselineDraftRef.current?.outline || '',
-    readonly: !canEditTopic || !editOutline,
+    readonly: !canEditTopic || !editOutline || topicSaveRecoveryMode !== 'none',
     persist: persistTopicManualBridge,
-  }), [canEditTopic, editOutline, id, persistTopicManualBridge, topic?.id]);
+  }), [canEditTopic, editOutline, id, persistTopicManualBridge, topic?.id, topicSaveRecoveryMode]);
   const isOverdue = topic?.deadline && new Date(topic.deadline) < new Date() && topic.status !== 'completed' && topic.status !== 'rejected';
 
   const beginEditingTopic = () => {
+    if (topicSaveRecoveryModeRef.current !== 'none') {
+      setTopicSaveRecoveryNotice('请先核实上一次选题内容保存结果；核实前不能开始新的编辑。');
+      return;
+    }
     if (!permissionsLoading && !canEditTopic) {
       appStore.addNotification({
         title: '暂不可编辑',
@@ -627,7 +1025,30 @@ export default function TopicDetail() {
   }
 
   if (!topic) {
-    return <p className="py-8 text-center text-studio-text-secondary">选题不存在</p>;
+    if (topicLoadFailure === 'not-found') {
+      return (
+        <section role="status" className="mx-auto flex max-w-xl flex-col items-center gap-4 rounded-card border border-studio-border-soft bg-studio-surface p-6 text-center">
+          <p className="text-base font-semibold text-studio-text-primary">选题不存在或已不可见</p>
+          <p className="text-sm text-studio-text-secondary">请返回选题列表确认当前可访问的内容。</p>
+          <ActionButton type="button" variant="secondary" className="min-h-11" onClick={() => navigate('/topics')}>返回选题列表</ActionButton>
+        </section>
+      );
+    }
+
+    if (topicLoadFailure === 'unavailable') {
+      return (
+        <section role="alert" className="mx-auto flex max-w-xl flex-col items-center gap-4 rounded-card border border-studio-coral/30 bg-studio-coral/10 p-6 text-center">
+          <p className="text-base font-semibold text-studio-coral-contrast">选题详情暂时无法读取</p>
+          <p className="text-sm text-studio-text-secondary">当前无法确认该选题是否存在；读取失败不代表选题已删除。你可以重新加载，或返回列表稍后再试。</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <ActionButton type="button" variant="primary" className="min-h-11" onClick={() => setTopicDetailReload((current) => current + 1)}>重新加载选题详情</ActionButton>
+            <ActionButton type="button" variant="secondary" className="min-h-11" onClick={() => navigate('/topics')}>返回选题列表</ActionButton>
+          </div>
+        </section>
+      );
+    }
+
+    return <p role="status" className="py-8 text-center text-studio-text-secondary">正在读取选题详情…</p>;
   }
 
   const isEditing = editTitle || editDetails || editDescription || editOutline;
@@ -640,7 +1061,7 @@ export default function TopicDetail() {
   // captured after Topic load, which prevents a dirty draft from hot-switching.
   const activeTopicEditorBranch: TopicDetailEditorBranch = {
     ...topicEditorBranch,
-    readonly: !canEditTopic || !editOutline,
+    readonly: !canEditTopic || !editOutline || topicSaveRecoveryMode !== 'none',
   };
 
   return (
@@ -669,6 +1090,7 @@ export default function TopicDetail() {
                 <input
                   type="text"
                   value={title}
+                  disabled={topicSaveRecoveryMode !== 'none'}
                   onChange={(e) => changeTitle(e.target.value)}
                   className={`text-2xl font-bold ${styles.textPrimary} ${styles.bgInput} border border-studio-primary rounded-lg px-3 py-1 focus:outline-none focus:ring-2 focus:ring-studio-primary w-96`}
                   autoFocus
@@ -677,7 +1099,7 @@ export default function TopicDetail() {
                 <h1
                   className={`text-2xl font-bold ${styles.textPrimary} cursor-pointer hover:text-studio-primary transition-colors`}
                   onClick={() => {
-                    if (canEditTopic) setEditTitle(true);
+                    if (canEditTopic && topicSaveRecoveryMode === 'none') setEditTitle(true);
                   }}
                 >
                   {title}
@@ -715,10 +1137,14 @@ export default function TopicDetail() {
             {editDetails ? (
               <select
                 value={details.assignee_id}
+                disabled={topicSaveRecoveryMode !== 'none' || userDirectoryLoadState === 'loading' || (userDirectoryLoadState === 'error' && users.length === 0)}
                 onChange={(e) => changeDetails({ ...details, assignee_id: parseInt(e.target.value) })}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
               >
                 <option value={0}>未分配</option>
+                {details.assignee_id && !users.some((user) => user.id === details.assignee_id) ? (
+                  <option value={details.assignee_id}>{topic.assignee_name || '当前负责人（暂不可确认）'}</option>
+                ) : null}
                 {users.filter(u => u.enabled).map(user => (
                   <option key={user.id} value={user.id}>{user.name}</option>
                 ))}
@@ -727,12 +1153,13 @@ export default function TopicDetail() {
               <p
                 className={`${styles.textPrimary} font-medium cursor-pointer hover:text-studio-primary transition-colors`}
                 onClick={() => {
-                  if (canEditTopic) setEditDetails(true);
+                  if (canEditTopic && topicSaveRecoveryMode === 'none') setEditDetails(true);
                 }}
               >
-                {details.assignee_id ? users.find(u => u.id === details.assignee_id)?.name || '未指派' : '未指派'}
+                {details.assignee_id ? topic.assignee_name || users.find(u => u.id === details.assignee_id)?.name || '负责人信息暂不可用' : '未指派'}
               </p>
             )}
+            {!showAuditModal ? userDirectoryFeedback : null}
           </div>
           <div className={`${styles.bgTertiary} rounded-lg p-4`}>
             <div className={`flex items-center gap-2 ${styles.textSecondary} mb-2`}>
@@ -743,6 +1170,7 @@ export default function TopicDetail() {
               <input
                 type="date"
                 value={details.deadline}
+                disabled={topicSaveRecoveryMode !== 'none'}
                 onChange={(e) => changeDetails({ ...details, deadline: e.target.value })}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
               />
@@ -750,7 +1178,7 @@ export default function TopicDetail() {
               <p
                 className={`font-medium cursor-pointer transition-colors ${isOverdue ? 'text-studio-coral-contrast hover:opacity-80' : `${styles.textPrimary} hover:text-studio-primary-contrast`}`}
                 onClick={() => {
-                  if (canEditTopic) setEditDetails(true);
+                  if (canEditTopic && topicSaveRecoveryMode === 'none') setEditDetails(true);
                 }}
               >
                 {formatBeijingDate(details.deadline)}
@@ -766,6 +1194,7 @@ export default function TopicDetail() {
               <input
                 type="text"
                 value={details.platform}
+                disabled={topicSaveRecoveryMode !== 'none'}
                 onChange={(e) => changeDetails({ ...details, platform: e.target.value })}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary ${styles.textPlaceholder}`}
                 placeholder="输入发布平台"
@@ -774,10 +1203,10 @@ export default function TopicDetail() {
               <p
                 className={`${styles.textPrimary} font-medium cursor-pointer hover:text-studio-primary transition-colors`}
                 onClick={() => {
-                  if (canEditTopic) setEditDetails(true);
+                  if (canEditTopic && topicSaveRecoveryMode === 'none') setEditDetails(true);
                 }}
               >
-                {details.platform || '-'}
+                {getPlatformLabel(details.platform) || '-'}
               </p>
             )}
           </div>
@@ -788,13 +1217,14 @@ export default function TopicDetail() {
           <div className={`${styles.bgTertiary} rounded-lg p-4`}>
             <div className="flex items-center justify-between mb-2">
               <h3 className={`${styles.textSecondary} text-sm font-medium`}>项目背景</h3>
-              {canEditTopic && isEditing && (
+              {canEditTopic && topicSaveRecoveryMode === 'none' && isEditing && (
                 <button onClick={() => setEditDescription(true)} className="text-xs text-studio-primary hover:text-studio-primary">编辑</button>
               )}
             </div>
             {editDescription ? (
               <textarea
                 value={parsedFields.projectBackground}
+                disabled={topicSaveRecoveryMode !== 'none'}
                 onChange={(e) => changeParsedFields({ ...parsedFields, projectBackground: e.target.value })}
                 rows={4}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary resize-none`}
@@ -809,13 +1239,14 @@ export default function TopicDetail() {
           <div className={`${styles.bgTertiary} rounded-lg p-4`}>
             <div className="flex items-center justify-between mb-2">
               <h3 className={`${styles.textSecondary} text-sm font-medium`}>目标受众</h3>
-              {canEditTopic && isEditing && (
+              {canEditTopic && topicSaveRecoveryMode === 'none' && isEditing && (
                 <button onClick={() => setEditDescription(true)} className="text-xs text-studio-primary hover:text-studio-primary">编辑</button>
               )}
             </div>
             {editDescription ? (
               <textarea
                 value={parsedFields.targetAudience}
+                disabled={topicSaveRecoveryMode !== 'none'}
                 onChange={(e) => changeParsedFields({ ...parsedFields, targetAudience: e.target.value })}
                 rows={4}
                 className={`w-full px-3 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary resize-none`}
@@ -834,7 +1265,7 @@ export default function TopicDetail() {
           <div className="flex items-center justify-between mb-2">
             <h3 className={`${styles.textSecondary} text-sm font-medium`}>剧本大纲</h3>
             <div className="flex items-center gap-2">
-              {canEditTopic && !editOutline && isEditing && (
+                {canEditTopic && topicSaveRecoveryMode === 'none' && !editOutline && isEditing && (
                 <button onClick={() => setEditOutline(true)} className="text-xs text-studio-primary hover:text-studio-primary">编辑大纲</button>
               )}
             </div>
@@ -872,8 +1303,8 @@ export default function TopicDetail() {
               </div>
               {canEditTopic && editOutline && (
                 <div className="flex flex-wrap gap-2">
-                  <ActionButton type="button" disabled={isAggregateSaving || !canPersistTopicDraft} onClick={() => void handleCreateOutlineVersion('minor')}>小版本保存</ActionButton>
-                  <ActionButton type="button" variant="primary" disabled={isAggregateSaving || !canPersistTopicDraft} onClick={() => void handleCreateOutlineVersion('major')}>大版本保存</ActionButton>
+                  <ActionButton type="button" disabled={isAggregateSaving || topicSaveRecoveryMode !== 'none' || !canPersistTopicDraft} onClick={() => void handleCreateOutlineVersion('minor')}>小版本保存</ActionButton>
+                  <ActionButton type="button" variant="primary" disabled={isAggregateSaving || topicSaveRecoveryMode !== 'none' || !canPersistTopicDraft} onClick={() => void handleCreateOutlineVersion('major')}>大版本保存</ActionButton>
                 </div>
               )}
             </div>
@@ -926,14 +1357,15 @@ export default function TopicDetail() {
           <div className="flex gap-3 mb-6">
             <button
               onClick={handleSave}
-              disabled={isAggregateSaving || !canPersistTopicDraft}
-              className="flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-white transition-colors hover:bg-studio-primary-button"
+              disabled={isAggregateSaving || topicSaveRecoveryMode !== 'none' || !canPersistTopicDraft}
+              className="flex items-center gap-2 rounded-lg px-4 py-2 text-white transition-colors xmt-btn-primary"
             >
               <Save className="w-4 h-4" />
               保存
             </button>
             <button
               onClick={handleCancel}
+              disabled={topicSaveRecoveryMode !== 'none'}
               className={`px-4 py-2 ${styles.bgTertiary} ${styles.hoverBg} ${styles.textPrimary} rounded-lg transition-colors flex items-center gap-2`}
             >
               取消
@@ -945,9 +1377,43 @@ export default function TopicDetail() {
             {topicSaveFeedback}
           </p>
         ) : null}
+        {topicSaveRecoveryMode !== 'none' ? (
+          <section
+            role={topicSaveRecoveryMode === 'unknown' || topicSaveRecoveryMode === 'invalid' ? 'alert' : 'status'}
+            data-testid="topic-save-recovery"
+            className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm text-studio-amber-contrast"
+          >
+            <span>{verifyingTopicSave ? '正在只读核实上次选题保存结果…' : topicSaveRecoveryNotice}</span>
+            <div className="flex flex-wrap gap-2">
+              {topicSaveRecoveryMode === 'unknown' && topicSaveRecoveryRef.current ? (
+                <ActionButton type="button" variant="secondary" disabled={verifyingTopicSave || isAggregateSaving} onClick={() => void verifyTopicDetailSave()}>
+                  {verifyingTopicSave ? '核实中…' : '只读核实上次保存'}
+                </ActionButton>
+              ) : null}
+              {topicSaveRecoveryMode === 'retryable' ? (
+                <ActionButton type="button" variant="primary" disabled={isAggregateSaving} onClick={() => void retryTopicDetailSaveExplicitly()}>
+                  {isAggregateSaving ? '正在提交…' : topicSaveRecoveryRef.current?.versionAction
+                    ? `按原${topicSaveRecoveryRef.current.versionAction === 'major' ? '大版本' : '小版本'}操作重试`
+                    : '按当前本地内容保存'}
+                </ActionButton>
+              ) : null}
+              {topicSaveRecoveryMode === 'conflict' ? (
+                <>
+                  <ActionButton type="button" variant="secondary" onClick={adoptServerTopicSaveConflict}>采用服务端内容</ActionButton>
+                  <ActionButton type="button" variant="primary" onClick={continueWithLocalTopicSaveConflict}>保留本地修改</ActionButton>
+                </>
+              ) : null}
+              {topicSaveRecoveryMode === 'invalid' ? (
+                <ActionButton type="button" variant="secondary" disabled={verifyingTopicSave} onClick={() => void adoptServerForUnreadableTopicRecovery()}>
+                  {verifyingTopicSave ? '正在重新读取…' : '重新读取并采用服务端内容'}
+                </ActionButton>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
 
-        <TopicResourcesPanel topicId={topic.id} canManage={canEditTopic && canManageTopicResources} />
-        <TopicAssetDimensionsPanel key={topic.id} topicId={topic.id} canManage={canEditTopic} />
+        <TopicResourcesPanel topicId={topic.id} canManage={canEditTopic && canManageTopicResources && topicSaveRecoveryMode === 'none'} />
+        <TopicAssetDimensionsPanel key={topic.id} topicId={topic.id} canManage={canEditTopic && topicSaveRecoveryMode === 'none'} />
 
         <div className="mb-6">
           <h3 className={`${styles.textSecondary} text-sm mb-4`}>流程进度</h3>
@@ -965,7 +1431,7 @@ export default function TopicDetail() {
                 </div>
               </div>
               {topic.status !== 'completed' && canEditTopic && (
-                <ActionButton type="button" variant="primary" disabled={repairingStageRecord} onClick={() => void handleRepairStageRecord()}>
+                <ActionButton type="button" variant="primary" disabled={repairingStageRecord || topicSaveRecoveryMode !== 'none'} onClick={() => void handleRepairStageRecord()}>
                   {repairingStageRecord ? '正在补齐…' : `补齐${currentStageRecordLabel}记录`}
                 </ActionButton>
               )}
@@ -1007,8 +1473,8 @@ export default function TopicDetail() {
           <div className="flex flex-wrap gap-3">
             {topic.status === 'pending' && canAudit && (
               <button
-                onClick={() => setShowAuditModal(true)}
-                className="flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-white transition-colors hover:bg-studio-primary-button"
+                onClick={openAuditModal}
+                className="flex items-center gap-2 rounded-lg px-4 py-2 text-white transition-colors xmt-btn-primary"
               >
                 <CheckCircle className="w-4 h-4" />
                 审核选题
@@ -1017,7 +1483,7 @@ export default function TopicDetail() {
             {canStartProduction && (topic.status === 'approved' || topic.status === 'production') && (
               <button
                 onClick={() => { void handleStartProduction(); }}
-                disabled={startingProduction}
+                disabled={startingProduction || topicSaveRecoveryMode !== 'none'}
                 className="flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <FileIcon className="h-4 w-4" />
@@ -1027,7 +1493,8 @@ export default function TopicDetail() {
             {!isEditing && (
               permissionsLoading || canEditTopic ? (
                 <button
-                  onClick={beginEditingTopic}
+                onClick={beginEditingTopic}
+                disabled={topicSaveRecoveryMode !== 'none'}
                   className={`px-4 py-2 ${styles.bgTertiary} ${styles.hoverBg} ${styles.textPrimary} rounded-lg transition-colors flex items-center gap-2`}
                 >
                   <FileText className="w-4 h-4" />
@@ -1042,10 +1509,12 @@ export default function TopicDetail() {
             {canEditTopic && !missingCurrentStageRecord && (topic.status === 'shooting' || topic.status === 'publishing') && (
               <button
                 onClick={() => handleUpdateStatus(nextStatuses[topic.status])}
+                disabled={statusUpdating || topicSaveRecoveryMode !== 'none'}
+                aria-busy={statusUpdating}
                 className="xmt-btn xmt-btn-primary"
               >
                 <ArrowRight className="w-4 h-4" />
-                推进到下一阶段
+                {statusUpdating ? '阶段处理中…' : '推进到下一阶段'}
               </button>
             )}
           </div>
@@ -1071,18 +1540,32 @@ export default function TopicDetail() {
         )}
       </div>
 
-      {showAuditModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-modal">
+      {showAuditModal && createPortal((
+        <div
+          ref={auditOverlayRef}
+          className="fixed inset-0 z-modal flex items-center justify-center overflow-y-auto bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={auditDialogTitleId}
+          aria-busy={auditSubmitting || verifyingAudit}
+          tabIndex={-1}
+        >
           <div className={`${styles.bgSecondary} rounded-xl p-6 w-full max-w-lg mx-4 ${styles.border}`}>
-            <h2 className={`text-xl font-bold ${styles.textPrimary} mb-6`}>审核选题</h2>
+            <h2 id={auditDialogTitleId} className={`text-xl font-bold ${styles.textPrimary} mb-6`}>审核选题</h2>
+            {auditVerificationNotice ? <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-studio-amber/30 bg-studio-amber/10 px-4 py-3 text-sm leading-6 text-studio-amber-contrast">
+              <span>{verifyingAudit ? '正在只读核实审核状态…' : auditVerificationNotice}</span>
+              {auditNeedsVerification ? <ActionButton type="button" variant="secondary" disabled={verifyingAudit} onClick={() => void verifyAuditStatus()}>{verifyingAudit ? '核实中…' : '只读核实状态'}</ActionButton> : null}
+            </div> : null}
             
             <div className="space-y-4">
               <div>
                 <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>审核结果</label>
                 <div className="flex gap-4">
                   <button
+                    type="button"
+                    disabled={auditSubmitting || auditNeedsVerification || verifyingAudit}
                     onClick={() => setAuditData({ ...auditData, status: 'approved' })}
-                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
+                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-60 ${
                       auditData.status === 'approved' 
                         ? 'border border-studio-success/30 bg-studio-success-soft text-studio-success-contrast'
                         : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
@@ -1092,8 +1575,10 @@ export default function TopicDetail() {
                     审核通过
                   </button>
                   <button
+                    type="button"
+                    disabled={auditSubmitting || auditNeedsVerification || verifyingAudit}
                     onClick={() => setAuditData({ ...auditData, status: 'rejected' })}
-                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
+                    className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-60 ${
                       auditData.status === 'rejected' 
                         ? 'border border-studio-coral/30 bg-studio-coral-soft text-studio-coral-contrast'
                         : `${styles.bgTertiary} ${styles.textPrimary} ${styles.hoverBg}`
@@ -1110,6 +1595,7 @@ export default function TopicDetail() {
                   <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>指派负责人</label>
                   <select
                     value={auditData.assignee_id}
+                    disabled={auditSubmitting || auditNeedsVerification || verifyingAudit || userDirectoryLoadState === 'loading' || (userDirectoryLoadState === 'error' && users.length === 0)}
                     onChange={(e) => setAuditData({ ...auditData, assignee_id: parseInt(e.target.value) })}
                     className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary`}
                   >
@@ -1118,6 +1604,7 @@ export default function TopicDetail() {
                       <option key={user.id} value={user.id}>{user.name}</option>
                     ))}
                   </select>
+                  {userDirectoryFeedback}
                 </div>
               )}
               
@@ -1125,6 +1612,7 @@ export default function TopicDetail() {
                 <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>审核意见</label>
                 <textarea
                   value={auditData.comment}
+                  disabled={auditSubmitting || auditNeedsVerification || verifyingAudit}
                   onChange={(e) => setAuditData({ ...auditData, comment: e.target.value })}
                   rows={3}
                   className={`w-full px-4 py-2 ${styles.bgInput} ${styles.borderInput} rounded-lg ${styles.textPrimary} focus:outline-none focus:ring-2 focus:ring-studio-primary resize-none ${styles.textPlaceholder}`}
@@ -1134,41 +1622,50 @@ export default function TopicDetail() {
               
               <div className="flex gap-3 mt-6">
                 <button
-                  onClick={() => setShowAuditModal(false)}
-                  className={`flex-1 px-4 py-2 ${styles.bgTertiary} ${styles.hoverBg} ${styles.textPrimary} rounded-lg transition-colors`}
+                  type="button"
+                  disabled={auditSubmitting || auditNeedsVerification || verifyingAudit}
+                  onClick={closeAuditModal}
+                  className={`flex-1 px-4 py-2 ${styles.bgTertiary} ${styles.hoverBg} ${styles.textPrimary} rounded-lg transition-colors disabled:cursor-wait disabled:opacity-60`}
                 >
-                  取消
+                  {verifyingAudit ? '正在核实…' : auditSubmitting ? '审核处理中…' : '取消'}
                 </button>
                 <button
+                  type="button"
+                  disabled={auditSubmitting || auditNeedsVerification || verifyingAudit}
+                  aria-busy={auditSubmitting || verifyingAudit}
                   onClick={handleAudit}
-                  className={`flex-1 px-4 py-2 rounded-lg transition-colors ${
+                  className={`flex-1 px-4 py-2 rounded-lg transition-colors disabled:cursor-wait disabled:opacity-60 ${
                     auditData.status === 'approved'
                       ? 'border border-studio-success/30 bg-studio-success-soft text-studio-success-contrast hover:bg-studio-success-soft'
                       : 'border border-studio-coral/30 bg-studio-coral-soft text-studio-coral-contrast hover:bg-studio-coral-soft'
                   }`}
                 >
-                  {auditData.status === 'approved' ? '通过审核' : '驳回选题'}
+                  {auditSubmitting ? '正在提交审核…' : auditData.status === 'approved' ? '通过审核' : '驳回选题'}
                 </button>
               </div>
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       <BaseModal
         open={topicLeaveState === 'dirty' || topicLeaveState === 'saving' || topicLeaveState === 'failed'}
-        onClose={continueTopicEditing}
+        onClose={handleContinueTopicEditing}
         title={topicLeaveState === 'failed' ? '保存失败，无法离开' : '存在未保存的修改'}
         description={topicLeaveState === 'failed'
-          ? '保存未完成。您可以重试保存，放弃本次修改后离开，或继续编辑。'
-          : '离开前请选择保存当前选题修改，或明确放弃本次修改。'}
+          ? topicSaveRecoveryMode !== 'none'
+            ? '上次保存结果尚未处理；请留在此页面完成只读核实或明确处理本地草稿。'
+            : '保存未完成。您可以重试保存，放弃本次修改后离开，或继续编辑。'
+          : topicSaveRecoveryMode !== 'none'
+            ? '上次保存结果尚未处理；请先完成只读核实或明确处理本地草稿。'
+            : '离开前请选择保存当前选题修改，或明确放弃本次修改。'}
         size="sm"
         closeOnOverlayClick={topicLeaveState !== 'saving'}
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
             <button
               type="button"
-              onClick={continueTopicEditing}
+              onClick={handleContinueTopicEditing}
               disabled={topicLeaveState === 'saving'}
               className={`rounded-xl px-4 py-2.5 text-sm disabled:opacity-60 ${styles.buttonSecondary}`}
             >
@@ -1177,7 +1674,7 @@ export default function TopicDetail() {
             <button
               type="button"
               onClick={() => { void discardTopicAndLeave(); }}
-              disabled={topicLeaveState === 'saving'}
+              disabled={topicLeaveState === 'saving' || topicSaveRecoveryMode !== 'none'}
               className="xmt-btn xmt-btn-danger rounded-xl disabled:opacity-60"
             >
               放弃离开
@@ -1185,7 +1682,7 @@ export default function TopicDetail() {
             <button
               type="button"
               onClick={() => { void saveTopicAndLeave(); }}
-              disabled={topicLeaveState === 'saving'}
+              disabled={topicLeaveState === 'saving' || topicSaveRecoveryMode !== 'none'}
               className="xmt-btn xmt-btn-primary rounded-xl disabled:opacity-60"
             >
               {topicLeaveState === 'saving' ? '正在保存…' : '保存并离开'}

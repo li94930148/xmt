@@ -17,9 +17,10 @@ const MY_DRAFT_PREVIEW_LIMIT = 12;
 const HOME_ACTIVITY_LIMIT = 12;
 const HOME_ACTIVITY_SOURCE_LIMIT = 12;
 const HOME_TOPIC_STAGE_STATUSES = ['pending', 'production', 'shooting', 'publishing', 'completed'] as const;
+const HOME_TOPIC_QUERY_STATUSES = ['pending', 'approved', 'production', 'shooting', 'publishing', 'completed'] as const;
 
-const overdueSql = `t.status <> 'completed' AND t.deadline IS NOT NULL AND date(t.deadline) < date(?)`;
-const dueSoonSql = `t.status <> 'completed' AND t.deadline IS NOT NULL AND date(t.deadline) >= date(?) AND date(t.deadline) <= date(?, '+2 days')`;
+const overdueSql = `t.status NOT IN ('completed', 'rejected') AND t.deadline IS NOT NULL AND date(t.deadline) < date(?)`;
+const dueSoonSql = `t.status NOT IN ('completed', 'rejected') AND t.deadline IS NOT NULL AND date(t.deadline) >= date(?) AND date(t.deadline) <= date(?, '+2 days')`;
 const stalledSql = `t.status NOT IN ('completed', 'rejected') AND t.stage_entered_at IS NOT NULL AND datetime(t.stage_entered_at) < datetime(?, '-${STALE_STAGE_DAYS} days')`;
 
 function topicScope(user: NonNullable<Express.Request['user']>) {
@@ -79,7 +80,7 @@ router.get('/home-attention', authenticate, async (req, res) => {
     const now = beijingNow();
     const scope = topicScope(req.user!);
     const publishing = publishingScope(req.user!);
-    const where = `t.status <> 'completed'${scope.sql}`;
+    const where = `t.status NOT IN ('completed', 'rejected')${scope.sql}`;
     const canViewSyncAnomalies = canManageCreatorData(req.user!.role)
       && await userHasPermission(req.user!.id, 'creator:data:view');
     const canViewProductionReviews = await userHasPermission(req.user!.id, 'production:update');
@@ -92,12 +93,13 @@ router.get('/home-attention', authenticate, async (req, res) => {
       tasks: [],
     }));
     const [count, activeTopicRows, todayPublishingCount, todayPublishingRows, topics, topicStageRows, myDraftRows, syncAnomalyCount, syncAnomalyRows, productionReviewCount, productionReviewRows, retrospectives] = await Promise.all([
-      queryOne<{ overdue: number; due_soon: number; stalled: number; total: number; active_total: number }>(
+      queryOne<{ overdue: number; due_soon: number; stalled: number; stage_time_unknown: number; total: number; active_total: number }>(
       `SELECT
          COUNT(CASE WHEN t.status NOT IN ('completed', 'rejected') THEN t.id END) AS active_total,
          COUNT(CASE WHEN ${overdueSql} THEN t.id END) AS overdue,
          COUNT(CASE WHEN ${dueSoonSql} THEN t.id END) AS due_soon,
          COUNT(CASE WHEN ${stalledSql} THEN t.id END) AS stalled,
+         COUNT(CASE WHEN t.status NOT IN ('completed', 'rejected') AND datetime(t.stage_entered_at) IS NULL THEN t.id END) AS stage_time_unknown,
          COUNT(DISTINCT CASE WHEN (${overdueSql}) OR (${dueSoonSql}) OR (${stalledSql}) THEN t.id END) AS total
        FROM topics t WHERE ${where}`,
       [today, today, today, now, today, today, today, now, ...scope.params],
@@ -142,20 +144,22 @@ router.get('/home-attention', authenticate, async (req, res) => {
       [today, today, today, now, ...scope.params, today, today, today, now],
       ),
       queryAll<Record<string, unknown>>(
-        `SELECT id, title, status, created_at, stage_entered_at, creator_name, assignee_name, stage_total
+        `SELECT id, title, status, stage_key, created_at, stage_entered_at, creator_name, assignee_name, stage_total
          FROM (
-           SELECT t.id, t.title, t.status, t.created_at, t.stage_entered_at,
+           SELECT t.id, t.title, t.status,
+             CASE WHEN t.status IN ('approved', 'production') THEN 'production' ELSE t.status END AS stage_key,
+             t.created_at, t.stage_entered_at,
              creator.name AS creator_name, assignee.name AS assignee_name,
-             COUNT(*) OVER (PARTITION BY t.status) AS stage_total,
-             ROW_NUMBER() OVER (PARTITION BY t.status ORDER BY datetime(t.created_at) DESC, t.id DESC) AS preview_rank
+             COUNT(*) OVER (PARTITION BY CASE WHEN t.status IN ('approved', 'production') THEN 'production' ELSE t.status END) AS stage_total,
+             ROW_NUMBER() OVER (PARTITION BY CASE WHEN t.status IN ('approved', 'production') THEN 'production' ELSE t.status END ORDER BY datetime(t.created_at) DESC, t.id DESC) AS preview_rank
            FROM topics t
            LEFT JOIN users creator ON creator.id = t.creator_id
            LEFT JOIN users assignee ON assignee.id = t.assignee_id
-           WHERE t.status IN (${HOME_TOPIC_STAGE_STATUSES.map(() => '?').join(',')})${scope.sql}
+           WHERE t.status IN (${HOME_TOPIC_QUERY_STATUSES.map(() => '?').join(',')})${scope.sql}
          )
          WHERE preview_rank <= ${TOPIC_STAGE_PREVIEW_LIMIT}
-         ORDER BY status, preview_rank`,
-        [...HOME_TOPIC_STAGE_STATUSES, ...scope.params],
+         ORDER BY stage_key, preview_rank`,
+        [...HOME_TOPIC_QUERY_STATUSES, ...scope.params],
       ),
       queryAll<Record<string, unknown>>(
         `SELECT p.id, p.topic_id, p.status, p.version, p.updated_at, t.title AS topic_title
@@ -223,14 +227,14 @@ router.get('/home-attention', authenticate, async (req, res) => {
 
     const topicStages = Object.fromEntries(HOME_TOPIC_STAGE_STATUSES.map((status) => [status, { total: 0, topics: [] as Array<Record<string, unknown>> }])) as Record<typeof HOME_TOPIC_STAGE_STATUSES[number], { total: number; topics: Array<Record<string, unknown>> }>;
     for (const row of topicStageRows) {
-      const status = String(row.status) as typeof HOME_TOPIC_STAGE_STATUSES[number];
-      const stage = topicStages[status];
+      const stageKey = String(row.stage_key) as typeof HOME_TOPIC_STAGE_STATUSES[number];
+      const stage = topicStages[stageKey];
       if (!stage) continue;
       stage.total = Number(row.stage_total) || 0;
       stage.topics.push({
         id: Number(row.id),
         title: String(row.title || ''),
-        status,
+        status: String(row.status),
         created_at: String(row.created_at || ''),
         stage_entered_at: row.stage_entered_at === null ? null : String(row.stage_entered_at || ''),
         creator_name: row.creator_name === null ? null : String(row.creator_name || ''),
@@ -247,6 +251,7 @@ router.get('/home-attention', authenticate, async (req, res) => {
         overdue: Number(count?.overdue || 0),
         due_soon: Number(count?.due_soon || 0),
         stalled: Number(count?.stalled || 0),
+        stage_time_unknown: Number(count?.stage_time_unknown || 0),
         total: Number(count?.total || 0),
       },
       today_publishing: {

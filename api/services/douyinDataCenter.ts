@@ -7,6 +7,7 @@ import { canonicalizeDouyinWorks } from './canonicalWorks.js';
 import { buildCreatorTopicSuggestions } from './creatorTopicSuggestions.js';
 import { reconcilePublishingDouyinLinks } from './publishingDouyinLink.js';
 import { apiLogger } from '../observability/logger.js';
+import { dateKeyBjt, parseStoredBjt } from '../../shared/time/index.js';
 
 type JsonRecord = Record<string, unknown>;
 type AgentIdentity = { id: number; user_id: number; platform: string; account_id: string };
@@ -18,11 +19,12 @@ export type DouyinWorksPage = { items: AnalyzedDouyinWork[]; next_cursor: string
 export type OfficialDashboardMode = 'existing_only' | 'shadow_compare' | 'official_preferred';
 export type OfficialReconciliationStatus = 'comparable' | 'matched' | 'different' | 'existing_only' | 'official_only' | 'not_comparable';
 type OfficialMetricAggregate = { works:number; plays:number; likes:number; comments:number; shares:number; collects:number; profile_visits:number; followers_gained:number; collected_at:string | null };
-type OfficialDailyPeriod = 'yesterday' | '7d' | '30d';
+export type OfficialDailyPeriod = 'yesterday' | '7d' | '30d';
 export type OfficialDailyPoint = { metric_date:string; posts:number; views:number; likes:number; comments:number; shares:number; five_second_completion_rate:number|null; two_second_bounce_rate:number|null; cover_click_rate:number|null; watch_time_seconds:number|null };
 export type OfficialDailySummary = Omit<OfficialDailyPoint, 'metric_date'> & { days:number; period:OfficialDailyPeriod; collected_at:string|null };
 
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const nonEmptyString = (value: unknown): string | null => typeof value === 'string' && value.trim() ? value.trim() : null;
 const parse = (value: unknown): JsonRecord => { try { return typeof value === 'string' ? JSON.parse(value) as JsonRecord : value && typeof value === 'object' ? value as JsonRecord : {}; } catch { return {}; } };
 const metricObserved = (work: NormalizedDouyinWork, keys: string[]) => {
   const metrics = parse(work.raw).metrics;
@@ -31,7 +33,50 @@ const metricObserved = (work: NormalizedDouyinWork, keys: string[]) => {
   return keys.some((key) => Object.prototype.hasOwnProperty.call(source, key) && source[key] !== null && source[key] !== undefined && source[key] !== '');
 };
 const shanghaiDate = (value: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+function storedBeijingDateKey(value: unknown) {
+  if (typeof value !== 'string' && typeof value !== 'number' && !(value instanceof Date)) return null;
+  const instant = parseStoredBjt(value);
+  return instant ? dateKeyBjt(instant) : null;
+}
 const days = (period: Period) => ({ '7d': 7, '30d': 30, '90d': 90 })[period];
+export const isOfficialCalendarDate = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && day >= 1 && day <= monthDays[month - 1];
+};
+const strictCollectionTime = (value: unknown): Date | null => {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-](\d{2}):(\d{2}))$/);
+  if (!match || !isOfficialCalendarDate(match[1]) || Number(match[2]) > 23 || Number(match[3]) > 59 || Number(match[4]) > 59) return null;
+  if (match[5] !== 'Z' && (Number(match[6]) > 14 || Number(match[7]) > 59 || (Number(match[6]) === 14 && Number(match[7]) !== 0))) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+};
+export const officialCollectionTimeIsValid = (value: unknown): boolean => strictCollectionTime(value) !== null;
+const shiftCalendarDate = (value: string, offset: number) => {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + offset)).toISOString().slice(0, 10);
+};
+export function expectedOfficialDailyDates(period: OfficialDailyPeriod, collectedAt: unknown): string[] | null {
+  const collectedDate = strictCollectionTime(collectedAt);
+  if (!collectedDate) return null;
+  const beijingToday = shanghaiDate(collectedDate.toISOString());
+  const count = period === 'yesterday' ? 1 : period === '7d' ? 7 : 30;
+  const end = period === 'yesterday' ? shiftCalendarDate(beijingToday, -1) : beijingToday;
+  const start = shiftCalendarDate(end, -(count - 1));
+  return Array.from({ length: count }, (_, index) => shiftCalendarDate(start, index));
+}
+export function officialDailyWindowIsValid(period: OfficialDailyPeriod, dates: readonly unknown[], collectedAt: unknown): boolean {
+  const expected = expectedOfficialDailyDates(period, collectedAt);
+  if (!expected || dates.some(date => !isOfficialCalendarDate(date))) return false;
+  const validDates = dates as readonly string[];
+  const distinctDates = [...new Set(validDates)].sort();
+  return distinctDates.length === validDates.length
+    && distinctDates.length === expected.length
+    && distinctDates.every((date, index) => date === expected[index]);
+}
 const COVER_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
 const MAX_COVER_BYTES = 128 * 1024;
 export function validatedCoverAsset(asset: NormalizedDouyinWork['cover_asset']) {
@@ -113,23 +158,122 @@ export function summarizeOfficialDaily(points: OfficialDailyPoint[], period: Off
   };
 }
 
+const requiredOfficialDailyMetricCodes = ['posts', 'views', 'likes', 'comments', 'shares'] as const;
+
 function pivotOfficialDaily(rows: Record<string, unknown>[]): OfficialDailyPoint[] {
-  const byDate = new Map<string, Record<string, number>>();
+  const byDate = new Map<string, Record<string, unknown>>();
   for (const row of rows) {
     const date = String(row.metric_date || '');
     if (!date) continue;
     const metrics = byDate.get(date) || {};
-    metrics[String(row.metric_code || '')] = number(row.value_number);
+    metrics[String(row.metric_code || '')] = row.value_number;
     byDate.set(date, metrics);
   }
-  return [...byDate].sort(([left], [right]) => left.localeCompare(right)).map(([metric_date, metrics]) => ({
-    metric_date,
-    posts: number(metrics.posts), views: number(metrics.views), likes: number(metrics.likes), comments: number(metrics.comments), shares: number(metrics.shares),
-    five_second_completion_rate: metrics.five_second_completion_rate ?? null,
-    two_second_bounce_rate: metrics.two_second_bounce_rate ?? null,
-    cover_click_rate: metrics.cover_click_rate ?? null,
-    watch_time_seconds: metrics.watch_time_seconds ?? null,
-  }));
+  return [...byDate].sort(([left], [right]) => left.localeCompare(right)).map(([metric_date, metrics]) => {
+    const requiredValue = (code: typeof requiredOfficialDailyMetricCodes[number]) => {
+      const value = metrics[code];
+      if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`官方逐日核心指标 ${code} 未通过完整性校验`);
+      return value;
+    };
+    const optionalValue = (code: string) => {
+      const value = metrics[code];
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    };
+    return {
+      metric_date,
+      posts: requiredValue('posts'), views: requiredValue('views'), likes: requiredValue('likes'), comments: requiredValue('comments'), shares: requiredValue('shares'),
+      five_second_completion_rate: optionalValue('five_second_completion_rate'),
+      two_second_bounce_rate: optionalValue('two_second_bounce_rate'),
+      cover_click_rate: optionalValue('cover_click_rate'),
+      watch_time_seconds: optionalValue('watch_time_seconds'),
+    };
+  });
+}
+
+function officialDailyMetricsAreComplete(rows: Record<string, unknown>[], dates: readonly unknown[]): boolean {
+  const metricsByDate = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const date = typeof row.metric_date === 'string' ? row.metric_date : '';
+    const code = String(row.metric_code || '');
+    if (!(requiredOfficialDailyMetricCodes as readonly string[]).includes(code)) continue;
+    if (typeof row.value_number !== 'number' || !Number.isFinite(row.value_number)) return false;
+    const metrics = metricsByDate.get(date) || new Set<string>();
+    if (metrics.has(code)) return false;
+    metrics.add(code);
+    metricsByDate.set(date, metrics);
+  }
+  return dates.every(date => {
+    if (typeof date !== 'string') return false;
+    const metrics = metricsByDate.get(date);
+    return Boolean(metrics && requiredOfficialDailyMetricCodes.every(code => metrics.has(code)));
+  });
+}
+
+function expectedBeijingTrendDates(period: Period, now = new Date()): string[] {
+  const beijingToday = shanghaiDate(now.toISOString());
+  return Array.from({ length: days(period) }, (_, index) => shiftCalendarDate(beijingToday, index - (days(period) - 1)));
+}
+
+function validateOfficialTrend90(rows: Record<string, unknown>[], now = new Date()): { valid: true; points: OfficialDailyPoint[] } | { valid: false } {
+  const dates = expectedBeijingTrendDates('90d', now);
+  const dateSet = new Set(dates);
+  const startDate = dates[0];
+  const endDate = dates[dates.length - 1];
+  const metricsByDate = new Map<string, Record<string, number>>();
+  let invalidWindowDate = false;
+  let invalidRequiredMetric = false;
+
+  for (const row of rows) {
+    const metricDate = typeof row.metric_date === 'string' ? row.metric_date : '';
+    const datePrefix = metricDate.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+    if (datePrefix && datePrefix >= startDate && datePrefix <= endDate
+      && (metricDate !== datePrefix || !isOfficialCalendarDate(metricDate))) {
+      invalidWindowDate = true;
+      continue;
+    }
+    if (!isOfficialCalendarDate(metricDate) || !dateSet.has(metricDate)) continue;
+
+    const metricCode = String(row.metric_code || '');
+    if (!(requiredOfficialDailyMetricCodes as readonly string[]).includes(metricCode)) continue;
+    const value = row.value_number;
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      invalidRequiredMetric = true;
+      continue;
+    }
+
+    const dailyMetrics = metricsByDate.get(metricDate) || {};
+    if (Object.prototype.hasOwnProperty.call(dailyMetrics, metricCode)) {
+      invalidRequiredMetric = true;
+      continue;
+    }
+    dailyMetrics[metricCode] = value;
+    metricsByDate.set(metricDate, dailyMetrics);
+  }
+
+  const completeWindow = dates.every(date => {
+    const dailyMetrics = metricsByDate.get(date);
+    return dailyMetrics && requiredOfficialDailyMetricCodes.every(code => Object.prototype.hasOwnProperty.call(dailyMetrics, code));
+  });
+  if (invalidWindowDate || invalidRequiredMetric || !completeWindow) return { valid: false };
+
+  return {
+    valid: true,
+    points: dates.map(metric_date => {
+      const metrics = metricsByDate.get(metric_date)!;
+      return {
+        metric_date,
+        posts: metrics.posts,
+        views: metrics.views,
+        likes: metrics.likes,
+        comments: metrics.comments,
+        shares: metrics.shares,
+        five_second_completion_rate: null,
+        two_second_bounce_rate: null,
+        cover_click_rate: null,
+        watch_time_seconds: null,
+      };
+    }),
+  };
 }
 
 async function officialDailyForPeriod(creatorAccountId: number, period: OfficialDailyPeriod) {
@@ -138,8 +282,12 @@ async function officialDailyForPeriod(creatorAccountId: number, period: Official
   if (!latest?.source_file_sha256) return null;
   const rows = await queryAll<Record<string, unknown>>(`SELECT metric_date,metric_code,value_number FROM creator_official_daily_metrics
     WHERE account_id=? AND source_period=? AND source_file_sha256=? ORDER BY metric_date ASC,id ASC`, [creatorAccountId,period,latest.source_file_sha256]);
+  const dates = [...new Set(rows.map(row => row.metric_date))];
+  const validWindow = officialDailyWindowIsValid(period, dates, latest.collected_at);
+  const validMetrics = validWindow && officialDailyMetricsAreComplete(rows, dates);
+  if (!validMetrics) return { points: [] as OfficialDailyPoint[], summary: null, source_file_sha256: latest.source_file_sha256, valid: false };
   const points = pivotOfficialDaily(rows);
-  return { points, summary: summarizeOfficialDaily(points, period, latest.collected_at), source_file_sha256: latest.source_file_sha256 };
+  return { points, summary: summarizeOfficialDaily(points, period, latest.collected_at), source_file_sha256: latest.source_file_sha256, valid: true };
 }
 
 const encodeCursor = (cursor: WorksCursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
@@ -254,7 +402,7 @@ export async function persistNormalizedDouyinSync(agent: AgentIdentity, payload:
     return { account_id: account.id, creator_account_id: creatorAccount.id, works: normalized.works.length, api_count: normalized.api_count, rejected_count: normalized.rejected_count };
   });
   try {
-    await reconcilePublishingDouyinLinks({ accountId: result.account_id });
+    await reconcilePublishingDouyinLinks({ accountId: result.account_id, scope: 'editable', editableBy: agent.user_id });
   } catch (error) {
     apiLogger.error({
       module: 'publishing',
@@ -344,7 +492,7 @@ async function persistValidatedDouyinContract(agent: AgentIdentity, normalized: 
     return { account_id: account.id, creator_account_id: creatorAccount.id, works: normalized.works.length, duplicate: false, snapshot_id: normalized.snapshot_id, summary: normalized.summary };
   });
   try {
-    await reconcilePublishingDouyinLinks({ accountId: result.account_id });
+    await reconcilePublishingDouyinLinks({ accountId: result.account_id, scope: 'editable', editableBy: agent.user_id });
   } catch (error) {
     apiLogger.error({
       module: 'publishing',
@@ -425,7 +573,14 @@ export async function getDouyinDashboard(creatorAccountId: number) {
   const displayGrowth = (value: ReturnType<typeof growthFor>, daily: OfficialDailySummary | null | undefined) => useOfficial
     ? { fans: value?.fans ?? null, plays: daily?.views ?? null, interactions: daily ? daily.likes + daily.comments + daily.shares : null }
     : value;
-  const growth7d = displayGrowth(growthFor(7), official7d?.summary);
+  const growth7dValues = displayGrowth(growthFor(7), official7d?.summary);
+  const growth7d = growth7dValues ? {
+    ...growth7dValues,
+    collected_at: useOfficial ? nonEmptyString(official7d?.summary?.collected_at) : null,
+    observed_through_date: useOfficial
+      ? nonEmptyString(official7d?.points.at(-1)?.metric_date)
+      : nonEmptyString(latest.snapshot_date),
+  } : null;
   const growth30d = displayGrowth(growthFor(30), official30d?.summary);
   const missingFields = [
     ...(fansAvailable ? [] : ['fans_count']),
@@ -437,6 +592,7 @@ export async function getDouyinDashboard(creatorAccountId: number) {
     account,
     metrics: {
       fans_count: fansAvailable ? number(accountFansAvailable ? account.fans_count : latestFanSnapshot?.fans_count) : null,
+      fans_observed_on: nonEmptyString(latestFanSnapshot?.snapshot_date),
       works_count: useOfficial ? official.works : canonical.length,
       play_count: displayPlays,
       interaction_count: displayInteractions,
@@ -569,9 +725,30 @@ export async function getDouyinTrends(creatorAccountId: number, period: Period) 
   const account = await accountForScope(creatorAccountId);
   if (!account) return { period, snapshots: [] };
   const exact = period === '7d' || period === '30d' ? await officialDailyForPeriod(creatorAccountId, period) : null;
+  if (exact?.valid === false) return {
+    period,
+    snapshots: [],
+    source: 'creator_official_daily_metrics',
+    metric_semantics: 'daily_flow',
+    data_status: 'partial',
+    snapshot_start_date: null,
+    missing_fields: ['period_daily_metrics'],
+    note: '官方逐日数据窗口不完整或核心指标缺失、无效；本周期不提供汇总。',
+  };
   const historyRows = period === '90d' ? await queryAll<Record<string, unknown>>(`SELECT metric_date,metric_code,value_number FROM creator_official_daily_metrics
     WHERE account_id=? AND source_period='30d' ORDER BY metric_date ASC,id ASC`, [creatorAccountId]) : [];
-  const officialPoints = exact?.points || pivotOfficialDaily(historyRows).slice(-90);
+  const history90 = period === '90d' && historyRows.length > 0 ? validateOfficialTrend90(historyRows) : null;
+  if (history90?.valid === false) return {
+    period,
+    snapshots: [],
+    source: 'creator_official_daily_metrics',
+    metric_semantics: 'daily_flow',
+    data_status: 'partial',
+    snapshot_start_date: null,
+    missing_fields: ['period_daily_metrics'],
+    note: '近 90 天官方逐日数据未覆盖北京时间完整连续日期，或缺少有效的播放、投稿、点赞、评论、分享指标；本周期不提供汇总。',
+  };
+  const officialPoints = period === '90d' ? history90?.points || [] : exact?.points || [];
   if (officialPoints.length) {
     const fanRows = await queryAll<Record<string, unknown>>('SELECT snapshot_date,fans_count,fans_count_available FROM douyin_daily_snapshots WHERE account_id=? ORDER BY snapshot_date ASC', [account.id]);
     const fans = new Map(fanRows.filter(row => number(row.fans_count_available) === 1).map(row => [String(row.snapshot_date), number(row.fans_count)]));
@@ -593,11 +770,15 @@ export async function getDouyinTrends(creatorAccountId: number, period: Period) 
       data_status: officialPoints.length < days(period) ? 'partial' : 'ready',
       snapshot_start_date: officialPoints[0]?.metric_date ?? null,
       missing_fields: officialPoints.some(point => !fans.has(point.metric_date)) ? ['fans_count'] : [],
-      note: '播放、互动和投稿是官方导出的逐日流量，周期卡片按日求和；粉丝仍使用存在真实值的账号快照。',
+      note: period === '90d'
+        ? '近 90 天按北京时间自然日计算并包含今天；逐日事实来自历次近 30 天官方导出按日期去重。本次校验不代表每个历史批次完整。'
+        : '播放、互动和投稿是官方导出的逐日流量，周期卡片按日求和；粉丝仍使用存在真实值的账号快照。',
     };
   }
-  const since = new Date(Date.now() - days(period) * 86400000).toISOString().slice(0, 10);
-  const snapshots = await queryAll<Record<string, unknown>>('SELECT * FROM douyin_daily_snapshots WHERE account_id=? AND snapshot_date>=? ORDER BY snapshot_date ASC', [account.id, since]);
+  const fallbackDates = expectedBeijingTrendDates(period);
+  const fallbackDateSet = new Set(fallbackDates);
+  const snapshots = (await queryAll<Record<string, unknown>>('SELECT * FROM douyin_daily_snapshots WHERE account_id=? AND snapshot_date>=? AND snapshot_date<=? ORDER BY snapshot_date ASC', [account.id, fallbackDates[0], fallbackDates[fallbackDates.length - 1]]))
+    .filter(snapshot => fallbackDateSet.has(String(snapshot.snapshot_date || '')));
   return {
     period,
     snapshots: snapshots.map(snapshot => {
@@ -619,7 +800,7 @@ export async function getDouyinSyncLogs(creatorAccountId: number) {
   return account ? queryAll<Record<string, unknown>>('SELECT * FROM douyin_sync_logs WHERE account_id=? ORDER BY sync_time DESC,id DESC LIMIT 100', [account.id]) : [];
 }
 
-export async function getDouyinReportData(creatorAccountId: number, type: ReportPeriod) {
+export async function getDouyinReportData(creatorAccountId: number, type: ReportPeriod, asOf: Date = new Date()) {
   const account = await accountForScope(creatorAccountId);
   if (!account) return null;
   const [works, snapshots] = await Promise.all([
@@ -636,12 +817,24 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
   const latest = snapshots.at(-1) || null;
   const validFanSnapshots = snapshots.filter(row => number(row.fans_count_available) === 1);
   const latestFanSnapshot = validFanSnapshots.at(-1) || null;
-  const officialEndDate = officialDaily?.points.at(-1)?.metric_date;
-  const anchor = officialEndDate ? new Date(officialEndDate).getTime() : latest?.snapshot_date ? new Date(String(latest.snapshot_date)).getTime() : Date.now();
-  const boundary = anchor - periodDays * 86400000;
+  const officialEndDate = officialDaily?.valid ? officialDaily.points.at(-1)?.metric_date : undefined;
+  const fallbackEndDate = shanghaiDate(asOf.toISOString());
+  const fallbackReportDates = Array.from({ length: periodDays }, (_, index) =>
+    shiftCalendarDate(fallbackEndDate, index - (periodDays - 1)),
+  );
+  const officialReportDates = officialDaily?.valid ? officialDaily.points.map(point => point.metric_date) : [];
+  const reportDates = officialReportDates.length ? officialReportDates : fallbackReportDates;
+  const periodStartDate = reportDates[0] ?? shiftCalendarDate(shanghaiDate(asOf.toISOString()), -(periodDays - 1));
+  const anchorDate = reportDates.at(-1) ?? shanghaiDate(asOf.toISOString());
+  const baselineDate = shiftCalendarDate(periodStartDate, -1);
+  const boundary = Date.parse(`${baselineDate}T00:00:00.000Z`);
   const startCandidate = snapshots.filter((row) => new Date(String(row.snapshot_date)).getTime() <= boundary).at(-1) || null;
   const start = startCandidate && boundary - new Date(String(startCandidate.snapshot_date)).getTime() <= 2 * 86400000 ? startCandidate : null;
-  const periodWorks = analyzed.works.filter((work) => new Date(String(work.publish_time || 0)).getTime() >= boundary);
+  const publishDateByWorkId = new Map(works.map(work => [number(work.id), storedBeijingDateKey(work.publish_time)]));
+  const periodWorks = analyzed.works.filter((work) => {
+    const publishDate = publishDateByWorkId.get(number(work.id));
+    return publishDate !== null && publishDate !== undefined && publishDate >= periodStartDate && publishDate <= anchorDate;
+  });
   const collectedCurrent = analyzed.works.reduce((result, work) => ({
     plays: result.plays + number(work.play_count),
     likes: result.likes + number(work.like_count),
@@ -679,6 +872,8 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
     },
     work_performance: {
       published: periodWorks.length,
+      published_period_start: periodStartDate,
+      published_period_end: anchorDate,
       total: useOfficial ? official.works : analyzed.works.length,
       level_distribution: analyzed.works.reduce<Record<string, number>>((result, work) => {
         result[work.performance.level] = (result[work.performance.level] || 0) + 1;
@@ -698,8 +893,8 @@ export async function getDouyinReportData(creatorAccountId: number, type: Report
     data_coverage: {
       source: useOfficial ? 'douyin_official_export' : 'douyin_operations_unified',
       snapshot_count: snapshots.length,
-      period_start: officialDaily?.points[0]?.metric_date ?? start?.snapshot_date ?? null,
-      period_end: officialEndDate ?? latest?.snapshot_date ?? null,
+      period_start: officialDaily?.valid === false ? null : officialDaily?.points[0]?.metric_date ?? start?.snapshot_date ?? null,
+      period_end: officialDaily?.valid === false ? null : officialEndDate ?? latest?.snapshot_date ?? null,
       fans_available: fansAvailable,
       missing_fields: [...(fansAvailable ? [] : ['fans_count', 'fan_growth']), ...(useOfficial && !officialDaily?.summary ? ['period_play_growth', 'period_interaction_growth'] : [])],
       metric_definition: useOfficial ? `作品累计指标以内容管理官方导出为准；${officialPeriod} 周期播放和互动来自对应官方逐日文件，计数求和，比例与时长按播放量加权。` : '累计播放为去重后每个入库作品当前播放量之和；周期增长仅在期初期末快照日期可比时计算。',

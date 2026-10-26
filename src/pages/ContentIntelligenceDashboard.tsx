@@ -68,7 +68,7 @@ export default function ContentIntelligenceDashboard() {
             />
             <button
               onClick={() => loadData(docId)}
-              className="inline-flex items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-studio-primary-button disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors xmt-btn-primary disabled:opacity-60"
             >
               <RefreshCw className="h-4 w-4" />
               分析
@@ -151,7 +151,15 @@ export default function ContentIntelligenceDashboard() {
           <h2 className={`text-base font-semibold ${styles.textPrimary}`}>用户影响力与结构分析</h2>
         </div>
         <div className="overflow-x-auto p-5">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[720px] table-fixed text-sm">
+            <colgroup>
+              <col className="w-[18%]" />
+              <col className="w-[13%]" />
+              <col className="w-[13%]" />
+              <col className="w-[13%]" />
+              <col className="w-[13%]" />
+              <col className="w-[30%]" />
+            </colgroup>
             <thead>
               <tr className={`border-b ${styles.border} ${styles.textMuted}`}>
                 <th className="py-3 text-left font-medium">用户</th>
@@ -165,12 +173,12 @@ export default function ContentIntelligenceDashboard() {
             <tbody>
               {impact.map((user) => (
                 <tr key={user.userId} className={`border-b ${styles.border}`}>
-                  <td className={`py-3 ${styles.textPrimary}`}>{user.userId}</td>
-                  <td className={`py-3 ${styles.textSecondary}`}>{user.impactScore}</td>
-                  <td className={`py-3 ${styles.textSecondary}`}>{user.structuralEdits}</td>
-                  <td className={`py-3 ${styles.textSecondary}`}>{user.expressionEdits}</td>
-                  <td className={`py-3 ${styles.textSecondary}`}>{user.polishEdits}</td>
-                  <td className={`py-3 ${styles.textSecondary}`}>{user.summary}</td>
+                  <td className={`break-words py-3 ${styles.textPrimary}`}>{user.userId}</td>
+                  <td className={`break-words py-3 ${styles.textSecondary}`}>{user.impactScore}</td>
+                  <td className={`break-words py-3 ${styles.textSecondary}`}>{user.structuralEdits}</td>
+                  <td className={`break-words py-3 ${styles.textSecondary}`}>{user.expressionEdits}</td>
+                  <td className={`break-words py-3 ${styles.textSecondary}`}>{user.polishEdits}</td>
+                  <td className={`break-words py-3 ${styles.textSecondary}`}>{user.summary}</td>
                 </tr>
               ))}
               {impact.length === 0 && (

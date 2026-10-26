@@ -56,17 +56,31 @@ const createdResourceBase = {
   versions: [],
   audit_summary: null,
 };
+const searchResult = {
+  resource_id: 76,
+  title: '资料搜索对比度验收',
+  summary: '只用于隔离浏览器主题测试',
+  snippet: '只用于隔离<mark>浏览器</mark>主题测试',
+  library_type: 'knowledge',
+  category: { id: 81, library_type: 'knowledge', parent_id: null, name: '浅色主题分类', code: 'light-theme', path: null, sort_order: 1, enabled: 1, resource_count: 1 },
+};
 let createdResource = { ...createdResourceBase };
 const existingResourceIds = new Set([listResource.id, detailResource.id, raceFirstResource.id, raceSecondResource.id]);
 let failNextDeleteId: number | null = null;
 let failNextResourceListRead = false;
+let failNextCategoryRead = false;
 let failNextCreatedResourceDetailRead = false;
 let delayedDeleteId: number | null = null;
 let resourceListReads = 0;
+let categoryReads = 0;
 let resourceDeleteRequests = 0;
 let successfulResourceDeletes = 0;
 let resourceCreateRequests = 0;
 let createdResourceDetailReads = 0;
+let resourceDetailReads = 0;
+let resourceAuditReads = 0;
+const resourceSearchQueries: string[] = [];
+let failNextAuditRead = false;
 let delayNextRaceDetailRead = false;
 let resolveRaceDetailReadStarted: (() => void) | null = null;
 let resolveRaceDetailReadFinished: (() => void) | null = null;
@@ -76,14 +90,18 @@ const app = express();
 app.use(express.json());
 app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
+  if (req.query.fail_audit === 'true') failNextAuditRead = true;
+  if (req.query.fail_categories === 'true') failNextCategoryRead = true;
   const route = req.query.view === 'knowledge' ? '/asset-center/knowledge'
+    : req.query.view === 'search' ? '/asset-center/search'
     : req.query.view === 'detail' ? `/asset-center/resources/${detailResource.id}`
-      : req.query.view === 'race' ? `/asset-center/resources/${raceFirstResource.id}`
+      : req.query.view === 'race' ? `/asset-center/resources/${raceFirstResource.id}?library_type=project`
       : '/asset-center/resources?library_type=project';
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','resource-hover-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace(${JSON.stringify(route)});</script>`);
 });
+app.get('/__qa/search-queries', (_req, res) => res.json(resourceSearchQueries));
 app.get('/api/auth/me', (_req, res) => res.json(user));
-app.get('/api/permissions/my', (_req, res) => res.json(['resource:update', 'resource:delete']));
+app.get('/api/permissions/my', (_req, res) => res.json(['resource:update', 'resource:delete', 'resource:audit']));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
 app.get('/api/resource-center/resources', (_req, res) => {
@@ -97,7 +115,13 @@ app.get('/api/resource-center/resources', (_req, res) => {
     pagination: { page: 1, page_size: 20, total: existingResourceIds.has(listResource.id) ? 1 : 0, total_pages: 1 },
   });
 });
+app.get('/api/resource-center/search', (req, res) => {
+  resourceSearchQueries.push(req.originalUrl);
+  if (req.query.keyword === '没有匹配') return res.json({ data: [], total: 0 });
+  return res.json({ data: [searchResult], total: 1 });
+});
 app.get('/api/resource-center/resources/:id', (req, res) => {
+  resourceDetailReads += 1;
   if (Number(req.params.id) === createdResource.id) {
     createdResourceDetailReads += 1;
     if (failNextCreatedResourceDetailRead) {
@@ -119,6 +143,14 @@ app.get('/api/resource-center/resources/:id', (req, res) => {
   }
   return res.json(resource);
 });
+app.get('/api/resource-center/resources/:id/audit', (_req, res) => {
+  resourceAuditReads += 1;
+  if (failNextAuditRead) {
+    failNextAuditRead = false;
+    return res.status(503).json({ message: '模拟资料审计记录读取失败' });
+  }
+  return res.json({ data: [] });
+});
 app.post('/api/resource-center/resources', (req, res) => {
   resourceCreateRequests += 1;
   createdResource = { ...createdResourceBase, title: String(req.body?.title || createdResourceBase.title) };
@@ -138,7 +170,17 @@ app.delete('/api/resource-center/resources/:id', async (req, res) => {
   successfulResourceDeletes += 1;
   return res.json({ message: '资料已删除' });
 });
-app.get('/api/resource-center/categories', (req, res) => res.json({ data: req.query.library_type === 'knowledge' ? [{ id: 81, library_type: 'knowledge', parent_id: null, name: '浅色主题分类', code: 'light-theme', path: null, sort_order: 1, enabled: 1, resource_count: 1 }] : [] }));
+app.get('/api/resource-center/categories', (req, res) => {
+  categoryReads += 1;
+  if (failNextCategoryRead) {
+    failNextCategoryRead = false;
+    return res.status(503).json({ message: '模拟分类列表读取失败' });
+  }
+  return res.json({ data: req.query.library_type === 'knowledge' ? [
+    { id: 81, library_type: 'knowledge', parent_id: null, name: '浅色主题分类', code: 'light-theme', path: null, sort_order: 1, enabled: 1, resource_count: 1 },
+    { id: 82, library_type: 'knowledge', parent_id: 81, name: '子分类', code: 'child-category', path: null, sort_order: 1, enabled: 1, resource_count: 1 },
+  ] : [] });
+});
 app.use('/api', (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 20 }));
 
 const server = http.createServer(app);
@@ -234,6 +276,18 @@ try {
   for (const theme of ['light', 'dark'] as const) {
     await page.goto(`${base}/__qa?theme=${theme}`);
     await page.getByRole('heading', { name: '项目资料库' }).waitFor();
+    const previousPage = page.getByRole('button', { name: '上一页', exact: true });
+    const nextPage = page.getByRole('button', { name: '下一页', exact: true });
+    assert.equal(await previousPage.count(), 1, `${theme} resource pagination exposes a named previous-page control`);
+    assert.equal(await nextPage.count(), 1, `${theme} resource pagination exposes a named next-page control`);
+    assert.equal(await previousPage.isDisabled(), true, `${theme} previous-page control is disabled on the first page`);
+    assert.equal(await nextPage.isDisabled(), true, `${theme} next-page control is disabled on the only page`);
+    const projectBreadcrumb = page.getByRole('navigation', { name: '面包屑' }).getByText('项目资料库', { exact: true });
+    assert.equal(await projectBreadcrumb.count(), 1, `${theme} project-library route uses the project breadcrumb`);
+    const projectNavActiveCount = await page.locator('aside button').filter({ hasText: '项目资料库' }).evaluateAll((elements) => elements.filter((element) => element.className.includes('bg-studio-primary/14')).length);
+    const archiveNavActiveCount = await page.locator('aside button').filter({ hasText: '内容档案库' }).evaluateAll((elements) => elements.filter((element) => element.className.includes('bg-studio-primary/14')).length);
+    assert.ok(projectNavActiveCount > 0, `${theme} project-library route highlights its own sidebar item`);
+    assert.equal(archiveNavActiveCount, 0, `${theme} project-library route does not highlight content archives`);
     const title = page.getByRole('link', { name: '悬停对比度验收资料', exact: true });
     await title.hover();
     const result = await title.evaluate((element) => {
@@ -250,6 +304,15 @@ try {
     assert.ok(ratio >= 4.5, `${theme} resource table title hover contrast is ${ratio.toFixed(2)}:1 on ${result.rowBackground}; expected at least 4.5:1`);
 
     const deleteAction = page.getByRole('button', { name: '删除资料 悬停对比度验收资料', exact: true });
+    const resourceActions = [
+      page.getByRole('link', { name: '查看资料 悬停对比度验收资料', exact: true }),
+      page.getByRole('link', { name: '编辑资料 悬停对比度验收资料', exact: true }),
+      deleteAction,
+    ];
+    const paginationActions = [
+      page.getByRole('button', { name: '上一页', exact: true }),
+      page.getByRole('button', { name: '下一页', exact: true }),
+    ];
     const deleteBackgroundBefore = await deleteAction.evaluate((element) => getComputedStyle(element).backgroundColor);
     await deleteAction.hover();
     const deleteBackgroundAfter = await deleteAction.evaluate((element) => getComputedStyle(element).backgroundColor);
@@ -257,8 +320,14 @@ try {
     assert.ok(await renderedAlpha(deleteAction) > 0, `${theme} resource delete hover uses a visible background`);
     assert.ok(await renderedContrast(deleteAction.locator('svg')) >= 3, `${theme} hovered resource delete icon maintains at least 3:1 contrast`);
 
-    for (const width of [320, 390]) {
+    for (const width of [320, 390, 1440]) {
       await page.setViewportSize({ width, height: 844 });
+      for (const action of [...resourceActions, ...paginationActions]) {
+        const bounds = await action.boundingBox();
+        assert(bounds, `${theme} resource operation remains visible at ${width}px`);
+        assert.ok(bounds.width >= 40 && bounds.height >= 40,
+          `${theme} ${await action.getAttribute('aria-label')} meets the 40×40px touch target at ${width}px: ${JSON.stringify(bounds)}`);
+      }
       const geometry = await deleteAction.evaluate((element) => {
         const action = element.getBoundingClientRect();
         const scrollport = element.closest('div.overflow-x-auto');
@@ -279,9 +348,176 @@ try {
     }
     await page.setViewportSize({ width: 1440, height: 900 });
 
+    for (const [libraryType, pageTitle, navigationLabel] of [
+      ['content_archive', '内容档案库', '内容档案库'],
+      ['media', '素材归档库', '素材归档'],
+    ] as const) {
+      await page.goto(`${base}/asset-center/resources?library_type=${libraryType}`);
+      await page.getByRole('heading', { name: pageTitle, exact: true }).waitFor();
+      assert.equal(await page.getByRole('navigation', { name: '面包屑' }).getByText(navigationLabel, { exact: true }).count(), 1, `${theme} ${libraryType} route uses its own breadcrumb`);
+      const activeCount = await page.locator('aside button').filter({ hasText: navigationLabel }).evaluateAll((elements) => elements.filter((element) => element.className.includes('bg-studio-primary/14')).length);
+      assert.ok(activeCount > 0, `${theme} ${libraryType} route highlights its own sidebar item`);
+    }
+
+    await page.goto(`${base}/__qa?theme=${theme}&view=search`);
+    await page.getByRole('heading', { name: '资料搜索', exact: true }).waitFor();
+    const searchInput = page.getByRole('textbox', { name: '搜索资料关键词', exact: true });
+    await page.getByLabel('资料库').selectOption('knowledge');
+    await page.getByRole('option', { name: '浅色主题分类', exact: true }).waitFor();
+    await page.getByLabel('分类').selectOption('81');
+    await page.getByLabel('标签').fill('内容 规划');
+    await page.getByLabel('排序').selectOption('title_asc');
+    await searchInput.fill('验收');
+    const searchButton = page.getByRole('button', { name: '搜索', exact: true });
+    const searchCard = page.getByRole('link', { name: /资料搜索对比度验收/ });
+    for (const viewport of [
+      { width: 320, height: 844 },
+      { width: 390, height: 844 },
+      { width: 1440, height: 900 },
+    ]) {
+      await page.setViewportSize(viewport);
+      assert.equal(await searchButton.isVisible(), true, `${theme} ${viewport.width}px search action remains visible`);
+      assert.equal(await searchButton.isEnabled(), true, `${theme} ${viewport.width}px search action remains enabled`);
+      const actionGeometry = await searchButton.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          type: element.getAttribute('type'),
+          height: rect.height,
+          x: rect.x,
+          y: rect.y,
+          right: rect.right,
+          bottom: rect.bottom,
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+          pageWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+          unifiedButton: element.classList.contains('xmt-btn') && element.getAttribute('data-reactbits-button') === 'primary',
+          display: style.display,
+          visibility: style.visibility,
+          opacity: Number(style.opacity),
+        };
+      });
+      assert.equal(actionGeometry.type, 'submit', `${theme} ${viewport.width}px search action remains a form submit button`);
+      assert.ok(actionGeometry.unifiedButton, `${theme} ${viewport.width}px search action uses the shared primary button style`);
+      assert.ok(actionGeometry.height >= 40,
+        `${theme} ${viewport.width}px search action is at least 40px tall: ${JSON.stringify(actionGeometry)}`);
+      assert.ok(actionGeometry.x >= 0 && actionGeometry.y >= 0
+        && actionGeometry.right <= actionGeometry.viewportWidth
+        && actionGeometry.bottom <= actionGeometry.viewportHeight
+        && actionGeometry.display !== 'none'
+        && actionGeometry.visibility !== 'hidden'
+        && actionGeometry.opacity > 0,
+      `${theme} ${viewport.width}px search action is fully within the viewport: ${JSON.stringify(actionGeometry)}`);
+      assert.ok(actionGeometry.pageWidth <= actionGeometry.clientWidth + 1,
+        `${theme} ${viewport.width}px search form does not overflow horizontally: ${JSON.stringify(actionGeometry)}`);
+      await searchInput.focus();
+      await page.keyboard.press('Tab');
+      const focusState = await searchButton.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          active: document.activeElement === element,
+          outlineStyle: style.outlineStyle,
+          outlineWidth: Number.parseFloat(style.outlineWidth),
+          outlineColor: style.outlineColor,
+        };
+      });
+      assert.ok(focusState.active, `${theme} ${viewport.width}px search action is reachable from the keyboard after the keyword field`);
+      assert.ok(focusState.outlineStyle !== 'none' && focusState.outlineWidth >= 2 && (colorChannels(focusState.outlineColor)?.alpha ?? 1) > 0,
+        `${theme} ${viewport.width}px keyboard focus has a visible indicator: ${JSON.stringify(focusState)}`,
+      );
+      const queryCountBeforeSubmit = (await page.evaluate(async () => await (await fetch('/__qa/search-queries')).json() as string[])).length;
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(async (previousCount) => {
+        const queries = await (await fetch('/__qa/search-queries')).json() as string[];
+        return queries.length > previousCount;
+      }, queryCountBeforeSubmit);
+      await searchCard.waitFor();
+      const resultLayout = await page.evaluate(() => ({
+        pageWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      assert.ok(resultLayout.pageWidth <= resultLayout.clientWidth + 1,
+        `${theme} ${viewport.width}px search results do not overflow horizontally: ${JSON.stringify(resultLayout)}`);
+      const queryHistory = await page.evaluate(async () => await (await fetch('/__qa/search-queries')).json() as string[]);
+      const submittedQuery = new URL(queryHistory.at(-1)!, base);
+      assert.equal(submittedQuery.searchParams.get('keyword'), '验收', `${theme} ${viewport.width}px keyboard submit sends the original search keyword`);
+      assert.equal(submittedQuery.searchParams.get('library_type'), 'knowledge', `${theme} ${viewport.width}px search applies its library filter`);
+      assert.equal(submittedQuery.searchParams.get('category_id'), '81', `${theme} ${viewport.width}px search applies its category filter`);
+      assert.equal(submittedQuery.searchParams.get('tag'), '内容 规划', `${theme} ${viewport.width}px search applies its tag filter`);
+      assert.equal(submittedQuery.searchParams.get('sort'), 'title_asc', `${theme} ${viewport.width}px search applies its selected order`);
+    }
+    await searchCard.waitFor();
+    const queryHistory = await page.evaluate(async () => await (await fetch('/__qa/search-queries')).json() as string[]);
+    const submittedQuery = new URL(queryHistory.at(-1)!, base);
+    assert.equal(submittedQuery.searchParams.get('keyword'), '验收', `${theme} keyboard submit sends the original search keyword`);
+    assert.equal(submittedQuery.searchParams.get('library_type'), 'knowledge', `${theme} search applies its library filter`);
+    assert.equal(submittedQuery.searchParams.get('category_id'), '81', `${theme} search applies its category filter`);
+    assert.equal(submittedQuery.searchParams.get('tag'), '内容 规划', `${theme} search applies the tag filter`);
+    assert.equal(submittedQuery.searchParams.get('sort'), 'title_asc', `${theme} search applies its selected order`);
+    const searchHighlight = searchCard.locator('mark');
+    assert.equal(await searchHighlight.count(), 1, `${theme} resource search displays the backend FTS hit as a semantic mark`);
+    assert.equal(await searchHighlight.innerText(), '浏览器', `${theme} resource search preserves the matched term`);
+    const searchHighlightContrast = await renderedContrast(searchHighlight);
+    assert.ok(searchHighlightContrast >= 4.5,
+      `${theme} resource search highlight contrast is ${searchHighlightContrast.toFixed(2)}:1; expected at least 4.5:1`);
+    const searchCategory = searchCard.locator('span.text-xs').first();
+    const searchCategoryContrast = await renderedContrast(searchCategory);
+    assert.ok(searchCategoryContrast >= 4.5,
+      `${theme} resource search category contrast is ${searchCategoryContrast.toFixed(2)}:1; expected at least 4.5:1`);
+    await searchInput.fill('没有匹配');
+    await page.getByRole('button', { name: '搜索', exact: true }).click();
+    await page.getByText('试试缩短关键词，或调整资料库、分类和标签条件。', { exact: true }).waitFor();
+    await page.getByRole('button', { name: '清除筛选条件并重新搜索', exact: true }).click();
+    assert.equal(await page.getByLabel('资料库').inputValue(), '', `${theme} empty-state recovery clears the library filter`);
+    assert.equal(await page.getByLabel('分类').inputValue(), '', `${theme} empty-state recovery clears the category filter`);
+    assert.equal(await page.getByLabel('标签').inputValue(), '', `${theme} empty-state recovery clears the tag filter`);
+    assert.equal(await page.getByLabel('排序').inputValue(), 'relevance', `${theme} empty-state recovery restores relevance sorting`);
+    const queriesAfterReset = await page.evaluate(async () => await (await fetch('/__qa/search-queries')).json() as string[]);
+    const resetQuery = new URL(queriesAfterReset.at(-1)!, base);
+    assert.equal(resetQuery.searchParams.get('keyword'), '没有匹配', `${theme} empty-state recovery preserves the keyword`);
+    assert.equal(resetQuery.searchParams.get('library_type'), null, `${theme} empty-state recovery removes the library filter from the request`);
+    assert.equal(resetQuery.searchParams.get('category_id'), null, `${theme} empty-state recovery removes the category filter from the request`);
+    assert.equal(resetQuery.searchParams.get('tag'), null, `${theme} empty-state recovery removes the tag filter from the request`);
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const geometry = await page.evaluate(() => ({ pageWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+      assert.ok(geometry.pageWidth <= geometry.clientWidth + 1,
+        `${theme} resource search results do not overflow horizontally at ${width}px: ${JSON.stringify(geometry)}`);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+
     await page.goto(`${base}/__qa?theme=${theme}&view=knowledge`);
     await page.getByRole('heading', { name: '知识库', exact: true }).waitFor();
     const selectedCategory = page.getByRole('button', { name: '全部分类', exact: true });
+    const collapseRoot = page.getByRole('button', { name: '收起 浅色主题分类', exact: true });
+    await collapseRoot.waitFor();
+    assert.equal(await page.getByRole('button', { name: /^(展开|收起) 子分类$/ }).count(), 0,
+      `${theme} leaf knowledge categories do not expose an inert expand/collapse button`);
+    await collapseRoot.click();
+    await page.getByRole('button', { name: '展开 浅色主题分类', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: '子分类 1', exact: true }).count(), 0,
+      `${theme} collapsing a knowledge category hides its child`);
+    await page.getByRole('button', { name: '展开 浅色主题分类', exact: true }).click();
+    const categoryButton = page.getByRole('button', { name: '浅色主题分类 1', exact: true });
+    await categoryButton.waitFor();
+    const categoryCount = categoryButton.locator('span.text-xs');
+    const categoryCountContrast = await renderedContrast(categoryCount);
+    assert.ok(categoryCountContrast >= 4.5,
+      `${theme} knowledge category count contrast is ${categoryCountContrast.toFixed(2)}:1; expected at least 4.5:1`);
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      const geometry = await selectedCategory.evaluate((element) => ({
+        categoryPanelHeight: element.parentElement?.getBoundingClientRect().height ?? 0,
+        pageWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      assert.ok(geometry.categoryPanelHeight <= 180,
+        `${theme} knowledge category panel should follow its contents rather than reserve desktop height at ${width}px: ${JSON.stringify(geometry)}`);
+      assert.ok(geometry.pageWidth <= geometry.clientWidth + 1,
+        `${theme} knowledge page should not overflow horizontally at ${width}px: ${JSON.stringify(geometry)}`);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
     const selectedColors = await selectedCategory.evaluate((element) => {
       const layers: string[] = [];
       for (let current: Element | null = element; current; current = current.parentElement) layers.push(getComputedStyle(current).backgroundColor);
@@ -296,8 +532,8 @@ try {
       background = layer.rgb.map((channel, index) => channel * layer.alpha + background[index] * (1 - layer.alpha));
     }
     assert.ok(foreground && contrastRatio(foreground, background) >= 4.5, `${theme} selected knowledge category contrast is ${foreground ? contrastRatio(foreground, background).toFixed(2) : 'unavailable'}:1; expected at least 4.5:1`);
-    await page.getByRole('button', { name: /浅色主题分类/ }).click();
-    const namedCategory = page.getByRole('button', { name: /浅色主题分类/ });
+    await categoryButton.click();
+    const namedCategory = categoryButton;
     await namedCategory.waitFor();
     const namedColors = await namedCategory.evaluate((element) => {
       const layers: string[] = [];
@@ -314,6 +550,48 @@ try {
     }
     assert.ok(namedForeground && contrastRatio(namedForeground, namedBackground) >= 4.5, `${theme} selected named knowledge category contrast is ${namedForeground ? contrastRatio(namedForeground, namedBackground).toFixed(2) : 'unavailable'}:1; expected at least 4.5:1`);
   }
+
+  await page.goto(`${base}/__qa?theme=light&fail_categories=true`);
+  await page.getByRole('heading', { name: '项目资料库', exact: true }).waitFor();
+  await page.getByRole('link', { name: listResource.title, exact: true }).waitFor();
+  const categoryFailure = page.getByRole('alert').filter({ hasText: '分类暂时无法读取' });
+  await categoryFailure.waitFor();
+  assert.equal(await page.getByText(listResource.title, { exact: true }).count(), 1, 'the resource list remains visible when its category request fails');
+  const listReadsBeforeCategoryRetry = resourceListReads;
+  const categoryReadsBeforeRetry = categoryReads;
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const geometry = await page.evaluate(() => ({ pageWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+    assert.ok(geometry.pageWidth <= geometry.clientWidth + 1, `the category recovery notice does not overflow at ${width}px: ${JSON.stringify(geometry)}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await categoryFailure.getByRole('button', { name: '重新加载分类', exact: true }).click();
+  await categoryFailure.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('button')).some((button) => button.textContent?.includes('分类管理') && !(button as HTMLButtonElement).disabled));
+  assert.equal(categoryReads, categoryReadsBeforeRetry + 1, 'category retry performs one category-list request');
+  assert.equal(resourceListReads, listReadsBeforeCategoryRetry, 'category retry does not reload the resource list');
+
+  const knowledgeListReadsBeforeFailure = resourceListReads;
+  await page.goto(`${base}/__qa?theme=light&view=knowledge&fail_categories=true`);
+  await page.getByRole('heading', { name: '知识库', exact: true }).waitFor();
+  await page.getByRole('link', { name: listResource.title, exact: true }).waitFor();
+  const knowledgeCategoryFailure = page.getByRole('alert').filter({ hasText: '分类目录暂不可用' });
+  await knowledgeCategoryFailure.waitFor();
+  assert.equal(await page.getByText(listResource.title, { exact: true }).count(), 1, 'the knowledge results remain visible when its category-tree request fails');
+  const knowledgeCategoryReadsBeforeRetry = categoryReads;
+  assert.equal(await page.getByRole('button', { name: '分类管理', exact: true }).isDisabled(), true, 'category management stays closed while its directory is unavailable');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const geometry = await page.evaluate(() => ({ pageWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+    assert.ok(geometry.pageWidth <= geometry.clientWidth + 1, `the knowledge category recovery notice does not overflow at ${width}px: ${JSON.stringify(geometry)}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await knowledgeCategoryFailure.getByRole('button', { name: '重新加载分类', exact: true }).click();
+  await knowledgeCategoryFailure.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('button')).some((button) => button.textContent?.includes('分类管理') && !(button as HTMLButtonElement).disabled));
+  assert.equal(categoryReads, knowledgeCategoryReadsBeforeRetry + 1, 'knowledge category retry performs one category-list request');
+  assert.equal(resourceListReads, knowledgeListReadsBeforeFailure + 1, 'knowledge category failure and retry do not duplicate the resource-list request');
+  assert.equal(await page.getByRole('button', { name: '分类管理', exact: true }).isDisabled(), false, 'category management becomes available after the directory is restored');
 
   await page.goto(`${base}/__qa?theme=light`);
   await page.getByRole('heading', { name: '项目资料库', exact: true }).waitFor();
@@ -367,6 +645,7 @@ try {
   assert.equal(resourceCreateRequests, 1, 'the server confirms one resource create before its detail read fails');
   await page.getByRole('button', { name: '重新加载详情', exact: true }).click();
   await page.getByRole('heading', { name: '隔离新建确认与详情恢复', exact: true }).waitFor();
+  assert.equal(new URL(page.url()).searchParams.get('library_type'), 'project', 'resource creation preserves the source library on its detail route');
   await page.getByRole('status').getByText('资料「隔离新建确认与详情恢复」已创建。', { exact: true }).waitFor();
   assert.equal(resourceCreateRequests, 1, 'retrying the detail read does not repeat the resource create');
   assert.equal(createdResourceDetailReads, 2, 'the recovery path performs one initial and one read-only detail request');
@@ -379,17 +658,44 @@ try {
   await racePage.evaluate((nextPath) => {
     window.history.pushState({}, '', nextPath);
     window.dispatchEvent(new PopStateEvent('popstate'));
-  }, `/asset-center/resources/${raceSecondResource.id}`);
+  }, `/asset-center/resources/${raceSecondResource.id}?library_type=project`);
   await racePage.getByRole('heading', { name: raceSecondResource.title, exact: true }).waitFor();
   await raceDetailReadFinished;
   await racePage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-  assert.equal(racePage.url().endsWith(`/asset-center/resources/${raceSecondResource.id}`), true, 'the route changes to the current resource while the prior read is pending');
+  assert.equal(racePage.url().endsWith(`/asset-center/resources/${raceSecondResource.id}?library_type=project`), true, 'the route changes to the current resource while the prior read is pending');
   assert.equal(await racePage.getByRole('heading', { name: raceFirstResource.title, exact: true }).count(), 0, 'a late response from the prior resource cannot replace current detail state');
   await racePage.close();
 
   failNextDeleteId = detailResource.id;
+  failNextAuditRead = true;
+  const detailReadsBeforeAuditFailure = resourceDetailReads;
+  const auditReadsBeforeFailure = resourceAuditReads;
   await page.goto(`${base}/__qa?theme=dark&view=detail`);
   await page.getByRole('heading', { name: detailResource.title, exact: true }).waitFor();
+  await page.waitForFunction(() => new URL(window.location.href).searchParams.get('library_type') === 'project');
+  assert.equal(new URL(page.url()).searchParams.get('library_type'), 'project', 'legacy detail routes learn and preserve the resource library type');
+  assert.equal(await page.getByRole('navigation', { name: '面包屑' }).getByText('项目资料库', { exact: true }).count(), 1, 'resource detail breadcrumb follows the resource library type');
+  assert.equal(await page.getByRole('link', { name: '返回所属资料库' }).getAttribute('href'), '/asset-center/projects', 'resource detail returns to its owning library');
+  const auditFailure = page.getByRole('alert').filter({ hasText: '审计记录暂时无法读取' });
+  await auditFailure.waitFor();
+  assert.equal(await page.getByText(detailResource.content_text!, { exact: true }).count(), 1, 'the resource detail remains usable when its optional audit request fails');
+  assert.equal(await page.getByRole('heading', { name: '资料详情暂时无法读取', exact: true }).count(), 0, 'an audit-only failure is not presented as a resource detail failure');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const geometry = await page.evaluate(() => ({ pageWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+    assert.ok(geometry.pageWidth <= geometry.clientWidth + 1, `the audit recovery notice does not overflow at ${width}px: ${JSON.stringify(geometry)}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  assert.equal(resourceDetailReads, detailReadsBeforeAuditFailure + 1, 'the initial audit failure does not cause a second resource detail read');
+  assert.equal(resourceAuditReads, auditReadsBeforeFailure + 1, 'the audit panel makes one initial read');
+  const createsBeforeAuditRetry = resourceCreateRequests;
+  const deletesBeforeAuditRetry = resourceDeleteRequests;
+  await auditFailure.getByRole('button', { name: '重新加载审计记录', exact: true }).click();
+  await auditFailure.waitFor({ state: 'detached' });
+  assert.equal(resourceAuditReads, auditReadsBeforeFailure + 2, 'retry performs one additional audit read');
+  assert.equal(resourceDetailReads, detailReadsBeforeAuditFailure + 1, 'audit retry does not reload the resource detail');
+  assert.equal(resourceCreateRequests, createsBeforeAuditRetry, 'audit retry does not create a resource');
+  assert.equal(resourceDeleteRequests, deletesBeforeAuditRetry, 'audit retry does not delete a resource');
   const detailPageIdentity = await page.evaluate(() => ({
     path: window.location.pathname,
     title: document.title,
@@ -433,10 +739,12 @@ try {
   await page.getByText('删除成功', { exact: true }).waitFor();
   assert.equal(existingResourceIds.has(detailResource.id), false, 'successful detail deletion removes the isolated resource');
   assert.equal(resourceDeleteRequests, detailDeleteRequestsBeforeRetry + 1, 'a rapid double trigger sends only one detail delete request');
+  await page.getByRole('heading', { name: '项目资料库', exact: true }).waitFor();
+  assert.equal(page.url().endsWith('/asset-center/projects'), true, 'successful detail deletion returns to the resource’s owning library');
 
   assert.deepEqual(errors, [], 'resource table light/dark hover states render without browser errors');
-  assert.equal(expectedHttpErrors.length, 4, 'two intentional delete failures, post-delete list failure and post-create detail failure each return one 503 response');
-  console.log('Resource browser test passed: fixed table actions stay visible at 320/390px; resource hover, selected knowledge categories, detail request ownership and list/detail delete success/failure feedback meet their contracts.');
+  assert.equal(expectedHttpErrors.length, 7, 'two intentional delete failures, post-delete list failure, post-create detail failure, two isolated category read failures and audit read failure each return one 503 response');
+  console.log('Resource browser test passed: resource search preserves semantic FTS highlights with readable category labels at 320/390px; list pagination actions have names and correct disabled states; fixed table actions stay visible; category/audit recovery, detail request ownership and list/detail delete feedback meet their contracts.');
 } finally {
   await browser.close();
   await vite.close();

@@ -1,7 +1,6 @@
 import { ArrowLeft, Save, Send } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { createTopic } from '@/api';
 import { useNetworkState } from '@/platform/network';
 import { useAppStore, useAuthStore } from '@/store';
 import { celebrateMilestone } from '@/utils/confetti';
@@ -14,6 +13,8 @@ import CreatorTopicSuggestionReference from '@/components/topics/CreatorTopicSug
 import TopicDraftPicker from '@/components/topics/TopicDraftPicker';
 import { findSimilarTopicsByTitle, normalizeTopicTitle, type SimilarTopic } from '@/utils/topic-title-similarity';
 import { creatorTopicSuggestionSourceFromDraft } from '@/utils/creatorTopicSuggestionSource';
+import { useTopicCreateRecovery } from '@/hooks/useTopicCreateRecovery';
+import type { TopicCreatePayload, TopicCreateRecovery } from '@/utils/topicCreateRecovery';
 
 export default function MobileAddTopic() {
   const navigate = useNavigate();
@@ -30,12 +31,41 @@ export default function MobileAddTopic() {
   const [notice, setNotice] = useState('');
   const draftStorageUnavailable = draftState.storageUnavailable;
   const [similarTopicReview, setSimilarTopicReview] = useState<{
+    actorId: number;
     title: string;
     topics: SimilarTopic[];
     checkFailed: boolean;
   } | null>(null);
   const reviewedTitle = useRef<string | null>(null);
   const submitInFlight = useRef(false);
+
+  const finishTopicCreation = useCallback((topicId: number, recovery: TopicCreateRecovery, recovered: boolean) => {
+    if (Number(useAuthStore.getState().user?.id) !== recovery.actorId) return;
+    const canSafelyRemoveDraft = Boolean(
+      recovery.draftId
+      && recovery.draftSnapshot
+      && draftState.activeDraftId === recovery.draftId
+      && JSON.stringify(draftState.form) === JSON.stringify(recovery.draftSnapshot)
+    );
+    const draftRemoved = canSafelyRemoveDraft && draftState.removeSubmittedDraft();
+    if (!draftRemoved) {
+      appStore.addNotification({
+        title: '本机草稿已保留',
+        message: '选题已成功创建；为避免删除可能更新过的内容，本机草稿未自动清理，请勿重复提报。',
+        type: 'warning',
+      });
+    }
+    celebrateMilestone();
+    navigate('/topics', { replace: true });
+    void topicId;
+    void recovered;
+  }, [appStore, draftState, navigate]);
+  const createRecovery = useTopicCreateRecovery(userId, finishTopicCreation);
+
+  useEffect(() => {
+    setSimilarTopicReview(null);
+    reviewedTitle.current = null;
+  }, [userId]);
 
   const change = (key: keyof typeof form, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const saveLocalDraft = () => {
@@ -48,11 +78,13 @@ export default function MobileAddTopic() {
     setNotice('已保存到本机草稿，不会创建服务端选题');
   };
   const submit = async (confirmedTitle?: string) => {
-    if (submitInFlight.current) return;
+    if (submitInFlight.current || createRecovery.locked || !createRecovery.ready) return;
     if (!canCreate || !userId) { setNotice('当前账号没有提报选题的权限。'); return; }
-    const title = (confirmedTitle ?? form.title).trim();
+    const submissionActorId = Number(userId);
+    const submittedForm = { ...form };
+    const title = (confirmedTitle ?? submittedForm.title).trim();
     if (!title) { setNotice('请输入选题标题'); return; }
-    const draftSaved = hasTopicDraftContent(form) && draftState.saveCurrentDraft().saved;
+    const draftSaved = hasTopicDraftContent(submittedForm) && draftState.saveCurrentDraft().saved;
     if (networkState !== 'online') {
       setNotice(draftSaved ? '当前网络未恢复，内容已保存在本地草稿，暂未提交。' : '当前网络未恢复，本机草稿保存失败；当前页面仍保留内容，请勿关闭。');
       return;
@@ -65,30 +97,34 @@ export default function MobileAddTopic() {
       if (reviewedTitle.current !== normalizedTitle) {
         try {
           const topics = await findSimilarTopicsByTitle(title);
+          if (Number(useAuthStore.getState().user?.id) !== submissionActorId) return;
           if (topics.length > 0) {
-            setSimilarTopicReview({ title, topics, checkFailed: false });
+            setSimilarTopicReview({ actorId: submissionActorId, title, topics, checkFailed: false });
             return;
           }
         } catch {
-          setSimilarTopicReview({ title, topics: [], checkFailed: true });
+          if (Number(useAuthStore.getState().user?.id) !== submissionActorId) return;
+          setSimilarTopicReview({ actorId: submissionActorId, title, topics: [], checkFailed: true });
           return;
         }
         reviewedTitle.current = normalizedTitle;
       }
+      if (Number(useAuthStore.getState().user?.id) !== submissionActorId) return;
 
       const details = [
-        form.projectBackground.trim() ? `【项目背景】\n${form.projectBackground.trim()}` : '',
-        form.targetAudience.trim() ? `【目标受众】\n${form.targetAudience.trim()}` : '',
+        submittedForm.projectBackground.trim() ? `【项目背景】\n${submittedForm.projectBackground.trim()}` : '',
+        submittedForm.targetAudience.trim() ? `【目标受众】\n${submittedForm.targetAudience.trim()}` : '',
       ].filter(Boolean).join('\n\n');
-      await createTopic({ title, description: details, outline: form.outline.trim() || undefined, platform: form.platform.trim(), deadline: form.deadline, assignee_id: form.assignee_id ? Number(form.assignee_id) : null, creator_suggestion_source: creatorTopicSuggestionSourceFromDraft(location.search, form.projectBackground) });
-      if (!draftState.removeSubmittedDraft()) {
-        appStore.addNotification({ title: '草稿清理失败', message: '选题已提交成功，但本机草稿未能清理；请勿重复提报。', type: 'warning' });
-      }
-      celebrateMilestone();
-      navigate('/topics', { replace: true });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '提交选题失败';
-      setNotice(draftSaved ? message : `${message}；本机草稿未能保存，请勿关闭此页。`);
+      const payload: TopicCreatePayload = {
+        title,
+        description: details,
+        outline: submittedForm.outline.trim() || undefined,
+        platform: submittedForm.platform.trim(),
+        deadline: submittedForm.deadline,
+        assignee_id: submittedForm.assignee_id ? Number(submittedForm.assignee_id) : null,
+        creator_suggestion_source: creatorTopicSuggestionSourceFromDraft(location.search, submittedForm.projectBackground),
+      };
+      await createRecovery.create(payload, draftState.activeDraftId, submittedForm);
     } finally {
       submitInFlight.current = false;
       setSaving(false);
@@ -97,6 +133,10 @@ export default function MobileAddTopic() {
 
   const continueAfterSimilarityReview = () => {
     if (!similarTopicReview) return;
+    if (Number(useAuthStore.getState().user?.id) !== similarTopicReview.actorId) {
+      setSimilarTopicReview(null);
+      return;
+    }
     reviewedTitle.current = normalizeTopicTitle(similarTopicReview.title);
     const title = similarTopicReview.title;
     setSimilarTopicReview(null);
@@ -107,7 +147,38 @@ export default function MobileAddTopic() {
 
   if (!permissionsLoading && !canCreate) return <AccessDeniedState title="暂时无法提报选题" description="请联系管理员分配选题创建权限。" />;
 
-  return <fieldset disabled={saving || !canCreate} aria-busy={saving} className="min-w-0 space-y-4 border-0 p-0 pb-2">
+  return <>
+    {(createRecovery.message || createRecovery.pending) ? (
+      <section role="status" aria-live="polite" className="mb-4 rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-text-secondary">
+        <p>{createRecovery.message || '选题创建结果尚未核实；为避免重复创建，原表单已锁定。'}</p>
+        {createRecovery.pending?.phase === 'uncertain' || createRecovery.pending?.phase === 'rejected' ? (
+          <button type="button" onClick={() => void createRecovery.verify()} className="mt-3 min-h-11 rounded-lg border border-studio-border-soft px-3 font-semibold text-studio-text-primary">
+            只读重新核实创建状态
+          </button>
+        ) : null}
+        {createRecovery.pending?.phase === 'rejected' && createRecovery.pending.confirmedNotFound ? (
+          <button type="button" onClick={createRecovery.releaseRejected} className="mt-3 min-h-11 rounded-lg bg-studio-primary-button px-3 font-semibold text-white">
+            确认服务端未创建并解除本次锁定
+          </button>
+        ) : null}
+        {createRecovery.pending?.phase === 'cleanup_failed' ? (
+          <button type="button" onClick={createRecovery.retryCleanup} className="mt-3 min-h-11 rounded-lg border border-studio-border-soft px-3 font-semibold text-studio-text-primary">
+            重试清理恢复记录并继续
+          </button>
+        ) : null}
+        {createRecovery.pending?.phase === 'not_found' ? (
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <button type="button" onClick={() => void createRecovery.retry()} disabled={networkState !== 'online'} className="min-h-11 rounded-lg bg-studio-primary-button px-3 font-semibold text-white disabled:opacity-50">
+              确认用原内容和同一编号重试
+            </button>
+            <button type="button" onClick={() => void createRecovery.verify()} disabled={networkState !== 'online'} className="min-h-11 rounded-lg border border-studio-border-soft px-3 font-semibold text-studio-text-primary disabled:opacity-50">
+              再次只读核实
+            </button>
+          </div>
+        ) : null}
+      </section>
+    ) : null}
+    <fieldset disabled={saving || !canCreate || createRecovery.locked} aria-busy={saving || createRecovery.pending?.phase === 'checking'} className="min-w-0 space-y-4 border-0 p-0 pb-2">
     <button type="button" onClick={() => navigate('/topics')} className="inline-flex min-h-11 items-center gap-2 text-sm text-studio-cyan-contrast"><ArrowLeft className="h-4 w-4" />返回选题</button>
     {permissionsLoading ? <p role="status" className="text-sm text-studio-text-muted">正在确认操作权限…</p> : null}
     <TopicDraftPicker
@@ -131,7 +202,7 @@ export default function MobileAddTopic() {
       <label className="block"><span className="mb-2 block text-sm font-semibold">目标受众</span><textarea value={form.targetAudience} onChange={(event) => change('targetAudience', event.target.value)} className="min-h-24 w-full resize-y rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm leading-6 outline-none focus:border-studio-cyan" placeholder="描述受众特征和需求" /></label>
     </section>
     <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><label className="block"><span className="mb-2 block text-base font-semibold">大纲结构</span><textarea value={form.outline} onChange={(event) => change('outline', event.target.value)} className="min-h-48 w-full resize-y rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm leading-6 outline-none focus:border-studio-cyan" placeholder="列出内容结构、核心观点和素材方向" /></label></section>
-    {draftStorageUnavailable ? <p role="status" className="px-1 text-sm text-studio-coral">本机存储不可用，草稿未能保存；请检查设备存储后重试。</p> : null}
+    {draftStorageUnavailable ? <p role="status" className="px-1 text-sm text-studio-coral-contrast">本机存储不可用，草稿未能保存；请检查设备存储后重试。</p> : null}
     {notice ? <p role="status" className="px-1 text-sm text-studio-text-secondary">{notice}</p> : null}
     <div className="grid grid-cols-2 gap-3"><button type="button" onClick={saveLocalDraft} disabled={saving} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-studio-border-soft text-sm font-semibold disabled:opacity-50"><Save className="h-4 w-4" />存本地草稿</button><button type="button" onClick={() => void submit()} disabled={saving || networkState !== 'online'} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{saving ? '提交中…' : networkState === 'offline' ? '等待联网' : '提交选题'}</button></div>
     <SimilarTopicReview
@@ -143,5 +214,6 @@ export default function MobileAddTopic() {
       onCancel={() => setSimilarTopicReview(null)}
       onContinue={continueAfterSimilarityReview}
     />
-  </fieldset>;
+  </fieldset>
+  </>;
 }

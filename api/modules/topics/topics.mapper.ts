@@ -1,5 +1,5 @@
 import type { CreateTopicRecord } from './topics.repository';
-import type { LegacyCreateTopicInput, LegacyUpdateTopicInput, TopicPersistencePatch } from './topics.types';
+import type { LegacyCreateTopicInput, LegacyUpdateTopicInput, TopicContentPatch } from './topics.types';
 
 export function mapLegacyCreateInput(input: LegacyCreateTopicInput, creatorId: number): CreateTopicRecord {
   const outline = input.outline || null;
@@ -15,8 +15,8 @@ export function mapLegacyCreateInput(input: LegacyCreateTopicInput, creatorId: n
     assigneeId: input.assignee_id || null,
   };
 }
-export function mapLegacyUpdateInput(input: LegacyUpdateTopicInput): TopicPersistencePatch {
-  const patch: TopicPersistencePatch = {};
+export function mapLegacyUpdateInput(input: LegacyUpdateTopicInput): TopicContentPatch {
+  const patch: TopicContentPatch = {};
   if (input.title) patch.title = input.title;
   if (input.description) patch.description = input.description;
   if (input.outline !== undefined) {

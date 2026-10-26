@@ -9,7 +9,7 @@ process.env.XMT_DB_PATH = path.join(directory, 'messages.db');
 process.env.JWT_SECRET = 'message-pagination-test-secret';
 
 const { initDatabase, closeDatabase } = await import('../../api/database/db.js');
-const { executeInsert, queryOne } = await import('../../api/database/utils.js');
+const { execute, executeInsert, queryOne } = await import('../../api/database/utils.js');
 const { signToken } = await import('../../api/utils/jwt.js');
 const { default: messagesRoutes } = await import('../../api/routes/messages.js');
 
@@ -40,6 +40,25 @@ await executeInsert(
 
 const app = express();
 app.use(express.json());
+let loseNextMessageClearResponse = false;
+let loseNextMessageReadAllResponse = false;
+app.use('/api/messages', (req, res, next) => {
+  if ((req.method === 'DELETE' && req.path === '/') || (req.method === 'POST' && req.path === '/read-all')) {
+    const sendJson = res.json.bind(res);
+    res.json = ((body: unknown) => {
+      if (req.method === 'DELETE' && loseNextMessageClearResponse) {
+        loseNextMessageClearResponse = false;
+        res.statusCode = 503;
+      }
+      if (req.method === 'POST' && req.path === '/read-all' && loseNextMessageReadAllResponse) {
+        loseNextMessageReadAllResponse = false;
+        res.statusCode = 503;
+      }
+      return sendJson(body);
+    }) as typeof res.json;
+  }
+  next();
+});
 app.use('/api/messages', messagesRoutes);
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -47,6 +66,7 @@ const address = server.address();
 assert(address && typeof address !== 'string');
 const base = `http://127.0.0.1:${address.port}/api/messages`;
 const headers = { Authorization: `Bearer ${signToken({ userId: ownerId })}`, 'Content-Type': 'application/json' };
+const otherHeaders = { Authorization: `Bearer ${signToken({ userId: otherUserId })}`, 'Content-Type': 'application/json' };
 
 async function getList(query: string) {
   const response = await fetch(`${base}${query ? `?${query}` : ''}`, { headers });
@@ -139,7 +159,168 @@ try {
   const otherUnread = await queryOne<{ count: number }>(`SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND read=0`, [otherUserId]);
   assert.equal(otherUnread?.count, 2, 'bulk read cannot modify another account');
 
-  console.log('message pagination, filtering, summary scope, and bulk-read tests passed');
+  const firstReadAllMessageId = await executeInsert(
+    `INSERT INTO messages(user_id,title,content,type,read,link,created_at) VALUES(?,?,?,?,?,?,?)`,
+    [ownerId, '批量已读一', '验证丢响应恢复', 'info', 0, null, '2026-10-23 12:00:00'],
+  );
+  const secondReadAllMessageId = await executeInsert(
+    `INSERT INTO messages(user_id,title,content,type,read,link,created_at) VALUES(?,?,?,?,?,?,?)`,
+    [ownerId, '批量已读二', '验证事务结果回放', 'info', 0, null, '2026-10-23 12:00:01'],
+  );
+  const foreignReadAllMessageId = await executeInsert(
+    `INSERT INTO messages(user_id,title,content,type,read,link,created_at) VALUES(?,?,?,?,?,?,?)`,
+    [otherUserId, '其他账号未读', '不得被当前请求修改', 'info', 0, null, '2026-10-23 12:00:02'],
+  );
+
+  const readAllRequestId = 'b01a2c3d-4e5f-4678-8a9b-0c1d2e3f4a71';
+  const missingReadAllStatus = await fetch(`${base}/read-all-requests/${readAllRequestId}`, { headers });
+  assert.equal(missingReadAllStatus.status, 200);
+  assert.equal(missingReadAllStatus.headers.get('cache-control'), 'no-store', 'actor-scoped read-all outcomes must not be cached across shared sessions');
+  assert.deepEqual(await missingReadAllStatus.json(), { state: 'not_found' });
+  assert.equal(Number((await queryOne<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND read=0', [ownerId],
+  ))?.count), 2, 'read-only recovery lookup does not mutate messages');
+  const unauthenticatedReadAllStatus = await fetch(`${base}/read-all-requests/${readAllRequestId}`);
+  assert.equal(unauthenticatedReadAllStatus.status, 401, 'read-all status requires authentication');
+  const invalidReadAllStatus = await fetch(`${base}/read-all-requests/not-a-request-id`, { headers });
+  assert.equal(invalidReadAllStatus.status, 400, 'read-all status rejects malformed request IDs');
+  const invalidReadAllRequest = await fetch(`${base}/read-all`, {
+    method: 'POST', headers, body: JSON.stringify({ client_request_id: 'not-a-request-id' }),
+  });
+  assert.equal(invalidReadAllRequest.status, 400, 'read-all rejects malformed request IDs before mutating messages');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND read=0', [ownerId],
+  ))?.count), 2);
+
+  loseNextMessageReadAllResponse = true;
+  const lostReadAllResponse = await fetch(`${base}/read-all`, {
+    method: 'POST', headers, body: JSON.stringify({ client_request_id: readAllRequestId }),
+  });
+  assert.equal(lostReadAllResponse.status, 503, 'the fixture loses the response after the keyed read-all transaction commits');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND read=0', [ownerId],
+  ))?.count), 0, 'the first keyed transaction marks only the actor unread rows read');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND read=0', [otherUserId],
+  ))?.count), 3, 'the keyed read-all transaction is limited to its actor');
+
+  const postCommitMessageId = await executeInsert(
+    `INSERT INTO messages(user_id,title,content,type,read,link,created_at) VALUES(?,?,?,?,?,?,?)`,
+    [ownerId, '事务后到达', '相同请求重放不得标记这条消息', 'info', 0, null, '2026-10-23 12:00:03'],
+  );
+  const recoveredReadAllStatus = await fetch(`${base}/read-all-requests/${readAllRequestId}`, { headers });
+  assert.equal(recoveredReadAllStatus.status, 200);
+  assert.deepEqual(await recoveredReadAllStatus.json(), { state: 'processed', updatedCount: 2 });
+  const foreignReadAllStatus = await fetch(`${base}/read-all-requests/${readAllRequestId}`, { headers: otherHeaders });
+  assert.equal(foreignReadAllStatus.status, 200);
+  assert.deepEqual(await foreignReadAllStatus.json(), { state: 'not_found' }, 'another actor cannot observe the stored outcome');
+
+  const replayedReadAll = await fetch(`${base}/read-all`, {
+    method: 'POST', headers, body: JSON.stringify({ client_request_id: readAllRequestId.toUpperCase() }),
+  });
+  assert.equal(replayedReadAll.status, 200);
+  assert.deepEqual(await replayedReadAll.json(), {
+    message: '所有消息已标记为已读', updatedCount: 2, replayed: true,
+  }, 'the same key returns its original result regardless of UUID casing');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND read=0', [ownerId],
+  ))?.count), 1, 'replaying the key does not mark a message arriving after the original transaction');
+  const foreignReadAllReplay = await fetch(`${base}/read-all`, {
+    method: 'POST', headers: otherHeaders, body: JSON.stringify({ client_request_id: readAllRequestId }),
+  });
+  assert.equal(foreignReadAllReplay.status, 409, 'a request key cannot be rebound to a different actor');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND read=0', [otherUserId],
+  ))?.count), 3, 'a cross-actor request-key collision does not mutate messages');
+
+  await execute(`CREATE TRIGGER reject_message_read_all_ledger BEFORE INSERT ON message_read_all_request_keys BEGIN SELECT RAISE(ABORT, 'simulated ledger failure'); END`);
+  const failedAtomicReadAll = await fetch(`${base}/read-all`, {
+    method: 'POST', headers, body: JSON.stringify({ client_request_id: 'b01a2c3d-4e5f-4678-8a9b-0c1d2e3f4a72' }),
+  });
+  assert.equal(failedAtomicReadAll.status, 500, 'ledger insertion failure rejects the keyed operation');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND read=0', [ownerId],
+  ))?.count), 1, 'the read update rolls back if its outcome cannot be persisted');
+  await execute('DROP TRIGGER reject_message_read_all_ledger');
+
+  const legacyReadAll = await fetch(`${base}/read-all`, { method: 'POST', headers, body: JSON.stringify({}) });
+  assert.equal(legacyReadAll.status, 200);
+  assert.deepEqual(await legacyReadAll.json(), { message: '所有消息已标记为已读', updatedCount: 1 }, 'legacy clients keep the unkeyed response contract');
+  await execute('DELETE FROM messages WHERE id IN (?,?,?)', [firstReadAllMessageId, secondReadAllMessageId, postCommitMessageId]);
+  await execute('DELETE FROM messages WHERE id=?', [foreignReadAllMessageId]);
+
+  const clearRequestId = 'b01a2c3d-4e5f-4678-8a9b-0c1d2e3f4a61';
+  const missingClearStatus = await fetch(`${base}/clear-requests/${clearRequestId}`, { headers });
+  assert.equal(missingClearStatus.status, 200);
+  assert.equal(missingClearStatus.headers.get('cache-control'), 'no-store', 'actor-scoped clear outcomes must not be cached across shared sessions');
+  assert.deepEqual(await missingClearStatus.json(), { state: 'not_found' }, 'clear recovery starts with a read-only not-found state');
+  assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM messages WHERE user_id=?', [ownerId]))?.count), 45, 'read-only status lookup does not mutate messages');
+  const unauthenticatedClearStatus = await fetch(`${base}/clear-requests/${clearRequestId}`);
+  assert.equal(unauthenticatedClearStatus.status, 401, 'clear status is not publicly discoverable');
+  const invalidClearStatus = await fetch(`${base}/clear-requests/not-a-request-id`, { headers });
+  assert.equal(invalidClearStatus.status, 400, 'malformed clear request IDs are rejected');
+  const invalidClearMutation = await fetch(base, {
+    method: 'DELETE',
+    headers,
+    body: JSON.stringify({ client_request_id: 'not-a-request-id' }),
+  });
+  assert.equal(invalidClearMutation.status, 400, 'malformed clear IDs cannot mutate messages');
+  assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM messages WHERE user_id=?', [ownerId]))?.count), 45);
+
+  loseNextMessageClearResponse = true;
+  const lostClearResponse = await fetch(base, {
+    method: 'DELETE',
+    headers,
+    body: JSON.stringify({ client_request_id: clearRequestId }),
+  });
+  assert.equal(lostClearResponse.status, 503, 'the fixture loses the response after the clear transaction commits');
+  assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM messages WHERE user_id=?', [ownerId]))?.count), 0, 'the first clear transaction committed before its response was lost');
+  assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM messages WHERE user_id=?', [otherUserId]))?.count), 2, 'the clear transaction is limited to its actor');
+
+  await executeInsert(
+    `INSERT INTO messages(user_id,title,content,type,read,link,created_at) VALUES(?,?,?,?,?,?,?)`,
+    [ownerId, '后来到达的消息', '同编号重放必须保留此消息', 'info', 0, null, '2026-10-23 12:00:00'],
+  );
+  const recoveredClearStatus = await fetch(`${base}/clear-requests/${clearRequestId}`, { headers });
+  assert.equal(recoveredClearStatus.status, 200);
+  assert.deepEqual(await recoveredClearStatus.json(), { state: 'cleared', deletedCount: 45 }, 'status lookup confirms the committed clear without writing');
+  const foreignClearStatus = await fetch(`${base}/clear-requests/${clearRequestId}`, { headers: otherHeaders });
+  assert.equal(foreignClearStatus.status, 200);
+  assert.deepEqual(await foreignClearStatus.json(), { state: 'not_found' }, 'another account cannot observe the original actor clear record');
+
+  const replayedClear = await fetch(base, {
+    method: 'DELETE',
+    headers,
+    body: JSON.stringify({ client_request_id: clearRequestId }),
+  });
+  assert.equal(replayedClear.status, 200);
+  assert.deepEqual(await replayedClear.json(), { message: '消息已清空', deletedCount: 45, replayed: true }, 'same-key retry returns the stored outcome');
+  assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM messages WHERE user_id=?', [ownerId]))?.count), 1, 'same-key retry does not delete messages that arrived after the first commit');
+
+  const keyCollision = await fetch(base, {
+    method: 'DELETE',
+    headers: otherHeaders,
+    body: JSON.stringify({ client_request_id: clearRequestId }),
+  });
+  assert.equal(keyCollision.status, 409, 'a request key cannot be rebound across actors');
+  assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM messages WHERE user_id=?', [otherUserId]))?.count), 2);
+
+  await execute(`CREATE TRIGGER reject_message_clear_ledger BEFORE INSERT ON message_clear_request_keys BEGIN SELECT RAISE(ABORT, 'simulated ledger failure'); END`);
+  const failedAtomicClear = await fetch(base, {
+    method: 'DELETE',
+    headers,
+    body: JSON.stringify({ client_request_id: 'b01a2c3d-4e5f-4678-8a9b-0c1d2e3f4a62' }),
+  });
+  assert.equal(failedAtomicClear.status, 500, 'ledger insertion failure rejects the entire transaction');
+  assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM messages WHERE user_id=?', [ownerId]))?.count), 1, 'transaction rollback preserves messages when no outcome record can be stored');
+  await execute('DROP TRIGGER reject_message_clear_ledger');
+
+  const legacyClear = await fetch(base, { method: 'DELETE', headers: { Authorization: headers.Authorization } });
+  assert.equal(legacyClear.status, 200, 'older clients without a request key remain compatible');
+  assert.deepEqual(await legacyClear.json(), { message: '消息已清空' });
+  assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM messages WHERE user_id=?', [ownerId]))?.count), 0);
+
+  console.log('message pagination, filtering, summary scope, bulk-read, and clear idempotency tests passed');
 } finally {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   await closeDatabase();

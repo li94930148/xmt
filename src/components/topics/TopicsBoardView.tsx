@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Camera, CheckCircle, Clock3, ExternalLink, FileText, Send, UserRound, XCircle } from 'lucide-react';
 import { ActionButton, EmptyState, GlassPanel, StatusPill } from '../studio';
 import { formatBeijingDate } from '../../lib/utils';
+import { getPlatformLabel } from '../../platform/platform-labels';
 import type { Topic } from '../../types';
 
 type TopicStatus = Topic['status'];
@@ -44,15 +45,18 @@ export type TopicsBoardViewProps = {
   loading: boolean;
   canUpdate: boolean;
   canAudit: boolean;
+  statusVerificationIds?: ReadonlySet<number>;
   onOpenTopic: (topic: Topic) => void;
-  onTransition: (topic: Topic, status: TopicStatus) => void;
+  onTransition: (topic: Topic, status: TopicStatus) => void | Promise<void>;
 };
 
 export default function TopicsBoardView({
-  topics, total, statusFilter, loading, canUpdate, canAudit, onOpenTopic, onTransition,
+  topics, total, statusFilter, loading, canUpdate, canAudit, statusVerificationIds, onOpenTopic, onTransition,
 }: TopicsBoardViewProps) {
   const [platformFilter, setPlatformFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
+  const [transitioningTopicIds, setTransitioningTopicIds] = useState<Set<number>>(() => new Set());
+  const transitionsInFlightRef = useRef(new Set<number>());
   const platforms = useMemo(() => [...new Set(topics.map((topic) => topic.platform).filter(Boolean))].sort(), [topics]);
   const assignees = useMemo(() => {
     const unique = new Map<number, string>();
@@ -66,7 +70,24 @@ export default function TopicsBoardView({
     if (assigneeFilter && String(topic.assignee_id ?? '') !== assigneeFilter) return false;
     return true;
   }), [assigneeFilter, platformFilter, topics]);
-  const visibleColumns = statusFilter ? columns.filter((column) => column.status === statusFilter) : columns;
+  const visibleColumns = statusFilter === 'creation'
+    ? columns.filter((column) => column.status === 'approved' || column.status === 'production')
+    : statusFilter ? columns.filter((column) => column.status === statusFilter) : columns;
+  const transitionTopic = async (topic: Topic, status: TopicStatus) => {
+    if (transitionsInFlightRef.current.has(topic.id)) return;
+    transitionsInFlightRef.current.add(topic.id);
+    setTransitioningTopicIds((current) => new Set(current).add(topic.id));
+    try {
+      await onTransition(topic, status);
+    } finally {
+      transitionsInFlightRef.current.delete(topic.id);
+      setTransitioningTopicIds((current) => {
+        const next = new Set(current);
+        next.delete(topic.id);
+        return next;
+      });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -75,7 +96,7 @@ export default function TopicsBoardView({
           <span className="shrink-0 whitespace-nowrap">平台</span>
           <select id="topics-board-platform-filter" name="topicsBoardPlatformFilter" aria-label="看板平台筛选" value={platformFilter} onChange={(event) => setPlatformFilter(event.target.value)} className="xmt-field min-w-0 flex-1 sm:min-w-28 sm:flex-initial">
             <option value="">全部平台</option>
-            {platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}
+            {platforms.map((platform) => <option key={platform} value={platform}>{getPlatformLabel(platform)}</option>)}
           </select>
         </label>
         <label className="flex w-full min-w-0 items-center gap-2 text-sm text-studio-text-secondary sm:w-auto sm:flex-initial">
@@ -86,7 +107,7 @@ export default function TopicsBoardView({
             {assignees.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
         </label>
-        <span className="ml-auto text-xs text-studio-text-muted">显示 {filteredTopics.length} / {total} 个选题</span>
+        <span className="ml-auto text-xs text-studio-text-secondary">显示 {filteredTopics.length} / {total} 个选题</span>
       </GlassPanel>
 
       {total > topics.length ? (
@@ -96,7 +117,7 @@ export default function TopicsBoardView({
       ) : null}
 
       {loading ? (
-        <div role="status" className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-8 text-center text-sm text-studio-text-muted">正在加载选题看板…</div>
+        <div role="status" className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-8 text-center text-sm text-studio-text-secondary">正在加载选题看板…</div>
       ) : filteredTopics.length === 0 ? (
         <EmptyState title="没有匹配的选题" description="调整平台或负责人筛选条件后再试。" />
       ) : (
@@ -110,30 +131,32 @@ export default function TopicsBoardView({
                   <header className="flex items-center gap-2 border-b border-studio-border-soft px-4 py-3">
                     <Icon className={`h-4 w-4 ${column.tone}`} />
                     <h2 id={`topic-column-${column.status}`} className="text-sm font-semibold text-studio-text-primary">{column.label}</h2>
-                    <span className="ml-auto rounded-full bg-studio-surface-soft px-2 py-0.5 text-xs tabular-nums text-studio-text-muted">{items.length}</span>
+                    <span className="ml-auto rounded-full bg-studio-surface-soft px-2 py-0.5 text-xs tabular-nums text-studio-text-secondary">{items.length}</span>
                   </header>
                   <div className="max-h-[calc(100vh-24rem)] min-h-40 space-y-3 overflow-y-auto p-3">
-                    {items.length === 0 ? <p className="py-8 text-center text-xs text-studio-text-muted">暂无选题</p> : items.map((topic) => {
+                    {items.length === 0 ? <p className="py-8 text-center text-xs text-studio-text-secondary">暂无选题</p> : items.map((topic) => {
                       const canChange = topic.status === 'pending' ? canAudit : canUpdate;
+                      const isTransitioning = transitioningTopicIds.has(topic.id);
+                      const statusNeedsVerification = statusVerificationIds?.has(topic.id) ?? false;
                       return (
                         <article key={topic.id} className="rounded-card border border-studio-border-soft bg-studio-surface-soft p-3.5 transition hover:border-studio-border-active">
-                          <button type="button" onClick={() => onOpenTopic(topic)} className="group flex w-full items-start justify-between gap-2 text-left">
+                          <ActionButton type="button" variant="ghost" onClick={() => onOpenTopic(topic)} className="group min-h-10 w-full items-start justify-between gap-2 p-0 text-left">
                             <span className="line-clamp-2 text-sm font-semibold text-studio-text-primary group-hover:text-studio-primary-contrast">{topic.title}</span>
                             <ExternalLink aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-studio-text-muted" />
-                          </button>
+                          </ActionButton>
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <StatusPill tone={statusTone[topic.status]}>{statusLabels[topic.status]}</StatusPill>
-                            {topic.platform ? <span className="rounded-full border border-studio-border-soft bg-studio-surface px-2 py-0.5 text-[10px] text-studio-text-secondary">{topic.platform}</span> : null}
+                            {topic.platform ? <span className="rounded-full border border-studio-border-soft bg-studio-surface px-2 py-0.5 text-[10px] text-studio-text-secondary">{getPlatformLabel(topic.platform)}</span> : null}
                           </div>
-                          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-studio-text-muted">
+                          <div className="mt-2 flex items-center justify-between gap-2 text-xs text-studio-text-secondary">
                             <span className="truncate">{topic.assignee_name || '未分配'}</span>
                             {topic.deadline ? <time className={new Date(topic.deadline) < new Date() && !['completed', 'rejected'].includes(topic.status) ? 'shrink-0 text-studio-coral-contrast' : 'shrink-0'}>{formatBeijingDate(topic.deadline)}</time> : null}
                           </div>
                           {canChange && nextStatuses[topic.status].length ? (
                             <div className="mt-3 flex flex-wrap gap-2 border-t border-studio-border-soft pt-3">
                               {nextStatuses[topic.status].map((next) => (
-                                <ActionButton key={next.status} type="button" variant="secondary" className="min-h-8 px-2.5 py-1 text-xs" onClick={() => onTransition(topic, next.status)}>
-                                  {next.label}
+                                <ActionButton key={next.status} type="button" variant="secondary" disabled={isTransitioning || statusNeedsVerification} aria-busy={isTransitioning} title={statusNeedsVerification ? '只读核实后才能更新状态' : undefined} className="min-h-10 px-2.5 py-1 text-xs" onClick={() => { void transitionTopic(topic, next.status); }}>
+                                  {isTransitioning ? '处理中…' : next.label}
                                 </ActionButton>
                               ))}
                             </div>

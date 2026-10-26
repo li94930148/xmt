@@ -25,7 +25,7 @@ export default function MyRetroActionsPanel({ actions, loading, error, onRefresh
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-bold text-studio-text-primary">我的复盘行动项</h2>
-          <p className="mt-1 text-xs text-studio-text-muted">仅显示待处理和进行中的行动项。</p>
+          <p className="mt-1 text-xs text-studio-text-secondary">仅显示待处理和进行中的行动项。</p>
         </div>
         <ActionButton variant="ghost" onClick={onRefresh} disabled={loading}>
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -42,11 +42,11 @@ export default function MyRetroActionsPanel({ actions, loading, error, onRefresh
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
         {loading ? (
-          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-secondary">
             正在加载行动项...
           </div>
         ) : error && actions.length === 0 ? null : actions.length === 0 ? (
-          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-secondary">
             当前没有需要你跟进的复盘行动项。
           </div>
         ) : actions.slice(0, 6).map((action) => (
@@ -59,7 +59,7 @@ export default function MyRetroActionsPanel({ actions, loading, error, onRefresh
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="line-clamp-1 font-semibold text-studio-text-primary">{action.title}</p>
-                <p className="mt-1 line-clamp-1 text-xs text-studio-text-muted">{action.retroTitle || `复盘 #${action.retroId}`}</p>
+                <p className="mt-1 line-clamp-1 text-xs text-studio-text-secondary">{action.retroTitle || `复盘 #${action.retroId}`}</p>
               </div>
               <ExternalLink className="h-4 w-4 shrink-0 text-studio-text-muted" />
             </div>
@@ -67,7 +67,7 @@ export default function MyRetroActionsPanel({ actions, loading, error, onRefresh
               <span className="rounded-full border border-studio-border-soft px-2 py-0.5 text-studio-text-secondary">
                 {retroActionStatusLabels[action.status]}
               </span>
-              <span className="text-studio-text-muted">截止 {formatDate(action.dueDate)}</span>
+              <span className="text-studio-text-secondary">截止 {formatDate(action.dueDate)}</span>
               {isOverdue(action) ? <span className="rounded-full bg-studio-coral/10 px-2 py-0.5 text-studio-coral-contrast">已逾期</span> : null}
             </div>
           </button>

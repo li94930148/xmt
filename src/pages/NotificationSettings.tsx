@@ -881,15 +881,15 @@ export default function NotificationSettings() {
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {notifyRecovery.kind === 'unknown' ? (
-                      <button type="button" onClick={() => void verifyNotificationRecovery()} disabled={notifySaving} className={`rounded-xl px-4 py-2 ${styles.buttonSecondary} disabled:opacity-60`}>
+                      <button type="button" onClick={() => void verifyNotificationRecovery()} disabled={notifySaving} className="xmt-btn xmt-btn-secondary">
                         {notifySaving ? '正在核实…' : '只读重新核实'}
                       </button>
                     ) : (
                       <>
-                        <button type="button" onClick={restoreCurrentNotificationPreferences} disabled={notifySaving} className={`rounded-xl px-4 py-2 ${styles.buttonSecondary} disabled:opacity-60`}>
+                        <button type="button" onClick={restoreCurrentNotificationPreferences} disabled={notifySaving} className="xmt-btn xmt-btn-secondary">
                           载入服务器设置
                         </button>
-                        <button type="button" onClick={() => void handleSaveNotifications(true)} disabled={notifySaving} className={`rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>
+                        <button type="button" onClick={() => void handleSaveNotifications(true)} disabled={notifySaving} className="xmt-btn xmt-btn-primary">
                           {notifySaving ? '正在保存…' : '确认覆盖服务器设置'}
                         </button>
                       </>

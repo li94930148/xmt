@@ -150,15 +150,15 @@ export default function MobileNotificationSettings() {
           </p>
           <div className="flex flex-wrap gap-2">
             {recovery.kind === 'unknown' ? (
-              <button type="button" onClick={() => void verifyRecovery()} disabled={saving} className="min-h-10 rounded-xl border border-studio-border-soft px-4 py-2 disabled:opacity-60">
+              <button type="button" onClick={() => void verifyRecovery()} disabled={saving} className="xmt-btn xmt-btn-secondary">
                 {saving ? '正在核实…' : '只读重新核实'}
               </button>
             ) : (
               <>
-                <button type="button" onClick={restoreCurrentPreferences} disabled={saving} className="min-h-10 rounded-xl border border-studio-border-soft px-4 py-2 disabled:opacity-60">
+                <button type="button" onClick={restoreCurrentPreferences} disabled={saving} className="xmt-btn xmt-btn-secondary">
                   载入服务器设置
                 </button>
-                <button type="button" onClick={() => void save(true)} disabled={saving} className="min-h-10 rounded-xl bg-studio-primary-button px-4 py-2 text-white disabled:opacity-60">
+                <button type="button" onClick={() => void save(true)} disabled={saving} className="xmt-btn xmt-btn-primary">
                   {saving ? '正在保存…' : '确认覆盖服务器设置'}
                 </button>
               </>

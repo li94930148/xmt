@@ -5,7 +5,8 @@
 - **改造内容**：移动工作区浏览器夹具不再用 Express 对所有 Socket.IO 请求重复返回 Engine.IO 握手；改为仓库依赖的本地内存 Socket.IO 服务，仅接受隔离连接、不发业务事件。
 - **验证结果**：目标文件 ESLint、`npm run check -- --pretty false`、`npm run version:check`、版本/更新说明/测试入口治理、部署安全合同测试、内部暴露门禁测试、`npm run build` 与 `git diff --check` 通过；生产构建保留既有 843.50 kB Silk 分包提示。`npm run test:mobile-work-center-browser` 已尝试，但 Chromium 在 macOS `bootstrap_check_in … Permission denied (1100)` 启动失败，未进入任何测试断言。Chrome DevTools MCP 内存夹具显示首页“正在整理今日任务…”和“正在读取灵感数量…”均为 `role=status`/`aria-live=polite`；释放两个延迟 GET 后状态提示消失。Socket.IO 资源请求 8 秒内保持 4 次，页面无错误或警告；当时页面视口 500 CSS px，文档宽度 492px，无横向溢出。320/390px 本轮未由 Chrome 窗口缩放工具成功模拟。
 - **VoiceOver 边界**：已临时开启系统 VoiceOver，确认字幕面板设置原为开启且语音效果未静音；验收结束后已将 VoiceOver 恢复关闭。页面辅助功能树能识别加载状态，但窗口工具未显示实际播报文本，故真实语音仍未确认。
-- **影响边界**：只改本地测试夹具和版本/说明文件；无产品 API、权限、数据库、真实业务数据或 Android 原生界面变化。Android 元数据同步至 90402，未构建 APK。
+- **影响边界**：只改浏览器测试夹具和版本/说明文件；无产品 API、权限、数据库、真实业务数据或 Android 原生界面变化。Android 元数据同步至 90402；GitHub CI 生成并上传 debug 验收 APK artifact，未发布 Android 安装包。
+- **部署结果**：PR #84 合并至 main，目标 SHA `957b0a7c0b8b74183c225dc2e89c1bf3108f7f9d`；该合并 SHA 的六项 CI 全部通过。受保护部署完成在线 SQLite 备份、Restore Drill PASS、65 项迁移检查 GO、运行环境读回 PASS、内部路由暴露检查 PASS，之后 PM2 运行 v9.4.2、Caddy active。公网健康接口和首页均为 HTTP 200；部署后 SQLite `quick_check=ok`、外键违规 0。生产依赖审计 `npm audit --omit=dev` 为 0 漏洞，无数据库迁移或业务数据写入。
 - **下一步**：继续推进 B4/B5 页面与辅助技术验收、B8 剩余写入恢复链路；匿名意见首次响应丢失仍需明确匿名范围与回执保留期，Android 原生专项后置。
 
 ## 2026-10-26 清单 B8：桌面与移动通知偏好结果核实（v9.4.1）

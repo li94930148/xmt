@@ -9,7 +9,7 @@
 ### Validation
 
 - Targeted checks and Chrome DevTools MCP fixture results are recorded in `docs/UPGRADE_PROGRESS.md`. Actual VoiceOver speech output was not captured and remains unverified.
-- No product API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.2 / 90402; no APK was built.
+- No product API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.2 / 90402; CI produced and uploaded an Android debug validation artifact only, and no Android release package was published.
 
 ## v9.4.1 - 2026-10-26
 

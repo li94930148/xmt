@@ -202,7 +202,7 @@ export default function Achievements() {
               <p className={`text-2xl font-bold ${styles.textPrimary}`}>
                 Lv.{currentLevel.level} {currentLevel.name}
               </p>
-              <p className={`text-xs ${styles.textMuted}`}>
+              <p className={`text-xs ${styles.textSecondary}`}>
                 {stats?.totalPoints || 0} 积分
                 {nextLevel && ` · 距下一级还需 ${nextLevel.minPoints - (stats?.totalPoints || 0)}`}
               </p>
@@ -229,9 +229,9 @@ export default function Achievements() {
             </div>
             <div>
               <p className={`text-2xl font-bold ${styles.textPrimary}`}>
-                {earnedCount}<span className={`text-sm font-normal ${styles.textMuted}`}>/{totalCount}</span>
+                {earnedCount}<span className={`text-sm font-normal ${styles.textSecondary}`}>/{totalCount}</span>
               </p>
-              <p className={`text-xs ${styles.textMuted}`}>已解锁成就</p>
+              <p className={`text-xs ${styles.textSecondary}`}>已解锁成就</p>
             </div>
           </div>
         </div>
@@ -244,7 +244,7 @@ export default function Achievements() {
             </div>
             <div>
               <p className={`text-2xl font-bold ${styles.textPrimary}`}>{stats?.totalPoints || 0}</p>
-              <p className={`text-xs ${styles.textMuted}`}>总积分</p>
+              <p className={`text-xs ${styles.textSecondary}`}>总积分</p>
             </div>
           </div>
         </div>
@@ -259,7 +259,7 @@ export default function Achievements() {
               <p className={`text-2xl font-bold ${styles.textPrimary}`}>
                 {totalCount > 0 ? Math.round((earnedCount / totalCount) * 100) : 0}%
               </p>
-              <p className={`text-xs ${styles.textMuted}`}>完成度</p>
+              <p className={`text-xs ${styles.textSecondary}`}>完成度</p>
             </div>
           </div>
         </div>
@@ -316,10 +316,12 @@ export default function Achievements() {
               <option key={r.value} value={r.value}>{r.label}</option>
             ))}
           </select>
-          <div className={`flex items-center gap-1 p-1 rounded-lg ${styles.bgTertiary}`}>
+          <div role="group" aria-label="成就视图" className={`flex items-center gap-1 p-1 rounded-lg ${styles.bgTertiary}`}>
             <button
               onClick={() => setViewMode('grid')}
               className={`p-2 rounded-md transition-colors ${viewMode === 'grid' ? `${styles.bgCard} ${styles.textPrimary}` : styles.textMuted}`}
+              aria-label="卡片视图"
+              aria-pressed={viewMode === 'grid'}
               title="卡片视图"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
@@ -327,6 +329,8 @@ export default function Achievements() {
             <button
               onClick={() => setViewMode('leaderboard')}
               className={`p-2 rounded-md transition-colors ${viewMode === 'leaderboard' ? `${styles.bgCard} ${styles.textPrimary}` : styles.textMuted}`}
+              aria-label="排行榜"
+              aria-pressed={viewMode === 'leaderboard'}
               title="排行榜"
             >
               <TrendingUp className="w-4 h-4" />
@@ -334,6 +338,8 @@ export default function Achievements() {
             <button
               onClick={() => setViewMode('feed')}
               className={`p-2 rounded-md transition-colors ${viewMode === 'feed' ? `${styles.bgCard} ${styles.textPrimary}` : styles.textMuted}`}
+              aria-label="动态"
+              aria-pressed={viewMode === 'feed'}
               title="动态"
             >
               <Sparkles className="w-4 h-4" />
@@ -409,7 +415,7 @@ export default function Achievements() {
                           <RarityBadge rarity={achievement.rarity} />
                           <PointBadge points={achievement.points || 0} />
                           {achievement.category && (
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${styles.bgTertiary} ${styles.textMuted}`}>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${styles.bgTertiary} ${styles.textSecondary}`}>
                               {ACHIEVEMENT_CATEGORIES.find(c => c.value === achievement.category)?.label || achievement.category}
                             </span>
                           )}
@@ -419,10 +425,10 @@ export default function Achievements() {
                         {!isEarned && prog && prog.target > 0 && (
                           <div>
                             <div className="flex items-center justify-between mb-1">
-                              <span className={`text-[10px] ${styles.textMuted}`}>
+                              <span className={`text-[10px] ${styles.textSecondary}`}>
                                 {prog.current}/{prog.target}
                               </span>
-                              <span className={`text-[10px] ${styles.textMuted}`}>
+                              <span className={`text-[10px] ${styles.textSecondary}`}>
                                 {prog.percentage}%
                               </span>
                             </div>
@@ -437,7 +443,7 @@ export default function Achievements() {
 
                         {/* 获得时间 */}
                         {isEarned && achievement.earned_at && (
-                          <p className={`text-[10px] ${styles.textMuted} mt-1`}>
+                          <p className={`text-[10px] ${styles.textSecondary} mt-1`}>
                             ✅ {formatBeijingDate(achievement.earned_at)} 获得
                           </p>
                         )}
@@ -464,7 +470,7 @@ export default function Achievements() {
             </div>
 
             {leaderboard.length === 0 ? (
-              <div role="status" className={`p-8 text-center ${styles.textMuted}`}>
+              <div role="status" className={`p-8 text-center ${styles.textSecondary}`}>
                 <Users className="w-10 h-10 mx-auto mb-3 opacity-50" />
                 <p className={`text-sm font-medium ${styles.textSecondary}`}>当前没有可显示的成员积分排行</p>
                 <p className="mt-1 text-xs">启用成员后，这里会显示成就积分排行。</p>
@@ -482,7 +488,7 @@ export default function Achievements() {
                       }`}
                     >
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${
-                        isTop3 ? 'text-lg' : `${styles.bgTertiary} ${styles.textMuted}`
+                        isTop3 ? 'text-lg' : `${styles.bgTertiary} ${styles.textSecondary}`
                       }`}>
                         {isTop3 ? medals[index] : index + 1}
                       </div>
@@ -491,11 +497,11 @@ export default function Achievements() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm font-medium ${styles.textPrimary} truncate`}>{entry.user_name}</p>
-                        <p className={`text-xs ${styles.textMuted}`}>{entry.achievement_count} 个成就</p>
+                        <p className={`text-xs ${styles.textSecondary}`}>{entry.achievement_count} 个成就</p>
                       </div>
                       <div className="text-right">
                         <p className={`text-sm font-bold ${styles.textPrimary}`}>{entry.total_points}</p>
-                        <p className={`text-[10px] ${styles.textMuted}`}>积分</p>
+                        <p className={`text-[10px] ${styles.textSecondary}`}>积分</p>
                       </div>
                     </div>
                   );
@@ -573,7 +579,7 @@ export default function Achievements() {
           </div>
 
           {recentAchievements.length === 0 ? (
-            <div className={`p-8 text-center ${styles.textMuted}`}>
+            <div className={`p-8 text-center ${styles.textSecondary}`}>
               <Trophy className="w-10 h-10 mx-auto mb-3 opacity-50" />
               <p className="text-sm">暂无人获得成就</p>
             </div>
@@ -598,7 +604,7 @@ export default function Achievements() {
                       <div className="flex items-center gap-2 mt-1">
                         <RarityBadge rarity={item.rarity} />
                         <PointBadge points={item.points} />
-                        <span className={`text-[10px] ${styles.textMuted}`}>
+                        <span className={`text-[10px] ${styles.textSecondary}`}>
                           {formatBeijingDate(item.earned_at)}
                         </span>
                       </div>

@@ -16,6 +16,25 @@ let globalTabs: SocketTabCoordinator | null = null;
 let globalLifecycleDiagnostics: SocketClientLifecycleDiagnostics | null = null;
 let desktopMessageGroups = new Map<string, MessageNotificationGroup>();
 
+export function createUnreadCountRefresher(
+  readUnreadCount: () => Promise<{ unreadCount: number }>,
+  commitUnreadCount: (count: number) => void,
+  isCurrentSession: () => boolean,
+) {
+  let latestRequestId = 0;
+
+  return async () => {
+    const requestId = ++latestRequestId;
+    try {
+      const result = await readUnreadCount();
+      if (requestId !== latestRequestId || !isCurrentSession()) return;
+      commitUnreadCount(result.unreadCount);
+    } catch {
+      // Realtime unread refresh is best-effort; the next event/reconnect retries it.
+    }
+  };
+}
+
 export function useSocket() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [, setSocketRevision] = useState(0);
@@ -29,6 +48,7 @@ export function useSocket() {
   useEffect(() => {
     if (!isLoggedIn || !user || !token) {
       setSocket(null);
+      setUnreadCount(0);
       return;
     }
 
@@ -37,6 +57,7 @@ export function useSocket() {
       return;
     }
 
+    const userIdentityChanged = globalUserId !== null && globalUserId !== user.id;
     if (globalSocket) {
       globalCoordinator?.destroy();
       globalCoordinator = null;
@@ -70,11 +91,25 @@ export function useSocket() {
     globalSocket = nextSocket;
     globalUserId = user.id;
     globalToken = token;
+    if (userIdentityChanged) setUnreadCount(0);
     const lifecycleDiagnostics = new SocketClientLifecycleDiagnostics(import.meta.env.DEV);
     globalLifecycleDiagnostics = lifecycleDiagnostics;
     lifecycleDiagnostics.created();
     setSocket(nextSocket);
     let reconnectAttempt = 0;
+    const refreshUnreadCount = createUnreadCountRefresher(
+      () => import('../api').then(({ getUnreadCount }) => getUnreadCount()),
+      setUnreadCount,
+      () => {
+        const currentAuth = useAuthStore.getState();
+        return globalSocket === nextSocket
+          && globalUserId === user.id
+          && globalToken === token
+          && currentAuth.isLoggedIn
+          && currentAuth.user?.id === user.id
+          && currentAuth.token === token;
+      },
+    );
 
     if (coordinatorEnabled && runtime) {
       const coordinator = new SocketCoordinator({
@@ -99,9 +134,7 @@ export function useSocket() {
       emitClientLog({ event: 'socket.connected', level: 'info' });
       setSocketRevision((revision) => revision + 1);
       setSocket(nextSocket);
-      import('../api').then(({ getUnreadCount }) => {
-        getUnreadCount().then((data) => setUnreadCount(data.unreadCount)).catch(() => {});
-      }).catch(() => {});
+      void refreshUnreadCount();
       window.dispatchEvent(new Event('xmt-messages-refresh'));
     });
 
@@ -139,11 +172,7 @@ export function useSocket() {
     });
 
     nextSocket.on('unread_count', () => {
-      import('../api').then(({ getUnreadCount }) => {
-        getUnreadCount().then((data) => {
-          setUnreadCount(data.unreadCount);
-        }).catch(() => {});
-      });
+      void refreshUnreadCount();
     });
 
     return () => {

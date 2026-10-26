@@ -8,6 +8,7 @@ import { STATUS_COLORS, STATUS_TEXT } from '../constants';
 import { formatBeijingDate } from '../lib/utils';
 import { celebrateMilestone } from '../utils/confetti';
 import { getKanbanTopicDestination } from '../platform/kanban-navigation';
+import { getPlatformLabel } from '../platform/platform-labels';
 import {
   Clock, CheckCircle, XCircle, FileText, Camera, Send,
   ChevronLeft, ChevronRight, Filter, User as UserIcon, ExternalLink
@@ -191,7 +192,7 @@ export default function Kanban() {
                           <div className="flex flex-wrap gap-1.5 mb-2.5">
                             {topic.platform && (
                               <span className={`text-[10px] px-2 py-0.5 rounded-full ${styles.bgSecondary} ${styles.textSecondary} border ${styles.border}`}>
-                                {topic.platform}
+                                {getPlatformLabel(topic.platform)}
                               </span>
                             )}
                           </div>

@@ -1,4 +1,5 @@
 import type { TopicStatus } from '@shared/types';
+import { createHash } from 'node:crypto';
 import { getTransitionText, isValidAuditAction, isValidTransition, STATUS_TEXT } from '../../utils/workflow';
 import type { TopicPolicy } from './topics.policy';
 import type { CreatorTopicSuggestionLinkRecord, TopicRepository } from './topics.repository';
@@ -24,6 +25,44 @@ const STAGE_RECORD_LABEL: Record<TopicStageRecord, string> = {
   shooting: '成片制作',
   publishing: '发布',
 };
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => item === undefined ? 'null' : stableJson(item)).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+function topicCreateRequestFingerprint(input: LegacyCreateTopicInput) {
+  return createHash('sha256').update(stableJson({
+    title: input.title,
+    description: input.description ?? '',
+    outline: input.outline ?? null,
+    outlineMarkdown: input.outlineMarkdown ?? null,
+    outlineJson: input.outlineJson ?? null,
+    platform: input.platform ?? '',
+    deadline: input.deadline ?? '',
+    assignee_id: input.assignee_id ?? null,
+    creator_suggestion_source: input.creator_suggestion_source ?? null,
+  })).digest('hex');
+}
+
+function assertTopicCreateRequestMatches(
+  existing: { actorId: number; topicId: number; requestFingerprint: string },
+  actorId: number,
+  requestFingerprint: string,
+) {
+  if (Number(existing.actorId) !== actorId || existing.requestFingerprint !== requestFingerprint) {
+    throw new TopicServiceError('TOPIC_CREATE_REQUEST_CONFLICT', '选题请求编号已用于其他账号或内容，请先核实原请求状态。');
+  }
+  return Number(existing.topicId);
+}
 
 function currentStageRecord(status: TopicStatus): TopicStageRecord | null {
   if (status === 'approved' || status === 'production') return 'production';
@@ -104,8 +143,23 @@ export class TopicService {
     return listWorkflowDocumentVersions('topic_outline', id);
   }
 
-  async createTopic(actor: TopicActor, input: LegacyCreateTopicInput) {
+  async getTopicCreateRequestStatus(actor: TopicActor, clientRequestId: string) {
+    const existing = await this.dependencies.repository.findTopicCreateRequest(clientRequestId);
+    if (!existing || Number(existing.actorId) !== Number(actor.id)) return { state: 'not_found' as const };
+    return { state: 'created' as const, topicId: Number(existing.topicId) };
+  }
+
+  async createTopic(actor: TopicActor, input: LegacyCreateTopicInput, clientRequestId?: string) {
     if (!input.title) throw new TopicServiceError('TOPIC_INVALID_INPUT', '选题标题不能为空');
+
+    const normalizedRequestId = clientRequestId?.trim().toLowerCase();
+    const requestFingerprint = normalizedRequestId ? topicCreateRequestFingerprint(input) : undefined;
+    if (normalizedRequestId && requestFingerprint) {
+      const existing = await this.dependencies.repository.findTopicCreateRequest(normalizedRequestId);
+      if (existing) {
+        return { topicId: assertTopicCreateRequestMatches(existing, Number(actor.id), requestFingerprint) };
+      }
+    }
 
     let suggestionAttribution: CreatorTopicSuggestionLinkRecord | undefined;
     if (input.creator_suggestion_source) {
@@ -128,15 +182,34 @@ export class TopicService {
     }
 
     const created = await this.dependencies.repository.withTransaction(async (tx) => {
+      if (normalizedRequestId && requestFingerprint) {
+        const existing = await tx.findTopicCreateRequest(normalizedRequestId);
+        if (existing) {
+          return {
+            topicId: assertTopicCreateRequestMatches(existing, Number(actor.id), requestFingerprint),
+            replayed: true,
+          };
+        }
+      }
       const createdTopicId = await tx.createTopic(mapLegacyCreateInput(input, actor.id));
       if (suggestionAttribution) await tx.linkCreatorTopicSuggestion(createdTopicId, suggestionAttribution);
       await tx.addHistory({ topicId: createdTopicId, action: 'created', comment: '创建选题', operatorId: actor.id });
       await tx.addActivity({ userId: actor.id, action: 'create', target: 'topic', detail: `创建选题: ${input.title}` });
+      if (normalizedRequestId && requestFingerprint) {
+        await tx.recordTopicCreateRequest({
+          clientRequestId: normalizedRequestId,
+          actorId: Number(actor.id),
+          topicId: createdTopicId,
+          requestFingerprint,
+        });
+      }
       const topic = await tx.findDetailById(createdTopicId);
       if (!topic) throw new TopicServiceError('TOPIC_NOT_FOUND', '选题不存在');
       const history = await tx.findHistory(createdTopicId);
-      return { topicId: createdTopicId, topic: toTopicDetail(topic, history) };
+      return { topicId: createdTopicId, topic: toTopicDetail(topic, history), replayed: false };
     });
+
+    if ('replayed' in created && created.replayed) return { topicId: created.topicId };
 
     this.dependencies.notify({
       userId: actor.id,

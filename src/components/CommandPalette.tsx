@@ -39,6 +39,7 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
   const [retryNonce, setRetryNonce] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const navigate = useNavigate();
   const styles = useThemeStyles();
   const user = useAuthStore((state) => state.user);
@@ -146,7 +147,18 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
   }, [filteredItems]);
 
   useEffect(() => {
-    if (isOpen) inputRef.current?.focus();
+    if (isOpen) {
+      const activeElement = document.activeElement;
+      previousFocusRef.current = activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : null;
+      inputRef.current?.focus();
+      return;
+    }
+
+    const previousFocus = previousFocusRef.current;
+    previousFocusRef.current = null;
+    if (previousFocus?.isConnected) previousFocus.focus();
   }, [isOpen]);
 
   useEffect(() => {

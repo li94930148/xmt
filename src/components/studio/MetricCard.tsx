@@ -42,12 +42,12 @@ export default function MetricCard({
     <XMTCard className="p-5">
       <div className="relative z-[1] flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-studio-text-muted">{title}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-studio-text-secondary">{title}</p>
           <div className="mt-3 flex flex-wrap items-baseline gap-2">
             <p className="xmt-data-number break-words text-3xl font-semibold leading-tight tracking-tight text-studio-text-primary">
               {typeof value === 'number' ? <AnimatedNumber value={value} /> : value}
             </p>
-            {unit ? <span className="text-xs font-medium leading-snug text-studio-text-muted">{unit}</span> : null}
+            {unit ? <span className="text-xs font-medium leading-snug text-studio-text-secondary">{unit}</span> : null}
           </div>
           {trend ? (
             <div className="mt-3 flex items-center gap-1 text-xs font-medium text-studio-text-secondary">

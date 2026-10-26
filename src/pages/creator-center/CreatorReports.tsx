@@ -6,6 +6,12 @@ import { ErrorState, LoadingState, PageHeader, Panel, asRecord, formatDate, form
 
 type ReportType='daily'|'weekly'|'monthly';
 const typeLabel={daily:'日报',weekly:'周报',monthly:'月报'};
+const reportWriteReviewStorageKey = (accountId: string) => `xmt:creator-report-write-review:${accountId}`;
+const legacyGenerationReviewStorageKey = (accountId: string) => `xmt:creator-report-generation-review:${accountId}`;
+type ReportWriteReview =
+  | { operation: 'generate'; type: ReportType; baselineIds: number[] }
+  | { operation: 'delete'; reportId: number; reportType: ReportType }
+  | { operation: 'refresh'; message: string };
 export default function CreatorReports() {
   const [reports, setReports] = useState<CreatorReport[]>([]);
   const [accountId, setAccountId] = useState('');
@@ -17,12 +23,18 @@ export default function CreatorReports() {
   const [generating, setGenerating] = useState<ReportType | null>(null);
   const [error, setError] = useState('');
   const [reportListUnavailable, setReportListUnavailable] = useState(false);
-  const [operationNotice, setOperationNotice] = useState<{ message: string; refreshFailed: boolean } | null>(null);
+  const [operationNotice, setOperationNotice] = useState<{ message: string; refreshFailed: boolean; needsReview?: boolean } | null>(null);
+  const [pendingWriteReview, setPendingWriteReview] = useState<ReportWriteReview | null>(null);
+  const [writeReviewReady, setWriteReviewReady] = useState(false);
+  const [reportListInitialized, setReportListInitialized] = useState(false);
   const reportListRequestRef = useRef(0);
   const mutationLock = useRef(false);
+  const pendingWriteReviewRef = useRef<{ accountId: string; review: ReportWriteReview } | null>(null);
 
   const load = useCallback(async () => {
     const reportListRequest = ++reportListRequestRef.current;
+    setReportListInitialized(false);
+    setWriteReviewReady(false);
     setLoading(true);
     setError('');
     const [dataResult, reportsResult] = await Promise.allSettled([getCreatorCenterData(), getCreatorReports()]);
@@ -30,9 +42,17 @@ export default function CreatorReports() {
       return { reportListLoaded: reportsResult.status === 'fulfilled' };
     }
     const errors: string[] = [];
+    let hasStoredWriteReview = false;
     if (dataResult.status === 'fulfilled') {
-      setAccountId(String(dataResult.value.account?.account_id || ''));
+      const loadedAccountId = String(dataResult.value.account?.account_id || '');
+      setAccountId(loadedAccountId);
       setCanManage(dataResult.value.access_level === 'manage');
+      try {
+        hasStoredWriteReview = Boolean(window.localStorage.getItem(reportWriteReviewStorageKey(loadedAccountId))
+          ?? window.localStorage.getItem(legacyGenerationReviewStorageKey(loadedAccountId)));
+      } catch {
+        hasStoredWriteReview = false;
+      }
     } else {
       errors.push(dataResult.reason instanceof Error ? dataResult.reason.message : '创作者中心数据加载失败');
     }
@@ -42,9 +62,10 @@ export default function CreatorReports() {
       setActive((current) => reportsResult.value.find((item) => item.id === current?.id) || reportsResult.value[0] || null);
     } else {
       setReportListUnavailable(true);
-      errors.push(reportsResult.reason instanceof Error ? reportsResult.reason.message : '报告列表加载失败');
+      if (!hasStoredWriteReview) errors.push(reportsResult.reason instanceof Error ? reportsResult.reason.message : '报告列表加载失败');
     }
     setError(errors.join('；'));
+    setReportListInitialized(true);
     setLoading(false);
     return { reportListLoaded: reportsResult.status === 'fulfilled' };
   }, []);
@@ -53,25 +74,93 @@ export default function CreatorReports() {
     void load();
   }, [load]);
 
-  const reloadReports = async () => {
+  useEffect(() => {
+    if (!accountId || !reportListInitialized) return;
+    setWriteReviewReady(false);
+    const storageKey = reportWriteReviewStorageKey(accountId);
+    let restored: ReportWriteReview | null = null;
+    try {
+      const raw = window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(legacyGenerationReviewStorageKey(accountId));
+      if (raw) {
+        const parsed = JSON.parse(raw) as { operation?: unknown; type?: unknown; baselineIds?: unknown; reportId?: unknown; reportType?: unknown; message?: unknown };
+        const isReportType = (value: unknown): value is ReportType => value === 'daily' || value === 'weekly' || value === 'monthly';
+        if (parsed.operation === 'refresh' && typeof parsed.message === 'string' && parsed.message.length <= 300) {
+          restored = { operation: 'refresh', message: parsed.message };
+        } else if (parsed.operation === 'delete' && isReportType(parsed.reportType)
+          && typeof parsed.reportId === 'number' && Number.isSafeInteger(parsed.reportId)) {
+          restored = { operation: 'delete', reportId: parsed.reportId, reportType: parsed.reportType };
+        } else if ((parsed.operation === 'generate' || parsed.operation === undefined) && isReportType(parsed.type)
+          && Array.isArray(parsed.baselineIds)
+          && parsed.baselineIds.length <= 100
+          && parsed.baselineIds.every((id) => typeof id === 'number' && Number.isSafeInteger(id))) {
+          restored = { operation: 'generate', type: parsed.type, baselineIds: parsed.baselineIds as number[] };
+        }
+      }
+    } catch {
+      restored = null;
+    }
+    if (!restored && pendingWriteReviewRef.current?.accountId === accountId) {
+      restored = pendingWriteReviewRef.current.review;
+    }
+    pendingWriteReviewRef.current = restored ? { accountId, review: restored } : null;
+    if (restored?.operation === 'refresh' && !reportListUnavailable) {
+      try {
+        window.localStorage.removeItem(reportWriteReviewStorageKey(accountId));
+        window.localStorage.removeItem(legacyGenerationReviewStorageKey(accountId));
+      } catch {
+        // The successful read still confirms the list for this page.
+      }
+      pendingWriteReviewRef.current = null;
+      setPendingWriteReview(null);
+      setOperationNotice({ message: restored.message, refreshFailed: false });
+      setWriteReviewReady(true);
+      return;
+    }
+    setPendingWriteReview(restored);
+    if (restored) {
+      let message: string;
+      if (restored.operation === 'refresh') {
+        message = `${restored.message}列表暂时无法读取，请只读重读后再继续操作。`;
+      } else if (restored.operation === 'generate') {
+        const newReports = reports.filter((report) => report.type === restored.type && !restored.baselineIds.includes(report.id));
+        message = reportListUnavailable
+          ? `此前运营${typeLabel[restored.type]}生成请求未获确认，报告列表暂时无法读取。请只读核实，暂不要重复生成。`
+          : newReports.length > 0
+            ? `此前运营${typeLabel[restored.type]}生成请求未获确认；重新读取后发现 ${newReports.length} 份新报告。请先核对，再决定是否继续。`
+            : `此前运营${typeLabel[restored.type]}生成请求未获确认；报告列表已重新读取但暂未发现新报告。请核对后再决定是否继续。`;
+      } else if (reportListUnavailable) {
+        message = `此前运营${typeLabel[restored.reportType]}删除请求未获确认，报告列表暂时无法读取。请只读核实，暂不要重复删除。`;
+      } else if (reports.some((report) => report.id === restored.reportId)) {
+        message = `此前运营${typeLabel[restored.reportType]}删除请求未获确认；该报告仍在列表中，请核对后再决定是否继续。`;
+      } else {
+        message = `此前运营${typeLabel[restored.reportType]}删除请求未获确认；该报告已不在当前列表，请核对删除状态后再决定是否继续。`;
+      }
+      setOperationNotice({ message, refreshFailed: reportListUnavailable, needsReview: true });
+    } else {
+      setOperationNotice((current) => current?.needsReview ? null : current);
+    }
+    setWriteReviewReady(true);
+  }, [accountId, reportListInitialized, reportListUnavailable, reports]);
+
+  const reloadReports = async (): Promise<CreatorReport[] | null> => {
     const reportListRequest = ++reportListRequestRef.current;
     setLoading(true);
     setError('');
     try {
       const items = await getCreatorReports();
-      if (reportListRequest === reportListRequestRef.current) {
-        setReportListUnavailable(false);
-        setReports(items);
-        setActive((current) => items.find((item) => item.id === current?.id) || items[0] || null);
-      }
-      return true;
+      if (reportListRequest !== reportListRequestRef.current) return null;
+      setReportListUnavailable(false);
+      setReports(items);
+      setReportListInitialized(true);
+      setActive((current) => items.find((item) => item.id === current?.id) || items[0] || null);
+      return items;
     } catch (cause) {
       if (reportListRequest === reportListRequestRef.current) {
         setReportListUnavailable(true);
+        setReportListInitialized(true);
         setError(cause instanceof Error ? cause.message : '报告加载失败');
-        return false;
       }
-      return true;
+      return null;
     } finally {
       if (reportListRequest === reportListRequestRef.current) setLoading(false);
     }
@@ -85,25 +174,119 @@ export default function CreatorReports() {
   };
 
   const refreshAfterMutation = async (message: string) => {
+    const review: ReportWriteReview = { operation: 'refresh', message };
+    pendingWriteReviewRef.current = { accountId, review };
+    setPendingWriteReview(review);
+    try {
+      window.localStorage.setItem(reportWriteReviewStorageKey(accountId), JSON.stringify(review));
+    } catch {
+      // The in-memory lock still protects this page if browser storage is unavailable.
+    }
     setOperationNotice({ message, refreshFailed: false });
     const refreshed = await reloadReports();
-    if (!refreshed) {
-      setOperationNotice({ message, refreshFailed: true });
+    if (refreshed) {
+      try {
+        window.localStorage.removeItem(reportWriteReviewStorageKey(accountId));
+        window.localStorage.removeItem(legacyGenerationReviewStorageKey(accountId));
+      } catch {
+        // The successful read still confirms the list for this page.
+      }
+      pendingWriteReviewRef.current = null;
+      setPendingWriteReview(null);
+      return;
     }
+    setError('');
+    setOperationNotice({ message, refreshFailed: true });
+  };
+
+  const retryOperationRead = async () => {
+    if (loading || mutationLock.current) return;
+    const items = await reloadReports();
+    setError('');
+    if (!items) {
+      setOperationNotice((current) => current ? { ...current, refreshFailed: true } : current);
+      return;
+    }
+    if (pendingWriteReview?.operation === 'generate') {
+      const newReports = items.filter((report) => report.type === pendingWriteReview.type && !pendingWriteReview.baselineIds.includes(report.id));
+      const message = newReports.length > 0
+        ? `运营${typeLabel[pendingWriteReview.type]}生成请求未收到确认；列表中出现 ${newReports.length} 份新报告，最新报告已显示。请先核对，再决定是否继续。`
+        : `运营${typeLabel[pendingWriteReview.type]}生成请求未收到确认；重新读取后暂未发现新报告。请先核对列表，再决定是否继续。`;
+      setOperationNotice({ message, refreshFailed: false, needsReview: true });
+      return;
+    }
+    if (pendingWriteReview?.operation === 'delete') {
+      const stillPresent = items.some((report) => report.id === pendingWriteReview.reportId);
+      const message = stillPresent
+        ? `运营${typeLabel[pendingWriteReview.reportType]}删除请求未收到确认；该报告仍在列表中，请核对后再决定是否继续。`
+        : `运营${typeLabel[pendingWriteReview.reportType]}删除请求未收到确认；该报告已不在当前列表，请核对删除状态后再决定是否继续。`;
+      setOperationNotice({ message, refreshFailed: false, needsReview: true });
+      return;
+    }
+    if (pendingWriteReview?.operation === 'refresh') {
+      try {
+        window.localStorage.removeItem(reportWriteReviewStorageKey(accountId));
+        window.localStorage.removeItem(legacyGenerationReviewStorageKey(accountId));
+      } catch {
+        // The successful read still confirms the list for this page.
+      }
+      pendingWriteReviewRef.current = null;
+      setPendingWriteReview(null);
+      setOperationNotice({ message: pendingWriteReview.message, refreshFailed: false });
+      return;
+    }
+    setOperationNotice((current) => current ? { ...current, refreshFailed: false } : current);
+  };
+
+  const acknowledgeWriteReview = () => {
+    try {
+      if (accountId) {
+        window.localStorage.removeItem(reportWriteReviewStorageKey(accountId));
+        window.localStorage.removeItem(legacyGenerationReviewStorageKey(accountId));
+      }
+    } catch {
+      // Keep the current page usable if browser storage is unavailable.
+    }
+    pendingWriteReviewRef.current = null;
+    setPendingWriteReview(null);
+    setOperationNotice(null);
   };
 
   const generate = async (type: ReportType) => {
-    if (mutationLock.current) return;
+    if (mutationLock.current || deleting || !writeReviewReady || pendingWriteReview || operationNotice?.refreshFailed) return;
     mutationLock.current = true;
     setGenerating(type);
     setError('');
     setOperationNotice(null);
+    const baselineIds = reports.map((report) => report.id);
     try {
       await generateCreatorReport(type, accountId);
       reportListRequestRef.current += 1;
       await refreshAfterMutation(`运营${typeLabel[type]}已生成。`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '报告生成失败');
+    } catch {
+      const review: ReportWriteReview = { operation: 'generate', type, baselineIds };
+      pendingWriteReviewRef.current = { accountId, review };
+      setPendingWriteReview(review);
+      try {
+        window.localStorage.setItem(reportWriteReviewStorageKey(accountId), JSON.stringify(review));
+      } catch {
+        // The in-memory lock still protects this page if storage is unavailable.
+      }
+      const items = await reloadReports();
+      setError('');
+      if (!items) {
+        setOperationNotice({
+          message: `运营${typeLabel[type]}生成请求未收到确认，报告列表也暂时无法读取。请仅读取核实，暂不要重复生成。`,
+          refreshFailed: true,
+          needsReview: true,
+        });
+      } else {
+        const newReports = items.filter((report) => report.type === type && !baselineIds.includes(report.id));
+        const message = newReports.length > 0
+          ? `运营${typeLabel[type]}生成请求未收到确认；列表中出现 ${newReports.length} 份新报告，最新报告已显示。请先核对，再决定是否继续。`
+          : `运营${typeLabel[type]}生成请求未收到确认；重新读取后暂未发现新报告。请先核对列表，再决定是否继续。`;
+        setOperationNotice({ message, refreshFailed: false, needsReview: true });
+      }
     } finally {
       mutationLock.current = false;
       setGenerating(null);
@@ -112,7 +295,7 @@ export default function CreatorReports() {
 
   const remove = async () => {
     const removed = deleting;
-    if (!removed || mutationLock.current) return;
+    if (!removed || mutationLock.current || !writeReviewReady || pendingWriteReview || operationNotice?.refreshFailed) return;
     mutationLock.current = true;
     setDeleteBusy(true);
     setError('');
@@ -125,8 +308,29 @@ export default function CreatorReports() {
       setActive((current) => current?.id === removed.id ? remaining[0] || null : current);
       setDeleting(null);
       await refreshAfterMutation(`运营${typeLabel[removed.type]}已删除。`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '报告删除失败');
+    } catch {
+      const review: ReportWriteReview = { operation: 'delete', reportId: removed.id, reportType: removed.type };
+      pendingWriteReviewRef.current = { accountId, review };
+      setPendingWriteReview(review);
+      setDeleting(null);
+      setError('');
+      try {
+        window.localStorage.setItem(reportWriteReviewStorageKey(accountId), JSON.stringify(review));
+      } catch {
+        // The in-memory lock still protects this page if browser storage is unavailable.
+      }
+      const items = await reloadReports();
+      setError('');
+      const stillPresent = items?.some((report) => report.id === removed.id) ?? false;
+      setOperationNotice({
+        message: !items
+          ? `运营${typeLabel[removed.type]}删除请求未收到确认，报告列表也暂时无法读取。请只读核实，暂不要重复删除。`
+          : stillPresent
+            ? `运营${typeLabel[removed.type]}删除请求未收到确认；该报告仍在列表中，请核对后再决定是否继续。`
+            : `运营${typeLabel[removed.type]}删除请求未收到确认；该报告已不在当前列表，请核对删除状态后再决定是否继续。`,
+        refreshFailed: !items,
+        needsReview: true,
+      });
     } finally {
       mutationLock.current = false;
       setDeleteBusy(false);
@@ -139,10 +343,12 @@ export default function CreatorReports() {
     <PageHeader
       title="运营复盘报告"
       description="账号、作品、累计播放和趋势统一使用抖音运营中心数据"
-      actions={<div className="flex flex-wrap gap-2">{(['daily', 'weekly', 'monthly'] as ReportType[]).map((type) => <button type="button" key={type} disabled={!canManage || Boolean(generating) || deleteBusy || loading} onClick={() => void generate(type)} className="inline-flex h-10 items-center gap-2 xmt-btn xmt-btn-primary disabled:opacity-45">{generating === type ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}生成{typeLabel[type]}</button>)}</div>}
+      actions={<div className="flex flex-wrap gap-2">{(['daily', 'weekly', 'monthly'] as ReportType[]).map((type) => <button type="button" key={type} disabled={!canManage || !writeReviewReady || Boolean(generating) || Boolean(deleting) || deleteBusy || loading || Boolean(pendingWriteReview) || Boolean(operationNotice?.refreshFailed)} onClick={() => void generate(type)} className="inline-flex h-10 items-center gap-2 xmt-btn xmt-btn-primary disabled:opacity-45">{generating === type ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}生成{typeLabel[type]}</button>)}</div>}
     />
-    {operationNotice ? <div role="status" className={`rounded-xl border p-4 text-sm ${operationNotice.refreshFailed ? 'border-studio-amber/30 bg-studio-amber/10 text-studio-amber-contrast' : 'border-studio-success/30 bg-studio-success/10 text-studio-success-contrast'}`}>
-      {operationNotice.message}{operationNotice.refreshFailed ? ' 列表刷新失败，请重新加载报告；不要重复执行刚才的操作。' : ''}
+    {operationNotice ? <div role={operationNotice.refreshFailed || operationNotice.needsReview ? 'alert' : 'status'} className={`space-y-3 rounded-xl border p-4 text-sm ${operationNotice.refreshFailed || operationNotice.needsReview ? 'border-studio-amber/30 bg-studio-amber/10 text-studio-amber-contrast' : 'border-studio-success/30 bg-studio-success/10 text-studio-success-contrast'}`}>
+      <p>{operationNotice.message}{operationNotice.refreshFailed && !operationNotice.needsReview ? ' 列表刷新失败，请重新加载报告；不要重复执行刚才的操作。' : ''}</p>
+      {operationNotice.refreshFailed || pendingWriteReview ? <button type="button" onClick={() => void retryOperationRead()} disabled={!writeReviewReady || loading || Boolean(deleting) || deleteBusy} className="xmt-btn xmt-btn-secondary inline-flex min-h-10 items-center gap-2 px-4 disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />只重新读取报告</button> : null}
+      {operationNotice.needsReview && !operationNotice.refreshFailed ? <button type="button" onClick={acknowledgeWriteReview} disabled={loading || deleteBusy} className="xmt-btn xmt-btn-secondary inline-flex min-h-10 items-center gap-2 px-4 disabled:opacity-60">我已核对，允许继续操作</button> : null}
     </div> : null}
     {error ? <div role="alert" className="space-y-3">
       <ErrorState message={error} />
@@ -156,20 +362,20 @@ export default function CreatorReports() {
           {reports.map((report) => <div key={report.id} className={`flex items-stretch rounded-xl border transition ${active?.id === report.id ? 'border-studio-cyan bg-studio-cyan/5' : 'border-studio-border bg-studio-surface hover:border-studio-cyan/40'}`}>
             <button type="button" onClick={() => setActive(report)} className="min-w-0 flex-1 p-4 text-left">
               <div className="flex items-center justify-between"><span className="font-medium">运营{typeLabel[report.type]}</span><FileText className="h-4 w-4 text-studio-text-muted" /></div>
-              <p className="mt-2 text-xs text-studio-text-muted">{formatDate(report.created_at, true)}</p>
+              <p className="mt-2 text-xs text-studio-text-secondary">{formatDate(report.created_at, true)}</p>
             </button>
-            {canManage ? <button type="button" aria-label={`删除运营${typeLabel[report.type]}`} disabled={deleteBusy || Boolean(generating) || loading} onClick={() => setDeleting(report)} className="m-2 grid w-9 place-items-center rounded-lg text-studio-text-muted transition hover:bg-studio-coral/10 hover:text-studio-coral disabled:opacity-45"><Trash2 className="h-4 w-4" /></button> : null}
+            {canManage ? <button type="button" aria-label={`删除运营${typeLabel[report.type]}`} disabled={!writeReviewReady || deleteBusy || Boolean(generating) || loading || Boolean(pendingWriteReview) || Boolean(operationNotice?.refreshFailed)} onClick={() => setDeleting(report)} className="m-2 grid h-10 min-h-10 w-10 min-w-10 place-items-center rounded-lg text-studio-text-muted transition hover:bg-studio-coral/10 hover:text-studio-coral disabled:opacity-45"><Trash2 className="h-4 w-4" /></button> : null}
           </div>)}
-          {reports.length === 0 ? <p className="py-10 text-center text-sm text-studio-text-muted">{reportListUnavailable ? '报告列表暂时无法读取；恢复读取后再确认是否为空。' : operationNotice?.refreshFailed ? '当前列表尚未刷新，请重新加载确认。' : '尚未生成报告'}</p> : null}
+          {reports.length === 0 ? <p className="py-10 text-center text-sm text-studio-text-secondary">{reportListUnavailable ? '报告列表暂时无法读取；恢复读取后再确认是否为空。' : operationNotice?.refreshFailed ? '当前列表尚未刷新，请重新加载确认。' : '尚未生成报告'}</p> : null}
         </div>
       </Panel>
-      {active ? <ReportContent report={active} /> : <Panel title="选择报告"><p className="py-20 text-center text-sm text-studio-text-muted">生成或选择一份运营分析报告</p></Panel>}
+      {active ? <ReportContent report={active} /> : <Panel title="选择报告"><p className="py-20 text-center text-sm text-studio-text-secondary">生成或选择一份运营分析报告</p></Panel>}
     </div>
     <ConfirmModal open={Boolean(deleting)} title="删除复盘报告" description="删除后无法恢复，但不会影响账号、作品和历史快照数据。" confirmText="删除报告" variant="danger" loading={deleteBusy} onCancel={() => setDeleting(null)} onConfirm={() => void remove()} />
   </div>;
 }
-function ReportContent({report}:{report:CreatorReport}){const content=asRecord(report.content),account=asRecord(content.account_performance),health=asRecord(account.health),current=asRecord(account.current),growth=asRecord(content.growth),works=asRecord(content.work_performance),coverage=asRecord(content.data_coverage),levels=asRecord(works.level_distribution),anomalies=Array.isArray(content.anomalies)?content.anomalies:[],top=Array.isArray(content.excellent_works)?content.excellent_works:[],low=Array.isArray(content.low_efficiency_works)?content.low_efficiency_works:[],isUnified=num(content.report_version)>=2;return <div className="space-y-6">{!isUnified?<div className="rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">这是一份旧口径报告，部分账号指标可能缺失。请重新生成统一口径报告，确认后可删除旧报告。</div>:null}<Panel title={`运营${typeLabel[report.type]}`} description={`生成于 ${formatDate(report.created_at,true)} · ${isUnified?'统一运营数据口径':'旧数据口径'}`}><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Summary label="账号健康度" value={`${num(health.score).toFixed(1)} 分`} icon={BarChart3}/><Summary label={isUnified?'当前累计播放':'周期播放变化'} value={isUnified?formatNumber(current.play_count):signed(growth.plays)} icon={TrendingUp}/><Summary label="当前粉丝" value={current.fans_count==null?'暂无数据':formatNumber(current.fans_count)} icon={Users}/><Summary label="周期发布" value={`${formatNumber(works.published)} 条`} icon={CalendarDays}/></div></Panel>{isUnified?<Panel title="周期变化" description="日快照期末减期初；无可靠快照时明确显示暂无"><div className="grid gap-4 sm:grid-cols-3"><Summary label="播放增长" value={signedNullable(growth.plays)} icon={TrendingUp}/><Summary label="粉丝增长" value={signedNullable(growth.fans)} icon={Users}/><Summary label="互动增长" value={signedNullable(growth.interactions)} icon={BarChart3}/></div></Panel>:null}<Panel title="作品表现" description={`共 ${formatNumber(works.total)} 条去重作品，按透明评分规则汇总`}><div className="grid gap-3 sm:grid-cols-4">{(['viral','excellent','normal','low'] as const).map(level=><div key={level} className="rounded-xl bg-studio-surface p-4"><span className={`rounded-md px-2 py-1 text-xs ${levelMeta[level].className}`}>{levelMeta[level].label}</span><p className="mt-4 text-2xl font-semibold">{formatNumber(levels[level])}</p></div>)}</div></Panel>{isUnified?<Panel title="数据完整度" description={String(coverage.metric_definition||'')}><div className="grid gap-3 text-sm sm:grid-cols-3"><div className="rounded-xl bg-studio-surface p-4"><span className="text-studio-text-muted">日快照</span><p className="mt-2 font-semibold">{formatNumber(coverage.snapshot_count)} 个</p></div><div className="rounded-xl bg-studio-surface p-4"><span className="text-studio-text-muted">统计区间</span><p className="mt-2 font-semibold">{String(coverage.period_start||'暂无')} 至 {String(coverage.period_end||'暂无')}</p></div><div className="rounded-xl bg-studio-surface p-4"><span className="text-studio-text-muted">粉丝数据</span><p className="mt-2 font-semibold">{coverage.fans_available?'可用':'当前采集未提供'}</p></div></div></Panel>:null}<Panel title="异常数据" description="固定规则检测，不生成推测结论">{anomalies.length?<div className="space-y-2">{anomalies.map((item,index)=>{const row=asRecord(item);return <div key={index} className="flex gap-3 rounded-xl bg-studio-amber/8 p-4 text-sm"><AlertTriangle className="h-5 w-5 shrink-0 text-studio-amber"/><span>{String(row.message||'检测到指标异常')}</span></div>})}</div>:<p className="py-8 text-center text-sm text-studio-text-muted">本周期未检测到显著异常</p>}</Panel><section className="grid gap-6 lg:grid-cols-2"><WorkList title="优秀作品" items={top} icon={TrendingUp}/><WorkList title="低效作品" items={low} icon={TrendingDown}/></section><p className="text-center text-xs text-studio-text-muted">{String(content.methodology||'全部结论来自 Creator Data Center 已入仓数据。')}</p></div>}
-function Summary({label,value,icon:Icon}:{label:string;value:string;icon:typeof BarChart3}){return <div className="rounded-xl bg-studio-surface p-4"><div className="flex items-center justify-between text-xs text-studio-text-muted"><span>{label}</span><Icon className="h-4 w-4"/></div><p className="mt-3 text-xl font-semibold">{value}</p></div>}
-function WorkList({title,items,icon:Icon}:{title:string;items:unknown[];icon:typeof TrendingUp}){return <Panel title={title} description="按综合评分排序"><div className="space-y-2">{items.map((item,index)=>{const row=asRecord(item);return <div key={index} className="flex items-center gap-3 rounded-xl bg-studio-surface p-3"><Icon className="h-4 w-4 text-studio-cyan"/><span className="min-w-0 flex-1 truncate text-sm">{String(row.title||'未命名作品')}</span>{row.play_count!=null?<span className="text-xs text-studio-text-muted">{formatNumber(row.play_count)} 播放</span>:null}<b>{num(row.score).toFixed(1)}</b></div>})}{items.length===0?<p className="py-8 text-center text-sm text-studio-text-muted">暂无周期作品</p>:null}</div></Panel>}
+function ReportContent({report}:{report:CreatorReport}){const content=asRecord(report.content),account=asRecord(content.account_performance),health=asRecord(account.health),current=asRecord(account.current),growth=asRecord(content.growth),works=asRecord(content.work_performance),coverage=asRecord(content.data_coverage),levels=asRecord(works.level_distribution),anomalies=Array.isArray(content.anomalies)?content.anomalies:[],top=Array.isArray(content.excellent_works)?content.excellent_works:[],low=Array.isArray(content.low_efficiency_works)?content.low_efficiency_works:[],isUnified=num(content.report_version)>=2;return <div className="space-y-6">{!isUnified?<div className="rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">这是一份旧口径报告，部分账号指标可能缺失。请重新生成统一口径报告，确认后可删除旧报告。</div>:null}<Panel title={`运营${typeLabel[report.type]}`} description={`生成于 ${formatDate(report.created_at,true)} · ${isUnified?'统一运营数据口径':'旧数据口径'}`}><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Summary label="账号健康度" value={`${num(health.score).toFixed(1)} 分`} icon={BarChart3}/><Summary label={isUnified?'当前累计播放':'周期播放变化'} value={isUnified?formatNumber(current.play_count):signed(growth.plays)} icon={TrendingUp}/><Summary label="当前粉丝" value={current.fans_count==null?'暂无数据':formatNumber(current.fans_count)} icon={Users}/><Summary label="周期发布" value={`${formatNumber(works.published)} 条`} icon={CalendarDays}/></div></Panel>{isUnified?<Panel title="周期变化" description="日快照期末减期初；无可靠快照时明确显示暂无"><div className="grid gap-4 sm:grid-cols-3"><Summary label="播放增长" value={signedNullable(growth.plays)} icon={TrendingUp}/><Summary label="粉丝增长" value={signedNullable(growth.fans)} icon={Users}/><Summary label="互动增长" value={signedNullable(growth.interactions)} icon={BarChart3}/></div></Panel>:null}<Panel title="作品表现" description={`共 ${formatNumber(works.total)} 条去重作品，按透明评分规则汇总`}><div className="grid gap-3 sm:grid-cols-4">{(['viral','excellent','normal','low'] as const).map(level=><div key={level} className="rounded-xl bg-studio-surface p-4"><span className={`rounded-md px-2 py-1 text-xs ${levelMeta[level].className}`}>{levelMeta[level].label}</span><p className="mt-4 text-2xl font-semibold">{formatNumber(levels[level])}</p></div>)}</div></Panel>{isUnified?<Panel title="数据完整度" description={String(coverage.metric_definition||'')}><div className="grid gap-3 text-sm sm:grid-cols-3"><div className="rounded-xl bg-studio-surface p-4"><span className="text-studio-text-secondary">日快照</span><p className="mt-2 font-semibold">{formatNumber(coverage.snapshot_count)} 个</p></div><div className="rounded-xl bg-studio-surface p-4"><span className="text-studio-text-secondary">统计区间</span><p className="mt-2 font-semibold">{String(coverage.period_start||'暂无')} 至 {String(coverage.period_end||'暂无')}</p></div><div className="rounded-xl bg-studio-surface p-4"><span className="text-studio-text-secondary">粉丝数据</span><p className="mt-2 font-semibold">{coverage.fans_available?'可用':'当前采集未提供'}</p></div></div></Panel>:null}<Panel title="异常数据" description="固定规则检测，不生成推测结论">{anomalies.length?<div className="space-y-2">{anomalies.map((item,index)=>{const row=asRecord(item);return <div key={index} className="flex gap-3 rounded-xl bg-studio-amber/8 p-4 text-sm"><AlertTriangle className="h-5 w-5 shrink-0 text-studio-amber"/><span>{String(row.message||'检测到指标异常')}</span></div>})}</div>:<p className="py-8 text-center text-sm text-studio-text-secondary">本周期未检测到显著异常</p>}</Panel><section className="grid gap-6 lg:grid-cols-2"><WorkList title="优秀作品" items={top} icon={TrendingUp}/><WorkList title="低效作品" items={low} icon={TrendingDown}/></section><p className="text-center text-xs text-studio-text-secondary">{String(content.methodology||'全部结论来自 Creator Data Center 已入仓数据。')}</p></div>}
+function Summary({label,value,icon:Icon}:{label:string;value:string;icon:typeof BarChart3}){return <div className="rounded-xl bg-studio-surface p-4"><div className="flex items-center justify-between text-xs text-studio-text-secondary"><span>{label}</span><Icon className="h-4 w-4"/></div><p className="mt-3 text-xl font-semibold">{value}</p></div>}
+function WorkList({title,items,icon:Icon}:{title:string;items:unknown[];icon:typeof TrendingUp}){return <Panel title={title} description="按综合评分排序"><div className="space-y-2">{items.map((item,index)=>{const row=asRecord(item);return <div key={index} className="flex items-center gap-3 rounded-xl bg-studio-surface p-3"><Icon className="h-4 w-4 text-studio-cyan"/><span className="min-w-0 flex-1 truncate text-sm">{String(row.title||'未命名作品')}</span>{row.play_count!=null?<span className="text-xs text-studio-text-secondary">{formatNumber(row.play_count)} 播放</span>:null}<b>{num(row.score).toFixed(1)}</b></div>})}{items.length===0?<p className="py-8 text-center text-sm text-studio-text-secondary">暂无周期作品</p>:null}</div></Panel>}
 const signed=(value:unknown)=>`${num(value)>=0?'+':''}${formatNumber(value)}`;
 const signedNullable=(value:unknown)=>value==null?'暂无数据':signed(value);

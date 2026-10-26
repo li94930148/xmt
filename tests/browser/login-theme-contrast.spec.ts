@@ -108,8 +108,9 @@ async function contrast(locator: import('playwright').Locator) {
   };
 }
 
-const browser = await chromium.launch({ headless: true });
-try {
+const serveOnly = process.env.XMT_LOGIN_THEME_QA_SERVE === '1';
+
+async function runBrowserSuite(browser: import('playwright').Browser) {
   for (const layout of ['style1', 'style2', 'style3'] as const) {
     for (const theme of ['light', 'dark'] as const) {
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
@@ -120,6 +121,7 @@ try {
       page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
       await page.goto(`${base}/__qa/${layout}/${theme}`);
       await page.getByRole('heading', { name: '欢迎回来', exact: true }).waitFor();
+      assert.equal(await page.getByRole('main').count(), 1, `${layout}/${theme} login exposes its content through one main landmark`);
       await page.waitForFunction((mode) => document.documentElement.dataset.theme === mode, theme);
       const heroFallback = page.locator('.fixed.inset-0.z-0').locator('div.absolute.inset-0').first().locator('div.absolute.inset-0').first();
       const heroFallbackClass = await heroFallback.getAttribute('class');
@@ -171,10 +173,21 @@ try {
         await page.locator('input[autocomplete="username"]').fill('theme-qa-forced');
         await page.locator('input[autocomplete="current-password"]').fill('initial-password');
         const forcedLoginResponse = page.waitForResponse((response) => response.url().endsWith('/api/auth/login') && response.status() === 200);
-        await page.getByRole('button', { name: '登录', exact: true }).click();
+        const loginButton = page.getByRole('button', { name: '登录', exact: true });
+        await loginButton.click();
         await forcedLoginResponse;
         const passwordDialog = page.getByRole('dialog', { name: '请先修改初始密码' });
         await passwordDialog.waitFor();
+        const loginBackground = page.getByTestId('login-background');
+        assert.equal(await loginBackground.getAttribute('aria-hidden'), 'true', `${theme} login content is hidden from assistive technology while the modal is open`);
+        assert.equal(await loginBackground.evaluate((element) => (element as HTMLElement).inert), true, `${theme} login content is inert while the modal is open`);
+        const currentPassword = passwordDialog.getByPlaceholder('当前密码');
+        const updateButton = passwordDialog.getByRole('button', { name: '更新密码' });
+        await page.waitForFunction(() => (document.activeElement as HTMLInputElement | null)?.placeholder === '当前密码');
+        await page.keyboard.press('Shift+Tab');
+        assert.equal(await updateButton.evaluate((button) => button === document.activeElement), true, `${theme} Shift+Tab from the first dialog control wraps to the last control`);
+        await page.keyboard.press('Tab');
+        assert.equal(await currentPassword.evaluate((input) => input === document.activeElement), true, `${theme} Tab from the last dialog control wraps to the first control`);
         const passwordPanel = page.getByTestId('first-login-password-panel');
         const panelTokens = await passwordPanel.evaluate((element) => {
           const style = getComputedStyle(element);
@@ -198,7 +211,6 @@ try {
           assert.ok(result.ratio >= 4.5, `${theme} first-login password dialog text contrast=${result.ratio.toFixed(2)} expected>=4.5 ${JSON.stringify(result)}`);
         }
         const cancelButton = passwordDialog.getByRole('button', { name: '退出登录' });
-        const updateButton = passwordDialog.getByRole('button', { name: '更新密码' });
         assert.ok((await cancelButton.getAttribute('class'))?.includes('xmt-btn-secondary'), `${theme} cancel action uses the Studio secondary button`);
         assert.ok((await updateButton.getAttribute('class'))?.includes('xmt-btn-primary'), `${theme} update action uses the Studio primary button`);
         const primaryButtonStops = await updateButton.evaluate((button) => {
@@ -218,7 +230,31 @@ try {
         }
         if (theme === 'light') await page.screenshot({ path: '/tmp/xmt-login-first-password-light.png', fullPage: true });
         await passwordDialog.getByRole('button', { name: '退出登录' }).click();
-        await page.getByRole('button', { name: '登录', exact: true }).waitFor();
+        await loginButton.waitFor();
+        assert.equal(await loginButton.evaluate((button) => button === document.activeElement), true, `${theme} cancel restores focus to the login control that opened the dialog`);
+        assert.equal(await loginBackground.getAttribute('aria-hidden'), null, `${theme} login content is exposed again after cancel`);
+        assert.equal(await loginBackground.evaluate((element) => (element as HTMLElement).inert), false, `${theme} login content is operable again after cancel`);
+
+        await page.locator('input[autocomplete="username"]').fill('theme-qa-forced');
+        await page.locator('input[autocomplete="current-password"]').fill('initial-password');
+        const reopenedLoginResponse = page.waitForResponse((response) => response.url().endsWith('/api/auth/login') && response.status() === 200);
+        await loginButton.click();
+        await reopenedLoginResponse;
+        await passwordDialog.waitFor();
+        await passwordDialog.getByPlaceholder('新密码（至少 6 位）').fill('12345');
+        await passwordDialog.getByPlaceholder('确认新密码').fill('12345');
+        await updateButton.click();
+        await passwordDialog.waitFor();
+        assert.equal(await loginBackground.evaluate((element) => (element as HTMLElement).inert), true, `${theme} validation errors keep the login background inert`);
+
+        await passwordDialog.getByPlaceholder('新密码（至少 6 位）').fill('updated-password');
+        await passwordDialog.getByPlaceholder('确认新密码').fill('updated-password');
+        const passwordUpdateResponse = page.waitForResponse((response) => response.url().endsWith('/api/auth/change-password') && response.status() === 200);
+        await passwordDialog.getByRole('button', { name: '更新密码' }).click();
+        await passwordUpdateResponse;
+        await passwordDialog.waitFor({ state: 'detached' });
+        assert.equal(await loginButton.evaluate((button) => button === document.activeElement), true, `${theme} successful update restores focus to the login control that opened the dialog`);
+        assert.equal(await loginBackground.evaluate((element) => (element as HTMLElement).inert), false, `${theme} successful update restores login interactivity`);
       }
       await page.getByRole('button', { name: layout === 'style1' ? '登录' : '进入系统', exact: true }).waitFor();
       assert.deepEqual(errors, [], `${layout}/${theme} should render without browser errors`);
@@ -239,6 +275,20 @@ try {
         assert.equal(await submit.isVisible(), true, `${layout}/${theme} primary login action remains visible at ${width}px`);
         assert.equal(await page.locator('input[autocomplete="username"]').isVisible(), true, `${layout}/${theme} account field remains visible at ${width}px`);
         assert.equal(await page.locator('input[autocomplete="current-password"]').isVisible(), true, `${layout}/${theme} password field remains visible at ${width}px`);
+        if (layout !== 'style2') {
+          const passwordToggle = page.getByRole('button', { name: '切换密码可见状态' });
+          const passwordField = page.locator('input[autocomplete="current-password"]');
+          const targetSize = await passwordToggle.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return { width: rect.width, height: rect.height };
+          });
+          assert.ok(targetSize.width >= 40 && targetSize.height >= 40, `${layout}/${theme} password visibility control provides a 40px touch target at ${width}px: ${JSON.stringify(targetSize)}`);
+          const previousType = await passwordField.getAttribute('type');
+          await passwordToggle.click();
+          assert.equal(await passwordField.getAttribute('type'), previousType === 'password' ? 'text' : 'password', `${layout}/${theme} password visibility control toggles the field type at ${width}px`);
+          await passwordToggle.click();
+          assert.equal(await passwordField.getAttribute('type'), previousType, `${layout}/${theme} password visibility control restores the masked field at ${width}px`);
+        }
         const interactiveBounds = await page.locator('input[autocomplete="username"], input[autocomplete="current-password"], button[aria-label="切换密码可见状态"], button[type="submit"]').evaluateAll((elements) => elements.map((element) => {
           const rect = element.getBoundingClientRect();
           return { left: rect.left, right: rect.right };
@@ -251,8 +301,24 @@ try {
     }
   }
   console.log('Login theme contrast browser test passed: style1/style2/style3 across light/dark themes, 4.5:1 key text contrast, no browser errors.');
+}
+
+try {
+  if (serveOnly) {
+    console.log(`Login theme QA fixture ready at ${base}/__qa/style1/light (synthetic API only). Press Ctrl+C to stop.`);
+    await new Promise<void>((resolve) => {
+      process.once('SIGINT', resolve);
+      process.once('SIGTERM', resolve);
+    });
+  } else {
+    const browser = await chromium.launch({ headless: true });
+    try {
+      await runBrowserSuite(browser);
+    } finally {
+      await browser.close();
+    }
+  }
 } finally {
-  await browser.close();
   await vite.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

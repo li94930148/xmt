@@ -93,6 +93,50 @@ try {
 
   const adminDelete = await fetch(`${base}/${ownerEventId}`, { method: 'DELETE', headers: headers(adminId) });
   assert.equal(adminDelete.status, 200, 'privileged admins can manage calendar events');
+
+  const createRequestId = 'a01b2c3d-4e5f-4678-8a9b-0c1d2e3f4a50';
+  const createPayload = { title: '可安全重放的日历事件', description: '同一请求不应创建第二条', event_date: '2026-10-06', event_type: 'meeting' };
+  const idempotentCreate = () => fetch(base, {
+    method: 'POST', headers: headers(ownerId),
+    body: JSON.stringify({ ...createPayload, client_request_id: createRequestId }),
+  });
+  const firstCreate = await idempotentCreate();
+  assert.equal(firstCreate.status, 200);
+  const firstResult = await firstCreate.json() as { id: number; idempotent_replay?: boolean };
+  assert.equal(firstResult.idempotent_replay, false);
+  const replayCreate = await idempotentCreate();
+  assert.equal(replayCreate.status, 200, 'same account and payload safely replay the same create request');
+  const replayResult = await replayCreate.json() as { id: number; idempotent_replay?: boolean };
+  assert.equal(replayResult.id, firstResult.id);
+  assert.equal(replayResult.idempotent_replay, true);
+
+  const conflictingReplay = await fetch(base, {
+    method: 'POST', headers: headers(ownerId),
+    body: JSON.stringify({ ...createPayload, title: '不同内容不能复用请求编号', client_request_id: createRequestId }),
+  });
+  assert.equal(conflictingReplay.status, 409, 'reusing a request ID for a different payload is rejected');
+  const ownerStatus = await fetch(`${base}/create-request/${createRequestId}`, { headers: headers(ownerId) });
+  assert.equal(ownerStatus.status, 200);
+  assert.equal((await ownerStatus.json() as { eventId: number }).eventId, firstResult.id);
+  const outsiderStatus = await fetch(`${base}/create-request/${createRequestId}`, { headers: headers(outsiderId) });
+  assert.equal(outsiderStatus.status, 404, 'create status cannot reveal another account\'s event');
+  const createdCount = await queryOne<{ total: number }>(
+    `SELECT COUNT(*) AS total FROM calendar_events WHERE title=? AND creator_id=?`,
+    [createPayload.title, ownerId],
+  );
+  assert.equal(Number(createdCount?.total), 1, 'replay leaves exactly one calendar event');
+
+  const deleteIdempotentEvent = await fetch(`${base}/${firstResult.id}`, { method: 'DELETE', headers: headers(adminId) });
+  assert.equal(deleteIdempotentEvent.status, 200);
+  const deletedStatus = await fetch(`${base}/create-request/${createRequestId}`, { headers: headers(ownerId) });
+  assert.equal(deletedStatus.status, 410, 'deleted request remains a tombstone');
+  const deletedReplay = await idempotentCreate();
+  assert.equal(deletedReplay.status, 410, 'a late replay cannot recreate a deleted calendar event');
+  const noResurrection = await queryOne<{ total: number }>(
+    `SELECT COUNT(*) AS total FROM calendar_events WHERE title=? AND creator_id=?`,
+    [createPayload.title, ownerId],
+  );
+  assert.equal(Number(noResurrection?.total), 0);
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await closeDatabase();

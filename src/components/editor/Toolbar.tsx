@@ -45,8 +45,15 @@ const HEADING_OPTIONS = [
 ];
 
 type ToolbarDropdownKey = 'heading' | 'textColor' | 'highlight' | 'file' | 'more';
-type ToolbarDropdownLayout = { placement: 'above' | 'below'; maxHeight: number };
+type ToolbarDropdownLayout = { placement: 'above' | 'below'; maxHeight: number; left?: number; width?: number };
 const DEFAULT_DROPDOWN_LAYOUT: ToolbarDropdownLayout = { placement: 'below', maxHeight: 448 };
+const TOOLBAR_DROPDOWN_WIDTH: Record<ToolbarDropdownKey, number> = {
+  heading: 128,
+  textColor: 176,
+  highlight: 176,
+  file: 160,
+  more: 224,
+};
 
 export default function Toolbar({
   editor,
@@ -112,11 +119,18 @@ export default function Toolbar({
         ? 'above'
         : spaceAbove > spaceBelow ? 'above' : 'below';
     const availableSpace = placement === 'above' ? spaceAbove : spaceBelow;
+    const toolbarBounds = toolbarRef.current?.getBoundingClientRect();
+    const safeLeft = Math.max(8, toolbarBounds?.left ?? 8);
+    const safeRight = Math.max(safeLeft, Math.min(window.innerWidth - 8, toolbarBounds?.right ?? window.innerWidth - 8));
+    const menuWidth = Math.max(0, Math.min(TOOLBAR_DROPDOWN_WIDTH[key], safeRight - safeLeft));
+    const menuLeft = Math.min(Math.max(safeLeft, bounds.right - menuWidth), safeRight - menuWidth) - bounds.left;
     setDropdownLayouts((current) => ({
       ...current,
       [key]: {
         placement,
         maxHeight: Math.max(0, Math.min(448, (availableSpace - 8) / zoomScale)),
+        left: menuLeft,
+        width: menuWidth,
       },
     }));
   };
@@ -130,6 +144,9 @@ export default function Toolbar({
       marginBottom: layout.placement === 'above' ? '0.25rem' : 0,
       maxHeight: `${layout.maxHeight}px`,
       overflowY: 'auto' as const,
+      left: `${layout.left ?? 0}px`,
+      right: 'auto',
+      width: `${layout.width ?? TOOLBAR_DROPDOWN_WIDTH[key]}px`,
     };
   };
 
@@ -587,7 +604,7 @@ export default function Toolbar({
           </button>
           {showTextColorPicker && (
             <div className={`${dropdownClass} p-3`} style={{ ...dropdownPositionStyle('textColor'), minWidth: '176px' }}>
-              <div className="text-xs font-medium mb-2 opacity-60">文字颜色</div>
+              <div className="mb-2 text-xs font-medium text-studio-text-secondary">文字颜色</div>
               <div className="grid grid-cols-4 gap-2.5">
                 {TEXT_COLORS.map((c) => (
                   <button
@@ -626,7 +643,7 @@ export default function Toolbar({
           </button>
           {showHighlightPicker && (
             <div className={`${dropdownClass} p-3`} style={{ ...dropdownPositionStyle('highlight'), minWidth: '176px' }}>
-              <div className="text-xs font-medium mb-2 opacity-60">高亮颜色</div>
+              <div className="mb-2 text-xs font-medium text-studio-text-secondary">高亮颜色</div>
               <div className="grid grid-cols-4 gap-2.5 mb-1">
                 {HIGHLIGHT_COLORS.map((c) => (
                   <button

@@ -19,13 +19,13 @@ export default function MobileWorkHub() {
   const canCreateProduction = !loading && hasPermission('production:update');
   return <div className="space-y-5">
     <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-5">
-      <p className="text-sm text-studio-text-muted">移动工作中心</p>
+      <p className="text-sm text-studio-text-secondary">移动工作中心</p>
       <h2 className="mt-1 text-xl font-semibold">从一件正在推进的工作开始</h2>
       {canViewProduction ? <button type="button" onClick={() => navigate(canCreateProduction ? '/production/content/new' : '/production/content')} className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white"><FilePenLine className="h-4 w-4" />{canCreateProduction ? '开始写稿' : '查看我的创作'}</button> : null}
     </section>
     <section>
       <h2 className="mb-3 text-base font-semibold">常用工作</h2>
-      <div className="grid grid-cols-2 gap-3">{visibleActions.map((action) => { const Icon = action.icon; return <button key={action.path} type="button" onClick={() => navigate(action.path, { state: { mobileReturnTo: '/production' } })} className="flex min-h-28 flex-col justify-between rounded-2xl border border-studio-border-soft bg-studio-surface p-4 text-left"><Icon className="h-5 w-5 text-studio-cyan" /><span><strong className="block text-sm">{action.label}</strong><small className="mt-1 block text-xs text-studio-text-muted">{action.description}</small></span></button>; })}</div>
+      <div className="grid grid-cols-2 gap-3">{visibleActions.map((action) => { const Icon = action.icon; return <button key={action.path} type="button" onClick={() => navigate(action.path, { state: { mobileReturnTo: '/production' } })} className="flex min-h-28 flex-col justify-between rounded-2xl border border-studio-border-soft bg-studio-surface p-4 text-left"><Icon className="h-5 w-5 text-studio-cyan" /><span><strong className="block text-sm">{action.label}</strong><small className="mt-1 block text-xs text-studio-text-secondary">{action.description}</small></span></button>; })}</div>
     </section>
   </div>;
 }

@@ -201,6 +201,7 @@ async function testTopicQuerySchemaAcceptsEmptyStrings() {
   assert.equal(parsed.search, undefined);
   assert.equal(parsed.page, 1);
   assert.equal(parsed.limit, 15);
+  assert.equal(topicQuerySchema.parse({ status: 'creation' }).status, 'creation', 'the dashboard creation-stage alias is accepted by topic list queries');
 }
 
 testControllerDedupsIdenticalErrors();

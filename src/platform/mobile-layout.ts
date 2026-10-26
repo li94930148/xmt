@@ -11,3 +11,8 @@ export function mobileNavigationPath(pathname: string): string | undefined {
   )) return '/production';
   return ['/topics', '/messages', '/me'].find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
+
+export function mobileFallbackReturnPath(pathname: string, currentTabPath?: string): string {
+  if (pathname.startsWith('/asset-center/')) return '/asset-center';
+  return currentTabPath ?? '/';
+}

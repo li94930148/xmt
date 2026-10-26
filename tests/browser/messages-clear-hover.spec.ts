@@ -74,18 +74,23 @@ async function renderedContrast(locator: Locator) {
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  const mobilePage = await browser.newPage({ viewport: { width: 320, height: 844 }, reducedMotion: 'reduce' });
   const errors: string[] = [];
   const mutations: string[] = [];
-  page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
-  page.on('request', (request) => {
-    const pathname = new URL(request.url()).pathname;
-    if (pathname.startsWith('/api/') && request.method() !== 'GET' && request.method() !== 'HEAD') mutations.push(`${request.method()} ${pathname}`);
-  });
+  for (const targetPage of [page, mobilePage]) {
+    targetPage.on('pageerror', (error) => errors.push(error.message));
+    targetPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    targetPage.on('request', (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith('/api/') && request.method() !== 'GET' && request.method() !== 'HEAD') mutations.push(`${request.method()} ${pathname}`);
+    });
+  }
 
   for (const theme of ['light', 'dark'] as const) {
     await page.goto(`${base}/__qa?theme=${theme}`);
     await page.getByRole('heading', { name: '消息中心', exact: true }).waitFor();
+    const countSummary = page.getByText(/^本页 \d+ 条，共 \d+ 条$/);
+    assert.ok(await renderedContrast(countSummary) >= 4.5, `${theme} message count summary maintains at least 4.5:1 contrast`);
     const clearAction = page.getByRole('button', { name: '清空', exact: true });
     assert.equal(await clearAction.getAttribute('data-reactbits-button'), 'danger', `${theme} clear action uses the shared danger button variant`);
     await page.mouse.move(0, 0);
@@ -95,20 +100,32 @@ try {
     assert.notEqual(backgroundAfter, backgroundBefore, `${theme} clear action hover visibly changes its background`);
     assert.ok(await renderedContrast(clearAction) >= 4.5, `${theme} clear action text maintains at least 4.5:1 contrast`);
     assert.ok(await renderedContrast(clearAction.locator('svg')) >= 3, `${theme} clear action icon maintains at least 3:1 contrast`);
-
-    await page.setViewportSize({ width: 320, height: 844 });
     const geometry = await clearAction.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       return { left: rect.left, right: rect.right, width: rect.width, viewport: document.documentElement.clientWidth, pageWidth: document.documentElement.scrollWidth };
     });
-    assert.ok(geometry.width > 0 && geometry.left >= 0 && geometry.right <= geometry.viewport + 1, `${theme} clear action remains visible at 320px: ${JSON.stringify(geometry)}`);
-    assert.ok(geometry.pageWidth <= geometry.viewport + 1, `${theme} messages page does not overflow horizontally at 320px`);
-    await page.setViewportSize({ width: 1440, height: 900 });
+    assert.ok(geometry.width > 0 && geometry.left >= 0 && geometry.right <= geometry.viewport + 1, `${theme} clear action remains visible at 1440px: ${JSON.stringify(geometry)}`);
+    assert.ok(geometry.pageWidth <= geometry.viewport + 1, `${theme} desktop messages page does not overflow horizontally`);
+
+    if (theme === 'dark') {
+      await clearAction.click();
+      await page.getByRole('dialog').getByRole('heading', { name: '确认清空消息' }).waitFor();
+      await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
+      assert.equal(await page.getByRole('dialog').count(), 0, 'cancelling clear closes the confirmation without clearing messages');
+    }
+
+    await mobilePage.goto(`${base}/__qa?theme=${theme}`);
+    await mobilePage.getByRole('heading', { name: '消息', exact: true }).waitFor();
+    await mobilePage.getByText('暂无消息', { exact: true }).waitFor();
+    assert.equal(await mobilePage.getByRole('navigation', { name: '移动主导航' }).count(), 1, `${theme} 320px route uses the mobile message shell`);
+    const mobileGeometry = await mobilePage.evaluate(() => ({ viewport: document.documentElement.clientWidth, pageWidth: document.documentElement.scrollWidth, mainWidth: document.querySelector('main')?.getBoundingClientRect().width ?? 0 }));
+    assert.ok(mobileGeometry.pageWidth <= mobileGeometry.viewport + 1, `${theme} mobile messages page does not overflow horizontally: ${JSON.stringify(mobileGeometry)}`);
+    assert.ok(mobileGeometry.mainWidth <= mobileGeometry.viewport, `${theme} mobile main content fits the viewport: ${JSON.stringify(mobileGeometry)}`);
   }
 
   assert.deepEqual(mutations, [], 'hover verification must not submit or clear messages');
   assert.deepEqual(errors, [], 'message clear button hover renders without browser errors');
-  console.log('Messages hover test passed: shared danger styling, contrast and 320px visibility in light/dark themes; no mutation requests.');
+  console.log('Messages test passed: desktop count and clear-action contrast, clear confirmation cancel, and 320px mobile shell in light/dark themes; no mutation requests.');
 } finally {
   await browser.close();
   await vite.close();

@@ -12,16 +12,31 @@ interface PomodoroTimerProps {
 }
 
 const DURATION = 25 * 60; // 25 minutes in seconds
+type PomodoroMutation = 'starting' | 'resetting' | 'completing' | null;
 
 export default function PomodoroTimer({ topicId, topicTitle, compact = false }: PomodoroTimerProps) {
   const styles = useThemeStyles();
   const appStore = useAppStore();
   const [timeLeft, setTimeLeft] = useState(DURATION);
+  const [timerDuration, setTimerDuration] = useState(DURATION);
   const [isRunning, setIsRunning] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [todayCount, setTodayCount] = useState(0);
   const [statsError, setStatsError] = useState('');
+  const [mutation, setMutation] = useState<PomodoroMutation>(null);
+  const [mutationError, setMutationError] = useState('');
+  const [completionUnconfirmed, setCompletionUnconfirmed] = useState(false);
+  const mutationLockRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const completionAtBoundary = isRunning && timeLeft === 0;
+  const controlsLocked = mutation !== null || completionUnconfirmed || completionAtBoundary;
+  const mutationMessage = mutation === 'starting'
+    ? '正在开始番茄钟…'
+    : mutation === 'resetting'
+      ? '正在重置番茄钟…'
+      : mutation === 'completing'
+        ? '正在保存完成记录…'
+        : '';
 
   // Fetch stats
   const refreshStats = useCallback(async () => {
@@ -42,34 +57,52 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
     };
   }, [isRunning, timeLeft]);
 
-  // Completion
+  const persistCompletion = useCallback(async (id: number) => {
+    if (mutationLockRef.current) return;
+    mutationLockRef.current = true;
+    setMutation('completing');
+    setMutationError('');
+    try {
+      await completePomodoro(id);
+      setSessionId(null);
+      setCompletionUnconfirmed(false);
+      void refreshStats();
+      const title = '🍅 番茄钟完成！';
+      const message = topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成，休息一下吧！';
+      const useDesktopNotification = document.visibilityState !== 'visible'
+        && isNotificationSupported()
+        && isDesktopNotifyEnabled()
+        && Notification.permission === 'granted';
+
+      if (useDesktopNotification) {
+        notifyDesktop({ title, body: message });
+      } else {
+        appStore.addNotification({ title, message, type: 'success' });
+      }
+    } catch {
+      setCompletionUnconfirmed(true);
+      setMutationError('完成结果尚未确认；请重试保存完成记录，在确认前无法重置此番茄钟。');
+    } finally {
+      mutationLockRef.current = false;
+      setMutation(null);
+    }
+  }, [appStore, refreshStats, topicTitle]);
+
+  // Completion writes use the same synchronous lock as start/reset so a reset
+  // cannot delete a session while its completion request is in flight.
   useEffect(() => {
     if (timeLeft === 0 && isRunning) {
       setIsRunning(false);
-      if (sessionId) {
-        void completePomodoro(sessionId)
-          .then(() => {
-            setSessionId(null);
-            void refreshStats();
-            const title = '🍅 番茄钟完成！';
-            const message = topicTitle ? `已完成「${topicTitle}」的一个番茄钟` : '25分钟专注时间已完成，休息一下吧！';
-            const useDesktopNotification = document.visibilityState !== 'visible'
-              && isNotificationSupported()
-              && isDesktopNotifyEnabled()
-              && Notification.permission === 'granted';
-
-            if (useDesktopNotification) {
-              notifyDesktop({ title, body: message });
-            } else {
-              appStore.addNotification({ title, message, type: 'success' });
-            }
-          })
-          .catch(() => appStore.addNotification({ title: '番茄钟保存失败', message: '本次专注未计入统计，请刷新后重试。', type: 'error' }));
-      }
+      if (sessionId) void persistCompletion(sessionId);
     }
-  }, [appStore, isRunning, refreshStats, sessionId, timeLeft, topicTitle]);
+  }, [isRunning, persistCompletion, sessionId, timeLeft]);
+
+  const handleRetryCompletion = useCallback(() => {
+    if (completionUnconfirmed && sessionId !== null) void persistCompletion(sessionId);
+  }, [completionUnconfirmed, persistCompletion, sessionId]);
 
   const handleStart = useCallback(async () => {
+    if (mutationLockRef.current || completionUnconfirmed || completionAtBoundary) return;
     if (isRunning) {
       setIsRunning(false);
       return;
@@ -78,36 +111,73 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
     if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
       void Notification.requestPermission();
     }
+    if (sessionId) {
+      setIsRunning(true);
+      return;
+    }
+
+    mutationLockRef.current = true;
+    setMutation('starting');
+    setMutationError('');
     try {
-      if (sessionId) {
-        setIsRunning(true);
-        return;
-      }
       const res = await startPomodoro({ duration: 25, topic_id: topicId });
       setSessionId(res.sessionId);
+      const nextDuration = Number.isSafeInteger(res.duration) && Number(res.duration) > 0
+        ? Number(res.duration) * 60
+        : DURATION;
+      setTimerDuration(nextDuration);
+      const remainingSeconds = Number.isSafeInteger(res.remainingSeconds)
+        ? Math.max(0, Math.min(nextDuration, Number(res.remainingSeconds)))
+        : nextDuration;
+      setTimeLeft(remainingSeconds);
       setIsRunning(true);
     } catch {
-      appStore.addNotification({ title: '番茄钟启动失败', message: '请稍后重试。', type: 'error' });
+      setMutationError('启动结果尚未确认；再次点击“开始”会恢复服务端当前会话。');
+    } finally {
+      mutationLockRef.current = false;
+      setMutation(null);
     }
-  }, [appStore, isRunning, sessionId, topicId]);
+  }, [completionAtBoundary, completionUnconfirmed, isRunning, sessionId, topicId]);
 
   const handleReset = useCallback(async () => {
-    if (sessionId) {
-      try {
-        await cancelPomodoro(sessionId);
-      } catch {
-        appStore.addNotification({ title: '番茄钟重置失败', message: '请刷新后重试。', type: 'error' });
-        return;
-      }
+    if (mutationLockRef.current || completionUnconfirmed || completionAtBoundary) return;
+    if (!sessionId) {
+      setMutationError('');
+      setIsRunning(false);
+      setTimerDuration(DURATION);
+      setTimeLeft(DURATION);
+      return;
+    }
+
+    mutationLockRef.current = true;
+    setMutation('resetting');
+    setMutationError('');
+    const wasRunning = isRunning;
+    const timeBeforeReset = timeLeft;
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
     setIsRunning(false);
-    setTimeLeft(DURATION);
-    setSessionId(null);
-  }, [appStore, sessionId]);
+    try {
+      await cancelPomodoro(sessionId);
+      setTimeLeft(DURATION);
+      setTimerDuration(DURATION);
+      setSessionId(null);
+      setCompletionUnconfirmed(false);
+    } catch {
+      setTimeLeft(timeBeforeReset);
+      setIsRunning(wasRunning);
+      setMutationError('重置结果尚未确认；点击“重置”可安全重试。');
+    } finally {
+      mutationLockRef.current = false;
+      setMutation(null);
+    }
+  }, [completionAtBoundary, completionUnconfirmed, isRunning, sessionId, timeLeft]);
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
-  const progress = ((DURATION - timeLeft) / DURATION) * 100;
+  const progress = ((timerDuration - timeLeft) / timerDuration) * 100;
   const circumference = 2 * Math.PI * 44;
 
   if (compact) {
@@ -125,7 +195,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           </div>
           <div className="flex items-center gap-1.5">
             <CheckCircle className="w-3.5 h-3.5 text-studio-success" />
-            {statsError ? <button type="button" onClick={() => void refreshStats()} className={`text-xs underline ${styles.textSecondary}`}>统计加载失败，重试</button> : <span className={`text-xs ${styles.textSecondary}`}>今日 {todayCount} 个</span>}
+            {statsError ? <button type="button" onClick={() => void refreshStats()} className={`xmt-btn xmt-btn-ghost min-h-10 shrink-0 px-2 text-xs underline ${styles.textSecondary}`}>统计加载失败，重试</button> : <span className={`text-xs ${styles.textSecondary}`}>今日 {todayCount} 个</span>}
           </div>
         </div>
 
@@ -158,21 +228,41 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
             )}
             <div className="flex gap-2">
               <button
+                type="button"
+                data-testid="pomodoro-start-button"
                 onClick={handleStart}
+                disabled={controlsLocked}
+                aria-busy={mutation !== null}
+                aria-label={isRunning ? '暂停番茄钟' : sessionId ? '继续番茄钟' : '开始番茄钟'}
                 className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium ${
                   isRunning ? styles.buttonSecondary : styles.buttonPrimary
-                } transition-all`}
+                } transition-all disabled:cursor-not-allowed disabled:opacity-60`}
               >
                 {isRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                {isRunning ? '暂停' : timeLeft < DURATION ? '继续' : '开始'}
+                {mutation === 'starting' ? '正在开始…' : isRunning ? '暂停' : sessionId && timeLeft < DURATION ? '继续' : '开始'}
               </button>
               <button
+                type="button"
+                data-testid="pomodoro-reset-button"
                 onClick={handleReset}
-                className={`p-2 rounded-lg ${styles.buttonSecondary} transition-colors`}
+                disabled={controlsLocked}
+                aria-label="重置番茄钟"
+                aria-busy={mutation === 'resetting'}
+                title={completionUnconfirmed ? '完成结果待确认，不能重置' : mutation === 'starting' ? '开始完成后才能重置' : mutation === 'completing' ? '正在保存完成记录' : mutation === 'resetting' ? '正在重置番茄钟' : '重置番茄钟'}
+                className="xmt-btn xmt-btn-secondary h-10 w-10 shrink-0 !p-0 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
             </div>
+            {mutationMessage && <p role="status" aria-live="polite" className={`text-xs ${styles.textSecondary}`}>{mutationMessage}</p>}
+            {completionUnconfirmed ? (
+              <div role="alert" className="space-y-2 text-xs text-studio-coral">
+                <p>{mutationError}</p>
+                <button type="button" data-testid="pomodoro-completion-retry" onClick={handleRetryCompletion} disabled={mutation !== null} className="xmt-btn xmt-btn-primary min-h-10 w-full rounded-lg px-3 py-2 font-medium disabled:cursor-not-allowed disabled:opacity-60">
+                  重试保存完成记录
+                </button>
+              </div>
+            ) : mutationError && <p role="alert" className="text-xs text-studio-coral">{mutationError}</p>}
           </div>
         </div>
       </div>
@@ -193,7 +283,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
         </div>
         <div className="flex items-center gap-1.5">
           <CheckCircle className="w-4 h-4 text-studio-success" />
-          {statsError ? <button type="button" onClick={() => void refreshStats()} className={`text-sm underline ${styles.textSecondary}`}>统计加载失败，点击重试</button> : <span className={`text-sm ${styles.textSecondary}`}>今日已完成 <span className={`font-semibold ${styles.textPrimary}`}>{todayCount}</span> 个</span>}
+          {statsError ? <button type="button" onClick={() => void refreshStats()} className={`xmt-btn xmt-btn-ghost min-h-10 px-2 text-sm underline ${styles.textSecondary}`}>统计加载失败，点击重试</button> : <span className={`text-sm ${styles.textSecondary}`}>今日已完成 <span className={`font-semibold ${styles.textPrimary}`}>{todayCount}</span> 个</span>}
         </div>
       </div>
 
@@ -236,22 +326,41 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
       {/* Controls */}
       <div className="flex items-center justify-center gap-3">
         <button
+          type="button"
+          data-testid="pomodoro-start-button"
           onClick={handleStart}
+          disabled={controlsLocked}
+          aria-busy={mutation !== null}
+          aria-label={isRunning ? '暂停番茄钟' : sessionId ? '继续番茄钟' : '开始番茄钟'}
           className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-medium ${
             isRunning ? styles.buttonSecondary : styles.buttonPrimary
-          } transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]`}
+          } transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60`}
         >
           {isRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          {isRunning ? '暂停' : timeLeft < DURATION ? '继续' : '开始专注'}
+          {mutation === 'starting' ? '正在开始…' : isRunning ? '暂停' : sessionId && timeLeft < DURATION ? '继续' : '开始专注'}
         </button>
         <button
+          type="button"
+          data-testid="pomodoro-reset-button"
           onClick={handleReset}
-          className={`p-2.5 rounded-xl ${styles.buttonSecondary} transition-colors`}
-          title="重置"
+          disabled={controlsLocked}
+          aria-label="重置番茄钟"
+          aria-busy={mutation === 'resetting'}
+          title={completionUnconfirmed ? '完成结果待确认，不能重置' : mutation === 'starting' ? '开始完成后才能重置' : mutation === 'completing' ? '正在保存完成记录' : mutation === 'resetting' ? '正在重置番茄钟' : '重置番茄钟'}
+          className="xmt-btn xmt-btn-secondary h-10 w-10 shrink-0 !p-0 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
         >
           <RotateCcw className="w-4 h-4" />
         </button>
       </div>
+      {mutationMessage && <p role="status" aria-live="polite" className={`mt-3 text-center text-sm ${styles.textSecondary}`}>{mutationMessage}</p>}
+      {completionUnconfirmed ? (
+        <div role="alert" className="mt-3 space-y-3 text-center text-sm text-studio-coral">
+          <p>{mutationError}</p>
+          <button type="button" data-testid="pomodoro-completion-retry" onClick={handleRetryCompletion} disabled={mutation !== null} className="xmt-btn xmt-btn-primary min-h-10 rounded-xl px-4 py-2 font-medium disabled:cursor-not-allowed disabled:opacity-60">
+            重试保存完成记录
+          </button>
+        </div>
+      ) : mutationError && <p role="alert" className="mt-3 text-center text-sm text-studio-coral">{mutationError}</p>}
     </div>
   );
 }

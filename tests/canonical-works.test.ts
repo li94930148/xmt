@@ -25,4 +25,19 @@ const differentAweme = canonicalizeDouyinWorks([{ ...base, id: 8, aweme_id: 'one
 assert.equal(differentAweme.length, 1, '同账号、同标题与精确发布时间应视为同一发布作品');
 const reusedTitle = canonicalizeDouyinWorks([{ ...base, id: 10, aweme_id: 'one111' }, { ...base, id: 11, aweme_id: 'two222', publish_time: '2026-01-01T00:00:01.000Z' }] as any);
 assert.equal(reusedTitle.length, 2, '不同发布时间的同名作品必须保留');
+
+const originalTimezone = process.env.TZ;
+try {
+  for (const timezone of ['UTC', 'America/New_York', 'Asia/Tokyo']) {
+    process.env.TZ = timezone;
+    const equivalentBeijingTimes = canonicalizeDouyinWorks([
+      { ...base, id: 12, aweme_id: 'naive-time', publish_time: '2026-01-01 08:00:00' },
+      { ...base, id: 13, aweme_id: 'offset-time', publish_time: '2026-01-01T08:00:00+08:00' },
+    ] as Parameters<typeof canonicalizeDouyinWorks>[0]);
+    assert.equal(equivalentBeijingTimes.length, 1, `naive database time and explicit Beijing offset deduplicate consistently in ${timezone}`);
+  }
+} finally {
+  if (originalTimezone === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTimezone;
+}
 console.log('Canonical works tests passed');

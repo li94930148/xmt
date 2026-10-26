@@ -38,7 +38,7 @@ export type TopicDetail = TopicRecord & {
   stage_record_presence: TopicStageRecordPresence;
 };
 
-export type TopicPersistencePatch = {
+export type TopicContentPatch = {
   title?: unknown;
   description?: unknown;
   outline?: unknown;
@@ -47,6 +47,9 @@ export type TopicPersistencePatch = {
   platform?: unknown;
   deadline?: unknown;
   assignee_id?: unknown;
+};
+
+export type TopicPersistencePatch = TopicContentPatch & {
   status?: TopicStatus;
 };
 
@@ -55,6 +58,7 @@ export type LegacyUpdateTopicInput = TopicPersistencePatch & Record<string, unkn
 export type { AuditTopicInput, CreateTopicInput, TopicQuery, TransitionTopicInput, UpdateTopicInput };
 
 export type TopicServiceErrorCode =
+  | 'TOPIC_CREATE_REQUEST_CONFLICT'
   | 'TOPIC_NOT_FOUND'
   | 'TOPIC_FORBIDDEN'
   | 'TOPIC_INVALID_INPUT'

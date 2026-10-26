@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import { BookOpen, Clapperboard, Music2, PlaySquare, Radio, Share2 } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
+import { getPlatformLabel } from '../../platform/platform-labels';
 
 type PlatformTone = {
   label: string;
@@ -14,26 +15,27 @@ function normalizePlatform(platform?: string) {
 
 function getPlatformTone(platform?: string): PlatformTone {
   const value = normalizePlatform(platform);
+  const label = getPlatformLabel(platform) || '其他平台';
 
   if (value.includes('抖音') || value.includes('douyin') || value.includes('tiktok')) {
     return {
-      label: platform || '抖音',
+      label,
       icon: Music2,
       className: 'border-studio-cyan/35 bg-studio-cyan/12 text-studio-cyan-contrast',
     };
   }
 
-  if (value.includes('小红书') || value.includes('red')) {
+  if (value.includes('小红书') || value.includes('xiaohongshu') || value.includes('red')) {
     return {
-      label: platform || '小红书',
+      label,
       icon: BookOpen,
       className: 'border-studio-coral/35 bg-studio-coral/12 text-studio-coral-contrast',
     };
   }
 
-  if (value.includes('视频号') || value.includes('wechat')) {
+  if (value.includes('视频号') || value.includes('wechat') || value.includes('weixin')) {
     return {
-      label: platform || '视频号',
+      label,
       icon: Radio,
       className: 'border-studio-success/35 bg-studio-success/12 text-studio-success-contrast',
     };
@@ -41,7 +43,7 @@ function getPlatformTone(platform?: string): PlatformTone {
 
   if (value.includes('快手') || value.includes('kuaishou')) {
     return {
-      label: platform || '快手',
+      label,
       icon: Clapperboard,
       className: 'border-studio-amber/35 bg-studio-amber/12 text-studio-amber-contrast',
     };
@@ -49,14 +51,14 @@ function getPlatformTone(platform?: string): PlatformTone {
 
   if (value.includes('b站') || value.includes('bilibili')) {
     return {
-      label: platform || 'B站',
+      label,
       icon: PlaySquare,
       className: 'border-studio-violet/35 bg-studio-violet/12 text-studio-violet-contrast',
     };
   }
 
   return {
-    label: platform || '其他平台',
+    label,
     icon: Share2,
     className: 'border-studio-border-soft bg-studio-surface-soft text-studio-text-secondary',
   };

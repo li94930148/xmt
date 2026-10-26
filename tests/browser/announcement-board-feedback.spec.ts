@@ -18,11 +18,21 @@ let announcements = [existing];
 let nextId = 102;
 let listRequests = 0;
 let createRequests = 0;
+let insertedCreateCount = 0;
+let statusRequests = 0;
 let deleteRequests = 0;
 let failNextList = false;
+let failNextListCount = 0;
 let failNextDelete = false;
+let failNextDeleteResponse = false;
+let failNextCreateBeforeCommit = false;
+let failNextCreateResponse = false;
+let failNextStatus = false;
+let denyNextStatus = false;
 let createDelayMs = 0;
 let deleteDelayMs = 0;
+const createRequestResults = new Map<string, { id: number; payload: { content: string; type: string; pinned: boolean } }>();
+const createRequestHistory: Array<{ requestId: string; payload: { content: string; type: string; pinned: boolean } }> = [];
 
 const app = express();
 app.use(express.json());
@@ -30,14 +40,31 @@ app.get('/__qa', (_req, res) => res.type('html').send('<!doctype html><html><hea
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 app.post('/__qa/options', (req, res) => {
   if (typeof req.body?.failNextList === 'boolean') failNextList = req.body.failNextList;
+  if (Number.isInteger(req.body?.failNextListCount) && req.body.failNextListCount >= 0) failNextListCount = req.body.failNextListCount;
   if (typeof req.body?.failNextDelete === 'boolean') failNextDelete = req.body.failNextDelete;
+  if (typeof req.body?.failNextDeleteResponse === 'boolean') failNextDeleteResponse = req.body.failNextDeleteResponse;
+  if (typeof req.body?.failNextCreateBeforeCommit === 'boolean') failNextCreateBeforeCommit = req.body.failNextCreateBeforeCommit;
+  if (typeof req.body?.failNextCreateResponse === 'boolean') failNextCreateResponse = req.body.failNextCreateResponse;
+  if (typeof req.body?.failNextStatus === 'boolean') failNextStatus = req.body.failNextStatus;
+  if (typeof req.body?.denyNextStatus === 'boolean') denyNextStatus = req.body.denyNextStatus;
   if (Number.isFinite(req.body?.createDelayMs)) createDelayMs = Math.max(0, Number(req.body.createDelayMs));
   if (Number.isFinite(req.body?.deleteDelayMs)) deleteDelayMs = Math.max(0, Number(req.body.deleteDelayMs));
+  if (req.body?.seedAnnouncement === true) {
+    announcements = [{
+      id: nextId++, content: '刷新恢复删除公告', type: 'announcement', pinned: false,
+      creator_id: 901, creator_name: '公告验收', created_at: '2026-10-09T12:02:00+08:00', updated_at: '2026-10-09T12:02:00+08:00',
+    }, ...announcements];
+  }
   res.json({ ready: true });
 });
 app.get('/api/permissions/my', (_req, res) => res.json([]));
 app.get('/api/announcements', (_req, res) => {
   listRequests += 1;
+  if (failNextListCount > 0) {
+    failNextListCount -= 1;
+    res.status(503).json({ message: '隔离公告列表暂不可用' });
+    return;
+  }
   if (failNextList) {
     failNextList = false;
     res.status(503).json({ message: '隔离公告列表暂不可用' });
@@ -45,22 +72,74 @@ app.get('/api/announcements', (_req, res) => {
   }
   res.json({ data: announcements });
 });
+app.get('/api/announcements/create-request/:requestId', (req, res) => {
+  statusRequests += 1;
+  res.set('Cache-Control', 'no-store');
+  if (failNextStatus) {
+    failNextStatus = false;
+    res.status(503).json({ message: '隔离公告创建状态暂不可用' });
+    return;
+  }
+  if (denyNextStatus) {
+    denyNextStatus = false;
+    res.status(403).json({ message: '隔离公告状态核实无权限' });
+    return;
+  }
+  const result = createRequestResults.get(req.params.requestId);
+  if (!result) {
+    res.json({ state: 'not_found' });
+    return;
+  }
+  if (!announcements.some((item) => item.id === result.id)) {
+    res.json({ state: 'deleted' });
+    return;
+  }
+  res.json({ state: 'committed', announcementId: result.id });
+});
 app.post('/api/announcements', async (req, res) => {
   createRequests += 1;
-  if (createDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, createDelayMs));
-  const now = '2026-10-09T12:01:00+08:00';
-  const created = {
-    id: nextId++,
+  const requestId = String(req.body?.client_request_id ?? '');
+  const payload = {
     content: String(req.body?.content ?? ''),
     type: String(req.body?.type ?? 'note'),
     pinned: Boolean(req.body?.pinned),
-    creator_id: 901,
-    creator_name: '公告验收',
-    created_at: now,
-    updated_at: now,
   };
-  announcements = [created, ...announcements];
-  res.json({ message: '公告创建成功', id: created.id });
+  createRequestHistory.push({ requestId, payload });
+  if (createDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, createDelayMs));
+  if (failNextCreateBeforeCommit) {
+    failNextCreateBeforeCommit = false;
+    res.status(503).json({ message: '隔离公告创建未提交' });
+    return;
+  }
+  const prior = createRequestResults.get(requestId);
+  if (prior && JSON.stringify(prior.payload) !== JSON.stringify(payload)) {
+    res.status(409).json({ message: '隔离公告请求编号冲突' });
+    return;
+  }
+  let createdId: number;
+  if (prior) {
+    createdId = prior.id;
+  } else {
+    const now = '2026-10-09T12:01:00+08:00';
+    const created = {
+      id: nextId++,
+      ...payload,
+      creator_id: 901,
+      creator_name: '公告验收',
+      created_at: now,
+      updated_at: now,
+    };
+    announcements = [created, ...announcements];
+    insertedCreateCount += 1;
+    createdId = created.id;
+    createRequestResults.set(requestId, { id: created.id, payload });
+  }
+  if (failNextCreateResponse) {
+    failNextCreateResponse = false;
+    res.status(503).json({ message: '模拟服务端已提交但响应丢失' });
+    return;
+  }
+  res.status(prior ? 200 : 201).json({ message: '公告创建成功', id: createdId, idempotent_replay: Boolean(prior) });
 });
 app.delete('/api/announcements/:id', async (req, res) => {
   deleteRequests += 1;
@@ -71,6 +150,11 @@ app.delete('/api/announcements/:id', async (req, res) => {
     return;
   }
   announcements = announcements.filter((item) => item.id !== Number(req.params.id));
+  if (failNextDeleteResponse) {
+    failNextDeleteResponse = false;
+    res.status(503).json({ message: '模拟服务端已提交但删除响应丢失' });
+    return;
+  }
   res.json({ message: '公告删除成功' });
 });
 
@@ -96,7 +180,7 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
-    if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    if (message.text().includes('503 (Service Unavailable)') || message.text().includes('403 (Forbidden)')) expectedHttpErrors.push(message.text());
     else errors.push(message.text());
   });
 
@@ -135,11 +219,14 @@ try {
   await page.evaluate(async () => {
     await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deleteDelayMs: 220, failNextDelete: true }) });
   });
+  const readsBeforeRejectedDelete = listRequests;
   await page.getByRole('button', { name: '删除公告', exact: true }).dblclick();
-  await page.getByText('删除公告失败', { exact: true }).waitFor();
+  await page.getByText('只读核实发现该公告仍存在；未自动重试，请在确认框中再次确认后再删除。', { exact: true }).waitFor();
   assert.equal(deleteRequests, 1, 'a failed delete double-click issues one request');
-  assert.equal(await page.getByRole('button', { name: '删除公告：新公告隔离记录' }).count(), 1, 'failed delete keeps the announcement row');
+  assert.equal(listRequests, readsBeforeRejectedDelete + 1, 'an ambiguous delete failure is reconciled with one read-only list request');
+  assert.equal(await page.locator('[aria-label="删除公告：新公告隔离记录"]').count(), 1, 'failed delete keeps the announcement row');
   assert.equal(await page.getByRole('heading', { name: '确认删除公告？' }).count(), 1, 'failed delete keeps its confirmation available for explicit retry');
+  await page.getByText('只读核实发现公告仍存在；本次未自动重试。如仍要删除，请再次确认。', { exact: true }).waitFor();
 
   await page.evaluate(async () => {
     await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextList: true }) });
@@ -155,14 +242,100 @@ try {
   assert.equal(listRequests, postDeleteReadCount + 1, 'delete recovery only reloads the list');
   assert.equal(deleteRequests, 2, 'read-only recovery never repeats the confirmed delete');
 
+  await page.getByRole('button', { name: '删除公告：保留的系统公告' }).click();
+  await page.evaluate(async () => {
+    await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextDeleteResponse: true }) });
+  });
+  const deletesBeforeLostResponse = deleteRequests;
+  await page.getByRole('button', { name: '删除公告', exact: true }).click();
+  await page.getByText('只读核实发现该公告当前已不存在；无法确认是否由本次删除完成，未重发删除请求。', { exact: true }).waitFor();
+  assert.equal(deleteRequests, deletesBeforeLostResponse + 1, 'commit-then-drop is reconciled without a second DELETE');
+  assert.equal(await page.locator('[aria-label="删除公告：保留的系统公告"]').count(), 0, 'a GET-confirmed absent announcement is removed from the view');
+
+  await page.evaluate(async () => {
+    await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seedAnnouncement: true }) });
+  });
+  await page.reload();
+  await page.getByText('刷新恢复删除公告', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '删除公告：刷新恢复删除公告' }).click();
+  await page.evaluate(async () => {
+    await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextDeleteResponse: true, failNextListCount: 3 }) });
+  });
+  const deletesBeforeRefreshRecovery = deleteRequests;
+  await page.getByRole('button', { name: '删除公告', exact: true }).click();
+  await page.getByText('暂时无法核实公告删除状态；公告写入已锁定，只能重新核实，请勿重复删除。', { exact: true }).waitFor();
+  assert.equal(deleteRequests, deletesBeforeRefreshRecovery + 1, 'a failed first GET never triggers another DELETE');
+  assert(await page.evaluate(() => sessionStorage.getItem('xmt:announcement-delete-pending:v1:actor:901')), 'ambiguous deletion is persisted by actor and announcement ID');
+  await page.reload();
+  await page.getByText('暂时无法核实公告删除状态；公告写入已锁定，只能重新核实，请勿重复删除。', { exact: true }).waitFor();
+  assert.equal(deleteRequests, deletesBeforeRefreshRecovery + 1, 'refresh recovery performs only GETs');
+  await page.getByRole('button', { name: '重新核实公告删除状态', exact: true }).click();
+  await page.getByText('只读核实发现该公告当前已不存在；无法确认是否由本次删除完成，未重发删除请求。', { exact: true }).waitFor();
+  assert.equal(deleteRequests, deletesBeforeRefreshRecovery + 1, 'manual verification after refresh remains read-only');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:announcement-delete-pending:v1:actor:901')), null, 'confirmed absent target clears its recovery marker');
+
+  await page.getByRole('button', { name: '添加公告' }).click();
+  await page.getByPlaceholder('输入公告内容...').fill('响应丢失后刷新核实');
+  const insertedBeforeLostResponse = insertedCreateCount;
+  const writesBeforeLostResponse = createRequests;
+  const statusReadsBeforeLostResponse = statusRequests;
+  await page.evaluate(async () => {
+    await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextCreateResponse: true, failNextStatus: true }) });
+  });
+  await page.getByRole('button', { name: '发布', exact: true }).click();
+  await page.getByText('暂时无法核实公告创建状态；公告操作已锁定，请稍后重新核实，不要重复发布。', { exact: true }).waitFor();
+  assert.equal(createRequests, writesBeforeLostResponse + 1, 'an ambiguous response never automatically retries the create');
+  assert.equal(statusRequests, statusReadsBeforeLostResponse + 1, 'ambiguous response is followed by one read-only verification');
+  assert.equal(insertedCreateCount, insertedBeforeLostResponse + 1, 'fixture committed exactly one announcement before losing the response');
+  assert(await page.evaluate(() => sessionStorage.getItem('xmt:announcement-create-pending:v1:actor:901')), 'pending marker survives until the result is verified');
+  const writesBeforeReload = createRequests;
+  await page.reload();
+  await page.getByText('公告已发布。', { exact: true }).waitFor();
+  assert.equal(createRequests, writesBeforeReload, 'refresh restores by GET-only status verification');
+  assert.equal(statusRequests, statusReadsBeforeLostResponse + 2, 'refresh recovery adds exactly one status GET');
+  assert.equal(insertedCreateCount, insertedBeforeLostResponse + 1, 'refresh recovery does not duplicate the committed announcement');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:announcement-create-pending:v1:actor:901')), null, 'confirmed result clears its session marker');
+
+  await page.getByRole('button', { name: '添加公告' }).click();
+  await page.getByPlaceholder('输入公告内容...').fill('明确未创建后显式重试');
+  const retryHistoryStart = createRequestHistory.length;
+  const insertedBeforeExplicitRetry = insertedCreateCount;
+  await page.evaluate(async () => {
+    await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextCreateBeforeCommit: true }) });
+  });
+  await page.getByRole('button', { name: '发布', exact: true }).click();
+  await page.getByRole('button', { name: '确认未创建，使用原编号重试', exact: true }).waitFor();
+  assert.equal(createRequestHistory.length, retryHistoryStart + 1, 'not_found does not retry automatically');
+  const firstAttempt = createRequestHistory[retryHistoryStart];
+  await page.getByRole('button', { name: '确认未创建，使用原编号重试', exact: true }).click();
+  await page.getByText('公告已发布。', { exact: true }).waitFor();
+  assert.equal(createRequestHistory.length, retryHistoryStart + 2, 'one explicit retry issues one additional POST');
+  assert.equal(createRequestHistory[retryHistoryStart + 1].requestId, firstAttempt.requestId, 'explicit retry preserves the original request ID');
+  assert.deepEqual(createRequestHistory[retryHistoryStart + 1].payload, firstAttempt.payload, 'explicit retry preserves the exact original payload');
+  assert.equal(insertedCreateCount, insertedBeforeExplicitRetry + 1, 'explicit retry creates exactly one announcement');
+
+  await page.getByRole('button', { name: '添加公告' }).click();
+  await page.getByPlaceholder('输入公告内容...').fill('权限异常时继续锁定');
+  const writesBeforeDeniedStatus = createRequests;
+  await page.evaluate(async () => {
+    await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextCreateBeforeCommit: true, denyNextStatus: true }) });
+  });
+  await page.getByRole('button', { name: '发布', exact: true }).click();
+  await page.getByText('暂时无法核实公告创建状态；公告操作已锁定，请稍后重新核实，不要重复发布。', { exact: true }).waitFor();
+  assert.equal(createRequests, writesBeforeDeniedStatus + 1, 'permission failure during verification does not trigger another POST');
+  assert.equal(await page.getByRole('button', { name: '确认未创建，使用原编号重试', exact: true }).count(), 0, 'a permission error is not treated as not_found');
+  await page.getByRole('button', { name: '重新核实发布状态', exact: true }).click();
+  await page.getByRole('button', { name: '确认未创建，使用原编号重试', exact: true }).waitFor();
+  assert.equal(createRequests, writesBeforeDeniedStatus + 1, 'later verification is also read-only until explicit retry');
+
   await page.goto(`${base}/__qa?role=editor`);
   await page.getByText('保留的系统公告', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: '添加公告' }).count(), 0, 'users without system:announcement do not see create controls');
   assert.equal(await page.getByRole('button', { name: /删除公告/ }).count(), 0, 'users without system:announcement do not see delete controls');
-  assert.equal(expectedHttpErrors.length, 4, 'initial load, post-create refresh, failed delete, and post-delete refresh each yield one intentional 503');
+  assert.equal(expectedHttpErrors.length, 16, 'only the deliberately injected status/create/delete/list failures produce expected HTTP errors');
   assert.deepEqual(errors, [], 'announcement board has no browser runtime or unexpected console errors');
   await context.close();
-  console.log('Announcement board browser test passed: initial read retry, create/delete confirmation, duplicate-write protection, confirmed-write recovery and permission-scoped controls at 390px.');
+  console.log('Announcement board browser test passed: initial read retry, create/delete confirmation, duplicate-write protection, ambiguous delete recovery, confirmed-write recovery and permission-scoped controls at 390px.');
 } finally {
   await browser.close();
   await vite.close();

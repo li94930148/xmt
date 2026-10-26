@@ -1,5 +1,5 @@
 import express from 'express';
-import { queryOne, queryAll, execute, executeInsert } from '../database/utils';
+import { queryOne, queryAll, execute, executeInsert, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { createMessage } from '../utils/messageHelper';
@@ -402,11 +402,6 @@ router.post('/check', authenticate, async (req, res) => {
 // POST /seed - 初始化预设成就（管理员）
 router.post('/seed', authenticate, requirePermission('system:achievement'), async (req, res) => {
   try {
-    const existing: any = await queryOne(`SELECT COUNT(*) as count FROM achievements`);
-    if (existing && existing.count > 0) {
-      return res.json({ message: '成就数据已存在，跳过初始化' });
-    }
-
     const seeds = [
       // 创作达人
       { name: '初出茅庐', description: '创建第一个选题', icon: '🎬', condition_type: 'topic_count', condition_value: 1, points: 10, category: 'production', rarity: 'common', sort_order: 1 },
@@ -442,15 +437,28 @@ router.post('/seed', authenticate, requirePermission('system:achievement'), asyn
       { name: '铁杆用户', description: '连续登录30天', icon: '💪', condition_type: 'login_streak', condition_value: 30, points: 100, category: 'special', rarity: 'epic', sort_order: 51 },
     ];
 
-    for (const s of seeds) {
-      await execute(
-        `INSERT INTO achievements (name, description, icon, condition_type, condition_value, points, category, rarity, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [s.name, s.description, s.icon, s.condition_type, s.condition_value, s.points, s.category, s.rarity, s.sort_order]
-      );
+    const result = await runInTransaction(async (tx) => {
+      const existing = await tx.queryOne<{ count: number }>(`SELECT COUNT(*) as count FROM achievements`);
+      if (Number(existing?.count ?? 0) > 0) {
+        return { skipped: true as const };
+      }
+
+      for (const s of seeds) {
+        await tx.execute(
+          `INSERT INTO achievements (name, description, icon, condition_type, condition_value, points, category, rarity, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [s.name, s.description, s.icon, s.condition_type, s.condition_value, s.points, s.category, s.rarity, s.sort_order]
+        );
+      }
+
+      return { skipped: false as const, count: seeds.length };
+    });
+
+    if (result.skipped) {
+      return res.json({ message: '成就数据已存在，跳过初始化' });
     }
 
-    res.json({ message: `成功初始化 ${seeds.length} 个成就` });
+    res.json({ message: `成功初始化 ${result.count} 个成就` });
   } catch {
     res.status(500).json({ message: '初始化成就失败' });
   }

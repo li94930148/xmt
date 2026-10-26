@@ -91,7 +91,7 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-studio-text-primary">指标快照</h2>
-          <p className="mt-1 text-sm text-studio-text-muted">
+          <p className="mt-1 text-sm text-studio-text-secondary">
             {snapshots.some((snapshot) => snapshot.metricKey.startsWith('published_'))
               ? '包含周期内已发布作品指标；每项按来源优先级取值，手工补充不覆盖抖音官方数据。'
               : '生成后会固定复盘周期内的流程数据；发布表现也会按单条发布记录带入。'}
@@ -103,7 +103,7 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
             {hasSnapshots ? '刷新快照' : '生成快照'}
           </ActionButton>
         ) : (
-          <span className="rounded-full border border-studio-border-soft px-3 py-1 text-xs text-studio-text-muted">
+          <span className="rounded-full border border-studio-border-soft px-3 py-1 text-xs text-studio-text-secondary">
             {status === 'draft' ? '无快照生成权限' : '已锁定快照'}
           </span>
         )}
@@ -113,7 +113,7 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
         <div className="mt-5 rounded-panel border border-dashed border-studio-border-soft p-8 text-center">
           <Database className="mx-auto h-8 w-8 text-studio-text-muted" />
           <p className="mt-3 text-sm font-semibold text-studio-text-primary">尚未生成指标快照</p>
-          <p className="mt-2 text-sm text-studio-text-muted">在草稿状态下生成快照后，周期内流程指标和发布记录表现会固定下来。</p>
+          <p className="mt-2 text-sm text-studio-text-secondary">在草稿状态下生成快照后，周期内流程指标和发布记录表现会固定下来。</p>
         </div>
       ) : (
         <div className="mt-5 space-y-5">
@@ -131,11 +131,11 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-studio-text-primary">{copy?.label || snapshot.metricName}</p>
-                          <p className="mt-1 text-xs text-studio-text-muted">{copy?.description || snapshot.metricName}</p>
+                          <p className="mt-1 text-xs text-studio-text-secondary">{copy?.description || snapshot.metricName}</p>
                         </div>
                         <span className="text-2xl font-bold text-studio-text-primary">{valueText(snapshot)}</span>
                       </div>
-                      <dl className="mt-4 space-y-2 text-xs text-studio-text-muted">
+                      <dl className="mt-4 space-y-2 text-xs text-studio-text-secondary">
                         <div className="flex justify-between gap-3">
                           <dt>数据来源</dt>
                           <dd className="text-right text-studio-text-secondary">{sourceText(snapshot)}</dd>

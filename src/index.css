@@ -25,6 +25,7 @@
 
 :root {
   --xmt-keyboard-height: 0px;
+  --xmt-mobile-nav-height: calc(3.5625rem + max(env(safe-area-inset-bottom), 0.5rem));
 }
 
 @layer base {
@@ -53,9 +54,18 @@
     color: var(--color-text-primary);
   }
 
-  ::selection {
-    background: color-mix(in srgb, var(--xmt-primary) 28%, transparent);
-    color: var(--xmt-text-primary);
+  ::selection,
+  *::selection {
+    background-color: var(--xmt-selection-bg);
+    color: var(--xmt-selection-fg);
+    text-shadow: none;
+  }
+
+  ::-moz-selection,
+  *::-moz-selection {
+    background-color: var(--xmt-selection-bg);
+    color: var(--xmt-selection-fg);
+    text-shadow: none;
   }
 
   :focus-visible {

@@ -14,6 +14,7 @@ process.env.XMT_DB_PATH = databasePath; process.env.NODE_ENV = 'test';
 const { db, initDatabase } = await import('../api/database/db.js');
 const { execute, executeInsert, queryOne } = await import('../api/database/utils.js');
 const { acceptCreatorDataSync } = await import('../api/services/creatorSyncV291.js');
+const { expectedOfficialDailyDates } = await import('../api/services/douyinDataCenter.js');
 await initDatabase();
 const token = 'official-export-v2-contract-token';
 await execute('INSERT INTO creator_agents(id,user_id,platform,account_id,device_id,token_hash,encryption_key_hash) VALUES(?,?,?,?,?,?,?)', [801,1,'douyin','export-account','export-device',await bcrypt.hash(token,4),crypto.createHash('sha256').update(token).digest('hex')]);
@@ -27,14 +28,21 @@ function envelope(payload: Record<string, unknown>, collectedAt='2026-08-28T00:0
   body.signature=crypto.createHmac('sha256',token).update([body.protocol_version,body.agent_id,body.platform,body.account_id,body.timestamp,body.nonce,body.collected_at,JSON.stringify(body.data)].join('\n')).digest('hex'); return body;
 }
 const batch=crypto.randomUUID(), sha='a'.repeat(64);
-const isoDate = (offset: number) => new Date(Date.UTC(2026,7,27 + offset)).toISOString().slice(0,10);
-const periodRows = (period: 'yesterday'|'7d'|'30d', count: number) => Array.from({length:count}, (_, index) => ({metric_date:isoDate(index-count+1),period,metrics:{posts:index===count-1?1:0,views:100+index,comments:index===count-1?-9:index,five_second_completion_rate:.5}}));
+const isoDate = (anchor: string, offset: number) => new Date(Date.parse(`${anchor}T00:00:00.000Z`) + offset * 86400000).toISOString().slice(0,10);
+const periodRows = (period: 'yesterday'|'7d'|'30d', count: number, anchor='2026-08-28') => Array.from({length:count}, (_, index) => ({metric_date:isoDate(anchor, period === 'yesterday' ? -1 : index-count+1),period,metrics:{posts:index===count-1?1:0,views:100+index,likes:index,comments:index===count-1?-9:index,shares:index%2,five_second_completion_rate:index===0?null:index===1?'   ':.5}}));
 const payload={schema_version:2,batch_id:batch,agent_version:'2.14.0-agent',parser_version:'douyin-export-v3',platform:'douyin',platform_account_id:'export-account',generated_at:'2026-08-28T00:00:00.000Z',source_files:[
   {file_type:'official_export',dataset_type:'content_list',period:null,file_name:'作品列表.xlsx',sha256:sha,size_bytes:42,downloaded_at:'2026-08-28T00:00:00.000Z'},
   {file_type:'official_export',dataset_type:'account_daily',period:'yesterday',file_name:'昨天.xlsx',sha256:'b'.repeat(64),size_bytes:42,downloaded_at:'2026-08-28T00:00:00.000Z'},
   {file_type:'official_export',dataset_type:'account_daily',period:'7d',file_name:'近7天.xlsx',sha256:'c'.repeat(64),size_bytes:42,downloaded_at:'2026-08-28T00:00:00.000Z'},
   {file_type:'official_export',dataset_type:'account_daily',period:'30d',file_name:'近30天.xlsx',sha256:'d'.repeat(64),size_bytes:42,downloaded_at:'2026-08-28T00:00:00.000Z'},
 ],datasets:{content_metrics:[{source_item_key:'work-key',title:'脱敏作品',published_at:'2026-08-27T00:00:00.000Z',metrics:{views:100,likes:2}}],account_daily_metrics:[...periodRows('yesterday',1),...periodRows('7d',7),...periodRows('30d',30)],income_metrics:[{metric_date:'2026-08-27',metric_code:'sound_wave_amount',value:'12',unit:'sound_wave'}]},quality:{source_rows:40,accepted_rows:40,duplicate_rows:0,rejected_rows:0,warnings:[]}};
+assert.deepEqual(expectedOfficialDailyDates('yesterday', '2026-08-28T00:00:00.000Z'), ['2026-08-27']);
+assert.deepEqual(expectedOfficialDailyDates('7d', '2026-08-28T00:00:00.000Z'), ['2026-08-22','2026-08-23','2026-08-24','2026-08-25','2026-08-26','2026-08-27','2026-08-28']);
+assert.equal(expectedOfficialDailyDates('30d', '2026-08-28T00:00:00.000Z')?.length, 30);
+assert.deepEqual(expectedOfficialDailyDates('30d', '2026-08-28T00:00:00.000Z')?.slice(0, 2), ['2026-07-30','2026-07-31']);
+assert.equal(expectedOfficialDailyDates('30d', '2026-08-28T00:00:00.000Z')?.at(-1), '2026-08-28');
+assert.deepEqual(expectedOfficialDailyDates('7d', '2026-08-27T16:00:00.000Z'), expectedOfficialDailyDates('7d', '2026-08-28T00:00:00.000Z'), 'period boundaries follow Beijing midnight, not UTC midnight');
+assert.equal(expectedOfficialDailyDates('7d', 'not-a-collection-time'), null);
 
 function startConcurrentWorker(request: Record<string, unknown>) {
   const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -126,7 +134,7 @@ async function verifyConcurrentBatchIdempotency() {
   }
 }
 
-const first=await acceptCreatorDataSync(envelope(payload),`Bearer ${token}`) as { duplicate_batch:boolean; result:{inserted:number;daily_inserted:number}; data_quality:{source_rows:number;accepted_rows:number;duplicate_rows:number;rejected_rows:number;warnings:string[]} }; assert.equal(first.duplicate_batch,false); assert.equal(first.result.inserted,3); assert.equal(first.result.daily_inserted,152);
+const first=await acceptCreatorDataSync(envelope(payload),`Bearer ${token}`) as { duplicate_batch:boolean; result:{inserted:number;daily_inserted:number}; data_quality:{source_rows:number;accepted_rows:number;duplicate_rows:number;rejected_rows:number;warnings:string[]} }; assert.equal(first.duplicate_batch,false); assert.equal(first.result.inserted,3); assert.equal(first.result.daily_inserted,228);
 assert.deepEqual(first.data_quality,{source_rows:40,accepted_rows:40,duplicate_rows:0,rejected_rows:0,warnings:[]},'clean batches expose the collector-reported quality summary without altering metric calculations');
 assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM douyin_works WHERE aweme_id=?',['work-id']))?.play_count,100,'官方导出应校准完全匹配作品的播放量');
 assert.deepEqual(
@@ -141,7 +149,7 @@ assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM creato
 assert.deepEqual(await queryOne<{fans_count:number;fans_count_available:number;play_count:number}>('SELECT fans_count,fans_count_available,play_count FROM douyin_daily_snapshots WHERE account_id=?',[douyinAccountId]), {fans_count:0,fans_count_available:0,play_count:100,}, '仅官方作品导出不能把旧粉丝总量伪装为当天实测值');
 await execute('UPDATE douyin_daily_snapshots SET fans_count=2163,fans_count_available=1 WHERE account_id=?',[douyinAccountId]);
 const second=await acceptCreatorDataSync(envelope(payload),`Bearer ${token}`) as { duplicate_batch:boolean; result:{inserted:number} }; assert.equal(second.duplicate_batch,true); assert.equal(second.result.inserted,3);
-const unchangedPayload={...payload,batch_id:crypto.randomUUID()}; const unchanged=await acceptCreatorDataSync(envelope(unchangedPayload),`Bearer ${token}`) as { result:{unchanged:number;daily_unchanged:number} }; assert.equal(unchanged.result.unchanged,3); assert.equal(unchanged.result.daily_unchanged,152);
+const unchangedPayload={...payload,batch_id:crypto.randomUUID()}; const unchanged=await acceptCreatorDataSync(envelope(unchangedPayload),`Bearer ${token}`) as { result:{unchanged:number;daily_unchanged:number} }; assert.equal(unchanged.result.unchanged,3); assert.equal(unchanged.result.daily_unchanged,228);
 assert.equal((await queryOne<{fans_count:number;fans_count_available:number}>('SELECT fans_count,fans_count_available FROM douyin_daily_snapshots WHERE account_id=?',[douyinAccountId]))?.fans_count,2163,'同一天已有真实粉丝观测时，后续官方导出必须保留该值');
 const refreshedSha='e'.repeat(64); const refreshedPayload={...payload,batch_id:crypto.randomUUID(),source_files:payload.source_files.map((file,index)=>index===0?{...file,sha256:refreshedSha}:file)}; const refreshed=await acceptCreatorDataSync(envelope(refreshedPayload),`Bearer ${token}`) as { result:{unchanged:number} }; assert.equal(refreshed.result.unchanged,3);
 assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_metrics WHERE source_file_sha256=?',[refreshedSha]))?.count,3,'相同指标也必须更新到最新官方文件来源，避免已移除作品继续累计');
@@ -155,14 +163,58 @@ for (const warning of ['HEADER_UNRECOGNIZED', 'ALL_ROWS_REJECTED', 'PARSE_FAILED
 }
 await assert.rejects(()=>acceptCreatorDataSync(envelope({...payload,batch_id:crypto.randomUUID(),source_files:[...payload.source_files,...payload.source_files]}),`Bearer ${token}`)); assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_ingest_batches'))?.count,3);
 const count=await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_metrics'); assert.equal(count?.count,3);
-assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_daily_metrics'))?.count,152);
+assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_daily_metrics'))?.count,228);
 assert.equal((await queryOne<{value_number:number}>("SELECT value_number FROM creator_official_daily_metrics WHERE source_period='yesterday' AND metric_code='comments'"))?.value_number,-9);
-const newestPayload={...payload,batch_id:crypto.randomUUID(),datasets:{...payload.datasets,content_metrics:[{...payload.datasets.content_metrics[0],metrics:{views:200,likes:2}}]}};
+assert.equal((await queryOne<{value_number:number|null}>("SELECT value_number FROM creator_official_daily_metrics WHERE source_period='yesterday' AND metric_code='five_second_completion_rate'"))?.value_number,null,'optional daily ratio NULL remains absent rather than becoming a zero');
+assert.equal((await queryOne<{value_number:number|null}>("SELECT value_number FROM creator_official_daily_metrics WHERE source_period='7d' AND metric_date='2026-08-23' AND metric_code='five_second_completion_rate'"))?.value_number,null,'optional blank daily ratio remains absent rather than becoming a zero');
+const counts = async () => Promise.all([
+  queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_ingest_batches'),
+  queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_ingest_files'),
+  queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_metrics'),
+  queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_official_daily_metrics'),
+]);
+const assertRejectedBeforeBatchWrite = async (candidate: Record<string, unknown>, collectedAt='2026-08-28T00:00:00.000Z', label='invalid official date window') => {
+  const before = await counts();
+  await assert.rejects(
+    () => acceptCreatorDataSync(envelope(candidate, collectedAt), `Bearer ${token}`),
+    (error: unknown) => Boolean(error && typeof error === 'object' && (error as { statusCode?: number }).statusCode === 422),
+    `${label} must fail with a validation error`,
+  );
+  assert.deepEqual(await counts(), before, `${label} must fail before any batch/file/metric write`);
+  assert.equal((await queryOne<{count:number}>('SELECT COUNT(*) count FROM creator_ingest_batches WHERE batch_id=?', [candidate.batch_id]))?.count, 0, `${label} must not create its batch row`);
+};
+const impossibleDatePayload = { ...payload, batch_id: crypto.randomUUID(), datasets: { ...payload.datasets, account_daily_metrics: payload.datasets.account_daily_metrics.map((row, index) => index === 8 ? { ...row, metric_date: '2026-02-30' } : row) } };
+await assertRejectedBeforeBatchWrite(impossibleDatePayload, undefined, 'impossible Gregorian date');
+const missingDayPayload = { ...payload, batch_id: crypto.randomUUID(), datasets: { ...payload.datasets, account_daily_metrics: payload.datasets.account_daily_metrics.map((row, index) => index === 1 ? { ...row, metric_date: '2026-08-21' } : row) } };
+await assertRejectedBeforeBatchWrite(missingDayPayload, undefined, '7-day window with a gap and stale extra date');
+const futureDayPayload = { ...payload, batch_id: crypto.randomUUID(), datasets: { ...payload.datasets, account_daily_metrics: payload.datasets.account_daily_metrics.map((row, index) => index === 7 ? { ...row, metric_date: '2026-08-29' } : row) } };
+await assertRejectedBeforeBatchWrite(futureDayPayload, undefined, 'future date replacing Beijing today');
+const duplicatedDayPayload = { ...payload, batch_id: crypto.randomUUID(), datasets: { ...payload.datasets, account_daily_metrics: [...payload.datasets.account_daily_metrics, { ...payload.datasets.account_daily_metrics[1] }] } };
+await assertRejectedBeforeBatchWrite(duplicatedDayPayload, undefined, 'duplicate 7-day date');
+const parserDuplicateWarningPayload = { ...payload, batch_id: crypto.randomUUID(), quality: { ...payload.quality, warnings: ['ACCOUNT_DAILY_DATE_DUPLICATE'] } };
+await assertRejectedBeforeBatchWrite(parserDuplicateWarningPayload, undefined, 'parser-reported duplicate account daily date');
+const legacyMissingPeriodPayload = { ...payload, batch_id: crypto.randomUUID(), parser_version: 'douyin-export-v2', datasets: { ...payload.datasets, account_daily_metrics: payload.datasets.account_daily_metrics.filter(row => row.period !== '30d') } };
+await assertRejectedBeforeBatchWrite(legacyMissingPeriodPayload, undefined, 'legacy parser missing the 30-day period');
+const legacyMissingDatePayload = { ...payload, batch_id: crypto.randomUUID(), parser_version: 'douyin-export-v2', datasets: { ...payload.datasets, account_daily_metrics: payload.datasets.account_daily_metrics.filter((row, index) => index !== 1) } };
+await assertRejectedBeforeBatchWrite(legacyMissingDatePayload, undefined, 'legacy parser missing one day in the 7-day period');
+const missingCoreMetricPayload = { ...payload, batch_id: crypto.randomUUID(), datasets: { ...payload.datasets, account_daily_metrics: payload.datasets.account_daily_metrics.map((row, index) => index === 2 ? { ...row, metrics: { ...row.metrics, likes: undefined } } : row) } };
+await assertRejectedBeforeBatchWrite(missingCoreMetricPayload, undefined, 'full date window with one missing required daily metric');
+const nullCoreMetricPayload = { ...payload, batch_id: crypto.randomUUID(), datasets: { ...payload.datasets, account_daily_metrics: payload.datasets.account_daily_metrics.map((row, index) => index === 2 ? { ...row, metrics: { ...row.metrics, views: null } } : row) } };
+await assertRejectedBeforeBatchWrite(nullCoreMetricPayload, undefined, 'full date window with one NULL required daily metric');
+for (const [label, invalidValue] of [['boolean', false], ['array', []], ['object', {}]] as const) {
+  const malformedScalarPayload = { ...payload, batch_id: crypto.randomUUID(), datasets: { ...payload.datasets, account_daily_metrics: payload.datasets.account_daily_metrics.map((row, index) => index === 2 ? { ...row, metrics: { ...row.metrics, likes: invalidValue } } : row) } };
+  await assertRejectedBeforeBatchWrite(malformedScalarPayload, undefined, `full date window with malformed ${label} metric scalar`);
+}
+await assertRejectedBeforeBatchWrite({ ...payload, batch_id: crypto.randomUUID() }, 'invalid-time', 'missing/invalid trusted collection time');
+await assertRejectedBeforeBatchWrite({ ...payload, batch_id: crypto.randomUUID() }, '2026-08-29T00:00:00.000Z', 'stale dates for the trusted collection day');
+await assertRejectedBeforeBatchWrite({ ...payload, batch_id: crypto.randomUUID() }, '2036-08-28T00:00:00.000Z', 'future collection timestamp');
+const newestPayload={...payload,batch_id:crypto.randomUUID(),source_files:payload.source_files.map(file=>file.dataset_type==='account_daily'&&file.period==='30d'?{...file,sha256:'e'.repeat(64)}:file),datasets:{...payload.datasets,content_metrics:[{...payload.datasets.content_metrics[0],metrics:{views:200,likes:2}}],account_daily_metrics:[...periodRows('yesterday',1,'2026-08-30'),...periodRows('7d',7,'2026-08-30'),...periodRows('30d',30,'2026-08-30')]}};
 await acceptCreatorDataSync(envelope(newestPayload,'2026-08-30T00:00:00.000Z'),`Bearer ${token}`);
-const stalePayload={...payload,batch_id:crypto.randomUUID(),datasets:{...payload.datasets,content_metrics:[{...payload.datasets.content_metrics[0],metrics:{views:50,likes:2}}]}};
+const stalePayload={...payload,batch_id:crypto.randomUUID(),source_files:payload.source_files.map(file=>file.dataset_type==='account_daily'&&file.period==='30d'?{...file,sha256:'f'.repeat(64)}:file),datasets:{...payload.datasets,content_metrics:[{...payload.datasets.content_metrics[0],metrics:{views:50,likes:2}}],account_daily_metrics:[...periodRows('yesterday',1,'2026-08-29'),...periodRows('7d',7,'2026-08-29'),...periodRows('30d',30,'2026-08-29')]}};
 const stale=await acceptCreatorDataSync(envelope(stalePayload,'2026-08-29T00:00:00.000Z'),`Bearer ${token}`) as {result:{stale_ignored:number}};
 assert(stale.result.stale_ignored > 0);
 assert.equal((await queryOne<{play_count:number}>('SELECT play_count FROM douyin_works WHERE aweme_id=?',['work-id']))?.play_count,200,'较旧官方批次不得回写当前作品指标');
+assert.deepEqual(await queryOne<{value_text:string;collected_at:string;source_file_sha256:string}>('SELECT value_text,collected_at,source_file_sha256 FROM creator_official_daily_metrics WHERE account_id=? AND metric_date=? AND source_period=? AND metric_code=?',[creatorAccountId,'2026-08-29','30d','views']),{value_text:'128',collected_at:'2026-08-30T00:00:00.000Z',source_file_sha256:'e'.repeat(64)},'较旧的重叠窗口重放不得覆盖官方日指标数值、采集时间或来源文件');
 await verifyConcurrentBatchIdempotency();
 const partialQualityPayload={...payload,batch_id:crypto.randomUUID(),quality:{source_rows:43,accepted_rows:40,duplicate_rows:0,rejected_rows:3,warnings:['FALLBACK_IDENTITY_COLLISION','FALLBACK_IDENTITY_COLLISION']}};
 const partialQuality=await acceptCreatorDataSync(envelope(partialQualityPayload),`Bearer ${token}`) as {data_quality:{source_rows:number;accepted_rows:number;duplicate_rows:number;rejected_rows:number;warnings:string[]}};

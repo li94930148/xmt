@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, getPublicSystemSettings, login } from '../api';
@@ -80,6 +80,7 @@ function ChangePasswordModal({
   newPwd,
   confirmPwd,
   loading,
+  returnFocusRef,
   onOldPwdChange,
   onNewPwdChange,
   onConfirmPwdChange,
@@ -91,18 +92,67 @@ function ChangePasswordModal({
   newPwd: string;
   confirmPwd: string;
   loading: boolean;
+  returnFocusRef: { current: HTMLElement | null };
   onOldPwdChange: (value: string) => void;
   onNewPwdChange: (value: string) => void;
   onConfirmPwdChange: (value: string) => void;
   onCancel: () => void;
   onConfirm: () => Promise<void>;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!show) return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+    const firstInput = dialog.querySelector<HTMLInputElement>('input:not([disabled])');
+    firstInput?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+
+      const focusableElements = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+        .filter((element) => element.getClientRects().length > 0);
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+
+      if (!firstElement || !lastElement) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      if (!dialog.contains(activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? lastElement : firstElement).focus();
+      } else if (event.shiftKey && activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      const returnFocusTarget = returnFocusRef.current;
+      returnFocusRef.current = null;
+      if (returnFocusTarget?.isConnected) returnFocusTarget.focus();
+    };
+  }, [returnFocusRef, show]);
+
   if (!show) {
     return null;
   }
 
   return (
-    <div className="xmt-overlay xmt-overlay-center px-4" role="dialog" aria-modal="true" aria-labelledby="first-login-password-title">
+    <div ref={dialogRef} className="xmt-overlay xmt-overlay-center px-4" role="dialog" aria-modal="true" aria-labelledby="first-login-password-title" tabIndex={-1}>
       <div data-testid="first-login-password-panel" className="w-full max-w-md rounded-panel border border-studio-border-soft bg-studio-surface p-8 text-studio-text-primary shadow-modal">
         <p className="text-xs uppercase tracking-[0.28em] text-studio-text-secondary">首次登录</p>
         <h3 id="first-login-password-title" className="mt-3 text-2xl font-semibold">请先修改初始密码</h3>
@@ -267,14 +317,14 @@ function LoginForm({
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
-              className={`h-12 w-full rounded-xl border px-4 pr-12 outline-none transition-all ${surfaceClass}`}
+              className={`h-12 w-full rounded-xl border px-4 pr-14 outline-none transition-all ${surfaceClass}`}
               placeholder="请输入密码"
               autoComplete="current-password"
             />
             <button
               type="button"
               onClick={onTogglePassword}
-              className={`absolute right-4 top-1/2 -translate-y-1/2 ${dark ? 'text-studio-text-secondary hover:text-studio-text-secondary' : 'text-studio-text-secondary hover:text-studio-text-muted'}`}
+              className={`absolute right-4 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-studio-primary focus-visible:outline-offset-2 ${dark ? 'text-studio-text-secondary hover:text-studio-text-secondary' : 'text-studio-text-secondary hover:text-studio-text-muted'}`}
               aria-label="切换密码可见状态"
             >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -363,6 +413,14 @@ export default function Login() {
   const [errorMessage, setErrorMessage] = useState(() => getNativeEndpointConfigurationError() || '');
   const loginRequestInFlight = useRef(false);
   const changePasswordFlowPending = useRef(false);
+  const changePasswordReturnFocusRef = useRef<HTMLElement | null>(null);
+  const loginBackgroundRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (loginBackgroundRef.current) {
+      loginBackgroundRef.current.inert = showChangePassword;
+    }
+  }, [showChangePassword]);
 
   useEffect(() => {
     setMounted(true);
@@ -451,6 +509,7 @@ export default function Login() {
       return;
     }
 
+    const submittedFrom = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     loginRequestInFlight.current = true;
     setLoading(true);
     try {
@@ -458,6 +517,7 @@ export default function Login() {
       const mustChangePassword = result.user.force_change_password || result.forceChangePassword;
       if (mustChangePassword) {
         changePasswordFlowPending.current = true;
+        changePasswordReturnFocusRef.current = submittedFrom;
       }
       if (isAndroid()) {
         await nativeRefreshCredentials.set((result as typeof result & { refreshToken: string }).refreshToken);
@@ -808,7 +868,7 @@ export default function Login() {
                       <button
                         type="button"
                         onClick={() => setShowPassword((prev) => !prev)}
-                        className="absolute bottom-3 right-0 text-studio-text-muted transition-colors hover:text-studio-text-primary"
+                        className="absolute right-0 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-studio-text-muted transition-colors hover:text-studio-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-studio-primary focus-visible:outline-offset-2"
                         aria-label="切换密码可见状态"
                       >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -882,13 +942,20 @@ export default function Login() {
 
   return (
     <>
-      {layoutNode}
+      <main
+        ref={loginBackgroundRef}
+        data-testid="login-background"
+        aria-hidden={showChangePassword ? 'true' : undefined}
+      >
+        {layoutNode}
+      </main>
       <ChangePasswordModal
         show={showChangePassword}
         oldPwd={oldPwd}
         newPwd={newPwd}
         confirmPwd={confirmPwd}
         loading={changePwdLoading}
+        returnFocusRef={changePasswordReturnFocusRef}
         onOldPwdChange={setOldPwd}
         onNewPwdChange={setNewPwd}
         onConfirmPwdChange={setConfirmPwd}

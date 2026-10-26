@@ -1,3 +1,5 @@
+import { canTransitionTopicStatus } from './topic-state-machine';
+
 export const WORKFLOW_ENGINE_MODE = 'v2_strict' as const;
 
 export type WorkflowEngineMode = typeof WORKFLOW_ENGINE_MODE;
@@ -36,21 +38,9 @@ export interface WorkflowPolicyContext {
   node?: WorkflowPolicyNode | null;
 }
 
-const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-  pending: ['approved', 'rejected'],
-  approved: ['production'],
-  rejected: ['pending'],
-  production: ['shooting'],
-  shooting: ['publishing'],
-  publishing: ['completed'],
-  completed: [],
-};
-
 export function canTransition(
   from: string | null | undefined,
   to: string | null | undefined,
-  _user?: WorkflowPolicyUser | null,
-  _context?: WorkflowPolicyContext,
 ): WorkflowPolicyResult {
   if (WORKFLOW_ENGINE_MODE !== 'v2_strict') {
     return { allowed: true, reason: 'non-strict mode - no enforcement' };
@@ -58,7 +48,7 @@ export function canTransition(
 
   const normalizedFrom = String(from || '');
   const normalizedTo = String(to || '');
-  const allowed = ALLOWED_TRANSITIONS[normalizedFrom]?.includes(normalizedTo) ?? false;
+  const allowed = canTransitionTopicStatus(normalizedFrom, normalizedTo);
 
   return {
     allowed,

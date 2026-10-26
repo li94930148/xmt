@@ -7,6 +7,7 @@ import {
   Shield, Users, Settings, Plus, Trash2, Edit2, X, ChevronDown, ChevronRight
 } from 'lucide-react';
 import ConfirmModal from '../components/common/ConfirmModal';
+import ActionButton from '../components/studio/ActionButton';
 
 interface Role {
   id: number;
@@ -26,6 +27,93 @@ interface Permission {
   module: string;
 }
 
+interface PendingRoleVerification {
+  roleId: number;
+  name: string;
+  description: string;
+  permissionIds: number[];
+  readError: string | null;
+  observedRole: Role | null;
+}
+
+interface PendingRoleCreateVerification {
+  code: string;
+  name: string;
+  description: string;
+  permissionIds: number[];
+  readError: string | null;
+  observedRole: Role | null;
+  notFound: boolean;
+}
+
+interface PendingRoleDeleteVerification {
+  roleId: number;
+  name: string;
+  readError: string | null;
+  observedRole: Role | null;
+}
+
+function loadPendingRoleVerification(userId: number | undefined): PendingRoleVerification | null {
+  if (!userId || typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(`xmt:role-update-pending:v1:user:${userId}`);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<PendingRoleVerification>;
+    if (!Number.isInteger(value.roleId) || Number(value.roleId) <= 0
+      || typeof value.name !== 'string' || typeof value.description !== 'string'
+      || !Array.isArray(value.permissionIds)
+      || !value.permissionIds.every((id) => Number.isInteger(id) && Number(id) > 0)) return null;
+    return {
+      roleId: Number(value.roleId),
+      name: value.name,
+      description: value.description,
+      permissionIds: value.permissionIds as number[],
+      readError: null,
+      observedRole: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function loadPendingRoleCreateVerification(userId: number | undefined): PendingRoleCreateVerification | null {
+  if (!userId || typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(`xmt:role-create-pending:v1:user:${userId}`);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<PendingRoleCreateVerification>;
+    if (typeof value.code !== 'string' || !value.code.trim()
+      || typeof value.name !== 'string' || !value.name.trim()
+      || typeof value.description !== 'string'
+      || !Array.isArray(value.permissionIds)
+      || !value.permissionIds.every((id) => Number.isInteger(id) && Number(id) > 0)) return null;
+    return {
+      code: value.code,
+      name: value.name,
+      description: value.description,
+      permissionIds: value.permissionIds as number[],
+      readError: null,
+      observedRole: null,
+      notFound: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function loadPendingRoleDeleteVerification(userId: number | undefined): PendingRoleDeleteVerification | null {
+  if (!userId || typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(`xmt:role-delete-pending:v1:user:${userId}`);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<PendingRoleDeleteVerification>;
+    if (!Number.isInteger(value.roleId) || Number(value.roleId) <= 0 || typeof value.name !== 'string') return null;
+    return { roleId: Number(value.roleId), name: value.name, readError: null, observedRole: null };
+  } catch {
+    return null;
+  }
+}
+
 async function getResponseMessage(response: Response, fallback: string) {
   try {
     const data = await response.json();
@@ -39,6 +127,7 @@ export default function PermissionManagement() {
   const styles = useThemeStyles();
   const addNotification = useAppStore((state) => state.addNotification);
   const { hasPermission } = usePermission();
+  const authUserId = useAuthStore((state) => state.user?.id);
   const token = useAuthStore((state) => state.token);
 
   const [roles, setRoles] = useState<Role[]>([]);
@@ -47,6 +136,12 @@ export default function PermissionManagement() {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [confirmedWriteNotice, setConfirmedWriteNotice] = useState<string | null>(null);
+  const [pendingRoleVerification, setPendingRoleVerification] = useState<PendingRoleVerification | null>(() => loadPendingRoleVerification(authUserId));
+  const [pendingRoleCreateVerification, setPendingRoleCreateVerification] = useState<PendingRoleCreateVerification | null>(() => loadPendingRoleCreateVerification(authUserId));
+  const [pendingRoleDeleteVerification, setPendingRoleDeleteVerification] = useState<PendingRoleDeleteVerification | null>(() => loadPendingRoleDeleteVerification(authUserId));
+  const [roleVerificationBusy, setRoleVerificationBusy] = useState(false);
+  const [roleCreateVerificationBusy, setRoleCreateVerificationBusy] = useState(false);
+  const [roleDeleteVerificationBusy, setRoleDeleteVerificationBusy] = useState(false);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [deletingRole, setDeletingRole] = useState<Role | null>(null);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
@@ -55,6 +150,9 @@ export default function PermissionManagement() {
   const [formData, setFormData] = useState({ code: '', name: '', description: '', permission_ids: [] as number[] });
   const loadLockRef = useRef(false);
   const mutationLockRef = useRef(false);
+  const roleVerificationLockRef = useRef(false);
+  const roleCreateVerificationLockRef = useRef(false);
+  const roleDeleteVerificationLockRef = useRef(false);
 
   const fetchData = useCallback(async () => {
     if (loadLockRef.current) return false;
@@ -102,8 +200,63 @@ export default function PermissionManagement() {
     void fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    if (!authUserId) return;
+    const key = `xmt:role-update-pending:v1:user:${authUserId}`;
+    try {
+      if (!pendingRoleVerification) {
+        sessionStorage.removeItem(key);
+        return;
+      }
+      sessionStorage.setItem(key, JSON.stringify({
+        roleId: pendingRoleVerification.roleId,
+        name: pendingRoleVerification.name,
+        description: pendingRoleVerification.description,
+        permissionIds: pendingRoleVerification.permissionIds,
+      }));
+    } catch {
+      // In-memory locking remains active if this tab cannot persist session recovery state.
+    }
+  }, [authUserId, pendingRoleVerification]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+    const key = `xmt:role-create-pending:v1:user:${authUserId}`;
+    try {
+      if (!pendingRoleCreateVerification) {
+        sessionStorage.removeItem(key);
+        return;
+      }
+      sessionStorage.setItem(key, JSON.stringify({
+        code: pendingRoleCreateVerification.code,
+        name: pendingRoleCreateVerification.name,
+        description: pendingRoleCreateVerification.description,
+        permissionIds: pendingRoleCreateVerification.permissionIds,
+      }));
+    } catch {
+      // In-memory locking remains active if this tab cannot persist session recovery state.
+    }
+  }, [authUserId, pendingRoleCreateVerification]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+    const key = `xmt:role-delete-pending:v1:user:${authUserId}`;
+    try {
+      if (!pendingRoleDeleteVerification) {
+        sessionStorage.removeItem(key);
+        return;
+      }
+      sessionStorage.setItem(key, JSON.stringify({
+        roleId: pendingRoleDeleteVerification.roleId,
+        name: pendingRoleDeleteVerification.name,
+      }));
+    } catch {
+      // In-memory locking remains active if this tab cannot persist session recovery state.
+    }
+  }, [authUserId, pendingRoleDeleteVerification]);
+
   const handleCreateRole = async () => {
-    if (mutationLockRef.current || loadError || confirmedWriteNotice) return;
+    if (mutationLockRef.current || pendingRoleVerification || pendingRoleCreateVerification || pendingRoleDeleteVerification || loadError || confirmedWriteNotice) return;
     mutationLockRef.current = true;
     setMutationBusy(true);
     try {
@@ -114,6 +267,18 @@ export default function PermissionManagement() {
       });
 
       if (!response.ok) {
+        if (response.status >= 500) {
+          setPendingRoleCreateVerification({
+            code: formData.code,
+            name: formData.name,
+            description: formData.description,
+            permissionIds: [...formData.permission_ids],
+            readError: null,
+            observedRole: null,
+            notFound: false,
+          });
+          return;
+        }
         addNotification({ title: '创建失败', message: await getResponseMessage(response, '角色创建失败，请重试。'), type: 'error' });
         return;
       }
@@ -124,15 +289,154 @@ export default function PermissionManagement() {
       const refreshed = await fetchData();
       if (!refreshed) setConfirmedWriteNotice('服务器已确认角色创建，但列表刷新失败；请重新加载确认，不要重复创建。');
     } catch {
-      addNotification({ title: '创建失败', message: '网络连接异常，角色未确认创建，请检查后重试。', type: 'error' });
+      setPendingRoleCreateVerification({
+        code: formData.code,
+        name: formData.name,
+        description: formData.description,
+        permissionIds: [...formData.permission_ids],
+        readError: null,
+        observedRole: null,
+        notFound: false,
+      });
     } finally {
       mutationLockRef.current = false;
       setMutationBusy(false);
     }
   };
 
+  const verifyPendingRoleCreate = async () => {
+    const pending = pendingRoleCreateVerification;
+    if (!pending || roleCreateVerificationLockRef.current) return;
+    roleCreateVerificationLockRef.current = true;
+    setRoleCreateVerificationBusy(true);
+    setPendingRoleCreateVerification({ ...pending, readError: null, notFound: false });
+
+    try {
+      const response = await fetch('/api/roles', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error(await getResponseMessage(response, '暂时无法读取角色列表，请稍后只读重试。'));
+      const data: unknown = await response.json();
+      if (!Array.isArray(data)) throw new Error('角色列表格式异常，请稍后只读重试。');
+
+      const rolesData = data as Role[];
+      const validRoles = rolesData.every((role) => (
+        !!role && Number.isInteger(Number(role.id)) && Number(role.id) > 0
+        && typeof role.code === 'string' && typeof role.name === 'string' && typeof role.description === 'string'
+        && Array.isArray(role.permissions)
+        && role.permissions.every((permission) => Number.isInteger(Number(permission?.id)) && Number(permission.id) > 0)
+      ));
+      if (!validRoles) throw new Error('角色列表数据格式异常，请稍后只读重试。');
+      const existingRole = rolesData.find((role) => role?.code === pending.code);
+      setRoles(rolesData);
+      if (!existingRole) {
+        setPendingRoleCreateVerification({ ...pending, readError: null, observedRole: null, notFound: true });
+        return;
+      }
+      const observedPermissionIds = existingRole.permissions.map((permission) => Number(permission.id)).sort((a, b) => a - b);
+      const expectedPermissionIds = [...pending.permissionIds].sort((a, b) => a - b);
+      const matches = existingRole.name === pending.name
+        && existingRole.description === pending.description
+        && observedPermissionIds.length === expectedPermissionIds.length
+        && observedPermissionIds.every((id, index) => id === expectedPermissionIds[index]);
+      if (matches) {
+        setPendingRoleCreateVerification(null);
+        setShowCreateForm(false);
+        setFormData({ code: '', name: '', description: '', permission_ids: [] });
+        addNotification({ title: '创建已确认', message: '服务器当前角色与本次创建内容一致；只读核实完成，未重复提交。', type: 'success' });
+      } else {
+        setPendingRoleCreateVerification({ ...pending, readError: null, observedRole: existingRole, notFound: false });
+      }
+    } catch (error) {
+      const message = error instanceof TypeError
+        ? '暂时无法连接，角色创建结果仍待确认；请只读重试核实。'
+        : error instanceof Error
+          ? error.message
+          : '角色创建结果仍待确认；请只读重试核实。';
+      setPendingRoleCreateVerification({ ...pending, readError: message, notFound: false });
+    } finally {
+      roleCreateVerificationLockRef.current = false;
+      setRoleCreateVerificationBusy(false);
+    }
+  };
+
+  const restoreUncreatedRoleForm = () => {
+    const pending = pendingRoleCreateVerification;
+    if (!pending?.notFound) return;
+    setFormData({
+      code: pending.code,
+      name: pending.name,
+      description: pending.description,
+      permission_ids: [...pending.permissionIds],
+    });
+    setShowCreateForm(true);
+    setPendingRoleCreateVerification(null);
+    addNotification({ title: '已恢复创建内容', message: '只读列表未找到该角色，原表单已恢复；系统不会自动重试。', type: 'info' });
+  };
+
+  const acceptObservedCreatedRole = () => {
+    if (!pendingRoleCreateVerification?.observedRole) return;
+    setShowCreateForm(false);
+    setFormData({ code: '', name: '', description: '', permission_ids: [] });
+    setPendingRoleCreateVerification(null);
+    addNotification({ title: '已采用服务器状态', message: '该角色编码已存在，已按服务器只读结果结束核实，没有再次创建。', type: 'info' });
+  };
+
+  const verifyPendingRoleDelete = async () => {
+    const pending = pendingRoleDeleteVerification;
+    if (!pending || roleDeleteVerificationLockRef.current) return;
+    roleDeleteVerificationLockRef.current = true;
+    setRoleDeleteVerificationBusy(true);
+    setPendingRoleDeleteVerification({ ...pending, readError: null });
+
+    try {
+      const response = await fetch(`/api/roles/${pending.roleId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.status === 404) {
+        setRoles((current) => current.filter((role) => role.id !== pending.roleId));
+        setPendingRoleDeleteVerification(null);
+        setDeletingRole(null);
+        addNotification({ title: '删除已确认', message: `服务器确认角色“${pending.name}”已不存在；只读核实完成，未重复提交。`, type: 'success' });
+        return;
+      }
+      if (!response.ok) throw new Error(await getResponseMessage(response, '暂时无法读取角色当前状态，请稍后只读重试。'));
+
+      const data: unknown = await response.json();
+      if (!data || typeof data !== 'object') throw new Error('角色当前状态格式异常，请稍后只读重试。');
+      const observedRole = data as Role;
+      if (Number(observedRole.id) !== pending.roleId || typeof observedRole.code !== 'string'
+        || typeof observedRole.name !== 'string' || typeof observedRole.description !== 'string'
+        || !Array.isArray(observedRole.permissions)
+        || !observedRole.permissions.every((permission) => Number.isInteger(Number(permission?.id)) && Number(permission.id) > 0)) {
+        throw new Error('角色当前状态格式异常，请稍后只读重试。');
+      }
+      setRoles((current) => current.some((role) => role.id === pending.roleId)
+        ? current.map((role) => role.id === pending.roleId ? { ...role, ...observedRole } : role)
+        : [...current, observedRole]);
+      setPendingRoleDeleteVerification({ ...pending, readError: null, observedRole });
+    } catch (error) {
+      const message = error instanceof TypeError
+        ? '暂时无法连接，角色删除结果仍待确认；请只读重试核实。'
+        : error instanceof Error
+          ? error.message
+          : '角色删除结果仍待确认；请只读重试核实。';
+      setPendingRoleDeleteVerification({ ...pending, readError: message, observedRole: null });
+    } finally {
+      roleDeleteVerificationLockRef.current = false;
+      setRoleDeleteVerificationBusy(false);
+    }
+  };
+
+  const acceptObservedRoleAfterDelete = () => {
+    if (!pendingRoleDeleteVerification?.observedRole) return;
+    setPendingRoleDeleteVerification(null);
+    setDeletingRole(null);
+    addNotification({ title: '已采用服务器状态', message: `服务器确认角色“${pendingRoleDeleteVerification.name}”仍存在；如仍需删除，请从列表重新发起。`, type: 'info' });
+  };
+
   const handleUpdateRole = async () => {
-    if (!editingRole || mutationLockRef.current || loadError || confirmedWriteNotice) return;
+    if (!editingRole || mutationLockRef.current || pendingRoleVerification || pendingRoleCreateVerification || pendingRoleDeleteVerification || loadError || confirmedWriteNotice) return;
     mutationLockRef.current = true;
     setMutationBusy(true);
 
@@ -148,6 +452,17 @@ export default function PermissionManagement() {
       });
 
       if (!response.ok) {
+        if (response.status >= 500) {
+          setPendingRoleVerification({
+            roleId: editingRole.id,
+            name: formData.name,
+            description: formData.description,
+            permissionIds: [...formData.permission_ids],
+            readError: null,
+            observedRole: null,
+          });
+          return;
+        }
         addNotification({ title: '更新失败', message: await getResponseMessage(response, '角色更新失败，请重试。'), type: 'error' });
         return;
       }
@@ -158,16 +473,118 @@ export default function PermissionManagement() {
       const refreshed = await fetchData();
       if (!refreshed) setConfirmedWriteNotice('服务器已确认角色更新，但列表刷新失败；请重新加载确认，不要重复保存。');
     } catch {
-      addNotification({ title: '更新失败', message: '网络连接异常，角色未确认更新，请检查后重试。', type: 'error' });
+      setPendingRoleVerification({
+        roleId: editingRole.id,
+        name: formData.name,
+        description: formData.description,
+        permissionIds: [...formData.permission_ids],
+        readError: null,
+        observedRole: null,
+      });
     } finally {
       mutationLockRef.current = false;
       setMutationBusy(false);
     }
   };
 
+  const verifyPendingRoleUpdate = async () => {
+    const pending = pendingRoleVerification;
+    if (!pending || roleVerificationLockRef.current) return;
+    roleVerificationLockRef.current = true;
+    setRoleVerificationBusy(true);
+    setPendingRoleVerification({ ...pending, readError: null });
+
+    try {
+      const response = await fetch(`/api/roles/${pending.roleId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.status === 404) {
+        setRoles((current) => current.filter((role) => role.id !== pending.roleId));
+        setPendingRoleVerification(null);
+        setEditingRole(null);
+        setFormData({ code: '', name: '', description: '', permission_ids: [] });
+        addNotification({ title: '角色已不存在', message: '服务器确认该角色已不存在；本次未重发更新。', type: 'info' });
+        return;
+      }
+      if (!response.ok) throw new Error(await getResponseMessage(response, '暂时无法读取角色当前状态，请稍后只读重试。'));
+
+      const data = await response.json() as Partial<Role>;
+      if (Number(data.id) !== pending.roleId || typeof data.name !== 'string' || typeof data.description !== 'string' || !Array.isArray(data.permissions)) {
+        throw new Error('角色当前状态格式异常，请稍后只读重试。');
+      }
+      const permissions = data.permissions.filter((permission): permission is Permission => (
+        !!permission && Number.isInteger(Number(permission.id)) && typeof permission.name === 'string'
+      ));
+      if (permissions.length !== data.permissions.length) throw new Error('角色权限清单格式异常，请稍后只读重试。');
+      const observedRole: Role = {
+        id: pending.roleId,
+        code: typeof data.code === 'string' ? data.code : editingRole?.code || '',
+        name: data.name,
+        description: data.description,
+        is_system: Boolean(data.is_system),
+        user_count: Number.isFinite(Number(data.user_count)) ? Number(data.user_count) : roles.find((role) => role.id === pending.roleId)?.user_count || 0,
+        permission_count: permissions.length,
+        permissions,
+      };
+      const observedIds = permissions.map((permission) => permission.id).sort((a, b) => a - b);
+      const expectedIds = [...pending.permissionIds].sort((a, b) => a - b);
+      const matches = observedRole.name === pending.name
+        && observedRole.description === pending.description
+        && observedIds.length === expectedIds.length
+        && observedIds.every((id, index) => id === expectedIds[index]);
+
+      if (matches) {
+        setRoles((current) => current.map((role) => role.id === pending.roleId ? { ...role, ...observedRole } : role));
+        setPendingRoleVerification(null);
+        setEditingRole(null);
+        setFormData({ code: '', name: '', description: '', permission_ids: [] });
+        setConfirmedWriteNotice(null);
+        addNotification({ title: '更新已确认', message: '服务器当前角色资料与本次修改一致；只读核实完成，未重复提交。', type: 'success' });
+      } else {
+        setPendingRoleVerification({ ...pending, readError: null, observedRole });
+        setRoles((current) => current.map((role) => role.id === pending.roleId ? { ...role, ...observedRole } : role));
+      }
+    } catch (error) {
+      const message = error instanceof TypeError
+        ? '暂时无法连接，角色更新结果仍待确认；请只读重试核实。'
+        : error instanceof Error
+          ? error.message
+          : '角色更新结果仍待确认；请只读重试核实。';
+      setPendingRoleVerification({ ...pending, readError: message, observedRole: null });
+    } finally {
+      roleVerificationLockRef.current = false;
+      setRoleVerificationBusy(false);
+    }
+  };
+
+  const acceptObservedRoleAndClose = () => {
+    const observedRole = pendingRoleVerification?.observedRole;
+    if (!observedRole) return;
+    setRoles((current) => current.map((role) => role.id === observedRole.id ? { ...role, ...observedRole } : role));
+    setPendingRoleVerification(null);
+    setEditingRole(null);
+    setFormData({ code: '', name: '', description: '', permission_ids: [] });
+    addNotification({ title: '已采用服务器状态', message: '已按只读结果退出编辑，没有再次提交角色更新。', type: 'info' });
+  };
+
+  const restoreUnappliedRoleUpdateForm = () => {
+    const pending = pendingRoleVerification;
+    const observedRole = pending?.observedRole;
+    if (!pending || !observedRole) return;
+    setEditingRole(observedRole);
+    setFormData({
+      code: observedRole.code,
+      name: pending.name,
+      description: pending.description,
+      permission_ids: [...pending.permissionIds],
+    });
+    setPendingRoleVerification(null);
+    addNotification({ title: '已恢复更新内容', message: '只读核实确认服务器尚未应用本次更新；原表单已恢复，系统不会自动重试。', type: 'info' });
+  };
+
   const handleDeleteRole = async () => {
     const role = deletingRole;
-    if (!role || mutationLockRef.current || loadError || confirmedWriteNotice) return;
+    if (!role || mutationLockRef.current || pendingRoleVerification || pendingRoleCreateVerification || pendingRoleDeleteVerification || loadError || confirmedWriteNotice) return;
     mutationLockRef.current = true;
     setMutationBusy(true);
 
@@ -178,6 +595,17 @@ export default function PermissionManagement() {
       });
 
       if (!response.ok) {
+        if (response.status >= 500 || [408, 425, 429].includes(response.status)) {
+          setPendingRoleDeleteVerification({ roleId: role.id, name: role.name, readError: null, observedRole: null });
+          setDeletingRole(null);
+          return;
+        }
+        if (response.status === 404) {
+          setRoles((current) => current.filter((item) => item.id !== role.id));
+          setDeletingRole(null);
+          addNotification({ title: '删除已确认', message: `服务器确认角色“${role.name}”已不存在。`, type: 'success' });
+          return;
+        }
         addNotification({ title: '删除失败', message: await getResponseMessage(response, '角色删除失败，请重试。'), type: 'error' });
         return;
       }
@@ -186,7 +614,8 @@ export default function PermissionManagement() {
       addNotification({ title: '删除成功', message: `角色“${role.name}”已删除`, type: 'success' });
       setDeletingRole(null);
     } catch {
-      addNotification({ title: '删除失败', message: '网络连接异常，角色未确认删除，请检查后重试。', type: 'error' });
+      setPendingRoleDeleteVerification({ roleId: role.id, name: role.name, readError: null, observedRole: null });
+      setDeletingRole(null);
     } finally {
       mutationLockRef.current = false;
       setMutationBusy(false);
@@ -249,6 +678,94 @@ export default function PermissionManagement() {
     return labels[module] || module;
   };
 
+  const mutationsLocked = loading || mutationBusy || roleVerificationBusy || roleCreateVerificationBusy || roleDeleteVerificationBusy || !!loadError || !!confirmedWriteNotice || !!pendingRoleVerification || !!pendingRoleCreateVerification || !!pendingRoleDeleteVerification;
+
+  const roleCreateVerificationAlert = pendingRoleCreateVerification && (
+    <div role="alert" className={`flex flex-col gap-3 rounded-xl border p-4 ${styles.border} ${styles.card}`}>
+      <p className={styles.textSecondary}>
+        {pendingRoleCreateVerification.readError
+          ? pendingRoleCreateVerification.readError
+          : pendingRoleCreateVerification.observedRole
+            ? `服务器中已存在编码“${pendingRoleCreateVerification.code}”的角色“${pendingRoleCreateVerification.observedRole.name}”，但名称、描述或权限集合与本次创建不一致。页面已显示服务器当前值，不会自动覆盖或重发。`
+            : pendingRoleCreateVerification.notFound
+              ? `只读读取的服务器角色列表中未找到编码“${pendingRoleCreateVerification.code}”。系统不会自动重发；角色编码在服务器端唯一，你可以恢复原表单后手动重试。`
+              : '角色创建结果尚未确认。请只读核实服务器角色列表；核实期间所有角色写入均已暂停。'}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => { void verifyPendingRoleCreate(); }}
+          disabled={roleCreateVerificationBusy}
+          className={`rounded-xl px-4 py-2 ${styles.buttonSecondary}`}
+        >
+          {roleCreateVerificationBusy ? '正在只读核实…' : '只读核实创建结果'}
+        </button>
+        {pendingRoleCreateVerification.notFound && (
+          <ActionButton
+            type="button"
+            variant="secondary"
+            onClick={restoreUncreatedRoleForm}
+            disabled={roleCreateVerificationBusy}
+          >
+            恢复原表单后手动重试
+          </ActionButton>
+        )}
+        {pendingRoleCreateVerification.observedRole && (
+          <button
+            type="button"
+            onClick={acceptObservedCreatedRole}
+            disabled={roleCreateVerificationBusy}
+            className={`rounded-xl px-4 py-2 ${styles.buttonSecondary}`}
+          >
+            采用服务器当前状态并结束核实
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const roleVerificationAlert = pendingRoleVerification && (
+    <div role="alert" className={`flex flex-col gap-3 rounded-xl border p-4 ${styles.border} ${styles.card}`}>
+      <p className={styles.textSecondary}>
+        {pendingRoleVerification.readError
+          ? pendingRoleVerification.readError
+          : pendingRoleVerification.observedRole
+            ? `已读取服务器角色“${pendingRoleVerification.observedRole.name}”，但名称、描述或权限集合与本次修改不一致。页面已显示服务器当前值，不会自动覆盖或重发。`
+            : '角色更新结果尚未确认。请只读核实服务器当前角色状态；核实完成前，所有角色写入均已暂停。'}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => { void verifyPendingRoleUpdate(); }}
+          disabled={roleVerificationBusy}
+          className={`rounded-xl px-4 py-2 ${styles.buttonSecondary}`}
+        >
+          {roleVerificationBusy ? '正在只读核实…' : '只读核实角色权限'}
+        </button>
+        {pendingRoleVerification.observedRole && (
+          <>
+            <ActionButton
+              type="button"
+              variant="secondary"
+              onClick={restoreUnappliedRoleUpdateForm}
+              disabled={roleVerificationBusy}
+            >
+              恢复原表单后手动重试
+            </ActionButton>
+            <button
+              type="button"
+              onClick={acceptObservedRoleAndClose}
+              disabled={roleVerificationBusy}
+              className={`rounded-xl px-4 py-2 ${styles.buttonSecondary}`}
+            >
+              采用服务器当前状态并退出编辑
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
   if (loading && !hasLoadedOnce) {
     return (
       <div className={`flex items-center justify-center h-64 ${styles.textMuted}`}>
@@ -268,7 +785,7 @@ export default function PermissionManagement() {
         {hasPermission('system:role') && (
           <button
             onClick={() => { setShowCreateForm(true); setFormData({ code: '', name: '', description: '', permission_ids: [] }); }}
-            disabled={loading || mutationBusy || !!loadError || !!confirmedWriteNotice}
+            disabled={mutationsLocked}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl ${styles.buttonPrimary}`}
           >
             <Plus className="w-4 h-4" />
@@ -288,6 +805,42 @@ export default function PermissionManagement() {
           >
             {loading ? '正在重新加载…' : '重新加载角色列表'}
           </button>
+        </div>
+      )}
+
+      {pendingRoleVerification && !editingRole && roleVerificationAlert}
+
+      {pendingRoleCreateVerification && !showCreateForm && roleCreateVerificationAlert}
+
+      {pendingRoleDeleteVerification && (
+        <div role="alert" className={`flex flex-col gap-3 rounded-xl border p-4 ${styles.border} ${styles.card}`}>
+          <p className={styles.textSecondary}>
+            {pendingRoleDeleteVerification.readError
+              ? pendingRoleDeleteVerification.readError
+              : pendingRoleDeleteVerification.observedRole
+                ? `服务器仍存在角色“${pendingRoleDeleteVerification.observedRole.name}”，本次删除尚未得到确认。页面已显示服务器当前资料，不会自动重发。`
+                : '角色删除结果尚未确认。请只读核实服务器当前角色状态；核实期间所有角色写入均已暂停。'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => { void verifyPendingRoleDelete(); }}
+              disabled={roleDeleteVerificationBusy}
+              className={`rounded-xl px-4 py-2 ${styles.buttonSecondary}`}
+            >
+              {roleDeleteVerificationBusy ? '正在只读核实…' : '只读核实删除结果'}
+            </button>
+            {pendingRoleDeleteVerification.observedRole && (
+              <button
+                type="button"
+                onClick={acceptObservedRoleAfterDelete}
+                disabled={roleDeleteVerificationBusy}
+                className={`rounded-xl px-4 py-2 ${styles.buttonSecondary}`}
+              >
+                采用服务器当前状态并结束核实
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -340,7 +893,7 @@ export default function PermissionManagement() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => startEdit(role)}
-                      disabled={loading || mutationBusy || !!loadError || !!confirmedWriteNotice}
+                      disabled={mutationsLocked}
                       className={`p-2 rounded-lg ${styles.hoverBg} ${styles.textMuted}`}
                       title="编辑"
                       aria-label={`编辑角色 ${role.name}`}
@@ -350,7 +903,7 @@ export default function PermissionManagement() {
                     {!role.is_system && (
                       <button
                         onClick={() => setDeletingRole(role)}
-                        disabled={loading || mutationBusy || !!loadError || !!confirmedWriteNotice}
+                        disabled={mutationsLocked}
                         className="p-2 rounded-lg text-studio-coral-contrast hover:bg-studio-coral-soft"
                         title="删除"
                         aria-label={`删除角色 ${role.name}`}
@@ -384,21 +937,24 @@ export default function PermissionManagement() {
 
       {/* 创建/编辑弹窗 */}
       {(showCreateForm || editingRole) && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-modal">
+        <div role="dialog" aria-modal="true" aria-labelledby="role-management-form-title" className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-modal">
           <div className={`w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-2xl ${styles.modal} p-6`}>
             <div className="flex items-center justify-between mb-6">
-              <h2 className={`text-xl font-bold ${styles.textPrimary}`}>
+              <h2 id="role-management-form-title" className={`text-xl font-bold ${styles.textPrimary}`}>
                 {editingRole ? '编辑角色' : '新建角色'}
               </h2>
               <button
-                onClick={() => { if (!mutationBusy) { setShowCreateForm(false); setEditingRole(null); } }}
-                disabled={mutationBusy}
+                onClick={() => { if (!mutationsLocked) { setShowCreateForm(false); setEditingRole(null); } }}
+                disabled={mutationsLocked}
                 className={`p-2 rounded-lg ${styles.hoverBg} ${styles.textMuted}`}
                 aria-label="关闭角色编辑"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {editingRole && pendingRoleVerification && roleVerificationAlert}
+            {showCreateForm && pendingRoleCreateVerification && roleCreateVerificationAlert}
 
             <div className="space-y-4">
               {/* 角色信息 */}
@@ -409,7 +965,7 @@ export default function PermissionManagement() {
                     type="text"
                     value={formData.code}
                     onChange={(e) => setFormData(prev => ({ ...prev, code: e.target.value }))}
-                    disabled={!!editingRole || mutationBusy}
+                    disabled={!!editingRole || mutationsLocked}
                     className={`w-full px-4 py-2 rounded-xl ${styles.input}`}
                     placeholder="如 editor"
                   />
@@ -420,7 +976,7 @@ export default function PermissionManagement() {
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                    disabled={mutationBusy}
+                    disabled={mutationsLocked}
                     className={`w-full px-4 py-2 rounded-xl ${styles.input}`}
                     placeholder="如 编辑"
                   />
@@ -432,7 +988,7 @@ export default function PermissionManagement() {
                   type="text"
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                  disabled={mutationBusy}
+                  disabled={mutationsLocked}
                   className={`w-full px-4 py-2 rounded-xl ${styles.input}`}
                   placeholder="角色描述"
                 />
@@ -461,7 +1017,7 @@ export default function PermissionManagement() {
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); selectAllModule(module); }}
-                          disabled={mutationBusy}
+                          disabled={mutationsLocked}
                           className={`text-xs px-2 py-1 rounded ${styles.hoverBg} ${styles.textMuted}`}
                         >
                           {perms.every(p => formData.permission_ids.includes(p.id)) ? '取消全选' : '全选'}
@@ -478,7 +1034,7 @@ export default function PermissionManagement() {
                                 type="checkbox"
                                 checked={formData.permission_ids.includes(perm.id)}
                                 onChange={() => togglePermission(perm.id)}
-                                disabled={mutationBusy}
+                                disabled={mutationsLocked}
                                 className="rounded border-studio-border-soft"
                               />
                               <span className={`text-sm ${styles.textPrimary}`}>{perm.name}</span>
@@ -495,18 +1051,18 @@ export default function PermissionManagement() {
               {/* 操作按钮 */}
               <div className="flex justify-end gap-3 pt-4">
                 <button
-                  onClick={() => { if (!mutationBusy) { setShowCreateForm(false); setEditingRole(null); } }}
-                  disabled={mutationBusy}
+                  onClick={() => { if (!mutationsLocked) { setShowCreateForm(false); setEditingRole(null); } }}
+                  disabled={mutationsLocked}
                   className={`px-4 py-2 rounded-xl ${styles.buttonSecondary}`}
                 >
                   取消
                 </button>
                 <button
                   onClick={editingRole ? handleUpdateRole : handleCreateRole}
-                  disabled={mutationBusy || !!loadError || !!confirmedWriteNotice}
+                  disabled={mutationsLocked}
                   className={`px-4 py-2 rounded-xl ${styles.buttonPrimary}`}
                 >
-                  {mutationBusy ? '处理中…' : editingRole ? '保存' : '创建'}
+                  {mutationBusy ? '处理中…' : roleVerificationBusy ? '正在只读核实…' : editingRole ? '保存' : '创建'}
                 </button>
               </div>
             </div>

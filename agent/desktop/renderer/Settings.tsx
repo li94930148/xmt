@@ -9,8 +9,8 @@ export default function Settings({state,onSave}:{state:DesktopState;onSave:(valu
   const chooseBrowser=async()=>{try{const selected=await window.xmtAgent.chooseBrowser();if(selected)setCfg({...cfg,executablePath:selected,browserId:''});}catch{setError('浏览器选择失败，请重新尝试。');}};
   const restartBrowser=async()=>{try{await window.xmtAgent.restartBrowser();setSaved('浏览器会话测试完成');}catch{setError('浏览器会话测试失败，请检查浏览器配置。');}};
   const clearProfile=async()=>{if(!window.confirm('第一次确认：清理后当前 Agent 浏览器的抖音登录状态会丢失，确定继续吗？'))return;try{const result=await window.xmtAgent.clearBrowserProfile();setSaved(result.cleared?'独立浏览器资料已清理，请重新登录':'已取消清理');}catch{setError('浏览器资料清理失败，请稍后重试。');}};
-  const rebind=async()=>{setError('');setSaved('');try{await window.xmtAgent.rebind({serverUrl:PRODUCTION_SERVER,bindingCode});setBindingCode('');setSaved('生产服务器已重新绑定，浏览器资料保持不变');}catch{setError('服务器重新绑定失败，请检查绑定码后重试。');}};
-  return <div className="settings-grid"><section className="card settings"><h2>设置</h2>
+  const rebind=async()=>{setError('');setSaved('');try{await window.xmtAgent.rebind({serverUrl:PRODUCTION_SERVER,bindingCode});setBindingCode('');setSaved('生产服务器已重新绑定，浏览器资料保持不变');}catch(cause){setError(cause instanceof Error&&cause.name==='BindingActionError'?cause.toString().replace(/^BindingActionError:\s*/, ''):'服务器重新绑定失败，请检查绑定码后重试。');}};
+  return <div className="settings-grid"><section className="card settings"><h2>设置</h2>{state.bindingAcknowledgementPending&&<p role="status" className="error">绑定凭据已安全保存在本机，服务器确认尚未完成；请检查网络后重新打开本页面。</p>}
     <label>当前服务器<input value={cfg.serverUrl} readOnly/></label><p>生产服务器：{PRODUCTION_SERVER}</p>
     <label>更换服务器绑定码<input value={bindingCode} onChange={e=>setBindingCode(e.target.value.trim())} autoComplete="off" placeholder="更换服务器时填写一次性绑定码"/></label>
     <button type="button" className="secondary" disabled={!bindingCode} onClick={()=>void rebind()}>安全更换并重新绑定服务器</button>{error&&<p className="error">{error}</p>}

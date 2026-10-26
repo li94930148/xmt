@@ -8,6 +8,10 @@ import {
   createRetrospective,
   exportRetrospective,
   generateRetrospectiveSnapshot,
+  getRetroActionCreateRequestStatus,
+  getRetroActionUpdateRequestStatus,
+  getRetrospectiveCreateRequestStatus,
+  getRetrospectiveUpdateRequestStatus,
   getRetrospectiveDetail,
   listMyRetroActions,
   listRetrospectiveDailyRisks,
@@ -54,6 +58,19 @@ function parseId(value: string) {
   return id;
 }
 
+function getCreateRequestId(req: Request, label = '复盘创建') {
+  const headerValue = req.get('X-Idempotency-Key');
+  const bodyValue: unknown = req.body?.client_request_id;
+  if (bodyValue !== undefined && bodyValue !== null && typeof bodyValue !== 'string') {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', `${label}请求编号无效`);
+  }
+  if (headerValue && typeof bodyValue === 'string' && bodyValue.trim()
+    && headerValue.trim().toLowerCase() !== bodyValue.trim().toLowerCase()) {
+    throw new RetrospectiveServiceError(400, 'INVALID_REQUEST_ID', `请求头与请求内容中的${label}编号不一致`);
+  }
+  return headerValue || (typeof bodyValue === 'string' ? bodyValue : undefined);
+}
+
 function sendData(res: Response, data: unknown) {
   res.json({ success: true, data });
 }
@@ -88,6 +105,27 @@ router.get('/templates', async (req, res) => {
   }
 });
 
+router.get('/create-requests/:requestId', async (req, res) => {
+  try {
+    sendData(res, await getRetrospectiveCreateRequestStatus(req.user, req.params.requestId));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+router.get('/:id/actions/create-requests/:requestId', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    sendData(res, await getRetroActionCreateRequestStatus(
+      req.user,
+      parseId(req.params.id),
+      req.params.requestId,
+    ));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
 router.post('/templates', async (req, res) => {
   try {
     sendData(res, await createRetroTemplate(req.user, req.body as CreateRetroTemplateInput));
@@ -115,7 +153,11 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    sendData(res, await createRetrospective(req.user, req.body as CreateRetrospectiveInput));
+    sendData(res, await createRetrospective(
+      req.user,
+      req.body as CreateRetrospectiveInput,
+      getCreateRequestId(req),
+    ));
   } catch (error) {
     handleError(error, res);
   }
@@ -129,9 +171,27 @@ router.get('/actions/mine', async (req, res) => {
   }
 });
 
+router.get('/actions/:actionId/update-requests/:requestId', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    sendData(res, await getRetroActionUpdateRequestStatus(
+      req.user,
+      parseId(req.params.actionId),
+      req.params.requestId,
+    ));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
 router.patch('/actions/:actionId', async (req, res) => {
   try {
-    sendData(res, await updateRetroAction(req.user, parseId(req.params.actionId), req.body as UpdateRetroActionInput));
+    sendData(res, await updateRetroAction(
+      req.user,
+      parseId(req.params.actionId),
+      req.body as UpdateRetroActionInput,
+      req.get('X-Idempotency-Key'),
+    ));
   } catch (error) {
     handleError(error, res);
   }
@@ -161,9 +221,27 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+router.get('/:id/update-requests/:requestId', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    sendData(res, await getRetrospectiveUpdateRequestStatus(
+      req.user,
+      parseId(req.params.id),
+      req.params.requestId,
+    ));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
 router.put('/:id', async (req, res) => {
   try {
-    sendData(res, await updateRetrospective(req.user, parseId(req.params.id), req.body as UpdateRetrospectiveInput));
+    sendData(res, await updateRetrospective(
+      req.user,
+      parseId(req.params.id),
+      req.body as UpdateRetrospectiveInput,
+      req.get('X-Idempotency-Key'),
+    ));
   } catch (error) {
     handleError(error, res);
   }
@@ -195,7 +273,11 @@ router.post('/:id/archive', async (req, res) => {
 
 router.post('/:id/actions', async (req, res) => {
   try {
-    sendData(res, await createRetroAction(req.user, parseId(req.params.id), req.body as CreateRetroActionInput));
+    const requestId = getCreateRequestId(req, '行动项创建');
+    sendData(res, await createRetroAction(req.user, parseId(req.params.id), {
+      ...(req.body as CreateRetroActionInput),
+      client_request_id: requestId,
+    }));
   } catch (error) {
     handleError(error, res);
   }

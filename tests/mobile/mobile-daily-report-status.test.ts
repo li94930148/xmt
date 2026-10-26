@@ -3,7 +3,7 @@ import { getMobileDailyReportStatusView } from '../../src/platform/mobile-daily-
 
 const expected = {
   draft: { label: '草稿', readOnly: false },
-  submitted: { label: '审核中', readOnly: false },
+  submitted: { label: '审核中', readOnly: true },
   approved: { label: '已通过', readOnly: true },
   rejected: { label: '已退回', readOnly: false },
   archived: { label: '已归档', readOnly: true },
@@ -22,4 +22,14 @@ assert.deepEqual(getMobileDailyReportStatusView(null), {
   description: '今天尚未填写，可保存草稿或提交。',
   readOnly: false,
 });
+assert.deepEqual(getMobileDailyReportStatusView('draft', true), {
+  label: '状态待确认',
+  description: '提交结果尚无法确认，核实前不要重复提交。',
+  readOnly: true,
+}, 'an ambiguous submission must not be presented as a confirmed draft');
+assert.deepEqual(getMobileDailyReportStatusView('future_status' as keyof typeof expected), {
+  label: '状态待确认',
+  description: '服务器返回了暂不支持的日报状态，当前为只读状态。',
+  readOnly: true,
+}, 'a future report status must be neutral and read-only');
 console.log('Mobile daily report status labels and editability passed');

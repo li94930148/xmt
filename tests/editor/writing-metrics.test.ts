@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import WritingMetrics from '../../src/components/editor/WritingMetrics';
 import { countWritingCharacters, estimatedReadingMinutes, parseWritingGoal } from '../../src/components/editor/writingMetricUtils';
 
 test('字数忽略空白，并按 Unicode 字符统计', () => {
@@ -18,4 +21,10 @@ test('目标字数只接受有效正整数', () => {
   for (const invalid of ['', '0', '-1', '1.5', 'NaN', '1000001']) {
     assert.equal(parseWritingGoal(invalid), null);
   }
+});
+
+test('目标字数输入包含稳定字段名并保留可访问标签', () => {
+  const markup = renderToStaticMarkup(createElement(WritingMetrics, { count: 12, readOnly: false }));
+  assert.match(markup, /name="writingGoal"/);
+  assert.match(markup, /aria-label="目标字数"/);
 });

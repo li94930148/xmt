@@ -45,6 +45,10 @@ await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 const address = server.address();
 assert(address && typeof address !== 'string');
 const base = `http://127.0.0.1:${address.port}`;
+if (process.env.XMT_ACHIEVEMENTS_QA_SERVE === '1') {
+  console.log(`Isolated achievements QA fixture: ${base}/__qa?theme=dark`);
+  await new Promise<void>(() => {});
+}
 const browser = await chromium.launch({ headless: true });
 
 function relativeLuminance(channels: number[]) {
@@ -80,6 +84,32 @@ async function composedTextContrastRatio(locator: import('playwright').Locator) 
   return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
 }
 
+async function assertTextContrast(locator: import('playwright').Locator, label: string) {
+  const ratio = await composedTextContrastRatio(locator);
+  assert(ratio >= 4.5, `${label} contrast=${ratio.toFixed(2)} expected>=4.5`);
+}
+
+const achievementViewModes = [
+  { name: '卡片视图', heading: '成就列表' },
+  { name: '排行榜', heading: '积分排行榜' },
+  { name: '动态', heading: '最近获得的成就' },
+] as const;
+
+async function assertAchievementView(page: import('playwright').Page, selectedView: (typeof achievementViewModes)[number]['name']) {
+  const group = page.getByRole('group', { name: '成就视图' });
+  assert.equal(await group.getByRole('button').count(), achievementViewModes.length, 'the achievement view selector exposes all three modes');
+
+  for (const viewMode of achievementViewModes) {
+    const button = group.getByRole('button', { name: viewMode.name, exact: true });
+    const selected = viewMode.name === selectedView;
+    assert.equal(await button.getAttribute('aria-label'), viewMode.name, `${viewMode.name} has a stable accessible name`);
+    assert.equal(await button.getAttribute('aria-pressed'), String(selected), `${viewMode.name} exposes whether it is selected`);
+    assert.equal(await page.getByRole('heading', { name: viewMode.heading, exact: true }).count(), Number(selected), `${viewMode.name} selected state matches the visible content view`);
+  }
+
+  assert.equal(await group.locator('button[aria-pressed="true"]').count(), 1, 'exactly one achievement view is selected');
+}
+
 try {
   const errors: string[] = [];
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
@@ -104,17 +134,47 @@ try {
     assert.equal(await rarityFilter.getAttribute('name'), 'achievementRarity');
     await page.getByRole('heading', { name: '暂无可查看的成就' }).waitFor();
     await page.getByText('当前还没有可查看的成就，请联系管理员启用成就内容。', { exact: true }).waitFor();
+    await assertAchievementView(page, '卡片视图');
+    await assertTextContrast(page.getByText('0 积分 · 距下一级还需 50', { exact: true }), `${theme} level progress summary`);
+    await assertTextContrast(page.getByText('/0', { exact: true }), `${theme} earned count denominator`);
+    await assertTextContrast(page.getByText('已解锁成就', { exact: true }), `${theme} earned count label`);
+    await assertTextContrast(page.getByText('总积分', { exact: true }), `${theme} total points label`);
+    await assertTextContrast(page.getByText('完成度', { exact: true }), `${theme} completion label`);
     assert.equal(await page.getByRole('button', { name: '启用预设成就' }).count(), 0, 'members do not see an admin-only action prompt');
     assert.equal(await page.getByRole('button', { name: '检查新成就' }).count(), 0, 'the empty catalog does not offer a no-op check action');
     if (theme === 'dark') {
       await page.getByRole('heading', { name: '暂无可查看的成就' }).scrollIntoViewIfNeeded();
       await page.screenshot({ path: '/tmp/xmt-achievements-no-config-member-dark-1440.png', fullPage: false });
     }
-    await page.getByRole('button', { name: '排行榜' }).click();
+    const leaderboardButton = page.getByRole('group', { name: '成就视图' }).getByRole('button', { name: '排行榜', exact: true });
+    await leaderboardButton.click();
+    await assertAchievementView(page, '排行榜');
     const emptyState = page.getByRole('status').filter({ hasText: '当前没有可显示的成员积分排行' });
     await emptyState.getByText('当前没有可显示的成员积分排行', { exact: true }).waitFor();
-    await emptyState.getByText('启用成员后，这里会显示成就积分排行。', { exact: true }).waitFor();
+    const leaderboardDescription = emptyState.getByText('启用成员后，这里会显示成就积分排行。', { exact: true });
+    await leaderboardDescription.waitFor();
+    await assertTextContrast(leaderboardDescription, `${theme} leaderboard empty-state description`);
     assert.equal(await page.getByText('暂无数据', { exact: true }).count(), 0, `${theme} leaderboard no longer shows a generic empty state`);
+
+    const feedButton = page.getByRole('group', { name: '成就视图' }).getByRole('button', { name: '动态', exact: true });
+    await page.keyboard.press('Tab');
+    assert.equal(await feedButton.evaluate((button) => button === document.activeElement), true, `${theme} keyboard Tab moves from leaderboard to dynamic view`);
+    await page.keyboard.press('Enter');
+    await assertAchievementView(page, '动态');
+    const feedEmptyState = page.getByText('暂无人获得成就', { exact: true });
+    await feedEmptyState.waitFor();
+    await assertTextContrast(feedEmptyState, `${theme} achievement feed empty-state message`);
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await leaderboardButton.evaluate((button) => button === document.activeElement), true, `${theme} keyboard Shift+Tab returns from dynamic to leaderboard view`);
+    await page.keyboard.press('Space');
+    await assertAchievementView(page, '排行榜');
+    await page.keyboard.press('Shift+Tab');
+    const cardButton = page.getByRole('group', { name: '成就视图' }).getByRole('button', { name: '卡片视图', exact: true });
+    assert.equal(await cardButton.evaluate((button) => button === document.activeElement), true, `${theme} keyboard Shift+Tab moves to card view`);
+    await page.keyboard.press('Enter');
+    await assertAchievementView(page, '卡片视图');
+    await leaderboardButton.click();
+    await assertAchievementView(page, '排行榜');
 
     for (const testId of ['achievement-filter-count', 'achievement-category-count', 'achievement-rarity-count']) {
       const labels = page.getByTestId(testId);
@@ -154,13 +214,17 @@ try {
   await page.getByRole('heading', { name: '成就系统', exact: true }).waitFor();
   await page.getByRole('heading', { name: '暂无可查看的成就' }).waitFor();
   await page.getByText('当前还没有可查看的成就，请联系管理员启用成就内容。', { exact: true }).waitFor();
+  await assertAchievementView(page, '卡片视图');
   assert.equal(await page.getByRole('button', { name: '启用预设成就' }).count(), 0, 'the mobile member view does not offer a hidden admin-only action');
   assert.equal(await page.getByRole('button', { name: '检查新成就' }).count(), 0, 'the mobile empty catalog does not offer a no-op check action');
   await page.getByRole('heading', { name: '暂无可查看的成就' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: '/tmp/xmt-achievements-no-config-member-dark-390.png', fullPage: false });
-  await page.getByRole('button', { name: '排行榜' }).click();
+  await page.getByRole('group', { name: '成就视图' }).getByRole('button', { name: '排行榜', exact: true }).click();
+  await assertAchievementView(page, '排行榜');
   const mobileEmptyState = page.getByRole('status').filter({ hasText: '当前没有可显示的成员积分排行' });
   await mobileEmptyState.getByText('当前没有可显示的成员积分排行', { exact: true }).waitFor();
+  await assertTextContrast(page.getByText('0 积分 · 距下一级还需 50', { exact: true }), '390px dark level progress summary');
+  await assertTextContrast(mobileEmptyState.getByText('启用成员后，这里会显示成就积分排行。', { exact: true }), '390px dark leaderboard empty-state description');
   const mobileLayout = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth }));
   assert.equal(mobileLayout.scrollWidth, mobileLayout.width, '390px leaderboard has no horizontal overflow');
   await mobileEmptyState.scrollIntoViewIfNeeded();
@@ -179,10 +243,6 @@ try {
   assert.deepEqual(errors, [], 'the isolated empty leaderboard flow has no unexpected browser errors');
   console.log('Achievements leaderboard empty-state browser test passed: mounted route, light/dark themes, 390px layout, and no business writes.');
 
-  if (process.env.XMT_ACHIEVEMENTS_QA_SERVE === '1') {
-    console.log(`Isolated achievements QA fixture: ${base}/__qa?theme=dark`);
-    await new Promise<void>((resolve) => process.once('SIGINT', resolve));
-  }
 } finally {
   await browser.close();
   io.close();

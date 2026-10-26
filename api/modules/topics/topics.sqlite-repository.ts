@@ -3,6 +3,8 @@ import { activityLogTimestamp } from '../../services/activity-log';
 import { advancePublishingTopicIfResolved } from './publishing-completion';
 import { insertTopicOutlineOriginSnapshot } from './production-origin-snapshot';
 import { deleteWorkflowDocumentVersionsForTopic, recordWorkflowDocumentVersion } from '../../services/workflowDocumentVersions';
+import { canTransitionTopicStatus } from '@shared/workflow/topic-state-machine';
+import type { TopicStatus } from '@shared/types';
 import type {
   CreateTopicRecord,
   CreatorTopicSuggestionLinkRecord,
@@ -13,9 +15,10 @@ import type {
   TopicHistoryWrite,
   TopicListFilter,
   TopicRepository,
+  TopicCreateRequestRecord,
   TopicTransaction,
 } from './topics.repository';
-import type { TopicPage, TopicPersistencePatch, TopicRecord } from './topics.types';
+import type { TopicContentPatch, TopicPage, TopicPersistencePatch, TopicRecord } from './topics.types';
 
 type DatabaseTransaction = Parameters<Parameters<typeof runInTransaction>[0]>[0];
 
@@ -32,8 +35,12 @@ function buildListFilter(filter: TopicListFilter) {
   const params: unknown[] = [];
 
   if (filter.status) {
-    where += ' AND t.status = ?';
-    params.push(filter.status);
+    if (filter.status === 'creation') {
+      where += " AND t.status IN ('approved', 'production')";
+    } else {
+      where += ' AND t.status = ?';
+      params.push(filter.status);
+    }
   }
 
   if (filter.search) {
@@ -81,7 +88,7 @@ async function createTopic(tx: DatabaseTransaction, input: CreateTopicRecord) {
   );
 }
 
-async function updateTopic(tx: Pick<DatabaseTransaction, 'execute'>, id: number | string, patch: TopicPersistencePatch) {
+async function updateTopic(tx: Pick<DatabaseTransaction, 'execute'>, id: number | string, patch: TopicContentPatch) {
   const { updates, params } = buildUpdate(patch);
   params.push(id);
   await tx.execute(`UPDATE topics SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -90,9 +97,10 @@ async function updateTopic(tx: Pick<DatabaseTransaction, 'execute'>, id: number 
 async function updateTopicIfStatus(
   tx: Pick<DatabaseTransaction, 'execute'>,
   id: number | string,
-  expectedStatus: string,
+  expectedStatus: TopicStatus,
   patch: TopicPersistencePatch,
 ) {
+  if (patch.status !== undefined && !canTransitionTopicStatus(expectedStatus, patch.status)) return false;
   const { updates, params } = buildUpdate(patch);
   params.push(id, expectedStatus);
   const changed = await tx.execute(`UPDATE topics SET ${updates.join(', ')} WHERE id = ? AND status = ?`, params);
@@ -102,6 +110,32 @@ async function updateTopicIfStatus(
 function transactionAdapter(tx: DatabaseTransaction): TopicTransaction {
   return {
     createTopic: (input) => createTopic(tx, input),
+    findTopicCreateRequest: async (clientRequestId) => {
+      const record = await tx.queryOne<{
+        client_request_id: string;
+        actor_id: number;
+        topic_id: number;
+        request_fingerprint: string;
+      }>(
+        `SELECT client_request_id,actor_id,topic_id,request_fingerprint
+         FROM topic_create_request_keys WHERE client_request_id=?`,
+        [clientRequestId],
+      );
+      return record ? {
+        clientRequestId: String(record.client_request_id),
+        actorId: Number(record.actor_id),
+        topicId: Number(record.topic_id),
+        requestFingerprint: String(record.request_fingerprint),
+      } : null;
+    },
+    recordTopicCreateRequest: async (input) => {
+      await tx.execute(
+        `INSERT INTO topic_create_request_keys
+          (client_request_id,actor_id,topic_id,request_fingerprint,created_at)
+         VALUES(?,?,?,?,datetime('now', '+8 hours'))`,
+        [input.clientRequestId, input.actorId, input.topicId, input.requestFingerprint],
+      );
+    },
     findDetailById: (id) => tx.queryOne<TopicRecord>(TOPIC_DETAIL_SQL, [id]),
     findHistory: (topicId) => tx.queryAll<Record<string, unknown>>(
       `SELECT th.*, u.name as operator_name FROM topic_history th
@@ -227,6 +261,25 @@ export class SqliteTopicRepository implements TopicRepository {
     );
   }
 
+  async findTopicCreateRequest(clientRequestId: string): Promise<TopicCreateRequestRecord | null> {
+    const record = await queryOne<{
+      client_request_id: string;
+      actor_id: number;
+      topic_id: number;
+      request_fingerprint: string;
+    }>(
+      `SELECT client_request_id,actor_id,topic_id,request_fingerprint
+       FROM topic_create_request_keys WHERE client_request_id=?`,
+      [clientRequestId],
+    );
+    return record ? {
+      clientRequestId: String(record.client_request_id),
+      actorId: Number(record.actor_id),
+      topicId: Number(record.topic_id),
+      requestFingerprint: String(record.request_fingerprint),
+    } : null;
+  }
+
   async findDirectorIds() {
     const rows = await queryAll<{ id: number }>("SELECT id FROM users WHERE role = 'director' OR role = 'admin'");
     return rows.map((row) => Number(row.id));
@@ -241,7 +294,7 @@ export class SqliteTopicRepository implements TopicRepository {
     return runInTransaction((tx) => work(transactionAdapter(tx)));
   }
 
-  updateTopic(id: number | string, patch: TopicPersistencePatch) {
+  updateTopic(id: number | string, patch: TopicContentPatch) {
     return updateTopic({ execute }, id, patch);
   }
 

@@ -39,6 +39,23 @@ try {
            (?, 'work-b', '作品 B', '2026-09-14T08:00:00.000Z', 900, 90, 9, 4, 3)`,
     [douyinAccountId, douyinAccountId],
   );
+  const reportBoundaryWorks = [
+    ['before-yesterday', '昨天前一日', '2026-09-15T23:59:59+08:00'],
+    ['yesterday-start', '昨天起点', '2026-09-16T00:00:00+08:00'],
+    ['yesterday-end', '昨天终点', '2026-09-16T23:59:59+08:00'],
+    ['after-yesterday', '昨天之后', '2026-09-17T00:00:00+08:00'],
+    ['before-week', '近七天前一日', '2026-09-10T23:59:59+08:00'],
+    ['week-start', '近七天起点', '2026-09-11T00:00:00+08:00'],
+    ['week-end', '近七天终点', '2026-09-17T23:59:59+08:00'],
+    ['after-week', '近七天之后', '2026-09-18T00:00:00+08:00'],
+    ['before-month', '近三十天前一日', '2026-08-18T23:59:59+08:00'],
+    ['month-start', '近三十天起点', '2026-08-19T00:00:00+08:00'],
+  ] as const;
+  for (const [id, title, publishTime] of reportBoundaryWorks) await execute(
+    `INSERT INTO douyin_works(account_id,aweme_id,title,publish_time,play_count,like_count,comment_count,share_count,collect_count)
+     VALUES(?,?,?,?,0,0,0,0,0)`,
+    [douyinAccountId, `boundary-${id}`, title, publishTime],
+  );
   await execute(
     `INSERT INTO douyin_daily_snapshots(account_id,snapshot_date,fans_count,fans_count_available,works_count,play_count,like_count,comment_count,share_count)
      VALUES(?, '2026-09-01', 100, 1, 1, 1000, 100, 10, 5),
@@ -74,14 +91,25 @@ try {
      VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
     [creatorAccountId, 'official-zero-view-work', '2026-09-14', 'likes', '0', 0, 'count', 'official_export', 'a'.repeat(64), 'douyin-export-v2', '2026-09-16T08:00:00.000Z'],
   );
-  for (const [date, values] of [
-    ['2026-09-15', { posts: 1, views: 100, likes: 10, comments: -2, shares: 3 }],
-    ['2026-09-16', { posts: 0, views: 200, likes: 20, comments: 4, shares: 5 }],
-  ] as const) {
+  const officialDates = (endDate: string, count: number) => Array.from({ length: count }, (_, index) => {
+    const [year, month, day] = endDate.split('-').map(Number);
+    return new Date(Date.UTC(year, month - 1, day + index - count + 1)).toISOString().slice(0, 10);
+  });
+  const dailyMetricRows = [
+    ...officialDates('2026-09-16', 1).map(date => [date, 'yesterday'] as const),
+    ...officialDates('2026-09-17', 7).map(date => [date, '7d'] as const),
+    ...officialDates('2026-09-17', 30).map(date => [date, '30d'] as const),
+  ];
+  for (const [date, period] of dailyMetricRows) {
+    const values = date === '2026-09-15'
+      ? { posts: 1, views: 100, likes: 10, comments: -2, shares: 3 }
+      : date === '2026-09-16'
+        ? { posts: 0, views: 200, likes: 20, comments: 4, shares: 5 }
+        : { posts: 0, views: 0, likes: 0, comments: 0, shares: 0 };
     for (const [metric, value] of Object.entries(values)) await execute(
       `INSERT INTO creator_official_daily_metrics(account_id,metric_date,source_period,metric_code,value_text,value_number,unit,source_file_sha256,parser_version,collected_at)
        VALUES(?,?,?,?,?,?,?,?,?,?)`,
-      [creatorAccountId, date, '7d', metric, String(value), value, 'count', 'c'.repeat(64), 'douyin-export-v3', '2026-09-17T08:00:00.000Z'],
+      [creatorAccountId, date, period, metric, String(value), value, 'count', period === 'yesterday' ? 'd'.repeat(64) : period === '7d' ? 'c'.repeat(64) : 'e'.repeat(64), 'douyin-export-v3', '2026-09-17T08:00:00.000Z'],
     );
   }
 
@@ -104,11 +132,24 @@ try {
   assert.equal(report.growth.fans, 30);
   assert.equal(report.growth.interactions, 40);
   assert.equal(report.work_performance.total, 3);
+  assert.equal(report.work_performance.published, 8, 'weekly published works must use the inclusive Beijing-date window from Sep 11 through Sep 17');
+  assert.equal(report.data_coverage.period_start, '2026-09-11');
+  assert.equal(report.data_coverage.period_end, '2026-09-17');
   assert.equal(report.data_coverage.source, 'douyin_official_export');
   assert(!report.data_coverage.missing_fields.includes('period_play_growth'));
   assert(report.excellent_works.every((work) => work.level === 'viral' || work.level === 'excellent'));
   assert(report.low_efficiency_works.every((work) => work.level === 'low'));
   assert.equal(new Set([...report.excellent_works, ...report.low_efficiency_works].map((work) => work.id)).size, report.excellent_works.length + report.low_efficiency_works.length, 'excellent and low-efficiency lists must not overlap');
+
+  const dailyReport = await creatorAnalyticsService.generateReport(creatorAccountId, 'daily');
+  assert.equal(dailyReport.work_performance.published, 2, 'daily published works must use yesterday only, with both Beijing-midnight endpoints included');
+  assert.equal(dailyReport.data_coverage.period_start, '2026-09-16');
+  assert.equal(dailyReport.data_coverage.period_end, '2026-09-16');
+
+  const monthlyReport = await creatorAnalyticsService.generateReport(creatorAccountId, 'monthly');
+  assert.equal(monthlyReport.work_performance.published, 10, 'monthly published works must use the inclusive Beijing-date window from Aug 19 through Sep 17');
+  assert.equal(monthlyReport.data_coverage.period_start, '2026-08-19');
+  assert.equal(monthlyReport.data_coverage.period_end, '2026-09-17');
 
   await assert.rejects(
     creatorAnalyticsService.deleteReport(otherAccountId, Number(report.id)),

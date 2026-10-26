@@ -4,22 +4,12 @@ import {
   COLLABORATION_EVENTS,
   type CollaborationUserPresence,
 } from '../core/events';
+import { COLLABORATOR_COLORS } from '../core/collaboratorColors';
 import { defineWriteSource } from '../core/writeConsistency';
 import { SocketYjsProvider } from './SocketYjsProvider';
 
-const USER_COLORS = [
-  '#2563eb',
-  '#16a34a',
-  '#dc2626',
-  '#9333ea',
-  '#ea580c',
-  '#0891b2',
-  '#be123c',
-  '#4f46e5',
-];
-
 function colorForUser(userId: number) {
-  return USER_COLORS[Math.abs(userId) % USER_COLORS.length];
+  return COLLABORATOR_COLORS[Math.abs(userId) % COLLABORATOR_COLORS.length];
 }
 
 export interface CollaborativeDocumentOptions {

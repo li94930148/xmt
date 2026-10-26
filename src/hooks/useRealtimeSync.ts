@@ -3,6 +3,7 @@ import type { Socket } from 'socket.io-client';
 
 interface UseRealtimeSyncOptions {
   room: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- payload types differ by socket event.
   events: Record<string, (data: any) => void>;
   socket: Socket | null;
 }
@@ -14,28 +15,25 @@ interface UseRealtimeSyncOptions {
 export function useRealtimeSync({ room, events, socket }: UseRealtimeSyncOptions) {
   const eventsRef = useRef(events);
   eventsRef.current = events;
+  const eventNamesKey = Object.keys(events).sort().join('\0');
 
   useEffect(() => {
     if (!socket) return;
 
-    // 无论是否已连接，都尝试加入房间
-    const joinAndListen = () => {
-      socket.emit('join', room);
-      Object.entries(eventsRef.current).forEach(([event, handler]) => {
-        socket.on(event, (data: unknown) => handler(data));
-      });
-    };
-
-    if (socket.connected) {
-      joinAndListen();
-    } else {
-      socket.on('connect', joinAndListen);
-    }
+    const eventNames = eventNamesKey.split('\0').filter(Boolean);
+    const listeners = eventNames.map((event) => {
+      const listener = (data: unknown) => eventsRef.current[event]?.(data);
+      socket.on(event, listener);
+      return { event, listener };
+    });
+    const joinRoom = () => socket.emit('join', room);
+    socket.on('connect', joinRoom);
+    if (socket.connected) joinRoom();
 
     return () => {
-      socket.emit('leave', room);
-      Object.keys(eventsRef.current).forEach((event) => socket.off(event));
-      socket.off('connect', joinAndListen);
+      if (socket.connected) socket.emit('leave', room);
+      socket.off('connect', joinRoom);
+      listeners.forEach(({ event, listener }) => socket.off(event, listener));
     };
-  }, [socket, room]);
+  }, [socket, room, eventNamesKey]);
 }

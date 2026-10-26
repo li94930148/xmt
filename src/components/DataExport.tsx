@@ -134,8 +134,8 @@ export default function DataExport() {
           <Download className="w-5 h-5 text-studio-primary" />
         </div>
         <div>
-          <h3 className={`text-lg font-semibold ${styles.textPrimary}`}>数据导出</h3>
-          <p className={`text-sm ${styles.textSecondary}`}>导出选题明细，或选题状态、成员活动、每日趋势和平台分布汇总。</p>
+          <h2 className="text-lg font-semibold text-studio-text-primary">数据导出</h2>
+          <p className="text-sm text-studio-text-secondary">导出选题明细，或选题状态、成员活动、每日趋势和平台分布汇总。</p>
         </div>
       </div>
 
@@ -172,7 +172,7 @@ export default function DataExport() {
               <FileText className={`w-5 h-5 ${exportType === 'topics' ? 'text-studio-primary' : styles.textMuted}`} />
               <div className="text-left">
                 <p className={`text-sm font-medium ${styles.textPrimary}`}>选题数据</p>
-                <p className={`text-xs ${styles.textMuted}`}>导出所有选题信息</p>
+                <p className="text-xs text-studio-text-secondary">导出所有选题信息</p>
               </div>
             </button>
 
@@ -190,7 +190,7 @@ export default function DataExport() {
               <BarChart3 className={`w-5 h-5 ${exportType === 'analytics' ? 'text-studio-primary' : styles.textMuted}`} />
               <div className="text-left">
                 <p className={`text-sm font-medium ${styles.textPrimary}`}>数据分析</p>
-                <p className={`text-xs ${styles.textMuted}`}>导出状态、活动与平台汇总</p>
+                <p className="text-xs text-studio-text-secondary">导出状态、活动与平台汇总</p>
               </div>
             </button>
           </div>
@@ -200,7 +200,7 @@ export default function DataExport() {
           <label className={`block text-sm font-medium ${styles.textSecondary} mb-2`}>导出格式</label>
           <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${styles.bgTertiary} ${styles.border}`}>
             <span className={`text-sm ${styles.textPrimary} font-medium`}>CSV</span>
-            <span className={`text-xs ${styles.textMuted}`}>(逗号分隔)</span>
+            <span className="text-xs text-studio-text-secondary">(逗号分隔)</span>
           </div>
         </div>
 

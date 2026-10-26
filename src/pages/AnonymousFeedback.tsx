@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Inbox, MessageSquareText, Plus } from 'lucide-react';
 import AnonymousFeedbackModal from '../components/AnonymousFeedbackModal';
 import { getPublicAnonymousFeedback, type AnonymousFeedbackType, type PublicAnonymousFeedback } from '../api/anonymousFeedback';
@@ -22,15 +22,20 @@ export default function AnonymousFeedbackPage() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const addNotification = useAppStore((state) => state.addNotification);
+  const listRequestSequenceRef = useRef(0);
 
   const load = useCallback(async () => {
+    const requestSequence = ++listRequestSequenceRef.current;
     setLoading(true);
     try {
-      setItems(await getPublicAnonymousFeedback());
+      const nextItems = await getPublicAnonymousFeedback();
+      if (requestSequence === listRequestSequenceRef.current) setItems(nextItems);
     } catch (error) {
-      addNotification({ title: '加载失败', message: error instanceof Error ? error.message : '无法获取公开意见', type: 'error' });
+      if (requestSequence === listRequestSequenceRef.current) {
+        addNotification({ title: '加载失败', message: error instanceof Error ? error.message : '无法获取公开意见', type: 'error' });
+      }
     } finally {
-      setLoading(false);
+      if (requestSequence === listRequestSequenceRef.current) setLoading(false);
     }
   }, [addNotification]);
 

@@ -6,6 +6,10 @@ import type { TopicController } from './topics.controller';
 export function createLegacyTopicsRouter(controller: TopicController) {
   const router = express.Router();
   router.get('/', authenticate, controller.legacyList);
+  router.get('/create-requests/:requestId', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  }, authenticate, controller.legacyTopicCreateRequestStatus);
   router.get('/:id', authenticate, controller.legacyGet);
   router.get('/:id/versions', authenticate, controller.legacyOutlineVersions);
   router.post('/', authenticate, requirePermission('topic:create'), controller.legacyCreate);
@@ -19,6 +23,10 @@ export function createLegacyTopicsRouter(controller: TopicController) {
 export function createV1TopicsRouter(controller: TopicController) {
   const router = express.Router();
   router.get('/', authenticate, controller.v1List);
+  router.get('/create-requests/:requestId', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  }, authenticate, controller.v1TopicCreateRequestStatus);
   router.get('/:id', authenticate, controller.v1Get);
   router.get('/:id/versions', authenticate, controller.v1OutlineVersions);
   router.post('/', authenticate, requirePermission('topic:create'), controller.v1Create);

@@ -1,14 +1,16 @@
 import type { TopicStatus } from '@shared/types';
-import type { TopicPage, TopicPersistencePatch, TopicRecord } from './topics.types';
+import type { TopicContentPatch, TopicPage, TopicPersistencePatch, TopicRecord } from './topics.types';
 import type { PublishingCompletionOutcome } from './publishing-completion';
 import type { RecordWorkflowDocumentVersionResult, WorkflowDocumentVersionAction } from '../../services/workflowDocumentVersions';
 
 export interface TopicTransaction {
   createTopic(input: CreateTopicRecord): Promise<number>;
+  findTopicCreateRequest(clientRequestId: string): Promise<TopicCreateRequestRecord | null>;
+  recordTopicCreateRequest(input: TopicCreateRequestRecord): Promise<void>;
   linkCreatorTopicSuggestion(topicId: number, input: CreatorTopicSuggestionLinkRecord): Promise<void>;
   findDetailById(id: number | string): Promise<TopicRecord | null>;
   findHistory(id: number | string): Promise<Record<string, unknown>[]>;
-  updateTopic(id: number | string, patch: TopicPersistencePatch): Promise<void>;
+  updateTopic(id: number | string, patch: TopicContentPatch): Promise<void>;
   recordTopicOutlineVersion(input: {
     id: number | string;
     nextContent: string | null;
@@ -39,6 +41,12 @@ export type CreatorTopicSuggestionLinkRecord = {
   medianPlays: number;
   baselineMedianPlays: number;
   playRatio: number;
+};
+export type TopicCreateRequestRecord = {
+  clientRequestId: string;
+  actorId: number;
+  topicId: number;
+  requestFingerprint: string;
 };
 export type TopicListFilter = {
   status?: unknown;
@@ -94,8 +102,9 @@ export interface TopicRepository {
   findHistory(topicId: number | string): Promise<Record<string, unknown>[]>;
   findDirectorIds(): Promise<number[]>;
   findParticipantIds(creatorId: unknown, assigneeId: unknown): Promise<number[]>;
+  findTopicCreateRequest(clientRequestId: string): Promise<TopicCreateRequestRecord | null>;
   withTransaction<T>(work: (tx: TopicTransaction) => Promise<T>): Promise<T>;
-  updateTopic(id: number | string, patch: TopicPersistencePatch): Promise<void>;
+  updateTopic(id: number | string, patch: TopicContentPatch): Promise<void>;
   deleteTopic(topicId: number | string): Promise<void>;
 }
 

@@ -18,6 +18,14 @@ type Props = {
   users: User[];
   currentUserId?: number;
   loading: boolean;
+  recovery: {
+    status: 'checking' | 'submitting' | 'uncertain' | 'not_found';
+    clientRequestId: string;
+    payload: CreateRetrospectivePayload;
+  } | { status: 'storage_error'; message: string } | null;
+  createStorageError: string | null;
+  canRetryRecovery: boolean;
+  onVerifyRecovery: () => void;
   usersStatus: RetroAssigneeDirectoryStatus;
   usersError: string | null;
   onRetryUsers: () => void;
@@ -51,6 +59,10 @@ export default function RetroCreateDialog({
   users,
   currentUserId,
   loading,
+  recovery,
+  createStorageError,
+  canRetryRecovery,
+  onVerifyRecovery,
   usersStatus,
   usersError,
   onRetryUsers,
@@ -69,6 +81,21 @@ export default function RetroCreateDialog({
 
   useEffect(() => {
     if (!open) return;
+    if (recovery && recovery.status !== 'storage_error') {
+      setTitle(recovery.payload.title);
+      setCategory(recovery.payload.category || 'weekly');
+      setTemplateId(recovery.payload.templateId ? String(recovery.payload.templateId) : '');
+      setScopeType(recovery.payload.scopeType);
+      setPeriodStart(recovery.payload.periodStart);
+      setPeriodEnd(recovery.payload.periodEnd);
+      setOwnerId(recovery.payload.ownerId ? String(recovery.payload.ownerId) : '');
+      setError('');
+      return;
+    }
+    if (recovery?.status === 'storage_error') {
+      setError(recovery.message);
+      return;
+    }
     setTitle('');
     setCategory((firstTemplate?.category as RetroTemplateCategory | undefined) || 'weekly');
     setTemplateId(firstTemplate ? String(firstTemplate.id) : '');
@@ -77,9 +104,13 @@ export default function RetroCreateDialog({
     setPeriodEnd(today());
     setOwnerId(currentUserId ? String(currentUserId) : '');
     setError('');
-  }, [currentUserId, firstTemplate, open]);
+  }, [currentUserId, firstTemplate, open, recovery]);
 
   const handleSubmit = () => {
+    if (recovery) {
+      if (recovery.status === 'not_found' && canRetryRecovery) onSubmit(recovery.payload);
+      return;
+    }
     const titleText = title.trim();
     if (!titleText) {
       setError('请填写复盘标题');
@@ -107,6 +138,25 @@ export default function RetroCreateDialog({
     });
   };
 
+  const fieldsDisabled = loading || recovery !== null;
+  const primaryDisabled = loading
+    || recovery?.status === 'checking'
+    || recovery?.status === 'submitting'
+    || recovery?.status === 'storage_error'
+    || (recovery?.status === 'not_found' && !canRetryRecovery);
+  const primaryLabel = recovery?.status === 'checking'
+    ? '正在核实...'
+    : recovery?.status === 'submitting'
+      ? '提交中...'
+      : recovery?.status === 'uncertain'
+        ? '重新核实'
+        : recovery?.status === 'not_found'
+          ? '用原请求编号重试'
+          : recovery?.status === 'storage_error'
+            ? '暂不可安全提交'
+            : loading ? '创建中...' : '创建复盘';
+  const primaryAction = recovery?.status === 'uncertain' ? onVerifyRecovery : handleSubmit;
+
   return (
     <BaseModal
       open={open}
@@ -116,19 +166,38 @@ export default function RetroCreateDialog({
       description="创建后进入详情页，再生成指标快照、填写结论和行动项。"
       footer={
         <div className="flex justify-end gap-3">
-          <ActionButton variant="ghost" onClick={onClose} disabled={loading}>取消</ActionButton>
-          <ActionButton variant="primary" onClick={handleSubmit} disabled={loading}>
-            <Plus className="h-4 w-4" />
-            {loading ? '创建中...' : '创建复盘'}
+          <ActionButton variant="ghost" onClick={onClose}>{recovery ? '稍后处理' : '取消'}</ActionButton>
+          <ActionButton variant="primary" onClick={primaryAction} disabled={primaryDisabled}>
+            {!recovery ? <Plus className="h-4 w-4" /> : null}
+            {primaryLabel}
           </ActionButton>
         </div>
       }
     >
+      {recovery ? (
+        <div className="mb-4 rounded-card border border-studio-border-soft bg-studio-surface-soft p-3 text-sm leading-6 text-studio-text-primary" role="status" aria-live="polite">
+          {recovery.status === 'checking'
+            ? '正在核实原请求。核实完成前不会重复提交。'
+            : recovery.status === 'submitting'
+              ? '正在提交原请求，请勿另建一条复盘。'
+              : recovery.status === 'uncertain'
+                ? '服务端暂时无法确认结果。可以重新核实；请不要新建另一条复盘。'
+                : recovery.status === 'not_found'
+                  ? `服务端尚未记录此请求。可在权限允许时使用同一请求编号安全重试：${recovery.clientRequestId}`
+                  : 'message' in recovery ? recovery.message : '无法读取创建恢复信息'}
+        </div>
+      ) : null}
+      {createStorageError ? (
+        <div className="mb-4 rounded-card border border-studio-coral/30 bg-studio-coral/10 p-3 text-sm leading-6 text-studio-coral-contrast" role="alert">
+          {createStorageError}
+        </div>
+      ) : null}
       <div className="grid gap-4 md:grid-cols-2">
         <label className="md:col-span-2">
           <span className="text-sm font-semibold text-studio-text-primary">标题</span>
           <input
             value={title}
+            disabled={fieldsDisabled}
             onChange={(event) => setTitle(event.target.value)}
             className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none focus:border-studio-border-active"
             placeholder="例如：7 月第一周内容运营复盘"
@@ -139,6 +208,7 @@ export default function RetroCreateDialog({
           <span className="text-sm font-semibold text-studio-text-primary">类型</span>
           <select
             value={category}
+            disabled={fieldsDisabled}
             onChange={(event) => setCategory(event.target.value as RetroTemplateCategory)}
             className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           >
@@ -150,6 +220,7 @@ export default function RetroCreateDialog({
           <span className="text-sm font-semibold text-studio-text-primary">模板</span>
           <select
             value={templateId}
+            disabled={fieldsDisabled}
             onChange={(event) => setTemplateId(event.target.value)}
             className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           >
@@ -164,6 +235,7 @@ export default function RetroCreateDialog({
           <span className="text-sm font-semibold text-studio-text-primary">复盘范围</span>
           <select
             value={scopeType}
+            disabled={fieldsDisabled}
             onChange={(event) => setScopeType(event.target.value as RetrospectiveScopeType)}
             className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           >
@@ -176,6 +248,7 @@ export default function RetroCreateDialog({
             <span className="text-sm font-semibold text-studio-text-primary">负责人</span>
             <select
               value={ownerId}
+              disabled={fieldsDisabled}
               onChange={(event) => setOwnerId(event.target.value)}
               className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
             >
@@ -196,6 +269,7 @@ export default function RetroCreateDialog({
           <input
             type="date"
             value={periodStart}
+            disabled={fieldsDisabled}
             onChange={(event) => setPeriodStart(event.target.value)}
             className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           />
@@ -206,6 +280,7 @@ export default function RetroCreateDialog({
           <input
             type="date"
             value={periodEnd}
+            disabled={fieldsDisabled}
             onChange={(event) => setPeriodEnd(event.target.value)}
             className="mt-2 w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none"
           />

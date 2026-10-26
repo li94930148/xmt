@@ -1,11 +1,46 @@
-import { queryAll, queryOne, runInTransaction } from '../database/utils.js';
+import { beijingNow, queryAll, queryOne, runInTransaction } from '../database/utils.js';
 import { advancePublishingTopicIfResolved } from '../modules/topics/publishing-completion.js';
+
+type PublishingDouyinLinkTransaction = Parameters<typeof advancePublishingTopicIfResolved>[0];
+
+async function recordPublishingDouyinLinkChange(
+  tx: PublishingDouyinLinkTransaction,
+  input: {
+    topicId: number;
+    topicTitle: string;
+    publishingId: number;
+    previousWorkId: number | null;
+    nextWorkId: number | null;
+    operatorId?: number;
+  },
+) {
+  const previous = input.previousWorkId === null ? '未关联' : `抖音作品 #${input.previousWorkId}`;
+  const next = input.nextWorkId === null ? '未关联' : `抖音作品 #${input.nextWorkId}`;
+  const comment = `发布记录 #${input.publishingId} 的抖音作品关联由「${previous}」更正为「${next}」`;
+  const recordedAt = beijingNow();
+  await tx.execute(
+    `INSERT INTO topic_history(topic_id,action,comment,operator_id,created_at) VALUES(?,?,?,?,?)`,
+    [input.topicId, 'publishing_douyin_link_changed', comment, input.operatorId ?? null, recordedAt],
+  );
+  await tx.execute(
+    `INSERT INTO activity_log(user_id,action,target,detail,created_at) VALUES(?,?,?,?,?)`,
+    [input.operatorId ?? null, 'update', 'publishing', `选题「${input.topicTitle}」的${comment}`, recordedAt],
+  );
+}
 
 export type PublishingTitle = {
   id: number;
   title: string;
   topic_id?: number;
 };
+
+type PublishingDouyinReconcileOptions = {
+  accountId?: number;
+  createdBy?: number;
+} & (
+  | { scope: 'all' }
+  | { scope: 'editable'; editableBy: number }
+);
 
 export type DouyinWorkCandidate = {
   id: number;
@@ -99,15 +134,26 @@ export function chooseAutomaticPublishingDouyinMatch(publishingTitle: unknown, w
   return best;
 }
 
-export async function reconcilePublishingDouyinLinks(options: { accountId?: number; createdBy?: number } = {}) {
-  const publishingRows = await queryAll<PublishingTitle>(`
+export async function reconcilePublishingDouyinLinks(options: PublishingDouyinReconcileOptions) {
+  if (!options || (options.scope !== 'all'
+    && !(options.scope === 'editable' && Number.isSafeInteger(options.editableBy) && options.editableBy > 0))) {
+    throw new Error('抖音发布关联必须显式指定逐条编辑范围或全库范围');
+  }
+
+  let publishingSql = `
     SELECT p.id,p.topic_id,t.title
     FROM publishing p
     JOIN topics t ON t.id=p.topic_id
     LEFT JOIN publishing_douyin_links link ON link.publishing_id=p.id
     WHERE link.publishing_id IS NULL
-    ORDER BY p.id
-  `);
+  `;
+  const publishingParams: unknown[] = [];
+  if (options.scope === 'editable') {
+    publishingSql += ' AND (t.creator_id=? OR t.assignee_id=? OR p.operator_id=?)';
+    publishingParams.push(options.editableBy, options.editableBy, options.editableBy);
+  }
+  publishingSql += ' ORDER BY p.id';
+  const publishingRows = await queryAll<PublishingTitle>(publishingSql, publishingParams);
   const params: unknown[] = [];
   let workSql = `
     SELECT w.id,w.account_id,w.title,w.publish_time,w.play_count,w.like_count,w.comment_count,w.share_count
@@ -145,7 +191,18 @@ export async function reconcilePublishingDouyinLinks(options: { accountId?: numb
           ) VALUES(?,?,?,?,?,datetime('now','+8 hours'),datetime('now','+8 hours'))
         `, [publishing.id, match.id, match.match_method, match.match_score, options.createdBy ?? null]);
         inserted += changes;
-        if (changes > 0 && publishing.topic_id != null) linkedTopicIds.add(Number(publishing.topic_id));
+        if (changes > 0 && publishing.topic_id != null) {
+          const topicId = Number(publishing.topic_id);
+          linkedTopicIds.add(topicId);
+          await recordPublishingDouyinLinkChange(tx, {
+            topicId,
+            topicTitle: publishing.title,
+            publishingId: Number(publishing.id),
+            previousWorkId: null,
+            nextWorkId: Number(match.id),
+            operatorId: options.createdBy ?? (options.scope === 'editable' ? options.editableBy : undefined),
+          });
+        }
       }
       for (const topicId of linkedTopicIds) {
         await advancePublishingTopicIfResolved(tx, topicId, options.createdBy);
@@ -187,33 +244,69 @@ export async function setPublishingDouyinLink(
   douyinWorkId: number | null,
   createdBy?: number,
 ) {
-  if (douyinWorkId === null) {
-    await runInTransaction(async (tx) => {
+  const result = await runInTransaction(async (tx) => {
+    const publishing = await tx.queryOne<{ id: number; topic_id: number; topic_title: string }>(
+      `SELECT p.id,p.topic_id,t.title AS topic_title FROM publishing p JOIN topics t ON t.id=p.topic_id WHERE p.id=?`,
+      [publishingId],
+    );
+    if (!publishing) return { kind: 'missing' as const };
+
+    const existing = await tx.queryOne<{ douyin_work_id: number }>(
+      'SELECT douyin_work_id FROM publishing_douyin_links WHERE publishing_id=?',
+      [publishingId],
+    );
+    const previousWorkId = existing ? Number(existing.douyin_work_id) : null;
+    if (douyinWorkId !== null) {
+      const work = await tx.queryOne<{ id: number }>('SELECT id FROM douyin_works WHERE id=?', [douyinWorkId]);
+      if (!work) return { kind: 'missing' as const };
+      const conflict = await tx.queryOne<{ publishing_id: number }>(
+        'SELECT publishing_id FROM publishing_douyin_links WHERE douyin_work_id=? AND publishing_id<>?',
+        [douyinWorkId, publishingId],
+      );
+      if (conflict) return { kind: 'conflict' as const, conflictPublishingId: Number(conflict.publishing_id) };
+      await tx.execute(`
+        INSERT INTO publishing_douyin_links(
+          publishing_id,douyin_work_id,match_method,match_score,created_by,created_at,updated_at
+        ) VALUES(?,?, 'manual',1,?,datetime('now','+8 hours'),datetime('now','+8 hours'))
+        ON CONFLICT(publishing_id) DO UPDATE SET
+          douyin_work_id=excluded.douyin_work_id,
+          match_method='manual',
+          match_score=1,
+          created_by=excluded.created_by,
+          updated_at=excluded.updated_at
+      `, [publishingId, douyinWorkId, createdBy ?? null]);
+    } else if (previousWorkId !== null) {
       await tx.execute('DELETE FROM publishing_douyin_links WHERE publishing_id=?', [publishingId]);
-    });
-    return { linked: false };
-  }
-  const publishing = await queryOne<{ id: number; topic_id: number }>('SELECT id,topic_id FROM publishing WHERE id=?', [publishingId]);
-  const work = await queryOne<{ id: number }>('SELECT id FROM douyin_works WHERE id=?', [douyinWorkId]);
-  if (!publishing || !work) return null;
-  const conflict = await queryOne<{ publishing_id: number }>(
-    'SELECT publishing_id FROM publishing_douyin_links WHERE douyin_work_id=? AND publishing_id<>?',
-    [douyinWorkId, publishingId],
-  );
-  if (conflict) return { conflictPublishingId: Number(conflict.publishing_id) };
-  const completionOutcome = await runInTransaction(async (tx) => {
-    await tx.execute(`
-      INSERT INTO publishing_douyin_links(
-        publishing_id,douyin_work_id,match_method,match_score,created_by,created_at,updated_at
-      ) VALUES(?,?, 'manual',1,?,datetime('now','+8 hours'),datetime('now','+8 hours'))
-      ON CONFLICT(publishing_id) DO UPDATE SET
-        douyin_work_id=excluded.douyin_work_id,
-        match_method='manual',
-        match_score=1,
-        created_by=excluded.created_by,
-        updated_at=excluded.updated_at
-    `, [publishingId, douyinWorkId, createdBy ?? null]);
-    return advancePublishingTopicIfResolved(tx, publishing.topic_id, createdBy);
+    }
+
+    if (previousWorkId !== douyinWorkId) {
+      await recordPublishingDouyinLinkChange(tx, {
+        topicId: Number(publishing.topic_id),
+        topicTitle: publishing.topic_title,
+        publishingId: Number(publishing.id),
+        previousWorkId,
+        nextWorkId: douyinWorkId,
+        operatorId: createdBy,
+      });
+    }
+
+    const completionOutcome = douyinWorkId === null
+      ? null
+      : await advancePublishingTopicIfResolved(tx, publishing.topic_id, createdBy);
+    return {
+      kind: 'success' as const,
+      linked: douyinWorkId !== null,
+      douyinWorkId,
+      topicId: Number(publishing.topic_id),
+      completionOutcome,
+    };
   });
-  return { linked: true, douyinWorkId, topicId: publishing.topic_id, completionOutcome };
+  if (result.kind === 'missing') return null;
+  if (result.kind === 'conflict') return { conflictPublishingId: result.conflictPublishingId };
+  return {
+    linked: result.linked,
+    ...(result.douyinWorkId === null ? {} : { douyinWorkId: result.douyinWorkId }),
+    topicId: result.topicId,
+    completionOutcome: result.completionOutcome,
+  };
 }

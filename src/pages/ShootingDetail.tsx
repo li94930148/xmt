@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useAppStore } from '../store';
+import { useAppStore, useAuthStore } from '../store';
 import { getShootingById, getShootingScriptVersions, syncShootingPublishedArchive, updateShooting } from '../api';
 import type { WorkflowDocumentVersion } from '../api';
 import { Shooting as ShootingType } from '../types';
@@ -43,6 +43,154 @@ interface ShootingDetailData extends ShootingType {
   can_sync_published_archive?: boolean;
 }
 
+type PendingShootingStatusVerification = {
+  id: number;
+  userId: number;
+  requestId: string;
+  topicTitle: string;
+  previousStatus: string;
+  targetStatus: string;
+  status: 'uncertain' | 'ready' | 'checking';
+  readError: string | null;
+};
+
+type ShootingScriptVersionAction = 'minor' | 'major';
+
+type PendingShootingScriptSaveVerification = {
+  shootingId: number;
+  userId: number;
+  requestId: string;
+  topicTitle: string;
+  scriptContent: string;
+  sourceProductionId: number | null;
+  sourceVersion: string | null;
+  originalScriptContent: string | null;
+  originalSourceProductionId: number | null;
+  originalSourceVersion: string | null;
+  expectedContent: string;
+  versionAction: ShootingScriptVersionAction;
+  baselineMaxVersionId: number;
+  status: 'uncertain' | 'checking';
+  readError: string | null;
+};
+
+function shootingStatusVerificationKey(userId: number | undefined, shootingId: number | undefined) {
+  return userId && shootingId ? `xmt:shooting-status-pending:v1:user:${userId}:shooting:${shootingId}` : null;
+}
+
+function loadPendingShootingStatusVerification(userId: number | undefined, shootingId: number | undefined): PendingShootingStatusVerification | null {
+  const key = shootingStatusVerificationKey(userId, shootingId);
+  if (!key || typeof window === 'undefined') return null;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(key) || 'null') as Partial<PendingShootingStatusVerification> | null;
+    if (!value || value.userId !== userId || Number(value.id) !== shootingId
+      || typeof value.requestId !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.requestId)
+      || typeof value.topicTitle !== 'string' || typeof value.previousStatus !== 'string'
+      || typeof value.targetStatus !== 'string') return null;
+    return {
+      id: Number(value.id),
+      userId: Number(value.userId),
+      requestId: value.requestId,
+      topicTitle: value.topicTitle,
+      previousStatus: value.previousStatus,
+      targetStatus: value.targetStatus,
+      status: value.status === 'ready' ? 'ready' : 'uncertain',
+      readError: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistPendingShootingStatusVerification(pending: PendingShootingStatusVerification) {
+  const key = shootingStatusVerificationKey(pending.userId, pending.id);
+  if (!key || typeof window === 'undefined') throw new Error('当前账号与成片记录尚未确认，无法安全保存恢复状态');
+  sessionStorage.setItem(key, JSON.stringify({ ...pending, status: pending.status === 'ready' ? 'ready' : 'uncertain' }));
+  const stored = loadPendingShootingStatusVerification(pending.userId, pending.id);
+  if (!stored || stored.requestId !== pending.requestId) throw new Error('成片状态恢复信息未能保存，本次未发送更新');
+}
+
+function removeStoredShootingStatusVerification(pending: PendingShootingStatusVerification) {
+  const key = shootingStatusVerificationKey(pending.userId, pending.id);
+  if (!key || typeof window === 'undefined') return;
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(key) || 'null') as { requestId?: unknown } | null;
+    if (stored?.requestId === pending.requestId) sessionStorage.removeItem(key);
+  } catch {
+    // The server read-back is authoritative even when this tab cannot clear its recovery marker.
+  }
+}
+
+function isDefinitiveShootingStatusRejection(error: unknown) {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && ![404, 408, 425, 429].includes(status);
+}
+
+function shootingScriptSaveVerificationKey(userId: number | undefined, shootingId: number | undefined) {
+  return userId && Number.isInteger(shootingId) && Number(shootingId) > 0
+    ? `xmt:shooting-script-save-pending:v1:user:${userId}:shooting:${shootingId}`
+    : null;
+}
+
+function loadPendingShootingScriptSaveVerification(userId: number | undefined, shootingId: number | undefined): PendingShootingScriptSaveVerification | null {
+  const key = shootingScriptSaveVerificationKey(userId, shootingId);
+  if (!key || typeof window === 'undefined') return null;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(key) || 'null') as Partial<PendingShootingScriptSaveVerification> | null;
+    const isNullableString = (candidate: unknown) => candidate === null || typeof candidate === 'string';
+    const isNullableNumber = (candidate: unknown) => candidate === null || (typeof candidate === 'number' && Number.isInteger(candidate) && candidate > 0);
+    if (!value || value.userId !== userId || value.shootingId !== shootingId
+      || typeof value.requestId !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.requestId)
+      || typeof value.topicTitle !== 'string' || typeof value.scriptContent !== 'string' || typeof value.expectedContent !== 'string'
+      || !isNullableString(value.originalScriptContent) || !Number.isInteger(value.baselineMaxVersionId) || Number(value.baselineMaxVersionId) < 0
+      || !['minor', 'major'].includes(value.versionAction ?? '')
+      || !isNullableNumber(value.sourceProductionId) || !isNullableString(value.sourceVersion)
+      || !isNullableNumber(value.originalSourceProductionId) || !isNullableString(value.originalSourceVersion)) return null;
+    return { ...value, status: 'uncertain', readError: null } as PendingShootingScriptSaveVerification;
+  } catch {
+    return null;
+  }
+}
+
+function persistPendingShootingScriptSaveVerification(pending: PendingShootingScriptSaveVerification) {
+  const key = shootingScriptSaveVerificationKey(pending.userId, pending.shootingId);
+  if (!key || typeof window === 'undefined') throw new Error('无法保存剧本版本操作的异常恢复信息；本次没有发送版本请求。');
+  sessionStorage.setItem(key, JSON.stringify(pending));
+  const stored = loadPendingShootingScriptSaveVerification(pending.userId, pending.shootingId);
+  if (!stored || stored.requestId !== pending.requestId) throw new Error('剧本版本恢复信息未能保存；本次没有发送版本请求。');
+}
+
+function removeStoredShootingScriptSaveVerification(pending: PendingShootingScriptSaveVerification) {
+  const key = shootingScriptSaveVerificationKey(pending.userId, pending.shootingId);
+  if (!key || typeof window === 'undefined') return;
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(key) || 'null') as { requestId?: unknown } | null;
+    if (stored?.requestId === pending.requestId) sessionStorage.removeItem(key);
+  } catch {
+    // Server read-back remains authoritative even if session cleanup is unavailable.
+  }
+}
+
+function shootingScriptContentValue(value: unknown) {
+  return sanitizeHtml(typeof value === 'string' ? value : '');
+}
+
+function nullableShootingScriptContentValue(value: unknown) {
+  return value === null || value === undefined ? null : shootingScriptContentValue(value);
+}
+
+function shootingScriptSourceId(value: unknown) {
+  const id = value == null || value === '' ? null : Number(value);
+  return Number.isInteger(id) && Number(id) > 0 ? Number(id) : null;
+}
+
+function isDefinitiveShootingScriptSaveRejection(error: unknown) {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && ![408, 425, 429].includes(status);
+}
+
 const WORKFLOW_STEPS = [
   { key: 'topic', label: '选题提交', icon: FileText },
   { key: 'production', label: '创作审核', icon: FileText },
@@ -57,6 +205,7 @@ export default function ShootingDetail() {
   const navigate = useNavigate();
   const appStore = useAppStore();
   const addNotification = useAppStore((state) => state.addNotification);
+  const authUserId = useAuthStore((state) => state.user?.id);
   const styles = useThemeStyles();
   const compactEditorToolbar = useCompactEditorToolbar();
   const { hasPermission } = usePermission();
@@ -83,14 +232,33 @@ export default function ShootingDetail() {
   const [scriptVersionsLoading, setScriptVersionsLoading] = useState(false);
   const [scriptVersionsLoadError, setScriptVersionsLoadError] = useState(false);
   const [savingScriptVersion, setSavingScriptVersion] = useState(false);
+  const saveScriptVersionInFlightRef = useRef(false);
+  const scriptSaveVerificationInFlightRef = useRef(false);
+  const [pendingScriptSaveVerification, setPendingScriptSaveVerification] = useState<PendingShootingScriptSaveVerification | null>(
+    () => loadPendingShootingScriptSaveVerification(authUserId, Number(id)),
+  );
+  const [scriptSaveVerificationLoading, setScriptSaveVerificationLoading] = useState(false);
+  const initialPendingScriptSaveRef = useRef(pendingScriptSaveVerification);
+  const restoredPendingScriptSaveStartedRef = useRef(false);
+  const [statusChangePending, setStatusChangePending] = useState(false);
+  const statusChangeInFlightRef = useRef(false);
+  const [pendingStatusVerification, setPendingStatusVerification] = useState<PendingShootingStatusVerification | null>(null);
+  const [statusVerificationLoading, setStatusVerificationLoading] = useState(false);
+  const statusVerificationInFlightRef = useRef(false);
   const [archiveSyncPending, setArchiveSyncPending] = useState(false);
   const [archiveSyncRetrying, setArchiveSyncRetrying] = useState(false);
+  const archiveSyncRetryInFlightRef = useRef(false);
   const archiveSyncSaveSequenceRef = useRef(0);
   const [showSidebar, setShowSidebar] = useState(false);
   const [leaveFailureDialogDismissed, setLeaveFailureDialogDismissed] = useState(false);
   const activeDocId = shooting ? getCollaborationRoomId('shooting', shooting.id) : undefined;
   const syncStatus = useEditorEventState(activeDocId);
   const runtimeHandleRef = useRef<ContentEditorRuntimeHandle | null>(null);
+  const hasPendingScriptSaveForCurrentRecord = Boolean(
+    pendingScriptSaveVerification
+    && pendingScriptSaveVerification.userId === authUserId
+    && pendingScriptSaveVerification.shootingId === Number(id),
+  );
   const loadScriptVersions = useCallback(async (recordId: number, detailRequestId?: number) => {
     const requestId = ++scriptVersionRequestSequenceRef.current;
     const isCurrent = () => requestId === scriptVersionRequestSequenceRef.current
@@ -113,6 +281,108 @@ export default function ShootingDetail() {
       if (isCurrent()) setScriptVersionsLoading(false);
     }
   }, []);
+  const verifyPendingShootingScriptSave = useCallback(async (pending: PendingShootingScriptSaveVerification): Promise<boolean> => {
+    if (scriptSaveVerificationInFlightRef.current) return false;
+    scriptSaveVerificationInFlightRef.current = true;
+    setScriptSaveVerificationLoading(true);
+    setPendingScriptSaveVerification({ ...pending, status: 'checking', readError: null });
+    try {
+      const [current, versions] = await Promise.all([
+        getShootingById(pending.shootingId) as Promise<ShootingDetailData>,
+        getShootingScriptVersions(pending.shootingId),
+      ]);
+      if (Number(currentShootingIdRef.current) !== pending.shootingId) return false;
+      if (!current || Number(current.id) !== pending.shootingId) throw new Error('服务器返回的成片记录与本次保存不一致');
+
+      const currentContent = nullableShootingScriptContentValue(current.script_content);
+      const expectedContent = shootingScriptContentValue(pending.scriptContent);
+      const originalContent = nullableShootingScriptContentValue(pending.originalScriptContent);
+      const currentSourceId = shootingScriptSourceId(current.script_source_production_id);
+      const currentSourceVersion = current.script_source_version ?? null;
+      const matchesTarget = currentContent !== null && currentContent === expectedContent
+        && currentSourceId === pending.sourceProductionId
+        && currentSourceVersion === pending.sourceVersion;
+      const matchesOriginal = currentContent === originalContent
+        && currentSourceId === pending.originalSourceProductionId
+        && currentSourceVersion === pending.originalSourceVersion;
+      const matchingVersion = versions.some((version) => Number(version.id) > pending.baselineMaxVersionId
+        && Number(version.is_baseline) !== 1
+        && version.change_type === pending.versionAction
+        && shootingScriptContentValue(version.content) === expectedContent
+        && shootingScriptSourceId(version.source_production_id) === pending.sourceProductionId
+        && (version.source_production_version ?? null) === pending.sourceVersion);
+      const hasNewVersion = versions.some((version) => Number(version.id) > pending.baselineMaxVersionId && Number(version.is_baseline) !== 1);
+      const applied = matchesTarget && matchingVersion;
+      const unchanged = matchesOriginal && !hasNewVersion;
+
+      removeStoredShootingScriptSaveVerification(pending);
+      setPendingScriptSaveVerification(null);
+      setShooting(current);
+      setArchiveSyncPending(current.published_archive_script_sync_pending === true);
+      setScriptVersions(versions);
+      setScriptVersionsLoadError(false);
+      if (applied) {
+        setScriptContent(current.script_content ?? current.production?.content ?? current.production?.content_markdown ?? '');
+        addNotification({
+          title: '版本保存结果已核实',
+          message: '服务器已确认本次剧本版本保存，没有重复提交。',
+          type: 'success',
+        });
+      } else if (unchanged) {
+        setScriptContent(pending.scriptContent);
+        addNotification({
+          title: '剧本版本尚未保存',
+          message: '服务器仍是请求前内容，编辑草稿已恢复；核对后请由你明确点击小版本或大版本保存重试。',
+          type: 'warning',
+        });
+      } else {
+        setScriptContent(pending.scriptContent);
+        addNotification({
+          title: '剧本版本状态已变化',
+          message: '已读取最新剧本和版本历史，并保留当前编辑草稿；请核对后再明确保存，不会自动重试。',
+          type: 'warning',
+        });
+      }
+      return applied;
+    } catch (error) {
+      if (Number(currentShootingIdRef.current) !== pending.shootingId) return false;
+      const readError = error instanceof Error ? error.message : '读取失败';
+      const uncertain = {
+        ...pending,
+        status: 'uncertain' as const,
+        readError: `剧本版本保存结果尚未确认，详情或版本历史读取失败（${readError}）。请只读核实，不要重复保存。`,
+      };
+      try { persistPendingShootingScriptSaveVerification(uncertain); } catch { /* Keep the in-memory lock even if storage is unavailable. */ }
+      setPendingScriptSaveVerification(uncertain);
+      setScriptContent(pending.scriptContent);
+      addNotification({
+        title: '剧本版本结果待核实',
+        message: '服务器详情或版本历史暂时无法读取；当前成片详情已锁定写入，请先只读核实。',
+        type: 'warning',
+      });
+      return false;
+    } finally {
+      scriptSaveVerificationInFlightRef.current = false;
+      setScriptSaveVerificationLoading(false);
+    }
+  }, [addNotification]);
+
+  useEffect(() => {
+    const pending = loadPendingShootingScriptSaveVerification(authUserId, Number(id));
+    setPendingScriptSaveVerification(pending);
+    initialPendingScriptSaveRef.current = pending;
+    restoredPendingScriptSaveStartedRef.current = false;
+  }, [authUserId, id]);
+
+  useEffect(() => {
+    const pending = initialPendingScriptSaveRef.current;
+    if (restoredPendingScriptSaveStartedRef.current || !pending
+      || pending.userId !== authUserId || pending.shootingId !== Number(id)) return;
+    restoredPendingScriptSaveStartedRef.current = true;
+    initialPendingScriptSaveRef.current = null;
+    void verifyPendingShootingScriptSave(pending);
+  }, [authUserId, id, verifyPendingShootingScriptSave]);
+
   const {
     requestLeave,
     retry: retryLeave,
@@ -137,6 +407,16 @@ export default function ShootingDetail() {
   const handleDiscardAndLeave = useCallback(() => discardAndLeave(), [discardAndLeave]);
 
   const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    if (hasPendingScriptSaveForCurrentRecord) {
+      appStore.addNotification({ title: '剧本版本结果待核实', message: '请先只读核实服务器详情和版本历史；核实完成前不能离开当前成片记录。', type: 'warning' });
+      stay();
+      return;
+    }
+    if (savingScriptVersion) {
+      appStore.addNotification({ title: '剧本版本保存尚未完成', message: '版本保存完成前不能离开当前成片记录，请稍候。', type: 'warning' });
+      stay();
+      return;
+    }
     let continued = false;
     const continueOnce = () => {
       if (continued) return;
@@ -158,8 +438,83 @@ export default function ShootingDetail() {
         }
       })
       .catch(stay);
-  }, [appStore, requestLeave]);
-  useRouteNavigationGuard(Boolean(shooting), handleRouteNavigationAttempt);
+  }, [appStore, hasPendingScriptSaveForCurrentRecord, requestLeave, savingScriptVersion]);
+  useRouteNavigationGuard(Boolean(shooting || hasPendingScriptSaveForCurrentRecord || savingScriptVersion), handleRouteNavigationAttempt);
+
+  useEffect(() => {
+    if (!hasPendingScriptSaveForCurrentRecord && !savingScriptVersion) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [hasPendingScriptSaveForCurrentRecord, savingScriptVersion]);
+
+  const applyShootingStatusReadback = useCallback((pending: PendingShootingStatusVerification, updated: ShootingDetailData) => {
+    if (!updated || Number(updated.id) !== pending.id || typeof updated.status !== 'string') {
+      throw new Error('服务器返回的成片记录与本次操作不一致');
+    }
+    const isCurrentPage = Number(currentShootingIdRef.current) === pending.id;
+    if (isCurrentPage) setShooting(updated);
+
+    if (updated.status === pending.targetStatus) {
+      removeStoredShootingStatusVerification(pending);
+      if (isCurrentPage) setPendingStatusVerification(null);
+      addNotification({
+        title: '服务器已确认状态更新',
+        message: `${pending.topicTitle}已更新为${getWorkflowStatusLabel('shooting', pending.targetStatus)}；没有重复提交。`,
+        type: 'success',
+      });
+      if (pending.targetStatus === 'completed') celebrateMilestone();
+      return 'applied' as const;
+    }
+
+    if (updated.status === pending.previousStatus) {
+      const ready = { ...pending, status: 'ready' as const, readError: null };
+      try { persistPendingShootingStatusVerification(ready); } catch { /* The original uncertain marker remains safe for reload recovery. */ }
+      if (isCurrentPage) setPendingStatusVerification(ready);
+      addNotification({
+        title: '状态尚未更新',
+        message: '服务器仍是原状态。核实结果已显示在页面；如仍需更新，请在页面明确确认后重试。',
+        type: 'warning',
+      });
+      return 'unchanged' as const;
+    }
+
+    removeStoredShootingStatusVerification(pending);
+    if (isCurrentPage) setPendingStatusVerification(null);
+    addNotification({
+      title: '服务器状态已变化',
+      message: `服务器当前状态为“${getWorkflowStatusLabel('shooting', updated.status)}”，与本次请求前后均不同；已采用服务器状态，请勿重复操作。`,
+      type: 'warning',
+    });
+    return 'changed' as const;
+  }, [addNotification]);
+
+  const verifyPendingShootingStatus = useCallback(async (pending: PendingShootingStatusVerification) => {
+    if (statusVerificationInFlightRef.current) return;
+    statusVerificationInFlightRef.current = true;
+    setStatusVerificationLoading(true);
+    const checking = { ...pending, status: 'checking' as const, readError: null };
+    setPendingStatusVerification(checking);
+    try {
+      const updated = await getShootingById(pending.id) as ShootingDetailData;
+      applyShootingStatusReadback(pending, updated);
+    } catch (error) {
+      const uncertain = { ...pending, status: 'uncertain' as const, readError: (error as Error).message };
+      try { persistPendingShootingStatusVerification(uncertain); } catch { /* Keep the in-memory lock even if storage is unavailable. */ }
+      if (Number(currentShootingIdRef.current) === pending.id) setPendingStatusVerification(uncertain);
+      addNotification({
+        title: '状态仍待核实',
+        message: '只读查询暂不可用。页面已锁定相关写入；可以重新核实，期间不会自动重发状态更新。',
+        type: 'warning',
+      });
+    } finally {
+      statusVerificationInFlightRef.current = false;
+      setStatusVerificationLoading(false);
+    }
+  }, [addNotification, applyShootingStatusReadback]);
 
   const navigateFromShooting = useCallback((to: string) => {
     navigate(to, { state: { mobileReturnTo: `/shooting/${id}` } });
@@ -178,7 +533,20 @@ export default function ShootingDetail() {
         const result = await getShootingById(parseInt(id!));
         if (requestId !== detailRequestSequenceRef.current || Number(currentShootingIdRef.current) !== Number(id)) return;
         setShooting(result);
-        void loadScriptVersions(result.id, requestId);
+        const pendingStatus = loadPendingShootingStatusVerification(authUserId, result.id);
+        if (pendingStatus) {
+          setPendingStatusVerification(pendingStatus);
+          applyShootingStatusReadback(pendingStatus, result);
+        } else {
+          setPendingStatusVerification(null);
+        }
+        const pendingScriptSave = loadPendingShootingScriptSaveVerification(authUserId, result.id);
+        if (pendingScriptSave) {
+          setPendingScriptSaveVerification(pendingScriptSave);
+          setScriptContent(pendingScriptSave.scriptContent);
+        } else {
+          void loadScriptVersions(result.id, requestId);
+        }
         setArchiveSyncPending(result.published_archive_script_sync_pending === true);
         setCurrentContentDocument(
           getCollaborationRoomId('shooting', result.id),
@@ -187,10 +555,19 @@ export default function ShootingDetail() {
 
         // 初始化剧本内容：优先使用本地编辑版，其次使用创作管理审核通过的内容
         const content = result.script_content ?? result.production?.content ?? result.production?.content_markdown ?? '';
-        setScriptContent(content);
+        if (!pendingScriptSave) setScriptContent(content);
       } catch (error) {
         if (requestId === detailRequestSequenceRef.current && Number(currentShootingIdRef.current) === Number(id)) {
-          addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+          const pendingStatus = loadPendingShootingStatusVerification(authUserId, Number(id));
+          const pendingScriptSave = loadPendingShootingScriptSaveVerification(authUserId, Number(id));
+          if (pendingStatus) {
+            setPendingStatusVerification({ ...pendingStatus, status: 'uncertain', readError: (error as Error).message });
+            addNotification({ title: '状态仍待核实', message: '详情读取失败；状态更新未重发。请通过页面中的只读操作重新核实。', type: 'warning' });
+          } else if (pendingScriptSave) {
+            setPendingScriptSaveVerification({ ...pendingScriptSave, status: 'uncertain', readError: (error as Error).message });
+          } else {
+            addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+          }
         }
       } finally {
         if (requestId === detailRequestSequenceRef.current && Number(currentShootingIdRef.current) === Number(id)) setLoading(false);
@@ -202,7 +579,7 @@ export default function ShootingDetail() {
       detailRequestSequenceRef.current += 1;
       scriptVersionRequestSequenceRef.current += 1;
     };
-  }, [addNotification, id, loadScriptVersions]);
+  }, [addNotification, applyShootingStatusReadback, authUserId, id, loadScriptVersions]);
 
   const shootingEditorAdapter = useMemo(() => {
     if (!shooting) return undefined;
@@ -211,7 +588,7 @@ export default function ShootingDetail() {
       documentId: room,
       collaborationRoom: room,
       initialContent: scriptContent,
-      readonly: false,
+      readonly: Boolean(pendingStatusVerification || hasPendingScriptSaveForCurrentRecord || savingScriptVersion),
       capabilities: {
         collaboration: true,
         manualSave: false,
@@ -219,6 +596,8 @@ export default function ShootingDetail() {
         pageScroll: false,
       },
       persist: (content) => {
+        if (pendingStatusVerification) return Promise.reject(new Error('成片状态仍待核实，确认服务器状态前不能保存剧本。'));
+        if (hasPendingScriptSaveForCurrentRecord) return Promise.reject(new Error('剧本版本结果仍待核实，确认服务器状态前不能保存剧本。'));
         const saveSequence = ++archiveSyncSaveSequenceRef.current;
         const source = workflowScriptSourceReference(
           shooting.script_content,
@@ -232,10 +611,11 @@ export default function ShootingDetail() {
         });
       },
     });
-  }, [scriptContent, shooting]);
+  }, [hasPendingScriptSaveForCurrentRecord, pendingStatusVerification, savingScriptVersion, scriptContent, shooting]);
 
   const handleRetryPublishedArchiveSync = async () => {
-    if (!shooting || archiveSyncRetrying || syncStatus === 'saving') return;
+    if (!shooting || pendingStatusVerification || hasPendingScriptSaveForCurrentRecord || archiveSyncRetryInFlightRef.current || syncStatus === 'saving') return;
+    archiveSyncRetryInFlightRef.current = true;
     setArchiveSyncRetrying(true);
     try {
       const result = await syncShootingPublishedArchive(shooting.id);
@@ -248,113 +628,227 @@ export default function ShootingDetail() {
     } catch (error) {
       appStore.addNotification({ title: '归档仍待同步', message: (error as Error).message, type: 'warning' });
     } finally {
+      archiveSyncRetryInFlightRef.current = false;
       setArchiveSyncRetrying(false);
     }
   };
 
   const handleSaveScriptVersion = async (versionAction: 'minor' | 'major') => {
-    if (!shooting || savingScriptVersion) return;
+    if (!shooting || pendingStatusVerification || hasPendingScriptSaveForCurrentRecord || saveScriptVersionInFlightRef.current) return;
     const requestedShootingId = shooting.id;
+    if (!authUserId || !Number.isInteger(authUserId)) {
+      appStore.addNotification({ title: '版本未提交', message: '登录状态尚未确认；为保证异常恢复安全，本次没有发送版本请求。', type: 'warning' });
+      return;
+    }
+    const requestedScriptContent = scriptContent;
+    saveScriptVersionInFlightRef.current = true;
     setSavingScriptVersion(true);
+    let requestStarted = false;
+    let serverConfirmed = false;
     try {
       const flushResult = await runtimeHandleRef.current?.flush({ timeoutMs: 8000 });
       if (flushResult && flushResult.status !== 'synced') {
         throw new Error('当前修改尚未完成保存，请处理保存状态后重试。');
       }
+      const [currentBeforeSave, baselineVersions] = await Promise.all([
+        getShootingById(requestedShootingId) as Promise<ShootingDetailData>,
+        getShootingScriptVersions(requestedShootingId),
+      ]);
+      if (Number(currentShootingIdRef.current) !== requestedShootingId) return;
+      if (!currentBeforeSave || Number(currentBeforeSave.id) !== requestedShootingId) {
+        throw new Error('成片记录与本次版本保存不一致；本次没有提交版本。');
+      }
       const source = workflowScriptSourceReference(
-        shooting.script_content,
-        { id: shooting.script_source_production_id, version: shooting.script_source_version },
-        shooting.production,
+        currentBeforeSave.script_content,
+        { id: currentBeforeSave.script_source_production_id, version: currentBeforeSave.script_source_version },
+        currentBeforeSave.production,
       );
-      const result = await updateShooting(requestedShootingId, {
-        script_content: scriptContent,
-        expected_content: scriptContent,
-        version_action: versionAction,
-        ...source,
-      });
-      if (Number(currentShootingIdRef.current) !== requestedShootingId) {
-        appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
-        return;
+      const expectedContent = currentBeforeSave.script_content ?? currentBeforeSave.production?.content ?? currentBeforeSave.production?.content_markdown ?? '';
+      const pending: PendingShootingScriptSaveVerification = {
+        shootingId: requestedShootingId,
+        userId: authUserId,
+        requestId: crypto.randomUUID(),
+        topicTitle: currentBeforeSave.topic_title || `成片 ${requestedShootingId}`,
+        scriptContent: requestedScriptContent,
+        sourceProductionId: source.script_source_production_id ?? currentBeforeSave.script_source_production_id ?? null,
+        sourceVersion: source.script_source_version ?? currentBeforeSave.script_source_version ?? null,
+        originalScriptContent: currentBeforeSave.script_content ?? null,
+        originalSourceProductionId: currentBeforeSave.script_source_production_id ?? null,
+        originalSourceVersion: currentBeforeSave.script_source_version ?? null,
+        expectedContent,
+        versionAction,
+        baselineMaxVersionId: baselineVersions.reduce((max, version) => Math.max(max, Number(version.id) || 0), 0),
+        status: 'checking',
+        readError: null,
+      };
+      persistPendingShootingScriptSaveVerification(pending);
+      setPendingScriptSaveVerification(pending);
+      requestStarted = true;
+
+      try {
+        const result = await updateShooting(requestedShootingId, {
+          script_content: requestedScriptContent,
+          expected_content: expectedContent,
+          version_action: versionAction,
+          ...source,
+        });
+        serverConfirmed = true;
+        removeStoredShootingScriptSaveVerification(pending);
+        setPendingScriptSaveVerification(null);
+        if (Number(currentShootingIdRef.current) !== requestedShootingId) {
+          appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+          return;
+        }
+        setArchiveSyncPending(result.archiveSync === 'pending');
+        setShooting((current) => current?.id === requestedShootingId ? {
+          ...current,
+          script_content: requestedScriptContent,
+          script_source_production_id: source.script_source_production_id ?? current.script_source_production_id,
+          script_source_version: source.script_source_version ?? current.script_source_version,
+        } : current);
+        const refreshedVersions = await loadScriptVersions(requestedShootingId);
+        if (Number(currentShootingIdRef.current) !== requestedShootingId) {
+          appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+          return;
+        }
+        appStore.addNotification({
+          title: refreshedVersions ? '版本已保存' : '版本已保存，历史列表未刷新',
+          message: refreshedVersions
+            ? `成片剧本已保存为${versionAction === 'major' ? '大版本' : '小版本'}`
+            : '服务端已确认版本；请重新加载查看历史，不要重复创建。',
+          type: refreshedVersions ? 'success' : 'warning',
+        });
+      } catch (error) {
+        if (isDefinitiveShootingScriptSaveRejection(error)) {
+          removeStoredShootingScriptSaveVerification(pending);
+          setPendingScriptSaveVerification(null);
+          appStore.addNotification({ title: '版本保存未生效', message: (error as Error).message, type: 'error' });
+          return;
+        }
+        appStore.addNotification({ title: '正在核实剧本版本', message: '版本请求结果不确定，先只读核实成片详情和版本历史；不会自动重复提交。', type: 'warning' });
+        await verifyPendingShootingScriptSave(pending);
       }
-      setArchiveSyncPending(result.archiveSync === 'pending');
-      setShooting((current) => current?.id === requestedShootingId ? {
-        ...current,
-        script_content: scriptContent,
-        script_source_production_id: source.script_source_production_id ?? current.script_source_production_id,
-        script_source_version: source.script_source_version ?? current.script_source_version,
-      } : current);
-      const refreshedVersions = await loadScriptVersions(requestedShootingId);
-      if (Number(currentShootingIdRef.current) !== requestedShootingId) {
-        appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
-        return;
-      }
-      appStore.addNotification({
-        title: refreshedVersions ? '版本已保存' : '版本已保存，历史列表未刷新',
-        message: refreshedVersions
-          ? `成片剧本已保存为${versionAction === 'major' ? '大版本' : '小版本'}`
-          : '服务端已确认版本；请重新加载查看历史，不要重复创建。',
-        type: refreshedVersions ? 'success' : 'warning',
-      });
     } catch (error) {
-      appStore.addNotification({ title: '版本保存失败', message: (error as Error).message, type: 'error' });
+      if (serverConfirmed) {
+        appStore.addNotification({ title: '版本已保存', message: '服务端已确认版本，但页面状态更新未完成；请重新加载确认，不要重复创建。', type: 'warning' });
+      } else {
+        appStore.addNotification({
+          title: requestStarted ? '版本结果待核实' : '版本未提交',
+          message: error instanceof Error ? error.message : '保存剧本版本失败',
+          type: requestStarted ? 'warning' : 'error',
+        });
+      }
     } finally {
+      saveScriptVersionInFlightRef.current = false;
       setSavingScriptVersion(false);
     }
   };
-  const handleStatusChange = async (newStatus: string) => {
-    if (!shooting) return;
+  const handleStatusChange = async (newStatus: string, explicitRetry = false) => {
+    if (!shooting || statusChangeInFlightRef.current) return;
+    if (hasPendingScriptSaveForCurrentRecord) {
+      appStore.addNotification({ title: '剧本版本结果待核实', message: '请先核实上次剧本版本保存结果，再更新成片状态。', type: 'warning' });
+      return;
+    }
+    const retryingKnownUnchanged = explicitRetry
+      && pendingStatusVerification?.status === 'ready'
+      && pendingStatusVerification.targetStatus === newStatus
+      && pendingStatusVerification.previousStatus === shooting.status;
+    if (pendingStatusVerification && !retryingKnownUnchanged) return;
+    statusChangeInFlightRef.current = true;
+    setStatusChangePending(true);
     const requestedShootingId = shooting.id;
+    const pending: PendingShootingStatusVerification = retryingKnownUnchanged && pendingStatusVerification ? pendingStatusVerification : {
+      id: requestedShootingId,
+      userId: Number(authUserId),
+      requestId: crypto.randomUUID(),
+      topicTitle: shooting.topic_title || `成片 ${requestedShootingId}`,
+      previousStatus: shooting.status,
+      targetStatus: newStatus,
+      status: 'uncertain' as const,
+      readError: null,
+    };
 
     try {
-      await updateShooting(requestedShootingId, {
-        topic_id: shooting.topic_id,
-        plan_date: shooting.plan_date || '',
-        location: shooting.location || '',
-        equipment: shooting.equipment || '',
-        status: newStatus
-      });
-    } catch (error) {
-      appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
-      return;
-    }
+      try {
+        const flushResult = await runtimeHandleRef.current?.flush({ timeoutMs: 8000 });
+        if (flushResult && flushResult.status !== 'synced') {
+          throw new Error('剧本尚未保存完成；本次没有发送状态更新，请先处理剧本保存状态。');
+        }
+      } catch (error) {
+        appStore.addNotification({ title: '状态未更新', message: (error as Error).message, type: 'warning' });
+        return;
+      }
+      try {
+        persistPendingShootingStatusVerification({ ...pending, status: 'uncertain', readError: null });
+      } catch (error) {
+        appStore.addNotification({ title: '未发送状态更新', message: (error as Error).message, type: 'error' });
+        return;
+      }
+      setPendingStatusVerification({ ...pending, status: 'uncertain', readError: null });
+      try {
+        await updateShooting(requestedShootingId, {
+          topic_id: shooting.topic_id,
+          plan_date: shooting.plan_date || '',
+          location: shooting.location || '',
+          equipment: shooting.equipment || '',
+          status: newStatus
+        });
+      } catch (error) {
+        if (isDefinitiveShootingStatusRejection(error)) {
+          removeStoredShootingStatusVerification(pending);
+          setPendingStatusVerification(null);
+          appStore.addNotification({ title: '状态更新未生效', message: (error as Error).message, type: 'error' });
+          return;
+        }
+        appStore.addNotification({ title: '正在核实状态', message: '更新响应不确定，先只读查询服务器；不会自动重复提交。', type: 'warning' });
+        await verifyPendingShootingStatus(pending);
+        return;
+      }
 
-    if (Number(currentShootingIdRef.current) !== requestedShootingId) {
-      appStore.addNotification({ title: '状态已更新', message: '服务端已确认更新；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
-      if (newStatus === 'completed') celebrateMilestone();
-      return;
-    }
+      removeStoredShootingStatusVerification(pending);
+      setPendingStatusVerification(null);
 
-    // The write is confirmed; keep the accepted status even if the follow-up read fails.
-    setShooting((current) => current?.id === requestedShootingId ? { ...current, status: newStatus } : current);
-
-    try {
-      const updated = await getShootingById(requestedShootingId);
       if (Number(currentShootingIdRef.current) !== requestedShootingId) {
         appStore.addNotification({ title: '状态已更新', message: '服务端已确认更新；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
         if (newStatus === 'completed') celebrateMilestone();
         return;
       }
-      setShooting((current) => current?.id === requestedShootingId ? updated : current);
-    } catch {
-      if (Number(currentShootingIdRef.current) !== requestedShootingId) {
-        if (newStatus === 'completed') celebrateMilestone();
+
+      // The write is confirmed; keep the accepted status even if the follow-up read fails.
+      setShooting((current) => current?.id === requestedShootingId ? { ...current, status: newStatus } : current);
+
+      try {
+        const updated = await getShootingById(requestedShootingId);
+        if (Number(currentShootingIdRef.current) !== requestedShootingId) {
+          appStore.addNotification({ title: '状态已更新', message: '服务端已确认更新；页面已切换，未用旧详情覆盖当前内容。', type: 'warning' });
+          if (newStatus === 'completed') celebrateMilestone();
+          return;
+        }
+        setShooting((current) => current?.id === requestedShootingId ? updated : current);
+      } catch {
+        if (Number(currentShootingIdRef.current) !== requestedShootingId) {
+          if (newStatus === 'completed') celebrateMilestone();
+          return;
+        }
+        const message = '服务端已确认更新，但页面刷新失败。请重新加载确认，不要重复操作。';
+        if (newStatus === 'completed') {
+          appStore.addNotification({ title: '制作已完成', message: `${message} 成片已自动流转到发布管理。`, type: 'warning' });
+          celebrateMilestone();
+        } else {
+          appStore.addNotification({ title: '状态已更新', message, type: 'warning' });
+        }
         return;
       }
-      const message = '服务端已确认更新，但页面刷新失败。请重新加载确认，不要重复操作。';
+
       if (newStatus === 'completed') {
-        appStore.addNotification({ title: '制作已完成', message: `${message} 成片已自动流转到发布管理。`, type: 'warning' });
+        appStore.addNotification({ title: '制作完成', message: '成片制作已完成，自动流转到发布管理', type: 'success' });
         celebrateMilestone();
       } else {
-        appStore.addNotification({ title: '状态已更新', message, type: 'warning' });
+        appStore.addNotification({ title: '状态更新', message: '状态已更新', type: 'success' });
       }
-      return;
-    }
-
-    if (newStatus === 'completed') {
-      appStore.addNotification({ title: '制作完成', message: '成片制作已完成，自动流转到发布管理', type: 'success' });
-      celebrateMilestone();
-    } else {
-      appStore.addNotification({ title: '状态更新', message: '状态已更新', type: 'success' });
+    } finally {
+      statusChangeInFlightRef.current = false;
+      setStatusChangePending(false);
     }
   };
 
@@ -422,6 +916,34 @@ export default function ShootingDetail() {
   }
 
   if (!shooting) {
+    if (hasPendingScriptSaveForCurrentRecord && pendingScriptSaveVerification) {
+      return (
+        <section role="alert" data-testid="shooting-script-save-pending-verification" className="flex flex-col items-start gap-3 rounded-xl border border-studio-border-soft bg-studio-amber-soft p-5 text-sm text-studio-amber-contrast">
+          <div>
+            <p className="font-medium">剧本版本结果尚未确认</p>
+            <p className="mt-1">当前详情无法读取。版本、剧本和状态写入保持锁定；只读核实成功前不会重发版本请求。</p>
+            {pendingScriptSaveVerification.readError && <p className="mt-1 text-xs">读取失败：{pendingScriptSaveVerification.readError}</p>}
+          </div>
+          <ActionButton type="button" variant="secondary" disabled={scriptSaveVerificationLoading} onClick={() => void verifyPendingShootingScriptSave(pendingScriptSaveVerification)}>
+            {scriptSaveVerificationLoading ? '正在核实…' : '只读核实保存状态'}
+          </ActionButton>
+        </section>
+      );
+    }
+    if (pendingStatusVerification) {
+      return (
+        <section role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-studio-border-soft bg-studio-amber-soft p-5 text-sm text-studio-amber-contrast">
+          <div>
+            <p className="font-medium">成片状态尚未确认</p>
+            <p className="mt-1">当前详情无法读取。状态、剧本和版本写入保持锁定；只读核实成功前不会重发状态更新。</p>
+            {pendingStatusVerification.readError && <p className="mt-1 text-xs">读取失败：{pendingStatusVerification.readError}</p>}
+          </div>
+          <ActionButton type="button" variant="secondary" disabled={statusVerificationLoading} onClick={() => void verifyPendingShootingStatus(pendingStatusVerification)}>
+            {statusVerificationLoading ? '正在核实…' : '只读核实状态'}
+          </ActionButton>
+        </section>
+      );
+    }
     return (
       <div className="flex items-center justify-center h-64">
         <p className="text-studio-text-muted">成片制作记录不存在</p>
@@ -436,14 +958,15 @@ export default function ShootingDetail() {
       <div className={`shrink-0 border-b ${styles.border} px-3 py-2`}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="flex min-w-0 items-center gap-3">
-            <button
+            <ActionButton
               type="button"
+              variant="icon"
               aria-label="返回制作列表"
               onClick={() => navigateFromShooting('/shooting')}
-              className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
+              className="!h-10 !w-10 !min-h-10 !min-w-10 !p-2"
             >
               <ChevronLeft className={`w-5 h-5 ${styles.textSecondary}`} />
-            </button>
+            </ActionButton>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <h1 className={`truncate text-base font-semibold ${styles.textPrimary}`}>
                 {shooting.topic_title || '成片制作'}
@@ -478,17 +1001,22 @@ export default function ShootingDetail() {
           <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
             {hasPermission('workflow:shooting') && (
               <>
-                <ActionButton type="button" disabled={savingScriptVersion || syncStatus === 'conflicted'} onClick={() => void handleSaveScriptVersion('minor')} className="min-h-10 px-3 py-2 text-xs">
+                <ActionButton type="button" disabled={Boolean(pendingStatusVerification) || hasPendingScriptSaveForCurrentRecord || savingScriptVersion || syncStatus === 'conflicted'} onClick={() => void handleSaveScriptVersion('minor')} className="min-h-10 px-3 py-2 text-xs">
                   {savingScriptVersion ? '保存中…' : '小版本保存'}
                 </ActionButton>
-                <ActionButton type="button" variant="primary" disabled={savingScriptVersion || syncStatus === 'conflicted'} onClick={() => void handleSaveScriptVersion('major')} className="min-h-10 px-3 py-2 text-xs">
+                <ActionButton type="button" variant="primary" disabled={Boolean(pendingStatusVerification) || hasPendingScriptSaveForCurrentRecord || savingScriptVersion || syncStatus === 'conflicted'} onClick={() => void handleSaveScriptVersion('major')} className="min-h-10 px-3 py-2 text-xs">
                   大版本保存
                 </ActionButton>
               </>
             )}
-            <button
+            <ActionButton
+              type="button"
+              variant="icon"
               onClick={() => setShowSidebar((prev) => !prev)}
-              className={`p-2 rounded-lg ${styles.hoverBg} transition-colors`}
+              className="!h-10 !w-10 !min-h-10 !min-w-10 !p-2"
+              data-testid="shooting-info-toggle"
+              aria-expanded={showSidebar}
+              aria-controls={showSidebar ? 'shooting-info-panel' : undefined}
               aria-label={showSidebar ? '收起信息栏' : '展开信息栏'}
               title={showSidebar ? '收起信息栏' : '展开信息栏'}
             >
@@ -497,34 +1025,40 @@ export default function ShootingDetail() {
               ) : (
                 <PanelRight className={`w-4 h-4 ${styles.textSecondary}`} />
               )}
-            </button>
+            </ActionButton>
             {shooting.status === 'planned' && (
               <button
                 onClick={() => handleStatusChange('in_progress')}
+                disabled={statusChangePending || Boolean(pendingStatusVerification) || hasPendingScriptSaveForCurrentRecord}
+                aria-busy={statusChangePending}
                 className="xmt-btn xmt-btn-primary min-h-10 px-3 py-1.5 text-xs"
               >
                 <Camera className="w-4 h-4" />
-                开始制作
+                {statusChangePending ? '正在开始制作…' : '开始制作'}
               </button>
             )}
 
             {shooting.status === 'in_progress' && (
               <button
                 onClick={() => handleStatusChange('completed')}
+                disabled={statusChangePending || Boolean(pendingStatusVerification) || hasPendingScriptSaveForCurrentRecord}
+                aria-busy={statusChangePending}
                 className="xmt-btn min-h-10 border border-studio-success/30 bg-studio-success-soft px-3 py-1.5 text-xs font-medium text-studio-success-contrast hover:bg-studio-success/12"
               >
                 <CheckCircle className="w-4 h-4" />
-                完成制作
+                {statusChangePending ? '正在完成制作…' : '完成制作'}
               </button>
             )}
 
             {shooting.status === 'cancelled' && (
               <button
                 onClick={() => handleStatusChange('planned')}
+                disabled={statusChangePending || Boolean(pendingStatusVerification) || hasPendingScriptSaveForCurrentRecord}
+                aria-busy={statusChangePending}
                 className="xmt-btn xmt-btn-primary min-h-10 px-3 py-1.5 text-xs"
               >
                 <Clock className="w-4 h-4" />
-                重新计划
+                {statusChangePending ? '正在重新计划…' : '重新计划'}
               </button>
             )}
 
@@ -538,6 +1072,75 @@ export default function ShootingDetail() {
         </div>
       </div>
 
+      {pendingStatusVerification && (
+        <section
+          role="alert"
+          aria-live="polite"
+          data-testid="shooting-status-pending-verification"
+          className="flex flex-col gap-3 rounded-xl border border-studio-border-soft bg-studio-amber-soft px-4 py-3 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <p className="font-medium">成片状态尚未确认</p>
+            <p className="mt-1">
+              {pendingStatusVerification.status === 'ready'
+                ? `服务器仍为“${getWorkflowStatusLabel('shooting', pendingStatusVerification.previousStatus)}”。请明确确认后重试，系统不会自动重复提交。`
+                : statusVerificationLoading
+                  ? '正在只读核实服务器状态；此期间状态、剧本和版本写入均已锁定。'
+                  : '上次更新结果不确定。请只读核实服务器状态；此期间状态、剧本和版本写入均已锁定。'}
+            </p>
+            {pendingStatusVerification.readError && <p className="mt-1 text-xs">上次核实未成功：{pendingStatusVerification.readError}</p>}
+          </div>
+          {pendingStatusVerification.status === 'ready' ? (
+            <ActionButton
+              type="button"
+              variant="secondary"
+              disabled={statusChangePending || statusVerificationLoading}
+              onClick={() => void handleStatusChange(pendingStatusVerification.targetStatus, true)}
+              className="min-h-10 shrink-0 px-3 py-2 text-xs"
+            >
+              {statusChangePending ? '正在重试…' : `确认后重试：${getWorkflowStatusLabel('shooting', pendingStatusVerification.targetStatus)}`}
+            </ActionButton>
+          ) : (
+            <ActionButton
+              type="button"
+              variant="secondary"
+              disabled={statusVerificationLoading || statusChangePending}
+              onClick={() => void verifyPendingShootingStatus(pendingStatusVerification)}
+              className="min-h-10 shrink-0 px-3 py-2 text-xs"
+            >
+              {statusVerificationLoading ? '正在核实…' : '只读核实状态'}
+            </ActionButton>
+          )}
+        </section>
+      )}
+
+      {hasPendingScriptSaveForCurrentRecord && pendingScriptSaveVerification && (
+        <section
+          role="alert"
+          aria-live="polite"
+          data-testid="shooting-script-save-pending-verification"
+          className="flex flex-col gap-3 rounded-xl border border-studio-border-soft bg-studio-amber-soft px-4 py-3 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <p className="font-medium">剧本版本结果尚未确认</p>
+            <p className="mt-1">
+              {pendingScriptSaveVerification.readError || (scriptSaveVerificationLoading
+                ? `正在只读核实「${pendingScriptSaveVerification.topicTitle}」的剧本详情和版本历史；核实期间已暂停编辑、版本保存、状态更新和离开。`
+                : `「${pendingScriptSaveVerification.topicTitle}」的剧本版本保存结果尚未确认；请先只读核实，系统不会自动重发。`)}
+            </p>
+          </div>
+          <ActionButton
+            type="button"
+            variant="secondary"
+            disabled={savingScriptVersion || scriptSaveVerificationLoading}
+            onClick={() => void verifyPendingShootingScriptSave(pendingScriptSaveVerification)}
+            className="min-h-10 shrink-0 px-3 py-2 text-xs"
+          >
+            {scriptSaveVerificationLoading ? '正在核实…' : '只读核实保存状态'}
+          </ActionButton>
+        </section>
+      )}
+
       {archiveSyncPending && (
         <section
           role="status"
@@ -549,7 +1152,7 @@ export default function ShootingDetail() {
             <button
               type="button"
               onClick={() => void handleRetryPublishedArchiveSync()}
-              disabled={archiveSyncRetrying || syncStatus === 'saving'}
+              disabled={Boolean(pendingStatusVerification) || hasPendingScriptSaveForCurrentRecord || archiveSyncRetrying || syncStatus === 'saving'}
               className="xmt-btn xmt-btn-warning min-h-10 shrink-0 px-3 py-2 text-xs disabled:opacity-50"
             >
               {archiveSyncRetrying ? '同步中...' : syncStatus === 'saving' ? '等待剧本保存...' : '重试同步归档'}
@@ -581,33 +1184,24 @@ export default function ShootingDetail() {
         </GlassPanel>
       ) : null}
 
-      <div className="flex gap-3">
-        <main className="min-w-0 flex-1">
-          <ContentEditor
-            value={scriptContent}
-            onChange={setScriptContent}
-            mode="rich"
-            collaborationKey={getCollaborationRoomId('shooting', shooting.id)}
-            persistenceStatus={syncStatus}
-            immersive
-            toolbarVariant={compactEditorToolbar ? 'basic' : 'full'}
-            className="h-full"
-            adapter={shootingEditorAdapter}
-            onRuntimeHandleChange={handleRuntimeHandleChange}
-            placeholder="开始编写剧本..."
-          />
-        </main>
-
+      <div className="flex flex-col gap-3 xl:flex-row">
         {showSidebar && (
-          <aside className={`${styles.bgSecondary} border ${styles.border} hidden w-80 shrink-0 rounded-2xl xl:block`}>
+          <aside id="shooting-info-panel" aria-label="成片制作信息" className={`${styles.bgSecondary} border ${styles.border} w-full shrink-0 rounded-2xl xl:order-last xl:w-80`}>
             <div className={`flex items-center justify-between border-b ${styles.border} px-5 py-4`}>
               <div>
                 <p className={`text-xs uppercase tracking-[0.24em] ${styles.textMuted}`}>信息栏</p>
                 <h2 className={`mt-1 text-sm font-semibold ${styles.textPrimary}`}>成片制作状态</h2>
               </div>
-              <button onClick={() => setShowSidebar(false)} className={`rounded-lg p-2 ${styles.hoverBg}`}>
+              <ActionButton
+                type="button"
+                variant="icon"
+                aria-label="收起信息栏"
+                title="收起信息栏"
+                onClick={() => setShowSidebar(false)}
+                className="!h-10 !w-10 !min-h-10 !min-w-10 !p-2"
+              >
                 <PanelRightClose className={`w-4 h-4 ${styles.textSecondary}`} />
-              </button>
+              </ActionButton>
             </div>
             <div className="space-y-5 p-5">
               <section className="space-y-2">
@@ -673,26 +1267,42 @@ export default function ShootingDetail() {
             </div>
           </aside>
         )}
+
+        <main className="min-w-0 flex-1">
+          <ContentEditor
+            value={scriptContent}
+            onChange={setScriptContent}
+            mode="rich"
+            collaborationKey={getCollaborationRoomId('shooting', shooting.id)}
+            persistenceStatus={syncStatus}
+            immersive
+            toolbarVariant={compactEditorToolbar ? 'basic' : 'full'}
+            className="h-full"
+            adapter={shootingEditorAdapter}
+            onRuntimeHandleChange={handleRuntimeHandleChange}
+            placeholder="开始编写剧本..."
+          />
+        </main>
       </div>
 
       <GlassPanel role="region" aria-label="剧本版本历史" className="p-4 sm:p-5">
         <div>
           <h2 className="text-sm font-semibold text-studio-text-primary">剧本版本历史</h2>
-          <p className="mt-1 text-xs text-studio-text-muted">自动保存更新当前稿；仅小版本和大版本操作会留档。</p>
+          <p className="mt-1 text-xs text-studio-text-secondary">自动保存更新当前稿；仅小版本和大版本操作会留档。</p>
         </div>
         {scriptVersionsLoadError ? (
-          <div role="alert" data-testid="shooting-script-history-error" className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-studio-danger/30 bg-studio-danger/10 p-3 text-sm text-studio-danger">
+          <div role="alert" data-testid="shooting-script-history-error" className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-studio-danger/30 bg-studio-danger/10 p-3 text-sm text-studio-coral-contrast">
             <span>版本历史读取失败，列表可能不完整；已保存的剧本仍可正常使用，请重试读取。</span>
-            <ActionButton type="button" disabled={scriptVersionsLoading || savingScriptVersion} onClick={() => shooting && void loadScriptVersions(shooting.id)} className="px-3 py-2">重新加载版本历史</ActionButton>
+            <ActionButton type="button" disabled={scriptVersionsLoading || savingScriptVersion || hasPendingScriptSaveForCurrentRecord} onClick={() => shooting && void loadScriptVersions(shooting.id)} className="px-3 py-2">重新加载版本历史</ActionButton>
           </div>
         ) : scriptVersionsLoading ? (
-          <p role="status" className="mt-3 text-sm text-studio-text-muted">正在加载版本历史…</p>
+          <p role="status" className="mt-3 text-sm text-studio-text-secondary">正在加载版本历史…</p>
         ) : scriptVersions.length > 0 ? (
           <ol className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {scriptVersions.map((version) => (
               <li key={version.id} className="rounded-xl border border-studio-border-soft bg-studio-surface-soft/60 p-3">
                 <p className="text-sm font-medium text-studio-text-primary">{version.is_baseline ? '历史原稿（时间未记录）' : `${version.version} · ${version.change_type === 'major' ? '大版本' : '小版本'}`}</p>
-                <p className="mt-1 text-xs text-studio-text-muted">{version.is_baseline ? '旧内容未记录操作人和时间' : `${version.operator_name || '系统记录'} · ${version.created_at || '时间未记录'}`}</p>
+                <p className="mt-1 text-xs text-studio-text-secondary">{version.is_baseline ? '旧内容未记录操作人和时间' : `${version.operator_name || '系统记录'} · ${version.created_at || '时间未记录'}`}</p>
                 {Number(version.source_production_id) > 0 && version.source_production_version ? (
                   <button
                     type="button"
@@ -702,7 +1312,7 @@ export default function ShootingDetail() {
                     来源创作稿：{version.source_production_version} · 查看
                   </button>
                 ) : (
-                  <p className="mt-2 text-xs text-studio-text-muted">该版本的创作来源未记录</p>
+                  <p className="mt-2 text-xs text-studio-text-secondary">该版本的创作来源未记录</p>
                 )}
                 <details className="mt-2">
                   <summary className="min-h-8 cursor-pointer py-1 text-xs font-medium text-studio-primary-contrast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring">查看此版本正文</summary>
@@ -711,7 +1321,7 @@ export default function ShootingDetail() {
               </li>
             ))}
           </ol>
-        ) : <p className="mt-3 rounded-xl border border-studio-border-soft bg-studio-surface-soft/50 p-3 text-xs text-studio-text-muted">暂无已保存版本</p>}
+        ) : <p className="mt-3 rounded-xl border border-studio-border-soft bg-studio-surface-soft/50 p-3 text-xs text-studio-text-secondary">暂无已保存版本</p>}
       </GlassPanel>
 
       <EditorLeaveFailureDialog

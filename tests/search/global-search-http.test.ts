@@ -37,10 +37,33 @@ const otherReportId = await database.executeInsert("INSERT INTO daily_reports(us
 await database.execute("INSERT INTO daily_report_items(report_id,section_key,title,content_md,sort_order) VALUES(?,'today','今日完成','daily-report-needle in report body',0)", [ownReportId]);
 await database.execute("INSERT INTO daily_report_items(report_id,section_key,title,content_md,sort_order) VALUES(?,'today','今日完成','daily-report-needle coworker private',0)", [otherReportId]);
 
-await database.execute(
+const ownResourceId = await database.executeInsert(
   `INSERT INTO resources(name,title,summary,library_type,visibility,status,content_text,source_type,owner_id,uploader_id,created_by,updated_by)
    VALUES('全局搜索资料','本地检索资料','资料摘要','knowledge','private','published','resource-needle phrase','manual',?,?,?,?)`,
   [userId, userId, userId, userId],
+);
+const searchCategoryId = await database.executeInsert(
+  `INSERT INTO resource_categories(library_type,name,path,sort_order,enabled,created_by)
+   VALUES('knowledge','搜索验收分类','/搜索验收分类',0,1,?)`,
+  [userId],
+);
+const searchTagId = await database.executeInsert(
+  `INSERT INTO resource_tags(name,normalized_name,created_by) VALUES('内容 规划','内容 规划',?)`,
+  [userId],
+);
+await database.execute('UPDATE resources SET category_id=? WHERE id=?', [searchCategoryId, ownResourceId]);
+await database.execute('INSERT INTO resource_tag_relations(resource_id,tag_id,created_by) VALUES(?,?,?)', [ownResourceId, searchTagId, userId]);
+const otherOwnResourceId = await database.executeInsert(
+  `INSERT INTO resources(name,title,summary,library_type,visibility,status,content_text,source_type,owner_id,uploader_id,created_by,updated_by)
+   VALUES('全局搜索第二资料','A资料检索','第二条摘要','media','private','published','resource-needle phrase','manual',?,?,?,?)`,
+  [userId, userId, userId, userId],
+);
+await database.execute("UPDATE resources SET updated_at='2099-01-01 00:00:00' WHERE id=?", [ownResourceId]);
+await database.execute("UPDATE resources SET updated_at='2020-01-01 00:00:00' WHERE id=?", [otherOwnResourceId]);
+await database.execute(
+  `INSERT INTO resources(name,title,summary,library_type,visibility,status,content_text,source_type,owner_id,uploader_id,created_by,updated_by)
+   VALUES('他人私有搜索资料','他人私有资料','不可见','knowledge','private','published','resource-needle phrase','manual',?,?,?,?)`,
+  [coworkerId, coworkerId, coworkerId, coworkerId],
 );
 
 const ownRetroId = await database.executeInsert(
@@ -84,7 +107,26 @@ try {
   const resourceResponse = await fetch(`${base}/resource-center/search?keyword=resource-needle`, { headers });
   assert.equal(resourceResponse.status, 200);
   const resources = await resourceResponse.json() as { data: Array<{ title: string }> };
-  assert.deepEqual(resources.data.map((row) => row.title), ['本地检索资料'], 'resource FTS remains permission and visibility scoped');
+  assert.deepEqual(resources.data.map((row) => row.title).sort(), ['A资料检索', '本地检索资料'], 'resource FTS remains permission and visibility scoped');
+
+  const filteredResourceResponse = await fetch(
+    `${base}/resource-center/search?keyword=resource-needle&library_type=knowledge&category_id=${searchCategoryId}&tag=%E5%86%85%E5%AE%B9%E3%80%80%E8%A7%84%E5%88%92`,
+    { headers },
+  );
+  assert.equal(filteredResourceResponse.status, 200);
+  const filteredResources = await filteredResourceResponse.json() as { data: Array<{ title: string }> };
+  assert.deepEqual(filteredResources.data.map((row) => row.title), ['本地检索资料'], 'library, category and normalized tag filters compose without widening resource visibility');
+
+  const titleSortedResponse = await fetch(`${base}/resource-center/search?keyword=resource-needle&sort=title_asc`, { headers });
+  assert.equal(titleSortedResponse.status, 200);
+  const titleSorted = await titleSortedResponse.json() as { data: Array<{ title: string }> };
+  assert.deepEqual(titleSorted.data.map((row) => row.title), ['A资料检索', '本地检索资料'], 'title sorting uses a fixed allowlisted SQL expression');
+
+  const recentSortedResponse = await fetch(`${base}/resource-center/search?keyword=resource-needle&sort=updated_desc`, { headers });
+  assert.equal(recentSortedResponse.status, 200);
+  const recentSorted = await recentSortedResponse.json() as { data: Array<{ title: string }> };
+  assert.deepEqual(recentSorted.data.map((row) => row.title), ['本地检索资料', 'A资料检索'], 'recent sorting orders by update time then stable resource ID');
+  assert.equal((await fetch(`${base}/resource-center/search?keyword=resource-needle&sort=unsafe`, { headers })).status, 400, 'unknown sort keys are rejected');
 
   const retroResponse = await fetch(`${base}/retrospectives?keyword=retro-action-needle&limit=8`, { headers });
   assert.equal(retroResponse.status, 200);

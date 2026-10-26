@@ -22,7 +22,7 @@ export default function RetroList({ retrospectives, loading, error, canCreate, o
           <RefreshCw className="h-7 w-7 text-studio-text-muted" />
         </div>
         <h2 className="mt-5 text-lg font-bold text-studio-text-primary">暂无复盘</h2>
-        <p className="mt-2 max-w-md text-sm leading-6 text-studio-text-muted">
+        <p className="mt-2 max-w-md text-sm leading-6 text-studio-text-secondary">
           创建第一份复盘，把周期内的指标快照、结论和下一步行动沉淀下来。
         </p>
         {canCreate ? (
@@ -40,7 +40,7 @@ export default function RetroList({ retrospectives, loading, error, canCreate, o
       <div className="flex items-center justify-between gap-3 border-b border-studio-border-soft px-5 py-4">
         <div>
           <h2 className="text-base font-bold text-studio-text-primary">复盘列表</h2>
-          <p className="mt-1 text-xs text-studio-text-muted">查看周期复盘进展和行动项跟进情况。</p>
+          <p className="mt-1 text-xs text-studio-text-secondary">查看周期复盘进展和行动项跟进情况。</p>
         </div>
         <ActionButton onClick={onRefresh} disabled={loading}>
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -57,7 +57,7 @@ export default function RetroList({ retrospectives, loading, error, canCreate, o
 
       <div className="overflow-x-auto">
         <table className="min-w-[980px] w-full table-fixed text-left text-sm">
-          <thead className="border-b border-studio-border-soft text-xs uppercase tracking-wide text-studio-text-muted">
+          <thead className="border-b border-studio-border-soft text-xs uppercase tracking-wide text-studio-text-secondary">
             <tr>
               <th className="px-5 py-3 font-semibold">标题</th>
               <th className="px-4 py-3 font-semibold">类型</th>
@@ -73,25 +73,26 @@ export default function RetroList({ retrospectives, loading, error, canCreate, o
           <tbody className="divide-y divide-studio-border-soft">
             {loading ? (
               <tr>
-                <td className="px-5 py-10 text-center text-studio-text-muted" colSpan={9}>
+                <td className="px-5 py-10 text-center text-studio-text-secondary" colSpan={9}>
                   正在加载复盘列表...
                 </td>
               </tr>
             ) : retrospectives.length === 0 ? (
               <tr>
-                <td role="status" className="px-5 py-10 text-center text-studio-text-muted" colSpan={9}>复盘列表暂不可用，请重新加载。</td>
+                <td role="status" className="px-5 py-10 text-center text-studio-text-secondary" colSpan={9}>复盘列表暂不可用，请重新加载。</td>
               </tr>
             ) : retrospectives.map((retro) => (
               <tr key={retro.id} className="transition hover:bg-studio-surface-soft">
                 <td className="max-w-[260px] px-5 py-4">
-                  <button
+                  <ActionButton
                     type="button"
+                    variant="ghost"
                     onClick={() => onOpen(retro.id)}
-                    className="line-clamp-2 text-left font-semibold text-studio-text-primary hover:text-studio-cyan-contrast"
+                    className="min-h-10 w-full justify-start px-2 py-2 text-left text-studio-text-primary hover:text-studio-cyan-contrast"
                   >
-                    {retro.title}
-                  </button>
-                  <p className="mt-1 text-xs text-studio-text-muted">更新于 {formatDateTime(retro.updatedAt)}</p>
+                    <span className="min-w-0 flex-1 line-clamp-2">{retro.title}</span>
+                  </ActionButton>
+                  <p className="mt-1 text-xs text-studio-text-secondary">更新于 {formatDateTime(retro.updatedAt)}</p>
                 </td>
                 <td className="px-4 py-4 text-studio-text-secondary">
                   {retro.templateCategory ? retroCategoryLabels[retro.templateCategory] : '-'}

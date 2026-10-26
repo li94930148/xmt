@@ -15,18 +15,41 @@ export type BackupInventory = {
   sources: Array<{ id: string; label: string; available: boolean; fileCount: number }>;
 };
 
-export async function createBackup(): Promise<{ message: string; name: string }> {
+export type BackupCreateRequestStatus =
+  | { state: 'created'; name: string }
+  | { state: 'pending' }
+  | { state: 'not_found' };
+
+export class BackupApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'BackupApiError';
+  }
+}
+
+export async function createBackup(requestId: string): Promise<{ message: string; name: string }> {
   const response = await fetch(`${BASE_URL}/backup/create`, {
     method: 'POST',
-    headers: { ...getAuthHeader() },
+    headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_request_id: requestId }),
   });
   if (!response.ok) throw new Error('备份创建失败');
+  return response.json();
+}
+
+export async function getBackupCreateRequestStatus(requestId: string): Promise<BackupCreateRequestStatus> {
+  const response = await fetch(`${BASE_URL}/backup/create-requests/${encodeURIComponent(requestId)}`, {
+    headers: { ...getAuthHeader() },
+    cache: 'no-store',
+  });
+  if (!response.ok) throw new Error('暂时无法核实备份状态');
   return response.json();
 }
 
 export async function getBackupList(): Promise<BackupFile[]> {
   const response = await fetch(`${BASE_URL}/backup/list`, {
     headers: { ...getAuthHeader() },
+    cache: 'no-store',
   });
   if (!response.ok) throw new Error('获取备份列表失败');
   return response.json();
@@ -71,5 +94,5 @@ export async function deleteBackup(name: string): Promise<void> {
     method: 'DELETE',
     headers: { ...getAuthHeader() },
   });
-  if (!response.ok) throw new Error('删除失败');
+  if (!response.ok) throw new BackupApiError('删除失败', response.status);
 }

@@ -1,11 +1,12 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore, useAppStore } from '../store';
-import { changePassword, updateMyProfile, getSystemSettings, updateSystemSettings } from '../api';
+import { updateMyProfile, getSystemSettings, updateSystemSettings } from '../api';
+import { apiUrl } from '../api/transport';
 import {
-  createBackup,
   getBackupList,
   downloadBackup,
   deleteBackup,
+  BackupApiError,
   BackupFile,
 } from '../api/backup';
 import { useThemeStyles } from '../hooks/useThemeStyles';
@@ -15,6 +16,7 @@ import { getRoleDisplayName } from '../lib/roles';
 import { ReactBitsAppearancePanel } from '@/features/reactbits-appearance/ReactBitsAppearancePanel';
 import { useDesktopNotification } from '../hooks/useDesktopNotification';
 import { isSecureContext } from '../utils/notification';
+import { useBackupCreateRecovery } from '../hooks/useBackupCreateRecovery';
 import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
 import ErrorState from '../components/common/ErrorState';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -73,11 +75,75 @@ const tabMeta = {
 } as const;
 
 type TabKey = keyof typeof tabMeta;
+type BackupDeleteRecoveryMarker = { version: 1; actorId: number; name: string };
+
+const BACKUP_DELETE_RECOVERY_PREFIX = 'xmt:backup-delete-pending:v1:actor:';
+
+function backupDeleteRecoveryKey(actorId: number, name: string) {
+  return `${BACKUP_DELETE_RECOVERY_PREFIX}${actorId}:${encodeURIComponent(name)}`;
+}
+
+function isSafeBackupName(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= 255
+    && value.endsWith('.db')
+    && !value.includes('/')
+    && !value.includes('\\');
+}
+
+function readBackupDeleteRecovery(actorId: number | null): BackupDeleteRecoveryMarker | null {
+  if (!actorId || typeof window === 'undefined') return null;
+  try {
+    const prefix = `${BACKUP_DELETE_RECOVERY_PREFIX}${actorId}:`;
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (!key?.startsWith(prefix)) continue;
+      const raw = window.sessionStorage.getItem(key);
+      if (!raw) continue;
+      const marker = JSON.parse(raw) as Partial<BackupDeleteRecoveryMarker>;
+      if (marker.version === 1 && marker.actorId === actorId && isSafeBackupName(marker.name)
+        && key === backupDeleteRecoveryKey(actorId, marker.name)) {
+        return { version: 1, actorId, name: marker.name };
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function persistBackupDeleteRecovery(marker: BackupDeleteRecoveryMarker): boolean {
+  try {
+    const key = backupDeleteRecoveryKey(marker.actorId, marker.name);
+    window.sessionStorage.setItem(key, JSON.stringify(marker));
+    return window.sessionStorage.getItem(key) === JSON.stringify(marker);
+  } catch {
+    return false;
+  }
+}
+
+function clearBackupDeleteRecovery(marker: BackupDeleteRecoveryMarker): boolean {
+  try {
+    const key = backupDeleteRecoveryKey(marker.actorId, marker.name);
+    const raw = window.sessionStorage.getItem(key);
+    if (raw) {
+      const stored = JSON.parse(raw) as Partial<BackupDeleteRecoveryMarker>;
+      if (stored.version === 1 && stored.actorId === marker.actorId && stored.name === marker.name) {
+        window.sessionStorage.removeItem(key);
+      }
+    }
+    return window.sessionStorage.getItem(key) === null;
+  } catch {
+    return false;
+  }
+}
 
 export default function NotificationSettings() {
   const styles = useThemeStyles();
   const authStore = useAuthStore();
   const appStore = useAppStore();
+  const addNotification = useAppStore((state) => state.addNotification);
   const desktopNotify = useDesktopNotification();
   const token = authStore.token;
   const { hasPermission } = usePermission();
@@ -116,12 +182,15 @@ export default function NotificationSettings() {
   const [showConfirmPwd, setShowConfirmPwd] = useState(false);
   const [pwdSaving, setPwdSaving] = useState(false);
   const passwordSaveLockRef = useRef(false);
+  const [passwordOutcomeUnknown, setPasswordOutcomeUnknown] = useState(false);
+  const passwordOutcomeUnknownRef = useRef(false);
 
   const [systemSettings, setSystemSettings] = useState<ManagedSystemSettings>(defaultSystemSettings);
   const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
   const [systemSettingsLoaded, setSystemSettingsLoaded] = useState(false);
   const [systemSettingsError, setSystemSettingsError] = useState('');
   const [systemSettingsSaving, setSystemSettingsSaving] = useState(false);
+  const systemSettingsSaveLockRef = useRef(false);
   const [fontSize, setFontSize] = useState(appStore.fontSize);
   const [appearanceTheme, setAppearanceTheme] = useState<'light' | 'dark'>(appStore.theme);
 
@@ -131,8 +200,16 @@ export default function NotificationSettings() {
   const [backupCreating, setBackupCreating] = useState(false);
   const [backupDeleteCandidate, setBackupDeleteCandidate] = useState<string | null>(null);
   const [backupDeleting, setBackupDeleting] = useState<string | null>(null);
+  const [backupDeleteRecovery, setBackupDeleteRecovery] = useState<BackupDeleteRecoveryMarker | null>(() => {
+    const actorId = Number(authStore.user?.id);
+    return Number.isSafeInteger(actorId) && actorId > 0 ? readBackupDeleteRecovery(actorId) : null;
+  });
+  const [backupDeleteVerifying, setBackupDeleteVerifying] = useState(false);
   const [backupFeedback, setBackupFeedback] = useState('');
   const backupMutationLockRef = useRef(false);
+  const backupDeleteVerificationLocksRef = useRef(new Set<string>());
+  const backupActorId = Number(authStore.user?.id);
+  const validBackupActorId = Number.isSafeInteger(backupActorId) && backupActorId > 0 ? backupActorId : null;
 
   const tabGroups = useMemo(() => {
     const management: TabKey[] = [];
@@ -150,6 +227,56 @@ export default function NotificationSettings() {
   }, [canManageDatabase, canManageSystem]);
   const activeTab = tabGroups.some((group) => group.tabs.includes(requestedTab)) ? requestedTab : 'notifications';
   const savedSettings = appStore.systemSettings;
+
+  const verifyBackupDelete = useCallback(async (marker: BackupDeleteRecoveryMarker) => {
+    const actorId = Number(useAuthStore.getState().user?.id);
+    if (!Number.isSafeInteger(actorId) || actorId !== marker.actorId) return;
+    const operationKey = backupDeleteRecoveryKey(marker.actorId, marker.name);
+    if (backupDeleteVerificationLocksRef.current.has(operationKey)) return;
+    backupDeleteVerificationLocksRef.current.add(operationKey);
+    setBackupDeleteVerifying(true);
+    setBackupLoading(true);
+    setBackupError('');
+    try {
+      const items = await getBackupList();
+      if (Number(useAuthStore.getState().user?.id) !== marker.actorId) return;
+      setBackupList(items);
+      const stillPresent = items.some((item) => item.name === marker.name);
+      if (!clearBackupDeleteRecovery(marker)) {
+        setBackupDeleteRecovery(marker);
+        setBackupDeleteCandidate(null);
+        setBackupFeedback(`已读取备份清单，但本机核实记录暂时无法清理。为避免重复删除，${marker.name} 仍保持锁定；请重试只读核实。`);
+        return;
+      }
+
+      setBackupDeleteRecovery(null);
+      setBackupFeedback(stillPresent
+        ? `删除请求未收到确认；备份 ${marker.name} 仍在当前清单中。请核对后决定是否再次删除。`
+        : `已核实：当前备份清单中不存在 ${marker.name}，没有重复提交删除。`);
+      if (stillPresent) {
+        setBackupDeleteCandidate(marker.name);
+      } else {
+        setBackupDeleteCandidate(null);
+        addNotification({
+          title: '删除状态已核实',
+          message: `当前备份清单中不存在 ${marker.name}；没有重复提交删除。`,
+          type: 'success',
+        });
+      }
+    } catch (error) {
+      if (Number(useAuthStore.getState().user?.id) !== marker.actorId) return;
+      setBackupDeleteRecovery(marker);
+      setBackupDeleteCandidate(null);
+      setBackupError((error as Error).message || '备份列表暂时无法读取。');
+      setBackupFeedback(`删除结果仍待核实；暂时无法读取备份清单。恢复记录已按当前账号和文件名保存，请只读核实，暂不要重复删除。`);
+    } finally {
+      backupDeleteVerificationLocksRef.current.delete(operationKey);
+      if (backupDeleteVerificationLocksRef.current.size === 0) {
+        setBackupDeleteVerifying(false);
+        setBackupLoading(false);
+      }
+    }
+  }, [addNotification]);
 
   useEffect(() => {
     void fetchNotificationData();
@@ -176,10 +303,30 @@ export default function NotificationSettings() {
   }, [canManageSystem]);
 
   useEffect(() => {
-    if (activeTab === 'database' && canManageDatabase) {
-      void loadBackupItems();
+    if (validBackupActorId) {
+      const recovery = readBackupDeleteRecovery(validBackupActorId);
+      setBackupDeleteRecovery(recovery);
+      if (recovery && canManageDatabase) {
+        setActiveTab('database');
+      }
+    } else {
+      setBackupDeleteRecovery(null);
     }
-  }, [activeTab, canManageDatabase]);
+  }, [validBackupActorId, canManageDatabase]);
+
+  useEffect(() => {
+    if (activeTab === 'database' && canManageDatabase) {
+      const recovery = readBackupDeleteRecovery(validBackupActorId);
+      if (recovery) {
+        setBackupDeleteRecovery(recovery);
+        setBackupDeleteCandidate(null);
+        void verifyBackupDelete(recovery);
+      } else {
+        setBackupDeleteRecovery(null);
+        void loadBackupItems();
+      }
+    }
+  }, [activeTab, canManageDatabase, validBackupActorId, verifyBackupDelete]);
 
   async function fetchNotificationData() {
     setNotifyLoading(true);
@@ -290,7 +437,7 @@ export default function NotificationSettings() {
   }
 
   async function handleChangePassword() {
-    if (passwordSaveLockRef.current) {
+    if (passwordSaveLockRef.current || passwordOutcomeUnknownRef.current) {
       return;
     }
     if (!oldPassword) {
@@ -309,7 +456,71 @@ export default function NotificationSettings() {
     passwordSaveLockRef.current = true;
     setPwdSaving(true);
     try {
-      await changePassword(oldPassword, newPassword);
+      let response: { status: number; body: unknown; bodyIsJson: boolean };
+      try {
+        response = await new Promise((resolve, reject) => {
+          const request = new XMLHttpRequest();
+          request.open('POST', apiUrl('/auth/change-password'));
+          request.timeout = 15_000;
+          if (token) request.setRequestHeader('Authorization', `Bearer ${token}`);
+          request.setRequestHeader('Content-Type', 'application/json');
+          request.onload = () => {
+            let body: unknown = null;
+            let bodyIsJson = false;
+            try {
+              body = JSON.parse(request.responseText);
+              bodyIsJson = typeof body === 'object' && body !== null && !Array.isArray(body);
+            } catch {
+              // A non-JSON response cannot confirm a successful password update.
+            }
+            resolve({ status: request.status, body, bodyIsJson });
+          };
+          request.onerror = () => reject(new TypeError('Password change response was not received'));
+          request.ontimeout = () => reject(new TypeError('Password change response was not received'));
+          request.onabort = () => reject(new TypeError('Password change response was not received'));
+          request.send(JSON.stringify({ oldPassword, newPassword }));
+        });
+      } catch {
+        passwordOutcomeUnknownRef.current = true;
+        setPasswordOutcomeUnknown(true);
+        setOldPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        appStore.addNotification({
+          title: '结果尚未确认',
+          message: '密码修改请求未收到确认。请不要重复提交；退出后尝试使用新密码重新登录。',
+          type: 'error',
+        });
+        return;
+      }
+
+      const body = response.body as { message?: unknown } | null;
+      const message = typeof body?.message === 'string' && body.message ? body.message : '密码修改请求未收到确认';
+      if (response.status < 200 || response.status >= 300 || !response.bodyIsJson) {
+        // These responses are emitted before the password transaction. A generic 401 is
+        // deliberately not included: middleware can return it after auth_version changed.
+        const definitelyRejected = response.status === 400
+          || response.status === 404
+          || response.status === 429
+          || (response.status === 401 && message === '旧密码错误');
+        if (definitelyRejected) {
+          appStore.addNotification({ title: '修改失败', message, type: 'error' });
+          return;
+        }
+
+        passwordOutcomeUnknownRef.current = true;
+        setPasswordOutcomeUnknown(true);
+        setOldPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        appStore.addNotification({
+          title: '结果尚未确认',
+          message: '密码修改请求未收到确认。请不要重复提交；退出后尝试使用新密码重新登录。',
+          type: 'error',
+        });
+        return;
+      }
+
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -317,8 +528,6 @@ export default function NotificationSettings() {
         authStore.login({ ...authStore.user, force_change_password: false }, authStore.token!);
       }
       appStore.addNotification({ title: '修改成功', message: '密码已更新', type: 'success' });
-    } catch (error) {
-      appStore.addNotification({ title: '修改失败', message: (error as Error).message, type: 'error' });
     } finally {
       passwordSaveLockRef.current = false;
       setPwdSaving(false);
@@ -326,7 +535,8 @@ export default function NotificationSettings() {
   }
 
   async function handleSaveSystemSection(patch: Partial<ManagedSystemSettings>, successMessage: string) {
-    if (!canManageSystem || !systemSettingsLoaded || systemSettingsLoading || systemSettingsSaving) return;
+    if (!canManageSystem || !systemSettingsLoaded || systemSettingsLoading || systemSettingsSaving || systemSettingsSaveLockRef.current) return;
+    systemSettingsSaveLockRef.current = true;
     setSystemSettingsSaving(true);
     try {
       const next = await updateSystemSettings(patch);
@@ -338,6 +548,7 @@ export default function NotificationSettings() {
     } catch (error) {
       appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
     } finally {
+      systemSettingsSaveLockRef.current = false;
       setSystemSettingsSaving(false);
     }
   }
@@ -418,19 +629,38 @@ export default function NotificationSettings() {
     }
   }
 
+  async function handleRefreshBackupList() {
+    const recovery = validBackupActorId
+      ? backupDeleteRecovery?.actorId === validBackupActorId
+        ? backupDeleteRecovery
+        : readBackupDeleteRecovery(validBackupActorId)
+      : null;
+    if (recovery) {
+      await verifyBackupDelete(recovery);
+      return;
+    }
+    await loadBackupItems();
+  }
+
+  async function handleBackupConfirmed(result: { name: string }, recovered: boolean) {
+    appStore.addNotification({
+      title: recovered ? '备份结果已核实' : '备份成功',
+      message: `已创建备份：${result.name}`,
+      type: 'success',
+    });
+    if (!(await loadBackupItems())) {
+      setBackupFeedback(`服务端已确认创建备份 ${result.name}，但备份列表刷新失败；请重新加载列表确认，不要重复创建。`);
+    }
+  }
+  const backupRecovery = useBackupCreateRecovery(handleBackupConfirmed);
+
   async function handleCreateBackup() {
-    if (backupMutationLockRef.current || backupLoading) return;
+    if (backupMutationLockRef.current || backupLoading || backupRecovery.busy || backupRecovery.pending || backupDeleteRecovery || backupDeleteVerifying) return;
     backupMutationLockRef.current = true;
     setBackupCreating(true);
     setBackupFeedback('');
     try {
-      const result = await createBackup();
-      appStore.addNotification({ title: '备份成功', message: `已创建备份：${result.name}`, type: 'success' });
-      if (!(await loadBackupItems())) {
-        setBackupFeedback(`服务端已确认创建备份 ${result.name}，但备份列表刷新失败；请重新加载列表确认，不要重复创建。`);
-      }
-    } catch (error) {
-      appStore.addNotification({ title: '备份失败', message: (error as Error).message, type: 'error' });
+      await backupRecovery.start();
     } finally {
       backupMutationLockRef.current = false;
       setBackupCreating(false);
@@ -447,20 +677,49 @@ export default function NotificationSettings() {
   }
 
   async function handleDeleteBackup(name: string) {
-    if (backupMutationLockRef.current || backupLoading) return;
+    if (backupMutationLockRef.current || backupLoading || backupRecovery.busy || backupRecovery.pending || backupDeleteRecovery || backupDeleteVerifying) return;
+    if (!validBackupActorId) {
+      appStore.addNotification({ title: '未能删除备份', message: '当前登录账号不可用；没有提交删除请求。', type: 'error' });
+      return;
+    }
+    const recovery: BackupDeleteRecoveryMarker = { version: 1, actorId: validBackupActorId, name };
+    if (!persistBackupDeleteRecovery(recovery)) {
+      setBackupFeedback(`无法保存 ${name} 的删除核实记录；本次没有提交删除。`);
+      return;
+    }
+    const isCurrentActor = () => Number(useAuthStore.getState().user?.id) === recovery.actorId;
+    setBackupDeleteRecovery(recovery);
     backupMutationLockRef.current = true;
     setBackupDeleting(name);
     setBackupFeedback('');
     try {
       await deleteBackup(name);
+      if (!isCurrentActor()) return;
+      const recoveryCleared = clearBackupDeleteRecovery(recovery);
+      if (recoveryCleared) setBackupDeleteRecovery(null);
       setBackupDeleteCandidate(null);
       setBackupList((current) => current.filter((item) => item.name !== name));
       appStore.addNotification({ title: '删除成功', message: '备份文件已删除', type: 'success' });
-      if (!(await loadBackupItems())) {
+      if (!recoveryCleared) {
+        setBackupDeleteRecovery(recovery);
+        await verifyBackupDelete(recovery);
+      } else if (!(await loadBackupItems())) {
         setBackupFeedback(`服务端已确认删除备份 ${name}，但备份列表刷新失败；请重新加载列表确认，不要重复删除。`);
       }
     } catch (error) {
-      appStore.addNotification({ title: '删除失败', message: (error as Error).message, type: 'error' });
+      if (!isCurrentActor()) return;
+      const status = error instanceof BackupApiError ? error.status : null;
+      const outcomeMayBeUnknown = status === null || status === 404 || status === 408 || status === 429 || status >= 500;
+      if (outcomeMayBeUnknown) {
+        await verifyBackupDelete(recovery);
+      } else if (clearBackupDeleteRecovery(recovery)) {
+        setBackupDeleteRecovery(null);
+        appStore.addNotification({ title: '删除失败', message: (error as Error).message, type: 'error' });
+      } else {
+        setBackupDeleteRecovery(recovery);
+        setBackupDeleteCandidate(null);
+        setBackupFeedback(`删除请求被拒绝，但本机核实记录无法清理。为避免重复删除，${name} 暂时保持锁定；请只读核实。`);
+      }
     } finally {
       backupMutationLockRef.current = false;
       setBackupDeleting(null);
@@ -473,6 +732,7 @@ export default function NotificationSettings() {
     onChange: (value: string) => void,
     type = 'text',
     placeholder?: string,
+    disabled = false,
   ) {
     return (
       <div>
@@ -482,10 +742,15 @@ export default function NotificationSettings() {
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
+          disabled={disabled}
           className={`w-full px-4 py-2.5 ${styles.input}`}
         />
       </div>
     );
+  }
+
+  function renderSystemInput(label: string, value: string, onChange: (value: string) => void) {
+    return renderInput(label, value, onChange, 'text', undefined, systemSettingsSaving);
   }
 
   return (
@@ -696,7 +961,7 @@ export default function NotificationSettings() {
                 <div>
                   <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>当前密码</label>
                   <div className="relative">
-                    <input type={showOldPwd ? 'text' : 'password'} value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input}`} />
+                    <input type={showOldPwd ? 'text' : 'password'} value={oldPassword} disabled={pwdSaving || passwordOutcomeUnknown} onChange={(event) => setOldPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input} disabled:cursor-not-allowed disabled:opacity-60`} />
                     <button type="button" onClick={() => setShowOldPwd((value) => !value)} className={`absolute right-4 top-1/2 -translate-y-1/2 ${styles.textMuted}`}>
                       {showOldPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -705,7 +970,7 @@ export default function NotificationSettings() {
                 <div>
                   <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>新密码</label>
                   <div className="relative">
-                    <input type={showNewPwd ? 'text' : 'password'} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input}`} />
+                    <input type={showNewPwd ? 'text' : 'password'} value={newPassword} disabled={pwdSaving || passwordOutcomeUnknown} onChange={(event) => setNewPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input} disabled:cursor-not-allowed disabled:opacity-60`} />
                     <button type="button" onClick={() => setShowNewPwd((value) => !value)} className={`absolute right-4 top-1/2 -translate-y-1/2 ${styles.textMuted}`}>
                       {showNewPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -714,7 +979,7 @@ export default function NotificationSettings() {
                 <div>
                   <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>确认新密码</label>
                   <div className="relative">
-                    <input type={showConfirmPwd ? 'text' : 'password'} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input}`} />
+                    <input type={showConfirmPwd ? 'text' : 'password'} value={confirmPassword} disabled={pwdSaving || passwordOutcomeUnknown} onChange={(event) => setConfirmPassword(event.target.value)} className={`w-full px-4 py-2.5 pr-12 ${styles.input} disabled:cursor-not-allowed disabled:opacity-60`} />
                     <button type="button" onClick={() => setShowConfirmPwd((value) => !value)} className={`absolute right-4 top-1/2 -translate-y-1/2 ${styles.textMuted}`}>
                       {showConfirmPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -722,13 +987,19 @@ export default function NotificationSettings() {
                 </div>
               </div>
 
+              {passwordOutcomeUnknown ? (
+                <div data-testid="password-outcome-unknown" role="alert" className="rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">
+                  密码修改结果尚未确认。为避免重复提交，当前密码表单已锁定。请退出后尝试使用新密码重新登录；如果新密码无法登录，请使用密码找回或联系管理员。
+                </div>
+              ) : null}
+
               <button
                 onClick={handleChangePassword}
-                disabled={pwdSaving}
+                disabled={pwdSaving || passwordOutcomeUnknown}
                 className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
               >
                 {pwdSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
-                {pwdSaving ? '提交中...' : '更新密码'}
+                {pwdSaving ? '提交中...' : passwordOutcomeUnknown ? '结果待核实' : '更新密码'}
               </button>
             </div>
           )}
@@ -794,8 +1065,8 @@ export default function NotificationSettings() {
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
-                {renderInput('系统名称', systemSettings.system.name, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, name: value } })))}
-                {renderInput('页签标题', systemSettings.system.browserTitle, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, browserTitle: value } })))}
+                {renderSystemInput('系统名称', systemSettings.system.name, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, name: value } })))}
+                {renderSystemInput('页签标题', systemSettings.system.browserTitle, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, browserTitle: value } })))}
               </div>
 
               <div className="max-w-xl">
@@ -804,6 +1075,7 @@ export default function NotificationSettings() {
                   id="system-default-theme"
                   aria-label="默认主题"
                   value={systemSettings.system.defaultTheme}
+                  disabled={systemSettingsSaving}
                   onChange={(event) => setSystemSettings((current) => ({
                     ...current,
                     system: { ...current.system, defaultTheme: event.target.value as 'light' | 'dark' },
@@ -817,8 +1089,8 @@ export default function NotificationSettings() {
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
-                {renderInput('系统图标（单字或 Emoji）', systemSettings.system.icon, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, icon: value } })))}
-                {renderInput('系统简介', systemSettings.system.description, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, description: value } })))}
+                {renderSystemInput('系统图标（单字或 Emoji）', systemSettings.system.icon, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, icon: value } })))}
+                {renderSystemInput('系统简介', systemSettings.system.description, (value) => setSystemSettings((current) => ({ ...current, system: { ...current.system, description: value } })))}
               </div>
 
               <button
@@ -841,8 +1113,8 @@ export default function NotificationSettings() {
               </div>
 
               <div className="grid gap-6 md:grid-cols-2">
-                {renderInput('品牌名称', systemSettings.branding.brandName, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandName: value } })))}
-                {renderInput('品牌展示文案', systemSettings.branding.brandDescription, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandDescription: value } })))}
+                {renderSystemInput('品牌名称', systemSettings.branding.brandName, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandName: value } })))}
+                {renderSystemInput('品牌展示文案', systemSettings.branding.brandDescription, (value) => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, brandDescription: value } })))}
               </div>
 
               <div>
@@ -856,13 +1128,14 @@ export default function NotificationSettings() {
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <label className={`cursor-pointer rounded-lg px-4 py-2 ${styles.buttonPrimary}`}>
+                    <label aria-disabled={systemSettingsSaving} className={`rounded-lg px-4 py-2 ${styles.buttonPrimary} ${systemSettingsSaving ? 'pointer-events-none cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
                       选择图片
-                      <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                      <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={systemSettingsSaving} className="hidden" />
                     </label>
                     {systemSettings.branding.logo && (
                       <button
                         onClick={() => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, logo: '' } }))}
+                        disabled={systemSettingsSaving}
                         className="rounded-lg border border-studio-coral/30 px-4 py-2 text-studio-coral-contrast hover:bg-studio-coral/10"
                       >
                         移除 Logo
@@ -893,17 +1166,17 @@ export default function NotificationSettings() {
               <div className="grid gap-6 md:grid-cols-2">
                 <div>
                   <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>登录页布局</label>
-                  <select value={systemSettings.login.layout} onChange={(event) => setSystemSettings((current) => ({ ...current, login: { ...current.login, layout: event.target.value as ManagedSystemSettings['login']['layout'] } }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
+                  <select value={systemSettings.login.layout} disabled={systemSettingsSaving} onChange={(event) => setSystemSettings((current) => ({ ...current, login: { ...current.login, layout: event.target.value as ManagedSystemSettings['login']['layout'] } }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
                     <option value="style1">样式一（暗色经典）</option>
                     <option value="style2">样式二（金色聚焦）</option>
                     <option value="style3">样式三（双栏对比）</option>
                   </select>
                 </div>
-                {renderInput('欢迎标题', systemSettings.login.welcomeTitle, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeTitle: value } })))}
+                {renderSystemInput('欢迎标题', systemSettings.login.welcomeTitle, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeTitle: value } })))}
               </div>
 
               <div className="grid gap-6">
-                {renderInput('欢迎说明', systemSettings.login.welcomeMessage, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeMessage: value } })))}
+                {renderSystemInput('欢迎说明', systemSettings.login.welcomeMessage, (value) => setSystemSettings((current) => ({ ...current, login: { ...current.login, welcomeMessage: value } })))}
               </div>
 
               <button
@@ -925,18 +1198,29 @@ export default function NotificationSettings() {
                   <p className={`mt-1 text-sm ${styles.textMuted}`}>创建、下载和清理系统备份。</p>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  <button onClick={() => void loadBackupItems()} disabled={backupLoading || backupCreating || backupDeleting !== null} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonSecondary} disabled:opacity-60`}>
-                    <RefreshCw className={`h-4 w-4 ${backupLoading ? 'animate-spin' : ''}`} /> 刷新列表
+                  <button onClick={() => void handleRefreshBackupList()} disabled={backupLoading || backupCreating || backupRecovery.busy || backupDeleting !== null || backupDeleteVerifying} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonSecondary} disabled:opacity-60`}>
+                    <RefreshCw className={`h-4 w-4 ${backupLoading || backupDeleteVerifying ? 'animate-spin' : ''}`} /> {backupDeleteRecovery ? '只读核实删除状态' : '刷新列表'}
                   </button>
-                  <button onClick={() => void handleCreateBackup()} disabled={backupCreating || backupLoading || backupDeleting !== null} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>
-                    {backupCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDrive className="h-4 w-4" />} 创建备份
+                  <button onClick={() => void handleCreateBackup()} disabled={backupCreating || backupRecovery.busy || backupRecovery.phase !== 'idle' || backupLoading || backupDeleting !== null || Boolean(backupDeleteRecovery) || backupDeleteVerifying} aria-busy={backupCreating || backupRecovery.busy} className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>
+                    {backupCreating || backupRecovery.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDrive className="h-4 w-4" />} {backupCreating || backupRecovery.busy ? '正在处理备份…' : backupRecovery.phase !== 'idle' ? '备份结果待核实' : '创建备份'}
                   </button>
                 </div>
               </div>
 
               {backupFeedback ? (
-                <div role="alert" className="rounded-xl border border-studio-amber/25 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">
-                  {backupFeedback}
+                <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-amber/25 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
+                  <p className="min-w-0">{backupFeedback}</p>
+                  {backupDeleteRecovery ? <button type="button" onClick={() => void verifyBackupDelete(backupDeleteRecovery)} disabled={backupLoading || backupDeleteVerifying || backupDeleting !== null} className={`shrink-0 rounded-xl px-4 py-2 ${styles.buttonSecondary} disabled:opacity-60`}>{backupDeleteVerifying ? '正在核实…' : '只读核实删除状态'}</button> : null}
+                </div>
+              ) : null}
+              {backupRecovery.message ? (
+                <div role={backupRecovery.phase === 'storage_error' ? 'alert' : 'status'} aria-live="polite" className="flex flex-col gap-3 rounded-xl border border-studio-amber/25 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
+                  <p className="min-w-0">{backupRecovery.message}</p>
+                  {backupRecovery.phase === 'not_found' ? (
+                    <button type="button" onClick={() => void backupRecovery.retry()} disabled={backupRecovery.busy || backupDeleting !== null} className={`rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}>使用同一编号明确重试</button>
+                  ) : backupRecovery.pending ? (
+                    <button type="button" onClick={() => void backupRecovery.verify()} disabled={backupRecovery.busy || backupDeleting !== null} className={`rounded-xl px-4 py-2 ${styles.buttonSecondary} disabled:opacity-60`}>{backupRecovery.busy ? '正在核实…' : '只读核实备份状态'}</button>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -967,7 +1251,7 @@ export default function NotificationSettings() {
                     <Loader2 className="h-6 w-6 animate-spin" />
                   </div>
                 ) : backupError ? (
-                  <ErrorState title="备份列表未能加载" description={backupError} onRetry={() => void loadBackupItems()} />
+                  <ErrorState title="备份列表未能加载" description={backupError} onRetry={() => void handleRefreshBackupList()} />
                 ) : backupList.length === 0 ? (
                   <p className={`py-6 text-center text-sm ${styles.textMuted}`}>暂无备份记录。</p>
                 ) : (
@@ -984,7 +1268,7 @@ export default function NotificationSettings() {
                             type="button"
                             aria-label={`删除备份 ${item.name}`}
                             onClick={() => setBackupDeleteCandidate(item.name)}
-                            disabled={backupLoading || backupCreating || backupDeleting !== null}
+                            disabled={backupLoading || backupCreating || Boolean(backupRecovery.pending) || backupRecovery.busy || backupDeleting !== null || Boolean(backupDeleteRecovery) || backupDeleteVerifying}
                             className={`rounded-lg px-3 py-1.5 text-sm ${styles.buttonDanger} disabled:opacity-60`}
                           >
                             {backupDeleting === item.name ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
@@ -1066,7 +1350,7 @@ export default function NotificationSettings() {
             <div className="space-y-6">
               <div>
                 <h2 className={`text-lg font-semibold ${styles.textPrimary}`}>关于系统</h2>
-                <p className={`mt-1 text-sm ${styles.textMuted}`}>{savedSettings.system.description}</p>
+                <p data-testid="about-description" className={`mt-1 text-sm ${styles.textSecondary}`}>{savedSettings.system.description}</p>
               </div>
 
               <div className="flex items-center gap-4">

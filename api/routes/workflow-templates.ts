@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { createHash } from 'node:crypto';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { beijingNow, execute, queryOne, queryAll, runInTransaction } from '../database/utils';
@@ -9,8 +10,50 @@ import { getTransitionText, STATUS_TEXT } from '../utils/workflow';
 import { apiLogger } from '../observability/logger.js';
 import { advancePublishingTopicIfResolved } from '../modules/topics/publishing-completion';
 import { insertTopicOutlineOriginSnapshot } from '../modules/topics/production-origin-snapshot';
+import { canTransitionTopicStatus } from '@shared/workflow/topic-state-machine';
+import {
+  createWorkflowTemplateBaseFingerprint,
+  getWorkflowTemplateUpdateRequestStatus,
+  WorkflowTemplateUpdateBaseConflictError,
+  WorkflowTemplateUpdateRequestConflictError,
+  WorkflowTemplateUpdateTargetMissingError,
+  type WorkflowTemplateUpdatePayload,
+  updateWorkflowTemplateWithRequest,
+} from '../services/workflowTemplateUpdate';
 
 const router = Router();
+const APPROVAL_OUTCOMES = new Set(['approved', 'rejected']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/i;
+
+function createTemplateRequestFingerprint(payload: { name: unknown; description: unknown; nodes: unknown }) {
+  const nodes = Array.isArray(payload.nodes)
+    ? payload.nodes.map((node) => {
+      const value = node as Record<string, unknown>;
+      return [
+        value.name,
+        value.status_from,
+        value.status_to,
+        value.approver_type || 'role',
+        value.approver_value || '',
+        value.is_required !== false,
+      ];
+    })
+    : [];
+  return createHash('sha256').update(JSON.stringify([
+    payload.name,
+    payload.description || '',
+    nodes,
+  ])).digest('hex');
+}
+
+function workflowNodesHaveValidTransitions(nodes: unknown[]): boolean {
+  return nodes.every((node) => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
+    const value = node as Record<string, unknown>;
+    return canTransitionTopicStatus(value.status_from, value.status_to);
+  });
+}
 
 type ApprovalTransaction = {
   queryOne<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | null>;
@@ -125,12 +168,93 @@ router.get('/:id', authenticate, async (req, res) => {
     const nodes = await queryAll(`
       SELECT * FROM workflow_nodes
       WHERE template_id = ?
-      ORDER BY node_order
+      ORDER BY node_order,id
     `, [req.params.id]);
 
-    res.json({ ...template, nodes });
+    const snapshot = {
+      name: String((template as { name?: unknown }).name || ''),
+      description: (template as { description?: string | null }).description || '',
+      nodes: nodes.map((node) => {
+        const storedNode = node as {
+          name: string;
+          status_from: string;
+          status_to: string;
+          approver_type?: string | null;
+          approver_value?: string | null;
+          is_required?: boolean | number | null;
+        };
+        return { ...storedNode, is_required: Boolean(storedNode.is_required) };
+      }),
+    };
+    res.json({ ...template, nodes, base_fingerprint: createWorkflowTemplateBaseFingerprint(snapshot) });
   } catch {
     res.status(500).json({ message: '获取审批流模板失败' });
+  }
+});
+
+router.get('/create-requests/:requestId', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, async (req, res) => {
+  try {
+    const requestId = String(req.params.requestId || '').trim().toLowerCase();
+    if (!UUID_PATTERN.test(requestId)) return res.status(400).json({ message: '审批流模板请求编号无效' });
+    const rawFingerprint = req.query.fingerprint;
+    if (typeof rawFingerprint !== 'string' || !SHA256_FINGERPRINT_PATTERN.test(rawFingerprint)) {
+      return res.status(400).json({ message: '审批流模板载荷指纹无效' });
+    }
+    const fingerprint = rawFingerprint.toLowerCase();
+
+    const request = await queryOne<{ template_id: number; actor_id: number; request_fingerprint: string }>(
+      `SELECT template_id,actor_id,request_fingerprint FROM workflow_template_create_request_keys WHERE client_request_id=?`,
+      [requestId],
+    );
+    if (!request || Number(request.actor_id) !== Number(req.user?.id)) {
+      return res.status(404).json({ message: '尚未找到对应审批流模板' });
+    }
+    if (request.request_fingerprint !== fingerprint) {
+      return res.status(409).json({
+        message: '请求编号对应的模板内容与当前载荷不一致，请核实原请求状态。',
+        code: 'WORKFLOW_TEMPLATE_CREATE_REQUEST_CONFLICT',
+      });
+    }
+
+    const template = await queryOne<{ id: number }>(
+      'SELECT id FROM workflow_templates WHERE id=?',
+      [request.template_id],
+    );
+    if (!template) return res.status(410).json({ deleted: true, message: '对应审批流模板已删除' });
+    return res.json({ templateId: Number(template.id) });
+  } catch {
+    return res.status(500).json({ message: '核实审批流模板创建状态失败' });
+  }
+});
+
+router.get('/:id/update-requests/:requestId', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, async (req, res) => {
+  try {
+    const templateId = Number(req.params.id);
+    if (!Number.isSafeInteger(templateId) || templateId <= 0) return res.status(400).json({ message: '审批流模板 ID 无效' });
+    const requestId = String(req.params.requestId || '').trim().toLowerCase();
+    if (!UUID_PATTERN.test(requestId)) return res.status(400).json({ message: '审批流模板更新请求编号无效' });
+    const rawFingerprint = req.query.fingerprint;
+    if (typeof rawFingerprint !== 'string' || !SHA256_FINGERPRINT_PATTERN.test(rawFingerprint)) {
+      return res.status(400).json({ message: '审批流模板载荷指纹无效' });
+    }
+    const status = await getWorkflowTemplateUpdateRequestStatus(
+      Number(req.user?.id), templateId, requestId, rawFingerprint,
+    );
+    return res.json(status);
+  } catch (error) {
+    if (error instanceof WorkflowTemplateUpdateRequestConflictError) {
+      return res.status(409).json({
+        message: '请求编号对应的模板更新内容与当前载荷不一致，请核实原请求状态。',
+        code: 'WORKFLOW_TEMPLATE_UPDATE_REQUEST_CONFLICT',
+      });
+    }
+    return res.status(500).json({ message: '核实审批流模板更新状态失败' });
   }
 });
 
@@ -138,12 +262,47 @@ router.post('/', authenticate, requirePermission('system:template'), async (req,
   try {
     const { name, description, nodes } = req.body;
     const userId = req.user?.id;
+    const rawClientRequestId = req.body?.client_request_id;
+    const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId.trim().toLowerCase() : '';
+
+    if (rawClientRequestId !== undefined && (typeof rawClientRequestId !== 'string' || !UUID_PATTERN.test(clientRequestId))) {
+      return res.status(400).json({ message: '审批流模板请求编号无效' });
+    }
 
     if (!name) {
       return res.status(400).json({ message: '模板名称必填' });
     }
+    if (Array.isArray(nodes) && !workflowNodesHaveValidTransitions(nodes)) {
+      return res.status(400).json({ message: '审批节点必须使用有效的选题状态转换' });
+    }
 
-    const templateId = await runInTransaction(async (tx) => {
+    const requestFingerprint = clientRequestId
+      ? createTemplateRequestFingerprint({ name, description, nodes })
+      : '';
+    const creation = await runInTransaction(async (tx) => {
+      if (clientRequestId) {
+        const existing = await tx.queryOne<{
+          template_id: number;
+          actor_id: number;
+          request_fingerprint: string;
+        }>(
+          `SELECT template_id,actor_id,request_fingerprint FROM workflow_template_create_request_keys WHERE client_request_id=?`,
+          [clientRequestId],
+        );
+        if (existing) {
+          if (Number(existing.actor_id) !== Number(userId) || existing.request_fingerprint !== requestFingerprint) {
+            return { conflict: true as const };
+          }
+          const existingTemplate = await tx.queryOne<{ id: number }>(
+            'SELECT id FROM workflow_templates WHERE id=?',
+            [existing.template_id],
+          );
+          return existingTemplate
+            ? { ok: true as const, id: Number(existingTemplate.id), replayed: true }
+            : { deleted: true as const };
+        }
+      }
+
       const createdTemplateId = await tx.executeInsert(
         `INSERT INTO workflow_templates (name, description, creator_id) VALUES (?, ?, ?)`,
         [name, description || '', userId]
@@ -159,10 +318,29 @@ router.post('/', authenticate, requirePermission('system:template'), async (req,
         }
       }
 
-      return createdTemplateId;
+      if (clientRequestId) {
+        await tx.execute(
+          `INSERT INTO workflow_template_create_request_keys(client_request_id,actor_id,template_id,request_fingerprint,created_at)
+           VALUES(?,?,?,?,?)`,
+          [clientRequestId, Number(userId), createdTemplateId, requestFingerprint, beijingNow()],
+        );
+      }
+
+      return { ok: true as const, id: createdTemplateId, replayed: false };
     });
 
-    res.json({ message: '审批流模板创建成功', id: templateId });
+    if ('conflict' in creation) {
+      return res.status(409).json({ message: '审批流模板请求编号已用于其他账号或内容，请先核实原请求状态。', code: 'WORKFLOW_TEMPLATE_CREATE_REQUEST_CONFLICT' });
+    }
+    if ('deleted' in creation) {
+      return res.status(410).json({ message: '该请求对应的审批流模板已删除，不会因为重试而重新创建。', deleted: true });
+    }
+
+    res.json({
+      message: '审批流模板创建成功',
+      id: creation.id,
+      ...(clientRequestId ? { idempotent_replay: creation.replayed } : {}),
+    });
   } catch {
     res.status(500).json({ message: '创建审批流模板失败' });
   }
@@ -172,10 +350,64 @@ router.put('/:id', authenticate, requirePermission('system:template'), async (re
   try {
     const { name, description, nodes } = req.body;
     const templateId = req.params.id;
+    const rawClientRequestId = req.body?.client_request_id;
+    const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId.trim().toLowerCase() : '';
+
+    if (rawClientRequestId !== undefined && (typeof rawClientRequestId !== 'string' || !UUID_PATTERN.test(clientRequestId))) {
+      return res.status(400).json({ message: '审批流模板更新请求编号无效' });
+    }
+
+    if (clientRequestId) {
+      const numericTemplateId = Number(templateId);
+      if (!Number.isSafeInteger(numericTemplateId) || numericTemplateId <= 0) {
+        return res.status(400).json({ message: '审批流模板 ID 无效' });
+      }
+      if (typeof name !== 'string' || !name.trim() || typeof description !== 'string' || !Array.isArray(nodes)) {
+        return res.status(400).json({ message: '审批流模板更新需要完整的名称、说明和节点列表' });
+      }
+      if (!workflowNodesHaveValidTransitions(nodes)) {
+        return res.status(400).json({ message: '审批节点必须使用有效的选题状态转换' });
+      }
+      const rawBaseFingerprint = req.body?.base_fingerprint;
+      if (typeof rawBaseFingerprint !== 'string' || !SHA256_FINGERPRINT_PATTERN.test(rawBaseFingerprint)) {
+        return res.status(400).json({ message: '原审批流模板指纹无效' });
+      }
+      const payload: WorkflowTemplateUpdatePayload = { name, description, nodes: nodes as WorkflowTemplateUpdatePayload['nodes'] };
+      try {
+        const updated = await updateWorkflowTemplateWithRequest(
+          numericTemplateId, Number(req.user!.id), payload, clientRequestId, rawBaseFingerprint,
+        );
+        return res.json({
+          message: '审批流模板更新成功',
+          idempotent_replay: updated.replayed,
+        });
+      } catch (error) {
+        if (error instanceof WorkflowTemplateUpdateBaseConflictError) {
+          return res.status(409).json({
+            message: '审批流模板已被其他操作修改，请刷新模板后再保存。',
+            code: 'WORKFLOW_TEMPLATE_UPDATE_BASE_CONFLICT',
+            base_fingerprint: error.currentFingerprint,
+          });
+        }
+        if (error instanceof WorkflowTemplateUpdateRequestConflictError) {
+          return res.status(409).json({
+            message: '审批流模板更新请求编号已用于其他账号、模板或内容，请先核实原请求状态。',
+            code: 'WORKFLOW_TEMPLATE_UPDATE_REQUEST_CONFLICT',
+          });
+        }
+        if (error instanceof WorkflowTemplateUpdateTargetMissingError) {
+          return res.status(404).json({ message: '审批流模板不存在' });
+        }
+        throw error;
+      }
+    }
 
     const template = await queryOne(`SELECT * FROM workflow_templates WHERE id = ?`, [templateId]);
     if (!template) {
       return res.status(404).json({ message: '审批流模板不存在' });
+    }
+    if (Array.isArray(nodes) && !workflowNodesHaveValidTransitions(nodes)) {
+      return res.status(400).json({ message: '审批节点必须使用有效的选题状态转换' });
     }
 
     await runInTransaction(async (tx) => {
@@ -265,8 +497,11 @@ router.post('/topic/:topicId/approve', authenticate, async (req, res) => {
     const topicId = req.params.topicId;
     const approverId = req.user?.id;
 
-    if (!node_id || !status) {
+    if (!node_id || status === undefined || status === null || status === '') {
       return res.status(400).json({ message: '节点ID和状态必填' });
+    }
+    if (typeof status !== 'string' || !APPROVAL_OUTCOMES.has(status)) {
+      return res.status(400).json({ message: '审批结果无效' });
     }
 
     const topic = await getTopicScopeById(topicId);

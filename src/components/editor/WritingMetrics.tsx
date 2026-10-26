@@ -34,12 +34,13 @@ export default function WritingMetrics({ count, readOnly, storageKey }: WritingM
   };
 
   return (
-    <div className="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-[var(--editor-muted)]">
+    <div className="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-studio-text-secondary">
       <span aria-label={`当前字数 ${count}`}>字数 {count}</span>
       <label className="inline-flex items-center gap-1.5">
         <span>目标</span>
         <input
           type="number"
+          name="writingGoal"
           min="1"
           max={MAX_WRITING_GOAL}
           step="1"

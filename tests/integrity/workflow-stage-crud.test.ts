@@ -60,15 +60,156 @@ async function createApprovalFixture(fromStatus: string, toStatus: string, title
   return { workflowTemplateId, nodeId, topicId: approvalTopicId };
 }
 
-function postWorkflowApproval(topicId: number, nodeId: number, userId = director.id) {
+function postWorkflowApproval(topicId: number, nodeId: number, userId = director.id, status = 'approved') {
   return fetch(`${workflowTemplatesBase}/topic/${topicId}/approve`, {
     method: 'POST',
     headers: headers(userId),
-    body: JSON.stringify({ node_id: nodeId, status: 'approved', comment: '隔离审批回归' }),
+    body: JSON.stringify({ node_id: nodeId, status, comment: '隔离审批回归' }),
   });
 }
 
 try {
+  const invalidTemplateName = '拒绝非法状态转换模板';
+  const invalidTemplateCreate = await fetch(workflowTemplatesBase, {
+    method: 'POST',
+    headers: headers(director.id),
+    body: JSON.stringify({
+      name: invalidTemplateName,
+      description: '',
+      nodes: [{ name: '非法跳级', status_from: 'pending', status_to: 'shooting', approver_type: 'role', approver_value: 'director' }],
+    }),
+  });
+  assert.equal(invalidTemplateCreate.status, 400, 'workflow template creation rejects a transition outside the shared Topic state machine');
+  assert.equal(await queryOne('SELECT id FROM workflow_templates WHERE name=?', [invalidTemplateName]), null,
+    'an invalid transition cannot create a workflow template');
+
+  const validTemplateCreate = await fetch(workflowTemplatesBase, {
+    method: 'POST',
+    headers: headers(director.id),
+    body: JSON.stringify({
+      name: '状态机合法转换模板',
+      description: '',
+      nodes: [{ name: '通过审核', status_from: 'pending', status_to: 'approved', approver_type: 'role', approver_value: 'director' }],
+    }),
+  });
+  assert.equal(validTemplateCreate.status, 200, 'workflow template creation continues to accept a valid transition');
+  const validTemplate = await validTemplateCreate.json() as { id: number };
+  const invalidTemplateUpdate = await fetch(`${workflowTemplatesBase}/${validTemplate.id}`, {
+    method: 'PUT',
+    headers: headers(director.id),
+    body: JSON.stringify({ nodes: [{ name: '非法跳级', status_from: 'pending', status_to: 'completed', approver_type: 'role', approver_value: 'director' }] }),
+  });
+  assert.equal(invalidTemplateUpdate.status, 400, 'workflow template updates reject a transition outside the shared Topic state machine');
+  assert.deepEqual(
+    await queryOne<{ status_from: string; status_to: string }>(
+      'SELECT status_from,status_to FROM workflow_nodes WHERE template_id=? ORDER BY node_order LIMIT 1',
+      [validTemplate.id],
+    ),
+    { status_from: 'pending', status_to: 'approved' },
+    'an invalid template update leaves the previously valid transition intact',
+  );
+
+  const invalidApprovalOutcome = await createApprovalFixture('pending', 'approved', '拒绝未知审批结果');
+  const invalidApprovalOutcomeResponse = await postWorkflowApproval(
+    invalidApprovalOutcome.topicId,
+    invalidApprovalOutcome.nodeId,
+    director.id,
+    'completed',
+  );
+  assert.equal(invalidApprovalOutcomeResponse.status, 400, 'approval actions accept only approved or rejected outcomes');
+  assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id=?', [invalidApprovalOutcome.topicId]))?.status, 'pending',
+    'an invalid approval outcome cannot advance the Topic');
+  assert.equal(await queryOne('SELECT id FROM approval_records WHERE topic_id=?', [invalidApprovalOutcome.topicId]), null,
+    'an invalid approval outcome cannot create an approval record');
+
+  const invalidProductionCreateTopicId = await executeInsert(
+    `INSERT INTO topics(title,description,platform,creator_id,assignee_id,status) VALUES(?,?,?,?,?,?)`,
+    ['拒绝未知创作状态的选题', '', 'douyin', director.id, director.id, 'approved'],
+  );
+  const invalidProductionCreate = await createProduction(invalidProductionCreateTopicId, 'completed');
+  assert.equal(invalidProductionCreate.status, 400, 'production creation rejects a Topic-stage status that is not a valid production sub-state');
+  assert.equal(await queryOne('SELECT id FROM production WHERE topic_id=?', [invalidProductionCreateTopicId]), null,
+    'an invalid production status cannot create a child record');
+  assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id=?', [invalidProductionCreateTopicId]))?.status, 'approved',
+    'an invalid production status cannot advance its parent Topic');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM topic_history WHERE topic_id=? AND action='status_production'`,
+    [invalidProductionCreateTopicId],
+  ))?.count || 0), 0, 'an invalid production status cannot leave a stage history record');
+
+  const invalidProductionUpdateTopicId = await executeInsert(
+    `INSERT INTO topics(title,description,platform,creator_id,assignee_id,status) VALUES(?,?,?,?,?,?)`,
+    ['拒绝未知创作更新状态的选题', '', 'douyin', director.id, director.id, 'production'],
+  );
+  const invalidProductionUpdateId = await executeInsert(
+    `INSERT INTO production(topic_id,version,content,status,operator_id) VALUES(?,?,?,?,?)`,
+    [invalidProductionUpdateTopicId, 'v1.0', '状态边界稿', 'draft', director.id],
+  );
+  const invalidProductionUpdate = await fetch(`${base}/production/${invalidProductionUpdateId}`, {
+    method: 'PUT',
+    headers: headers(director.id),
+    body: JSON.stringify({ topic_id: invalidProductionUpdateTopicId, version: 'v1.0', content: '不应被写入', status: 'completed' }),
+  });
+  assert.equal(invalidProductionUpdate.status, 400, 'production updates reject a Topic-stage status that is not a valid production sub-state');
+  assert.equal((await queryOne<{ status: string; content: string }>('SELECT status,content FROM production WHERE id=?', [invalidProductionUpdateId]))?.status, 'draft',
+    'invalid production status updates leave the child status unchanged');
+  assert.equal((await queryOne<{ content: string }>('SELECT content FROM production WHERE id=?', [invalidProductionUpdateId]))?.content, '状态边界稿',
+    'invalid production status updates leave the child content unchanged');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM topic_history WHERE topic_id=? AND action='production_status_changed'`,
+    [invalidProductionUpdateTopicId],
+  ))?.count || 0), 0, 'an invalid production status cannot leave a child-state audit record');
+
+  const strictShootingStatusTopicId = await executeInsert(
+    `INSERT INTO topics(title,description,platform,creator_id,assignee_id,status) VALUES(?,?,?,?,?,?)`,
+    ['成片状态类型校验选题', '', 'douyin', director.id, director.id, 'shooting'],
+  );
+  const arrayShootingStatusCreate = await fetch(`${base}/shooting`, {
+    method: 'POST',
+    headers: headers(director.id),
+    body: JSON.stringify({ topic_id: strictShootingStatusTopicId, status: ['planned'] }),
+  });
+  assert.equal(arrayShootingStatusCreate.status, 400, 'shooting creation rejects arrays that coerce to a valid status string');
+  assert.equal(await queryOne('SELECT id FROM shooting WHERE topic_id=?', [strictShootingStatusTopicId]), null,
+    'a non-string shooting status cannot create a child record');
+  const strictShootingStatusId = await executeInsert(
+    `INSERT INTO shooting(topic_id,status,operator_id) VALUES(?,?,?)`,
+    [strictShootingStatusTopicId, 'planned', director.id],
+  );
+  const arrayShootingStatusUpdate = await fetch(`${base}/shooting/${strictShootingStatusId}`, {
+    method: 'PUT',
+    headers: headers(director.id),
+    body: JSON.stringify({ status: ['in_progress'] }),
+  });
+  assert.equal(arrayShootingStatusUpdate.status, 400, 'shooting updates reject arrays that coerce to a valid status string');
+  assert.equal((await queryOne<{ status: string }>('SELECT status FROM shooting WHERE id=?', [strictShootingStatusId]))?.status, 'planned',
+    'a non-string shooting status cannot update the stored state');
+
+  const strictPublishingStatusTopicId = await executeInsert(
+    `INSERT INTO topics(title,description,platform,creator_id,assignee_id,status) VALUES(?,?,?,?,?,?)`,
+    ['发布状态类型校验选题', '', 'douyin', director.id, director.id, 'publishing'],
+  );
+  const arrayPublishingStatusCreate = await fetch(`${base}/publishing`, {
+    method: 'POST',
+    headers: headers(director.id),
+    body: JSON.stringify({ topic_id: strictPublishingStatusTopicId, status: ['pending'], publish_time: '2026-10-22 12:00:00' }),
+  });
+  assert.equal(arrayPublishingStatusCreate.status, 400, 'publishing creation rejects arrays that coerce to a valid status string');
+  assert.equal(await queryOne('SELECT id FROM publishing WHERE topic_id=?', [strictPublishingStatusTopicId]), null,
+    'a non-string publishing status cannot create a child record');
+  const strictPublishingStatusId = await executeInsert(
+    `INSERT INTO publishing(topic_id,status,operator_id) VALUES(?,?,?)`,
+    [strictPublishingStatusTopicId, 'pending', director.id],
+  );
+  const arrayPublishingStatusUpdate = await fetch(`${base}/publishing/${strictPublishingStatusId}`, {
+    method: 'PUT',
+    headers: headers(director.id),
+    body: JSON.stringify({ status: ['failed'] }),
+  });
+  assert.equal(arrayPublishingStatusUpdate.status, 400, 'publishing updates reject arrays that coerce to a valid status string');
+  assert.equal((await queryOne<{ status: string }>('SELECT status FROM publishing WHERE id=?', [strictPublishingStatusId]))?.status, 'pending',
+    'a non-string publishing status cannot update the stored state');
+
   const approvedProductionTopicId = await executeInsert(
     `INSERT INTO topics(title,description,platform,creator_id,assignee_id,status) VALUES(?,?,?,?,?,?)`,
     ['创建已通过创作稿', '', 'douyin', director.id, director.id, 'approved'],
@@ -134,6 +275,19 @@ try {
   );
   assert.equal(topicApprovalHistory?.operator_id, director.id);
   assert.match(topicApprovalHistory?.comment || '', /pending到approved.*已通过/);
+
+  const invalidJumpApproval = await createApprovalFixture('pending', 'shooting', '审批状态机拒绝越级');
+  const invalidJumpResponse = await postWorkflowApproval(invalidJumpApproval.topicId, invalidJumpApproval.nodeId);
+  assert.equal(invalidJumpResponse.status, 400, 'custom approval cannot bypass the shared Topic transition matrix');
+  assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id=?', [invalidJumpApproval.topicId]))?.status, 'pending');
+  assert.equal(await queryOne('SELECT id FROM shooting WHERE topic_id=?', [invalidJumpApproval.topicId]), null);
+  assert.equal(await queryOne('SELECT id FROM approval_records WHERE topic_id=?', [invalidJumpApproval.topicId]), null);
+
+  const unknownTargetApproval = await createApprovalFixture('pending', 'archived', '审批状态机拒绝未知状态');
+  const unknownTargetResponse = await postWorkflowApproval(unknownTargetApproval.topicId, unknownTargetApproval.nodeId);
+  assert.equal(unknownTargetResponse.status, 400, 'unknown Topic stages cannot be persisted through custom approval');
+  assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id=?', [unknownTargetApproval.topicId]))?.status, 'pending');
+  assert.equal(await queryOne('SELECT id FROM approval_records WHERE topic_id=?', [unknownTargetApproval.topicId]), null);
 
   const productionApproval = await createApprovalFixture('approved', 'production', '审批创建创作稿');
   const unassignedApproval = await postWorkflowApproval(productionApproval.topicId, productionApproval.nodeId, memberId);

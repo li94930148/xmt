@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Menu, Moon, Search, Settings, Sun, User, LogOut, ChevronRight } from 'lucide-react';
 import { getMe, getPublicSystemSettings, getUnreadCount, registerMobileDevice } from '../api';
@@ -9,11 +9,13 @@ import { WritingFocusContext } from './layout/WritingFocusContext';
 import CommandPalette from './CommandPalette';
 import KeyboardHelp from './KeyboardHelp';
 import UpdateNotification from './UpdateNotification';
+import AnnouncementStrip from './AnnouncementStrip';
 import { useSocket } from '../hooks/useSocket';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePermission } from '../hooks/usePermission';
 import { getRoleDisplayName } from '../lib/roles';
 import { applyDocumentBranding } from '@/lib/systemSettings';
+import { observeAppHeaderHeight } from '@/lib/app-header-offset';
 import { AnimatedPage, AppShell, Topbar } from '@/components/studio';
 import { MobileShell } from '@/components/mobile/MobileShell';
 import { isAndroid } from '@/platform/runtime';
@@ -76,7 +78,7 @@ function NotificationItem({ notification }: { notification: Notification }) {
 
 function Breadcrumbs() {
   const location = useLocation();
-  const crumbs = useMemo(() => buildBreadcrumbs(location.pathname), [location.pathname]);
+  const crumbs = useMemo(() => buildBreadcrumbs(location.pathname, location.search), [location.pathname, location.search]);
 
   return (
     <nav aria-label="面包屑" className="flex flex-wrap items-center gap-1.5 text-[13px] text-studio-text-secondary">
@@ -110,16 +112,25 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
   const [showHelp, setShowHelp] = useState(false);
   const [showUpdateNotification, setShowUpdateNotification] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
+  const desktopScrollContainerRef = useRef<HTMLDivElement>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
+  const isHomeRoute = location.pathname === '/' || location.pathname === '/home' || location.pathname === '/dashboard';
   const [writingFocusPath, setWritingFocusPath] = useState<string | null>(null);
   const writingFocused = writingFocusPath === location.pathname;
   const setWritingFocused = useCallback((focused: boolean) => {
     setWritingFocusPath(focused ? location.pathname : null);
   }, [location.pathname]);
   const writingFocusContext = useMemo(() => ({ focused: writingFocused, setFocused: setWritingFocused }), [setWritingFocused, writingFocused]);
+
+  useLayoutEffect(() => {
+    const scrollContainer = desktopScrollContainerRef.current;
+    if (!scrollContainer) return;
+    return observeAppHeaderHeight(scrollContainer);
+  }, [loading, mobileLayout, writingFocused]);
 
   useEffect(() => {
     setWritingFocusPath(null);
@@ -376,17 +387,24 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
         onToggle={toggleSidebar}
         theme={theme}
         mobileOpen={mobileNavOpen}
-        onMobileClose={() => setMobileNavOpen(false)}
+        onMobileClose={() => {
+          setMobileNavOpen(false);
+          window.requestAnimationFrame(() => {
+            const trigger = mobileNavTriggerRef.current;
+            if (trigger?.getClientRects().length) trigger.focus();
+          });
+        }}
         onOpenCommandPalette={() => {
           setMobileNavOpen(false);
           setShowCmdPalette(true);
         }}
       />}
 
-      <div className="min-h-screen min-w-0 md:h-screen md:min-h-0 md:overflow-y-auto">
+      <div ref={desktopScrollContainerRef} className="min-h-screen min-w-0 md:h-screen md:min-h-0 md:overflow-y-auto">
         {!writingFocused && <Topbar>
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
+              ref={mobileNavTriggerRef}
               onClick={() => setMobileNavOpen(true)}
               className="inline-flex h-10 w-10 items-center justify-center rounded-button text-studio-text-secondary transition-colors hover:bg-studio-surface-soft hover:text-studio-text-primary md:hidden"
               aria-label="打开导航菜单"
@@ -408,7 +426,7 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
           <div className="flex shrink-0 items-center gap-2">
             <button
               onClick={() => navigate('/messages')}
-              className="relative rounded-xl p-2.5 text-studio-text-secondary transition-all duration-200 hover:bg-studio-surface-soft hover:text-studio-text-primary"
+              className="xmt-btn xmt-btn-ghost relative h-10 w-10 shrink-0 !p-0"
               aria-label="打开消息中心"
             >
               <Bell className="h-[18px] w-[18px]" />
@@ -421,7 +439,7 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
 
             <button
               onClick={toggleTheme}
-              className="rounded-xl p-2.5 text-studio-text-secondary transition-all duration-200 hover:bg-studio-surface-soft hover:text-studio-amber"
+              className="xmt-btn xmt-btn-ghost h-10 w-10 shrink-0 !p-0 hover:!text-studio-amber"
               title={theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'}
               aria-label="切换主题"
             >
@@ -472,6 +490,8 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
             </div>
           </div>
         </Topbar>}
+
+        {!writingFocused && isHomeRoute ? <AnnouncementStrip /> : null}
 
         {showUpdateNotification && !writingFocused && (
           <div className="px-4 pt-3 sm:px-6">

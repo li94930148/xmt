@@ -143,7 +143,7 @@ export async function executeInsert(sql: string, params: unknown[] = []): Promis
   }
 }
 
-type TransactionContext = {
+export type TransactionContext = {
   queryOne<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | null>;
   queryAll<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
   execute(sql: string, params?: unknown[]): Promise<number>;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { App } from '@capacitor/app';
 import { ArrowLeft, Bell, FileText, Home, LogOut, Settings, BriefcaseBusiness } from 'lucide-react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -6,7 +6,8 @@ import type { User } from '@/types';
 import { handleBackButton, isAndroid } from '@/platform/runtime';
 import { useNetworkState } from '@/platform/network';
 import { resolveMobileDeepLink } from '@/platform/deep-link';
-import { mobileNavigationPath } from '@/platform/mobile-layout';
+import { mobileFallbackReturnPath, mobileNavigationPath } from '@/platform/mobile-layout';
+import { observeAppHeaderHeight } from '@/lib/app-header-offset';
 
 const tabs = [
   { path: '/', label: '首页', icon: Home },
@@ -17,16 +18,25 @@ const tabs = [
 ];
 
 export function MobileShell({ user, unreadCount, onLogout }: { user: User | null; unreadCount: number; onLogout: () => void }) {
+  const shellRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const current = useMemo(() => tabs.find((tab) => tab.path === mobileNavigationPath(location.pathname)), [location.pathname]);
   const mobileReturnTo = (location.state as { mobileReturnTo?: unknown } | null)?.mobileReturnTo;
+  const defaultReturnPath = mobileFallbackReturnPath(location.pathname, current?.path);
   const returnPath = typeof mobileReturnTo === 'string' && (tabs.some((tab) => tab.path === mobileReturnTo) || mobileReturnTo === '/topics?view=board')
     ? mobileReturnTo
-    : current?.path ?? '/';
-  const returnLabel = returnPath === '/topics?view=board' ? '选题' : tabs.find((tab) => tab.path === returnPath)?.label ?? '首页';
+    : defaultReturnPath;
+  const returnLabel = returnPath === '/asset-center' ? '资料中心' : returnPath === '/topics?view=board' ? '选题' : tabs.find((tab) => tab.path === returnPath)?.label ?? '首页';
+  const sectionLabel = location.pathname === '/asset-center' || location.pathname.startsWith('/asset-center/') ? '资料中心' : current?.label ?? '工作台';
   const isRoot = tabs.some((tab) => tab.path === location.pathname) || ['/home', '/dashboard'].includes(location.pathname);
   const networkState = useNetworkState();
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    return observeAppHeaderHeight(shell);
+  }, []);
 
   useEffect(() => {
     if (!isAndroid()) return;
@@ -53,11 +63,11 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
     return () => window.removeEventListener('xmt-deep-link', onDeepLink);
   }, [navigate]);
 
-  return <div className="min-h-dvh bg-studio-bg text-theme-text" style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
+  return <div ref={shellRef} className="min-h-dvh bg-studio-bg text-theme-text" style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
     <header className="sticky top-0 z-sticky flex min-h-14 items-center justify-between border-b border-studio-border-soft bg-studio-surface/95 px-4 backdrop-blur">
       <div className="flex min-w-0 items-center gap-2">
         {!isRoot && <button type="button" aria-label={`返回${returnLabel}`} onClick={() => navigate(returnPath)} className="xmt-btn xmt-btn-ghost h-11 w-11 shrink-0 p-2"><ArrowLeft className="h-5 w-5" /></button>}
-        <div><p className="text-xs text-studio-text-secondary">XMT 移动办公</p><h1 className="text-base font-semibold">{current?.label ?? '工作台'}</h1></div>
+        <div><p className="text-xs text-studio-text-secondary">XMT 移动办公</p><h1 className="text-base font-semibold">{sectionLabel}</h1></div>
       </div>
       <button onClick={onLogout} aria-label="退出登录" className="flex h-11 w-11 items-center justify-center rounded-xl text-studio-text-secondary"><LogOut className="h-5 w-5" /></button>
     </header>

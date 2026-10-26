@@ -6,14 +6,52 @@ import { chromium } from 'playwright';
 import { createServer as createViteServer } from 'vite';
 import { readFileSync } from 'node:fs';
 
+async function renderedTextContrastRatio(locator: import('playwright').Locator) {
+  return locator.evaluate((element) => {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return 0;
+    context.fillStyle = getComputedStyle(element).color;
+    context.fillRect(0, 0, 1, 1);
+    const foreground = Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3);
+    const background = [255, 255, 255];
+    const layers = [getComputedStyle(document.documentElement).backgroundColor];
+    const ancestors: Element[] = [];
+    for (let current: Element | null = element; current && current !== document.documentElement; current = current.parentElement) ancestors.push(current);
+    for (const ancestor of ancestors.reverse()) layers.push(getComputedStyle(ancestor).backgroundColor);
+    for (const color of layers) {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      const layer = Array.from(context.getImageData(0, 0, 1, 1).data);
+      const alpha = layer[3] / 255;
+      for (let index = 0; index < 3; index += 1) background[index] = layer[index] * alpha + background[index] * (1 - alpha);
+    }
+    let textLuminance = 0;
+    let backgroundLuminance = 0;
+    const weights = [0.2126, 0.7152, 0.0722];
+    for (let index = 0; index < 3; index += 1) {
+      const textValue = foreground[index] / 255;
+      const backgroundValue = background[index] / 255;
+      textLuminance += weights[index] * (textValue <= 0.04045 ? textValue / 12.92 : ((textValue + 0.055) / 1.055) ** 2.4);
+      backgroundLuminance += weights[index] * (backgroundValue <= 0.04045 ? backgroundValue / 12.92 : ((backgroundValue + 0.055) / 1.055) ** 2.4);
+    }
+    return (Math.max(textLuminance, backgroundLuminance) + 0.05) / (Math.min(textLuminance, backgroundLuminance) + 0.05);
+  });
+}
+
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const editor = { id: 93, username: 'topic-stage-qa', role: 'editor', name: '阶段记录验收', enabled: true, force_change_password: false };
 const viewer = { id: 94, username: 'topic-stage-viewer-qa', role: 'member', name: '只读验收', enabled: true, force_change_password: false };
 const manager = { id: 95, username: 'topic-stage-manager-qa', role: 'director', name: '负责人验收', enabled: true, force_change_password: false };
+const creator = { id: 96, username: 'topic-stage-creator-qa', role: 'member', name: '创作者验收', enabled: true, force_change_password: false };
 const actionableManagerMessage = { id: 951, user_id: manager.id, title: '需要确认发布安排', content: '发布安排仍待跟进。', type: 'warning', read: false, link: '/publishing/941', created_at: '2026-10-09 10:00:00' };
 const managerSyncAccountUid = 'manager-sync-anomaly-uid';
 const managerSyncAnomaly = { id: 981, platform: 'douyin', account_name: '负责人验收账号', account_uid: managerSyncAccountUid, status: 'partial_success', start_time: '2026-10-09 11:00:00', success_count: 3, failed_count: 2, owner_name: editor.name };
 const managerProductionReview = { id: 942, topic_id: 934, topic_title: '待审核稿件浏览器验收', version: 'v1.0', updated_at: '2026-10-09 08:30:00', operator_name: editor.name, assignee_name: editor.name };
+let managerProductionReviewStatus = 'review';
+let managerProductionReviewContent = '<p>隔离验收稿件正文</p>';
+let managerProductionApprovalWrites = 0;
 const productionTopic = {
   id: 931,
   title: '缺失创作稿的选题',
@@ -31,6 +69,15 @@ const productionTopic = {
   history: [],
   stage_record_presence: { production: false, shooting: false, publishing: false },
 };
+const approvedPipelineTopic = {
+  ...productionTopic,
+  id: 953,
+  title: '内容流已通过待开始创作',
+  description: '隔离首页内容流验收',
+  status: 'approved',
+  created_at: '2026-10-09 09:30:00',
+};
+let approvedPipelineStageEnteredAt: string | null | undefined = '2026-10-06 12:00:00';
 const completedTopic = {
   ...productionTopic,
   id: 932,
@@ -87,6 +134,28 @@ const mobileDelayedSaveTopic = {
   title: '移动端保存重复提交保护验收',
   stage_record_presence: { production: true, shooting: true, publishing: true },
 };
+const mobileEditCommittedTopic = {
+  ...productionTopic,
+  id: 956,
+  title: '移动端内容保存响应丢失验收',
+  description: '服务端原始说明',
+  stage_record_presence: { production: true, shooting: true, publishing: true },
+};
+const mobileEditRetryTopic = {
+  ...mobileEditCommittedTopic,
+  id: 957,
+  title: '移动端内容保存明确重试验收',
+};
+const mobileEditReadFailureTopic = {
+  ...mobileEditCommittedTopic,
+  id: 958,
+  title: '移动端内容保存只读恢复验收',
+};
+const mobileEditConflictTopic = {
+  ...mobileEditCommittedTopic,
+  id: 959,
+  title: '移动端内容保存并发变化验收',
+};
 const mobileDelayedRepairTopic = {
   ...leaveGuardTopic,
   id: 951,
@@ -118,7 +187,7 @@ const manualSaveTopic = {
   title: '手动保存失败反馈验收选题',
   stage_record_presence: { production: true, shooting: true, publishing: false },
 };
-const topics = new Map([[productionTopic.id, productionTopic], [completedTopic.id, completedTopic], [mobileTopic.id, mobileTopic], [auditTopic.id, auditTopic], [secondPendingTopic.id, secondPendingTopic], [thirdPendingTopic.id, thirdPendingTopic], [fourthPendingTopic.id, fourthPendingTopic], [leaveGuardTopic.id, leaveGuardTopic], [missingAdvanceTopic.id, missingAdvanceTopic], [mobileMissingAdvanceTopic.id, mobileMissingAdvanceTopic], [desktopDelayedAdvanceTopic.id, desktopDelayedAdvanceTopic], [mobileDelayedAdvanceTopic.id, mobileDelayedAdvanceTopic], [mobileDelayedSaveTopic.id, mobileDelayedSaveTopic], [mobileDelayedRepairTopic.id, mobileDelayedRepairTopic], [saveTopic.id, saveTopic], [manualSaveTopic.id, manualSaveTopic]]);
+const topics = new Map([[productionTopic.id, productionTopic], [approvedPipelineTopic.id, approvedPipelineTopic], [completedTopic.id, completedTopic], [mobileTopic.id, mobileTopic], [auditTopic.id, auditTopic], [secondPendingTopic.id, secondPendingTopic], [thirdPendingTopic.id, thirdPendingTopic], [fourthPendingTopic.id, fourthPendingTopic], [leaveGuardTopic.id, leaveGuardTopic], [missingAdvanceTopic.id, missingAdvanceTopic], [mobileMissingAdvanceTopic.id, mobileMissingAdvanceTopic], [desktopDelayedAdvanceTopic.id, desktopDelayedAdvanceTopic], [mobileDelayedAdvanceTopic.id, mobileDelayedAdvanceTopic], [mobileDelayedSaveTopic.id, mobileDelayedSaveTopic], [mobileEditCommittedTopic.id, mobileEditCommittedTopic], [mobileEditRetryTopic.id, mobileEditRetryTopic], [mobileEditReadFailureTopic.id, mobileEditReadFailureTopic], [mobileEditConflictTopic.id, mobileEditConflictTopic], [mobileDelayedRepairTopic.id, mobileDelayedRepairTopic], [saveTopic.id, saveTopic], [manualSaveTopic.id, manualSaveTopic]]);
 const repairedStages: string[] = [];
 const auditWrites: Array<{ topicId: number; status: string }> = [];
 const statusWrites: Array<{ topicId: number; status: string }> = [];
@@ -126,9 +195,16 @@ const managerMessageQueries: Array<{ read: string | undefined; link: string | un
 const creatorDashboardAccountQueries: Array<string | undefined> = [];
 let failNextCreatorDashboard = false;
 let hideCreatorMetricsForHome = false;
+let creatorDashboardMetricsVariant: 'snapshot' | 'official' | 'official-no-time' = 'snapshot';
 let failNextCreatorSyncLogs = false;
 let failNextCreatorAgentStatus = false;
 let failNextAuditSave: string | null = null;
+let commitNextAuditThenFailResponse = false;
+let failNextAuditStatusRead = false;
+let failNextAuditStatusReadAfterAuditFailure = false;
+let holdNextAuditStatusRead = false;
+let auditStatusReadStartedCallback: (() => void) | null = null;
+let releaseAuditStatusRead: (() => void) | null = null;
 let holdNextAuditSave = false;
 let auditSaveStartedCallback: (() => void) | null = null;
 let releaseAuditSave: (() => void) | null = null;
@@ -141,6 +217,11 @@ let holdNextMobileTopicSave = false;
 let mobileTopicSaveStartedCallback: (() => void) | null = null;
 let releaseMobileTopicSave: (() => void) | null = null;
 let mobileTopicSaveAttempts = 0;
+const mobileTopicEditOutcomes = new Map<number, 'committed-response-lost' | 'unchanged-once' | 'read-fails-once' | 'concurrent-change'>();
+const mobileTopicEditSaveAttempts = new Map<number, number>();
+const mobileTopicEditReadAttempts = new Map<number, number>();
+const mobileTopicEditWrites = new Map<number, number>();
+let failNextMobileTopicEditReadForId: number | null = null;
 let holdNextMobileStageRepair = false;
 let mobileStageRepairStartedCallback: (() => void) | null = null;
 let releaseMobileStageRepair: (() => void) | null = null;
@@ -150,6 +231,10 @@ let topicUserDirectoryReads = 0;
 const linkedResource = { id: 991, title: '解除关联反馈验收资料', summary: '隔离浏览器资料', library_type: 'knowledge', category: { id: 1, name: '验收资料', path: '验收资料' } };
 let isResourceLinked = true;
 let topicResourceListReads = 0;
+let topicResourceSearchReads = 0;
+let holdNextTopicResourceSearch = false;
+let topicResourceSearchStartedCallback: (() => void) | null = null;
+let releaseTopicResourceSearchCallback: (() => void) | null = null;
 const topicResourceWrites = { add: 0, remove: 0 };
 let failNextTopicRefreshForTopicId: number | null = null;
 let topicSaveWrites = 0;
@@ -163,6 +248,9 @@ let failNextHomeRetrospectives = false;
 let failNextHomeActionableMessages = false;
 let delayNextHomeActionableMessages = 0;
 let emptyHomeTasks = false;
+let missingActiveTopicPreviews = false;
+let mobileHomeTaskVariant: 'default' | 'attention-only' = 'default';
+let homeUnknownStageTimeCount = 0;
 let homeTopicListReads = 0;
 let homeProductionListReads = 0;
 let allowHomeCreate = false;
@@ -171,10 +259,39 @@ const heldOldHomeReplies: Array<() => void> = [];
 const app = express();
 app.use(express.json());
 app.get('/__qa/:topicId', (req, res) => {
-  res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(editor))});localStorage.setItem('xmt_token','topic-stage-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(req.query.theme === 'dark' ? 'dark' : 'light')});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics/${req.params.topicId}');</script>`);
+  const topicId = Number(req.params.topicId);
+  const editOutcome = String(req.query.editOutcome ?? '');
+  const mobileEditFixtures = [mobileEditCommittedTopic, mobileEditRetryTopic, mobileEditReadFailureTopic, mobileEditConflictTopic];
+  if (mobileEditFixtures.some((fixture) => fixture.id === topicId)
+    && ['committed-response-lost', 'unchanged-once', 'read-fails-once', 'concurrent-change'].includes(editOutcome)) {
+    const fixture = topics.get(topicId);
+    if (fixture) {
+      fixture.title = mobileEditFixtures.find((candidate) => candidate.id === topicId)?.title ?? fixture.title;
+      fixture.description = '服务端原始说明';
+      mobileTopicEditOutcomes.set(topicId, editOutcome as 'committed-response-lost' | 'unchanged-once' | 'read-fails-once' | 'concurrent-change');
+      mobileTopicEditSaveAttempts.set(topicId, 0);
+      mobileTopicEditReadAttempts.set(topicId, 0);
+      mobileTopicEditWrites.set(topicId, 0);
+      failNextMobileTopicEditReadForId = null;
+    }
+  }
+  if (req.query.auditOutcome === 'committed-response-lost' || req.query.auditOutcome === 'readback-fails') {
+    auditTopic.status = 'pending';
+    auditWrites.length = 0;
+    if (req.query.auditOutcome === 'committed-response-lost') commitNextAuditThenFailResponse = true;
+    if (req.query.auditOutcome === 'readback-fails') {
+      failNextAuditSave = '隔离验收：审核暂不可用';
+      failNextAuditStatusReadAfterAuditFailure = true;
+    }
+  }
+  const action = req.query.action === 'audit' ? '?action=audit' : '';
+  res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(editor))});localStorage.setItem('xmt_token','topic-stage-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(req.query.theme === 'dark' ? 'dark' : 'light')});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics/${req.params.topicId}${action}');</script>`);
 });
 app.get('/__qa-viewer/:topicId', (req, res) => {
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(viewer))});localStorage.setItem('xmt_token','topic-stage-viewer-fixture');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics/${req.params.topicId}');</script>`);
+});
+app.get('/__qa-production-viewer', (_req, res) => {
+  res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(viewer))});localStorage.setItem('xmt_token','topic-stage-viewer-fixture');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/production/${managerProductionReview.id}?action=review');</script>`);
 });
 app.get('/__qa-audit-viewer/:topicId', (req, res) => {
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(viewer))});localStorage.setItem('xmt_token','topic-stage-viewer-fixture');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics/${req.params.topicId}?action=audit');</script>`);
@@ -183,13 +300,23 @@ app.get('/__qa-stale-audit/:topicId', (req, res) => {
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(editor))});localStorage.setItem('xmt_token','topic-stage-fixture');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics/${req.params.topicId}?action=audit');</script>`);
 });
 app.get('/__qa-home', (req, res) => {
+  if (req.query.fail_retrospectives === 'true') failNextHomeRetrospectives = true;
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(editor))});localStorage.setItem('xmt_token','topic-stage-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/');</script>`);
 });
-app.get('/__qa-manager-home', (_req, res) => {
-  res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(manager))});localStorage.setItem('xmt_token','topic-stage-manager-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/');</script>`);
+app.get('/__qa-manager-home', (req, res) => {
+  creatorDashboardMetricsVariant = req.query.metrics === 'official'
+    ? 'official'
+    : req.query.metrics === 'official-no-time' ? 'official-no-time' : 'snapshot';
+  missingActiveTopicPreviews = req.query.active_preview === 'missing';
+  mobileHomeTaskVariant = req.query.tasks === 'attention-only' ? 'attention-only' : 'default';
+  const theme = req.query.theme === 'dark' ? 'dark' : 'light';
+  res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(manager))});localStorage.setItem('xmt_token','topic-stage-manager-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/');</script>`);
 });
-app.get('/api/auth/me', (req, res) => res.json(req.get('authorization') === 'Bearer topic-stage-viewer-fixture' ? viewer : req.get('authorization') === 'Bearer topic-stage-manager-fixture' ? manager : editor));
+app.get('/__qa-creator-home', (_req, res) => {
+  res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(creator))});localStorage.setItem('xmt_token','topic-stage-creator-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/');</script>`);
+});
+app.get('/api/auth/me', (req, res) => res.json(req.get('authorization') === 'Bearer topic-stage-viewer-fixture' ? viewer : req.get('authorization') === 'Bearer topic-stage-manager-fixture' ? manager : req.get('authorization') === 'Bearer topic-stage-creator-fixture' ? creator : editor));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get('/api/messages', (req, res) => {
   const isManager = req.get('authorization') === 'Bearer topic-stage-manager-fixture';
@@ -202,16 +329,20 @@ app.get('/api/messages', (req, res) => {
     if (delayMs > 0) return setTimeout(() => res.status(503).json({ message: '待处理消息服务暂不可用，请稍后重试。' }), delayMs);
     return res.status(503).json({ message: '待处理消息服务暂不可用，请稍后重试。' });
   }
-  const data = isManager && !emptyHomeTasks ? [actionableManagerMessage] : [];
+  const data = isManager && !emptyHomeTasks && mobileHomeTaskVariant !== 'attention-only' ? [actionableManagerMessage] : [];
   const sendResponse = () => res.json({ data, total: data.length, page: Number(req.query.page) || 1, limit: Number(req.query.limit) || 20, summary: { total: data.length, unread: data.length, actionable: data.length } });
   if (delayMs > 0) return setTimeout(sendResponse, delayMs);
   return sendResponse();
 });
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
 app.get('/api/permissions/my', (req, res) => {
-  const codes = req.get('authorization') === 'Bearer topic-stage-viewer-fixture' ? [] : req.get('authorization') === 'Bearer topic-stage-manager-fixture' ? ['topic:update', 'topic:audit', 'production:update', 'workflow:publishing', 'resource:view', 'creator:data:view', 'analytics:retro:view'] : ['topic:update', 'topic:audit', 'production:update', 'workflow:publishing', 'resource:view', 'analytics:retro:view'];
-  if (allowHomeCreate && req.get('authorization') !== 'Bearer topic-stage-viewer-fixture') codes.push('topic:create');
-  if (holdOldHomeReads && req.get('authorization') !== 'Bearer topic-stage-viewer-fixture') {
+  const authorization = req.get('authorization');
+  const codes = authorization === 'Bearer topic-stage-viewer-fixture' ? []
+    : authorization === 'Bearer topic-stage-creator-fixture' ? ['topic:create', 'workflow:publishing']
+      : authorization === 'Bearer topic-stage-manager-fixture' ? ['topic:update', 'topic:audit', 'production:update', 'workflow:publishing', 'resource:view', 'creator:data:view', 'analytics:retro:view']
+        : ['topic:update', 'topic:audit', 'production:update', 'workflow:publishing', 'resource:view', 'analytics:retro:view'];
+  if (allowHomeCreate && authorization !== 'Bearer topic-stage-viewer-fixture' && authorization !== 'Bearer topic-stage-creator-fixture') codes.push('topic:create');
+  if (holdOldHomeReads && authorization !== 'Bearer topic-stage-viewer-fixture' && authorization !== 'Bearer topic-stage-creator-fixture') {
     heldOldHomeReplies.push(() => res.json(codes));
     return;
   }
@@ -240,14 +371,20 @@ app.get('/api/dashboard/home-attention', (req, res) => {
     };
   failNextHomeRetrospectives = false;
   const payload = {
-    scope: 'all-visible-content',
+    scope: req.get('authorization') === 'Bearer topic-stage-creator-fixture' ? 'personal' : 'all-visible-content',
     generated_at: '2026-10-09 12:00:00',
     stale_stage_days: 2,
-    active_topics: req.get('authorization') === 'Bearer topic-stage-viewer-fixture'
+    active_topics: missingActiveTopicPreviews && req.get('authorization') === 'Bearer topic-stage-manager-fixture'
+      ? { total: 47, topics: [] }
+      : req.get('authorization') === 'Bearer topic-stage-creator-fixture'
+      ? { total: 2, topics: [{ id: leaveGuardTopic.id, title: '创作者自己的选题', status: 'shooting' }] }
+      : req.get('authorization') === 'Bearer topic-stage-viewer-fixture'
       ? { total: 2, topics: [{ id: mobileTopic.id, title: '当前账号进行中选题', status: 'approved' }] }
       : { total: 47, topics: [auditTopic, secondPendingTopic, thirdPendingTopic].map((topic, index) => ({ id: topic.id, title: topic.title, status: index === 0 ? 'approved' : 'pending' })) },
-    counts: { overdue: 1, due_soon: 1, stalled: 1, total: 2 },
-    topics: [{ id: leaveGuardTopic.id, title: leaveGuardTopic.title, status: 'shooting', deadline: '2026-10-07', stage_entered_at: '2026-10-04 12:00:00', assignee_name: editor.name, is_overdue: true, is_due_soon: false, is_stalled: true }],
+    counts: { overdue: 1, due_soon: 1, stalled: 1, stage_time_unknown: homeUnknownStageTimeCount, total: 2 },
+    topics: req.get('authorization') === 'Bearer topic-stage-creator-fixture'
+      ? [{ id: leaveGuardTopic.id, title: '我的临近选题', status: 'production', deadline: '2026-10-10', stage_entered_at: '2026-10-09 12:00:00', assignee_name: creator.name, is_overdue: false, is_due_soon: true, is_stalled: false }]
+      : [{ id: leaveGuardTopic.id, title: leaveGuardTopic.title, status: 'shooting', deadline: '2026-10-07', stage_entered_at: '2026-10-04 12:00:00', assignee_name: editor.name, is_overdue: true, is_due_soon: false, is_stalled: true }],
     today_publishing: {
       total: 1,
       tasks: [{ id: 941, topic_id: 934, topic_title: '今日待发布验收', platform: '抖音', publish_time: '2026-10-09 15:00:00', status: 'pending', operator_name: editor.name }],
@@ -255,18 +392,24 @@ app.get('/api/dashboard/home-attention', (req, res) => {
     sync_anomalies: req.get('authorization') === 'Bearer topic-stage-manager-fixture'
       ? { available: true, total: 1, tasks: [managerSyncAnomaly] }
       : { available: false, total: 0, tasks: [] },
-    production_reviews: req.get('authorization') === 'Bearer topic-stage-viewer-fixture'
+    production_reviews: req.get('authorization') === 'Bearer topic-stage-viewer-fixture' || req.get('authorization') === 'Bearer topic-stage-creator-fixture'
       ? { available: false, total: 0, tasks: [] }
       : { available: true, total: 1, tasks: [managerProductionReview] },
     retrospectives: retrospectiveSummary,
     topic_stages: {
       pending: { total: 4, topics: [auditTopic, secondPendingTopic, thirdPendingTopic].map((topic) => ({ id: topic.id, title: topic.title, status: 'pending', created_at: topic.created_at, stage_entered_at: topic.stage_entered_at, creator_name: topic.creator_name, assignee_name: topic.assignee_name })) },
-      production: { total: 1, topics: [{ id: productionTopic.id, title: productionTopic.title, status: 'production', created_at: '2026-10-09 08:00:00', stage_entered_at: '2026-10-09 08:00:00', creator_name: editor.name, assignee_name: editor.name }] },
+      production: { total: 2, topics: [
+        { id: approvedPipelineTopic.id, title: approvedPipelineTopic.title, status: 'approved', created_at: approvedPipelineTopic.created_at, stage_entered_at: approvedPipelineStageEnteredAt, creator_name: editor.name, assignee_name: editor.name },
+        { id: productionTopic.id, title: productionTopic.title, status: 'production', created_at: '2026-10-09 08:00:00', stage_entered_at: '2026-10-09 08:00:00', creator_name: editor.name, assignee_name: editor.name },
+      ] },
       shooting: { total: 2, topics: [leaveGuardTopic, missingAdvanceTopic].map((topic) => ({ id: topic.id, title: topic.title, status: 'shooting', created_at: '2026-10-08 08:00:00', stage_entered_at: '2026-10-08 08:00:00', creator_name: editor.name, assignee_name: editor.name })) },
       publishing: { total: 1, topics: [{ id: 941, title: '今日待发布验收', status: 'publishing', created_at: '2026-10-09 08:00:00', stage_entered_at: '2026-10-09 08:00:00', creator_name: editor.name, assignee_name: editor.name }] },
       completed: { total: 1, topics: [{ id: completedTopic.id, title: completedTopic.title, status: 'completed', created_at: '2026-10-08 08:00:00', stage_entered_at: null, creator_name: editor.name, assignee_name: editor.name }] },
     },
-    my_drafts: { tasks: [{ id: 943, topic_id: productionTopic.id, topic_title: '我的待续写稿件', status: 'draft', version: 'v1.1', updated_at: '2026-10-09 09:10:00' }] },
+    my_drafts: { tasks: [
+      { id: 943, topic_id: productionTopic.id, topic_title: '我的待续写稿件', status: 'draft', version: 'v1.1', updated_at: '2026-10-09 09:10:00' },
+      { id: 944, topic_id: productionTopic.id, topic_title: '我的退回稿件', status: 'rejected', version: 'v1.2', updated_at: '2026-10-09 10:10:00' },
+    ] },
   };
   if (emptyHomeTasks) {
     payload.sync_anomalies = { available: true, total: 0, tasks: [] };
@@ -274,8 +417,28 @@ app.get('/api/dashboard/home-attention', (req, res) => {
     payload.today_publishing = { total: 0, tasks: [] };
     payload.my_drafts = { tasks: [] };
     payload.topic_stages.pending = { total: 0, topics: [] };
+    payload.topics = [];
+    payload.counts = { overdue: 0, due_soon: 0, stalled: 0, stage_time_unknown: homeUnknownStageTimeCount, total: 0 };
   }
-  if (holdOldHomeReads && req.get('authorization') !== 'Bearer topic-stage-viewer-fixture') {
+  if (mobileHomeTaskVariant === 'attention-only' && req.get('authorization') === 'Bearer topic-stage-manager-fixture') {
+    payload.topics = Array.from({ length: 8 }, (_, index) => ({
+      id: 980 + index,
+      title: `移动首页第 ${index + 1} 条关注事项`,
+      status: 'shooting',
+      deadline: '2026-10-09',
+      stage_entered_at: '2026-10-08 12:00:00',
+      assignee_name: manager.name,
+      is_overdue: true,
+      is_due_soon: false,
+      is_stalled: false,
+    }));
+    payload.sync_anomalies = { available: true, total: 0, tasks: [] };
+    payload.production_reviews = { available: true, total: 0, tasks: [] };
+    payload.today_publishing = { total: 0, tasks: [] };
+    payload.my_drafts = { tasks: [] };
+    payload.topic_stages.pending = { total: 0, topics: [] };
+  }
+  if (holdOldHomeReads && req.get('authorization') !== 'Bearer topic-stage-viewer-fixture' && req.get('authorization') !== 'Bearer topic-stage-creator-fixture') {
     payload.active_topics = { total: 99, topics: [{ id: mobileTopic.id, title: '迟到的旧账号选题', status: 'approved' }] };
     heldOldHomeReplies.push(() => res.json(payload));
     return;
@@ -298,6 +461,7 @@ app.get('/api/dashboard/home-activity', (_req, res) => {
 });
 app.get('/api/creator-agent/douyin/dashboard', (req, res) => {
   const accountUid = typeof req.query.account_id === 'string' ? req.query.account_id : undefined;
+  const usesOfficialMetrics = creatorDashboardMetricsVariant !== 'snapshot';
   creatorDashboardAccountQueries.push(accountUid);
   if (failNextCreatorDashboard) {
     failNextCreatorDashboard = false;
@@ -305,12 +469,24 @@ app.get('/api/creator-agent/douyin/dashboard', (req, res) => {
   }
   return res.json({
     account: { nickname: '负责人验收账号', douyin_uid: accountUid || managerSyncAccountUid },
-    metrics: { fans_count: hideCreatorMetricsForHome ? null : 120, works_count: 4, play_count: 2400, interaction_count: 120, interaction_rate: 0.05, share_rate: 0.01, viral_works_count: 0 },
+    metrics: {
+      fans_count: hideCreatorMetricsForHome ? null : 120,
+      fans_observed_on: hideCreatorMetricsForHome || creatorDashboardMetricsVariant === 'official-no-time' ? null : '2026-10-08',
+      works_count: 4, play_count: 2400, interaction_count: 120, interaction_rate: 0.05, share_rate: 0.01, viral_works_count: 0,
+    },
     health: { score: 90, level: 'healthy', available_weight: 1, dimensions: {}, data_notes: [] },
-    growth_7d: hideCreatorMetricsForHome ? { fans: null, plays: null, interactions: null } : { fans: 2, plays: 200, interactions: 10 },
+    growth_7d: hideCreatorMetricsForHome
+      ? { fans: null, plays: null, interactions: null, collected_at: null, observed_through_date: null }
+      : {
+        fans: 2,
+        plays: 200,
+        interactions: 10,
+        collected_at: usesOfficialMetrics && creatorDashboardMetricsVariant === 'official' ? '2026-10-09T10:30:00.000Z' : null,
+        observed_through_date: usesOfficialMetrics ? '2026-10-08' : '2026-10-09',
+      },
     growth_30d: { fans: 5, plays: 800, interactions: 40 },
     top_works: [], snapshot_count: 2, snapshot_start_date: '2026-10-07', data_status: 'ready',
-    data_source: 'creator_agent', official_snapshot_at: null, last_success_at: '2026-10-09 10:00:00', missing_fields: [], warnings: [],
+    data_source: usesOfficialMetrics ? 'douyin_official_export' : 'douyin_creator_center_collection', official_snapshot_at: null, last_success_at: '2026-10-09 10:00:00', missing_fields: [], warnings: [],
     access_level: 'manage', metric_sources: {}, formulas: {},
   });
 });
@@ -332,7 +508,7 @@ app.get('/api/creator-agent/status', (_req, res) => {
 app.get('/api/topics', (req, res) => {
   if (typeof req.query.status === 'string') homeTopicListReads += 1;
   const matches = Array.from(topics.values())
-    .filter((topic) => !req.query.status || topic.status === req.query.status)
+    .filter((topic) => !req.query.status || (req.query.status === 'creation' ? topic.status === 'approved' || topic.status === 'production' : topic.status === req.query.status))
     .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
   const limit = Number(req.query.limit) || 5;
   return res.json({ success: true, data: matches.slice(0, limit), pagination: { total: matches.length, page: 1, limit } });
@@ -372,6 +548,31 @@ app.get('/api/topics/:id/versions', (req, res) => {
   return res.json({ data: [...manualTopicVersions].reverse() });
 });
 app.get('/api/topics/:id', (req, res) => {
+  const topicId = Number(req.params.id);
+  if (mobileTopicEditOutcomes.has(topicId)) {
+    mobileTopicEditReadAttempts.set(topicId, (mobileTopicEditReadAttempts.get(topicId) ?? 0) + 1);
+    if (failNextMobileTopicEditReadForId === topicId) {
+      failNextMobileTopicEditReadForId = null;
+      return res.status(503).json({ error: '隔离验收：选题内容只读核实暂不可用' });
+    }
+  }
+  if (Number(req.params.id) === auditTopic.id && failNextAuditStatusRead) {
+    failNextAuditStatusRead = false;
+    return res.status(503).json({ error: '隔离验收：审核状态暂不可读' });
+  }
+  if (topicId === auditTopic.id && holdNextAuditStatusRead) {
+    holdNextAuditStatusRead = false;
+    const heldAuditStatusRead = new Promise<void>((resolve) => { releaseAuditStatusRead = resolve; });
+    auditStatusReadStartedCallback?.();
+    auditStatusReadStartedCallback = null;
+    void heldAuditStatusRead.then(() => {
+      releaseAuditStatusRead = null;
+      const latest = topics.get(topicId);
+      if (!latest) return res.status(404).json({ error: '选题不存在' });
+      return res.json({ success: true, data: latest });
+    });
+    return;
+  }
   if (Number(req.params.id) === failNextTopicRefreshForTopicId) {
     failNextTopicRefreshForTopicId = null;
     return res.status(503).json({ error: '隔离验收：详情刷新暂不可用' });
@@ -380,23 +581,64 @@ app.get('/api/topics/:id', (req, res) => {
   if (!topic) return res.status(404).json({ error: '选题不存在' });
   return res.json({ success: true, data: topic });
 });
-app.get('/api/workflow/production/942', (_req, res) => res.json({
+app.get('/api/workflow/production/942', (req, res) => res.json({
   id: managerProductionReview.id,
   topic_id: managerProductionReview.topic_id,
   topic_title: managerProductionReview.topic_title,
   operator_id: editor.id,
   operator_name: editor.name,
-  content: '<p>隔离验收稿件正文</p>',
-  status: 'review',
+  topic_status: 'production',
+  content: managerProductionReviewContent,
+  status: managerProductionReviewStatus,
   version: managerProductionReview.version,
+  can_edit: req.get('authorization') === 'Bearer topic-stage-manager-fixture' || req.get('authorization') === 'Bearer topic-stage-fixture',
   created_at: '2026-10-09 08:00:00',
   updated_at: managerProductionReview.updated_at,
 }));
 app.get('/api/workflow/production/942/history', (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 20 }));
+app.get('/api/workflow/production/942/review-threads', (_req, res) => res.json({ data: [] }));
+app.put('/api/workflow/production/942', (req, res) => {
+  managerProductionApprovalWrites += 1;
+  if (req.body?.expected_content !== managerProductionReviewContent) {
+    return res.status(409).json({ message: '隔离验收：正文版本已变化' });
+  }
+  managerProductionReviewContent = String(req.body?.content ?? managerProductionReviewContent);
+  managerProductionReviewStatus = String(req.body?.status ?? managerProductionReviewStatus);
+  return res.json({ message: '创作状态已更新', version: managerProductionReview.version });
+});
 app.put('/api/topics/:id', (req, res) => {
   const topicId = Number(req.params.id);
   const topic = topics.get(topicId);
   if (!topic) return res.status(404).json({ error: '选题不存在' });
+  const editOutcome = mobileTopicEditOutcomes.get(topicId);
+  if (editOutcome) {
+    const attempt = (mobileTopicEditSaveAttempts.get(topicId) ?? 0) + 1;
+    mobileTopicEditSaveAttempts.set(topicId, attempt);
+    const applyRequestedEdit = () => {
+      topic.title = String(req.body?.title ?? topic.title);
+      topic.description = String(req.body?.description ?? topic.description);
+      mobileTopicEditWrites.set(topicId, (mobileTopicEditWrites.get(topicId) ?? 0) + 1);
+    };
+    if (editOutcome === 'committed-response-lost') {
+      applyRequestedEdit();
+      return res.status(503).json({ error: '隔离验收：保存响应丢失' });
+    }
+    if (editOutcome === 'unchanged-once' && attempt === 1) {
+      return res.status(503).json({ error: '隔离验收：保存暂不可用' });
+    }
+    if (editOutcome === 'read-fails-once') {
+      applyRequestedEdit();
+      failNextMobileTopicEditReadForId = topicId;
+      return res.status(503).json({ error: '隔离验收：保存响应丢失' });
+    }
+    if (editOutcome === 'concurrent-change') {
+      topic.title = '服务端并发更新标题';
+      topic.description = '服务端并发更新说明';
+      return res.status(503).json({ error: '隔离验收：服务端内容已被并发更新' });
+    }
+    applyRequestedEdit();
+    return res.json({ message: '选题已更新' });
+  }
   if (topicId === mobileDelayedSaveTopic.id) {
     mobileTopicSaveAttempts += 1;
     if (holdNextMobileTopicSave) {
@@ -472,6 +714,10 @@ function finishTopicAudit(req: express.Request, res: express.Response) {
   if (failNextAuditSave) {
     const message = failNextAuditSave;
     failNextAuditSave = null;
+    if (failNextAuditStatusReadAfterAuditFailure) {
+      failNextAuditStatusReadAfterAuditFailure = false;
+      failNextAuditStatusRead = true;
+    }
     return res.status(503).json({ message });
   }
   const topicId = Number(req.params.id);
@@ -479,6 +725,10 @@ function finishTopicAudit(req: express.Request, res: express.Response) {
   if (!topic) return res.status(404).json({ message: '选题不存在' });
   topic.status = req.body?.status;
   auditWrites.push({ topicId, status: String(req.body?.status) });
+  if (commitNextAuditThenFailResponse) {
+    commitNextAuditThenFailResponse = false;
+    return res.status(503).json({ message: '隔离验收：审核已保存但响应丢失' });
+  }
   return res.json({ message: '审核结果已保存' });
 }
 app.post('/api/topics/:id/status', (req, res) => {
@@ -534,7 +784,15 @@ function finishTopicStageRecordRepair(req: express.Request, res: express.Respons
   }
   return res.json({ success: true, data: { stage, created } });
 }
-app.get('/api/resource-center/search', (_req, res) => res.json({ data: [{ resource_id: linkedResource.id, title: linkedResource.title, summary: linkedResource.summary, snippet: '<mark>隔离</mark>验收素材', library_type: linkedResource.library_type, category: linkedResource.category }], total: 1 }));
+app.get('/api/resource-center/search', async (_req, res) => {
+  topicResourceSearchReads += 1;
+  if (holdNextTopicResourceSearch) {
+    holdNextTopicResourceSearch = false;
+    topicResourceSearchStartedCallback?.();
+    await new Promise<void>((resolve) => { releaseTopicResourceSearchCallback = resolve; });
+  }
+  return res.json({ data: [{ resource_id: linkedResource.id, title: linkedResource.title, summary: linkedResource.summary, snippet: '<mark>隔离</mark>验收素材', library_type: linkedResource.library_type, category: linkedResource.category }], total: 1 });
+});
 app.get('/api/resource-center/resources', (_req, res) => res.json({ data: [], pagination: { page: 1, page_size: 1, total: 0, total_pages: 0 } }));
 app.get('/api/retrospectives', (_req, res) => res.json({ retrospectives: [] }));
 app.get('/api/retrospectives/actions/mine', (_req, res) => res.json({ actions: [] }));
@@ -620,6 +878,31 @@ try {
     await auditContext.close();
   }
 
+  auditTopic.status = 'pending';
+  const auditLifecycle = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  auditLifecycle.on('pageerror', (error) => errors.push(error.message));
+  auditLifecycle.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  const auditWritesBeforeLifecycle = auditWrites.length;
+  await auditLifecycle.goto(`${base}/__qa/${auditTopic.id}`);
+  await auditLifecycle.getByRole('heading', { name: auditTopic.title }).waitFor();
+  const auditDialogOpener = auditLifecycle.getByRole('button', { name: '审核选题', exact: true });
+  await auditDialogOpener.click();
+  const auditDialog = auditLifecycle.getByRole('dialog', { name: '审核选题', exact: true });
+  await auditDialog.waitFor();
+  assert.equal(await auditDialog.getAttribute('aria-modal'), 'true', 'the audit overlay is exposed as a modal dialog');
+  const firstAuditControl = auditDialog.getByRole('button', { name: '审核通过', exact: true });
+  assert.equal(await firstAuditControl.evaluate((element) => document.activeElement === element), true, 'opening the audit dialog moves focus into the first control');
+  await auditLifecycle.keyboard.press('Shift+Tab');
+  const lastAuditControl = auditDialog.getByRole('button', { name: '通过审核', exact: true });
+  assert.equal(await lastAuditControl.evaluate((element) => document.activeElement === element), true, 'Shift+Tab from the first audit control wraps to the last control');
+  await auditLifecycle.keyboard.press('Tab');
+  assert.equal(await firstAuditControl.evaluate((element) => document.activeElement === element), true, 'Tab from the last audit control wraps to the first control');
+  await auditLifecycle.keyboard.press('Escape');
+  await auditDialog.waitFor({ state: 'detached' });
+  assert.equal(await auditDialogOpener.evaluate((element) => document.activeElement === element), true, 'closing the audit dialog restores focus to its opener');
+  assert.equal(auditWrites.length, auditWritesBeforeLifecycle, 'keyboard dismissal does not write an audit result');
+  await auditLifecycle.close();
+
   const auditSubmit = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   const expectedAuditHttpErrors: string[] = [];
   const expectedAuditConsoleErrors: string[] = [];
@@ -642,7 +925,7 @@ try {
   await auditSubmit.locator('select').last().selectOption(String(editor.id));
   failNextAuditSave = '审核服务暂不可用，请稍后重试。';
   await auditSubmit.getByRole('button', { name: '通过审核', exact: true }).click();
-  await auditSubmit.getByText('审核服务暂不可用，请稍后重试。', { exact: true }).waitFor();
+  await auditSubmit.getByText('服务器仍显示待审核。未自动重发；请核对审核意见后，再次明确确认。', { exact: true }).waitFor();
   assert.equal(auditTopic.status, 'pending', 'failed audit leaves the isolated topic unchanged');
   assert.deepEqual(auditWrites, [], 'failed audit is not recorded as a successful mutation');
   await auditSubmit.getByRole('heading', { name: '审核选题', exact: true }).waitFor();
@@ -670,6 +953,8 @@ try {
   assert.equal(await pendingAuditSubmit.isDisabled(), true, 'the audit submit button stays disabled until the server confirms the result');
   assert.equal(await auditSubmit.getByRole('button', { name: '审核处理中…', exact: true }).isDisabled(), true, 'the dialog cannot be dismissed while the audit request is pending');
   assert.equal(await auditSubmit.locator('textarea').isDisabled(), true, 'audit comments cannot change while their submitted values are in flight');
+  await auditSubmit.keyboard.press('Escape');
+  assert.equal(await auditSubmit.getByRole('dialog', { name: '审核选题', exact: true }).count(), 1, 'Escape cannot dismiss the dialog while the audit request is pending');
   assert.equal(auditSaveAttempts, auditAttemptsBeforeDelayedSave + 1, 'one delayed audit request is in flight');
   releaseAuditSave?.();
   releaseAuditSave = null;
@@ -678,6 +963,81 @@ try {
   assert.deepEqual(auditWrites.at(-1), { topicId: auditTopic.id, status: 'approved' }, 'the delayed audit is recorded once');
   assert.equal(auditSaveAttempts, auditAttemptsBeforeDelayedSave + 1, 'the locked dialog does not issue a duplicate write');
   await auditSubmit.close();
+
+  auditTopic.status = 'pending';
+  auditWrites.length = 0;
+  const lostAuditResponse = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const expectedLostAuditErrors: string[] = [];
+  lostAuditResponse.on('pageerror', (error) => errors.push(error.message));
+  lostAuditResponse.on('console', (message) => {
+    if (message.type() === 'error' && message.text().includes('status of 503 (Service Unavailable)')) expectedLostAuditErrors.push(message.text());
+    else if (message.type() === 'error') errors.push(message.text());
+  });
+  lostAuditResponse.on('response', (response) => {
+    if (response.status() < 400) return;
+    const responseDescription = `${response.status()} ${response.url()}`;
+    if (response.url().endsWith(`/api/topics/${auditTopic.id}/audit`) && response.status() === 503) expectedLostAuditErrors.push(responseDescription);
+    else errors.push(`Unexpected HTTP error: ${responseDescription}`);
+  });
+  await lostAuditResponse.goto(`${base}/__qa/${auditTopic.id}`);
+  await lostAuditResponse.getByRole('heading', { name: auditTopic.title }).waitFor();
+  await lostAuditResponse.getByRole('button', { name: '审核选题', exact: true }).click();
+  commitNextAuditThenFailResponse = true;
+  await lostAuditResponse.getByRole('button', { name: '通过审核', exact: true }).click();
+  await lostAuditResponse.getByText('服务器已记录通过审核。', { exact: true }).waitFor();
+  assert.equal(auditTopic.status, 'approved', 'readback confirms an audit committed before its response was lost');
+  assert.deepEqual(auditWrites, [{ topicId: auditTopic.id, status: 'approved' }], 'committed audit is not submitted a second time after a lost response');
+  assert.equal(await lostAuditResponse.getByRole('heading', { name: '审核选题', exact: true }).count(), 0, 'confirmed audit closes the review dialog');
+  assert.equal(expectedLostAuditErrors.filter((entry) => entry.startsWith('503 ')).length, 1, 'only the injected lost audit response is expected');
+  assert.equal(expectedLostAuditErrors.filter((entry) => entry.includes('status of 503')).length, 1, 'only the fixture audit 503 is logged by the page');
+  await lostAuditResponse.close();
+
+  auditTopic.status = 'pending';
+  auditWrites.length = 0;
+  const lockedAudit = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const expectedLockedAuditHttpErrors: string[] = [];
+  const expectedLockedAuditConsoleErrors: string[] = [];
+  lockedAudit.on('pageerror', (error) => errors.push(error.message));
+  lockedAudit.on('console', (message) => {
+    if (message.type() === 'error' && message.text().includes('status of 503 (Service Unavailable)')) expectedLockedAuditConsoleErrors.push(message.text());
+    else if (message.type() === 'error') errors.push(message.text());
+  });
+  lockedAudit.on('response', (response) => {
+    if (response.status() < 400) return;
+    const responseDescription = `${response.status()} ${response.url()}`;
+    if (response.status() === 503 && (response.url().endsWith(`/api/topics/${auditTopic.id}/audit`) || response.url().endsWith(`/api/topics/${auditTopic.id}`))) expectedLockedAuditHttpErrors.push(responseDescription);
+    else errors.push(`Unexpected HTTP error: ${responseDescription}`);
+  });
+  await lockedAudit.goto(`${base}/__qa/${auditTopic.id}`);
+  await lockedAudit.getByRole('heading', { name: auditTopic.title }).waitFor();
+  await lockedAudit.getByRole('button', { name: '审核选题', exact: true }).click();
+  failNextAuditSave = '审核服务暂不可用，请稍后重试。';
+  failNextAuditStatusReadAfterAuditFailure = true;
+  await lockedAudit.getByRole('button', { name: '通过审核', exact: true }).click();
+  await lockedAudit.getByText('审核结果暂时无法确认。为避免重复提交，审核控件已锁定；请重新只读核实状态。', { exact: true }).waitFor();
+  assert.equal(await lockedAudit.getByRole('button', { name: '通过审核', exact: true }).isDisabled(), true, 'unknown audit result locks duplicate submission');
+  assert.deepEqual(auditWrites, [], 'failed audit and failed readback do not report a successful write');
+  let resolveAuditStatusReadStarted!: () => void;
+  const auditStatusReadStarted = new Promise<void>((resolve) => { resolveAuditStatusReadStarted = resolve; });
+  auditStatusReadStartedCallback = resolveAuditStatusReadStarted;
+  holdNextAuditStatusRead = true;
+  const heldAuditStatusResponse = lockedAudit.waitForResponse((response) => response.url().endsWith(`/api/topics/${auditTopic.id}`) && response.request().method() === 'GET' && response.status() === 200);
+  await lockedAudit.getByRole('button', { name: '只读核实状态', exact: true }).click();
+  await auditStatusReadStarted;
+  await lockedAudit.getByRole('button', { name: '核实中…', exact: true }).waitFor();
+  await lockedAudit.keyboard.press('Escape');
+  assert.equal(await lockedAudit.getByRole('dialog', { name: '审核选题', exact: true }).count(), 1, 'Escape cannot dismiss the dialog while audit status is being verified');
+  releaseAuditStatusRead?.();
+  releaseAuditStatusRead = null;
+  await heldAuditStatusResponse;
+  await lockedAudit.getByText('服务器仍显示待审核。未自动重发；请核对审核意见后，再次明确确认。', { exact: true }).waitFor();
+  assert.equal(auditWrites.length, 0, 'read-only verification does not repeat an audit write');
+  await lockedAudit.getByRole('button', { name: '通过审核', exact: true }).click();
+  await lockedAudit.getByText('选题已通过审核', { exact: true }).waitFor();
+  assert.deepEqual(auditWrites, [{ topicId: auditTopic.id, status: 'approved' }], 'a second audit write occurs only after verification and explicit user confirmation');
+  assert.equal(expectedLockedAuditHttpErrors.length, 2, 'only the injected audit and readback 503 responses are expected');
+  assert.equal(expectedLockedAuditConsoleErrors.length, 2, 'only the injected audit and readback 503 errors are logged by the page');
+  await lockedAudit.close();
 
   auditTopic.status = 'pending';
   const auditWritesBeforeHomeAction = auditWrites.length;
@@ -702,11 +1062,61 @@ try {
   assert.deepEqual(recentHomePublishingListRequests, [], 'Home no longer reads the publishing list to synthesize recent activity');
   assert.deepEqual({ topics: homeTopicListReads, production: homeProductionListReads }, homeLegacyListReadsBefore, 'Home uses bounded summaries instead of separate topic-stage and production list requests');
   await home.getByText('我的待续写稿件', { exact: true }).waitFor();
+  await home.getByRole('button', { name: `审核稿件：待审核稿件 · ${managerProductionReview.topic_title}`, exact: true }).waitFor();
+  await home.getByRole('button', { name: `开始审核：审核选题 · ${auditTopic.title}`, exact: true }).waitFor();
+  await home.getByRole('button', { name: '去发布：今日发布 · 今日待发布验收 · 抖音', exact: true }).waitFor();
+  await home.getByRole('button', { name: '继续写稿：继续写稿 · 我的待续写稿件', exact: true }).waitFor();
+  const desktopReviewTasks = home.getByTestId('home-priority-task');
+  assert.match(await desktopReviewTasks.nth(0).getAttribute('aria-label') || '', /^审核稿件：/);
+  assert.match(await desktopReviewTasks.nth(1).getAttribute('aria-label') || '', /^开始审核：/);
+  assert.match(await desktopReviewTasks.nth(2).getAttribute('aria-label') || '', /^跟进选题：/);
+  const attentionTaskMeta = home.getByTestId('home-priority-task-meta').nth(2);
+  assert.equal(await attentionTaskMeta.innerText(), `负责人：${editor.name} · 截止 2026/10/07`, 'an actionable attention task identifies who owns the topic and its deadline');
+  assert.ok(await textContrast(attentionTaskMeta) >= 4.5, 'light-theme attention task ownership meets 4.5:1 contrast');
+  const desktopDraftSaveStatus = home.getByTestId('home-draft-save-status').first();
+  await desktopDraftSaveStatus.waitFor();
+  assert.equal(await desktopDraftSaveStatus.innerText(), '保存状态未确认', 'a server update timestamp does not claim a save was confirmed in the desktop browser session');
+  await home.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('writeConsistency:saved', 'production:943@v1.1', { userId: 96, source: 'browser-test' });
+  });
+  assert.equal(await desktopDraftSaveStatus.innerText(), '保存状态未确认', 'save state from another account is not shown on a desktop personal draft');
+  await home.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('editor:synced', 'production:943@v1.1', { userId: 93, source: 'browser-test' });
+  });
+  assert.equal(await desktopDraftSaveStatus.innerText(), '保存状态未确认', 'a collaboration sync event alone is not treated as persisted save confirmation');
+  await home.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('writeConsistency:saved', 'production:943@v1.1', { userId: 93, source: 'browser-test' });
+  });
+  assert.equal(await desktopDraftSaveStatus.innerText(), '本次会话已确认保存', 'the desktop Home only shows saved after an account-matched write confirmation');
+  await home.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('conflict:event', 'production:943@v1.1', { userId: 93, source: 'browser-test' });
+  });
+  assert.equal(await desktopDraftSaveStatus.innerText(), '保存异常待确认', 'a persisted editor conflict is surfaced on desktop Home');
+  await home.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('editor:local-change', 'production:943@v1.1', { userId: 93, source: 'browser-test' });
+  });
+  assert.equal(await desktopDraftSaveStatus.innerText(), '保存异常待确认', 'a later edit does not hide an unresolved editor conflict');
+  assert.match(await desktopReviewTasks.nth(3).getAttribute('aria-label') || '', /^去发布：/);
   const ideaStage = home.getByRole('button', { name: /^4 灵感池/ });
   await ideaStage.getByText('首页灵感预览 3', { exact: true }).waitFor();
   assert.equal(await ideaStage.getByText('首页灵感预览 4', { exact: true }).count(), 0, 'the inspiration stage displays exactly three latest previews');
   assert.equal(await home.getByRole('button', { name: '新建选题', exact: true }).count(), 0, 'the desktop header hides create-topic actions without the actual permission');
-  await home.getByRole('button', { name: '继续写稿', exact: true }).waitFor();
+  assert.equal(await home.getByRole('button', { name: '进入选题管理', exact: true }).count(), 1, 'Home keeps one general entry to the topic list');
+  assert.equal(await home.getByRole('button', { name: '进入内容生产', exact: true }).count(), 0, 'the content-flow section does not duplicate the general topic-list entry');
+  const quickWriteButton = home.getByRole('button', { name: '写两句', exact: true });
+  await quickWriteButton.waitFor();
+  await quickWriteButton.click();
+  await home.waitForURL((url) => url.pathname === '/production' && !url.searchParams.has('action'));
+  await home.getByRole('heading', { name: '添加创作记录', exact: true }).waitFor();
+  await home.getByText('关联选题 *', { exact: true }).waitFor();
+  await home.goBack();
+  await home.getByRole('heading', { name: '内容流' }).waitFor();
+  await home.getByRole('button', { name: /^继续写稿：/ }).waitFor();
   await home.getByText('最近变化验收稿件', { exact: true }).scrollIntoViewIfNeeded();
   await home.screenshot({ path: '/tmp/xmt-home-recent-activity-1440.png', fullPage: false });
   await home.getByText('已超过截止时间 · 2026/10/07', { exact: true }).waitFor();
@@ -722,7 +1132,7 @@ try {
   await home.waitForURL((url) => url.pathname === `/topics/${auditTopic.id}`);
   await home.goBack();
   await home.getByRole('heading', { name: '内容流' }).waitFor();
-  const startAuditFromHome = home.getByRole('button', { name: '开始审核', exact: true }).first();
+  const startAuditFromHome = home.getByRole('button', { name: /^开始审核：/ }).first();
   await startAuditFromHome.waitFor();
   const pendingStageCard = home.getByRole('button', { name: /^4 待审 / });
   for (const title of [auditTopic.title, secondPendingTopic.title, thirdPendingTopic.title]) {
@@ -734,6 +1144,56 @@ try {
   assert.ok(await textContrast(pendingStageCard.getByText(auditTopic.title, { exact: true })) >= 4.5, 'light-theme stage topic previews meet 4.5:1 contrast');
   assert.ok(await textContrast(pendingStageCard.getByText('停留 1 天', { exact: true }).first()) >= 4.5, 'light-theme stage elapsed-time details meet 4.5:1 contrast');
   assert.equal(await pendingStageCard.getByText(fourthPendingTopic.title, { exact: true }).count(), 0, 'the content-flow card shows only the three newest topics from the loaded stage list');
+  const creationStageCard = home.getByRole('button').filter({ has: home.getByText(approvedPipelineTopic.title, { exact: true }) }).first();
+  await creationStageCard.getByText('已通过 · 待开始创作', { exact: true }).waitFor();
+  const approvedStageTimeCases = [
+    ['2026-10-06 12:00:00', '停留 3 天'],
+    [null, '阶段时间待确认'],
+    [undefined, '阶段时间待确认'],
+    ['不是有效时间', '阶段时间待确认'],
+    ['2026-10-10 12:00:00', '阶段时间待确认'],
+  ] as const;
+  for (const [stageEnteredAt, expectedElapsed] of approvedStageTimeCases) {
+    approvedPipelineStageEnteredAt = stageEnteredAt;
+    await home.goto(`${base}/__qa-home`);
+    await home.getByRole('heading', { name: '内容流' }).waitFor();
+    const approvedStage = home.getByRole('button').filter({ has: home.getByText(approvedPipelineTopic.title, { exact: true }) }).first();
+    await approvedStage.getByText('已通过 · 待开始创作', { exact: true }).waitFor();
+    await approvedStage.getByText(expectedElapsed, { exact: true }).waitFor();
+  }
+  approvedPipelineStageEnteredAt = '2026-10-06 12:00:00';
+  await home.goto(`${base}/__qa-home`);
+  await home.getByRole('heading', { name: '内容流' }).waitFor();
+  const restoredCreationStageCard = home.getByRole('button').filter({ has: home.getByText(approvedPipelineTopic.title, { exact: true }) }).first();
+  await restoredCreationStageCard.getByText('已通过 · 待开始创作', { exact: true }).waitFor();
+  await restoredCreationStageCard.getByText('停留 3 天', { exact: true }).waitFor();
+  await Promise.all([
+    home.waitForURL((url) => url.pathname === '/topics' && url.searchParams.get('status') === 'creation'),
+    restoredCreationStageCard.click(),
+  ]);
+  const creationStageFilter = home.getByRole('combobox', { name: '按状态筛选选题' });
+  await creationStageFilter.waitFor();
+  assert.equal(await creationStageFilter.inputValue(), 'creation', 'opening the creation stage selects the combined approved and active filter');
+  await home.getByRole('table').getByText(approvedPipelineTopic.title, { exact: true }).waitFor();
+  await home.getByRole('table').getByText(productionTopic.title, { exact: true }).waitFor();
+  await home.getByRole('button', { name: '看板', exact: true }).click();
+  const creationBoard = home.getByRole('region', { name: '选题状态看板' });
+  await creationBoard.getByRole('heading', { name: '已通过', exact: true }).waitFor();
+  await creationBoard.getByRole('heading', { name: '创作中', exact: true }).waitFor();
+  await creationBoard.getByRole('button', { name: approvedPipelineTopic.title, exact: true }).waitFor();
+  await creationBoard.getByRole('button', { name: productionTopic.title, exact: true }).waitFor();
+  await creationStageFilter.selectOption('production');
+  await home.waitForURL((url) => url.pathname === '/topics' && url.searchParams.get('status') === 'production');
+  await home.reload();
+  assert.equal(await creationStageFilter.inputValue(), 'production', 'a changed desktop status filter survives a reload through the URL');
+  await creationStageFilter.selectOption('');
+  await home.waitForURL((url) => url.pathname === '/topics' && !url.searchParams.has('status'));
+  await home.reload();
+  assert.equal(await creationStageFilter.inputValue(), '', 'clearing the desktop status filter also survives a reload');
+  await creationStageFilter.selectOption('creation');
+  await home.goBack();
+  await home.goBack();
+  await home.getByRole('heading', { name: '内容流' }).waitFor();
   const retrospectiveStageCard = home.getByRole('button', { name: /^5 复盘 / });
   for (const title of ['团队周复盘', '选题专项复盘', '渠道复盘']) {
     await retrospectiveStageCard.getByText(title, { exact: true }).waitFor();
@@ -763,6 +1223,9 @@ try {
   homeDark.on('console', (message) => { if (message.type() === 'error') darkHomeErrors.push(message.text()); });
   await homeDark.goto(`${base}/__qa-home?theme=dark`);
   await homeDark.getByRole('heading', { name: '内容流' }).waitFor();
+  const darkAttentionTaskMeta = homeDark.getByTestId('home-priority-task-meta').nth(2);
+  assert.equal(await darkAttentionTaskMeta.innerText(), `负责人：${editor.name} · 截止 2026/10/07`, 'dark-theme attention task exposes the same assigned owner and deadline');
+  assert.ok(await textContrast(darkAttentionTaskMeta) >= 4.5, 'dark-theme attention task ownership meets 4.5:1 contrast');
   const darkPendingStage = homeDark.getByRole('button', { name: /^4 待审 / });
   assert.ok(await textContrast(darkPendingStage.getByText(auditTopic.title, { exact: true })) >= 4.5, 'dark-theme stage topic previews meet 4.5:1 contrast');
   assert.ok(await textContrast(darkPendingStage.getByText('停留 1 天', { exact: true }).first()) >= 4.5, 'dark-theme stage elapsed-time details meet 4.5:1 contrast');
@@ -825,6 +1288,33 @@ try {
   assert.equal(await partialRetrospectiveHome.getByRole('alert').count(), 1, 'the partial failure is reported in the dashboard summary');
   await partialRetrospectiveHome.close();
 
+  const mobileRetrospectiveHome = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  const mobileRetrospectiveMethods: string[] = [];
+  mobileRetrospectiveHome.on('pageerror', (error) => errors.push(error.message));
+  mobileRetrospectiveHome.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  mobileRetrospectiveHome.on('request', (request) => {
+    if (request.url().includes('/api/')) mobileRetrospectiveMethods.push(request.method());
+  });
+  failNextHomeRetrospectives = true;
+  await mobileRetrospectiveHome.goto(`${base}/__qa-home`);
+  await mobileRetrospectiveHome.getByRole('heading', { name: '内容阶段' }).waitFor();
+  await mobileRetrospectiveHome.getByRole('button', { name: '— 复盘', exact: true }).waitFor();
+  await mobileRetrospectiveHome.getByRole('button', { name: /各阶段最新内容/ }).click();
+  await mobileRetrospectiveHome.getByText('复盘摘要暂时无法读取，当前无法确认是否有复盘记录。', { exact: true }).waitFor();
+  await mobileRetrospectiveHome.getByRole('button', { name: '重试读取复盘', exact: true }).waitFor();
+  const unavailableMobileRetrospectiveStage = mobileRetrospectiveHome.getByRole('region', { name: '复盘 · —' });
+  assert.equal(await unavailableMobileRetrospectiveStage.getByText('当前没有内容', { exact: true }).count(), 0, 'an unavailable review summary is never shown as an empty review list');
+  mobileRetrospectiveMethods.length = 0;
+  const mobileRetrospectiveRecovery = mobileRetrospectiveHome.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-attention'));
+  await mobileRetrospectiveHome.getByRole('button', { name: '重试读取复盘', exact: true }).click();
+  const mobileRetrospectiveResponse = await mobileRetrospectiveRecovery;
+  assert.equal(mobileRetrospectiveResponse.status(), 200, 'the section retry re-reads the Home summary');
+  await mobileRetrospectiveHome.getByRole('button', { name: '5 复盘', exact: true }).waitFor();
+  await mobileRetrospectiveHome.getByText('团队周复盘', { exact: true }).waitFor();
+  assert.deepEqual(mobileRetrospectiveMethods, ['GET'], 'the mobile retrospective retry performs one read and no writes');
+  assert.equal(await mobileRetrospectiveHome.getByRole('alert').count(), 0, 'successful section retry clears its unavailable state');
+  await mobileRetrospectiveHome.close();
+
   const actionableRecoveryHome = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   const expectedActionableReadErrors: string[] = [];
   const actionableHomeApiMethods: string[] = [];
@@ -843,8 +1333,10 @@ try {
     else errors.push(`Unexpected HTTP error: ${response.status()} ${response.url()}`);
   });
   emptyHomeTasks = true;
+  homeUnknownStageTimeCount = 2;
   failNextHomeActionableMessages = true;
-  delayNextHomeActionableMessages = 1800;
+  // Leave enough time for slower/macOS browser startup before asserting the loading state.
+  delayNextHomeActionableMessages = 5000;
   const firstActionableRead = actionableRecoveryHome.waitForResponse((response) => response.url().includes('/api/messages?') && response.url().includes('link=present'));
   await actionableRecoveryHome.goto(`${base}/__qa-manager-home`);
   await actionableRecoveryHome.getByRole('heading', { name: '团队今日重点' }).waitFor();
@@ -865,12 +1357,20 @@ try {
   await actionableRecoveryHome.screenshot({ path: '/tmp/xmt-home-actionable-read-retrying-1440.png', fullPage: false });
   assert.equal((await failedActionableRead).status(), 200, 'the explicit read-only retry succeeds');
   await actionableRecoveryHome.getByText('今天没有必须处理的任务', { exact: true }).waitFor();
+  await actionableRecoveryHome.getByText('目前没有逾期或已确认卡点内容', { exact: true }).waitFor();
+  await actionableRecoveryHome.getByText('2 项内容的当前阶段时间待确认，暂不计入卡点；这不代表它们一定没有卡点。', { exact: true }).waitFor();
   assert.equal(await actionableRecoveryHome.getByText('待处理消息暂时无法读取，请重试。', { exact: true }).count(), 0, 'successful retry clears the read error and confirms the empty task state');
-  await actionableRecoveryHome.screenshot({ path: '/tmp/xmt-home-actionable-read-confirmed-empty-1440.png', fullPage: false });
+  await actionableRecoveryHome.screenshot({ path: '/tmp/xmt-home-unknown-stage-time-empty-1440.png', fullPage: false });
   assert.equal(managerMessageQueries.length, actionableQueriesBeforeFailure + 1, 'retry performs exactly one scoped actionable-message read');
   assert.ok(expectedActionableReadErrors.length >= 2, 'the only expected errors are the isolated actionable-message 503 and its response record');
   assert.ok(actionableHomeApiMethods.every((method) => method === 'GET'), 'Home actionable-message failure and retry perform no API writes');
+  homeUnknownStageTimeCount = 0;
+  await actionableRecoveryHome.reload();
+  await actionableRecoveryHome.getByText('目前没有逾期或卡点内容', { exact: true }).waitFor();
+  assert.equal(await actionableRecoveryHome.getByText(/当前阶段时间待确认/).count(), 0, 'when no active topic has unknown stage time, the dashboard confirms the genuine empty attention state');
+  await actionableRecoveryHome.screenshot({ path: '/tmp/xmt-home-attention-confirmed-empty-1440.png', fullPage: false });
   emptyHomeTasks = false;
+  homeUnknownStageTimeCount = 0;
   await actionableRecoveryHome.close();
 
   const managerHome = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
@@ -878,8 +1378,13 @@ try {
   managerHome.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await managerHome.goto(`${base}/__qa-manager-home`);
   await managerHome.getByRole('heading', { name: '团队今日重点' }).waitFor();
+  const desktopManagerPriorityTasks = managerHome.getByTestId('home-priority-task');
+  assert.match(await desktopManagerPriorityTasks.nth(0).getAttribute('aria-label') || '', /^处理消息：/);
+  assert.match(await desktopManagerPriorityTasks.nth(1).getAttribute('aria-label') || '', /^查看同步：/);
+  assert.match(await desktopManagerPriorityTasks.nth(2).getAttribute('aria-label') || '', /^跟进选题：/);
+  assert.match(await desktopManagerPriorityTasks.nth(3).getAttribute('aria-label') || '', /^开始审核：/);
   await managerHome.getByRole('heading', { name: '团队选题关注' }).waitFor();
-  const userMenuButton = managerHome.getByRole('button', { name: /负责人验收/ });
+  const userMenuButton = managerHome.locator('button[title="打开用户菜单"]');
   await userMenuButton.waitFor();
   assert.equal(await userMenuButton.getAttribute('title'), '打开用户菜单');
   assert.equal(await userMenuButton.getAttribute('aria-expanded'), 'false');
@@ -887,7 +1392,16 @@ try {
   await managerHome.getByText('粉丝总数', { exact: true }).waitFor();
   await managerHome.getByText('200', { exact: true }).waitFor();
   await managerHome.getByText('120', { exact: true }).waitFor();
+  const snapshotMetricProvenance = await managerHome.getByRole('region', { name: '近 7 天播放与粉丝数据' }).locator('p').last().innerText();
+  assert.match(snapshotMetricProvenance, /统计口径：近 7 天按北京时间自然日计算，包含当天。/);
+  assert.match(snapshotMetricProvenance, /抖音采集快照/);
+  assert.match(snapshotMetricProvenance, /精确采集时间未知/);
+  assert.match(snapshotMetricProvenance, /粉丝.*观测日期/);
+  assert.doesNotMatch(snapshotMetricProvenance, /数据同步于/);
   await managerHome.getByRole('region', { name: '近 7 天播放与粉丝数据' }).scrollIntoViewIfNeeded();
+  const snapshotMetricRegion = managerHome.getByRole('region', { name: '近 7 天播放与粉丝数据' });
+  assert.ok(await renderedTextContrastRatio(snapshotMetricRegion.locator('dt').first()) >= 4.5, 'the weekly metric label meets text contrast requirements in the light theme');
+  assert.ok(await renderedTextContrastRatio(snapshotMetricRegion.locator('p').last()) >= 4.5, 'the weekly metric provenance meets text contrast requirements in the light theme');
   await managerHome.screenshot({ path: '/tmp/xmt-home-weekly-metrics-1440.png', fullPage: false });
   await managerHome.getByText('逾期 1 · 阶段超过 2 天 1 · 截止临近 1', { exact: true }).waitFor();
   await managerHome.getByText('同步未完整', { exact: true }).waitFor();
@@ -900,21 +1414,21 @@ try {
   await managerHome.waitForURL((url) => url.pathname === '/topics');
   await managerHome.goBack();
   await managerHome.getByRole('heading', { name: '团队今日重点' }).waitFor();
-  await managerHome.getByRole('button', { name: '处理消息', exact: true }).click();
+  await managerHome.getByRole('button', { name: /^处理消息：/ }).click();
   await managerHome.waitForURL((url) => url.pathname === '/messages' && url.searchParams.get('filter') === 'actionable');
   assert.equal(await managerHome.getByRole('button', { name: '待处理', exact: true }).getAttribute('aria-pressed'), 'true', 'the Home message action opens the actionable unread filter');
   await managerHome.getByText(actionableManagerMessage.title, { exact: true }).waitFor();
   assert.ok(managerMessageQueries.some((query) => query.read === 'unread' && query.link === 'present'), 'the actionable filter requests only unread messages with business links');
   await managerHome.goto(`${base}/__qa-manager-home`);
   await managerHome.getByRole('heading', { name: '团队今日重点' }).waitFor();
-  const managerSync = managerHome.getByRole('button', { name: '查看同步', exact: true });
-  const managerAudit = managerHome.getByRole('button', { name: '开始审核', exact: true }).first();
-  const managerProductionReview = managerHome.getByRole('button', { name: '审核稿件', exact: true });
-  const managerPublishing = managerHome.getByRole('button', { name: '去发布', exact: true });
-  const managerMessages = managerHome.getByRole('button', { name: '处理消息', exact: true });
+  const managerSync = managerHome.getByRole('button', { name: /^查看同步：/ });
+  const managerAudit = managerHome.getByRole('button', { name: /^开始审核：/ }).first();
+  const managerProductionReviewTaskButton = managerHome.getByRole('button', { name: /^审核稿件：/ });
+  const managerPublishing = managerHome.getByRole('button', { name: /^去发布：/ });
+  const managerMessages = managerHome.getByRole('button', { name: /^处理消息：/ });
   await managerPublishing.waitFor();
   await managerSync.waitFor();
-  await managerProductionReview.waitFor();
+  await managerProductionReviewTaskButton.waitFor();
   const managerPublishingHandle = await managerPublishing.elementHandle();
   assert.ok(managerPublishingHandle, 'manager dashboard includes an actionable publishing task');
   const managerMessagesHandle = await managerMessages.elementHandle();
@@ -922,10 +1436,25 @@ try {
   assert.ok(await managerMessages.evaluate((element, auditElement) => Boolean(element.compareDocumentPosition(auditElement) & Node.DOCUMENT_POSITION_FOLLOWING), await managerAudit.elementHandle()), 'actionable unread messages are prioritized ahead of team review tasks');
   assert.ok(await managerSync.evaluate((element, auditElement) => Boolean(element.compareDocumentPosition(auditElement) & Node.DOCUMENT_POSITION_FOLLOWING), await managerAudit.elementHandle()), 'team sync anomalies are prioritized ahead of review tasks');
   assert.ok(await managerAudit.evaluate((element, publishingElement) => Boolean(element.compareDocumentPosition(publishingElement) & Node.DOCUMENT_POSITION_FOLLOWING), managerPublishingHandle), 'team review actions are shown ahead of publishing tasks for a manager');
-  assert.ok(await managerAudit.evaluate((element, manuscriptReviewElement) => Boolean(element.compareDocumentPosition(manuscriptReviewElement) & Node.DOCUMENT_POSITION_FOLLOWING), await managerProductionReview.elementHandle()), 'topic audits are shown before the existing-permission manuscript review queue');
-  assert.ok(await managerProductionReview.evaluate((element, publishingElement) => Boolean(element.compareDocumentPosition(publishingElement) & Node.DOCUMENT_POSITION_FOLLOWING), managerPublishingHandle), 'manuscript review is retained ahead of publishing tasks for a manager');
-  await managerProductionReview.click();
-  await managerHome.waitForURL((url) => url.pathname === '/production/942');
+  assert.ok(await managerAudit.evaluate((element, manuscriptReviewElement) => Boolean(element.compareDocumentPosition(manuscriptReviewElement) & Node.DOCUMENT_POSITION_FOLLOWING), await managerProductionReviewTaskButton.elementHandle()), 'topic audits are shown before the existing-permission manuscript review queue');
+  assert.ok(await managerProductionReviewTaskButton.evaluate((element, publishingElement) => Boolean(element.compareDocumentPosition(publishingElement) & Node.DOCUMENT_POSITION_FOLLOWING), managerPublishingHandle), 'manuscript review is retained ahead of publishing tasks for a manager');
+  await managerProductionReviewTaskButton.click();
+  await managerHome.waitForURL((url) => url.pathname === '/production/942' && !url.searchParams.has('action'));
+  const managerReviewApproveAction = managerHome.getByTestId('production-review-approve');
+  await managerReviewApproveAction.waitFor();
+  assert.equal(await managerReviewApproveAction.innerText(), '审核通过', 'an authorized review task focuses the existing approval action without executing it');
+  assert.equal(await managerReviewApproveAction.evaluate((element) => document.activeElement === element), true, 'the authorized review deep link moves keyboard focus to the approval action');
+  assert.equal(await managerHome.locator('.ProseMirror').getAttribute('contenteditable'), 'false', 'review-only access keeps the manuscript body read-only');
+  assert.equal(managerProductionReviewStatus, 'review', 'opening a review task does not approve the production');
+  assert.equal(managerProductionApprovalWrites, 0, 'opening a review task performs no approval write');
+  const managerApprovalResponse = managerHome.waitForResponse((response) => response.request().method() === 'PUT'
+    && new URL(response.url()).pathname === '/api/workflow/production/942'
+    && response.status() === 200);
+  await managerReviewApproveAction.click();
+  await managerApprovalResponse;
+  assert.equal(managerProductionReviewStatus, 'approved', 'the focused approval action performs the existing authorized status transition');
+  assert.equal(managerProductionApprovalWrites, 1, 'an explicit approval click writes exactly once');
+  assert.equal(managerProductionReviewContent, '<p>隔离验收稿件正文</p>', 'review-only approval does not alter the manuscript body');
   await managerHome.goto(`${base}/__qa-manager-home`);
   await managerHome.getByRole('heading', { name: '团队今日重点' }).waitFor();
   await managerSync.click();
@@ -937,6 +1466,37 @@ try {
   await managerPublishing.click();
   await managerHome.waitForURL((url) => url.pathname === '/publishing/941');
   await managerHome.close();
+
+  const darkManagerHome = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  await darkManagerHome.goto(`${base}/__qa-manager-home?theme=dark`);
+  await darkManagerHome.getByText('近 7 天播放变化', { exact: true }).waitFor();
+  const darkWeeklyMetricRegion = darkManagerHome.getByRole('region', { name: '近 7 天播放与粉丝数据' });
+  const darkWeeklyMetricProvenance = await darkWeeklyMetricRegion.locator('p').last().innerText();
+  assert.match(darkWeeklyMetricProvenance, /统计口径：近 7 天按北京时间自然日计算，包含当天。/);
+  assert.ok(await renderedTextContrastRatio(darkWeeklyMetricRegion.locator('dt').first()) >= 4.5, 'the weekly metric label meets text contrast requirements in the dark theme');
+  assert.ok(await renderedTextContrastRatio(darkWeeklyMetricRegion.locator('p').last()) >= 4.5, 'the weekly metric provenance meets text contrast requirements in the dark theme');
+  await darkManagerHome.screenshot({ path: '/tmp/xmt-home-weekly-metrics-dark-390.png', fullPage: false });
+  await darkManagerHome.close();
+
+  const officialMetricsHome = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  await officialMetricsHome.goto(`${base}/__qa-manager-home?metrics=official`);
+  await officialMetricsHome.getByText('近 7 天播放变化', { exact: true }).waitFor();
+  const officialMetricProvenance = await officialMetricsHome.getByRole('region', { name: '近 7 天播放与粉丝数据' }).locator('p').last().innerText();
+  assert.match(officialMetricProvenance, /官方逐日数据/);
+  assert.match(officialMetricProvenance, /采集时间：2026\/10\/9 18:30/);
+  assert.doesNotMatch(officialMetricProvenance, /采集时间：未知/);
+  assert.match(officialMetricProvenance, /数据截至：/);
+  await officialMetricsHome.close();
+
+  const officialMetricsUnknownTimeHome = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  await officialMetricsUnknownTimeHome.goto(`${base}/__qa-manager-home?metrics=official-no-time`);
+  await officialMetricsUnknownTimeHome.getByText('近 7 天播放变化', { exact: true }).waitFor();
+  const officialUnknownTimeProvenance = await officialMetricsUnknownTimeHome.getByRole('region', { name: '近 7 天播放与粉丝数据' }).locator('p').last().innerText();
+  assert.match(officialUnknownTimeProvenance, /官方逐日数据/);
+  assert.match(officialUnknownTimeProvenance, /采集时间：未知/);
+  assert.match(officialUnknownTimeProvenance, /数据截至：/);
+  assert.match(officialUnknownTimeProvenance, /粉丝总数.*观测日期：未知/);
+  await officialMetricsUnknownTimeHome.close();
 
   const creatorDashboardPage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   const expectedCreatorDashboardErrors: string[] = [];
@@ -967,6 +1527,27 @@ try {
   await creatorDashboardPage.getByText('负责人验收账号', { exact: true }).first().waitFor();
   await creatorDashboardPage.getByText('采集端在线', { exact: true }).first().waitFor();
   await creatorDashboardPage.getByText('尚无同步记录；首次同步后会显示在这里。', { exact: true }).waitFor();
+  const creatorWorksButton = creatorDashboardPage.getByRole('button', { name: '查看作品', exact: true });
+  for (const width of [320, 390, 1440]) {
+    await creatorDashboardPage.setViewportSize({ width, height: 844 });
+    const creatorWorksButtonLayout = await creatorWorksButton.evaluate((element) => {
+      const button = element.getBoundingClientRect();
+      const card = element.closest('[aria-label="创作者账号概览"]')?.getBoundingClientRect();
+      return {
+        whiteSpace: getComputedStyle(element).whiteSpace,
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        buttonRight: button.right,
+        cardRight: card?.right ?? 0,
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: document.documentElement.clientWidth,
+      };
+    });
+    assert.equal(creatorWorksButtonLayout.whiteSpace, 'nowrap', `the creator works action stays on one line at ${width}px`);
+    assert.ok(creatorWorksButtonLayout.scrollWidth <= creatorWorksButtonLayout.clientWidth, `the creator works label fits within its button at ${width}px`);
+    assert.ok(creatorWorksButtonLayout.buttonRight <= creatorWorksButtonLayout.cardRight, `the creator works action stays within its card at ${width}px`);
+    assert.ok(creatorWorksButtonLayout.documentWidth <= creatorWorksButtonLayout.viewportWidth, `the creator dashboard has no horizontal overflow at ${width}px`);
+  }
   assert.equal(await creatorDashboardPage.getByText('采集端离线', { exact: true }).count(), 0, 'a failed status read does not claim the collector is offline');
   failNextCreatorDashboard = true;
   failNextCreatorSyncLogs = true;
@@ -989,28 +1570,173 @@ try {
   managerMobile.on('pageerror', (error) => errors.push(error.message));
   managerMobile.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await managerMobile.goto(`${base}/__qa-manager-home`);
-  await managerMobile.getByRole('heading', { name: '数据同步异常' }).waitFor();
-  await managerMobile.getByRole('heading', { name: '待审核稿件' }).waitFor();
+  managerProductionReviewStatus = 'review';
+  managerProductionReviewContent = '<p>隔离验收稿件正文</p>';
+  managerProductionApprovalWrites = 0;
+  await managerMobile.getByRole('heading', { name: '团队今日重点' }).waitFor();
+  const managerQuickActions = managerMobile.getByTestId('mobile-home-quick-action');
+  assert(await managerQuickActions.count() >= 3, 'the management mobile Home renders its available quick actions');
+  const quickActionWidths = () => managerQuickActions.evaluateAll((elements) => elements.map((element) => {
+    const button = element.getBoundingClientRect();
+    const wrapper = element.parentElement?.getBoundingClientRect();
+    return { button: button.width, wrapper: wrapper?.width ?? 0 };
+  }));
+  assert((await quickActionWidths()).every(({ button, wrapper }) => button >= 150 && wrapper >= 150), 'quick actions fill their two-column cells at 390px instead of shrinking to their labels');
+  await managerMobile.setViewportSize({ width: 320, height: 844 });
+  assert((await quickActionWidths()).every(({ button, wrapper }) => button >= 125 && wrapper >= 125), 'quick actions remain comfortably wide in the 320px layout');
+  assert(await managerMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the 320px quick-action layout has no horizontal overflow');
+  await managerMobile.setViewportSize({ width: 390, height: 844 });
   assert.equal(await managerMobile.getByText('近 7 天播放变化', { exact: true }).count(), 0, 'the separate MobileHome keeps its current scope; this optional block belongs to the desktop Home screen');
-  await managerMobile.getByText('负责人验收账号', { exact: true }).waitFor();
-  await managerMobile.getByRole('button', { name: '打开待审核稿件：待审核稿件浏览器验收' }).waitFor();
-  assert(await managerMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the manager Home fits a 390px viewport without horizontal overflow');
-  await managerMobile.screenshot({ path: '/tmp/xmt-home-sync-anomalies-manager-390.png', fullPage: false });
-  await managerMobile.getByRole('button', { name: '打开待审核稿件：待审核稿件浏览器验收' }).click();
-  await managerMobile.waitForURL((url) => url.pathname === '/production/942');
+  const managerPriorityTasks = managerMobile.getByTestId('mobile-home-task');
+  await managerPriorityTasks.nth(2).waitFor();
+  const managerFirstScreenTaskText = await managerPriorityTasks.allInnerTexts();
+  assert.match(managerFirstScreenTaskText[0], /待处理消息[\s\S]*需要确认发布安排/, 'management mobile Home prioritizes actionable messages first');
+  assert.match(managerFirstScreenTaskText[1], /同步异常[\s\S]*负责人验收账号/, 'management mobile Home prioritizes sync anomalies second');
+  assert.match(managerFirstScreenTaskText[2], /已逾期[\s\S]*选题离开确认对比度验收/, 'management mobile Home follows with an overdue team topic');
+  for (const [index, action] of ['处理消息', '查看同步', '跟进选题'].entries()) {
+    assert.ok(await renderedTextContrastRatio(managerPriorityTasks.nth(index).getByText(action, { exact: true })) >= 4.5, `management task action ${action} meets light-theme contrast requirements`);
+  }
+  const thirdManagerTaskBottom = await managerPriorityTasks.nth(2).evaluate((element) => element.getBoundingClientRect().bottom);
+  const managerNavigationTop = await managerMobile.getByRole('navigation', { name: '移动主导航' }).evaluate((element) => element.getBoundingClientRect().top);
+  assert(thirdManagerTaskBottom <= managerNavigationTop, 'three prioritized management tasks fit above the fixed mobile navigation');
+  await managerMobile.getByRole('heading', { name: '内容阶段' }).waitFor();
+  await managerMobile.getByRole('button', { name: '4 灵感池' }).waitFor();
+  await managerMobile.getByRole('button', { name: '4 待审' }).waitFor();
+  await managerMobile.getByRole('button', { name: '5 复盘' }).waitFor();
+  const managerStageButtons = managerMobile.getByRole('list', { name: '内容生产各阶段' }).getByRole('button');
+  for (const button of await managerStageButtons.all()) {
+    const visibleName = (await button.innerText()).split(/\s+/).filter(Boolean).join(' ');
+    assert.equal(await button.getAttribute('aria-label'), null, `stage button “${visibleName}” derives its accessible name from its visible count and label`);
+    await managerMobile.getByRole('button', { name: visibleName, exact: true }).waitFor();
+  }
+  await managerMobile.screenshot({ path: '/tmp/xmt-home-priority-manager-390.png', fullPage: false });
+  const pendingStageNavigation = managerMobile.waitForURL((url) => url.pathname === '/topics' && url.searchParams.get('status') === 'pending');
+  await managerMobile.getByRole('button', { name: '4 待审' }).click();
+  await pendingStageNavigation;
   await managerMobile.goto(`${base}/__qa-manager-home`);
-  await managerMobile.getByRole('heading', { name: '数据同步异常' }).waitFor();
-  await managerMobile.getByRole('button', { name: '查看同步异常：负责人验收账号' }).click();
+  await managerMobile.getByRole('heading', { name: '团队今日重点' }).waitFor();
+  await managerMobile.getByRole('button', { name: '查看剩余 3 项', exact: true }).click();
+  await managerPriorityTasks.nth(5).waitFor();
+  const managerTaskText = await managerPriorityTasks.allInnerTexts();
+  assert.match(managerTaskText[3], /待审核选题/);
+  assert.match(managerTaskText[4], /待审核稿件/);
+  assert.match(managerTaskText[5], /今日发布/);
+  await managerMobile.getByText('负责人验收账号', { exact: true }).waitFor();
+  await managerMobile.getByRole('button', { name: /待审核稿件浏览器验收.*v1\.0/ }).waitFor();
+  assert(await managerMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the manager Home fits a 390px viewport without horizontal overflow');
+  await managerMobile.goto(`${base}/__qa-manager-home?tasks=attention-only`);
+  await managerMobile.getByRole('heading', { name: '团队今日重点' }).waitFor();
+  const attentionOnlyTasks = managerMobile.getByTestId('mobile-home-task');
+  assert.equal(await attentionOnlyTasks.count(), 3, 'attention-only Home initially keeps the first three priority tasks visible');
+  assert.match(await attentionOnlyTasks.nth(2).innerText(), /移动首页第 3 条关注事项/);
+  await managerMobile.getByRole('button', { name: '查看剩余 3 项', exact: true }).click();
+  assert.equal(await attentionOnlyTasks.count(), 6, 'expanding attention-only Home reveals the full six-task cap');
+  await attentionOnlyTasks.nth(3).getByText('移动首页第 4 条关注事项', { exact: true }).waitFor();
+  await attentionOnlyTasks.nth(5).getByText('移动首页第 6 条关注事项', { exact: true }).waitFor();
+  assert.equal(await managerMobile.getByText('移动首页第 7 条关注事项', { exact: true }).count(), 0, 'the mobile Home respects its documented maximum of six tasks when the server returns eight attention topics');
+  assert(await managerMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'expanded attention-only tasks fit a 390px viewport without horizontal overflow');
+  await managerMobile.goto(`${base}/__qa-manager-home`);
+  await managerMobile.getByRole('heading', { name: '团队今日重点' }).waitFor();
+  await managerMobile.getByRole('button', { name: /待审核稿件浏览器验收.*v1\.0/ }).click();
+  await managerMobile.waitForURL((url) => url.pathname === '/production/942' && url.searchParams.get('action') === 'review');
+  await managerMobile.getByRole('button', { name: '保存修改', exact: true }).waitFor();
+  const mobileApproval = managerMobile.waitForResponse((response) => response.request().method() === 'PUT'
+    && new URL(response.url()).pathname === '/api/workflow/production/942'
+    && response.status() === 200);
+  await managerMobile.getByRole('button', { name: '审核通过', exact: true }).click();
+  await mobileApproval;
+  await managerMobile.getByText('审核已通过', { exact: true }).waitFor();
+  assert.equal(managerProductionApprovalWrites, 1, 'the mobile Home review task performs one scoped approval write after the editor flush');
+  assert.equal(managerProductionReviewStatus, 'approved', 'the mobile approval is confirmed by the isolated server fixture');
+  await managerMobile.getByText(/这份稿件已不在待审核状态/).waitFor();
+  await managerMobile.getByText('待审核任务已结束：当前页面只读。', { exact: true }).waitFor();
+  assert.equal(await managerMobile.getByRole('button', { name: '审核通过', exact: true }).count(), 0, 'a completed review task no longer offers approval');
+  assert.equal(await managerMobile.getByRole('button', { name: '提交审核', exact: true }).count(), 0, 'a stale review deep link cannot accidentally submit a new review');
+  await managerMobile.waitForFunction(() => document.querySelector('.ProseMirror')?.getAttribute('contenteditable') === 'false');
+  assert.equal(await managerMobile.locator('.ProseMirror').getAttribute('contenteditable'), 'false', 'a completed review deep link also becomes read-only instead of silently saving edits');
+  await managerMobile.goto(`${base}/__qa-manager-home`);
+  await managerMobile.getByRole('button', { name: /负责人验收账号.*部分同步失败.*2 项未同步/ }).click();
   await managerMobile.waitForURL((url) => url.pathname === '/analytics/creator-center' && url.searchParams.get('account_id') === managerSyncAccountUid);
   await managerMobile.getByRole('heading', { name: '抖音数据驾驶舱' }).waitFor();
   await managerMobile.goto(`${base}/__qa-manager-home`);
-  await managerMobile.getByRole('heading', { name: '待处理消息' }).waitFor();
   await managerMobile.getByText(actionableManagerMessage.title, { exact: true }).waitFor();
   assert(await managerMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the manager Home fits a 390px viewport without horizontal overflow');
   await managerMobile.screenshot({ path: '/tmp/xmt-home-actionable-messages-manager-390.png', fullPage: false });
-  await managerMobile.getByRole('button', { name: '查看待处理消息' }).click();
+  await managerMobile.getByTestId('mobile-home-task').first().click();
   await managerMobile.waitForURL((url) => url.pathname === '/messages' && url.searchParams.get('filter') === 'actionable');
   await managerMobile.close();
+
+  const productionViewerMobile = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  productionViewerMobile.on('pageerror', (error) => errors.push(error.message));
+  productionViewerMobile.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await productionViewerMobile.goto(`${base}/__qa-production-viewer`);
+  await productionViewerMobile.getByRole('heading', { name: '当前账号无法打开这份稿件', exact: true }).waitFor();
+  await productionViewerMobile.waitForURL((url) => url.pathname === '/production/942' && !url.searchParams.has('action'));
+  assert.equal(await productionViewerMobile.getByRole('button', { name: '审核通过', exact: true }).count(), 0, 'a read-only account cannot expose the production approval action through a direct link');
+  assert.equal(managerProductionApprovalWrites, 1, 'opening the same review task without production permission does not add a server write');
+  await productionViewerMobile.close();
+
+  const creatorMobile = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  creatorMobile.on('pageerror', (error) => errors.push(error.message));
+  creatorMobile.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await creatorMobile.goto(`${base}/__qa-creator-home`);
+  await creatorMobile.getByRole('heading', { name: '我的今日任务' }).waitFor();
+  assert.equal(await creatorMobile.getByTestId('mobile-home-active-topic-summary').innerText(), '共 2 项 · 展示最近 1 项', 'the creator Home shows the exact personal in-progress total separately from its bounded preview');
+  const creatorPriorityTasks = creatorMobile.getByTestId('mobile-home-task');
+  await creatorPriorityTasks.nth(2).waitFor();
+  const creatorTaskText = await creatorPriorityTasks.allInnerTexts();
+  assert.match(creatorTaskText[0], /我的稿件[\s\S]*我的待续写稿件[\s\S]*继续写稿/, 'creator Home puts the creator\'s own draft first');
+  const creatorDraftSaveStatus = creatorMobile.getByTestId('mobile-home-draft-save-status').first();
+  await creatorDraftSaveStatus.waitFor();
+  assert.equal(await creatorDraftSaveStatus.innerText(), '保存状态未确认', 'a server update timestamp does not claim a save was confirmed in this browser session');
+  await creatorMobile.getByRole('button', {
+    name: '我的稿件 保存状态未确认 我的待续写稿件 草稿待续写 · v1.1 · 2026/10/9 继续写稿',
+    exact: true,
+  }).waitFor();
+  await creatorMobile.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('writeConsistency:saved', 'production:943@v1.1', { userId: 95, source: 'browser-test' });
+  });
+  assert.equal(await creatorDraftSaveStatus.innerText(), '保存状态未确认', 'save state from another account is not shown on the personal draft');
+  await creatorMobile.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('editor:synced', 'production:943@v1.1', { userId: 96, source: 'browser-test' });
+  });
+  assert.equal(await creatorDraftSaveStatus.innerText(), '保存状态未确认', 'a collaboration sync event alone is not treated as persisted save confirmation');
+  await creatorMobile.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('editor:local-change', 'production:943@v1.1', { userId: 96, source: 'browser-test' });
+  });
+  await creatorMobile.getByText('有修改待保存', { exact: true }).waitFor();
+  await creatorMobile.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('yjs:update', 'production:943@v1.1', { userId: 96, source: 'browser-test' });
+  });
+  await creatorMobile.getByText('同步中，保存结果未确认', { exact: true }).waitFor();
+  await creatorMobile.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('writeConsistency:save', 'production:943@v1.1', { userId: 96, source: 'browser-test' });
+  });
+  await creatorMobile.getByText('正在保存', { exact: true }).waitFor();
+  await creatorMobile.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('writeConsistency:saved', 'production:943@v1.1', { userId: 96, source: 'browser-test' });
+  });
+  await creatorMobile.getByText('本次会话已确认保存', { exact: true }).waitFor();
+  await creatorMobile.evaluate(async () => {
+    const { emitEditorState } = await import('/src/editor/state/editorStateEventBus.ts');
+    emitEditorState('conflict:event', 'production:943@v1.1', { userId: 96, source: 'browser-test' });
+  });
+  await creatorMobile.getByText('保存异常待确认', { exact: true }).waitFor();
+  assert.match(creatorTaskText[1], /截止临近[\s\S]*我的临近选题/, 'creator Home puts a nearing deadline after personal drafts');
+  assert.match(creatorTaskText[2], /今日发布[\s\S]*今日待发布验收/, 'creator Home keeps the publishing action in the first task group');
+  const thirdCreatorTaskBottom = await creatorPriorityTasks.nth(2).evaluate((element) => element.getBoundingClientRect().bottom);
+  const creatorNavigationTop = await creatorMobile.getByRole('navigation', { name: '移动主导航' }).evaluate((element) => element.getBoundingClientRect().top);
+  assert(thirdCreatorTaskBottom <= creatorNavigationTop, 'three prioritized creator tasks fit above the fixed mobile navigation');
+  assert(await creatorMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the creator Home fits a 390px viewport without horizontal overflow');
+  await creatorMobile.getByRole('button', { name: /我的待续写稿件.*继续写稿/ }).click();
+  await creatorMobile.waitForURL((url) => url.pathname === '/production/943');
+  await creatorMobile.close();
 
   const weeklyMetricsRetry = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   const expectedWeeklyMetricsErrors: string[] = [];
@@ -1115,11 +1841,35 @@ try {
   malformedHomeMobile.on('console', (message) => { if (message.type() === 'error') malformedHomeRuntimeErrors.push(message.text()); });
   returnMalformedNextHomeAttention = true;
   await malformedHomeMobile.goto(`${base}/__qa-home`);
-  await malformedHomeMobile.getByText('工作台摘要数据格式暂不兼容，请重新加载；如问题持续，请联系管理员。', { exact: true }).waitFor();
+  await malformedHomeMobile.getByRole('alert').getByText('工作台摘要数据格式暂不兼容，请重新加载；如问题持续，请联系管理员。', { exact: true }).waitFor();
   assert.equal(await malformedHomeMobile.getByRole('alert').count(), 1, 'an incompatible summary response becomes a recoverable card error, not a route crash');
   assert.equal(await malformedHomeMobile.getByText('Unexpected Application Error!', { exact: true }).count(), 0, 'the framework error page is not shown for an incompatible summary response');
   assert.equal(await malformedHomeMobile.locator('vite-error-overlay').count(), 0, 'the malformed summary does not trigger a Vite overlay');
-  assert(await malformedHomeMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the malformed-summary recovery card fits a 390px viewport');
+  const malformedHomeLayout = await malformedHomeMobile.evaluate(() => ({
+    viewportWidth: document.documentElement.clientWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    stageScrollport: (() => {
+      const element = document.querySelector('[role="list"][aria-label="内容生产各阶段"]');
+      const rect = element?.getBoundingClientRect();
+      return element && rect ? {
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        left: Math.round(rect.left),
+        right: Math.round(rect.right),
+      } : null;
+    })(),
+    overflowCandidates: Array.from(document.querySelectorAll('body *')).filter((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && (rect.left < -1 || rect.right > document.documentElement.clientWidth + 1);
+    }).slice(0, 8).map((element) => ({
+      tag: element.tagName,
+      className: typeof element.className === 'string' ? element.className : '',
+      text: element.textContent?.trim().slice(0, 80),
+      left: Math.round(element.getBoundingClientRect().left),
+      right: Math.round(element.getBoundingClientRect().right),
+    })),
+  }));
+  assert(malformedHomeLayout.documentWidth <= malformedHomeLayout.viewportWidth + 1, `the malformed-summary recovery card fits a 390px viewport: ${JSON.stringify(malformedHomeLayout)}`);
   await malformedHomeMobile.screenshot({ path: '/tmp/xmt-home-malformed-summary-recovery-390.png', fullPage: false });
   const malformedSummaryRetry = malformedHomeMobile.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-attention'));
   await malformedHomeMobile.getByRole('button', { name: '重新加载', exact: true }).click();
@@ -1130,7 +1880,15 @@ try {
   await malformedHomeMobile.close();
 
   const homeMobile = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  await homeMobile.addInitScript(() => { Date.now = () => new Date('2026-10-09T12:00:00+08:00').getTime(); });
   const expectedMobileAttentionErrors: string[] = [];
+  const expectedMobileActivityErrors: string[] = [];
+  const mobileActivityMethods: string[] = [];
+  const mobileAttentionMethods: string[] = [];
+  homeMobile.on('request', (request) => {
+    if (request.url().endsWith('/api/dashboard/home-attention')) mobileAttentionMethods.push(request.method());
+    if (request.url().endsWith('/api/dashboard/home-activity')) mobileActivityMethods.push(request.method());
+  });
   homeMobile.on('pageerror', (error) => errors.push(error.message));
   homeMobile.on('console', (message) => {
     if (message.type() !== 'error') return;
@@ -1139,37 +1897,194 @@ try {
   });
   homeMobile.on('response', (response) => {
     if (response.url().endsWith('/api/dashboard/home-attention') && response.status() === 503) expectedMobileAttentionErrors.push(`${response.status()} ${response.url()}`);
+    else if (response.url().endsWith('/api/dashboard/home-activity') && response.status() === 503) expectedMobileActivityErrors.push(`${response.status()} ${response.url()}`);
     else if (response.status() >= 400) errors.push(`Unexpected HTTP error: ${response.status()} ${response.url()}`);
   });
+  homeUnknownStageTimeCount = 3;
   failNextHomeAttention = true;
   const mobileTopicReadsBefore = homeTopicListReads;
   await homeMobile.goto(`${base}/__qa-home`);
-  await homeMobile.getByText('工作台摘要暂时无法读取，请重试。', { exact: true }).waitFor();
-  await homeMobile.getByRole('button', { name: '— 进行中选题', exact: true }).waitFor();
-  assert.equal(await homeMobile.getByRole('alert').count(), 1, 'the mobile Home keeps the attention error scoped to its own card');
+  const mobileAnnouncementStrip = homeMobile.getByTestId('home-announcement-strip');
+  await mobileAnnouncementStrip.getByText('暂无公告', { exact: true }).waitFor();
+  await mobileAnnouncementStrip.getByRole('button', { name: '查看公告', exact: true }).waitFor();
+  await homeMobile.getByRole('button', { name: '记灵感', exact: true }).waitFor();
+  await homeMobile.getByRole('alert').getByText('工作台摘要暂时无法读取，请重试。', { exact: true }).waitFor();
+  await homeMobile.getByRole('heading', { name: '审核与内容推进' }).waitFor();
+  assert.equal(await homeMobile.getByRole('alert').count(), 1, 'the mobile Home keeps the attention error scoped to its priority task card');
   const mobileRetryResponse = homeMobile.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-attention'));
   await homeMobile.getByRole('button', { name: '重新加载', exact: true }).click();
   const mobileRetryResponseResult = await mobileRetryResponse;
   assert.equal(mobileRetryResponseResult.status(), 200, 'the mobile attention retry request succeeds');
   await homeMobile.getByText('逾期', { exact: true }).waitFor();
   await homeMobile.getByRole('heading', { name: '团队选题关注' }).waitFor();
-  await homeMobile.getByRole('button', { name: '47 进行中选题', exact: true }).waitFor();
-  await homeMobile.getByRole('heading', { name: '团队最近选题', exact: true }).waitFor();
-  const mobileRecent = homeMobile.locator('section').filter({ has: homeMobile.getByRole('heading', { name: '团队最近选题', exact: true }) });
+  await homeMobile.getByText('3 项内容的当前阶段时间待确认，暂不计入卡点；这不代表它们一定没有卡点。', { exact: true }).waitFor();
+  const mobileAttentionSummary = homeMobile.locator('[aria-label="2 项需要跟进"]');
+  assert.equal(await mobileAttentionSummary.count(), 1, 'unknown stage time is not added to the mobile attention total');
+  const mobileAttentionCards = mobileAttentionSummary.locator(':scope > div');
+  assert.equal(await mobileAttentionCards.nth(1).getByText('卡点', { exact: true }).count(), 1, 'the second mobile attention metric remains the confirmed stalled count');
+  assert.equal(await mobileAttentionCards.nth(1).getByText('1', { exact: true }).count(), 1, 'unknown stage time is not added to the mobile stalled count');
+  homeUnknownStageTimeCount = 0;
+  await homeMobile.reload();
+  await homeMobile.getByRole('heading', { name: '团队选题关注' }).waitFor();
+  assert.equal(await homeMobile.getByText(/当前阶段时间待确认/).count(), 0, 'mobile does not show an unknown-time notice when the scoped count is zero');
+  assert.equal(await mobileAttentionSummary.count(), 1, 'the confirmed attention total stays unchanged when unknown stage time is absent');
+  assert(mobileAttentionMethods.length >= 3 && mobileAttentionMethods.every((method) => method === 'GET'), 'mobile attention failure, retry, and refresh are isolated read-only requests');
+  await homeMobile.getByRole('heading', { name: '团队进行中的选题', exact: true }).waitFor();
+  assert.equal(await homeMobile.getByTestId('mobile-home-active-topic-summary').innerText(), '共 47 项 · 展示最近 3 项', 'the manager Home distinguishes the full team count from three bounded previews');
+  for (const [stageEnteredAt, expectedElapsed] of approvedStageTimeCases) {
+    approvedPipelineStageEnteredAt = stageEnteredAt;
+    await homeMobile.goto(`${base}/__qa-home`);
+    await homeMobile.getByRole('heading', { name: '内容阶段' }).waitFor();
+    await homeMobile.getByRole('button', { name: /各阶段最新内容/ }).click();
+    const approvedPreview = homeMobile.getByTestId('mobile-home-stage-preview').filter({ hasText: approvedPipelineTopic.title });
+    await approvedPreview.getByText(`已通过 · 待开始创作 · ${expectedElapsed}`, { exact: true }).waitFor();
+  }
+  approvedPipelineStageEnteredAt = '2026-10-06 12:00:00';
+  await homeMobile.goto(`${base}/__qa-home`);
+  await homeMobile.getByRole('heading', { name: '内容阶段' }).waitFor();
+  await homeMobile.getByRole('button', { name: '4 灵感池' }).waitFor();
+  const stagePreviewToggle = homeMobile.getByRole('button', { name: /各阶段最新内容/ });
+  assert.equal(await stagePreviewToggle.getAttribute('aria-expanded'), 'false', 'mobile stage previews are collapsed by default to keep the first screen compact');
+  assert.equal(await homeMobile.locator('#mobile-home-stage-previews').count(), 1, 'the stage-preview disclosure references a persistent controlled region');
+  const stagePreviewRequestCount = homeTopicListReads;
+  await stagePreviewToggle.click();
+  const stagePreviewList = homeMobile.getByTestId('mobile-home-stage-preview-list');
+  await stagePreviewList.waitFor();
+  await stagePreviewList.getByText('首页灵感预览 3', { exact: true }).waitFor();
+  assert.equal(await stagePreviewList.getByText('首页灵感预览 4', { exact: true }).count(), 0, 'the inspiration preview stays within its three-item cap');
+  await stagePreviewList.getByRole('heading', { name: '待审 · 4' }).waitFor();
+  await stagePreviewList.getByText('内容流第三条待审选题', { exact: true }).waitFor();
+  await stagePreviewList.getByText(approvedPipelineTopic.title, { exact: true }).waitFor();
+  await stagePreviewList.getByText('已通过 · 待开始创作 · 停留 3 天', { exact: true }).waitFor();
+  await stagePreviewList.getByText(/停留 \d+ 天/).first().waitFor();
+  assert.equal(await stagePreviewList.getByTestId('mobile-home-stage-preview').count(), 14, 'all seven available stages show at most three recent previews');
+  assert.equal(homeTopicListReads, stagePreviewRequestCount, 'stage previews reuse the existing bounded dashboard summary instead of requesting full topic lists');
+  assert(await homeMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'expanded stage previews fit a 390px viewport without horizontal overflow');
+  await stagePreviewList.getByTestId('mobile-home-stage-preview').filter({ hasText: '内容流第三条待审选题' }).click();
+  await homeMobile.waitForURL((url) => url.pathname === `/topics/${thirdPendingTopic.id}`);
+  await homeMobile.goto(`${base}/topics?status=creation`);
+  await homeMobile.getByRole('button', { name: '创作阶段', exact: true }).waitFor();
+  await homeMobile.getByRole('button', { name: approvedPipelineTopic.title }).waitFor();
+  await homeMobile.getByRole('button', { name: productionTopic.title }).waitFor();
+  await homeMobile.getByRole('button', { name: '我的', exact: true }).click();
+  await homeMobile.waitForURL((url) => url.pathname === '/topics' && url.searchParams.get('topic_filter') === 'mine' && !url.searchParams.has('status'));
+  await homeMobile.reload();
+  assert.equal(await homeMobile.getByRole('button', { name: '我的', exact: true }).getAttribute('aria-pressed'), 'true', 'the mobile personal filter is addressable and survives a reload');
+  await homeMobile.getByRole('button', { name: '全部', exact: true }).click();
+  await homeMobile.waitForURL((url) => url.pathname === '/topics' && !url.searchParams.has('status') && !url.searchParams.has('topic_filter'));
+  await homeMobile.reload();
+  assert.equal(await homeMobile.getByRole('button', { name: '全部', exact: true }).getAttribute('aria-pressed'), 'true', 'clearing the mobile filter restores and persists the unfiltered list');
+  await homeMobile.goto(`${base}/__qa-home`);
+  await homeMobile.getByRole('heading', { name: '内容阶段' }).waitFor();
+  const recentChangesToggle = homeMobile.getByRole('button', { name: /最近变化/ });
+  assert.equal(await recentChangesToggle.getAttribute('aria-expanded'), 'false', 'recent changes are collapsed on the mobile Home by default');
+  assert.equal(await homeMobile.locator('#mobile-home-recent-changes').count(), 1, 'the collapsed disclosure has a persistent controlled region for assistive technology');
+  assert.equal(await homeMobile.locator('#mobile-home-recent-changes').isVisible(), false, 'collapsed activity content stays hidden');
+  assert.equal(mobileActivityMethods.length, 0, 'the collapsed recent-changes section does not fetch activity data');
+  failNextHomeActivity = true;
+  const firstMobileActivityFailure = homeMobile.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-activity'));
+  await recentChangesToggle.click();
+  const firstMobileActivityFailureResponse = await firstMobileActivityFailure;
+  assert.equal(firstMobileActivityFailureResponse.status(), 503, 'expanding recent changes surfaces the isolated activity-read failure');
+  assert.equal(firstMobileActivityFailureResponse.request().method(), 'GET', 'recent changes remain read-only');
+  await homeMobile.getByRole('alert').getByText('最近变化暂不可用，请重试。', { exact: true }).waitFor();
+  const firstMobileActivityRetry = homeMobile.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-activity'));
+  await homeMobile.getByRole('button', { name: '重新加载最近变化', exact: true }).click();
+  assert.equal((await firstMobileActivityRetry).status(), 200, 'the mobile recent-changes retry recovers');
+  await homeMobile.getByText('最近变化验收稿件', { exact: true }).waitFor();
+  assert.equal(await homeMobile.getByTestId('mobile-home-recent-change').count(), 2, 'mobile recent changes render the bounded activity events');
+  failNextHomeActivity = true;
+  const mobileStaleActivityFailure = homeMobile.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-activity') && response.status() === 503);
+  await homeMobile.getByRole('button', { name: '刷新最近变化', exact: true }).click();
+  await mobileStaleActivityFailure;
+  await homeMobile.getByText('仍显示最近一次成功读取的内容，可能不是最新。', { exact: true }).waitFor();
+  assert.equal(await homeMobile.getByText('最近变化验收稿件', { exact: true }).count(), 1, 'a failed mobile refresh retains the last successful activity');
+  const mobileStaleActivityRetry = homeMobile.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-activity') && response.status() === 200);
+  await homeMobile.getByRole('alert').getByRole('button', { name: '重新加载最近变化', exact: true }).click();
+  await mobileStaleActivityRetry;
+  const mobileActivityLink = homeMobile.getByTestId('mobile-home-recent-change').filter({ hasText: '最近变化验收稿件' });
+  await mobileActivityLink.click();
+  await homeMobile.waitForURL((url) => url.pathname === '/production/943');
+  assert.deepEqual(mobileActivityMethods, ['GET', 'GET', 'GET', 'GET'], 'the collapsed section makes no request and each explicit expand/retry/refresh uses GET');
+  assert.ok(expectedMobileActivityErrors.length >= 2, 'only the deliberately injected first-read and refresh 503 responses are expected');
+  await homeMobile.goto(`${base}/__qa-home`);
+  await homeMobile.getByRole('heading', { name: '审核与内容推进' }).waitFor();
+  await homeMobile.goto(`${base}/__qa-manager-home?active_preview=missing`);
+  assert.equal(await homeMobile.getByTestId('mobile-home-active-topic-summary').innerText(), '共 47 项 · 展示最近 0 项', 'a nonzero exact total remains visible when the bounded preview is unavailable');
+  await homeMobile.getByText('共 47 项进行中选题，预览暂不可用；可查看全部。', { exact: true }).waitFor();
+  assert.equal(await homeMobile.getByText('当前没有进行中的选题。', { exact: true }).count(), 0, 'an unavailable preview does not masquerade as an empty scope');
+  await homeMobile.goto(`${base}/__qa-manager-home`);
+  await homeMobile.getByRole('heading', { name: '审核与内容推进' }).waitFor();
+  const mobileRecent = homeMobile.locator('section').filter({ has: homeMobile.getByRole('heading', { name: '团队进行中的选题', exact: true }) });
   assert.equal(await mobileRecent.getByRole('button').count(), 4, 'mobile recent topics contain the three bounded previews plus the full-list link');
+  assert.ok(await textContrast(mobileRecent.getByRole('button', { name: '查看全部', exact: true })) >= 4.5, 'light-theme mobile Home links meet 4.5:1 contrast');
   await mobileRecent.getByText('已通过', { exact: true }).waitFor();
+  await homeMobile.getByRole('button', { name: '查看剩余 3 项', exact: true }).click();
+  await homeMobile.getByRole('button', { name: /选题离开确认对比度验收.*已逾期/ }).waitFor();
+  await homeMobile.getByRole('button', { name: /待审核稿件浏览器验收.*v1\.0/ }).waitFor();
+  await homeMobile.getByRole('button', { name: /今日待发布验收.*抖音.*2026\/10\/09 15:00/ }).waitFor();
+  await homeMobile.getByRole('heading', { name: '审核与内容推进' }).waitFor();
+  const homeMobileTasks = homeMobile.getByTestId('mobile-home-task');
+  await homeMobileTasks.nth(2).waitFor();
+  const continueDraftTask = homeMobile.getByRole('button', { name: /我的待续写稿件.*草稿待续写.*v1\.1.*继续写稿/ });
+  await continueDraftTask.waitFor();
+  assert.ok(await renderedTextContrastRatio(continueDraftTask.getByText('继续写稿', { exact: true })) >= 4.5, 'the draft action label meets text contrast requirements in the light theme');
+  await continueDraftTask.click();
+  await homeMobile.waitForURL((url) => url.pathname === '/production/943');
+  await homeMobile.goto(`${base}/__qa-home`);
+  await homeMobile.getByRole('heading', { name: '审核与内容推进' }).waitFor();
+  await homeMobileTasks.nth(2).waitFor();
+  await homeMobile.getByRole('button', { name: '查看剩余 3 项', exact: true }).click();
+  const rejectedDraftTask = homeMobile.getByRole('button', { name: /我的退回稿件.*退回修改.*v1\.2.*处理退回/ });
+  await rejectedDraftTask.waitFor();
+  assert.ok(await renderedTextContrastRatio(rejectedDraftTask.getByText('处理退回', { exact: true })) >= 4.5, 'the returned-draft action label meets text contrast requirements in the light theme');
+  await rejectedDraftTask.click();
+  await homeMobile.waitForURL((url) => url.pathname === '/production/944');
+  await homeMobile.goto(`${base}/__qa-home`);
+  await homeMobile.getByRole('heading', { name: '审核与内容推进' }).waitFor();
+  await homeMobileTasks.nth(2).waitFor();
+  await homeMobile.getByRole('button', { name: '查看剩余 3 项', exact: true }).click();
+  const todayPublishingTask = homeMobile.getByRole('button', { name: /今日发布.*今日待发布验收.*去发布/ });
   assert.equal(await homeMobile.title(), '新媒体协作管理系统');
   assert.equal(await homeMobile.getByText('逾期', { exact: true }).count(), 1, 'the mobile Home renders attention counts after retry');
-  await homeMobile.getByRole('heading', { name: '今日发布' }).waitFor();
-  await homeMobile.getByText('今日待发布验收', { exact: true }).waitFor();
+  await todayPublishingTask.waitFor();
+  await todayPublishingTask.getByText('今日待发布验收', { exact: true }).waitFor();
   await homeMobile.getByText('抖音 · 2026/10/09 15:00', { exact: true }).waitFor();
   assert.equal(await homeMobile.getByRole('alert').count(), 0, 'a successful mobile retry clears the attention error');
   assert.equal(homeTopicListReads, mobileTopicReadsBefore, 'mobile Home uses the bounded aggregate without a paged topics request');
   assert.ok(expectedMobileAttentionErrors.length >= 1, 'the only expected mobile Home failure is the injected attention 503');
   assert(await homeMobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), 'the Home dashboard fits a 390px viewport without horizontal overflow');
   await homeMobile.screenshot({ path: '/tmp/xmt-home-attention-390.png', fullPage: false });
-  await homeMobile.getByRole('button', { name: '处理今日发布：今日待发布验收，抖音' }).click();
+  await homeMobile.getByRole('button', { name: /今日待发布验收.*抖音.*2026\/10\/09 15:00/ }).click();
   await homeMobile.waitForURL((url) => url.pathname === '/publishing/941');
+  await homeMobile.goto(`${base}/__qa-home`);
+  const mobileQuickWrite = homeMobile.getByRole('button', { name: '写两句', exact: true });
+  await mobileQuickWrite.waitFor();
+  await mobileQuickWrite.click();
+  await homeMobile.waitForURL((url) => url.pathname === '/production/content/new');
+  await homeMobile.getByLabel('关联选题').waitFor();
+
+  const darkMobileHome = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  darkMobileHome.on('pageerror', (error) => errors.push(error.message));
+  darkMobileHome.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await darkMobileHome.goto(`${base}/__qa-home?theme=dark`);
+  await darkMobileHome.getByRole('heading', { name: '团队进行中的选题', exact: true }).waitFor();
+  await darkMobileHome.getByRole('button', { name: '查看剩余 3 项', exact: true }).click();
+  const darkMobileRecent = darkMobileHome.locator('section').filter({ has: darkMobileHome.getByRole('heading', { name: '团队进行中的选题', exact: true }) });
+  assert.ok(await textContrast(darkMobileRecent.getByRole('button', { name: '查看全部', exact: true })) >= 4.5, 'dark-theme mobile Home links meet 4.5:1 contrast');
+  await darkMobileHome.getByRole('button', { name: /选题离开确认对比度验收.*已逾期/ }).waitFor();
+  await darkMobileHome.getByRole('button', { name: /待审核稿件浏览器验收.*v1\.0/ }).waitFor();
+  await darkMobileHome.getByRole('button', { name: /今日待发布验收.*抖音.*2026\/10\/09 15:00/ }).waitFor();
+  const darkContinueDraftTask = darkMobileHome.getByRole('button', { name: /我的待续写稿件.*草稿待续写.*v1\.1.*继续写稿/ });
+  const darkRejectedDraftTask = darkMobileHome.getByRole('button', { name: /我的退回稿件.*退回修改.*v1\.2.*处理退回/ });
+  await darkContinueDraftTask.waitFor();
+  await darkRejectedDraftTask.waitFor();
+  for (const [index, action] of ['审核稿件', '开始审核', '跟进选题'].entries()) {
+    assert.ok(await renderedTextContrastRatio(darkMobileHome.getByTestId('mobile-home-task').nth(index).getByText(action, { exact: true })) >= 4.5, `dark-theme task action ${action} meets 4.5:1 contrast`);
+  }
+  assert.ok(await renderedTextContrastRatio(darkContinueDraftTask.getByText('继续写稿', { exact: true })) >= 4.5, 'the draft action label meets text contrast requirements in the dark theme');
+  assert.ok(await renderedTextContrastRatio(darkRejectedDraftTask.getByText('处理退回', { exact: true })) >= 4.5, 'the returned-draft action label meets text contrast requirements in the dark theme');
+  await darkMobileHome.close();
 
   for (const width of [390, 1440]) {
     allowHomeCreate = true;
@@ -1189,6 +2104,7 @@ try {
     try {
       await identityHome.goto(`${base}/__qa-home`);
       await identityHome.getByRole('button', { name: width === 390 ? '提报选题' : '新建选题', exact: true }).first().waitFor();
+      await identityHome.getByRole('button', { name: '写两句', exact: true }).waitFor();
       await installNonCancelableReads();
       holdOldHomeReads = true;
       const oldSummaryRead = width === 390 ? identityHome.waitForRequest((request) => request.url().endsWith('/api/dashboard/home-attention')) : null;
@@ -1206,8 +2122,9 @@ try {
       }, viewer);
       await identityHome.getByText(`你好，${viewer.name}`, { exact: width === 390 }).first().waitFor();
       assert.equal(await identityHome.getByRole('button', { name: /^(提报选题|新建选题)$/ }).count(), 0, 'switching accounts immediately removes the previous create permission');
+      assert.equal(await identityHome.getByRole('button', { name: '写两句', exact: true }).count(), 0, 'switching accounts immediately removes the write shortcut without production:update');
       if (width === 390) {
-        await identityHome.getByRole('button', { name: '2 进行中选题', exact: true }).waitFor();
+        await identityHome.getByRole('heading', { name: '我的今日任务' }).waitFor();
         await identityHome.getByText('当前账号进行中选题', { exact: true }).waitFor();
       }
       const lateResponse = identityHome.waitForResponse((response) => response.url().endsWith('/api/permissions/my') && response.request().headers().authorization === 'Bearer topic-stage-refresh-fixture');
@@ -1215,8 +2132,9 @@ try {
       await lateResponse;
       await identityHome.waitForTimeout(80);
       assert.equal(await identityHome.getByRole('button', { name: /^(提报选题|新建选题)$/ }).count(), 0, 'late old permissions cannot restore the create entry');
+      assert.equal(await identityHome.getByRole('button', { name: '写两句', exact: true }).count(), 0, 'late old permissions cannot restore the write shortcut');
       assert.equal(await identityHome.getByText('迟到的旧账号选题', { exact: true }).count(), 0, 'late old summary cannot replace current account data');
-      if (width === 390) await identityHome.getByRole('button', { name: '2 进行中选题', exact: true }).waitFor();
+      if (width === 390) await identityHome.getByRole('heading', { name: '我的今日任务' }).waitFor();
       assert.equal(await identityHome.locator('vite-error-overlay').count(), 0);
       await identityHome.screenshot({ path: `/tmp/xmt-home-account-isolation-${width}.png`, fullPage: false });
     } finally {
@@ -1227,6 +2145,11 @@ try {
     }
   }
 
+  if (process.env.XMT_HOME_DASHBOARD_ONLY === '1') {
+    assert.deepEqual(errors, [], 'Home dashboard browser tests complete without unexpected browser or console errors');
+    await homeMobile.close();
+    console.log('Home dashboard browser tests passed: creator draft save status remains unknown without explicit same-account persistence confirmation, isolates account state, and covers editing/syncing/saving/saved/conflict states; collapsed mobile recent changes, GET-only retry, stale-data recovery, direct content link, and 390px layout.');
+  } else {
   const unauthorizedAudit = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   unauthorizedAudit.on('pageerror', (error) => errors.push(error.message));
   unauthorizedAudit.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
@@ -1238,6 +2161,19 @@ try {
   assert.equal(auditTopic.status, 'pending', 'unauthorized direct navigation leaves the topic unchanged');
   assert.equal(auditWrites.length, auditWritesBeforeHomeAction, 'unauthorized direct navigation performs no audit write');
   await unauthorizedAudit.close();
+
+  const unauthorizedMobileAudit = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  unauthorizedMobileAudit.on('pageerror', (error) => errors.push(error.message));
+  unauthorizedMobileAudit.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await unauthorizedMobileAudit.goto(`${base}/__qa-audit-viewer/${auditTopic.id}`);
+  await unauthorizedMobileAudit.getByRole('textbox', { name: '选题标题' }).waitFor();
+  await unauthorizedMobileAudit.waitForURL((url) => url.pathname === `/topics/${auditTopic.id}` && !url.searchParams.has('action'));
+  assert.equal(await unauthorizedMobileAudit.getByRole('button', { name: '开始审核', exact: true }).count(), 0, 'unauthorized mobile direct review navigation does not show an audit control');
+  assert.equal(await unauthorizedMobileAudit.getByRole('button', { name: '收起审核', exact: true }).count(), 0, 'unauthorized mobile direct review navigation does not expand the audit panel');
+  assert.equal(await unauthorizedMobileAudit.getByRole('button', { name: /确认(通过|驳回)选题/ }).count(), 0, 'unauthorized mobile direct review navigation exposes no submit action');
+  assert.equal(auditTopic.status, 'pending', 'unauthorized mobile direct navigation leaves the topic unchanged');
+  assert.equal(auditWrites.length, auditWritesBeforeHomeAction, 'unauthorized mobile direct navigation performs no audit write');
+  await unauthorizedMobileAudit.close();
 
   auditTopic.status = 'approved';
   const staleAudit = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
@@ -1312,11 +2248,21 @@ try {
     { width: 1440, height: 900 },
     { width: 1920, height: 1080 },
   ]) {
-    await desktop.setViewportSize(viewport);
     for (const zoom of [0.8, 0.9, 1, 1.1, 1.25]) {
-      await desktop.evaluate((value) => {
-        document.documentElement.style.zoom = `${value * 100}%`;
-      }, zoom);
+      const cssViewport = {
+        width: Math.round(viewport.width / zoom),
+        height: Math.round(viewport.height / zoom),
+      };
+      await desktop.setViewportSize(cssViewport);
+      const viewportMetrics = await desktop.evaluate(() => ({
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        documentWidth: document.documentElement.scrollWidth,
+      }));
+      const viewportLabel = `${viewport.width}×${viewport.height}px / ${zoom * 100}% (CSS ${cssViewport.width}×${cssViewport.height}px)`;
+      assert.equal(viewportMetrics.innerWidth, cssViewport.width, `Chromium innerWidth matches the converted CSS viewport at ${viewportLabel}`);
+      assert.equal(viewportMetrics.innerHeight, cssViewport.height, `Chromium innerHeight matches the converted CSS viewport at ${viewportLabel}`);
+      assert.ok(viewportMetrics.documentWidth <= viewportMetrics.innerWidth, `document has no horizontal overflow at ${viewportLabel}: ${JSON.stringify(viewportMetrics)}`);
       for (const name of ['补齐创作稿记录', '编辑选题']) {
         const button = desktop.getByRole('button', { name, exact: true });
         await button.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
@@ -1338,20 +2284,20 @@ try {
             width: rect.width,
             height: rect.height,
             viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
             display: getComputedStyle(element).display,
             visibility: getComputedStyle(element).visibility,
             clippedBy,
           };
         });
-        assert.ok(geometry.width > 0 && geometry.height > 0, `${name} has a layout box at ${viewport.width}px / ${zoom * 100}%: ${JSON.stringify(geometry)}`);
-        assert.notEqual(geometry.display, 'none', `${name} is not hidden at ${viewport.width}px / ${zoom * 100}%`);
-        assert.notEqual(geometry.visibility, 'hidden', `${name} is visible at ${viewport.width}px / ${zoom * 100}%`);
-        assert.deepEqual(geometry.clippedBy, [], `${name} is not clipped at ${viewport.width}px / ${zoom * 100}%`);
-        assert.ok(geometry.x >= -1 && geometry.x + geometry.width <= geometry.viewportWidth + 1, `${name} stays within the viewport at ${viewport.width}px / ${zoom * 100}%: ${JSON.stringify(geometry)}`);
+        assert.ok(geometry.width > 0 && geometry.height > 0, `${name} has a layout box at ${viewportLabel}: ${JSON.stringify(geometry)}`);
+        assert.notEqual(geometry.display, 'none', `${name} is not hidden at ${viewportLabel}`);
+        assert.notEqual(geometry.visibility, 'hidden', `${name} is visible at ${viewportLabel}`);
+        assert.deepEqual(geometry.clippedBy, [], `${name} is not clipped at ${viewportLabel}`);
+        assert.ok(geometry.x >= -1 && geometry.x + geometry.width <= geometry.viewportWidth + 1, `${name} stays within the viewport at ${viewportLabel}: ${JSON.stringify(geometry)}`);
       }
     }
   }
-  await desktop.evaluate(() => { document.documentElement.style.zoom = ''; });
   await desktop.setViewportSize({ width: 1440, height: 960 });
   failNextTopicRefreshForTopicId = productionTopic.id;
   await repairButton.click();
@@ -1377,10 +2323,31 @@ try {
   assert.equal(await desktop.getByText(linkedResource.title, { exact: true }).count(), 0, 'unlinked resource disappears from the topic detail');
   assert.equal(topicResourceWrites.remove, 1, 'successful unlink is submitted once');
   assert.equal(topicResourceListReads, initialResourceListReads, 'confirmed unlink updates the current list without a follow-up GET');
-  await desktop.getByRole('button', { name: '关联资料' }).click();
+  const openResourcePicker = desktop.getByRole('button', { name: '关联资料' });
+  assert.match(await openResourcePicker.getAttribute('class') || '', /xmt-btn-primary/, 'topic resource linking uses the shared primary button style');
+  await openResourcePicker.click();
   await desktop.getByPlaceholder('搜索资料').fill('隔离素材');
-  await desktop.getByRole('button', { name: '搜索', exact: true }).click();
+  const searchButton = desktop.getByRole('button', { name: '搜索', exact: true });
+  assert.match(await searchButton.getAttribute('class') || '', /xmt-btn-primary/, 'topic resource search uses the shared primary button style');
+  const searchStarted = new Promise<void>((resolve) => { topicResourceSearchStartedCallback = resolve; });
+  holdNextTopicResourceSearch = true;
+  const searchReadsBefore = topicResourceSearchReads;
+  await searchButton.evaluate((element) => {
+    const form = element.closest('form');
+    form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  await searchStarted;
+  const pendingSearchButton = desktop.getByRole('button', { name: '搜索中…', exact: true });
+  await pendingSearchButton.waitFor();
+  assert.equal(await pendingSearchButton.isDisabled(), true, 'search shows a disabled in-progress action');
+  assert.equal(await desktop.getByPlaceholder('搜索资料').isDisabled(), true, 'the search term cannot change while its results are pending');
+  assert.equal(topicResourceSearchReads, searchReadsBefore + 1, 'duplicate form submissions during one pending search produce only one request');
+  releaseTopicResourceSearchCallback?.();
+  releaseTopicResourceSearchCallback = null;
+  topicResourceSearchStartedCallback = null;
   await desktop.getByText(linkedResource.title, { exact: true }).waitFor();
+  assert.equal(await desktop.getByPlaceholder('搜索资料').isDisabled(), false, 'the search term is editable again after results arrive');
   await desktop.getByRole('button', { name: '关联', exact: true }).click();
   await desktop.getByRole('link', { name: linkedResource.title, exact: true }).waitFor();
   assert.equal(isResourceLinked, true, 'successful resource link persists in the isolated fixture');
@@ -1557,6 +2524,85 @@ try {
   assert.equal(mobileTopicSaveAttempts, mobileTopicSaveAttemptsBefore + 1, 'mobile detail save is not repeated after confirmation');
   await delayedMobileSave.close();
 
+  const watchMobileEditPage = (page: import('playwright').Page) => {
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error' && !message.text().includes('status of 503 (Service Unavailable)')) errors.push(message.text());
+    });
+  };
+
+  const committedEditPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  watchMobileEditPage(committedEditPage);
+  await committedEditPage.goto(`${base}/__qa/${mobileEditCommittedTopic.id}?editOutcome=committed-response-lost`);
+  await committedEditPage.getByRole('heading', { name: mobileEditCommittedTopic.title }).waitFor();
+  const committedReadCountBeforeSave = mobileTopicEditReadAttempts.get(mobileEditCommittedTopic.id) ?? 0;
+  const committedEditTitle = `${mobileEditCommittedTopic.title}（本地修改）`;
+  await committedEditPage.getByRole('textbox', { name: '选题标题' }).fill(committedEditTitle);
+  await committedEditPage.getByRole('button', { name: '保存修改', exact: true }).click();
+  await committedEditPage.getByRole('status').getByText('只读核实已确认选题内容保存成功；没有重复提交。', { exact: true }).waitFor();
+  assert.equal(mobileEditCommittedTopic.title, committedEditTitle, 'a lost save response is confirmed by the existing topic GET');
+  assert.equal(mobileTopicEditSaveAttempts.get(mobileEditCommittedTopic.id), 1, 'a committed response-lost save sends one PUT only');
+  assert.equal(mobileTopicEditWrites.get(mobileEditCommittedTopic.id), 1, 'the fixture applies the lost-response save exactly once');
+  assert.equal(mobileTopicEditReadAttempts.get(mobileEditCommittedTopic.id), committedReadCountBeforeSave + 1, 'the ambiguous save triggers exactly one additional read-only verification');
+  await committedEditPage.close();
+
+  const retryEditPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  watchMobileEditPage(retryEditPage);
+  await retryEditPage.goto(`${base}/__qa/${mobileEditRetryTopic.id}?editOutcome=unchanged-once`);
+  await retryEditPage.getByRole('heading', { name: mobileEditRetryTopic.title }).waitFor();
+  const retryReadCountBeforeSave = mobileTopicEditReadAttempts.get(mobileEditRetryTopic.id) ?? 0;
+  const retryEditTitle = `${mobileEditRetryTopic.title}（明确重试）`;
+  await retryEditPage.getByRole('textbox', { name: '选题标题' }).fill(retryEditTitle);
+  await retryEditPage.getByRole('button', { name: '保存修改', exact: true }).click();
+  await retryEditPage.getByRole('status').getByText('只读核实确认服务端内容仍是原版本；本次没有保存，也没有自动重发。请核对本地修改后再明确点击保存。', { exact: true }).waitFor();
+  assert.equal(mobileTopicEditSaveAttempts.get(mobileEditRetryTopic.id), 1, 'an unchanged server record does not trigger an automatic retry');
+  assert.equal(mobileTopicEditWrites.get(mobileEditRetryTopic.id), 0, 'the first retry fixture request leaves the server unchanged');
+  assert.equal(mobileTopicEditReadAttempts.get(mobileEditRetryTopic.id), retryReadCountBeforeSave + 1, 'the failed save is followed by one read-only verification');
+  assert.equal(await retryEditPage.getByRole('textbox', { name: '选题标题' }).inputValue(), retryEditTitle, 'the local title draft remains available for review');
+  await retryEditPage.getByRole('button', { name: '保存修改', exact: true }).click();
+  await retryEditPage.getByRole('status').getByText('已保存', { exact: true }).waitFor();
+  assert.equal(mobileTopicEditSaveAttempts.get(mobileEditRetryTopic.id), 2, 'only the explicit user click sends the retry');
+  assert.equal(mobileTopicEditWrites.get(mobileEditRetryTopic.id), 1, 'the explicit retry applies the draft once');
+  await retryEditPage.close();
+
+  const readFailureEditPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  watchMobileEditPage(readFailureEditPage);
+  await readFailureEditPage.goto(`${base}/__qa/${mobileEditReadFailureTopic.id}?editOutcome=read-fails-once`);
+  await readFailureEditPage.getByRole('heading', { name: mobileEditReadFailureTopic.title }).waitFor();
+  const readFailureCountBeforeSave = mobileTopicEditReadAttempts.get(mobileEditReadFailureTopic.id) ?? 0;
+  const readFailureTitle = `${mobileEditReadFailureTopic.title}（保留修改）`;
+  await readFailureEditPage.getByRole('textbox', { name: '选题标题' }).fill(readFailureTitle);
+  await readFailureEditPage.getByRole('button', { name: '保存修改', exact: true }).click();
+  await readFailureEditPage.getByRole('alert').getByText(/保存结果仍暂时无法确认/).waitFor();
+  assert.equal(await readFailureEditPage.getByRole('button', { name: '保存修改', exact: true }).isDisabled(), true, 'a failed readback locks further writes');
+  assert.equal(mobileTopicEditSaveAttempts.get(mobileEditReadFailureTopic.id), 1, 'a failed readback does not retry the PUT');
+  const readFailureCountAfterFirstRecovery = mobileTopicEditReadAttempts.get(mobileEditReadFailureTopic.id) ?? 0;
+  assert.equal(readFailureCountAfterFirstRecovery, readFailureCountBeforeSave + 1, 'the failed recovery path performs one additional GET-only readback');
+  readFailureEditPage.once('dialog', (dialog) => { void dialog.accept(); });
+  await readFailureEditPage.reload();
+  await readFailureEditPage.getByRole('status').getByText('只读核实已确认选题内容保存成功；没有重复提交。', { exact: true }).waitFor();
+  assert.equal(mobileTopicEditSaveAttempts.get(mobileEditReadFailureTopic.id), 1, 'reopening after read failure resumes with GET only');
+  assert.ok((mobileTopicEditReadAttempts.get(mobileEditReadFailureTopic.id) ?? 0) > readFailureCountAfterFirstRecovery, 'reopening performs a read-only recovery request');
+  assert.equal(await readFailureEditPage.evaluate(() => localStorage.getItem('xmt:mobile-topic-edit-recovery:v1:user:93:topic:958')), null, 'confirmed recovery removes the account-scoped uncertainty marker');
+  await readFailureEditPage.close();
+
+  const conflictEditPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  watchMobileEditPage(conflictEditPage);
+  await conflictEditPage.goto(`${base}/__qa/${mobileEditConflictTopic.id}?editOutcome=concurrent-change`);
+  await conflictEditPage.getByRole('heading', { name: mobileEditConflictTopic.title }).waitFor();
+  const conflictDraftTitle = `${mobileEditConflictTopic.title}（本地草稿）`;
+  await conflictEditPage.getByRole('textbox', { name: '选题标题' }).fill(conflictDraftTitle);
+  await conflictEditPage.getByRole('button', { name: '保存修改', exact: true }).click();
+  await conflictEditPage.getByRole('alert').getByText('服务端标题：服务端并发更新标题').waitFor();
+  assert.equal(await conflictEditPage.getByRole('textbox', { name: '选题标题' }).inputValue(), conflictDraftTitle, 'the local title draft is preserved when the server has diverged');
+  assert.equal(mobileTopicEditSaveAttempts.get(mobileEditConflictTopic.id), 1, 'concurrent content is not overwritten by an automatic retry');
+  assert.equal(mobileTopicEditWrites.get(mobileEditConflictTopic.id), 0, 'the conflict fixture does not apply the submitted draft');
+  assert.equal(await conflictEditPage.getByRole('button', { name: '保存修改', exact: true }).isDisabled(), true, 'the user must resolve the visible conflict before saving');
+  await conflictEditPage.getByRole('button', { name: '保留本地修改继续编辑', exact: true }).click();
+  await conflictEditPage.getByRole('status').getByText('已保留本地修改；你可以继续编辑，只有再次明确点击保存时才会提交。', { exact: true }).waitFor();
+  assert.equal(await conflictEditPage.getByRole('button', { name: '保存修改', exact: true }).isEnabled(), true, 'the user can explicitly choose to continue with the local draft');
+  await conflictEditPage.close();
+
   const delayedMobileRepair = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   delayedMobileRepair.on('pageerror', (error) => errors.push(error.message));
   delayedMobileRepair.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
@@ -1588,10 +2634,16 @@ try {
   const mobileAudit = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   mobileAudit.on('pageerror', (error) => errors.push(error.message));
   mobileAudit.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
-  await mobileAudit.goto(`${base}/__qa/${auditTopic.id}`);
+  const mobileAuditWritesBeforeNavigation = auditWrites.length;
+  await mobileAudit.goto(`${base}/__qa/${auditTopic.id}?action=audit`);
   await mobileAudit.getByRole('textbox', { name: '选题标题' }).waitFor();
-  await mobileAudit.getByRole('button', { name: '开始审核', exact: true }).click();
+  await mobileAudit.waitForURL((url) => url.pathname === `/topics/${auditTopic.id}` && !url.searchParams.has('action'));
+  await mobileAudit.getByRole('button', { name: '收起审核', exact: true }).waitFor();
   const mobileAuditSubmit = mobileAudit.getByRole('button', { name: '确认通过选题', exact: true });
+  await mobileAuditSubmit.waitFor();
+  assert.equal(await mobileAudit.getByRole('button', { name: '开始审核', exact: true }).count(), 0, 'mobile direct review navigation expands the audit panel without a second click');
+  assert.equal(auditTopic.status, 'pending', 'mobile direct review navigation does not submit an audit automatically');
+  assert.equal(auditWrites.length, mobileAuditWritesBeforeNavigation, 'mobile direct review navigation performs no audit write');
   let resolveMobileAuditSaveStarted!: () => void;
   const mobileAuditSaveStarted = new Promise<void>((resolve) => { resolveMobileAuditSaveStarted = resolve; });
   auditSaveStartedCallback = resolveMobileAuditSaveStarted;
@@ -1774,6 +2826,7 @@ try {
   await homeMobile.close();
   await mobile.close();
   console.log('Topic stage repair browser test passed: Home identity/overlay/desktop and mobile layout, permission-gated weekly creator metrics and empty/retry states, auditable recent-activity links and isolated retry, today publishing and actionable unread message links, role-prioritized tasks, attention failure retry, Home-to-review handoff, permission-safe deep link, audit retry, stage/history refresh, read-only language and return flow, completed-history safeguard, dirty-leave controls in both themes, 1440/390px layout, no unexpected browser errors.');
+  }
 } finally {
   await browser.close();
   await vite.close();

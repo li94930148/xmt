@@ -4,7 +4,7 @@ import RichTextEditor from './RichTextEditor';
 import { useAuthStore } from '../store';
 import { useSocket } from '../hooks/useSocket';
 import { useCollaborativeDocument } from '../collaboration/yjs/useCollaborativeDocument';
-import { explainAutoSave, explainChange } from '../editor/explain/editorExplain';
+import { explainAutoSave } from '../editor/explain/editorExplain';
 import { getEditingRegions, setActiveUsers } from '../editor/collaboration/editorPresence';
 import { editorStateLabel, getEditorState, normalizeEditorState, useEditorEventState, type EditorState } from '../editor/state/editorStateManager';
 import { emitEditorState } from '../editor/state/editorStateEventBus';
@@ -27,7 +27,7 @@ export interface ContentEditorProps {
   onChange?: (value: string) => void;
   readOnly?: boolean;
   placeholder?: string;
-  onSave?: (value: string) => void;
+  onSave?: (value: string) => void | boolean | Promise<void | boolean>;
   mode?: ContentEditorMode;
   minHeight?: string | number;
   className?: string;
@@ -114,7 +114,7 @@ export default function ContentEditor({
   const visibleEditingRegions = useMemo(() => editingRegions.slice(0, 2), [editingRegions]);
   const primaryHint = realtimeUnavailable
     ? '实时同步暂不可用，不影响普通编辑和保存。'
-    : editingRegions[0]?.message || explainChange({ origin: 'system' }).message;
+    : editingRegions[0]?.message || '当前没有协作者正在编辑正文。';
   const saveHint = persistenceStatus === 'saving'
     ? explainAutoSave('debounce')
     : editorStateLabel(editorState);
@@ -153,10 +153,10 @@ export default function ContentEditor({
 
   const handleRuntimeStatusChange = useCallback((status: ContentEditorSaveStatus) => {
     if (!adapter || !collaborationKey) return;
-    if (status === 'saving') emitEditorState('writeConsistency:save', collaborationKey, { source: 'ContentEditorRuntime' });
-    if (status === 'synced') emitEditorState('writeConsistency:saved', collaborationKey, { source: 'ContentEditorRuntime' });
-    if (status === 'conflicted') emitEditorState('conflict:event', collaborationKey, { source: 'ContentEditorRuntime' });
-  }, [adapter, collaborationKey]);
+    if (status === 'saving') emitEditorState('writeConsistency:save', collaborationKey, { source: 'ContentEditorRuntime', userId: user?.id });
+    if (status === 'synced') emitEditorState('writeConsistency:saved', collaborationKey, { source: 'ContentEditorRuntime', userId: user?.id });
+    if (status === 'conflicted') emitEditorState('conflict:event', collaborationKey, { source: 'ContentEditorRuntime', userId: user?.id });
+  }, [adapter, collaborationKey, user?.id]);
 
   const handleEditorChange = useCallback((content: string, local: boolean) => {
     onChange(content);
@@ -181,42 +181,43 @@ export default function ContentEditor({
   useEffect(() => {
     if (!collaborationKey) return;
     if (persistenceStatus === 'saving') {
-      emitEditorState('writeConsistency:save', collaborationKey, { source: 'ContentEditor' });
+      emitEditorState('writeConsistency:save', collaborationKey, { source: 'ContentEditor', userId: user?.id });
       recordEditorTelemetry('save trigger', { docId: collaborationKey, reason: 'debounce' });
     }
     if (normalizedPersistenceStatus === 'synced') {
-      emitEditorState('writeConsistency:saved', collaborationKey, { source: 'ContentEditor' });
+      emitEditorState('writeConsistency:saved', collaborationKey, { source: 'ContentEditor', userId: user?.id });
     }
     if (persistenceStatus === 'syncing' || collaborationSyncing) {
-      emitEditorState('yjs:update', collaborationKey, { source: 'ContentEditor' });
+      emitEditorState('yjs:update', collaborationKey, { source: 'ContentEditor', userId: user?.id });
     }
     if (normalizedPersistenceStatus === 'conflicted') {
-      emitEditorState('conflict:event', collaborationKey, { source: 'ContentEditor' });
+      emitEditorState('conflict:event', collaborationKey, { source: 'ContentEditor', userId: user?.id });
       recordEditorTelemetry('conflict event', { docId: collaborationKey, reason: 'save failed' });
     }
-  }, [collaborationKey, collaborationSyncing, normalizedPersistenceStatus, persistenceStatus]);
+  }, [collaborationKey, collaborationSyncing, normalizedPersistenceStatus, persistenceStatus, user?.id]);
 
   useEffect(() => {
     if (!collaborationKey || editingRegions.length === 0) return;
     emitEditorState('collaboration:remote-change', collaborationKey, {
       users: editingRegions.map((region) => region.userName),
+      userId: user?.id,
     });
     recordEditorTelemetry('remote edit', {
       docId: collaborationKey,
       users: editingRegions.map((region) => region.userName),
     });
-  }, [collaborationKey, editingRegions]);
+  }, [collaborationKey, editingRegions, user?.id]);
 
   useEffect(() => {
     if (!collaborationKey || value === previousValueRef.current) return;
     previousValueRef.current = value;
-    emitEditorState('editor:local-change', collaborationKey);
+    emitEditorState('editor:local-change', collaborationKey, { userId: user?.id });
     recordEditorTelemetry('edit start', { docId: collaborationKey });
     if (editStopTimerRef.current) clearTimeout(editStopTimerRef.current);
     editStopTimerRef.current = setTimeout(() => {
       recordEditorTelemetry('edit stop', { docId: collaborationKey });
     }, 1200);
-  }, [collaborationKey, value]);
+  }, [collaborationKey, user?.id, value]);
 
   useEffect(() => {
     return () => {
@@ -266,12 +267,12 @@ export default function ContentEditor({
           ) : null}
           {editingRegions.length > 0 ? (
             visibleEditingRegions.map((region) => (
-              <span key={`${region.userId}-${region.region}`} className="text-studio-text-muted">
+              <span key={`${region.userId}-${region.region}`} className="text-studio-text-secondary">
                 {region.message}
               </span>
             ))
           ) : (
-            <span className="text-studio-text-muted">{primaryHint}</span>
+            <span className="text-studio-text-secondary">{primaryHint}</span>
           )}
         </div>
       )}

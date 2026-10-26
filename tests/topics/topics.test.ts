@@ -64,11 +64,18 @@ async function repositoryTests() {
   assert.equal(afterContentUpdate?.title, 'Repository 更新');
   assert.equal(afterContentUpdate?.stage_entered_at, created?.stage_entered_at, 'ordinary content edits do not reset stage duration');
   await execute('UPDATE topics SET stage_entered_at = ? WHERE id = ?', ['2000-01-01 00:00:00', topicId]);
+  assert.equal(await repository.withTransaction((tx) => tx.updateTopicIfStatus(topicId, 'pending', { status: 'production' })), false,
+    'the repository rejects jumps outside the shared Topic transition matrix');
+  assert.equal((await repository.findById(topicId))?.status, 'pending');
+  assert.equal((await repository.findById(topicId))?.stage_entered_at, '2000-01-01 00:00:00');
+  assert.equal(await repository.withTransaction((tx) => tx.updateTopicIfStatus(topicId, 'pending', { status: 'approved' })), true);
+  await execute('UPDATE topics SET stage_entered_at = ? WHERE id = ?', ['2000-01-01 00:00:00', topicId]);
   const beforeStageTransition = await repository.findById(topicId);
-  assert.equal(await repository.withTransaction((tx) => tx.updateTopicIfStatus(topicId, 'pending', { status: 'production' })), true);
+  assert.equal(await repository.withTransaction((tx) => tx.updateTopicIfStatus(topicId, 'approved', { status: 'production' })), true);
   const afterStageTransition = await repository.findById(topicId);
   assert.ok(afterStageTransition?.stage_entered_at && afterStageTransition.stage_entered_at !== beforeStageTransition?.stage_entered_at, 'a successful status transition records a new stage entry time');
-  assert.equal(await repository.withTransaction((tx) => tx.updateTopicIfStatus(topicId, 'pending', { status: 'shooting' })), false);
+  assert.equal(await repository.withTransaction((tx) => tx.updateTopicIfStatus(topicId, 'approved', { status: 'production' })), false,
+    'a stale but otherwise legal source status cannot overwrite the committed transition');
   assert.equal((await repository.findById(topicId))?.stage_entered_at, afterStageTransition?.stage_entered_at, 'a stale transition cannot change the recorded stage entry time');
   await execute('INSERT INTO topic_history (topic_id, action, comment, operator_id) VALUES (?, ?, ?, ?)', [topicId, 'created', '保留事务历史', testUserId]);
   await execute(`CREATE TRIGGER block_topic_delete BEFORE DELETE ON topics BEGIN SELECT RAISE(ABORT, 'blocked'); END`);
@@ -251,6 +258,16 @@ async function apiTests() {
      VALUES (?, ?, ?, ?, ?)`,
     ['API 契约', 'legacy/v1', 'douyin', testUserId, 'pending'],
   );
+  await executeInsert(
+    `INSERT INTO topics (title, description, platform, creator_id, assignee_id, status)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    ['创作阶段筛选已通过', '', 'douyin', testUserId, testUserId, 'approved'],
+  );
+  await executeInsert(
+    `INSERT INTO topics (title, description, platform, creator_id, assignee_id, status)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    ['创作阶段筛选进行中', '', 'douyin', testUserId, testUserId, 'production'],
+  );
   const notifications: Array<{ userId: number; title: string; content: string; link: string }> = [];
   const broadcasts: Array<{ room: string; event: string; data: unknown }> = [];
   const service = new TopicService({
@@ -300,6 +317,14 @@ async function apiTests() {
     assert.deepEqual(v1.data, legacy.data);
     assert.deepEqual(v1.meta, { ...legacy.pagination as object, requestId: (v1.meta as { requestId: string }).requestId });
     assert.equal(typeof (v1.meta as { requestId: string }).requestId, 'string');
+
+    const creationStageResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics?status=creation`, { headers });
+    assert.equal(creationStageResponse.status, 200, 'the content-flow creation-stage filter is accepted by the existing topic list API');
+    const creationStage = await creationStageResponse.json() as { data: Array<{ title: string; status: string }>; pagination: { total: number } };
+    assert.equal(creationStage.pagination.total, 2, 'the creation-stage filter combines approved and actively produced topics');
+    assert.deepEqual(new Set(creationStage.data.map((topic) => topic.status)), new Set(['approved', 'production']), 'the combined filter preserves each topic real workflow status');
+    assert.ok(creationStage.data.some((topic) => topic.title === '创作阶段筛选已通过'));
+    assert.ok(creationStage.data.some((topic) => topic.title === '创作阶段筛选进行中'));
 
     const outsiderId = await executeInsert(
       `INSERT INTO users (username, password, email, role, name, enabled, force_change_password)
@@ -523,7 +548,7 @@ async function staleStatusTests() {
     ['过期审核状态保护', '', 'douyin', testUserId, 'pending', '过期审核大纲'],
   );
   const rejectFirst = () => repository.withTransaction(async (tx) => {
-    await tx.updateTopic(auditTopicId, { status: 'rejected' });
+    assert.equal(await tx.updateTopicIfStatus(auditTopicId, 'pending', { status: 'rejected' }), true);
     await tx.addHistory({ topicId: auditTopicId, action: 'rejected', comment: '先提交的审核', operatorId: testUserId });
     await tx.addActivity({ userId: testUserId, action: 'audit', target: 'topic', detail: '先提交审核驳回' });
   });
@@ -551,7 +576,7 @@ async function staleStatusTests() {
     ['过期阶段推进保护', '', 'douyin', testUserId, testUserId, 'approved'],
   );
   const advanceFirst = () => repository.withTransaction(async (tx) => {
-    await tx.updateTopic(transitionTopicId, { status: 'production' });
+    assert.equal(await tx.updateTopicIfStatus(transitionTopicId, 'approved', { status: 'production' }), true);
     await tx.addHistory({ topicId: transitionTopicId, action: 'status_production', comment: '先提交的阶段推进', operatorId: testUserId });
     await tx.addActivity({ userId: testUserId, action: 'status_change', target: 'topic', detail: '先提交进入创作阶段' });
     await tx.createInitialProduction({

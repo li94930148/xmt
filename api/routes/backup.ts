@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import fs from 'fs';
@@ -7,7 +7,7 @@ import path from 'path';
 import { beijingNow } from '../database/utils';
 import { getDatabasePath } from '../database/path';
 import { db } from '../database/db';
-import { BackupLockBusyError, withBackupLock } from '../database/backup-lock.js';
+import { BackupLockBusyError, isBackupLockHeld, withBackupLock } from '../database/backup-lock.js';
 import { getBackupSources, listBackupInventory, resolveInventoryBackup } from '../services/backupInventory.js';
 
 const router = Router();
@@ -15,7 +15,39 @@ const router = Router();
 const DB_PATH = getDatabasePath();
 const BACKUP_DIR = path.join(path.dirname(DB_PATH), 'backups');
 const BACKUP_SOURCES = getBackupSources(DB_PATH);
-const BACKUP_NAME = /^xmt-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d+-[a-f0-9]{8})?\.db$/;
+const BACKUP_NAME = /^xmt-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d+-[a-f0-9]{8,64})?\.db$/;
+const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function backupRequestDigest(actorId: number, requestId: string): string {
+  return createHash('sha256').update(`${actorId}:backup-create:${requestId.toLowerCase()}`).digest('hex').slice(0, 24);
+}
+
+function findBackupForRequest(actorId: number, requestId: string): string | null {
+  const digest = backupRequestDigest(actorId, requestId);
+  if (!fs.existsSync(BACKUP_DIR)) return null;
+  const matches = fs.readdirSync(BACKUP_DIR).filter((name) => {
+    if (!BACKUP_NAME.test(name) || !name.endsWith(`-${digest}.db`)) return false;
+    try {
+      return fs.lstatSync(path.join(BACKUP_DIR, name)).isFile();
+    } catch {
+      return false;
+    }
+  });
+  if (matches.length > 1) throw new Error('备份请求关联文件不唯一，已停止自动恢复');
+  return matches[0] ?? null;
+}
+
+function isValidBackupRequest(actorId: number, requestId: string): boolean {
+  return Number.isSafeInteger(actorId) && actorId > 0 && REQUEST_ID_PATTERN.test(requestId);
+}
+
+export function getBackupCreateRequestStatus(actorId: number, requestId: string): { state: 'created'; name: string } | { state: 'pending' } | { state: 'not_found' } {
+  if (!isValidBackupRequest(actorId, requestId)) throw new Error('备份请求编号无效');
+  const name = findBackupForRequest(actorId, requestId);
+  if (name) return { state: 'created', name };
+  if (isBackupLockHeld()) return { state: 'pending' };
+  return { state: 'not_found' };
+}
 
 // 确保备份目录存在
 function ensureBackupDir() {
@@ -32,10 +64,14 @@ function resolveBackupPath(name: unknown): string | null {
 }
 
 // 创建备份
-async function createBackup(): Promise<string> {
+async function createBackup(actorId: number, requestId?: string): Promise<string> {
+  if (requestId !== undefined && !isValidBackupRequest(actorId, requestId)) throw new Error('备份请求编号无效');
   return withBackupLock(async () => {
   ensureBackupDir();
-  const dateStr = `${beijingNow().replace(/[: ]/g, '-')}-${process.pid}-${randomUUID().slice(0, 8)}`;
+  const existingBackup = requestId ? findBackupForRequest(actorId, requestId) : null;
+  if (existingBackup) return existingBackup;
+  const requestSuffix = requestId ? `-${backupRequestDigest(actorId, requestId)}` : `-${randomUUID().slice(0, 8)}`;
+  const dateStr = `${beijingNow().replace(/[: ]/g, '-')}-${process.pid}${requestSuffix}`;
   const backupName = `xmt-${dateStr}.db`;
   const backupPath = path.join(BACKUP_DIR, backupName);
   const temporaryPath = `${backupPath}.tmp`;
@@ -57,11 +93,29 @@ async function createBackup(): Promise<string> {
 // 手动创建备份
 router.post('/create', authenticate, requirePermission('system:backup'), async (req, res) => {
   try {
-    const name = await createBackup();
+    const actorId = Number(req.user?.id);
+    const hasRequestId = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'client_request_id');
+    const requestId = typeof req.body?.client_request_id === 'string' ? req.body.client_request_id : undefined;
+    if (hasRequestId && (!requestId || !isValidBackupRequest(actorId, requestId))) return res.status(400).json({ message: '备份请求编号无效' });
+    const name = await createBackup(actorId, requestId);
     res.json({ message: '备份创建成功', name });
   } catch (error) {
     if (error instanceof BackupLockBusyError) return res.status(409).json({ message: '备份正在进行', code: 'LOCK_BUSY' });
     res.status(500).json({ message: '备份创建失败' });
+  }
+});
+
+router.get('/create-requests/:requestId', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, requirePermission('system:backup'), (req, res) => {
+  const actorId = Number(req.user?.id);
+  const requestId = String(req.params.requestId || '');
+  if (!isValidBackupRequest(actorId, requestId)) return res.status(400).json({ message: '备份请求编号无效' });
+  try {
+    return res.json(getBackupCreateRequestStatus(actorId, requestId));
+  } catch {
+    return res.status(500).json({ message: '暂时无法核实备份状态' });
   }
 });
 

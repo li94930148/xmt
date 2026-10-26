@@ -104,7 +104,7 @@ export default function AuthRolloutStatus() {
       <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-start gap-4">
           <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-xl ${decision.ready ? 'bg-studio-success/10 text-studio-success-contrast' : 'bg-studio-amber/10 text-studio-amber-contrast'}`}><ShieldCheck className="h-6 w-6"/></div>
-          <div><p className="text-xs font-semibold text-studio-text-muted">当前结论</p><h2 className="mt-1 text-xl font-bold text-studio-text-primary">{decision.title}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-studio-text-secondary">{decision.next}</p></div>
+          <div><p className="text-xs font-semibold text-studio-text-secondary">当前结论</p><h2 className="mt-1 text-xl font-bold text-studio-text-primary">{decision.title}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-studio-text-secondary">{decision.next}</p></div>
         </div>
         <StatusPill tone={decision.ready ? 'success' : 'amber'}>{decision.ready ? '准备就绪' : '有前置项未完成'}</StatusPill>
       </div>
@@ -113,17 +113,17 @@ export default function AuthRolloutStatus() {
     <section className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
       <GlassPanel className="p-6">
         <h2 className="text-base font-semibold text-studio-text-primary">进入下一阶段前要完成什么</h2>
-        <p className="mt-1 text-xs text-studio-text-muted">每一项都通过后，才适合让少量内部账号试用。</p>
+        <p className="mt-1 text-xs text-studio-text-secondary">每一项都通过后，才适合让少量内部账号试用。</p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2">{decision.checks.map((check) => <ReadinessCheck key={check.label} check={check}/>)}</div>
       </GlassPanel>
       <GlassPanel className="p-6">
         <h2 className="text-base font-semibold text-studio-text-primary">当前运行概况</h2>
         <dl className="mt-5 space-y-4 text-sm">
-          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">当前登录方式</dt><dd className="font-semibold text-studio-text-primary">{data.runtime.effectiveRolloutMode === 'legacy' ? '现有登录方式' : '小范围试用新版登录'}</dd></div>
-          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">试用账号</dt><dd className="font-semibold text-studio-text-primary">{data.rollout.allowlistCount} 人</dd></div>
-          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">近 60 分钟登录次数</dt><dd className="font-semibold text-studio-text-primary">{hour.categories.login}</dd></div>
-          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">登录续期失败率</dt><dd className="font-semibold text-studio-text-primary">{(hour.refreshFailureRate * 100).toFixed(1)}%</dd></div>
-          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-muted">安全异常次数</dt><dd className="font-semibold text-studio-text-primary">{hour.categories.securityEvents}</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">当前登录方式</dt><dd className="font-semibold text-studio-text-primary">{data.runtime.effectiveRolloutMode === 'legacy' ? '现有登录方式' : '小范围试用新版登录'}</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">试用账号</dt><dd className="font-semibold text-studio-text-primary">{data.rollout.allowlistCount} 人</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">近 60 分钟登录次数</dt><dd className="font-semibold text-studio-text-primary">{hour.categories.login}</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">登录续期失败率</dt><dd className="font-semibold text-studio-text-primary">{(hour.refreshFailureRate * 100).toFixed(1)}%</dd></div>
+          <div className="flex items-center justify-between gap-3"><dt className="text-studio-text-secondary">安全异常次数</dt><dd className="font-semibold text-studio-text-primary">{hour.categories.securityEvents}</dd></div>
         </dl>
       </GlassPanel>
     </section>
@@ -133,12 +133,12 @@ export default function AuthRolloutStatus() {
     <details className="rounded-card border border-studio-border-soft bg-studio-card">
       <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-5 text-sm font-semibold text-studio-text-primary">管理员技术明细（排查时展开）<ChevronDown className="h-4 w-4"/></summary>
       <div className="grid gap-4 border-t border-studio-border-soft p-6 text-sm sm:grid-cols-2 xl:grid-cols-4">
-        <div><p className="text-xs text-studio-text-muted">配置来源</p><p className="mt-1 font-medium">{configSourceLabel(data.runtime.effectiveConfigSource)}</p></div>
-        <div><p className="text-xs text-studio-text-muted">新版登录机制 / 网页版</p><p className="mt-1 font-medium">{data.runtime.effectiveAuthV1Enabled ? '开' : '关'} / {data.runtime.effectiveAuthWebEnabled ? '开' : '关'}</p></div>
-        <div><p className="text-xs text-studio-text-muted">监控记录来源</p><p className="mt-1 font-medium">{data.exporters.source.map(exporterLabel).join('、') || '无'}</p></div>
-        <div><p className="text-xs text-studio-text-muted">最近监控确认时间</p><p className="mt-1 font-medium">{lastExternalScrape ? formatTime(lastExternalScrape) : '尚未验证'}</p></div>
-        <div><p className="text-xs text-studio-text-muted">状态生成时间</p><p className="mt-1 font-medium">{formatTime(data.generatedAt)}</p></div>
-        {data.risk.events.length > 0 ? <div className="sm:col-span-2 xl:col-span-4"><p className="text-xs text-studio-text-muted">风险排查记录</p><ul className="mt-1 space-y-1 font-medium">{data.risk.events.map((risk) => <li key={risk.code}><code>{risk.code}</code> · {risk.reason}（当前值 {formatRiskValue(risk, risk.value)}，触发阈值 {formatRiskValue(risk, risk.threshold)}）</li>)}</ul></div> : null}
+        <div><p className="text-xs text-studio-text-secondary">配置来源</p><p className="mt-1 font-medium">{configSourceLabel(data.runtime.effectiveConfigSource)}</p></div>
+        <div><p className="text-xs text-studio-text-secondary">新版登录机制 / 网页版</p><p className="mt-1 font-medium">{data.runtime.effectiveAuthV1Enabled ? '开' : '关'} / {data.runtime.effectiveAuthWebEnabled ? '开' : '关'}</p></div>
+        <div><p className="text-xs text-studio-text-secondary">监控记录来源</p><p className="mt-1 font-medium">{data.exporters.source.map(exporterLabel).join('、') || '无'}</p></div>
+        <div><p className="text-xs text-studio-text-secondary">最近监控确认时间</p><p className="mt-1 font-medium">{lastExternalScrape ? formatTime(lastExternalScrape) : '尚未验证'}</p></div>
+        <div><p className="text-xs text-studio-text-secondary">状态生成时间</p><p className="mt-1 font-medium">{formatTime(data.generatedAt)}</p></div>
+        {data.risk.events.length > 0 ? <div className="sm:col-span-2 xl:col-span-4"><p className="text-xs text-studio-text-secondary">风险排查记录</p><ul className="mt-1 space-y-1 font-medium">{data.risk.events.map((risk) => <li key={risk.code}><code>{risk.code}</code> · {risk.reason}（当前值 {formatRiskValue(risk, risk.value)}，触发阈值 {formatRiskValue(risk, risk.threshold)}）</li>)}</ul></div> : null}
       </div>
     </details>
   </PageShell>;

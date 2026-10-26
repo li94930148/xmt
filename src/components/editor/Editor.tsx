@@ -13,6 +13,7 @@ import BaseModal from '../common/BaseModal';
 import ActionButton from '../studio/ActionButton';
 import { markdownToHtml } from '../../utils/markdown';
 import { syncToYjs } from '../../collaboration/core/writeConsistency';
+import { getCollaboratorDisplayColors } from '../../collaboration/core/collaboratorColors';
 import { TiptapCollaboration } from '../../collaboration/yjs/tiptapCollaboration';
 import type { SocketYjsProvider } from '../../collaboration/yjs/SocketYjsProvider';
 import type { CollaborationUserPresence } from '../../collaboration/core/events';
@@ -31,11 +32,12 @@ import type { FormatPainterMode } from './formatPainter';
 import { resolveEditorInsertionSelection } from './editorInsertion';
 import { isLocalEditorChange } from './editorChangeOrigin';
 import { calculateContextMenuPosition, type Point } from './menuBehavior';
+import { confirmManualEditorSave } from './manualSaveConfirmation';
 
 interface EditorProps {
   value: string;
   onChange: (html: string, local: boolean) => void;
-  onSave?: () => void;
+  onSave?: () => void | boolean | Promise<void | boolean>;
   readOnly?: boolean;
   placeholder?: string;
   collaboration?: {
@@ -164,6 +166,7 @@ export default function Editor({
     y: number;
   } | null>(null);
   const commentMenuRef = useRef<HTMLDivElement>(null);
+  const findReplaceReturnFocusRef = useRef<HTMLElement | null>(null);
   const [commentMenuPosition, setCommentMenuPosition] = useState<Point>({ x: 8, y: 8 });
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -177,13 +180,18 @@ export default function Editor({
   const baseExtensions = useMemo(() => createEditorExtensions(placeholder), [placeholder]);
 
   // 立即保存（仅 Ctrl+S 触发）
-  const performSave = useCallback(() => {
-    if (!onSave) return;
+  const performSave = useCallback(async () => {
+    if (!onSave || savingRef.current) return;
     savingRef.current = true;
     if (stateDocId) emitEditorState('writeConsistency:save', stateDocId, { reason: 'manual save' });
     else setSaveStatus('saving');
     try {
-      onSave();
+      const confirmed = await confirmManualEditorSave(onSave);
+      if (!confirmed) {
+        if (stateDocId) emitEditorState('conflict:event', stateDocId, { reason: 'manual save not confirmed' });
+        else setSaveStatus('conflicted');
+        return;
+      }
       lastValueRef.current = value;
       if (stateDocId) emitEditorState('writeConsistency:saved', stateDocId, { reason: 'manual save' });
       else setSaveStatus('synced');
@@ -196,6 +204,8 @@ export default function Editor({
       savingRef.current = false;
     }
   }, [onSave, stateDocId, value]);
+  const performSaveRef = useRef(performSave);
+  performSaveRef.current = performSave;
 
   useEffect(() => {
     if (!collaboration?.provider || !value?.trim()) return;
@@ -258,12 +268,13 @@ export default function Editor({
       handleKeyDown: (view, event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
           event.preventDefault();
+          findReplaceReturnFocusRef.current = view.dom;
           setShowFindReplace(true);
           return true;
         }
         if ((event.ctrlKey || event.metaKey) && event.key === 's') {
           event.preventDefault();
-          performSave();
+          void performSaveRef.current();
           return true;
         }
         return false;
@@ -307,6 +318,19 @@ export default function Editor({
       },
     },
   }, [readOnly, collaboration?.provider, baseExtensions]);
+
+  const closeFindReplace = useCallback(() => {
+    setShowFindReplace(false);
+    const returnFocusTarget = findReplaceReturnFocusRef.current;
+    findReplaceReturnFocusRef.current = null;
+    window.requestAnimationFrame(() => {
+      if (returnFocusTarget?.isConnected) {
+        returnFocusTarget.focus({ preventScroll: true });
+      } else if (editor && !editor.isDestroyed) {
+        editor.commands.focus();
+      }
+    });
+  }, [editor]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -638,6 +662,7 @@ export default function Editor({
         className={`flex flex-wrap sm:flex-nowrap items-center justify-between shrink-0 relative z-sticky sticky top-0 ${
           isDark ? 'bg-[var(--editor-panel)]' : 'bg-[var(--editor-panel)]'
         } ${focusMode ? 'hidden' : ''}`}
+        style={{ top: isFullscreen ? 0 : 'calc(var(--xmt-app-topbar-height, 0px) + 1px)' }}
       >
         <div className="min-w-0 w-full sm:w-auto sm:flex-1">
           {editor && !readOnly && (
@@ -657,7 +682,14 @@ export default function Editor({
           {editor && (
             <button
               type="button"
-              onClick={() => setShowFindReplace((open) => !open)}
+              onClick={(event) => {
+                if (showFindReplace) {
+                  closeFindReplace();
+                  return;
+                }
+                findReplaceReturnFocusRef.current = event.currentTarget;
+                setShowFindReplace(true);
+              }}
               className="xmt-btn xmt-btn-ghost"
               aria-label="查找替换"
               aria-expanded={showFindReplace}
@@ -665,18 +697,15 @@ export default function Editor({
             >查找</button>
           )}
           {editor && (
-            <button
+            <ActionButton
               type="button"
+              variant="secondary"
               onClick={() => void handleCopyAll()}
-              className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
-                isDark
-                  ? 'border-white/15 text-studio-text-secondary hover:bg-white/10'
-                  : 'border-studio-border-soft text-studio-text-muted hover:bg-studio-surface-soft'
-              }`}
+              className={`min-h-10 px-2.5 py-1 text-xs font-medium ${isDark ? 'text-studio-text-secondary' : 'text-studio-text-muted'}`}
               title="复制编辑器全部内容（文本和 HTML）"
             >
               {copyStatus === 'copied' ? '已复制' : copyStatus === 'failed' ? '复制失败' : '复制全文'}
-            </button>
+            </ActionButton>
           )}
           {collaboration && (
             <div className="flex items-center gap-2">
@@ -687,16 +716,19 @@ export default function Editor({
                 title={collaboration.connected ? '协作已连接' : '协作重连中'}
               />
               <div className="flex -space-x-1">
-                {collaboration.users.slice(0, 5).map((user) => (
-                  <span
-                    key={user.socketId || `${user.id}-${user.name}`}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/50 text-[10px] font-semibold text-white"
-                    style={{ backgroundColor: user.color }}
-                    title={`${user.name}${user.typing ? ' 正在输入' : ''}`}
-                  >
-                    {(user.name || '?').slice(0, 1)}
-                  </span>
-                ))}
+                {collaboration.users.slice(0, 5).map((user) => {
+                  const colors = getCollaboratorDisplayColors(user.color);
+                  return (
+                    <span
+                      key={user.socketId || `${user.id}-${user.name}`}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/50 text-[10px] font-semibold"
+                      style={{ backgroundColor: colors.backgroundColor, color: colors.foregroundColor }}
+                      title={`${user.name}${user.typing ? ' 正在输入' : ''}`}
+                    >
+                      {(user.name || '?').slice(0, 1)}
+                    </span>
+                  );
+                })}
               </div>
               {collaboration.users.some((user) => user.typing) && (
                 <span className={`text-xs ${isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'}`}>
@@ -710,7 +742,7 @@ export default function Editor({
       </div>
 
       {editor && showFindReplace && !focusMode && (
-        <FindReplacePanel editor={editor} readOnly={readOnly} onClose={() => setShowFindReplace(false)} />
+        <FindReplacePanel editor={editor} readOnly={readOnly} onClose={closeFindReplace} />
       )}
 
       {/* 编辑区域 + 目录侧栏 */}

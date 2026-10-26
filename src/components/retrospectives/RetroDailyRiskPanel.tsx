@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { AlertTriangle, Plus, RefreshCw } from 'lucide-react';
 import type { CreateRetroActionPayload, RetroDailyRiskItem, RetrospectiveStatus } from '../../api/retrospectives';
 import type { User } from '../../types';
@@ -11,6 +11,8 @@ type Props = {
   status: RetrospectiveStatus;
   canManageActions: boolean;
   loading: boolean;
+  locked?: boolean;
+  resetCreateDraftSignal?: number;
   error: string | null;
   onRefresh: () => void;
   onCreateAction: (payload: CreateRetroActionPayload) => Promise<boolean> | boolean;
@@ -43,21 +45,32 @@ export default function RetroDailyRiskPanel({
   status,
   canManageActions,
   loading,
+  locked = false,
+  resetCreateDraftSignal,
   error,
   onRefresh,
   onCreateAction,
 }: Props) {
+  const riskSelectId = useId();
   const [selectedId, setSelectedId] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [title, setTitle] = useState('');
+
+  useEffect(() => {
+    if (resetCreateDraftSignal === undefined) return;
+    setSelectedId('');
+    setOwnerId('');
+    setDueDate('');
+    setTitle('');
+  }, [resetCreateDraftSignal]);
 
   const selected = useMemo(
     () => risks.find((risk) => String(risk.itemId) === selectedId) || null,
     [risks, selectedId],
   );
 
-  const canCreate = canManageActions && status !== 'archived' && !error && !loading;
+  const canCreate = canManageActions && status !== 'archived' && !error && !loading && !locked;
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
@@ -102,12 +115,12 @@ export default function RetroDailyRiskPanel({
           </div>
           <div>
             <h2 className="text-lg font-bold text-studio-text-primary">日报风险联动</h2>
-            <p className="mt-1 text-sm text-studio-text-muted">
+            <p className="mt-1 text-sm text-studio-text-secondary">
               读取当前复盘周期内的日报风险分段，可确认后转为复盘行动项。
             </p>
           </div>
         </div>
-        <ActionButton variant="ghost" onClick={onRefresh} disabled={loading}>
+        <ActionButton variant="ghost" onClick={onRefresh} disabled={loading || locked}>
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           刷新日报风险
         </ActionButton>
@@ -122,60 +135,77 @@ export default function RetroDailyRiskPanel({
 
       <div className="mt-4 space-y-3">
         {loading ? (
-          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-secondary">
             正在加载日报风险...
           </div>
         ) : error && risks.length === 0 ? null : risks.length === 0 ? (
-          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-muted">
+          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-secondary">
             当前复盘周期内没有可联动的日报风险分段。
           </div>
         ) : (
-          <select
-            value={selectedId}
-            onChange={(event) => handleSelect(event.target.value)}
-            disabled={!canCreate}
-            className="w-full rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
-          >
-            <option value="">选择一条风险</option>
-            {risks.map((risk) => (
-              <option key={risk.itemId} value={risk.itemId}>
-                {formatDate(risk.reportDate)} · {risk.userName || risk.userId} · {excerpt(risk.contentMd)}
-              </option>
-            ))}
-          </select>
+          <label htmlFor={riskSelectId} className="grid min-w-0 gap-1">
+            <span className="text-xs text-studio-text-secondary">选择日报风险</span>
+            <select
+              id={riskSelectId}
+              aria-label="选择日报风险"
+              value={selectedId}
+              onChange={(event) => handleSelect(event.target.value)}
+              disabled={!canCreate}
+              className="xmt-field min-h-10 text-sm disabled:opacity-70"
+            >
+              <option value="">选择一条风险</option>
+              {risks.map((risk) => (
+                <option key={risk.itemId} value={risk.itemId}>
+                  {formatDate(risk.reportDate)} · {risk.userName || risk.userId} · {excerpt(risk.contentMd)}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
 
         {selected ? (
           <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4">
-            <p className="text-xs text-studio-text-muted">
+            <p className="text-xs text-studio-text-secondary">
               {formatDate(selected.reportDate)} · {selected.userName || selected.userId} · {riskLabels[selected.riskLevel] || '未知风险'}
             </p>
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-studio-text-secondary">{selected.contentMd}</p>
 
             <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1.4fr)_180px_160px_auto]">
-              <input
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                disabled={!canCreate}
-                className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
-                placeholder="行动项标题"
-              />
-              <select
-                value={ownerId}
-                onChange={(event) => setOwnerId(event.target.value)}
-                disabled={!canCreate}
-                className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
-              >
-                <option value="">负责人</option>
-                {users.map((user) => <option key={user.id} value={user.id}>{user.name || user.username}</option>)}
-              </select>
-              <input
-                type="date"
-                value={dueDate}
-                onChange={(event) => setDueDate(event.target.value)}
-                disabled={!canCreate}
-                className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary outline-none disabled:opacity-70"
-              />
+              <label className="grid min-w-0 gap-1">
+                <span className="text-xs text-studio-text-secondary">行动项标题</span>
+                <input
+                  aria-label="行动项标题"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  disabled={!canCreate}
+                  className="xmt-field min-h-10 text-sm disabled:opacity-70"
+                  placeholder="行动项标题"
+                />
+              </label>
+              <label className="grid min-w-0 gap-1">
+                <span className="text-xs text-studio-text-secondary">负责人</span>
+                <select
+                  aria-label="负责人"
+                  value={ownerId}
+                  onChange={(event) => setOwnerId(event.target.value)}
+                  disabled={!canCreate}
+                  className="xmt-field min-h-10 text-sm disabled:opacity-70"
+                >
+                  <option value="">负责人</option>
+                  {users.map((user) => <option key={user.id} value={user.id}>{user.name || user.username}</option>)}
+                </select>
+              </label>
+              <label className="grid min-w-0 gap-1">
+                <span className="text-xs text-studio-text-secondary">截止日期</span>
+                <input
+                  type="date"
+                  aria-label="截止日期"
+                  value={dueDate}
+                  onChange={(event) => setDueDate(event.target.value)}
+                  disabled={!canCreate}
+                  className="xmt-field min-h-10 text-sm disabled:opacity-70"
+                />
+              </label>
               <ActionButton variant="primary" onClick={() => void handleCreate()} disabled={!canCreate || !title.trim()}>
                 <Plus className="h-4 w-4" />
                 生成行动项
@@ -185,7 +215,7 @@ export default function RetroDailyRiskPanel({
         ) : null}
 
         {!canCreate && status === 'archived' ? (
-          <p className="text-xs text-studio-text-muted">复盘已归档，不能从日报风险新增行动项。</p>
+          <p className="text-xs text-studio-text-secondary">复盘已归档，不能从日报风险新增行动项。</p>
         ) : null}
       </div>
     </GlassPanel>

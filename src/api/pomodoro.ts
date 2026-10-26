@@ -10,7 +10,14 @@ function getAuthHeader(): Record<string, string> {
 
 export type { PomodoroSession, PomodoroStats, PomodoroRanking };
 
-export async function startPomodoro(data?: { duration?: number; topic_id?: number }): Promise<{ sessionId: number; message: string }> {
+export async function startPomodoro(data?: { duration?: number; topic_id?: number }): Promise<{
+  sessionId: number;
+  message: string;
+  duration?: number;
+  startedAt?: string;
+  remainingSeconds?: number;
+  resumed?: boolean;
+}> {
   const response = await fetch(`${BASE_URL}/pomodoro/start`, {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
@@ -32,7 +39,13 @@ export async function completePomodoro(id: number): Promise<{ message: string }>
     method: 'POST',
     headers: getAuthHeader()
   });
-  if (!response.ok) throw new Error('完成番茄钟失败');
+  if (!response.ok) {
+    if (response.status === 400) {
+      const payload = await response.json().catch(() => null) as { message?: unknown } | null;
+      if (payload?.message === '该番茄钟已完成') return { message: '番茄钟完成！' };
+    }
+    throw new Error('完成番茄钟失败');
+  }
   return response.json();
 }
 

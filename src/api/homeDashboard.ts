@@ -15,12 +15,14 @@ export type HomeAttentionTopic = {
 export type HomePipelineTopic = {
   id: number;
   title: string;
-  status: 'pending' | 'production' | 'shooting' | 'publishing' | 'completed';
+  status: 'pending' | 'approved' | 'production' | 'shooting' | 'publishing' | 'completed';
   created_at: string;
   stage_entered_at: string | null;
   creator_name: string | null;
   assignee_name: string | null;
 };
+
+export type HomePipelineStage = 'pending' | 'production' | 'shooting' | 'publishing' | 'completed';
 
 export type HomeDraftTask = {
   id: number;
@@ -36,7 +38,7 @@ export type HomeAttentionSummary = {
   generated_at: string;
   stale_stage_days: number;
   active_topics: { total: number; topics: Array<{ id: number; title: string; status: string }> };
-  counts: { overdue: number; due_soon: number; stalled: number; total: number };
+  counts: { overdue: number; due_soon: number; stalled: number; stage_time_unknown: number; total: number };
   today_publishing: {
     total: number;
     tasks: HomeTodayPublishingTask[];
@@ -57,7 +59,7 @@ export type HomeAttentionSummary = {
     tasks: HomeRetrospectiveTask[];
   };
   topics: HomeAttentionTopic[];
-  topic_stages: Record<HomePipelineTopic['status'], { total: number; topics: HomePipelineTopic[] }>;
+  topic_stages: Record<HomePipelineStage, { total: number; topics: HomePipelineTopic[] }>;
   my_drafts: { tasks: HomeDraftTask[] };
 };
 
@@ -96,7 +98,7 @@ function isHomeAttentionSummary(value: unknown): value is HomeAttentionSummary {
 
   const counts = value.counts;
   const stages = value.topic_stages;
-  const stageNames: HomePipelineTopic['status'][] = ['pending', 'production', 'shooting', 'publishing', 'completed'];
+  const stageNames: HomePipelineStage[] = ['pending', 'production', 'shooting', 'publishing', 'completed'];
   const hasStagePreviews = isRecord(stages) && stageNames.every((stage) => {
     const entry = stages[stage];
     return isRecord(entry) && typeof entry.total === 'number' && Number.isFinite(entry.total) && isRecordArray(entry.topics);
@@ -107,7 +109,7 @@ function isHomeAttentionSummary(value: unknown): value is HomeAttentionSummary {
     && typeof value.stale_stage_days === 'number' && Number.isFinite(value.stale_stage_days)
     && typeof value.active_topics.total === 'number' && Number.isFinite(value.active_topics.total)
     && isRecordArray(value.active_topics.topics)
-    && ['overdue', 'due_soon', 'stalled', 'total'].every((key) => typeof counts[key] === 'number' && Number.isFinite(counts[key]))
+    && ['overdue', 'due_soon', 'stalled', 'stage_time_unknown', 'total'].every((key) => typeof counts[key] === 'number' && Number.isFinite(counts[key]))
     && hasCountAndRecords(value.today_publishing)
     && hasCountAndRecords(value.sync_anomalies)
     && typeof value.sync_anomalies.available === 'boolean'
@@ -177,9 +179,10 @@ export async function getHomeAttention(signal?: AbortSignal): Promise<HomeAttent
   return payload;
 }
 
-export async function getHomeActivity(): Promise<HomeActivitySummary> {
+export async function getHomeActivity(signal?: AbortSignal): Promise<HomeActivitySummary> {
   const token = useAuthStore.getState().token;
   const response = await fetch('/api/dashboard/home-activity', {
+    signal,
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!response.ok) {

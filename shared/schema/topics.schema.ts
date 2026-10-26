@@ -9,6 +9,7 @@ export const topicStatusSchema = z.enum([
   'publishing',
   'completed',
 ]);
+const topicQueryStatusSchema = z.union([topicStatusSchema, z.literal('creation')]);
 
 const emptyToUndefined = (value: unknown) => (value === '' || value === undefined || value === null ? undefined : value);
 const creatorTopicSuggestionSourceSchema = z.object({
@@ -18,7 +19,7 @@ const creatorTopicSuggestionSourceSchema = z.object({
 }).strict();
 
 export const topicQuerySchema = z.object({
-  status: z.preprocess(emptyToUndefined, topicStatusSchema.optional()),
+  status: z.preprocess(emptyToUndefined, topicQueryStatusSchema.optional()),
   search: z.preprocess(emptyToUndefined, z.string().trim().max(200).optional()),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(200).default(10),
@@ -29,7 +30,7 @@ export const createTopicInputSchema = z.object({
   description: z.string().optional().default(''),
   outline: z.string().nullable().optional(),
   outlineMarkdown: z.string().nullable().optional(),
-  outlineJson: z.union([z.string(), z.record(z.unknown())]).nullable().optional(),
+  outlineJson: z.union([z.string(), z.record(z.string(), z.unknown())]).nullable().optional(),
   platform: z.string().max(100).optional().default(''),
   deadline: z.string().optional().default(''),
   assignee_id: z.coerce.number().int().positive().nullable().optional(),

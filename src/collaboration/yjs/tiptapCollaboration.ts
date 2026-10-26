@@ -3,6 +3,7 @@ import { Plugin } from '@tiptap/pm/state';
 import { yCursorPlugin, ySyncPlugin, yUndoPlugin } from 'y-prosemirror';
 import type { Awareness } from 'y-protocols/awareness';
 import type * as Y from 'yjs';
+import { getCollaboratorDisplayColors } from '../core/collaboratorColors';
 export { editorExtensions } from '../../components/editor/extensions/editorExtensions';
 
 export interface TiptapCollaborationOptions {
@@ -21,7 +22,9 @@ function remoteCursorLabelPlugin() {
       const lastPositions = new WeakMap<Element, string>();
       const overflow = document.createElement('div');
       overflow.className = 'xmt-collaboration-cursor-overflow';
+      overflow.setAttribute('role', 'group');
       overflow.setAttribute('aria-label', '其他协作者');
+      overflow.setAttribute('aria-hidden', 'true');
       document.body.append(overflow);
 
       const positionLabels = () => {
@@ -65,11 +68,18 @@ function remoteCursorLabelPlugin() {
           const avatar = document.createElement('span');
           avatar.className = 'xmt-collaboration-cursor-avatar';
           avatar.textContent = (label.dataset.remoteName || '协').slice(0, 1);
-          avatar.title = label.dataset.remoteName || '协作者';
-          avatar.style.backgroundColor = label.dataset.remoteColor || '#3b82f6';
+          const collaboratorName = label.dataset.remoteName || '协作者';
+          avatar.setAttribute('role', 'img');
+          avatar.setAttribute('aria-label', collaboratorName);
+          avatar.title = collaboratorName;
+          const colors = getCollaboratorDisplayColors(label.dataset.remoteColor);
+          avatar.style.backgroundColor = colors.backgroundColor;
+          avatar.style.color = colors.foregroundColor;
           overflow.append(avatar);
         });
-        overflow.classList.toggle('is-visible', overflow.childElementCount > 0);
+        const hasOverflowCollaborators = overflow.childElementCount > 0;
+        overflow.classList.toggle('is-visible', hasOverflowCollaborators);
+        overflow.setAttribute('aria-hidden', String(!hasOverflowCollaborators));
       };
       const observer = new MutationObserver(() => { schedulePosition(); refreshVisibility(); });
       observer.observe(editorView.dom, { childList: true, subtree: true });
@@ -104,14 +114,16 @@ export const TiptapCollaboration = Extension.create<TiptapCollaborationOptions>(
         cursorBuilder: (user) => {
           const cursor = document.createElement('span');
           cursor.classList.add('xmt-collaboration-cursor');
-          cursor.style.borderColor = user.color || '#3b82f6';
+          const colors = getCollaboratorDisplayColors(user.color);
+          cursor.style.borderColor = colors.backgroundColor;
 
           const label = document.createElement('span');
           label.classList.add('xmt-collaboration-cursor-label');
-          label.style.backgroundColor = user.color || '#3b82f6';
+          label.style.backgroundColor = colors.backgroundColor;
+          label.style.color = colors.foregroundColor;
           label.textContent = user.role ? `${user.name || '协作者'} · ${user.role}` : user.name || '协作者';
           label.dataset.remoteName = user.name || '协作者';
-          label.dataset.remoteColor = user.color || '#3b82f6';
+          label.dataset.remoteColor = colors.backgroundColor;
           cursor.append(label);
 
           return cursor;

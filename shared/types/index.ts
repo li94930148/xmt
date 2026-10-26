@@ -350,6 +350,7 @@ export interface InspirationComment {
   id: number;
   inspiration_id: number;
   content: string;
+  client_request_id?: string | null;
   creator_id: number;
   creator_name?: string;
   created_at: string;

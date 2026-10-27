@@ -112,6 +112,10 @@ async function testGetTopicsOmitsEmptyFilters() {
     assert.ok(!requestedUrl.includes('search='), '空 search 不应进入查询串');
     assert.ok(requestedUrl.includes('page=1'));
     assert.ok(requestedUrl.includes('limit=15'));
+
+    await getTopics({ topic_filter: 'mine', page: 2, limit: 20 });
+    assert.ok(requestedUrl.includes('topic_filter=mine'), 'the mobile per-topic filter is sent to the server');
+    assert.ok(requestedUrl.includes('page=2'), 'filter requests retain the current page');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -202,6 +206,9 @@ async function testTopicQuerySchemaAcceptsEmptyStrings() {
   assert.equal(parsed.page, 1);
   assert.equal(parsed.limit, 15);
   assert.equal(topicQuerySchema.parse({ status: 'creation' }).status, 'creation', 'the dashboard creation-stage alias is accepted by topic list queries');
+  assert.equal(topicQuerySchema.parse({ topic_filter: 'mine' }).topic_filter, 'mine');
+  assert.equal(topicQuerySchema.parse({ topic_filter: 'active' }).topic_filter, 'active');
+  assert.throws(() => topicQuerySchema.parse({ topic_filter: 'all' }));
 }
 
 testControllerDedupsIdenticalErrors();

@@ -102,6 +102,13 @@ v1 错误响应统一为：
 - Auth v1 Web 模式的 Refresh Token 只通过 `__Host-xmt_refresh` HttpOnly Cookie 交付；login/refresh JSON 不含原值，refresh 不接受 body Token，并要求受信 Origin 与 `X-XMT-CSRF`。
 - Auth Rollout 管理诊断使用 `GET /api/v1/auth-rollout/status`，接受当前 legacy Bearer JWT 以支持迁移期管理员访问；只读返回 5 分钟、60 分钟、24 小时统一 Auth Event 聚合、风险和审计，不提供配置写接口。
 
+### 选题列表过滤与分页（Legacy 与 v1）
+
+- `GET /api/topics` 和 `GET /api/v1/topics` 可选接收 `status`、`search`、`topic_filter`、`page`、`limit`；`topic_filter` 当前仅接受 `mine` 或 `active`。
+- `topic_filter=mine` 将结果收窄到当前操作者创建或负责的选题，即使该角色默认可查看全库也不扩大“我的”结果；不改变详情、编辑或默认列表的权限规则。
+- `topic_filter=active` 只包含已通过、创作中、拍摄中、发布中四种状态。`status`、`search` 与 `topic_filter` 同时提供时取交集。
+- 所有过滤条件在分页和总数统计之前应用，返回的 `pagination.total` / `meta.total` 与筛选后的列表一致。
+
 ### 选题创建结果恢复（Legacy 与 v1）
 
 - `POST /api/topics` 与 `POST /api/v1/topics` 继续要求 `topic:create`。新客户端可附带 UUID `client_request_id`；旧客户端不带该字段时沿用原创建路径与响应。相同操作者、相同规范化载荷与请求编号重放会返回首次创建的 `topicId`；请求编号被其他操作者或不同载荷复用时返回 `409`。选题、建议归因、历史、活动记录和回执在一个事务中提交；成功重放不会重复这些写入，也不会再次发送通知或广播。

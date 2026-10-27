@@ -116,6 +116,19 @@ export default {
         '3xl': '1.5rem',
         '4xl': '2rem',
       },
+      // Keep authored Studio token alpha utilities in the generated scale.
+      opacity: {
+        8: '0.08',
+        12: '0.12',
+        14: '0.14',
+        16: '0.16',
+        18: '0.18',
+        22: '0.22',
+        72: '0.72',
+        76: '0.76',
+        78: '0.78',
+        82: '0.82',
+      },
       boxShadow: {
         'glow-primary': 'var(--xmt-glow-primary)',
         'glow-cyan': 'var(--xmt-glow-cyan)',

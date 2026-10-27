@@ -50,6 +50,7 @@ export type TopicCreateRequestRecord = {
 };
 export type TopicListFilter = {
   status?: unknown;
+  topic_filter?: 'mine' | 'active';
   search?: unknown;
   page: number;
   limit: number;

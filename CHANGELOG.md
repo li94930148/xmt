@@ -1,5 +1,34 @@
 # Changelog
 
+
+## v9.4.15 - 2026-10-28
+
+### Mobile topic filters and pagination
+
+- The mobile “Mine” and “Active” filters now run on the server before pagination and totals are calculated. “Mine” is scoped to topics created by or assigned to the current user; “Active” includes approved, production, shooting, and publishing topics.
+- Status, search, and topic filters intersect, so the displayed count and pages represent the same filtered result set.
+- Shared status pills now use generated theme-aware soft tokens, fixing transparent badges in the topic board in both themes.
+- Completed the Studio alpha-opacity scale so all used token-based background, border, and text opacity classes generate CSS.
+- Replaced the Pomodoro panel's unsupported alpha modifier on a plain theme CSS variable with the equivalent Studio surface token.
+- Mobile topic filter results, page changes, and empty states now have polite screen-reader announcements. The mobile profile asks before discarding an unsaved name or email draft.
+
+### Validation
+
+- Topic API/SQLite integration and client query/schema checks passed. Chrome DevTools MCP manually verified the isolated mobile fixture at 390px and 320px, including the second “Mine” page, filtered counts, status set, zero horizontal overflow, and no console warnings/errors. Automated browser-suite and full repository checks are recorded in `docs/UPGRADE_PROGRESS.md`. Android metadata is 9.4.15 / 90415; no Android package was built. Local changes only; not committed, pushed, or deployed.
+
+## v9.4.14 - 2026-10-28
+
+### Creator Center read recovery
+
+- A failed next-page request now says that the next page could not be read, keeps the loaded works visible, and leaves retry on the next-page control. Initial-load and full-list refresh messages remain distinct.
+- Creator work list and detail read retries, Auth rollout recheck, mobile notification settings return, and mobile production editor return were manually reviewed in isolated Google Chrome fixtures. No real business data was used; exact scopes are recorded in `docs/UPGRADE_PROGRESS.md`.
+
+### Validation
+
+- The focused creator browser assertion now checks the next-page failure message. Android metadata is 9.4.14 / 90414; no Android package was built. Local changes only; not committed, pushed, or deployed.
+- The automated creator browser suite was attempted but did not reach assertions: macOS Chromium exited during startup with `bootstrap_check_in` permission denied (1100). Chrome MCP manual checks are recorded separately and are not counted as an automated-suite pass.
+
+
 ## v9.4.13 - 2026-10-28
 
 ### Write recovery

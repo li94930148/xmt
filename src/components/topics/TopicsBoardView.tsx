@@ -107,7 +107,7 @@ export default function TopicsBoardView({
             {assignees.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
         </label>
-        <span className="ml-auto text-xs text-studio-text-secondary">显示 {filteredTopics.length} / {total} 个选题</span>
+        <span role="status" aria-live="polite" aria-atomic="true" className="ml-auto text-xs text-studio-text-secondary">显示 {filteredTopics.length} / {total} 个选题</span>
       </GlassPanel>
 
       {total > topics.length ? (

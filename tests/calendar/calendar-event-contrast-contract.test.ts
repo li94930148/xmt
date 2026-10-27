@@ -90,8 +90,8 @@ for (const [eventType, tone] of Object.entries(eventTones)) {
 
 for (const tone of ['primary', 'cyan', 'violet', 'coral', 'amber', 'success']) {
   assert.ok(
-    statusPillSource.includes(`${tone}: 'border-studio-${tone}/35 bg-studio-${tone}/12 text-studio-${tone}-contrast'`),
-    `StatusPill ${tone} foreground and background remain paired through semantic tokens`,
+    statusPillSource.includes(`${tone}: 'border-studio-${tone}/35 bg-studio-${tone}-soft text-studio-${tone}-contrast'`),
+    `StatusPill ${tone} uses a generated theme-aware soft background and matching semantic foreground`,
   );
 }
 assert.ok(
@@ -165,13 +165,14 @@ for (const [theme, variables] of Object.entries(themeBlocks)) {
     }
 
     const foreground = get(`xmt-${tone}-contrast`);
-    const semanticBackground = get(`xmt-${tone}`);
+    const statusPillBackground = get(`xmt-${tone}-soft`);
     for (const [surfaceName, base] of bases) {
-      const mobileBackground = composite([semanticBackground[0], semanticBackground[1], semanticBackground[2], 0.12], base);
+      const mobileBackground = composite(statusPillBackground, base);
       const mobileRatio = contrastRatio(foreground, mobileBackground);
       assert.ok(mobileRatio >= 4.5, `${theme}/${eventType}/StatusPill on ${surfaceName} has ${mobileRatio.toFixed(2)}:1 contrast; expected >= 4.5:1`);
     }
 
+    const semanticBackground = get(`xmt-${tone}`);
     for (const [surfaceName, base] of cellBases) {
       const desktopBackground = composite([semanticBackground[0], semanticBackground[1], semanticBackground[2], 0.1], base);
       const desktopRatio = contrastRatio(foreground, desktopBackground);

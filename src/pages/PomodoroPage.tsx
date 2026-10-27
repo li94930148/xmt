@@ -60,7 +60,7 @@ export default function PomodoroPage() {
               {ranking.map((item, index) => (
                 <div
                   key={item.user_id}
-                  className="flex items-center gap-3 p-3 rounded-xl bg-theme-tertiary/50 hover:bg-theme-tertiary transition-colors"
+                  className="flex items-center gap-3 p-3 rounded-xl bg-studio-surface-soft/50 hover:bg-theme-tertiary transition-colors"
                 >
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
                     index === 0 ? 'bg-studio-amber/20 text-studio-amber-contrast' :

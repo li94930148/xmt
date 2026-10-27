@@ -55,13 +55,17 @@ export default function MobileMe() {
   const passwordSaveLockRef = useRef(false);
   const passwordOutcomeUnknownRef = useRef(false);
   const [pendingLeaveAttempt, setPendingLeaveAttempt] = useState<{
-    kind: 'profile' | 'password';
+    kind: 'profile-draft' | 'profile-recovery' | 'password';
     attempt: Pick<RouteNavigationAttempt, 'proceed' | 'stay'>;
   } | null>(null);
   const [passwordNavigationNotice, setPasswordNavigationNotice] = useState('');
   const [showChangelog, setShowChangelog] = useState(false);
 
   useEffect(() => { setName(user?.name ?? ''); setEmail(user?.email ?? ''); }, [user?.email, user?.name]);
+  const profileDirty = Boolean(user) && !sameProfileFields(
+    { name, email },
+    { name: user?.name ?? '', email: user?.email ?? '' },
+  );
   const saveProfileFromServer = (profile: Awaited<ReturnType<typeof getMe>>, actorId: number, actorAuthMode: 'legacy' | 'v1-web') => {
     const auth = useAuthStore.getState();
     const currentToken = auth.token;
@@ -208,7 +212,12 @@ export default function MobileMe() {
     }
     if (profileRecovery) {
       setPasswordNavigationNotice('');
-      setPendingLeaveAttempt({ kind: 'profile', attempt: { proceed, stay } });
+      setPendingLeaveAttempt({ kind: 'profile-recovery', attempt: { proceed, stay } });
+      return;
+    }
+    if (profileDirty) {
+      setPasswordNavigationNotice('');
+      setPendingLeaveAttempt({ kind: 'profile-draft', attempt: { proceed, stay } });
       return;
     }
     if (savingPassword || passwordSaveLockRef.current) {
@@ -222,18 +231,18 @@ export default function MobileMe() {
       return;
     }
     proceed();
-  }, [passwordOutcomeUnknown, profileRecovery, saving, savingPassword]);
-  useRouteNavigationGuard(saving || profileRecovery !== null || savingPassword || passwordOutcomeUnknown, handleRouteNavigationAttempt);
+  }, [passwordOutcomeUnknown, profileDirty, profileRecovery, saving, savingPassword]);
+  useRouteNavigationGuard(saving || profileDirty || profileRecovery !== null || savingPassword || passwordOutcomeUnknown, handleRouteNavigationAttempt);
 
   useEffect(() => {
-    if (!saving && !profileRecovery && !savingPassword && !passwordOutcomeUnknown) return undefined;
+    if (!saving && !profileDirty && !profileRecovery && !savingPassword && !passwordOutcomeUnknown) return undefined;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warnBeforeUnload);
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
-  }, [passwordOutcomeUnknown, profileRecovery, saving, savingPassword]);
+  }, [passwordOutcomeUnknown, profileDirty, profileRecovery, saving, savingPassword]);
   const row = 'flex min-h-14 w-full items-center justify-between border-t border-studio-border-soft px-4 text-sm';
   const profileLocked = saving || Boolean(profileRecovery);
   return <div className="space-y-4">
@@ -273,11 +282,17 @@ export default function MobileMe() {
     <p className="px-1 text-xs text-studio-text-muted">XMT Mobile v{__APP_VERSION__}</p>
     <ConfirmModal
       open={pendingLeaveAttempt !== null}
-      title={pendingLeaveAttempt?.kind === 'password' ? '密码修改结果尚未确认' : '个人资料结果尚未确认'}
+      title={pendingLeaveAttempt?.kind === 'password'
+        ? '密码修改结果尚未确认'
+        : pendingLeaveAttempt?.kind === 'profile-draft' ? '个人资料尚未保存' : '个人资料结果尚未确认'}
       description={pendingLeaveAttempt?.kind === 'password'
         ? '离开后本页的核验提示会关闭。请先退出当前账号，再用新密码尝试登录；此页面不会自动重复提交改密请求。'
-        : '离开后本页的草稿和待核实提示会关闭。重新打开后会读取账号当前资料，不会自动重复提交或覆盖服务器内容。'}
-      confirmText={pendingLeaveAttempt?.kind === 'password' ? '离开并按提示核验' : '离开并放弃本页草稿'}
+        : pendingLeaveAttempt?.kind === 'profile-draft'
+          ? '姓名或邮箱尚未保存。离开后本页草稿会丢失。'
+          : '离开后本页的草稿和待核实提示会关闭。重新打开后会读取账号当前资料，不会自动重复提交或覆盖服务器内容。'}
+      confirmText={pendingLeaveAttempt?.kind === 'password'
+        ? '离开并按提示核验'
+        : pendingLeaveAttempt?.kind === 'profile-draft' ? '离开并放弃草稿' : '离开并放弃本页草稿'}
       cancelText="留在当前页面"
       variant="warning"
       onCancel={() => {

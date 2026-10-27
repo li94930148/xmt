@@ -10,6 +10,7 @@ export const topicStatusSchema = z.enum([
   'completed',
 ]);
 const topicQueryStatusSchema = z.union([topicStatusSchema, z.literal('creation')]);
+const topicQueryFilterSchema = z.enum(['mine', 'active']);
 
 const emptyToUndefined = (value: unknown) => (value === '' || value === undefined || value === null ? undefined : value);
 const creatorTopicSuggestionSourceSchema = z.object({
@@ -20,6 +21,7 @@ const creatorTopicSuggestionSourceSchema = z.object({
 
 export const topicQuerySchema = z.object({
   status: z.preprocess(emptyToUndefined, topicQueryStatusSchema.optional()),
+  topic_filter: z.preprocess(emptyToUndefined, topicQueryFilterSchema.optional()),
   search: z.preprocess(emptyToUndefined, z.string().trim().max(200).optional()),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(200).default(10),

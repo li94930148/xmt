@@ -326,6 +326,77 @@ async function apiTests() {
     assert.ok(creationStage.data.some((topic) => topic.title === '创作阶段筛选已通过'));
     assert.ok(creationStage.data.some((topic) => topic.title === '创作阶段筛选进行中'));
 
+    const listFilterActorId = await executeInsert(
+      `INSERT INTO users (username, password, email, role, name, enabled, force_change_password)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ['topic-list-filter-member', 'unused', 'topic-list-filter-member@example.invalid', 'member', '列表筛选成员', 1, 0],
+    );
+    await execute('INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE code = ?', [listFilterActorId, 'member']);
+    const listFilterForeignId = await executeInsert(
+      `INSERT INTO users (username, password, email, role, name, enabled, force_change_password)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ['topic-list-filter-foreign', 'unused', 'topic-list-filter-foreign@example.invalid', 'member', '其他成员', 1, 0],
+    );
+    await execute('INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE code = ?', [listFilterForeignId, 'member']);
+    const mineTopicIds: number[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const creatorId = index % 2 === 0 ? listFilterActorId : listFilterForeignId;
+      const assigneeId = index % 2 === 0 ? listFilterForeignId : listFilterActorId;
+      const topicId = await executeInsert(
+        `INSERT INTO topics (title, description, platform, creator_id, assignee_id, status, created_at)
+         VALUES (?, '', 'douyin', ?, ?, ?, ?)`,
+        [`server-mine-pagination-${index}`, creatorId, assigneeId, ['pending', 'approved', 'production', 'shooting', 'publishing'][index], `2026-10-28 10:00:0${index}`],
+      );
+      mineTopicIds.push(topicId);
+    }
+    for (let index = 0; index < 3; index += 1) {
+      await executeInsert(
+        `INSERT INTO topics (title, description, platform, creator_id, assignee_id, status, created_at)
+         VALUES (?, '', 'douyin', ?, NULL, 'approved', ?)`,
+        [`server-mine-excluded-${index}`, listFilterForeignId, `2026-10-28 09:00:0${index}`],
+      );
+    }
+
+    const minePageResponses = await Promise.all([1, 2, 3].map(async (page) => {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/topics?topic_filter=mine&search=server-mine-pagination&limit=2&page=${page}`, {
+        headers: { authorization: `Bearer ${signToken({ userId: listFilterActorId })}` },
+      });
+      assert.equal(response.status, 200);
+      return response.json() as Promise<{ data: Array<{ id: number }>; pagination: { total: number; page: number; limit: number } }>;
+    }));
+    assert.deepEqual(minePageResponses.map((page) => page.pagination.total), [5, 5, 5], 'mine filtering is applied before COUNT for each page');
+    assert.deepEqual(minePageResponses.map((page) => page.data.length), [2, 2, 1], 'pagination slices the filtered mine result set');
+    assert.deepEqual(new Set(minePageResponses.flatMap((page) => page.data.map((item) => item.id))), new Set(mineTopicIds), 'mine pagination returns each created-or-assigned topic once');
+    assert.deepEqual(minePageResponses.map((page) => page.pagination.page), [1, 2, 3]);
+
+    const activeStatuses = ['approved', 'production', 'shooting', 'publishing', 'pending', 'rejected', 'completed'];
+    for (let index = 0; index < activeStatuses.length; index += 1) {
+      await executeInsert(
+        `INSERT INTO topics (title, description, platform, creator_id, status, created_at)
+         VALUES (?, '', 'douyin', ?, ?, ?)`,
+        [`server-active-matrix-${index}`, listFilterForeignId, activeStatuses[index], `2026-10-28 08:00:0${index}`],
+      );
+    }
+    const activeFilterResponse = await fetch(`http://127.0.0.1:${address.port}/api/v1/topics?topic_filter=active&search=server-active-matrix&limit=20`, {
+      headers: { authorization: `Bearer ${signToken({ userId: listFilterActorId })}` },
+    });
+    assert.equal(activeFilterResponse.status, 200);
+    const activeFilter = await activeFilterResponse.json() as { data: Array<{ status: string }>; meta: { total: number } };
+    assert.equal(activeFilter.meta.total, 4, 'active count includes only the four active workflow statuses');
+    assert.deepEqual(new Set(activeFilter.data.map((item) => item.status)), new Set(['approved', 'production', 'shooting', 'publishing']));
+
+    const intersectedFilterResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics?topic_filter=active&status=pending&search=server-active-matrix`, {
+      headers: { authorization: `Bearer ${signToken({ userId: listFilterActorId })}` },
+    });
+    assert.equal(intersectedFilterResponse.status, 200);
+    const intersectedFilter = await intersectedFilterResponse.json() as { data: unknown[]; pagination: { total: number } };
+    assert.equal(intersectedFilter.pagination.total, 0, 'status and topic filters intersect before counting');
+
+    const invalidTopicFilterResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics?topic_filter=all`, {
+      headers: { authorization: `Bearer ${signToken({ userId: listFilterActorId })}` },
+    });
+    assert.equal(invalidTopicFilterResponse.status, 400, 'unknown topic filters are rejected by the strict query schema');
+
     const outsiderId = await executeInsert(
       `INSERT INTO users (username, password, email, role, name, enabled, force_change_password)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,

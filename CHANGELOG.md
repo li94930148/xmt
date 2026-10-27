@@ -1,5 +1,27 @@
 # Changelog
 
+## v9.4.5 - 2026-10-27
+
+### Task feedback
+
+- Mobile home now reports an unknown task state when attention or actionable-message reads fail; it shows an empty task state only after all required reads succeed.
+
+### Validation
+
+- Chrome MCP isolated 390px failure/retry checks and automated test status are recorded in `docs/UPGRADE_PROGRESS.md`.
+- No API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.5 / 90405; no APK was built. This update remains local and is not pushed or deployed.
+
+## v9.4.4 - 2026-10-27
+
+### Mobile accessibility
+
+- Mobile home attention loading now exposes a polite status announcement, matching the task and inspiration loading states.
+
+### Validation
+
+- Focused Chrome and VoiceOver verification, version governance, type checking, lint, and build results are recorded in `docs/UPGRADE_PROGRESS.md`.
+- No API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.4 / 90404; no APK was built. This update remains local and is not deployed.
+
 ## v9.4.3 - 2026-10-27
 
 ### Mobile accessibility fixture

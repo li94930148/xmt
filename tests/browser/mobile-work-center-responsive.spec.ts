@@ -1672,13 +1672,15 @@ try {
       await Promise.all([attentionReadStarted, inspirationReadStarted]);
       const taskStatus = page.getByRole('status').filter({ hasText: '正在整理今日任务…' });
       const inspirationStatus = page.getByRole('status').filter({ hasText: '正在读取灵感数量…' });
-      await Promise.all([taskStatus.waitFor(), inspirationStatus.waitFor()]);
+      const attentionStatus = page.getByRole('status').filter({ hasText: '正在读取关注事项…' });
+      await Promise.all([taskStatus.waitFor(), inspirationStatus.waitFor(), attentionStatus.waitFor()]);
       assert.equal(await taskStatus.getAttribute('aria-live'), 'polite', 'mobile home task loading status is politely announced');
       assert.equal(await inspirationStatus.getAttribute('aria-live'), 'polite', 'mobile home inspiration loading status is politely announced');
+      assert.equal(await attentionStatus.getAttribute('aria-live'), 'polite', 'mobile home attention loading status is politely announced');
       releaseAttentionRead();
       releaseInspirationRead();
       await Promise.all([attentionResponse, inspirationResponse]);
-      await Promise.all([taskStatus.waitFor({ state: 'detached' }), inspirationStatus.waitFor({ state: 'detached' })]);
+      await Promise.all([taskStatus.waitFor({ state: 'detached' }), inspirationStatus.waitFor({ state: 'detached' }), attentionStatus.waitFor({ state: 'detached' })]);
       await page.getByTestId('mobile-home-active-topic-summary').waitFor();
       assert.deepEqual(businessWrites, [], 'mobile home loading fixture performs no business writes');
       await assertMobileLayout(page, 390, 'home-loading-status-light');

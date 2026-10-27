@@ -124,6 +124,7 @@ export default function MobileHome() {
     recentActivityCurrent && recentActivitySnapshot?.loading
       || showRecentChanges && userId && token && !recentActivityCurrent,
   );
+  const taskSourcesError = Boolean(attentionError || (isManagementRole && actionableMessages.error));
 
   const loadAttention = useCallback(async () => {
     request.current?.abort();
@@ -330,7 +331,7 @@ export default function MobileHome() {
           <span className="shrink-0 text-xs font-semibold text-studio-primary-contrast">{task.action}</span>
           <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-studio-text-secondary" />
         </ActionButton>)}
-      </div> : attentionLoading || (isManagementRole && actionableMessages.loading) ? <p role="status" aria-live="polite" className="py-2 text-sm text-studio-text-secondary">正在整理今日任务…</p> : <p className="py-2 text-sm text-studio-text-secondary">当前没有需要立即处理的任务。</p>}
+      </div> : attentionLoading || (isManagementRole && actionableMessages.loading) ? <p role="status" aria-live="polite" className="py-2 text-sm text-studio-text-secondary">正在整理今日任务…</p> : taskSourcesError ? <p className="py-2 text-sm text-studio-text-secondary">暂时无法确认是否有需要立即处理的任务。</p> : <p className="py-2 text-sm text-studio-text-secondary">当前没有需要立即处理的任务。</p>}
       {remainingTaskCount > 0 ? <ActionButton
         variant="ghost"
         className="mt-2 w-full justify-center py-2 text-sm"
@@ -465,7 +466,7 @@ export default function MobileHome() {
         </div>
         <ActionButton variant="ghost" className="px-2 py-1 text-sm" onClick={() => navigate('/topics', { state: { mobileReturnTo: '/' } })}>查看选题</ActionButton>
       </div>
-      {attentionLoading ? <p className="text-sm text-studio-text-secondary">正在读取关注事项…</p> : attentionError ? (
+      {attentionLoading ? <p role="status" aria-live="polite" className="text-sm text-studio-text-secondary">正在读取关注事项…</p> : attentionError ? (
         <p className="text-sm text-studio-coral-contrast">关注事项暂不可用，请在今日任务卡重试。</p>
       ) : attention ? (
         <>

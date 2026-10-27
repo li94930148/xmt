@@ -11,6 +11,24 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.4.5',
+    date: '2026-10-27',
+    title: '移动首页任务状态反馈修复',
+    impactScope: ['移动工作区首页'],
+    changes: [
+      { type: 'fix', description: '关注事项或待处理消息读取失败且没有可展示任务时，改为说明结果尚未确认；只有相关读取成功后才显示真实空状态。' },
+    ],
+  },
+  {
+    version: '9.4.4',
+    date: '2026-10-27',
+    title: '移动首页加载状态读屏播报完善',
+    impactScope: ['移动工作区首页'],
+    changes: [
+      { type: 'improvement', description: '选题关注读取期间会礼貌播报加载状态，与今日任务和灵感数量保持一致；不改变业务行为。' },
+    ],
+  },
+  {
     version: '9.4.3',
     date: '2026-10-27',
     title: '移动首页辅助功能验收稳定性修复',

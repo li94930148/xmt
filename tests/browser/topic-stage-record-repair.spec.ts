@@ -301,10 +301,18 @@ app.get('/__qa-stale-audit/:topicId', (req, res) => {
 });
 app.get('/__qa-home', (req, res) => {
   if (req.query.fail_retrospectives === 'true') failNextHomeRetrospectives = true;
+  if (req.query.fail_attention === 'true') {
+    failNextHomeAttention = true;
+    emptyHomeTasks = true;
+  }
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(editor))});localStorage.setItem('xmt_token','topic-stage-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/');</script>`);
 });
 app.get('/__qa-manager-home', (req, res) => {
+  if (req.query.fail_actionable === 'true') {
+    emptyHomeTasks = true;
+    failNextHomeActionableMessages = true;
+  }
   creatorDashboardMetricsVariant = req.query.metrics === 'official'
     ? 'official'
     : req.query.metrics === 'official-no-time' ? 'official-no-time' : 'snapshot';
@@ -1369,9 +1377,44 @@ try {
   await actionableRecoveryHome.getByText('目前没有逾期或卡点内容', { exact: true }).waitFor();
   assert.equal(await actionableRecoveryHome.getByText(/当前阶段时间待确认/).count(), 0, 'when no active topic has unknown stage time, the dashboard confirms the genuine empty attention state');
   await actionableRecoveryHome.screenshot({ path: '/tmp/xmt-home-attention-confirmed-empty-1440.png', fullPage: false });
+  await actionableRecoveryHome.close();
+
+  const actionableMobileHome = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  const actionableMobileMethods: string[] = [];
+  const expectedMobileActionableErrors: string[] = [];
+  actionableMobileHome.on('pageerror', (error) => errors.push(error.message));
+  actionableMobileHome.on('console', (message) => {
+    if (message.type() === 'error' && message.text().includes('status of 503 (Service Unavailable)')) expectedMobileActionableErrors.push(message.text());
+    else if (message.type() === 'error') errors.push(message.text());
+  });
+  actionableMobileHome.on('request', (request) => {
+    if (request.url().includes('/api/')) actionableMobileMethods.push(request.method());
+  });
+  actionableMobileHome.on('response', (response) => {
+    if (response.status() < 400) return;
+    if (response.status() === 503 && response.url().includes('/api/messages?') && response.url().includes('link=present')) expectedMobileActionableErrors.push(`${response.status()} ${response.url()}`);
+    else errors.push(`Unexpected mobile Home HTTP error: ${response.status()} ${response.url()}`);
+  });
+  emptyHomeTasks = true;
+  failNextHomeActionableMessages = true;
+  const failedMobileActionableRead = actionableMobileHome.waitForResponse((response) => response.url().includes('/api/messages?') && response.url().includes('link=present'));
+  await actionableMobileHome.goto(`${base}/__qa-manager-home`);
+  await actionableMobileHome.getByRole('heading', { name: '团队今日重点' }).waitFor();
+  assert.equal((await failedMobileActionableRead).status(), 503, 'the isolated mobile actionable-message read fails as injected');
+  await actionableMobileHome.getByRole('alert').getByText('待处理消息暂时无法读取，请重试。', { exact: true }).waitFor();
+  await actionableMobileHome.getByText('暂时无法确认是否有需要立即处理的任务。', { exact: true }).waitFor();
+  assert.equal(await actionableMobileHome.getByText('当前没有需要立即处理的任务。', { exact: true }).count(), 0, 'a failed mobile actionable-message read is not presented as a confirmed empty task list');
+  const recoveredMobileActionableRead = actionableMobileHome.waitForResponse((response) => response.url().includes('/api/messages?') && response.url().includes('link=present'));
+  await actionableMobileHome.getByRole('button', { name: '重新加载消息', exact: true }).click();
+  assert.equal((await recoveredMobileActionableRead).status(), 200, 'the explicit mobile retry recovers the actionable-message read');
+  await actionableMobileHome.getByText('当前没有需要立即处理的任务。', { exact: true }).waitFor();
+  assert.equal(await actionableMobileHome.getByText('暂时无法确认是否有需要立即处理的任务。', { exact: true }).count(), 0, 'the confirmed empty task state appears only after the retry succeeds');
+  assert.deepEqual(actionableMobileMethods, ['GET', 'GET'], 'mobile actionable-message failure and retry issue reads only');
+  assert.equal(expectedMobileActionableErrors.length, 2, 'only the deliberately injected actionable-message 503 is expected');
+  assert.equal(await actionableMobileHome.getByRole('alert').count(), 0, 'successful mobile retry clears the actionable-message alert');
+  await actionableMobileHome.close();
   emptyHomeTasks = false;
   homeUnknownStageTimeCount = 0;
-  await actionableRecoveryHome.close();
 
   const managerHome = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   managerHome.on('pageerror', (error) => errors.push(error.message));
@@ -1911,6 +1954,8 @@ try {
   await homeMobile.getByRole('alert').getByText('工作台摘要暂时无法读取，请重试。', { exact: true }).waitFor();
   await homeMobile.getByRole('heading', { name: '审核与内容推进' }).waitFor();
   assert.equal(await homeMobile.getByRole('alert').count(), 1, 'the mobile Home keeps the attention error scoped to its priority task card');
+  await homeMobile.getByText('暂时无法确认是否有需要立即处理的任务。', { exact: true }).waitFor();
+  assert.equal(await homeMobile.getByText('当前没有需要立即处理的任务。', { exact: true }).count(), 0, 'a failed attention read is not presented as a confirmed empty task list');
   const mobileRetryResponse = homeMobile.waitForResponse((response) => response.url().endsWith('/api/dashboard/home-attention'));
   await homeMobile.getByRole('button', { name: '重新加载', exact: true }).click();
   const mobileRetryResponseResult = await mobileRetryResponse;

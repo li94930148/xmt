@@ -9,7 +9,7 @@
 ### Validation
 
 - `npm run test:user-api-error-copy` covers every user-management API fallback with malformed responses and preserves server-provided errors. Type, lint, version-governance, build, and checklist browser results are recorded in `docs/UPGRADE_PROGRESS.md`.
-- No API behavior, permissions, database, or business data changed. Android metadata is synchronized to 9.4.7 / 90407; no APK was built. This version remains local and is not pushed or deployed.
+- No API behavior, permissions, database, or business data changed. Android metadata is 9.4.7 / 90407; CI produced a debug validation APK artifact, but no Android release package was published. PR #88 merged and deployed as `e8897fc3594d94784c5845e8f79f37a69b406c18`, tagged `v9.4.7`; actual VoiceOver speech remains unverified.
 
 ## v9.4.6 - 2026-10-27
 
@@ -21,7 +21,7 @@
 ### Validation
 
 - Playwright MCP in Google Chrome verified the mobile 503 error and explicit retry recovery at 390px. Type, version-governance, lint, build, and browser-suite status are recorded in `docs/UPGRADE_PROGRESS.md`.
-- No API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.6 / 90406; no APK was built. This version remains local and is not pushed or deployed.
+- No API, permissions, database, or business data changed. Android metadata is 9.4.6 / 90406; this code was released together with v9.4.7 in PR #88 and was not built as a separate Android package.
 
 ## v9.4.5 - 2026-10-27
 
@@ -32,7 +32,7 @@
 ### Validation
 
 - Chrome MCP isolated 390px failure/retry checks and automated test status are recorded in `docs/UPGRADE_PROGRESS.md`.
-- No API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.5 / 90405; no APK was built. PR #87 merged and deployed commit `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`; actual VoiceOver speech remains unverified.
+- No API, permissions, database, or business data changed. Android metadata is 9.4.5 / 90405; PR CI produced a debug validation APK artifact, but no Android release package was published. PR #87 merged and deployed commit `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`; actual VoiceOver speech remains unverified.
 
 ## v9.4.4 - 2026-10-27
 
@@ -43,7 +43,7 @@
 ### Validation
 
 - Focused Chrome and VoiceOver verification, version governance, type checking, lint, and build results are recorded in `docs/UPGRADE_PROGRESS.md`.
-- No API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.4 / 90404; no APK was built. This update remains local and is not deployed.
+- No API, permissions, database, or business data changed. Android metadata was 9.4.4 / 90404; this change was included in the v9.4.5 deployment through PR #87 at `7d58e9d067b4c6a71e8cf14e83b44996a4458df0` and was not built as a separate Android package.
 
 ## v9.4.3 - 2026-10-27
 

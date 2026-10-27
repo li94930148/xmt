@@ -5,7 +5,8 @@
 - **改造内容**：用户管理 API 在服务端错误响应缺少可用 `message` 时，成员列表/详情、角色列表、操作日志、成员创建/更新/删除及请求结果核实使用中文兜底；服务端提供的明确错误消息继续透传。
 - **验证结果**：`npm run test:user-api-error-copy` 覆盖 11 类用户管理请求，验证错误响应不是 JSON 时使用对应中文兜底、服务端给出具体消息时不覆盖。`npm run check -- --pretty false`、`npm run build`、`npm run version:check`、更新说明治理（522 个版本）、测试入口检查（288 个文件）、目标 ESLint 与 `git diff --check` 均通过。构建仍有既有 Silk 843.50 kB 大分包提示。
 - **修改文件**：`src/api/users.ts`、`tests/users/user-api-error-copy.test.ts`、CI、版本与更新说明。
-- **影响边界**：无产品 API 行为、权限、数据库或业务数据变化；Android 同步至 9.4.7 / 90407 元数据，未构建 APK。仅本地修改，不提交、推送或部署。
+- **影响边界**：无产品 API 行为、权限、数据库或业务数据变化；Android 元数据为 9.4.7 / 90407，CI 生成 Debug 验收 APK artifact，未发布 Android 安装包。
+- **部署结果**：PR #88 六项 CI 全部通过并合入，精确 SHA `e8897fc3594d94784c5845e8f79f37a69b406c18`，标签 `v9.4.7` 指向同一 SHA。受保护部署备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261027-130118-3685482.db`；Restore Drill PASS、65 项迁移兼容检查 GO、运行环境检查与读回 PASS、4 条内部路由检查 PASS。PM2 v9.4.7 online、Caddy active；本机/公网健康均返回 v9.4.7，首页 HTTP 200；SQLite `quick_check=ok`、外键违规 0。服务器安装脚本缺少模板末尾开发依赖清理，部署成功后按模板执行 `npm prune --omit=dev`、依赖树检查 PASS、`npm audit --omit=dev` 0 漏洞。重启窗口首次健康探测未连上，限次重试后成功；无数据库迁移或业务数据写入。
 - **未完成与下一步**：继续清单 B4/B5、B8 的其它本地项；真实 VoiceOver 语音仍需等 Mac 解锁后验收。
 
 ## 2026-10-27 清单 B8：移动端选题列表失败只由用户重试（v9.4.6）
@@ -13,7 +14,7 @@
 - **改造内容**：移动端 `useTopics` 查询关闭自动失败重试；503 后保留 inline 错误及“重试加载选题”按钮，用户明确点击后才再次 GET。首次加载时，数量和刷新入口分别提示“正在读取选题数量…”与“正在加载…”，避免结果未到时误显示 0。同步扩展隔离浏览器回归，覆盖桌面与移动端的一次初始请求、错误/非空状态区分、显式重试及只读恢复；修正移动工作中心旧回归，使其不再把自动重试当作预期行为。
 - **验证结果**：Playwright MCP 连接 Google Chrome 的隔离夹具在 390px 将首个选题 GET 挂起，确认播报状态可见、数量显示正在读取而非 0、加载按钮禁用；放行后得到 31 个选题，只有 1 次 GET，页面宽度/视口均为 390px、无横向溢出、控制台错误/警告为 0。另在 390px 注入 GET 503，验证只发生 1 次初始请求并显示错误与手动重试；点击后仅再请求 1 次 GET 200 并恢复。`npm run check -- --pretty false`、`npm run build`、`npm run version:check`、更新说明治理（521 个版本）、测试入口检查（287 个文件）、目标 ESLint 与 `git diff --check` 通过；生产构建仍有既有 Silk 843.50 kB 大分包提示。`npm run test:topics-responsive-browser` 在 macOS Chromium 启动阶段因 `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言；Playwright MCP 手工隔离验收已完成。
 - **修改文件**：`src/hooks/useTopics.ts`、`src/pages/mobile/MobileTopics.tsx`、`tests/browser/topics-list-responsive.spec.ts`、`tests/browser/mobile-work-center-responsive.spec.ts`、版本与更新说明。
-- **影响边界**：无 API、权限、数据库或业务数据变化；Android 同步至 9.4.6 / 90406 元数据，未构建 APK。本版本只做本地修改，不提交、推送或部署。
+- **影响边界**：无 API、权限、数据库或业务数据变化；Android 元数据曾同步至 9.4.6 / 90406，未单独构建 Android 安装包。该改造随 PR #88 的 v9.4.7 一并合并部署，SHA `e8897fc3594d94784c5845e8f79f37a69b406c18`。
 - **未完成与下一步**：实际 VoiceOver 语音验收仍未完成；尝试检查时 macOS 显示已锁定且无法自动解锁，因此没有更改 VoiceOver 状态。自动浏览器回归仍需在可启动仓库 Chromium 的环境执行；继续清单 B4/B5 与 B8 其它路径。
 
 ## 2026-10-27 清单 B8：移动首页读取失败时避免误报任务为空（v9.4.5）
@@ -21,7 +22,7 @@
 - **改造内容**：移动首页仅在关注事项摘要及负责人待处理消息等相关来源读取成功后，才显示“当前没有需要立即处理的任务”。任一来源失败且没有其它已确认任务时，改为提示“暂时无法确认是否有需要立即处理的任务”；原有错误提示和只读重试入口继续保留。无 API、权限、数据库或业务查询范围变化。
 - **验证结果**：`npm run test:home-dashboard`、`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、版本治理、更新说明治理（520 个版本）、测试入口检查（287 个文件）、`npm run build` 与 `git diff --check` 通过；生产构建保留既有 Silk 843.50 kB 大分包提示。`npm run test:topic-stage-record-repair-browser` 在 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 启动阶段退出，未进入测试断言。随后 Playwright MCP 连接 Chrome，用隔离 fixture 在 390px 分别注入关注摘要和负责人待处理消息 GET 503：两种错误态均显示“暂时无法确认”，不显示空任务；点击重试后只发生 GET 200，随后才显示确认空态。两场景文档宽度 382px/视口 390px，无横向溢出；控制台只有各自预期注入的 503 错误，无 warning；API 请求均为 GET，未触发业务写入。
 - **修改文件**：`src/pages/mobile/MobileHome.tsx`、`tests/browser/topic-stage-record-repair.spec.ts` 及版本、更新说明、改造清单和验收文档。
-- **影响边界**：没有服务端 API、权限、数据库或真实业务数据变化；Android 仅同步 9.4.5 / 90405 元数据，未构建 APK。PR #87 合并并部署到服务器，目标 SHA `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`；六项 CI 通过，受保护部署的备份、Restore Drill、迁移/运行环境/内部路由门禁，以及 PM2/Caddy/公网健康/SQLite 复核通过。真实 VoiceOver 语音仍未确认。
+- **影响边界**：没有服务端 API、权限、数据库或真实业务数据变化；Android 元数据为 9.4.5 / 90405，PR CI 生成 Debug 验收 APK artifact，未发布 Android 安装包。PR #87 合并并部署到服务器，目标 SHA `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`；六项 CI 通过，受保护部署的备份、Restore Drill、迁移/运行环境/内部路由门禁，以及 PM2/Caddy/公网健康/SQLite 复核通过。真实 VoiceOver 语音仍未确认。
 - **未完成与下一步**：VoiceOver 实际语音仍未验收（此前设备锁定，本轮未启用）；继续 B4/B5 全站可见性/主题/响应式验收、B8 其它路径清点。匿名意见首次提交响应丢失的匿名范围与回执保留期限仍需业务口径；Android 原生专项后置。
 
 ## 2026-10-27 清单 B4/B5：移动首页关注事项加载播报（v9.4.4）
@@ -29,7 +30,7 @@
 - **改造内容**：移动首页“选题关注”首次读取期间增加 `role=status` / `aria-live=polite`，与今日任务及灵感数量加载状态一致；读取结束后自动移除提示。无 API、权限、数据库或真实业务数据变化。
 - **验证结果**：Playwright MCP 连接 Google Chrome，在 390px 视口确认今日任务、灵感数量和关注事项三条加载提示均以 `role=status` / `aria-live=polite` 暴露；释放本地只读验收夹具后，三条提示均消失并显示关注事项数据。页面宽 382px、视口 390px，无横向溢出；控制台错误 0，未触发业务写入。`npm run version:check`、`npm run check`、目标 ESLint、版本治理、更新说明治理、287 个测试入口检查、`npm run build` 与 `git diff --check` 通过；构建保留既有 Silk 843.50 kB 大分包提示。完整仓库移动浏览器套件未运行。
 - **VoiceOver 边界**：本轮尝试进行真实播报验收时 Mac 处于锁定状态，无法操作系统设置；没有开启 VoiceOver，设备此前状态为关闭。故真实语音播报仍未验收，不将其标记为通过。
-- **影响边界**：仅修改移动首页 JSX、对应浏览器断言及版本/说明文件；Android 仅同步至 90404 元数据，未构建 APK。本次按要求仅本地修改，不推送或部署。
+- **影响边界**：仅修改移动首页 JSX、对应浏览器断言及版本/说明文件；Android 元数据曾同步至 90404，未单独构建 Android 安装包。该改造包含在 PR #87 的 v9.4.5 部署中，SHA `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`。
 - **下一步**：完成三类首页加载提示的辅助技术验收，继续 B4/B5、B8 未完成项；匿名意见首次提交响应丢失的匿名范围/回执保留期仍需业务口径，Android 原生专项后置。
 
 ## 2026-10-27 清单 B4/B5：移动首页加载状态验收夹具（v9.4.3）

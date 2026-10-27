@@ -21,7 +21,11 @@
 
 ### 数据库变化
 
-- 无新增迁移；Android 元数据为 9.5.0 / 90500，未构建安装包。
+- 无新增迁移；Android 元数据为 9.5.0 / 90500。GitHub CI 生成 Debug 验收 APK artifact，未发布 Android 安装包。
+
+### 发布
+
+- PR #93 已合并并部署，SHA `94a2e4a84842c29eed2467aee0d82959c59a48fe`；标签 `v9.5.0` 指向同一 SHA。PR head 与合并 SHA 的六项 CI 均通过。生产备份、Restore Drill、migration 001–066、运行环境/构建、PM2/Caddy、SQLite、内网暴露与公网健康门禁通过，详见 `docs/UPGRADE_PROGRESS.md`。
 
 ## v9.4.15 - 2026-10-28
 

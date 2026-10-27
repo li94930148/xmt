@@ -58,6 +58,7 @@ const postStart = (userId: number, body: Record<string, unknown> = {}) => fetch(
 });
 const postCancel = (userId: number, sessionId: number) => fetch(`${base}/pomodoro/${sessionId}/cancel`, { method: 'POST', headers: headers(userId) });
 const postComplete = (userId: number, sessionId: number) => fetch(`${base}/pomodoro/${sessionId}/complete`, { method: 'POST', headers: headers(userId) });
+const getActive = (userId: number) => fetch(`${base}/pomodoro/active`, { headers: headers(userId) });
 
 try {
   const denied = await fetch(`${base}/resources`, { method: 'POST', headers: headers(memberId), body: JSON.stringify({ name: '无权限资料' }) });
@@ -65,6 +66,13 @@ try {
   const created = await fetch(`${base}/resources`, { method: 'POST', headers: headers(adminId), body: JSON.stringify({ name: '安全资料', file_path: '/uploads/file.pdf' }) });
   assert.equal(created.status, 410);
   assert.equal(created.headers.get('deprecation'), 'true');
+
+  const unauthenticatedActive = await fetch(`${base}/pomodoro/active`);
+  assert.equal(unauthenticatedActive.status, 401, 'active-session read requires authentication');
+  const emptyActive = await getActive(adminId);
+  assert.equal(emptyActive.status, 200);
+  assert.equal(emptyActive.headers.get('cache-control'), 'no-store', 'active-session response is not cached');
+  assert.deepEqual(await emptyActive.json(), { session: null }, 'a user without an active session receives an explicit null');
 
   const concurrentStarts = await Promise.all([postStart(memberId), postStart(memberId)]);
   assert.deepEqual(concurrentStarts.map((response) => response.status), [200, 200], 'concurrent start requests both resolve successfully');
@@ -74,6 +82,20 @@ try {
   assert(concurrentStartBodies.every((body) => Number.isSafeInteger(body.remainingSeconds) && body.remainingSeconds >= 0 && body.remainingSeconds <= 25 * 60));
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM pomodoro_sessions WHERE user_id = ? AND completed = 0', [memberId]))?.count, 1, 'concurrent starts insert only one active session');
   const sessionId = concurrentStartBodies[0].sessionId;
+  const activeMemberResponse = await getActive(memberId);
+  const activeMemberPayload = await activeMemberResponse.json() as { session: {
+    id: number; sessionId: number; duration: number; topicId: number | null; startedAt: string; remainingSeconds: number;
+  } | null };
+  assert(activeMemberPayload.session, 'active-session reads return a session for the current user');
+  assert.equal(activeMemberPayload.session.id, sessionId);
+  assert.equal(activeMemberPayload.session.sessionId, sessionId);
+  assert.equal(activeMemberPayload.session.duration, 25);
+  assert.equal(activeMemberPayload.session.topicId, null);
+  assert.equal(activeMemberPayload.session.startedAt, concurrentStartBodies[0].startedAt);
+  assert(Number.isSafeInteger(activeMemberPayload.session.remainingSeconds)
+    && activeMemberPayload.session.remainingSeconds >= 0
+    && activeMemberPayload.session.remainingSeconds <= 25 * 60);
+  assert.deepEqual(await (await getActive(peerId)).json(), { session: null }, 'a different user cannot see another user’s active session');
 
   dropNextPomodoroResponse = 'start';
   await assert.rejects(postStart(peerId), 'the first start response is intentionally dropped after the route writes');
@@ -85,9 +107,14 @@ try {
   assert.equal(recoveredStart.startedAt, lostStartBody.startedAt, 'retry retains the original server start time');
   assert.equal(recoveredStart.resumed, true, 'retry is explicitly identified as an active-session recovery');
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM pomodoro_sessions WHERE user_id = ? AND completed = 0', [peerId]))?.count, 1, 'lost start response leaves exactly one recoverable active row');
+  const peerActive = await getActive(peerId).then((response) => response.json()) as { session: { sessionId: number } | null };
+  assert.equal(peerActive.session?.sessionId, lostStartBody.sessionId, 'an active read recovers a start whose first response was lost');
+  const memberActiveAfterPeerStart = await getActive(memberId).then((response) => response.json()) as { session: { sessionId: number } | null };
+  assert.equal(memberActiveAfterPeerStart.session?.sessionId, sessionId, 'one user’s active read stays on their own session');
 
   const completedResponse = await postComplete(memberId, sessionId);
   assert.equal(completedResponse.status, 200);
+  assert.deepEqual(await (await getActive(memberId)).json(), { session: null }, 'completed sessions are no longer active');
   assert.equal((await postComplete(memberId, sessionId)).status, 400, 'a repeated completion is reported as already completed');
   const completedCancelResponse = await postCancel(memberId, sessionId);
   assert.equal(completedCancelResponse.status, 409, 'a completed session cannot be cancelled');
@@ -106,6 +133,7 @@ try {
   await assert.rejects(postCancel(memberId, cancellationSessionId), 'the cancel response is intentionally dropped after the cancellation is committed');
   assert.equal(await queryOne('SELECT id FROM pomodoro_sessions WHERE id = ? AND user_id = ?', [cancellationSessionId, memberId]), null, 'cancel removes the row legacy start and complete routes inspect');
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM pomodoro_cancellation_ledger WHERE user_id = ? AND session_id = ?', [memberId, cancellationSessionId]))?.count, 1, 'cancellation ledger retains the owner-scoped idempotency record after a lost response');
+  assert.deepEqual(await (await getActive(memberId)).json(), { session: null }, 'cancelled sessions are not returned as active');
   // The old release only inspects pomodoro_sessions: an absent cancelled row cannot block start,
   // be marked complete by its id-only update, or affect completed=1 statistics.
   assert.equal(await queryOne('SELECT id FROM pomodoro_sessions WHERE user_id = ? AND completed = 0', [memberId]), null, 'legacy start predicate does not mistake a cancelled row for an active session');
@@ -122,6 +150,21 @@ try {
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM pomodoro_sessions WHERE id = ? AND user_id = ? AND completed = 0', [nextSessionId, memberId]))?.count, 1, 'retrying an older cancellation does not delete the user\'s newer active session');
   assert.equal((await postCancel(peerId, cancellationSessionId)).status, 404, 'another user cannot treat an owned cancellation ledger entry as theirs');
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM pomodoro_cancellation_ledger WHERE user_id = ? AND session_id = ?', [peerId, cancellationSessionId]))?.count, 0, 'another user cannot observe the owner-scoped cancellation ledger');
+
+  const expiredSessionId = await executeInsert(
+    `INSERT INTO pomodoro_sessions (user_id, duration, topic_id, completed, started_at)
+     VALUES (?, 1, NULL, 0, datetime('now', '-1 hour'))`,
+    [adminId]
+  );
+  const expiredActiveResponse = await getActive(adminId);
+  const expiredActive = await expiredActiveResponse.json() as { session: {
+    id: number; sessionId: number; duration: number; topicId: number | null; startedAt: string; remainingSeconds: number;
+  } | null };
+  assert.equal(expiredActive.session?.id, expiredSessionId);
+  assert.equal(expiredActive.session?.sessionId, expiredSessionId);
+  assert.equal(expiredActive.session?.remainingSeconds, 0, 'an unfinished session past its duration remains visible with zero seconds');
+  assert.equal((await postCancel(adminId, expiredSessionId)).status, 200, 'the expired unfinished fixture can be removed through its owner-only cancellation path');
+  assert.deepEqual(await (await getActive(adminId)).json(), { session: null }, 'a cancelled expired session disappears from active reads');
 
   const raceStartResponse = await postStart(memberId);
   const raceSessionId = (await raceStartResponse.json() as { sessionId: number }).sessionId;

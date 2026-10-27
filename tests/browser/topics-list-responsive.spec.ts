@@ -178,7 +178,7 @@ async function assertTopicsBoardContrast(page: import('playwright').Page, theme:
     const ratio = await contrastRatio(locator);
     assert(ratio >= 4.5, `${theme} topic board ${label} text contrast is ${ratio.toFixed(2)}:1`);
   }
-  await page.getByRole('status', { name: /^显示 \d+ \/ \d+ 个选题$/ }).waitFor({ state: 'visible' });
+  await page.getByRole('status').filter({ hasText: /^显示 \d+ \/ \d+ 个选题$/ }).waitFor({ state: 'visible' });
 
   const statusPills = page.locator('article span.inline-flex[class*="border-studio-"]');
   const statusPillCount = await statusPills.count();
@@ -262,6 +262,10 @@ app.get('/api/topics', async (req, res) => {
   return res.json({ data, total: topicExists ? 31 : 30, page: 1, limit: Number(req.query.limit) || 15 });
 });
 app.get('/__qa/topic-list-state', (_req, res) => res.json({ topicListGetRequests, topicListReadStarted }));
+app.post('/__qa/fail-next-topic-list-read', (_req, res) => {
+  failNextTopicListRead = true;
+  return res.json({ armed: true });
+});
 app.post('/__qa/release-topic-list-read', (_req, res) => {
   releaseTopicListRead?.();
   releaseTopicListRead = null;
@@ -510,15 +514,16 @@ try {
   });
   await listReadFailurePage.goto(`${base}/__qa?fail_list_get=true`);
   await listReadFailurePage.getByRole('heading', { name: '选题管理' }).waitFor();
-  const listFailureNotification = listReadFailurePage.getByRole('status').getByText('获取选题列表失败', { exact: true });
-  await listFailureNotification.waitFor();
+  const listFailureHeading = listReadFailurePage.getByRole('heading', { name: '获取选题列表失败', exact: true });
+  await listFailureHeading.waitFor();
   await listReadFailurePage.getByText('模拟选题列表读取失败', { exact: true }).waitFor();
   await listReadFailurePage.getByRole('button', { name: '重试', exact: true }).waitFor();
   const initialListFailureState = await listReadFailurePage.request.get(`${base}/__qa/topic-list-state`).then((response) => response.json());
   assert.equal(initialListFailureState.topicListGetRequests, 1, 'the failed desktop list read does not repeat before an explicit retry');
-  assert.equal(await listFailureNotification.count(), 1, 'an initial list failure presents one understandable error notification');
+  assert.equal(await listFailureHeading.count(), 1, 'an initial list failure presents one inline error');
+  assert.equal(await listReadFailurePage.getByRole('status').getByText('获取选题列表失败', { exact: true }).count(), 0, 'the inline error is not duplicated as a toast');
   assert.equal(await listReadFailurePage.getByText('暂无选题', { exact: true }).count(), 0, 'a failed list read is not misreported as an empty result');
-  await listReadFailurePage.screenshot({ path: '/tmp/xmt-topics-list-failure-single-toast.png', fullPage: false });
+  await listReadFailurePage.screenshot({ path: '/tmp/xmt-topics-list-failure-single-inline-error.png', fullPage: false });
   const retryListRead = listReadFailurePage.waitForResponse((response) => new URL(response.url()).pathname === '/api/topics' && response.status() === 200);
   await listReadFailurePage.getByRole('button', { name: '重试', exact: true }).click();
   await retryListRead;
@@ -685,10 +690,29 @@ try {
   const boardPage = await context.newPage();
   boardPage.setDefaultTimeout(5000);
   boardPage.on('pageerror', (error) => errors.push(error.message));
-  boardPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  boardPage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    else errors.push(message.text());
+  });
+  const boardTopicMethods: string[] = [];
+  boardPage.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/topics') boardTopicMethods.push(request.method());
+  });
   await boardPage.goto(`${base}/__qa`);
   await boardPage.getByRole('heading', { name: '选题管理' }).waitFor();
-  await boardPage.goto(`${base}/topics?view=board`);
+  await boardPage.request.post(`${base}/__qa/fail-next-topic-list-read`);
+  await boardPage.getByRole('button', { name: '看板', exact: true }).click();
+  const boardReadError = boardPage.getByTestId('topics-board-read-error');
+  await boardReadError.waitFor();
+  assert.match(await boardReadError.innerText(), /看板读取失败，仍显示上次成功读取的结果/);
+  assert.equal(await boardPage.locator('article').filter({ hasText: topic.title }).count(), 1, 'a failed board read keeps the last successful topics visible');
+  assert.deepEqual(boardTopicMethods, ['GET', 'GET'], 'board read failure follows a single read-only request');
+  const retryBoardRead = boardPage.waitForResponse((response) => new URL(response.url()).pathname === '/api/topics' && response.request().method() === 'GET' && response.status() === 200);
+  await boardReadError.getByRole('button', { name: '重试加载选题', exact: true }).click();
+  await retryBoardRead;
+  await boardReadError.waitFor({ state: 'detached' });
+  assert.deepEqual(boardTopicMethods, ['GET', 'GET', 'GET'], 'explicit board recovery sends exactly one additional GET');
   await assertMainButtonTouchTargets(boardPage, 'desktop topic board');
   const pendingBoardColumn = boardPage.locator('[aria-labelledby="topic-column-pending"]');
   await pendingBoardColumn.waitFor();
@@ -738,6 +762,7 @@ try {
   await mobileBoard.goto(`${base}/__qa`);
   await mobileBoard.getByRole('textbox', { name: '搜索选题' }).waitFor();
   await mobileBoard.goto(`${base}/topics?view=board`);
+  await mobileBoard.getByRole('group', { name: '选题视图切换' }).waitFor();
   await assertTopicsBoardContrast(mobileBoard, 'light mobile');
   for (const width of [390, 320, 1440]) {
     await mobileBoard.setViewportSize({ width, height: width === 320 ? 800 : 844 });
@@ -992,17 +1017,17 @@ try {
   }
   await mobileListPage.goto(`${base}/__qa?filter_fixture=true`);
   await mobileListPage.getByText('23 个选题', { exact: true }).waitFor();
-  await mobileListPage.getByRole('status', { name: '筛选结果：全部，共 23 个选题，第 1 页。', exact: true }).waitFor();
+  await mobileListPage.getByRole('status').filter({ hasText: /^筛选结果：全部，共 23 个选题，第 1 页。$/ }).waitFor();
   await mobileTopicFilters.getByRole('button', { name: '我的', exact: true }).click();
   await mobileListPage.getByText('21 个选题', { exact: true }).waitFor();
-  await mobileListPage.getByRole('status', { name: '筛选结果：我的，共 21 个选题，第 1 页。', exact: true }).waitFor();
+  await mobileListPage.getByRole('status').filter({ hasText: /^筛选结果：我的，共 21 个选题，第 1 页。$/ }).waitFor();
   assert.equal(new URL(mobileListPage.url()).searchParams.get('topic_filter'), 'mine', 'the mobile mine filter remains reflected in the URL');
   let lastTopicListRequest = mobileTopicListRequests.at(-1);
   assert.ok(lastTopicListRequest && new URL(lastTopicListRequest).searchParams.get('topic_filter') === 'mine', 'mine is requested from the server, not filtered only in the loaded page');
   assert.equal(await mobileListPage.locator('button.xmt-card').count(), 20, 'the first filtered page contains 20 of the 21 owned topics');
   await mobileListPage.getByRole('button', { name: '下一页', exact: true }).click();
-  await mobileListPage.getByRole('button', { name: '第 2 页', exact: true }).waitFor();
-  await mobileListPage.getByRole('status', { name: '筛选结果：我的，共 21 个选题，第 2 页。', exact: true }).waitFor();
+  await mobileListPage.getByText('第 2 页', { exact: true }).waitFor();
+  await mobileListPage.getByRole('status').filter({ hasText: /^筛选结果：我的，共 21 个选题，第 2 页。$/ }).waitFor();
   assert.equal(await mobileListPage.locator('button.xmt-card').count(), 1, 'the final mine page contains the one remaining owned topic');
   assert.equal(await mobileListPage.getByRole('button', { name: /筛选分页验收选题 21/ }).count(), 1, 'the second page contains the final matching topic');
   lastTopicListRequest = mobileTopicListRequests.at(-1);
@@ -1010,11 +1035,11 @@ try {
   await mobileTopicFilters.getByRole('button', { name: '进行中', exact: true }).click();
   await mobileListPage.getByText('14 个选题', { exact: true }).waitFor();
   assert.equal(await mobileListPage.locator('button.xmt-card').count(), 14, 'active filter displays only the 14 server-matched topics');
-  await mobileListPage.getByRole('status', { name: '筛选结果：进行中，共 14 个选题，第 1 页。', exact: true }).waitFor();
+  await mobileListPage.getByRole('status').filter({ hasText: /^筛选结果：进行中，共 14 个选题，第 1 页。$/ }).waitFor();
   lastTopicListRequest = mobileTopicListRequests.at(-1);
   assert.ok(lastTopicListRequest && new URL(lastTopicListRequest).searchParams.get('topic_filter') === 'active', 'active is requested from the server');
   await mobileListPage.getByRole('textbox', { name: '搜索选题' }).fill('本地夹具不存在的标题');
-  await mobileListPage.getByRole('status', { name: '进行中筛选没有符合条件的选题。', exact: true }).waitFor();
+  await mobileListPage.getByRole('status').filter({ hasText: /^进行中筛选没有符合条件的选题。$/ }).waitFor();
   await mobileListPage.getByText('没有符合条件的选题', { exact: true }).waitFor();
   await mobileListPage.close();
 
@@ -1054,6 +1079,7 @@ try {
 
   const darkBoardPage = await darkContext.newPage();
   await darkBoardPage.goto(`${base}/topics?view=board`);
+  await darkBoardPage.locator('[aria-labelledby="topic-column-pending"]').waitFor();
   await assertMainButtonTouchTargets(darkBoardPage, 'dark desktop topic board');
   await assertTopicsBoardContrast(darkBoardPage, 'dark desktop');
   await darkBoardPage.close();
@@ -1270,7 +1296,7 @@ try {
   await page.getByRole('heading', { name: '确认删除', exact: true }).waitFor();
   failNextTopicDelete = true;
   await page.getByRole('button', { name: '确认删除', exact: true }).click();
-  await page.getByText('删除失败', { exact: true }).waitFor();
+  await page.getByText('删除未完成', { exact: true }).waitFor();
   assert.equal(topicExists, true, 'failed topic deletion leaves the isolated topic intact');
   assert.equal(await page.getByRole('heading', { name: '确认删除', exact: true }).count(), 1, 'failed topic deletion keeps its confirmation open for retry');
   const deletesBeforeRetry = await page.request.get(`${base}/__qa/topic-delete-state`).then((response) => response.json()).then((state) => state.topicDeleteRequestCount);
@@ -1329,7 +1355,7 @@ try {
 
   await page.screenshot({ path: '/tmp/xmt-topics-list-responsive-1366.png', fullPage: true });
   assert.deepEqual(errors, [], 'Topics list should render without browser errors');
-  assert.equal(expectedHttpErrors.length, 25, 'the isolated mutation recovery scenarios plus desktop/mobile initial and same-page detail recovery return twenty-three intentional 503s and two confirmed missing-topic 404s');
+  assert.equal(expectedHttpErrors.length, 29, 'the isolated board, topic mutation, detail, and desktop/mobile list-recovery fixtures return only their expected 503 responses and confirmed missing-topic 404s');
   await context.close();
   await darkContext.close();
   console.log('Topics list responsive browser test passed: topic board transition locking at desktop/mobile widths, sticky actions, and desktop zoom matrix.');

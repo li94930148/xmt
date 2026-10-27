@@ -1,5 +1,14 @@
 # XMT 升级阶段记录
 
+## 2026-10-28 清单 B5/B8：番茄钟恢复、选题错误恢复与无障碍提示（v9.5.0，发布候选）
+
+- **番茄钟**：新增登录态 `GET /api/pomodoro/active`，按当前用户只读获取未完成会话，明确禁止缓存；重新进入页面时采用服务端 `remainingSeconds` 恢复计时，不创建新会话。计时归零但 `completed = 0` 的会话仍处于活动状态。客户端验证所有字段和值域，读取失败或响应异常时保留锁定态，只开放 GET 重试。
+- **选题读取与批量审核**：移除列表读取失败的重复 toast，错误保持在列表区域；看板读取失败时保留当前显示内容，并提供只读重试。通知卡片文字区域可点击穿透，关闭按钮仍可操作，避免短暂通知挡住下层业务按钮。批量审核响应不确定后若 GET 确认目标状态已生效，计为成功并从失败集合排除；详情 GET 响应必须包含与路径一致的选题编号，格式异常时失败项保持选中并待核实，避免错误提示和重复审核。
+- **移动稿件与匿名意见**：移动稿件加载状态增加 polite/atomic status。用户确认听到了本轮核对的加载提示；仅记录本轮提示范围，不外推为全站语音验收。匿名意见旧编号回执不存在也可能是意见删除，保留稿件不能复用旧编号，用户明确发起新提交才生成新编号；提交人身份不保存，回执不自动过期，意见删除时级联清除。
+- **接口/数据边界**：无新权限、数据表或数据库迁移；新增 API 为当前账号范围的只读读取。Android 原生专项按用户要求后置，元数据同步为 9.5.0 / 90500，未构建 Android 包。
+- **验证结果**：`npm run test:integrity:resources-pomodoro`、`npm run test:api-contract`、`npm run test:topics`、`npm run test:topics-list-notify`、`npm run test:pomodoro-notification-browser`、`npm run test:topics-responsive-browser`、`npm run test:topics-batch-mutation-browser`、`npm run test:mobile-work-center-browser`、`npm run test:entrypoints`（292 个入口）、`npm run test:android-runtime`、`npm run test:changelog-governance`（531 个版本）、`npm run version:check`、涉及文件定向 ESLint、`npm run check -- --pretty false` 和 `npm run build` 均通过。构建保留既有 Silk 843.50 kB 大分包提示。Playwright MCP 在隔离内存夹具核对批量已读响应丢失后的只读恢复提示；无真实账号或业务数据写入。Chrome DevTools MCP 因已存在的浏览器 profile 占用而无法启动，本轮使用仓库 Playwright 自动套件及 Playwright MCP 完成验证，没有把人工浏览器检查记作自动套件通过。`npm audit --omit=dev --audit-level=high` 通过高危门槛，但仍报告 5 项 moderate 传递依赖问题（含 `qs` 且当前无修复版本）；详见门禁结果，未升级无关依赖。
+- **发布状态**：基于 v9.4.15 的 `origin/main` 创建 PR #93。首次 CI 有五项通过；`creator-agent-macos-arm64-package-contract` 使用的 `macos-14` runner 排队约 15 分钟后在未分配 runner、未运行任何步骤的情况下取消。GitHub 已公告 macOS 14/ARM64 runner 正在退役，期间可能延长排队，计划于 2026-11-02 停止支持；CI 已改为 `macos-15` 并等待完整重跑（[官方公告](https://github.com/actions/runner-images/issues/13518)）。PR 尚未合并或部署；发布仍须等待全部六项检查通过，并按精确合并 SHA 完成生产备份、Restore Drill、环境/SQLite/PM2/Caddy/公网只读门禁。
+
 
 ## 2026-10-28 清单 B5：移动选题筛选与分页一致性（v9.4.15，本地未部署）
 

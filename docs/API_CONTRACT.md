@@ -102,12 +102,19 @@ v1 错误响应统一为：
 - Auth v1 Web 模式的 Refresh Token 只通过 `__Host-xmt_refresh` HttpOnly Cookie 交付；login/refresh JSON 不含原值，refresh 不接受 body Token，并要求受信 Origin 与 `X-XMT-CSRF`。
 - Auth Rollout 管理诊断使用 `GET /api/v1/auth-rollout/status`，接受当前 legacy Bearer JWT 以支持迁移期管理员访问；只读返回 5 分钟、60 分钟、24 小时统一 Auth Event 聚合、风险和审计，不提供配置写接口。
 
+### 番茄钟活动会话读取（Legacy）
+
+- `GET /api/pomodoro/active` 要求登录，仅按当前账号读取一条未完成会话；响应头为 `Cache-Control: no-store`。没有活动会话时返回 `{ "session": null }`。
+- 有会话时返回 `{ "session": { "id", "sessionId", "duration", "topicId", "startedAt", "remainingSeconds" } }`。`remainingSeconds` 由服务端根据开始时间计算，可为 `0`；会话是否未完成由持久化 `completed` 状态决定。
+- 此接口只读，不创建计时、不修改会话、不读取其他账号数据；无需数据库迁移。客户端对响应结构和值域做严格校验，异常时保持计时操作锁定并允许只读重试。
+
 ### 选题列表过滤与分页（Legacy 与 v1）
 
 - `GET /api/topics` 和 `GET /api/v1/topics` 可选接收 `status`、`search`、`topic_filter`、`page`、`limit`；`topic_filter` 当前仅接受 `mine` 或 `active`。
 - `topic_filter=mine` 将结果收窄到当前操作者创建或负责的选题，即使该角色默认可查看全库也不扩大“我的”结果；不改变详情、编辑或默认列表的权限规则。
 - `topic_filter=active` 只包含已通过、创作中、拍摄中、发布中四种状态。`status`、`search` 与 `topic_filter` 同时提供时取交集。
 - 所有过滤条件在分页和总数统计之前应用，返回的 `pagination.total` / `meta.total` 与筛选后的列表一致。
+- `GET /api/topics/{id}` 的成功响应必须包含 `data` 对象，且 `data.id` 与路径编号一致；缺少对象、编号无效或不匹配的响应按格式异常处理，调用方不得据此确认状态变化或解锁待核实写入。
 
 ### 选题创建结果恢复（Legacy 与 v1）
 

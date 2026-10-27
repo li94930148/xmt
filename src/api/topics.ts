@@ -11,6 +11,14 @@ export class TopicApiError extends Error {
   }
 }
 
+export type GetTopicsParams = {
+  status?: string;
+  topic_filter?: 'mine' | 'active';
+  search?: string;
+  page?: number;
+  limit?: number;
+};
+
 function getAuthHeader(): Record<string, string> {
   const token = useAuthStore.getState().token;
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -30,7 +38,7 @@ async function getErrorMessage(response: Response, fallback: string) {
   return fallback;
 }
 
-function buildTopicsQuery(params?: { status?: string; topic_filter?: 'mine' | 'active'; search?: string; page?: number; limit?: number }): string {
+function buildTopicsQuery(params?: GetTopicsParams): string {
   const query = new URLSearchParams();
   const status = params?.status?.trim();
   const topicFilter = params?.topic_filter;
@@ -50,7 +58,7 @@ type TopicsListResponse = {
   limit: number;
 };
 
-export async function getTopics(params?: { status?: string; topic_filter?: 'mine' | 'active'; search?: string; page?: number; limit?: number }): Promise<TopicsListResponse> {
+export async function getTopics(params?: GetTopicsParams): Promise<TopicsListResponse> {
   const query = buildTopicsQuery(params);
   const response = await fetch(`${BASE_URL}/topics?${query}`, {
     headers: getAuthHeader()
@@ -82,7 +90,11 @@ export async function getTopic(id: number): Promise<Topic> {
   });
   if (!response.ok) throw new TopicApiError(await getErrorMessage(response, '获取选题详情失败'), response.status);
   const result = await response.json();
-  return result.data;
+  const topic = result?.data;
+  if (!topic || typeof topic !== 'object' || Array.isArray(topic) || !Number.isSafeInteger(topic.id) || topic.id !== id) {
+    throw new Error('选题详情响应格式异常');
+  }
+  return topic as Topic;
 }
 
 export async function getTopicDeleteStatus(id: number): Promise<'present' | 'missing'> {

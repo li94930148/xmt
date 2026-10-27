@@ -38,7 +38,7 @@ import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import { useSocket } from '../hooks/useSocket';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
 import { useAppStore } from '../store';
-import { createListFetchController, listErrorKey } from '../utils/listFetchNotify';
+import { createListFetchController } from '../utils/listFetchNotify';
 import { createBatchMutationNotice } from '../utils/batch-mutation-feedback';
 import { Topic } from '../types';
 import Pagination from '../components/Pagination';
@@ -246,11 +246,8 @@ export default function Topics() {
 
   const fetchControllerRef = useRef(createListFetchController());
 
-  const fetchTopics = useCallback(async (options?: { resetErrorNotify?: boolean; suppressErrorNotify?: boolean }) => {
+  const fetchTopics = useCallback(async () => {
     const controller = fetchControllerRef.current;
-    if (options?.resetErrorNotify) {
-      controller.resetErrorNotify();
-    }
     const requestId = controller.begin();
     setLoading(true);
     try {
@@ -276,21 +273,13 @@ export default function Topics() {
       }
       const message = error instanceof Error && error.message ? error.message : '获取选题列表失败';
       setLoadError(message);
-      const key = listErrorKey('获取选题列表失败', message, 'error');
-      if (!options?.suppressErrorNotify && controller.shouldNotifyError(key)) {
-        addNotification({
-          title: '获取选题列表失败',
-          message,
-          type: 'error',
-        });
-      }
       return false;
     } finally {
       if (controller.isCurrent(requestId)) {
         setLoading(false);
       }
     }
-  }, [addNotification, debouncedSearch, limit, page, statusFilter, view]);
+  }, [debouncedSearch, limit, page, statusFilter, view]);
 
   const resolveAmbiguousTopicStatusWrite = async (
     id: number,
@@ -359,7 +348,7 @@ export default function Topics() {
         });
       }
       if (applied > 0 || changed > 0 || missing > 0) {
-        await fetchTopics({ suppressErrorNotify: true });
+        await fetchTopics();
       }
     }
   };
@@ -575,7 +564,7 @@ export default function Topics() {
     addNotification(notice);
     if (selectedIds.length === failedIds.length) return;
 
-    const refreshed = await fetchTopics({ suppressErrorNotify: true });
+    const refreshed = await fetchTopics();
     if (refreshed === false) {
       const failedSummary = failedIds.length > 0 ? `；失败的 ${failedIds.length} 项仍保留选择，可单独重试` : '';
       setBatchRefreshNotice(`服务端已确认批量${action}成功 ${selectedIds.length - failedIds.length}/${selectedIds.length} 项${failedSummary}。选题列表刷新失败；重新加载列表只会读取数据，不会再次执行已成功的操作。`);
@@ -650,12 +639,12 @@ export default function Topics() {
           await auditTopic(id, { status, comment: '批量审核' });
           succeededIds.push(id);
         } catch (error) {
-          failedIds.push(id);
           const definiteRejection = error instanceof TopicApiError
             && error.status >= 400
             && error.status < 500
             && ![408, 425, 429].includes(error.status);
           if (definiteRejection) {
+            failedIds.push(id);
             selectedAfter.push(id);
             if (!firstError) firstError = error.message || '审核失败，请检查权限或当前状态';
             continue;
@@ -665,6 +654,7 @@ export default function Topics() {
           if (outcome === 'applied') {
             succeededIds.push(id);
           } else {
+            failedIds.push(id);
             if (outcome === 'retryable' || outcome === 'unknown') selectedAfter.push(id);
             if (!firstError) {
               firstError = outcome === 'retryable'
@@ -691,7 +681,7 @@ export default function Topics() {
   };
 
   const retryTopicsList = async () => {
-    await fetchTopics({ resetErrorNotify: true, suppressErrorNotify: Boolean(batchRefreshNotice) });
+    await fetchTopics();
   };
 
   const openBoardTopic = async (topic: Topic) => {
@@ -812,6 +802,11 @@ export default function Topics() {
       {batchRefreshNotice ? <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
         <p>{batchRefreshNotice}</p>
         <ActionButton type="button" variant="secondary" onClick={() => void retryTopicsList()} disabled={loading} className="shrink-0">{loading ? '正在重新加载…' : '重新加载列表'}</ActionButton>
+      </div> : null}
+
+      {view === 'board' && loadError ? <div role="alert" data-testid="topics-board-read-error" className="flex flex-col gap-3 rounded-xl border border-studio-coral/30 bg-studio-coral/10 p-4 text-sm text-studio-coral-contrast sm:flex-row sm:items-center sm:justify-between">
+        <p>{topics.length > 0 ? '看板读取失败，仍显示上次成功读取的结果。' : '看板读取失败，当前无法确认是否有符合条件的选题。'} {loadError}</p>
+        <ActionButton type="button" variant="secondary" onClick={() => void retryTopicsList()} disabled={loading} className="shrink-0">{loading ? '正在重新加载…' : '重试加载选题'}</ActionButton>
       </div> : null}
 
       {view === 'list' ? (

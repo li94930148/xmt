@@ -1,6 +1,25 @@
 # Changelog
 
 
+## v9.5.0 - 2026-10-28
+
+### Pomodoro session recovery
+
+- Added an authenticated, owner-scoped, no-store endpoint to restore the current unfinished Pomodoro session after reload. The timer restores duration, topic, start time, and server-calculated remaining seconds without creating another session.
+- Added strict client validation and recovery coverage for the active-session response, including a session whose remaining time has reached zero but is not yet completed.
+
+### Topic and mobile recovery
+
+- Removed the duplicate topic-list failure toast and added an inline board read error with a read-only retry that preserves stale data.
+- Treat an ambiguously confirmed batch audit as successful so it is not incorrectly reported as failed or offered for repeat submission. Malformed topic-detail read-back now remains uncertain and keeps the failed item selected.
+- Notification text no longer blocks clicks on underlying controls; its close button remains interactive.
+- Added a screen-reader status announcement for mobile manuscript loading; the user confirmed hearing the loading prompts covered in this round.
+- Corrected the anonymous-feedback recovery guidance: an absent receipt may also mean the feedback was deleted, so a new submission uses a new request ID. Receipts remain until the feedback is deleted and do not store submitter identity.
+
+### Validation
+
+- Focused and full validation results, browser-suite limitations, and protected release evidence are recorded in `docs/UPGRADE_PROGRESS.md`. Android metadata is 9.5.0 / 90500; no Android package was built.
+
 ## v9.4.15 - 2026-10-28
 
 ### Mobile topic filters and pagination

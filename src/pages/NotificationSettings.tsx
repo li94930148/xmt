@@ -97,6 +97,7 @@ type ProfileRecovery = {
   kind: 'unknown' | 'unchanged' | 'conflict';
   actorId: number;
   token: string;
+  authMode: 'legacy' | 'v1-web';
   draft: ProfileFields;
   before: ProfileFields;
   currentUser?: Awaited<ReturnType<typeof getMe>>;
@@ -505,10 +506,11 @@ export default function NotificationSettings() {
     appStore.addNotification({ title: '已载入服务器设置', message: '页面现在显示服务器当前保存的通知偏好。', type: 'info' });
   }
 
-  function saveProfileFromServer(profile: Awaited<ReturnType<typeof getMe>>, actorId: number, actorToken: string) {
+  function saveProfileFromServer(profile: Awaited<ReturnType<typeof getMe>>, actorId: number, actorAuthMode: 'legacy' | 'v1-web') {
     const currentAuth = useAuthStore.getState();
-    if (Number(currentAuth.user?.id) !== actorId || currentAuth.token !== actorToken) return false;
-    currentAuth.login(profile, actorToken);
+    const currentToken = currentAuth.token;
+    if (Number(profile.id) !== actorId || Number(currentAuth.user?.id) !== actorId || currentAuth.authMode !== actorAuthMode || !currentToken) return false;
+    currentAuth.login(profile, currentToken);
     setProfileName(profile.name);
     setProfileEmail(profile.email ?? '');
     setProfileRecovery(null);
@@ -530,7 +532,7 @@ export default function NotificationSettings() {
 
       const currentFields = normalizeProfileFields({ name: currentProfile.name, email: currentProfile.email ?? '' });
       if (sameProfileFields(currentFields, recovery.draft)) {
-        if (!saveProfileFromServer(currentProfile, recovery.actorId, recovery.token)) return;
+        if (!saveProfileFromServer(currentProfile, recovery.actorId, recovery.authMode)) return;
         appStore.addNotification({ title: '保存结果已核实', message: '已核实个人资料已更新。', type: 'success' });
         return;
       }
@@ -584,6 +586,7 @@ export default function NotificationSettings() {
       kind: 'unknown',
       actorId,
       token: actorToken,
+      authMode: currentAuth.authMode,
       draft,
       before,
       message: '个人资料保存结果尚未核实，正在只读核实；核实前不会再次提交。',
@@ -593,7 +596,7 @@ export default function NotificationSettings() {
     setProfileSaving(true);
     try {
       const profile = await updateMyProfile(draft);
-      if (!saveProfileFromServer(profile, actorId, actorToken)) return;
+      if (!saveProfileFromServer(profile, actorId, currentAuth.authMode)) return;
       appStore.addNotification({ title: '保存成功', message: '个人资料已更新', type: 'success' });
     } catch (error) {
       const status = error instanceof AuthRequestError ? error.status : null;
@@ -619,7 +622,7 @@ export default function NotificationSettings() {
 
   function restoreCurrentProfile() {
     if (!profileRecovery?.currentUser) return;
-    if (!saveProfileFromServer(profileRecovery.currentUser, profileRecovery.actorId, profileRecovery.token)) return;
+    if (!saveProfileFromServer(profileRecovery.currentUser, profileRecovery.actorId, profileRecovery.authMode)) return;
     appStore.addNotification({ title: '已载入服务器资料', message: '页面现在显示服务器当前保存的姓名和邮箱。', type: 'info' });
   }
 

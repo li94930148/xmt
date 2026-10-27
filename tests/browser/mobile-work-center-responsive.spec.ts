@@ -4125,6 +4125,34 @@ try {
     await profilePage.getByText('个人资料已保存。', { exact: true }).waitFor();
     assert.equal(profileUpdateAttempts, 2, 'only the explicit retry follows a failed, read-back-unchanged profile request');
 
+    await profilePage.evaluate(async () => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      const auth = useAuthStore.getState();
+      if (!auth.user) throw new Error('the isolated mobile profile fixture must be authenticated');
+      auth.loginV1(auth.user, 'mobile-profile-session-token-before-refresh');
+    });
+    await profilePage.getByRole('textbox', { name: '姓名' }).fill('移动端令牌刷新后已保存');
+    await profilePage.getByRole('textbox', { name: '邮箱' }).fill('mobile-token-refresh@example.test');
+    const tokenRefreshProfileRequest = profilePage.waitForRequest((request) => request.method() === 'PUT' && request.url().endsWith('/api/auth/profile'));
+    const tokenRefreshProfileResponse = profilePage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/auth/profile') && response.status() === 200);
+    await profilePage.getByRole('button', { name: '保存个人资料' }).click();
+    await tokenRefreshProfileRequest;
+    await profilePage.evaluate(async () => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      const auth = useAuthStore.getState();
+      if (!auth.user) throw new Error('the isolated mobile profile fixture must remain authenticated during token refresh');
+      auth.loginV1(auth.user, 'mobile-profile-session-token-after-refresh');
+    });
+    await tokenRefreshProfileResponse;
+    await profilePage.getByText('个人资料已保存。', { exact: true }).last().waitFor();
+    const refreshedMobileProfileAuth = await profilePage.evaluate(async () => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      const auth = useAuthStore.getState();
+      return { token: auth.token, user: auth.user };
+    });
+    assert.equal(refreshedMobileProfileAuth.token, 'mobile-profile-session-token-after-refresh', 'mobile profile read-back keeps the access token refreshed during the request');
+    assert.equal(refreshedMobileProfileAuth.user?.name, '移动端令牌刷新后已保存', 'mobile same-account profile response applies after routine token rotation');
+
     await profilePage.getByRole('textbox', { name: '姓名' }).fill('修正校验后重试');
     const profileReadsBeforeRejectedUpdate = profileReadAttempts;
     profileUpdateFailures = 1;

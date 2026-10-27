@@ -180,7 +180,7 @@ async function changePasswordFreezeTests(token: string) {
     body: JSON.stringify({ oldPassword: 'wrong-password', newPassword: 'new-legacy-password' }),
   });
   assert.equal(wrongOldPassword.status, 401);
-  assert.deepEqual(await wrongOldPassword.json(), { message: '旧密码错误' });
+  assert.deepEqual(await wrongOldPassword.json(), { code: 'OLD_PASSWORD_INCORRECT', message: '旧密码错误' });
 
   const shortPassword = await fetch(`${baseUrl}/api/auth/change-password`, {
     method: 'POST',

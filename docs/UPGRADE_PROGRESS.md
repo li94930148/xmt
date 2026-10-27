@@ -1,12 +1,12 @@
 # XMT 升级阶段记录
 
-## 2026-10-27 清单 B8：写入结果核实与离页保护（v9.4.13，本地未部署）
+## 2026-10-28 清单 B8：写入结果核实与离页保护（v9.4.13，PR #91 等待 CI，未部署）
 
-- **改造内容**：创作管理列表编辑在发送前按账号保存待核实快照，保留现有 `expected_content` 与 `version_action: 'none'`；网络/超时/限流/服务端异常或无效成功响应后只读读取详情，目标值匹配才确认成功，原值匹配时保留草稿并允许用户明确重试，第三方变化时锁定普通写入并要求明确处理。兼容历史创作记录 `operator_id = null`。选题阶段状态按账号和选题保存 session 标记；刷新、损坏或过期标记均先只读读取服务器状态，不自动重发，站内离页和刷新前均保留/提示未决核实。桌面系统设置、桌面个人资料、移动个人资料以及桌面/移动通知偏好增加结果恢复与离页保护；移动改密结果不确定时锁定重复提交，密码不落地保存，并提示退出后重新登录核验。匿名意见回执继续按用户确认保留至意见删除时清除；若旧编号的回执不存在，恢复流程不再复用该编号，而是保留内容并要求用户明确开始新提交，以免恢复已删除意见。
+- **改造内容**：创作管理列表编辑在发送前按账号保存待核实快照，保留现有 `expected_content` 与 `version_action: 'none'`；网络/超时/限流/服务端异常或无效成功响应后只读读取详情，目标值匹配才确认成功，原值匹配时保留草稿并允许用户明确重试，第三方变化时锁定普通写入并要求明确处理。兼容历史创作记录 `operator_id = null`。选题阶段状态按账号和选题保存 session 标记；刷新、损坏或过期标记均先只读读取服务器状态，不自动重发，站内离页和刷新前均保留/提示未决核实；迟到的选题阶段请求仅清除其捕获的用户/选题标记，不会误解锁当前另一选题。桌面系统设置、桌面个人资料、移动个人资料以及桌面/移动通知偏好增加结果恢复与离页保护；个人资料核实按账号和认证模式确认会话，允许同账号常规访问令牌轮换，并使用当前令牌更新；移动改密结果不确定时锁定重复提交，密码不落地保存，并提示退出后重新登录核验。匿名意见回执继续按用户确认保留至意见删除时清除；若旧编号的回执不存在，恢复流程不再复用该编号，而是保留内容并要求用户明确开始新提交，以免恢复已删除意见。
 - **手工核验**：Chrome DevTools MCP 的本地隔离创作夹具复核“服务端已提交但返回 503”后通过详情 GET 确认，无重复 PUT；将旧记录操作人编号设为 null 后模拟未提交 503，系统正确恢复原编辑草稿；模拟首次详情核实失败后刷新，session 标记触发只读 GET，恢复原记录且无自动 PUT。选题阶段夹具模拟未提交 503 和首次只读 GET 503 后，阶段按钮保持锁定；离页弹窗可取消，刷新时 session 标记只触发只读 GET，确认服务端仍为原阶段后解锁，未发送第二个状态 POST。beforeunload 事件也被拦截。之前的隔离 Chrome 手工证据还覆盖手机通知偏好离页取消/放弃和桌面通知设置离页保护。没有连接真实账号、生产服务或业务数据库。
 - **自动化与边界**：本地隔离 Chromium 浏览器套件已通过：`test:topic-stage-record-repair-browser`、`test:mobile-work-center-browser`（320/390px）、`test:production-list-feedback-browser`、`test:system-settings-browser`、`test:mobile-notification-settings-browser`、`test:anonymous-feedback-theme-browser`。阶段恢复与手动保存回归确认普通保存在结果待核实期间锁定；只有专用明确重试操作才产生第二次写入。系统设置品牌保存回归覆盖 503 后只读核实与明确覆盖。Chrome DevTools MCP 仍用于创作记录提交后响应丢失、历史空操作人、刷新恢复以及阶段离页保护的手工复核。以上仅使用本机隔离夹具，没有真实业务账号、数据库或生产写入。用户确认听到首页今日任务、灵感数量和关注事项加载提示；真实语音证据只覆盖这三条首页提示，不代表全站 VoiceOver 验收。Android 原生专项按用户要求后置。
-- **验证结果**：`npm run check -- --pretty false`、`npm run build`、定向 ESLint（0 错误，9 条 hook/unused 警告）、`npm run test:production-list-update`、`npm run test:system-settings`、匿名意见提交恢复 HTTP/迁移/sessionStorage 回归、以上六项浏览器套件、`npm run version:check`、更新说明治理（528 个版本）、测试入口检查（291 个文件）及 `git diff --check` 通过。生产构建保留既有 Silk 843.50 kB 大分包提示。Android 元数据为 v9.4.13 / 90413，未构建 APK。
-- **部署状态**：仅本地修改，未提交、推送或部署。整体 B8/B4/B5 清单仍有未完成项；Android 原生专项按用户要求后置。
+- **验证结果**：最终 `npm run check -- --pretty false`、`npm run build`、`npm run version:check`、`npm run test:changelog-governance`（528 个版本）、`npm run test:entrypoints`（292 个文件）、`npm run test:auth`、`npm run test:topics`（含 2 个跨选题恢复用例）、桌面 `test:system-settings-browser`、移动 `test:mobile-work-center-browser`、定向 ESLint（0 错误，7 条 hook/unused 警告）及 `git diff --check` 通过。此前候选验证还包括 `npm run test:production-list-update`、`npm run test:system-settings`、匿名意见提交恢复 HTTP/迁移/sessionStorage 回归及其余四项浏览器套件。生产构建保留既有 Silk 843.50 kB 大分包提示。Android 元数据为 v9.4.13 / 90413，未构建 APK。
+- **部署状态**：PR #91 等待更新后的六项 CI；生产仍为 v9.4.11，未部署。整体 B8/B4/B5 清单仍有未完成项；Android 原生专项按用户要求后置。
 
 ## 2026-10-27 清单 B5：移动与桌面操作及卡片悬停反馈（v9.4.12，本地未部署）
 

@@ -1,17 +1,18 @@
 # Changelog
 
-## v9.4.13 - 2026-10-27
+## v9.4.13 - 2026-10-28
 
 ### Write recovery
 
-- Production record edits, topic-stage updates, desktop system settings, and desktop/mobile profile updates now verify ambiguous outcomes with read-only requests before allowing a deliberate retry. Pending state is scoped to the account; refresh or leaving a page does not silently resend a write. Mobile password changes with an unknown result lock repeat submission and explain how to verify by signing in again.
+- Production record edits, topic-stage updates, desktop system settings, and desktop/mobile profile updates now verify ambiguous outcomes with read-only requests before allowing a deliberate retry. Pending state is scoped to the account; refresh or leaving a page does not silently resend a write. Profile verification remains valid across routine access-token rotation within the same auth mode and applies the result with the current token. Mobile password changes with an unknown result lock repeat submission and explain how to verify by signing in again.
+- A late topic-stage write completion clears only its captured account/topic recovery marker, preserving another topic's pending state.
 - Desktop and mobile notification settings warn before leaving unsaved changes or unresolved recovery state. Historical production records with no operator ID remain eligible for safe read-back comparison.
 - Anonymous feedback recovery no longer retries an old request ID when the server reports no receipt, because that ID may have been cleared after an administrator deleted the feedback. The text stays in the form, and a deliberate fresh submission gets a new request ID.
 
 ### Validation
 
-- Type check, production build, targeted ESLint, version governance, and test-entrypoint checks passed. Isolated Chromium suites passed for topic-stage/save recovery, the mobile work center (320/390px), production-list feedback, system settings, mobile notification settings, and anonymous-feedback submission recovery. Chrome DevTools MCP also verified isolated commit-then-503 recovery, historical null-operator records, refresh-time read-only recovery, and stage leave confirmation. No repeated business writes or real business data were involved. The user confirmed hearing the three homepage loading announcements; this does not establish site-wide VoiceOver coverage. See `docs/UPGRADE_PROGRESS.md` for scope and test results.
-- Android metadata is 9.4.13 / 90413; no Android package was built. Local changes only; not committed, pushed, or deployed.
+- Type check, production build, targeted ESLint, version governance, and test-entrypoint checks passed. Isolated Chromium suites passed for topic-stage/save recovery, the mobile work center (320/390px), production-list feedback, system settings, mobile notification settings, and anonymous-feedback submission recovery. Additional tests cover auth failure contracts, same-account profile token rotation on desktop/mobile, and a pending recovery from topic A completing while topic B stays locked. Chrome DevTools MCP also verified isolated commit-then-503 recovery, historical null-operator records, refresh-time read-only recovery, and stage leave confirmation. No repeated business writes or real business data were involved. The user confirmed hearing the three homepage loading announcements; this does not establish site-wide VoiceOver coverage. See `docs/UPGRADE_PROGRESS.md` for scope and test results.
+- Android metadata is 9.4.13 / 90413; no Android package was built. PR #91 is awaiting CI and protected deployment; production remains on the prior version.
 
 ## v9.4.12 - 2026-10-27
 

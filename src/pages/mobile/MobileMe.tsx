@@ -15,6 +15,7 @@ type ProfileRecovery = {
   kind: 'unknown' | 'unchanged' | 'conflict';
   actorId: number;
   token: string;
+  authMode: 'legacy' | 'v1-web';
   before: ProfileFields;
   draft: ProfileFields;
   currentUser?: Awaited<ReturnType<typeof getMe>>;
@@ -61,10 +62,11 @@ export default function MobileMe() {
   const [showChangelog, setShowChangelog] = useState(false);
 
   useEffect(() => { setName(user?.name ?? ''); setEmail(user?.email ?? ''); }, [user?.email, user?.name]);
-  const saveProfileFromServer = (profile: Awaited<ReturnType<typeof getMe>>, actorId: number, actorToken: string) => {
+  const saveProfileFromServer = (profile: Awaited<ReturnType<typeof getMe>>, actorId: number, actorAuthMode: 'legacy' | 'v1-web') => {
     const auth = useAuthStore.getState();
-    if (Number(auth.user?.id) !== actorId || auth.token !== actorToken || Number(profile.id) !== actorId) return false;
-    auth.login(profile, actorToken);
+    const currentToken = auth.token;
+    if (Number(auth.user?.id) !== actorId || auth.authMode !== actorAuthMode || !currentToken || Number(profile.id) !== actorId) return false;
+    auth.login(profile, currentToken);
     setName(profile.name);
     setEmail(profile.email ?? '');
     setProfileRecovery(null);
@@ -85,7 +87,7 @@ export default function MobileMe() {
       }
       const currentFields = normalizeProfileFields({ name: currentProfile.name, email: currentProfile.email ?? '' });
       if (sameProfileFields(currentFields, snapshot.draft)) {
-        if (!saveProfileFromServer(currentProfile, snapshot.actorId, snapshot.token)) return;
+        if (!saveProfileFromServer(currentProfile, snapshot.actorId, snapshot.authMode)) return;
         setProfileNotice('已核实个人资料已更新。');
         return;
       }
@@ -138,7 +140,7 @@ export default function MobileMe() {
       ? { name: recovery.currentUser.name, email: recovery.currentUser.email ?? '' }
       : { name: currentUser.name, email: currentUser.email ?? '' });
     const snapshot: ProfileRecovery = {
-      kind: 'unknown', actorId, token: actorToken, before, draft,
+      kind: 'unknown', actorId, token: actorToken, authMode: auth.authMode, before, draft,
       message: '正在只读核实个人资料保存结果；核实期间不会再次提交。',
     };
     profileSaveLockRef.current = true;
@@ -146,7 +148,7 @@ export default function MobileMe() {
     try {
       try {
         const profile = await updateMyProfile(draft);
-        if (!saveProfileFromServer(profile, actorId, actorToken)) return;
+        if (!saveProfileFromServer(profile, actorId, auth.authMode)) return;
       } catch (error) {
         const status = error instanceof AuthRequestError ? error.status : null;
         const definitelyRejected = status !== null && status >= 400 && status < 500
@@ -254,7 +256,7 @@ export default function MobileMe() {
               {profileRecovery.kind === 'conflict' ? (
                 <>
                   <button type="button" disabled={saving} onClick={() => {
-                    if (profileRecovery.currentUser && saveProfileFromServer(profileRecovery.currentUser, profileRecovery.actorId, profileRecovery.token)) {
+                    if (profileRecovery.currentUser && saveProfileFromServer(profileRecovery.currentUser, profileRecovery.actorId, profileRecovery.authMode)) {
                       setProfileNotice('已载入服务器当前资料。');
                     }
                   }} className="xmt-btn xmt-btn-secondary min-h-10 px-3">载入服务器资料</button>

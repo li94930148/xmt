@@ -631,6 +631,43 @@ try {
   assert.equal(profile.name, '资料明确恢复验收', 'the explicit profile retry persists the preserved draft');
   assert.equal(profileSaveRequests, profileWritesBeforeUnknown + 2, 'explicit profile retry sends exactly one additional PUT');
 
+  await notificationPage.evaluate(async () => {
+    const { useAuthStore } = await import('/src/store/index.ts');
+    const auth = useAuthStore.getState();
+    if (!auth.user) throw new Error('the isolated profile fixture must be authenticated');
+    auth.loginV1(auth.user, 'settings-profile-session-token-before-refresh');
+  });
+  await profileInputs.nth(0).fill('令牌刷新后仍能保存');
+  await profileInputs.nth(1).fill('token-refresh-profile@example.test');
+  profileSaveDelayMs = 160;
+  const tokenRefreshProfileRequest = notificationPage.waitForRequest((request) => request.method() === 'PUT' && request.url().endsWith('/api/auth/profile'));
+  const tokenRefreshProfileResponse = notificationPage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/auth/profile') && response.status() === 200);
+  await notificationPage.getByRole('button', { name: '保存个人资料', exact: true }).click();
+  await tokenRefreshProfileRequest;
+  await notificationPage.evaluate(async () => {
+    const { useAuthStore } = await import('/src/store/index.ts');
+    const auth = useAuthStore.getState();
+    if (!auth.user) throw new Error('the isolated profile fixture must remain authenticated during token refresh');
+    auth.loginV1(auth.user, 'settings-profile-session-token-after-refresh');
+  });
+  await tokenRefreshProfileResponse;
+  profileSaveDelayMs = 0;
+  await notificationPage.getByText('个人资料已更新', { exact: true }).last().waitFor();
+  const refreshedProfileAuth = await notificationPage.evaluate(async () => {
+    const { useAuthStore } = await import('/src/store/index.ts');
+    const auth = useAuthStore.getState();
+    return { token: auth.token, user: auth.user };
+  });
+  assert.equal(refreshedProfileAuth.token, 'settings-profile-session-token-after-refresh', 'profile read-back keeps the access token refreshed during the request');
+  assert.equal(refreshedProfileAuth.user?.name, '令牌刷新后仍能保存', 'a same-account profile response still applies after routine token rotation');
+  assert.equal(profile.name, '令牌刷新后仍能保存', 'the isolated server fixture records the profile update once');
+  await notificationPage.evaluate(async () => {
+    const { useAuthStore } = await import('/src/store/index.ts');
+    const auth = useAuthStore.getState();
+    if (!auth.user) throw new Error('the isolated profile fixture must remain authenticated after token refresh');
+    auth.login(auth.user, 'settings-fixture', { persist: 'local' });
+  });
+
   await notificationPage.getByRole('button', { name: '账号安全', exact: true }).click();
   const passwordInputs = notificationPage.locator('input[type="password"]');
   await passwordInputs.nth(0).fill('wrong-current-pass');

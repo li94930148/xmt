@@ -49,20 +49,17 @@ import TopicResourcesPanel from '../components/topic/TopicResourcesPanel';
 import TopicAssetDimensionsPanel from '../components/topics/TopicAssetDimensionsPanel';
 import { startOrResumeTopicProduction } from '../utils/topicProductionHandoff';
 import { ActionButton } from '../components/studio';
+import { completeTopicStatusRecovery, isSameTopicStatusRecovery, type TopicStatusRecoveryIdentity } from './topicStatusRecovery';
 
-type PendingTopicStatusWrite = {
+type PendingTopicStatusWrite = TopicStatusRecoveryIdentity & {
   kind: 'write';
-  topicId: number;
-  userId: number;
   before: Topic['status'];
   target: Topic['status'];
   createdAt: number;
 };
 
-type InvalidTopicStatusRecovery = {
+type InvalidTopicStatusRecovery = TopicStatusRecoveryIdentity & {
   kind: 'invalid';
-  topicId: number;
-  userId: number;
   reason: 'expired' | 'corrupt';
 };
 
@@ -125,10 +122,12 @@ function persistPendingTopicStatusWrite(pending: PendingTopicStatusWrite) {
   }
 }
 
-function removePendingTopicStatusWrite(userId: number, topicId: number) {
+function removePendingTopicStatusWrite(userId: number, topicId: number, expected?: TopicStatusRecoveryIdentity) {
   if (typeof window === 'undefined') return;
   try {
-    sessionStorage.removeItem(topicStatusRecoveryKey(userId, topicId));
+    const key = topicStatusRecoveryKey(userId, topicId);
+    if (expected && !isSameTopicStatusRecovery(loadPendingTopicStatusWrite(userId, topicId), expected)) return;
+    sessionStorage.removeItem(key);
   } catch {
     // A remaining marker will trigger a read-only verification after reopening.
   }
@@ -592,6 +591,17 @@ export default function TopicDetail() {
     return true;
   };
 
+  const completePendingTopicStatusWrite = (completed: TopicStatusRecovery) => completeTopicStatusRecovery(
+    pendingTopicStatusWriteRef.current,
+    completed,
+    (recovery) => removePendingTopicStatusWrite(recovery.userId, recovery.topicId, recovery),
+    () => {
+      pendingTopicStatusWriteRef.current = null;
+      setPendingTopicStatusWrite(null);
+      setStatusVerificationNotice('');
+    },
+  );
+
   const verifyPendingTopicStatusWrite = useCallback(async (pendingOverride?: TopicStatusRecovery) => {
     const pending = pendingOverride ?? pendingTopicStatusWriteRef.current;
     if (!pending || topicStatusVerificationInFlightRef.current) return;
@@ -605,7 +615,7 @@ export default function TopicDetail() {
       if (Number(currentTopicIdRef.current) === pending.topicId) {
         setTopic(latest);
       }
-      rememberPendingTopicStatusWrite(null);
+      completePendingTopicStatusWrite(pending);
 
       if (pending.kind === 'invalid') {
         const reason = pending.reason === 'expired' ? '已过期' : '无法读取';
@@ -644,7 +654,7 @@ export default function TopicDetail() {
           setTopic(null);
           setTopicLoadFailure('not-found');
         }
-        rememberPendingTopicStatusWrite(null);
+        completePendingTopicStatusWrite(pending);
         return;
       }
       const message = error instanceof Error ? error.message : '暂时无法读取选题状态';
@@ -715,7 +725,7 @@ export default function TopicDetail() {
         const definitelyRejected = responseStatus >= 400 && responseStatus < 500
           && ![408, 425, 429].includes(responseStatus);
         if (definitelyRejected) {
-          rememberPendingTopicStatusWrite(null);
+          completePendingTopicStatusWrite(pending);
           if (Number(currentTopicIdRef.current) === requestedTopicId) {
             appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
           }
@@ -726,7 +736,7 @@ export default function TopicDetail() {
         return;
       }
 
-      rememberPendingTopicStatusWrite(null);
+      completePendingTopicStatusWrite(pending);
       if (Number(currentTopicIdRef.current) !== requestedTopicId) return;
       if (status === 'shooting' || status === 'completed') celebrateMilestone();
       try {

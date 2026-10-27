@@ -189,10 +189,10 @@ let messageListReadStarted: (() => void) | null = null;
 let releaseMessageListRead: (() => void) | null = null;
 let homeAttentionReadHold = false;
 let homeAttentionReadStarted: (() => void) | null = null;
-let releaseHomeAttentionRead: (() => void) | null = null;
+const pendingHomeAttentionReads: Array<() => void> = [];
 let homeInspirationReadHold = false;
 let homeInspirationReadStarted: (() => void) | null = null;
-let releaseHomeInspirationRead: (() => void) | null = null;
+const pendingHomeInspirationReads: Array<() => void> = [];
 let topicListReadHold = false;
 let topicListReadStarted: (() => void) | null = null;
 let releaseTopicListRead: (() => void) | null = null;
@@ -666,11 +666,10 @@ fixtureApi.use('/api', async (request, response) => {
   }
   if (request.path === '/dashboard/home-attention' && request.method === 'GET') {
     if (homeAttentionReadHold) {
-      homeAttentionReadHold = false;
       const markReadStarted = homeAttentionReadStarted;
       homeAttentionReadStarted = null;
       markReadStarted?.();
-      await new Promise<void>((resolve) => { releaseHomeAttentionRead = resolve; });
+      await new Promise<void>((resolve) => { pendingHomeAttentionReads.push(resolve); });
     }
     return response.json({
       scope: 'personal',
@@ -784,11 +783,10 @@ fixtureApi.use('/api', async (request, response) => {
   }
   if (request.path === '/inspirations' && request.method === 'GET') {
     if (homeInspirationReadHold) {
-      homeInspirationReadHold = false;
       const markReadStarted = homeInspirationReadStarted;
       homeInspirationReadStarted = null;
       markReadStarted?.();
-      await new Promise<void>((resolve) => { releaseHomeInspirationRead = resolve; });
+      await new Promise<void>((resolve) => { pendingHomeInspirationReads.push(resolve); });
     }
     const currentInspiration = promotedInspirationTopicId === null
       ? inspiration
@@ -1029,10 +1027,10 @@ fixtureApi.get('/__qa/mobile-loading-statuses', (_request, response) => {
   );
 });
 fixtureApi.post('/__qa/release-home-loading-statuses', (_request, response) => {
-  releaseHomeAttentionRead?.();
-  releaseHomeAttentionRead = null;
-  releaseHomeInspirationRead?.();
-  releaseHomeInspirationRead = null;
+  homeAttentionReadHold = false;
+  homeInspirationReadHold = false;
+  pendingHomeAttentionReads.splice(0).forEach((releaseRead) => releaseRead());
+  pendingHomeInspirationReads.splice(0).forEach((releaseRead) => releaseRead());
   return response.json({ released: true });
 });
 fixtureApi.get('/__qa/mobile-topic-loading', (_request, response) => {

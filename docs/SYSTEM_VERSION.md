@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-v9.4.2
+v9.4.3
 
 ## 版本规则
 
@@ -10,7 +10,11 @@ v9.4.2
 - 每次升级递增一个明确版本，不跳过中间版本。
 - 版本变更需同步 README、根目录 CHANGELOG、`docs/CHANGELOG.md` 与系统更新说明。
 
-## 当前版本摘要 · v9.4.2
+## 当前版本摘要 · v9.4.3
+
+B4/B5：移动首页本地验收夹具在明确释放前持续挂起所有重复的数据读取，避免第二次 GET 提前返回而清除加载状态。用于稳定核对真实 VoiceOver 播报；不改变产品 API、权限、数据库或业务数据。Android 仅同步 90403 元数据，未构建 APK。验收结果见 `docs/UPGRADE_PROGRESS.md`。
+
+## 历史版本摘要 · v9.4.2
 
 B4/B5：修复移动工作区本地浏览器验收夹具的 Socket.IO 握手，改用不发送业务事件的内存服务，避免快速重连干扰加载状态检查。产品 API、权限、数据库和业务数据不变。定向 lint、类型、版本和 Chrome DevTools MCP 隔离夹具证据及未完成的实际 VoiceOver 语音验收见 `docs/UPGRADE_PROGRESS.md`。Android 同步 90402 元数据；GitHub CI 生成 debug 验收 APK artifact，未发布 Android 安装包。
 

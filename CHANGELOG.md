@@ -1,5 +1,16 @@
 # Changelog
 
+## v9.4.3 - 2026-10-27
+
+### Mobile accessibility fixture
+
+- The local mobile-home fixture now keeps every duplicate initial read pending until explicitly released, so a second request cannot hide the loading statuses before accessibility checks finish.
+
+### Validation
+
+- Focused fixture and real VoiceOver checks, type and version governance, lint, and build results are recorded in `docs/UPGRADE_PROGRESS.md`.
+- No product API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.3 / 90403; no APK was built.
+
 ## v9.4.2 - 2026-10-26
 
 ### Mobile accessibility fixture

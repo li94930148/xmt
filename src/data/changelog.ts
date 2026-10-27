@@ -11,6 +11,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.4.3',
+    date: '2026-10-27',
+    title: '移动首页辅助功能验收稳定性修复',
+    impactScope: ['移动工作区本地验收'],
+    changes: [
+      { type: 'fix', description: '本地验收期间，移动首页的重复数据读取会一起等待明确放行，避免加载提示提前消失；不改变产品页面或业务行为。' },
+    ],
+  },
+  {
     version: '9.4.2',
     date: '2026-10-26',
     title: '移动端验收连接稳定性修复',

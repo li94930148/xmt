@@ -53,7 +53,7 @@ function NotificationItem({ notification }: { notification: Notification }) {
   const style = typeStyles[notification.type] || typeStyles.info;
 
   return (
-    <div className={`studio-sheen relative max-w-sm overflow-hidden rounded-card border p-4 shadow-floating backdrop-blur-xl ${style.bg} ${style.border}`}>
+    <div className={`pointer-events-none studio-sheen relative max-w-sm overflow-hidden rounded-card border p-4 shadow-floating backdrop-blur-xl ${style.bg} ${style.border}`}>
       <div className="relative z-[1] flex items-start gap-3">
         <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${style.bg} ${style.text}`}>
           {style.icon}
@@ -66,7 +66,7 @@ function NotificationItem({ notification }: { notification: Notification }) {
         </div>
         <button
           onClick={() => removeNotification(notification.id)}
-          className="flex-shrink-0 text-current opacity-40 transition hover:opacity-80"
+          className="pointer-events-auto flex-shrink-0 text-current opacity-40 transition hover:opacity-80"
           aria-label="关闭通知"
         >
           <span className="text-sm">&times;</span>
@@ -370,7 +370,7 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
   if (mobileLayout) {
     return <WritingFocusContext.Provider value={writingFocusContext}>
       <MobileShell user={user} unreadCount={unreadCount} onLogout={handleLogout} />
-      <div className="fixed inset-x-4 bottom-28 z-notification space-y-2" role="status" aria-live="polite">
+      <div className="pointer-events-none fixed inset-x-4 bottom-28 z-notification space-y-2" role="status" aria-live="polite">
         {notifications.map((notification) => <NotificationItem key={notification.id} notification={notification} />)}
       </div>
     </WritingFocusContext.Provider>;
@@ -511,7 +511,7 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
         </main>
       </div>
 
-      <div className="fixed bottom-4 right-4 z-notification space-y-2" role="status" aria-live="polite">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-notification space-y-2" role="status" aria-live="polite">
         {notifications.map((notification) => (
           <NotificationItem key={notification.id} notification={notification} />
         ))}

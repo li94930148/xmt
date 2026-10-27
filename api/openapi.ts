@@ -491,6 +491,17 @@ const WorkflowTemplateDetailResponse = registerSchema('WorkflowTemplateDetailRes
   base_fingerprint: z.string().regex(/^[0-9a-fA-F]{64}$/),
 }).passthrough());
 const LegacyPomodoroStart = registerSchema('LegacyPomodoroStart', z.object({ duration: z.number().int().min(1).max(180).optional(), topic_id: z.number().int().positive().nullable().optional() }).strict());
+const LegacyPomodoroActiveSession = registerSchema('LegacyPomodoroActiveSession', z.object({
+  id: z.number().int().positive(),
+  sessionId: z.number().int().positive(),
+  duration: z.number().int().positive(),
+  topicId: z.number().int().positive().nullable(),
+  startedAt: z.string(),
+  remainingSeconds: z.number().int().nonnegative(),
+}).strict());
+const LegacyPomodoroActiveResponse = registerSchema('LegacyPomodoroActiveResponse', z.object({
+  session: LegacyPomodoroActiveSession.nullable(),
+}).strict());
 const LegacyIdParams = registerSchema('LegacyIdParams', z.object({ id: idSchema }).strict());
 
 registry.registerComponent('securitySchemes', 'bearerAuth', {
@@ -566,6 +577,7 @@ registry.registerPath({
   path: '/api/v1/topics',
   tags: ['Topics'],
   summary: '获取选题列表',
+  description: '筛选条件在分页前应用。topic_filter=mine 仅返回当前账号创建或负责的选题；topic_filter=active 仅返回已通过、创作中、成片制作或发布中的选题。topic_filter 与 status、search 取交集，并且不会扩大账号原有的数据查看范围。',
   security: [{ bearerAuth: [] }],
   request: { query: topicQuerySchema },
   responses: {
@@ -1116,6 +1128,7 @@ registry.registerPath({ method: 'post', path: '/api/templates', tags: ['Template
 registry.registerPath({ method: 'put', path: '/api/templates/{id}', tags: ['Templates (Legacy)'], summary: '更新选题模板', security: [{ bearerAuth: [] }], request: { params: LegacyIdParams, body: { content: { 'application/json': { schema: LegacyTemplateInput.partial() } } } }, responses: { 200: { description: '模板已更新' }, ...errorResponses } });
 registry.registerPath({ method: 'delete', path: '/api/templates/{id}', tags: ['Templates (Legacy)'], summary: '删除选题模板', security: [{ bearerAuth: [] }], request: { params: LegacyIdParams }, responses: { 200: { description: '模板已删除' }, ...errorResponses } });
 registry.registerPath({ method: 'post', path: '/api/pomodoro/start', tags: ['Pomodoro (Legacy)'], summary: '开始专注计时', security: [{ bearerAuth: [] }], request: { body: { content: { 'application/json': { schema: LegacyPomodoroStart } } } }, responses: { 200: { description: '计时已开始' }, ...errorResponses } });
+registry.registerPath({ method: 'get', path: '/api/pomodoro/active', tags: ['Pomodoro (Legacy)'], summary: '读取当前活动专注计时', description: '只读返回当前认证用户最新的未完成番茄钟；没有活动会话时 session 为 null。会话按当前用户隔离，不返回其他用户的记录。', security: [{ bearerAuth: [] }], responses: { 200: { description: '当前活动会话或空结果', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: LegacyPomodoroActiveResponse } } }, ...errorResponses } });
 for (const action of ['complete', 'cancel'] as const) registry.registerPath({ method: 'post', path: `/api/pomodoro/{id}/${action}`, tags: ['Pomodoro (Legacy)'], summary: action === 'complete' ? '完成专注计时' : '放弃专注计时', security: [{ bearerAuth: [] }], request: { params: LegacyIdParams }, responses: { 200: { description: '操作完成' }, ...errorResponses } });
 for (const path of ['/api/pomodoro/stats', '/api/pomodoro/ranking'] as const) registry.registerPath({ method: 'get', path, tags: ['Pomodoro (Legacy)'], summary: path.endsWith('stats') ? '获取个人专注统计' : '获取脱敏团队排行', security: [{ bearerAuth: [] }], responses: { 200: { description: '统计结果' }, ...errorResponses } });
 

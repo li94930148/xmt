@@ -80,8 +80,16 @@ export default function MobileProduction() {
     void load(page);
     return () => { requestSequenceRef.current += 1; };
   }, [canView, load, loadedPage, loadedUserId, page, permissionsLoading, userId]);
+  const liveStatus = loading && canView && !permissionsLoading
+    ? `正在读取第 ${page} 页的创作稿件。`
+    : error || loadedPage !== page || loadedUserId !== userId
+      ? ''
+      : items.length === 0
+        ? `第 ${loadedPage} 页读取完成，目前没有创作稿件。`
+        : `第 ${loadedPage} 页已加载 ${items.length} 条稿件，共 ${total} 条。`;
   if (!permissionsLoading && !canView) return <AccessDeniedState title="暂时无法查看创作稿件" description="请联系管理员分配创作查看权限。" />;
   return <div className="space-y-4">
+    <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">{liveStatus}</p>
     <div className="flex items-center justify-between"><div><p className="text-sm text-studio-text-muted">我的创作</p><h2 className="text-xl font-semibold">稿件与协作编辑</h2></div>{canEdit ? <button type="button" onClick={() => navigate('/production/content/new')} className="xmt-btn xmt-btn-primary min-h-11 px-3 text-sm font-semibold text-white"><FilePlus2 className="h-4 w-4" />新建</button> : null}</div>
     <button type="button" disabled={loading || permissionsLoading} onClick={() => void load()} className="xmt-btn xmt-btn-secondary inline-flex min-h-11 items-center px-3 text-sm disabled:opacity-50">{loading || permissionsLoading ? '正在同步…' : error ? '重新加载创作列表' : '刷新创作列表'}</button>
     {error ? <p role="alert" className="text-sm text-studio-coral-contrast">{error}</p> : null}

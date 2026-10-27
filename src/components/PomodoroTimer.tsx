@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useAppStore } from '../store';
 import { Play, Pause, RotateCcw, Timer, CheckCircle, Link } from 'lucide-react';
-import { cancelPomodoro, completePomodoro, getPomodoroStats, startPomodoro } from '../api/pomodoro';
+import { cancelPomodoro, completePomodoro, getActivePomodoro, getPomodoroStats, startPomodoro } from '../api/pomodoro';
 import { isDesktopNotifyEnabled, isNotificationSupported, notifyDesktop } from '../utils/notification';
 
 interface PomodoroTimerProps {
@@ -21,15 +21,19 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
   const [timerDuration, setTimerDuration] = useState(DURATION);
   const [isRunning, setIsRunning] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [activeSessionReadState, setActiveSessionReadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [activeSessionReadError, setActiveSessionReadError] = useState('');
+  const [activeSessionAnnouncement, setActiveSessionAnnouncement] = useState('');
   const [todayCount, setTodayCount] = useState(0);
   const [statsError, setStatsError] = useState('');
   const [mutation, setMutation] = useState<PomodoroMutation>(null);
   const [mutationError, setMutationError] = useState('');
   const [completionUnconfirmed, setCompletionUnconfirmed] = useState(false);
   const mutationLockRef = useRef(false);
+  const activeSessionReadLockRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const completionAtBoundary = isRunning && timeLeft === 0;
-  const controlsLocked = mutation !== null || completionUnconfirmed || completionAtBoundary;
+  const controlsLocked = activeSessionReadState !== 'ready' || mutation !== null || completionUnconfirmed || completionAtBoundary;
   const mutationMessage = mutation === 'starting'
     ? '正在开始番茄钟…'
     : mutation === 'resetting'
@@ -44,6 +48,44 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
     catch (error) { setStatsError(error instanceof Error ? error.message : '获取番茄钟统计失败'); }
   }, []);
   useEffect(() => { void refreshStats(); }, [refreshStats]);
+
+  const restoreActiveSession = useCallback(async () => {
+    if (activeSessionReadLockRef.current) return;
+    activeSessionReadLockRef.current = true;
+    setActiveSessionReadState('loading');
+    setActiveSessionReadError('');
+    setActiveSessionAnnouncement('正在读取当前番茄钟状态。');
+    try {
+      const session = await getActivePomodoro();
+      if (!session) {
+        setSessionId(null);
+        setTimerDuration(DURATION);
+        setTimeLeft(DURATION);
+        setIsRunning(false);
+        setActiveSessionAnnouncement('当前没有正在进行的番茄钟。');
+      } else {
+        const nextDuration = Number.isSafeInteger(session.duration) && session.duration > 0
+          ? session.duration * 60
+          : DURATION;
+        const remainingSeconds = Number.isSafeInteger(session.remainingSeconds)
+          ? Math.max(0, Math.min(nextDuration, session.remainingSeconds))
+          : nextDuration;
+        setSessionId(session.sessionId);
+        setTimerDuration(nextDuration);
+        setTimeLeft(remainingSeconds);
+        setIsRunning(true);
+        setActiveSessionAnnouncement('已恢复正在进行的番茄钟。');
+      }
+      setActiveSessionReadState('ready');
+    } catch {
+      setActiveSessionReadState('error');
+      setActiveSessionReadError('当前番茄钟状态暂时无法读取。请重新读取后再开始或重置。');
+      setActiveSessionAnnouncement('');
+    } finally {
+      activeSessionReadLockRef.current = false;
+    }
+  }, []);
+  useEffect(() => { void restoreActiveSession(); }, [restoreActiveSession]);
 
   // Timer logic
   useEffect(() => {
@@ -102,7 +144,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
   }, [completionUnconfirmed, persistCompletion, sessionId]);
 
   const handleStart = useCallback(async () => {
-    if (mutationLockRef.current || completionUnconfirmed || completionAtBoundary) return;
+    if (activeSessionReadState !== 'ready' || mutationLockRef.current || completionUnconfirmed || completionAtBoundary) return;
     if (isRunning) {
       setIsRunning(false);
       return;
@@ -137,10 +179,10 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
       mutationLockRef.current = false;
       setMutation(null);
     }
-  }, [completionAtBoundary, completionUnconfirmed, isRunning, sessionId, topicId]);
+  }, [activeSessionReadState, completionAtBoundary, completionUnconfirmed, isRunning, sessionId, topicId]);
 
   const handleReset = useCallback(async () => {
-    if (mutationLockRef.current || completionUnconfirmed || completionAtBoundary) return;
+    if (activeSessionReadState !== 'ready' || mutationLockRef.current || completionUnconfirmed || completionAtBoundary) return;
     if (!sessionId) {
       setMutationError('');
       setIsRunning(false);
@@ -173,7 +215,15 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
       mutationLockRef.current = false;
       setMutation(null);
     }
-  }, [completionAtBoundary, completionUnconfirmed, isRunning, sessionId, timeLeft]);
+  }, [activeSessionReadState, completionAtBoundary, completionUnconfirmed, isRunning, sessionId, timeLeft]);
+
+  const activeSessionFeedback = <>
+    <p role="status" aria-live="polite" aria-atomic="true" className={`text-xs ${styles.textSecondary}`}>{activeSessionAnnouncement}</p>
+    {activeSessionReadState === 'error' ? <div role="alert" className="space-y-2 text-xs text-studio-coral">
+      <p>{activeSessionReadError}</p>
+      <button type="button" data-testid="pomodoro-active-retry" onClick={() => void restoreActiveSession()} className="xmt-btn xmt-btn-secondary min-h-10 w-full rounded-lg px-3 py-2 font-medium">重新读取番茄钟状态</button>
+    </div> : null}
+  </>;
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
@@ -254,6 +304,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
             </div>
+            {activeSessionFeedback}
             {mutationMessage && <p role="status" aria-live="polite" className={`text-xs ${styles.textSecondary}`}>{mutationMessage}</p>}
             {completionUnconfirmed ? (
               <div role="alert" className="space-y-2 text-xs text-studio-coral">
@@ -352,6 +403,7 @@ export default function PomodoroTimer({ topicId, topicTitle, compact = false }: 
           <RotateCcw className="w-4 h-4" />
         </button>
       </div>
+      {activeSessionFeedback}
       {mutationMessage && <p role="status" aria-live="polite" className={`mt-3 text-center text-sm ${styles.textSecondary}`}>{mutationMessage}</p>}
       {completionUnconfirmed ? (
         <div role="alert" className="mt-3 space-y-3 text-center text-sm text-studio-coral">

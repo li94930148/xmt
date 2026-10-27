@@ -1991,6 +1991,72 @@ try {
   {
     const previousUser = fixtureUser;
     const previousPermissions = fixturePermissions;
+    const listReader = { ...user, id: 17, username: 'mobile-production-loading-reader', name: '创作列表播报验收', role: 'member' };
+    fixtureUser = listReader;
+    fixturePermissions = ['production:view'];
+    try {
+      const { context, page, errors } = await openMobilePage(390, listReader, 'dark');
+      let listReads = 0;
+      let listWrites = 0;
+      let releaseInitialRead: (() => void) | null = null;
+      let markInitialReadStarted: (() => void) | null = null;
+      const initialReadStarted = new Promise<void>((resolve) => { markInitialReadStarted = resolve; });
+      await page.route('**/api/workflow/production*', async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (url.pathname !== '/api/workflow/production') return route.continue();
+        if (request.method() !== 'GET') {
+          listWrites += 1;
+          return route.continue();
+        }
+        listReads += 1;
+        if (listReads === 1) {
+          markInitialReadStarted?.();
+          markInitialReadStarted = null;
+          await new Promise<void>((resolve) => { releaseInitialRead = resolve; });
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ data: [{ ...mobileProductionFixture, id: 784, topic_title: '读屏验收稿件' }], total: 1, page: 1, limit: 20 }),
+          });
+          return;
+        }
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [], total: 0, page: 1, limit: 20 }) });
+      });
+
+      try {
+        await page.goto(`${baseUrl}/production/content`, { waitUntil: 'domcontentloaded' });
+        await initialReadStarted;
+        const loadingStatus = page.getByRole('status').filter({ hasText: '正在读取第 1 页的创作稿件。' });
+        await loadingStatus.waitFor();
+        assert.equal(await loadingStatus.getAttribute('aria-live'), 'polite', 'mobile production loading is announced politely');
+        assert.equal(await loadingStatus.getAttribute('aria-atomic'), 'true', 'mobile production announces the complete status message');
+        releaseInitialRead?.();
+        await page.getByText('读屏验收稿件', { exact: true }).waitFor();
+        await page.getByRole('status').filter({ hasText: '第 1 页已加载 1 条稿件，共 1 条。' }).waitFor();
+
+        const emptyResponse = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/workflow/production' && response.status() === 200 && listReads === 2);
+        await page.getByRole('button', { name: '刷新创作列表', exact: true }).click();
+        await emptyResponse;
+        await page.getByText('还没有创作稿件', { exact: true }).waitFor();
+        await page.getByRole('status').filter({ hasText: '第 1 页读取完成，目前没有创作稿件。' }).waitFor();
+        assert.equal(listReads, 2, 'initial read and explicit empty-state refresh each make one GET');
+        assert.equal(listWrites, 0, 'mobile production status checks never write business data');
+        await assertMobileLayout(page, 390, 'production-list-loading-status');
+        assert.deepEqual(errors, [], `mobile production loading status has no browser errors: ${errors.join('\n')}`);
+      } finally {
+        releaseInitialRead?.();
+        await context.close();
+      }
+    } finally {
+      fixtureUser = previousUser;
+      fixturePermissions = previousPermissions;
+    }
+  }
+
+  {
+    const previousUser = fixtureUser;
+    const previousPermissions = fixturePermissions;
     const paginationUser = { ...user, id: 18, username: 'mobile-production-pagination', name: '移动创作分页验收', role: 'member' };
     fixtureUser = paginationUser;
     fixturePermissions = ['production:view'];

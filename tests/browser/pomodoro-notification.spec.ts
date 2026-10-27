@@ -12,6 +12,7 @@ type PomodoroNotificationTestWindow = Window & {
 };
 type PomodoroMutationFixtureState = { startAttempts: number; cancelAttempts: number };
 type PomodoroCompletionFixtureState = { completeAttempts: number; completedSessionIds: number[] };
+type PomodoroActiveFixtureSession = { sessionId: number; duration: number; topicId: number | null; startedAt: string; remainingSeconds: number };
 const user = { id: 93, username: 'pomodoro-notification-qa', name: '专注通知验收', role: 'admin', enabled: true, force_change_password: false };
 let nextSessionId = 1;
 const completedSessionIds: number[] = [];
@@ -19,7 +20,11 @@ const unexpectedWrites: string[] = [];
 let startAttempts = 0;
 let cancelAttempts = 0;
 let completeAttempts = 0;
+let activeSessionReadAttempts = 0;
+let activePomodoro: PomodoroActiveFixtureSession | null = null;
 let failNextStart = false;
+let failNextActiveSessionRead = false;
+let malformNextActiveSessionRead = false;
 let failNextCancel = false;
 let failNextCompleteBeforeWrite = false;
 let loseNextCompleteResponseAfterWrite = false;
@@ -41,11 +46,16 @@ app.get('/__qa', (_request, response) => response.type('html').send(`<script>
 </script>`));
 app.get('/__qa/pomodoro-mutation-state', (_request, response) => response.json({ startAttempts, cancelAttempts }));
 app.get('/__qa/pomodoro-completion-state', (_request, response) => response.json({ completeAttempts, completedSessionIds }));
+app.get('/__qa/pomodoro-active-state', (_request, response) => response.json({ activeSessionReadAttempts, activePomodoro }));
 app.post('/__qa/reset-pomodoro-mutations', (_request, response) => {
   startAttempts = 0;
   cancelAttempts = 0;
   completeAttempts = 0;
+  activeSessionReadAttempts = 0;
+  activePomodoro = null;
   failNextStart = false;
+  failNextActiveSessionRead = false;
+  malformNextActiveSessionRead = false;
   failNextCancel = false;
   failNextCompleteBeforeWrite = false;
   loseNextCompleteResponseAfterWrite = false;
@@ -62,6 +72,18 @@ app.post('/__qa/reset-pomodoro-mutations', (_request, response) => {
 });
 app.post('/__qa/fail-next-pomodoro-start', (_request, response) => {
   failNextStart = true;
+  return response.json({ ok: true });
+});
+app.post('/__qa/fail-next-pomodoro-active-get', (_request, response) => {
+  failNextActiveSessionRead = true;
+  return response.json({ ok: true });
+});
+app.post('/__qa/malform-next-pomodoro-active-get', (_request, response) => {
+  malformNextActiveSessionRead = true;
+  return response.json({ ok: true });
+});
+app.post('/__qa/seed-active-pomodoro', (request, response) => {
+  activePomodoro = request.body as PomodoroActiveFixtureSession;
   return response.json({ ok: true });
 });
 app.post('/__qa/hold-next-pomodoro-start', (_request, response) => {
@@ -108,6 +130,19 @@ app.get('/api/messages/unread', (_request, response) => response.json({ unreadCo
 app.get(['/api/system-settings', '/api/system-settings/public'], (_request, response) => response.json({}));
 app.get('/api/pomodoro/stats', (_request, response) => response.json({ today: 0, week: 0, totalMinutes: 0 }));
 app.get('/api/pomodoro/ranking', (_request, response) => response.json({ data: [] }));
+app.get('/api/pomodoro/active', (_request, response) => {
+  activeSessionReadAttempts += 1;
+  response.setHeader('Cache-Control', 'no-store');
+  if (failNextActiveSessionRead) {
+    failNextActiveSessionRead = false;
+    return response.status(503).json({ message: '隔离验收模拟活动番茄钟读取失败，请重试' });
+  }
+  if (malformNextActiveSessionRead) {
+    malformNextActiveSessionRead = false;
+    return response.json({ session: { id: 9, sessionId: 10, duration: 25, topicId: null, startedAt: '2026-10-09T10:00:00.000Z', remainingSeconds: 900 } });
+  }
+  return response.json({ session: activePomodoro ? { id: activePomodoro.sessionId, ...activePomodoro } : null });
+});
 app.post('/api/pomodoro/start', async (_request, response) => {
   startAttempts += 1;
   const gate = startGate;
@@ -118,7 +153,8 @@ app.post('/api/pomodoro/start', async (_request, response) => {
     return response.status(503).json({ message: '隔离验收模拟番茄钟启动失败，请重试' });
   }
   const sessionId = nextSessionId++;
-  return response.json({ sessionId, message: '专注已开始' });
+  activePomodoro = { sessionId, duration: 25, topicId: null, startedAt: new Date().toISOString(), remainingSeconds: 25 * 60 };
+  return response.json({ sessionId, message: '专注已开始', duration: 25, startedAt: activePomodoro.startedAt, remainingSeconds: activePomodoro.remainingSeconds });
 });
 app.post('/api/pomodoro/:id/complete', async (request, response) => {
   completeAttempts += 1;
@@ -134,6 +170,7 @@ app.post('/api/pomodoro/:id/complete', async (request, response) => {
     return response.status(400).json({ message: '该番茄钟已完成' });
   }
   completedSessionIds.push(sessionId);
+  if (activePomodoro?.sessionId === sessionId) activePomodoro = null;
   if (loseNextCompleteResponseAfterWrite) {
     loseNextCompleteResponseAfterWrite = false;
     return response.status(503).json({ message: '隔离验收模拟完成记录已写入但响应丢失，请重试' });
@@ -149,6 +186,7 @@ app.post('/api/pomodoro/:id/cancel', async (_request, response) => {
     failNextCancel = false;
     return response.status(503).json({ message: '隔离验收模拟番茄钟重置失败，请重试' });
   }
+  if (activePomodoro?.sessionId === Number(_request.params.id)) activePomodoro = null;
   return response.json({ message: '专注已取消' });
 });
 app.use('/api', (request, response) => {
@@ -279,6 +317,7 @@ try {
         Object.defineProperty(Notification, 'permission', { configurable: true, value: 'granted' });
       }
     });
+    await page.request.post(`${base}/__qa/reset-pomodoro-mutations`);
     await page.goto(variant === 'compact' ? `${base}/__qa/compact` : `${base}/__qa`);
     try {
       await page.getByTestId('pomodoro-start-button').waitFor({ state: 'visible' });
@@ -286,7 +325,6 @@ try {
       console.error('Pomodoro mutation fixture failed to mount', { variant, url: page.url(), pageErrors, body: await page.locator('body').innerText().catch(() => '') });
       throw error;
     }
-    await page.request.post(`${base}/__qa/reset-pomodoro-mutations`);
     return { page, pageErrors, expected503ConsoleErrors, expected400ConsoleErrors, observedPomodoroPosts };
   };
   const readMutationState = async (page: import('playwright').Page): Promise<PomodoroMutationFixtureState> => (
@@ -326,6 +364,65 @@ try {
   const waitForPomodoroResponse = (page: import('playwright').Page, path: string, status: number) => page.waitForResponse((response) => (
     response.url().endsWith(path) && response.request().method() === 'POST' && response.status() === status
   ));
+
+  for (const variant of ['full', 'compact'] as const) {
+    const restored = await openMutationTimer(variant);
+    const beforeRestoreRead = await restored.page.request.get(`${base}/__qa/pomodoro-active-state`).then((response) => response.json() as Promise<{ activeSessionReadAttempts: number }>);
+    await restored.page.getByRole('status').filter({ hasText: '当前没有正在进行的番茄钟。' }).waitFor();
+    await restored.page.request.post(`${base}/__qa/seed-active-pomodoro`, { data: {
+      sessionId: variant === 'full' ? 7001 : 7002,
+      duration: 25,
+      topicId: null,
+      startedAt: '2026-10-09T10:00:00.000Z',
+      remainingSeconds: 12 * 60 + 5,
+    } satisfies PomodoroActiveFixtureSession });
+    await restored.page.reload();
+    await restored.page.getByRole('status').filter({ hasText: '已恢复正在进行的番茄钟。' }).waitFor();
+    await restored.page.getByText('12:05', { exact: true }).waitFor();
+    await restored.page.getByRole('button', { name: '暂停番茄钟', exact: true }).waitFor();
+    const activeReadAfterReload = await restored.page.request.get(`${base}/__qa/pomodoro-active-state`).then((response) => response.json() as Promise<{ activeSessionReadAttempts: number; activePomodoro: PomodoroActiveFixtureSession | null }>);
+    assert.equal(activeReadAfterReload.activeSessionReadAttempts - beforeRestoreRead.activeSessionReadAttempts, 1, `${variant} reload performs one active-session GET`);
+    assert.equal(activeReadAfterReload.activePomodoro?.sessionId, variant === 'full' ? 7001 : 7002, `${variant} restores the same server session`);
+    await restored.page.clock.runFor(1000);
+    await restored.page.getByText('12:04', { exact: true }).waitFor();
+    assert.equal(restored.observedPomodoroPosts.start, 0, `${variant} refresh recovery does not create another session`);
+    assert.deepEqual(restored.observedPomodoroPosts, { start: 0, complete: 0, cancel: 0 }, `${variant} refreshing an active timer performs reads only`);
+    assert.deepEqual(restored.pageErrors, [], `${variant} active-session reload recovery has no browser errors`);
+    await restored.page.close();
+
+    const failedActiveRead = await openMutationTimer(variant);
+    const beforeFailedRead = await failedActiveRead.page.request.get(`${base}/__qa/pomodoro-active-state`).then((response) => response.json() as Promise<{ activeSessionReadAttempts: number }>);
+    await failedActiveRead.page.getByRole('status').filter({ hasText: '当前没有正在进行的番茄钟。' }).waitFor();
+    await failedActiveRead.page.request.post(`${base}/__qa/fail-next-pomodoro-active-get`);
+    await failedActiveRead.page.reload();
+    await failedActiveRead.page.getByRole('alert').filter({ hasText: '当前番茄钟状态暂时无法读取。' }).waitFor();
+    assert.equal(await failedActiveRead.page.getByTestId('pomodoro-start-button').isDisabled(), true, `${variant} start stays locked when active state cannot be read`);
+    assert.equal(await failedActiveRead.page.getByTestId('pomodoro-reset-button').isDisabled(), true, `${variant} reset stays locked when active state cannot be read`);
+    assert.deepEqual(failedActiveRead.observedPomodoroPosts, { start: 0, complete: 0, cancel: 0 }, `${variant} active-session GET failure sends no business writes`);
+    const retryActiveRead = failedActiveRead.page.waitForResponse((response) => response.url().endsWith('/api/pomodoro/active') && response.request().method() === 'GET' && response.status() === 200);
+    await failedActiveRead.page.getByTestId('pomodoro-active-retry').click();
+    await retryActiveRead;
+    await failedActiveRead.page.getByRole('status').filter({ hasText: '当前没有正在进行的番茄钟。' }).waitFor();
+    assert.equal(await failedActiveRead.page.getByTestId('pomodoro-start-button').isEnabled(), true, `${variant} explicit read retry unlocks controls only after success`);
+    await failedActiveRead.page.request.post(`${base}/__qa/malform-next-pomodoro-active-get`);
+    const malformedActiveRead = failedActiveRead.page.waitForResponse((response) => response.url().endsWith('/api/pomodoro/active') && response.request().method() === 'GET' && response.status() === 200);
+    await failedActiveRead.page.reload();
+    await malformedActiveRead;
+    await failedActiveRead.page.getByRole('alert').filter({ hasText: '当前番茄钟状态暂时无法读取。' }).waitFor();
+    assert.equal(await failedActiveRead.page.getByTestId('pomodoro-start-button').isDisabled(), true, `${variant} malformed session data does not unlock start`);
+    assert.equal(await failedActiveRead.page.getByTestId('pomodoro-reset-button').isDisabled(), true, `${variant} malformed session data does not unlock reset`);
+    const retryMalformedActiveRead = failedActiveRead.page.waitForResponse((response) => response.url().endsWith('/api/pomodoro/active') && response.request().method() === 'GET' && response.status() === 200);
+    await failedActiveRead.page.getByTestId('pomodoro-active-retry').click();
+    await retryMalformedActiveRead;
+    await failedActiveRead.page.getByRole('status').filter({ hasText: '当前没有正在进行的番茄钟。' }).waitFor();
+    const failedActiveState = await failedActiveRead.page.request.get(`${base}/__qa/pomodoro-active-state`).then((response) => response.json() as Promise<{ activeSessionReadAttempts: number }>);
+    assert.equal(failedActiveState.activeSessionReadAttempts - beforeFailedRead.activeSessionReadAttempts, 4, `${variant} failed and malformed reads each require one explicit read retry`);
+    assert.equal(await failedActiveRead.page.getByTestId('pomodoro-start-button').isEnabled(), true, `${variant} valid read retry unlocks controls after malformed data`);
+    assert.deepEqual(failedActiveRead.observedPomodoroPosts, { start: 0, complete: 0, cancel: 0 }, `${variant} state and format retries remain read-only`);
+    assert.equal(failedActiveRead.expected503ConsoleErrors.length, 1, `${variant} active-session failure is the one expected 503 console message`);
+    assert.deepEqual(failedActiveRead.pageErrors, [], `${variant} active-session retry has no browser errors`);
+    await failedActiveRead.page.close();
+  }
 
   for (const variant of ['full', 'compact'] as const) {
     const { page, pageErrors, observedPomodoroPosts } = await openMutationTimer(variant);

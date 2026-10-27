@@ -123,8 +123,8 @@ try {
   const selectBothTopics = async () => {
     await page.getByRole('heading', { name: '选题管理' }).waitFor();
     for (const title of initialTopics.map((topic) => topic.title)) {
-      await page.getByRole('button', { name: `选择选题 ${title}` }).click();
-      assert.equal(await page.getByRole('button', { name: `选择选题 ${title}` }).getAttribute('aria-pressed'), 'true');
+      await page.getByRole('button', { name: `选择选题：${title}` }).click();
+      assert.equal(await page.getByRole('button', { name: `选择选题：${title}` }).getAttribute('aria-pressed'), 'true');
     }
   };
 
@@ -156,9 +156,9 @@ try {
 
   const deleteGetCountBeforeRetry = deleteFailureState.topicListGetRequests;
   await deleteAlert.getByRole('button', { name: '重新加载列表', exact: true }).click();
-  await page.getByRole('button', { name: `选择选题 ${initialTopics[1].title}` }).waitFor();
-  assert.equal(await page.getByRole('button', { name: `选择选题 ${initialTopics[1].title}` }).getAttribute('aria-pressed'), 'true', 'failed deletion remains selected for an intentional retry');
-  assert.equal(await page.getByRole('button', { name: `选择选题 ${initialTopics[0].title}` }).count(), 0, 'confirmed deletion is absent after read-only reload');
+  await page.getByRole('button', { name: `选择选题：${initialTopics[1].title}` }).waitFor();
+  assert.equal(await page.getByRole('button', { name: `选择选题：${initialTopics[1].title}` }).getAttribute('aria-pressed'), 'true', 'failed deletion remains selected for an intentional retry');
+  assert.equal(await page.getByRole('button', { name: `选择选题：${initialTopics[0].title}` }).count(), 0, 'confirmed deletion is absent after read-only reload');
   assert.equal(await page.getByRole('alert').filter({ hasText: '服务端已确认批量删除' }).count(), 0, 'successful list reload clears the persistent refresh warning');
   const deleteRecoveredState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(deleteRecoveredState.topicListGetRequests, deleteGetCountBeforeRetry + 1, 'delete recovery performs exactly one GET');
@@ -177,10 +177,10 @@ try {
 
   const auditGetCountBeforeRetry = auditFailureState.topicListGetRequests;
   await auditAlert.getByRole('button', { name: '重新加载列表', exact: true }).click();
-  const failedAuditSelection = page.getByRole('button', { name: `选择选题 ${initialTopics[1].title}` });
+  const failedAuditSelection = page.getByRole('button', { name: `选择选题：${initialTopics[1].title}` });
   await failedAuditSelection.waitFor();
   assert.equal(await failedAuditSelection.getAttribute('aria-pressed'), 'true', 'failed audit remains selected for an intentional retry');
-  const auditedRow = page.locator('tbody tr').filter({ has: page.getByRole('button', { name: `选择选题 ${initialTopics[0].title}` }) });
+  const auditedRow = page.locator('tbody tr').filter({ has: page.getByRole('button', { name: `选择选题：${initialTopics[0].title}` }) });
   await auditedRow.getByText('已通过', { exact: true }).waitFor();
   assert.equal(await page.getByRole('alert').filter({ hasText: '服务端已确认批量审核' }).count(), 0, 'successful list reload clears the audit refresh warning');
   const auditRecoveredState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());

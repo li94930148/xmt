@@ -2,6 +2,7 @@
 export { login, mobileLogin, mobileRefresh, getMe, updateMyProfile, changePassword } from './auth';
 export { getMobileDeviceId, registerMobileDevice, revokeMobileDevice } from './mobileDevices';
 export { getTopics, getTopic, getTopicDeleteStatus, getTopicOutlineVersions, repairCurrentTopicStageRecord, createTopic, updateTopic, deleteTopic, auditTopic, updateTopicStatus } from './topics';
+export type { GetTopicsParams } from './topics';
 export { getHomeAttention, getHomeActivity } from './homeDashboard';
 export type { HomeAttentionSummary, HomeAttentionTopic, HomePipelineTopic, HomeDraftTask, HomeTodayPublishingTask, HomeSyncAnomalyTask, HomeActivitySummary, HomeActivityEvent } from './homeDashboard';
 export { TopicApiError } from './topics';

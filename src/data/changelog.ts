@@ -11,6 +11,21 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.5.0',
+    date: '2026-10-28',
+    title: '番茄钟恢复与选题读取可靠性',
+    impactScope: ['番茄钟', '选题列表与看板', '移动稿件编辑器', '匿名意见恢复说明'],
+    changes: [
+      { type: 'improvement', description: '重新打开页面时只读恢复当前账号未完成的番茄钟，使用服务端剩余时间，避免重复创建会话。' },
+      { type: 'fix', description: '选题列表只显示一次读取错误；看板失败时保留原内容并提供只读重试。' },
+      { type: 'fix', description: '批量审核经只读核实确认已生效后按成功计数，避免误报失败并重复执行。' },
+      { type: 'fix', description: '选题详情响应格式异常时保持待核实状态和失败项选中，不将无效数据误判为状态变化。' },
+      { type: 'improvement', description: '通知卡片文字区域不再挡住下层业务操作，关闭按钮仍可使用。' },
+      { type: 'improvement', description: '移动稿件加载状态增加读屏礼貌播报，用户确认听到本轮核对的加载提示。' },
+      { type: 'fix', description: '匿名意见旧回执不存在时不再复用旧请求编号；回执按用户规则保留至意见删除。' },
+    ],
+  },
+  {
     version: '9.4.15',
     date: '2026-10-28',
     title: '移动选题筛选与分页一致',

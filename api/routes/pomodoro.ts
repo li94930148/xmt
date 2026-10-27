@@ -155,6 +155,37 @@ router.post('/:id/complete', authenticate, async (req, res) => {
   }
 });
 
+// GET /active - 获取当前用户正在进行的番茄钟
+router.get('/active', authenticate, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const session = await queryOne<PomodoroSessionState>(
+      `SELECT id, user_id, duration, topic_id, completed, started_at
+       FROM pomodoro_sessions
+       WHERE user_id = ? AND completed = 0
+       ORDER BY id DESC
+       LIMIT 1`,
+      [req.user?.id]
+    );
+
+    if (!session) return res.json({ session: null });
+
+    const id = Number(session.id);
+    return res.json({
+      session: {
+        id,
+        sessionId: id,
+        duration: Number(session.duration),
+        topicId: session.topic_id === null ? null : Number(session.topic_id),
+        startedAt: `${String(session.started_at).replace(' ', 'T')}Z`,
+        remainingSeconds: sessionRemainingSeconds(session),
+      },
+    });
+  } catch {
+    return res.status(500).json({ message: '读取当前番茄钟失败' });
+  }
+});
+
 // GET /stats - 获取当前用户的番茄钟统计
 router.get('/stats', authenticate, async (req, res) => {
   try {

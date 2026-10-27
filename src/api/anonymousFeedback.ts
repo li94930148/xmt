@@ -54,8 +54,32 @@ async function ensureOk(response: Response, fallback: string) {
     typeof payload.code === 'string' ? payload.code : null);
 }
 
-export async function submitAnonymousFeedback(payload: { type: AnonymousFeedbackType; content: string; needReply: boolean }) {
-  return ensureOk(await fetch('/api/anonymous-feedback', { method: 'POST', headers: authHeaders(true), body: JSON.stringify(payload) }), '提交意见失败');
+export async function submitAnonymousFeedback(
+  payload: { type: AnonymousFeedbackType; content: string; needReply: boolean },
+  clientRequestId?: string,
+) {
+  return ensureOk(await fetch('/api/anonymous-feedback', {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify(clientRequestId ? { ...payload, client_request_id: clientRequestId } : payload),
+  }), '提交意见失败');
+}
+
+export type AnonymousFeedbackSubmissionRequestStatus = 'processed' | 'not_found' | 'conflict';
+
+export async function getAnonymousFeedbackSubmissionRequestStatus(
+  requestId: string,
+  requestFingerprint: string,
+): Promise<AnonymousFeedbackSubmissionRequestStatus> {
+  const query = new URLSearchParams({ request_fingerprint: requestFingerprint });
+  const response = await ensureOk(await fetch(
+    `/api/anonymous-feedback/submission-requests/${encodeURIComponent(requestId)}?${query.toString()}`,
+    { headers: authHeaders(), cache: 'no-store' },
+  ), '核实意见提交结果失败');
+  const payload = await response.json();
+  const state = payload?.data?.state;
+  if (state !== 'processed' && state !== 'not_found' && state !== 'conflict') throw new Error('意见提交结果状态无法识别');
+  return state;
 }
 
 export async function getPublicAnonymousFeedback(): Promise<PublicAnonymousFeedback[]> {

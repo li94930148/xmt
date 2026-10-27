@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import { Editor } from '@tiptap/react';
 import { useAppStore } from '../../store';
 import { calculateContextMenuPosition, getContextMenuSubmenuSide } from './menuBehavior';
+import { useEditorTextPrompt } from './useEditorTextPrompt';
 import { EDITOR_HIGHLIGHT_COLORS as HIGHLIGHT_COLORS, EDITOR_TEXT_COLORS as TEXT_COLORS } from './editorColorPalette';
 import {
   Copy, Scissors, Clipboard,
@@ -54,6 +55,7 @@ export default function EditorContextMenu({
   editor, onAddComment, onEditComment, onDeleteComment, onOpenChange,
 }: EditorContextMenuProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
+  const { prompt: promptEditorText, dialog: editorTextPromptDialog } = useEditorTextPrompt();
   const [visible, setVisible] = useState(false);
   const [openSubmenu, setOpenSubmenu] = useState<ContextSubmenu>(null);
   const [position, setPosition] = useState<MenuPosition>({ x: 0, y: 0 });
@@ -162,7 +164,7 @@ export default function EditorContextMenu({
     };
   }, [visible]);
 
-  if (!visible || !editor || editor.isDestroyed) return null;
+  if (!visible || !editor || editor.isDestroyed) return editorTextPromptDialog;
 
   const comment = findCommentInSelection(editor);
   const hasSelection = !editor.state.selection.empty;
@@ -251,7 +253,21 @@ export default function EditorContextMenu({
     openSubmenuAndFocusFirstOption(submenu);
   };
   const act = (fn: () => void) => { fn(); close(); };
-  return createPortal((
+  const insertLink = async () => {
+    const url = await promptEditorText({
+      title: '插入链接',
+      label: '链接 URL',
+      description: '输入要应用到所选文字的链接地址。',
+      placeholder: 'https://example.com',
+    });
+    close();
+    editor.commands.focus();
+    if (url) editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+  };
+
+  return (
+    <>
+    {createPortal((
     <>
       <div data-testid="editor-context-menu-backdrop" className="fixed inset-0 z-editor-backdrop" onClick={close} />
       <div data-testid="editor-context-menu" data-anchor-x={anchor.x} data-anchor-y={anchor.y} ref={menuRef} onKeyDown={handleMenuKeyDown} className="fixed z-editor-menu min-w-[200px] rounded-xl border border-studio-border-soft bg-studio-surface-glass py-1.5 shadow-2xl backdrop-blur-sm" style={{ left: position.x, top: position.y, visibility: measured ? 'visible' : 'hidden' }}>
@@ -389,7 +405,7 @@ export default function EditorContextMenu({
             <Unlink className="w-4 h-4" /> 删除链接
           </button>
         ) : (
-          <button onClick={() => act(() => { const url = window.prompt('输入链接 URL'); if (url) editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run(); })}
+          <button onClick={() => void insertLink()}
             className={hasSelection ? itemClass : disabledClass} disabled={!hasSelection}>
             <LinkIcon className="w-4 h-4" /> 插入链接
           </button>
@@ -417,5 +433,8 @@ export default function EditorContextMenu({
         </button>
       </div>
     </>
-  ), document.body);
+    ), document.body)}
+    {editorTextPromptDialog}
+    </>
+  );
 }

@@ -510,11 +510,19 @@ try {
 
   await recoveryPage.goto(`${base}/__qa?theme=light&resetTemplates=1`);
   await recoveryPage.getByText('通用工作选题', { exact: true }).waitFor();
+  const deleteTemplateRow = recoveryPage.locator('li').filter({ hasText: '通用工作选题' });
+  await deleteTemplateRow.getByRole('button', { name: '删除', exact: true }).click();
+  const deleteTemplateDialog = recoveryPage.getByRole('dialog', { name: '确认删除选题模板？' });
+  await deleteTemplateDialog.waitFor();
+  assert.equal(templateDeleteAttempts, 0, 'opening the themed confirmation does not send the delete request');
+  await deleteTemplateDialog.getByRole('button', { name: '取消', exact: true }).click();
+  await deleteTemplateDialog.waitFor({ state: 'detached' });
+  assert.equal(templateDeleteAttempts, 0, 'canceling the themed confirmation keeps the template');
   expectedDroppedResponse.count += 1;
   await recoveryPage.evaluate(async () => { await fetch('/__qa/lose-next-template-delete-response', { method: 'POST' }); });
-  recoveryPage.once('dialog', (dialog) => dialog.accept());
   const lostDeleteRequest = recoveryPage.waitForRequest((request) => request.url().endsWith('/api/templates/1') && request.method() === 'DELETE');
-  await recoveryPage.locator('li').filter({ hasText: '通用工作选题' }).getByRole('button', { name: '删除', exact: true }).click();
+  await deleteTemplateRow.getByRole('button', { name: '删除', exact: true }).click();
+  await recoveryPage.getByRole('dialog', { name: '确认删除选题模板？' }).getByRole('button', { name: '删除模板', exact: true }).click();
   await lostDeleteRequest;
   await recoveryPage.getByText('还没有选题模板', { exact: true }).waitFor();
   const deleteCounts = await recoveryPage.evaluate(async () => (await (await fetch('/__qa/template-counts')).json()));

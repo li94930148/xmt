@@ -1250,7 +1250,6 @@ try {
     }
     errors.push(message.text());
   });
-  workflowPage.on('dialog', (dialog) => { void dialog.accept(); });
   workflowPage.on('request', (request) => {
     if (request.url().includes('/api/retrospectives') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) {
       mutations.push(`${request.method()} ${request.url()}`);
@@ -1399,6 +1398,16 @@ try {
   await workflowPage.getByText('指标快照已更新', { exact: true }).waitFor();
   assert.equal(retroMutationAttempts.snapshot, 2, 'the explicit snapshot retry sends only one more POST');
   assert.equal(await summaryInput.inputValue(), lateSummaryInput, 'a snapshot response preserves an unsaved conclusion');
+  await snapshotButton.click();
+  const replaceSnapshotDialog = workflowPage.getByRole('dialog', { name: '替换指标快照？' });
+  await replaceSnapshotDialog.waitFor();
+  await replaceSnapshotDialog.getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal(retroMutationAttempts.snapshot, 2, 'cancelling snapshot replacement sends no POST');
+  await snapshotButton.click();
+  const confirmedReplaceSnapshotDialog = workflowPage.getByRole('dialog', { name: '替换指标快照？' });
+  await confirmedReplaceSnapshotDialog.getByRole('button', { name: '替换快照', exact: true }).click();
+  await workflowPage.waitForResponse((response) => response.url().endsWith(snapshotUrl) && response.request().method() === 'POST' && response.status() === 200);
+  assert.equal(retroMutationAttempts.snapshot, 3, 'replacing an existing snapshot requires explicit confirmation');
 
   const workflowActions = workflowPage.getByTestId('retro-action-table-panel');
   await workflowActions.getByLabel('行动项标题', { exact: true }).fill('保留结论时新增的行动项');
@@ -1431,7 +1440,13 @@ try {
   expectedWorkflow503 += 1;
   const publishUrl = `/api/retrospectives/${retrospective.id}/publish`;
   const failedPublish = workflowPage.waitForResponse((response) => response.url().endsWith(publishUrl) && response.request().method() === 'POST' && response.status() === 503);
-  await publishButton.dblclick({ delay: 10 });
+  await publishButton.click();
+  const publishCancelDialog = workflowPage.getByRole('dialog', { name: '发布复盘？' });
+  await publishCancelDialog.getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal(retroMutationAttempts.publish, 0, 'cancelling publish confirmation sends no POST');
+  await publishButton.click();
+  const publishConfirmDialog = workflowPage.getByRole('dialog', { name: '发布复盘？' });
+  await publishConfirmDialog.getByRole('button', { name: '发布复盘', exact: true }).dblclick({ delay: 10 });
   assert.equal(await publishButton.isDisabled(), true, 'publishing locks the workflow while pending');
   assert.equal(await summaryInput.isDisabled(), true, 'a pending publish also locks the retrospective summary');
   await failedPublish;
@@ -1441,6 +1456,7 @@ try {
   await configureWorkflowMutation('publish', 0);
   const successfulPublish = workflowPage.waitForResponse((response) => response.url().endsWith(publishUrl) && response.request().method() === 'POST' && response.status() === 200);
   await workflowPage.getByRole('button', { name: '发布复盘' }).click();
+  await workflowPage.getByRole('dialog', { name: '发布复盘？' }).getByRole('button', { name: '发布复盘', exact: true }).click();
   await successfulPublish;
   await workflowPage.getByText('复盘已发布', { exact: true }).waitFor();
   assert.equal(await workflowPage.getByRole('button', { name: '归档复盘' }).count(), 1, 'confirmed publish unlocks the archive step');
@@ -1451,7 +1467,9 @@ try {
   const archiveUrl = `/api/retrospectives/${retrospective.id}/archive`;
   const failedArchive = workflowPage.waitForResponse((response) => response.url().endsWith(archiveUrl) && response.request().method() === 'POST' && response.status() === 503);
   const archiveButton = workflowPage.getByRole('button', { name: '归档复盘' });
-  await archiveButton.dblclick({ delay: 10 });
+  await archiveButton.click();
+  const archiveConfirmDialog = workflowPage.getByRole('dialog', { name: '归档复盘？' });
+  await archiveConfirmDialog.getByRole('button', { name: '归档复盘', exact: true }).dblclick({ delay: 10 });
   assert.equal(await archiveButton.isDisabled(), true, 'archive action locks while pending');
   await failedArchive;
   await workflowPage.getByText('归档复盘失败', { exact: true }).waitFor();
@@ -1460,6 +1478,7 @@ try {
   await configureWorkflowMutation('archive', 0);
   const successfulArchive = workflowPage.waitForResponse((response) => response.url().endsWith(archiveUrl) && response.request().method() === 'POST' && response.status() === 200);
   await workflowPage.getByRole('button', { name: '归档复盘' }).click();
+  await workflowPage.getByRole('dialog', { name: '归档复盘？' }).getByRole('button', { name: '归档复盘', exact: true }).click();
   await successfulArchive;
   await workflowPage.getByText('复盘已归档', { exact: true }).waitFor();
   assert.equal(retroMutationAttempts.archive, 2, 'only the explicit archive retry sends a second POST');
@@ -1471,6 +1490,7 @@ try {
     `PUT http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}`,
     `PUT http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}`,
     `PUT http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}`,
+    `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/snapshot`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/snapshot`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/snapshot`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/actions`,
@@ -1487,21 +1507,18 @@ try {
   const leavePage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   leavePage.on('pageerror', (error) => errors.push(error.message));
   leavePage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
-  let discardSummaryOnLeave = false;
-  leavePage.on('dialog', (dialog) => {
-    void (discardSummaryOnLeave ? dialog.accept() : dialog.dismiss());
-  });
   await leavePage.goto(`${base}/__qa?theme=light&workflow=draft`);
   const leaveInput = leavePage.getByPlaceholder('记录本周期发生了什么、为什么发生、下一轮怎么调整...');
   await leaveInput.fill('返回前需要保留的复盘文字');
   await leavePage.getByRole('status').filter({ hasText: '复盘结论有未保存的修改' }).waitFor();
   const beforeLeaveWrites = retroMutationAttempts.summary;
-  const firstLeaveWarningEvent = leavePage.waitForEvent('dialog', { timeout: 5000 });
   await leavePage.getByRole('button', { name: '返回列表', exact: true }).click();
+  const firstLeaveWarning = leavePage.getByRole('dialog', { name: '存在未保存的复盘结论' });
+  await firstLeaveWarning.waitFor();
   assert.equal(new URL(leavePage.url()).pathname, `/retrospectives/${retrospective.id}`, 'cancelling the leave warning keeps the current retrospective open');
   assert.equal(await leaveInput.inputValue(), '返回前需要保留的复盘文字');
-  const firstLeaveWarning = await firstLeaveWarningEvent;
-  assert.ok(firstLeaveWarning.message().includes('未保存') && firstLeaveWarning.message().includes('复制保留'), 'the warning explains both editable and read-only recovery');
+  assert.ok(await firstLeaveWarning.getByText(/未保存.*复制保留/).count() > 0, 'the warning explains both editable and read-only recovery');
+  await firstLeaveWarning.getByRole('button', { name: '继续编辑', exact: true }).click();
   assert.equal(await leavePage.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true }))), true, 'refresh and close are protected while the conclusion is dirty');
   assert.equal(retroMutationAttempts.summary, beforeLeaveWrites, 'cancelling leave does not save or discard on the server');
   await leavePage.getByRole('button', { name: '保存结论', exact: true }).click();
@@ -1511,16 +1528,14 @@ try {
   await leavePage.screenshot({ path: '/tmp/xmt-retro-unsaved-leave-390.png', fullPage: false });
   // Keep the destination isolated from the unrelated list screen/API contract.
   await leavePage.route('**/api/retrospectives', (route) => route.fulfill({ json: { success: true, data: { retrospectives: [] } } }));
-  discardSummaryOnLeave = true;
   await leavePage.getByRole('button', { name: '返回列表', exact: true }).click();
+  await leavePage.getByRole('dialog', { name: '存在未保存的复盘结论' }).getByRole('button', { name: '放弃修改并离开', exact: true }).click();
   await leavePage.waitForURL((url) => url.pathname === '/retrospectives');
   assert.equal(retroMutationAttempts.summary, beforeLeaveWrites + 1, 'explicit discard leaves without an extra server write');
   await leavePage.close();
 
   const conflictPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   conflictPage.on('pageerror', (error) => errors.push(error.message));
-  let acceptConflictConfirmation = false;
-  conflictPage.on('dialog', (dialog) => { void (acceptConflictConfirmation ? dialog.accept() : dialog.dismiss()); });
   const conflictWrites: string[] = [];
   conflictPage.on('request', (request) => {
     if (request.url().includes('/api/retrospectives') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) conflictWrites.push(request.method());
@@ -1541,15 +1556,19 @@ try {
   assert.equal(new URL(conflictPage.url()).pathname, `/retrospectives/${retrospective.id}`, 'read-only unsaved text is protected on return to the list too');
   assert.equal(await conflictPage.getByText(conflictSummary, { exact: true }).count(), 1);
   await conflictPage.getByRole('button', { name: '使用已保存结论' }).click();
+  const useSavedDialog = conflictPage.getByRole('dialog', { name: '使用已保存结论？' });
+  await useSavedDialog.waitFor();
+  await useSavedDialog.getByRole('button', { name: '取消', exact: true }).click();
   assert.equal(await conflictPage.getByText(conflictSummary, { exact: true }).count(), 1, 'cancelling local replacement retains the unsaved conclusion');
   await conflictPage.screenshot({ path: '/tmp/xmt-retro-readonly-unsaved-conclusion-390.png', fullPage: true });
-  acceptConflictConfirmation = true;
   await conflictPage.getByRole('button', { name: '使用已保存结论' }).click();
+  await conflictPage.getByRole('dialog', { name: '使用已保存结论？' }).getByRole('button', { name: '使用已保存结论', exact: true }).click();
   await conflictPage.getByRole('button', { name: '使用已保存结论' }).waitFor({ state: 'hidden' });
   assert.equal(await conflictPage.getByText('原始复盘结论', { exact: true }).count(), 1, 'explicit local replacement displays the server-confirmed conclusion');
   assert.deepEqual(conflictWrites, [], 'local confirmation does not overwrite the published server conclusion');
   const conflictArchive = conflictPage.waitForResponse((response) => response.url().endsWith(`/api/retrospectives/${retrospective.id}/archive`) && response.status() === 200);
   await conflictPage.getByRole('button', { name: '归档复盘' }).click();
+  await conflictPage.getByRole('dialog', { name: '归档复盘？' }).getByRole('button', { name: '归档复盘', exact: true }).click();
   await conflictArchive;
   assert.deepEqual(conflictWrites, ['POST'], 'archive resumes only after the unsaved local conclusion has been explicitly resolved');
   await conflictPage.close();

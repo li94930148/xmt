@@ -565,7 +565,11 @@ export default function Editor({
     if (!editor) return;
     const { from, to } = editor.state.selection;
     if (from === to) {
-      alert('请先选中要添加批注的文本');
+      useAppStore.getState().addNotification({
+        title: '请先选中文字',
+        message: '选中要添加批注的文字后，再选择添加批注。',
+        type: 'info',
+      });
       return;
     }
     const selectedText = editor.state.doc.textBetween(from, to);

@@ -26,6 +26,7 @@ import {
 import { useAppStore, useAuthStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
 import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
+import { ConfirmModal } from '../components/common';
 import { ActionButton, GlassPanel, PageHeader, PageShell } from '../components/studio';
 import RetroStatusPill from '../components/retrospectives/RetroStatusPill';
 import RetroMetricSnapshotPanel from '../components/retrospectives/RetroMetricSnapshotPanel';
@@ -34,6 +35,13 @@ import RetroSummaryUpdateRecoveryNotice from '../components/retrospectives/Retro
 import RetroPublishPanel from '../components/retrospectives/RetroPublishPanel';
 import RetroActionTable from '../components/retrospectives/RetroActionTable';
 import RetroActionDetailDrawer from '../components/retrospectives/RetroActionDetailDrawer';
+
+type RetroConfirmation =
+  | { kind: 'replace-snapshot' }
+  | { kind: 'publish' }
+  | { kind: 'archive' }
+  | { kind: 'use-saved-summary' }
+  | { kind: 'leave'; attempt: Pick<RouteNavigationAttempt, 'proceed' | 'stay'> };
 import RetroDailyRiskPanel from '../components/retrospectives/RetroDailyRiskPanel';
 import RetroAssigneeDirectoryNotice from '../components/retrospectives/RetroAssigneeDirectoryNotice';
 import { useRetroAssigneeDirectory } from '../components/retrospectives/useRetroAssigneeDirectory';
@@ -250,6 +258,7 @@ export default function RetrospectiveDetailPage() {
   const detailRequestSequenceRef = useRef(0);
   const risksRequestSequenceRef = useRef(0);
   const [saving, setSaving] = useState(false);
+  const [confirmation, setConfirmation] = useState<RetroConfirmation | null>(null);
   const [exporting, setExporting] = useState(false);
   const summaryIsDirty = Boolean(detail && summary !== (detail.retrospective.summaryMd || ''));
 
@@ -274,8 +283,8 @@ export default function RetrospectiveDetailPage() {
       return;
     }
 
-    if (summaryIsDirty && !window.confirm('本页还有未保存的复盘结论，离开后这些修改可能无法恢复。请取消并先保存；当前已只读时请先复制保留。是否放弃未保存修改并离开？')) {
-      stay();
+    if (summaryIsDirty) {
+      setConfirmation({ kind: 'leave', attempt: { proceed, stay } });
       return;
     }
 
@@ -912,12 +921,8 @@ export default function RetrospectiveDetailPage() {
     void verifyPendingActionCreate(pendingActionCreate);
   }, [actionCreateRecoveryState, detail?.retrospective.id, pendingActionCreate, verifyPendingActionCreate]);
 
-  const handleGenerateSnapshot = async () => {
+  const generateSnapshot = async () => {
     if (!detail) return;
-    if (detail.snapshots.length > 0) {
-      const confirmed = window.confirm('刷新快照会替换当前复盘的旧快照，是否继续？');
-      if (!confirmed) return;
-    }
     if (!beginMutation()) return;
     try {
       applyDetail(await generateRetroSnapshot(detail.retrospective.id, { mode: 'replace' }));
@@ -927,6 +932,15 @@ export default function RetrospectiveDetailPage() {
     } finally {
       endMutation();
     }
+  };
+
+  const handleGenerateSnapshot = () => {
+    if (!detail) return;
+    if (detail.snapshots.length > 0) {
+      setConfirmation({ kind: 'replace-snapshot' });
+      return;
+    }
+    void generateSnapshot();
   };
 
   const handleSaveSummary = async () => {
@@ -1002,14 +1016,17 @@ export default function RetrospectiveDetailPage() {
     }
   };
 
-  const handlePublish = async () => {
+  const handlePublish = () => {
     if (!detail) return;
     if (summary !== (detail.retrospective.summaryMd || '')) {
       setSummaryActionError('还有尚未保存的复盘结论，请先点击“保存结论”，再发布复盘。');
       return;
     }
-    const confirmed = window.confirm('发布后基础信息和指标快照将只读，是否继续？');
-    if (!confirmed) return;
+    setConfirmation({ kind: 'publish' });
+  };
+
+  const publish = async () => {
+    if (!detail) return;
     if (!beginMutation()) return;
     try {
       applyDetail(await publishRetrospective(detail.retrospective.id));
@@ -1021,7 +1038,7 @@ export default function RetrospectiveDetailPage() {
     }
   };
 
-  const handleArchive = async () => {
+  const handleArchive = () => {
     if (!detail) return;
     if (summary !== (detail.retrospective.summaryMd || '')) {
       setSummaryActionError(detail.retrospective.status === 'draft' && detail.permissions.canEdit
@@ -1029,8 +1046,11 @@ export default function RetrospectiveDetailPage() {
         : '还有尚未保存的复盘结论，当前复盘已只读。请先复制保留本页文字，再确认使用已保存结论后归档。');
       return;
     }
-    const confirmed = window.confirm('归档后复盘进入只读，不再允许新增行动项，是否继续？');
-    if (!confirmed) return;
+    setConfirmation({ kind: 'archive' });
+  };
+
+  const archive = async () => {
+    if (!detail) return;
     if (!beginMutation()) return;
     try {
       applyDetail(await archiveRetrospective(detail.retrospective.id));
@@ -1431,11 +1451,7 @@ export default function RetrospectiveDetailPage() {
           {summaryIsDirty && !canEditSummary ? (
             <div role="alert" className="space-y-3 rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-primary">
               <p>当前复盘已只读，仍保留本页未保存的结论修改。请先复制保留下面的文字，再核对已保存结论。</p>
-              <ActionButton onClick={() => {
-                if (!window.confirm('确认使用已保存结论？这会替换本页尚未保存的结论修改，请先复制保留需要的文字。')) return;
-                setSummary(retrospective.summaryMd || '');
-                setSummaryActionError(null);
-              }}>使用已保存结论</ActionButton>
+              <ActionButton onClick={() => setConfirmation({ kind: 'use-saved-summary' })}>使用已保存结论</ActionButton>
             </div>
           ) : null}
           {summaryUpdateRecovery?.state ? (
@@ -1529,6 +1545,40 @@ export default function RetrospectiveDetailPage() {
         onVerifyActionUpdate={(actionId) => { void refreshPendingActionUpdate(actionId); }}
         onRetryActionUpdate={(actionId) => { void retryPendingActionUpdate(actionId); }}
         onRefreshActionUpdate={(actionId) => { void refreshPendingActionUpdate(actionId); }}
+      />
+      <ConfirmModal
+        open={confirmation !== null}
+        title={confirmation?.kind === 'leave' ? '存在未保存的复盘结论' : confirmation?.kind === 'replace-snapshot' ? '替换指标快照？' : confirmation?.kind === 'publish' ? '发布复盘？' : confirmation?.kind === 'archive' ? '归档复盘？' : '使用已保存结论？'}
+        description={confirmation?.kind === 'leave'
+          ? '离开后本页未保存的结论可能无法恢复。请先复制保留需要的文字，再确认放弃修改并离开。'
+          : confirmation?.kind === 'replace-snapshot'
+            ? '刷新会替换当前复盘的旧指标快照。'
+            : confirmation?.kind === 'publish'
+              ? '发布后基础信息和指标快照将进入只读状态。'
+              : confirmation?.kind === 'archive'
+                ? '归档后复盘进入只读状态，不能再新增行动项。'
+                : '这会替换本页尚未保存的结论修改。请先复制保留需要的文字。'}
+        confirmText={confirmation?.kind === 'leave' ? '放弃修改并离开' : confirmation?.kind === 'replace-snapshot' ? '替换快照' : confirmation?.kind === 'publish' ? '发布复盘' : confirmation?.kind === 'archive' ? '归档复盘' : '使用已保存结论'}
+        cancelText={confirmation?.kind === 'leave' ? '继续编辑' : '取消'}
+        variant={confirmation?.kind === 'leave' || confirmation?.kind === 'archive' ? 'warning' : 'default'}
+        loading={working || saving}
+        onCancel={() => {
+          if (confirmation?.kind === 'leave') confirmation.attempt.stay();
+          setConfirmation(null);
+        }}
+        onConfirm={() => {
+          const pending = confirmation;
+          setConfirmation(null);
+          if (!pending) return;
+          if (pending.kind === 'leave') pending.attempt.proceed();
+          else if (pending.kind === 'replace-snapshot') void generateSnapshot();
+          else if (pending.kind === 'publish') void publish();
+          else if (pending.kind === 'archive') void archive();
+          else {
+            setSummary(retrospective.summaryMd || '');
+            setSummaryActionError(null);
+          }
+        }}
       />
     </PageShell>
   );

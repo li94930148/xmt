@@ -90,4 +90,6 @@ export const migrationPolicies: Readonly<Record<string, MigrationPolicy>> = {
   '064': 'SAFE_EXPAND',
   // Report summary update receipts are additive; legacy unkeyed PUT clients remain supported.
   '065': 'SAFE_EXPAND',
+  // Anonymous feedback submit receipts are additive and are deleted with their feedback row.
+  '066': 'SAFE_EXPAND',
 };

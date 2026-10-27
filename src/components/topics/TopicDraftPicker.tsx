@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { FileText, Plus, Trash2 } from 'lucide-react';
+import { ConfirmModal } from '@/components/common';
 import {
   formatTopicDraftUpdatedAt,
   topicDraftTitle,
@@ -24,6 +26,8 @@ export default function TopicDraftPicker({
   onFailure,
   compact = false,
 }: TopicDraftPickerProps) {
+  const [pendingDelete, setPendingDelete] = useState<TopicDraftEntry | null>(null);
+
   const handleSelect = (id: string) => {
     if (!onSelect(id)) onFailure();
   };
@@ -33,9 +37,7 @@ export default function TopicDraftPicker({
   };
 
   const handleDelete = (entry: TopicDraftEntry) => {
-    const title = topicDraftTitle(entry.draft);
-    if (!window.confirm(`删除本机草稿「${title}」？只会删除这台设备上的草稿副本。`)) return;
-    if (!onDelete(entry.id)) onFailure();
+    setPendingDelete(entry);
   };
 
   return (
@@ -90,6 +92,18 @@ export default function TopicDraftPicker({
       ) : (
         <p className="mt-3 rounded-card border border-dashed border-studio-border-soft px-3 py-3 text-sm text-studio-text-muted">还没有已保存的草稿；输入内容后会自动保存到本机。</p>
       )}
+      <ConfirmModal
+        open={Boolean(pendingDelete)}
+        title="确认删除本机草稿？"
+        description={pendingDelete ? `删除「${topicDraftTitle(pendingDelete.draft)}」？只会删除当前设备上保存的草稿副本。此操作无法撤销。` : undefined}
+        confirmText="删除草稿"
+        variant="danger"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete && !onDelete(pendingDelete.id)) onFailure();
+          setPendingDelete(null);
+        }}
+      />
     </section>
   );
 }

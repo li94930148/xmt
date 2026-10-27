@@ -15,6 +15,7 @@ import {
 } from '../api';
 import { getInspirationDeleteStatus, InspirationDeleteError } from '../api/inspirations';
 import type { Inspiration, InspirationComment } from '../api/inspirations';
+import ConfirmModal from '../components/common/ConfirmModal';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useModalLifecycle } from '../components/common/useModalLifecycle';
 import { usePermission } from '../hooks/usePermission';
@@ -232,6 +233,7 @@ export default function Inspirations() {
   const [formData, setFormData] = useState({ title: '', description: '', category: '其他' });
   const [promotingIds, setPromotingIds] = useState<Set<number>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [deleteVerificationIds, setDeleteVerificationIds] = useState<Set<number>>(new Set());
   const [deleteVerifyingIds, setDeleteVerifyingIds] = useState<Set<number>>(new Set());
   const [newItemIds, setNewItemIds] = useState<Set<number>>(new Set());
@@ -914,8 +916,6 @@ export default function Inspirations() {
 
   const handleDelete = async (id: number) => {
     if (deleteInFlightRef.current.has(id) || deleteUncertainRef.current.has(id)) return;
-    if (!confirm('确定要删除这条灵感吗？')) return;
-    if (deleteInFlightRef.current.has(id) || deleteUncertainRef.current.has(id)) return;
 
     deleteInFlightRef.current.add(id);
     setDeletingIds((current) => new Set(current).add(id));
@@ -1458,7 +1458,7 @@ export default function Inspirations() {
                         disabled={deletingIds.has(inspiration.id) || deleteVerificationIds.has(inspiration.id)}
                         onClick={(event) => {
                           event.stopPropagation();
-                          void handleDelete(inspiration.id);
+                          setPendingDeleteId(inspiration.id);
                         }}
                         className="h-10 w-10 min-h-10 min-w-10 p-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100"
                       >
@@ -1781,6 +1781,20 @@ export default function Inspirations() {
         continueLabel="仍然转为选题"
         onCancel={cancelSimilarityReview}
         onContinue={continueAfterSimilarityReview}
+      />
+      <ConfirmModal
+        open={pendingDeleteId !== null}
+        title="删除这条灵感？"
+        description="删除后这条灵感将从灵感池移除，无法恢复。"
+        confirmText="删除灵感"
+        variant="danger"
+        loading={pendingDeleteId !== null && deletingIds.has(pendingDeleteId)}
+        onCancel={() => setPendingDeleteId(null)}
+        onConfirm={() => {
+          const id = pendingDeleteId;
+          if (id === null) return;
+          void handleDelete(id).finally(() => setPendingDeleteId(null));
+        }}
       />
     </div>
   );

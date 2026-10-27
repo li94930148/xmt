@@ -29,8 +29,18 @@ type AnonymousFeedbackUpdatePayload = {
   is_public?: boolean;
 };
 
+type AnonymousFeedbackSubmissionPayload = {
+  type: string;
+  content: string;
+  needReply: boolean;
+};
+
 function sha256(value: string) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+export function anonymousFeedbackSubmissionFingerprint(payload: AnonymousFeedbackSubmissionPayload) {
+  return sha256(JSON.stringify([payload.type, payload.content, payload.needReply]));
 }
 
 /** Stable mutable-row baseline exposed to the admin list for keyed PATCH compare-and-swap. */
@@ -80,6 +90,36 @@ function normalizeAnonymousFeedbackUpdatePayload(body: Record<string, unknown>):
   return Object.keys(payload).length > 0 ? payload : null;
 }
 
+router.use('/submission-requests/:requestId', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
+router.get('/submission-requests/:requestId', authenticate, async (req, res) => {
+  const requestId = String(req.params.requestId || '').trim().toLowerCase();
+  const requestFingerprint = typeof req.query.request_fingerprint === 'string'
+    ? req.query.request_fingerprint.trim().toLowerCase()
+    : '';
+  if (!DELETE_REQUEST_ID_PATTERN.test(requestId) || !SHA256_PATTERN.test(requestFingerprint)) {
+    return res.status(400).json({ message: '意见提交请求编号无效' });
+  }
+
+  try {
+    const receipt = await queryOne<{ request_fingerprint: string }>(
+      `SELECT receipt.request_fingerprint
+       FROM anonymous_feedback_submission_request_keys receipt
+       INNER JOIN anonymous_feedback feedback ON feedback.id=receipt.target_feedback_id
+       WHERE receipt.client_request_id=?`,
+      [requestId],
+    );
+    const state = !receipt ? 'not_found'
+      : receipt.request_fingerprint === requestFingerprint ? 'processed' : 'conflict';
+    return res.json({ data: { state } });
+  } catch {
+    return res.status(500).json({ message: '核实意见提交结果失败' });
+  }
+});
+
 router.get('/', authenticate, async (_req, res) => {
   try {
     const feedback = await queryAll(`
@@ -95,16 +135,68 @@ router.get('/', authenticate, async (_req, res) => {
 });
 
 router.post('/', authenticate, async (req, res) => {
-  const type = typeof req.body.type === 'string' ? req.body.type : '';
-  const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
-  const needReply = req.body.needReply;
+  const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
+  const type = typeof body.type === 'string' ? body.type : '';
+  const content = typeof body.content === 'string' ? body.content.trim() : '';
+  const needReply = body.needReply;
 
   if (!feedbackTypes.has(type)) return res.status(400).json({ message: '请选择有效的意见类型' });
   if (!content) return res.status(400).json({ message: '意见内容不能为空' });
   if (content.length > 2000) return res.status(400).json({ message: '意见内容不能超过 2000 字' });
   if (typeof needReply !== 'boolean') return res.status(400).json({ message: '回复选项格式不正确' });
 
+  const hasRequestId = body.client_request_id !== undefined;
+  const requestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim().toLowerCase() : '';
+  if (hasRequestId && !DELETE_REQUEST_ID_PATTERN.test(requestId)) {
+    return res.status(400).json({ message: '意见提交请求编号无效' });
+  }
+
   try {
+    if (hasRequestId) {
+      const payload = { type, content, needReply };
+      const requestFingerprint = anonymousFeedbackSubmissionFingerprint(payload);
+      const outcome = await runInTransaction(async (tx) => {
+        const existing = await tx.queryOne<{
+          target_feedback_id: number | string;
+          request_fingerprint: string;
+        }>(
+          `SELECT target_feedback_id,request_fingerprint
+           FROM anonymous_feedback_submission_request_keys WHERE client_request_id=?`,
+          [requestId],
+        );
+        if (existing) {
+          if (existing.request_fingerprint !== requestFingerprint) return { state: 'conflict' as const };
+          const feedback = await tx.queryOne<{ id: number }>(
+            'SELECT id FROM anonymous_feedback WHERE id=?',
+            [Number(existing.target_feedback_id)],
+          );
+          if (feedback) return { state: 'processed' as const, replayed: true };
+          // Heal a legacy orphan without changing the user's opinion data.
+          await tx.execute('DELETE FROM anonymous_feedback_submission_request_keys WHERE client_request_id=?', [requestId]);
+        }
+
+        const feedbackId = await tx.executeInsert(
+          `INSERT INTO anonymous_feedback (type, content, need_reply, status, created_at, updated_at)
+           VALUES (?, ?, ?, 'pending', ?, ?)`,
+          [type, content, needReply ? 1 : 0, beijingNow(), beijingNow()],
+        );
+        await tx.execute(
+          `INSERT INTO anonymous_feedback_submission_request_keys
+             (client_request_id,target_feedback_id,request_fingerprint,created_at)
+           VALUES(?,?,?,?)`,
+          [requestId, feedbackId, requestFingerprint, beijingNow()],
+        );
+        return { state: 'processed' as const, replayed: false };
+      });
+      if (outcome.state === 'conflict') {
+        return res.status(409).json({
+          message: '意见提交请求编号已对应其他内容，已停止本次提交以避免重复。',
+          code: 'ANONYMOUS_FEEDBACK_SUBMISSION_REQUEST_CONFLICT',
+        });
+      }
+      return res.status(outcome.replayed ? 200 : 201).json({ success: true, idempotent_replay: outcome.replayed });
+    }
+
     await executeInsert(
       `INSERT INTO anonymous_feedback (type, content, need_reply, status, created_at, updated_at)
        VALUES (?, ?, ?, 'pending', ?, ?)`,
@@ -335,6 +427,7 @@ anonymousFeedbackAdminRouter.delete('/:id', async (req, res) => {
 
       const existingFeedback = await tx.queryOne<{ id: number }>(`SELECT id FROM anonymous_feedback WHERE id=?`, [id]);
       if (!existingFeedback) return { deleted: false, replayed: false, conflict: false };
+      await tx.execute(`DELETE FROM anonymous_feedback_submission_request_keys WHERE target_feedback_id=?`, [id]);
       const affected = await tx.execute(`DELETE FROM anonymous_feedback WHERE id=?`, [id]);
       if (affected !== 1) throw new Error('ANONYMOUS_FEEDBACK_DELETE_TARGET_MISSING');
       if (hasRequestId) {

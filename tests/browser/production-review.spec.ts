@@ -1516,6 +1516,11 @@ try {
   const toolbarPage = await toolbarContext.newPage();
   toolbarPage.setDefaultTimeout(5000);
   const toolbarErrors: string[] = [];
+  const nativeDialogTypes: string[] = [];
+  toolbarPage.on('dialog', (dialog) => {
+    nativeDialogTypes.push(dialog.type());
+    void dialog.dismiss();
+  });
   toolbarPage.on('pageerror', (error) => toolbarErrors.push(error.message));
   toolbarPage.on('console', (message) => { if (message.type() === 'error') toolbarErrors.push(message.text()); });
   await toolbarPage.goto(`${base}/__qa`);
@@ -2097,7 +2102,42 @@ try {
   await toolbarPage.goto(`${base}/__qa?theme=light`);
   await toolbarPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
   const commentEditor = toolbarPage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).first();
+
+  const imagePromptBefore = await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  await toolbarPage.locator('.editor-toolbar button[title="图片"]').last().click();
+  const imagePrompt = toolbarPage.getByRole('dialog', { name: '插入图片' });
+  await imagePrompt.waitFor({ state: 'visible' });
+  assert.equal(await imagePrompt.getAttribute('aria-modal'), 'true', 'image URL entry uses an accessible in-app modal');
+  await imagePrompt.getByLabel('图片 URL').fill('https://example.invalid/image.png');
+  await imagePrompt.getByRole('button', { name: '取消', exact: true }).click();
+  await imagePrompt.waitFor({ state: 'hidden' });
+  assert.equal(await commentEditor.locator('img').count(), 0, 'canceling image URL entry leaves the manuscript unchanged');
+  const imagePromptAfter = await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(imagePromptAfter.content, imagePromptBefore.content, 'canceling image URL entry preserves the saved draft');
+  assert.equal(imagePromptAfter.apiMutationAttempts, imagePromptBefore.apiMutationAttempts, 'canceling image URL entry sends no business write');
+
   await selectToolbarParagraph(commentEditor);
+  await toolbarPage.locator('.editor-toolbar button[title="链接"]').last().click();
+  const linkPrompt = toolbarPage.getByRole('dialog', { name: '插入链接' });
+  await linkPrompt.waitFor({ state: 'visible' });
+  assert.equal(await linkPrompt.evaluate((dialog) => dialog.parentElement === document.body), true, 'link URL dialog escapes editor clipping and transform containers');
+  const linkInput = linkPrompt.getByLabel('链接 URL');
+  await linkInput.fill('https://example.invalid/review');
+  await linkInput.press('Enter');
+  await linkPrompt.waitFor({ state: 'hidden' });
+  await commentEditor.locator('a[href="https://example.invalid/review"]').waitFor({ state: 'visible' });
+  assert.deepEqual(nativeDialogTypes, [], 'link and image URL entry does not open blocking browser dialogs');
+
+  await toolbarPage.request.post(`${base}/__qa/reset-review-fixture`);
+  await toolbarPage.goto(`${base}/__qa?theme=light`);
+  await toolbarPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+  const cleanCommentEditor = toolbarPage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).first();
+  await toolbarPage.locator('.editor-toolbar button[title="更多操作"]').last().click();
+  await toolbarPage.getByRole('button', { name: '批注', exact: true }).last().click();
+  await toolbarPage.getByText('选中要添加批注的文字后，再选择添加批注。', { exact: true }).waitFor({ state: 'visible' });
+  assert.deepEqual(nativeDialogTypes, [], 'requesting a comment without a selection does not open a browser alert');
+
+  await selectToolbarParagraph(cleanCommentEditor);
   await toolbarPage.locator('.editor-toolbar button[title="更多操作"]').last().click();
   await toolbarPage.getByRole('button', { name: '批注', exact: true }).click();
   const addCommentDialog = toolbarPage.getByRole('dialog', { name: /添加批注/ });
@@ -2168,6 +2208,7 @@ try {
   assert.equal(await inlineComment.getAttribute('data-comment-text'), '请补充可核验的来源。', 'saving the edit updates the inline comment');
   await toolbarPage.waitForTimeout(1200);
   await toolbarPage.request.post(`${base}/__qa/reset-review-fixture`);
+  assert.deepEqual(nativeDialogTypes, [], 'the editor never opens native prompt or alert dialogs');
   assert.deepEqual(toolbarErrors, [], 'editor toolbar and comment dialogs render without browser errors or warnings');
   await toolbarContext.close();
 

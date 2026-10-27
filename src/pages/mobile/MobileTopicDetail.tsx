@@ -12,6 +12,7 @@ import { STATUS_COLORS } from '@/constants';
 import { usePermission } from '@/hooks/usePermission';
 import { useAppStore, useAuthStore } from '@/store';
 import { useRouteNavigationGuard, type RouteNavigationAttempt } from '@/hooks/useRouteNavigationGuard';
+import ConfirmModal from '@/components/common/ConfirmModal';
 import { formatBeijingDate } from '@/lib/utils';
 import TopicAssetDimensionsPanel from '@/components/topics/TopicAssetDimensionsPanel';
 import { startOrResumeTopicProduction } from '@/utils/topicProductionHandoff';
@@ -72,6 +73,7 @@ export default function MobileTopicDetail() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [edited, setEdited] = useState(false);
+  const [pendingLeaveAttempt, setPendingLeaveAttempt] = useState<Pick<RouteNavigationAttempt, 'proceed' | 'stay'> | null>(null);
   const [loading, setLoading] = useState(true);
   const [topicLoadFailure, setTopicLoadFailure] = useState<'not-found' | 'unavailable' | null>(null);
   const [saving, setSaving] = useState(false);
@@ -118,8 +120,8 @@ export default function MobileTopicDetail() {
       stay();
       return;
     }
-    if (edited && !window.confirm('当前选题修改已保存为本机草稿，重新进入此选题时可继续编辑。是否离开？')) {
-      stay();
+    if (edited) {
+      setPendingLeaveAttempt({ proceed, stay });
       return;
     }
     proceed();
@@ -690,5 +692,22 @@ export default function MobileTopicDetail() {
         <ActionButton type="button" variant="primary" disabled={loading} onClick={() => { void load('initial'); }} className="min-h-11 w-full justify-center">{loading ? '正在重新加载…' : '重新加载选题详情'}</ActionButton>
       </section>
       : <p role="status" className="text-sm text-studio-text-secondary">暂时无法确认选题状态，请返回列表重试。</p>}
+    <ConfirmModal
+      open={pendingLeaveAttempt !== null}
+      title="选题修改已保存在本机"
+      description="离开后仍可重新进入此选题继续编辑。"
+      confirmText="离开选题"
+      cancelText="继续编辑"
+      variant="warning"
+      onCancel={() => {
+        pendingLeaveAttempt?.stay();
+        setPendingLeaveAttempt(null);
+      }}
+      onConfirm={() => {
+        const attempt = pendingLeaveAttempt;
+        setPendingLeaveAttempt(null);
+        attempt?.proceed();
+      }}
+    />
   </div>;
 }

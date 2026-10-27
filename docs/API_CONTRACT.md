@@ -185,6 +185,12 @@ v1 错误响应统一为：
 - 服务端在同一事务内先查操作者隔离回执，再比较当前记录基线，随后执行自然键 upsert、读回保存快照并写回执。更新基线过期返回 `409 REPORT_SUMMARY_UPDATE_BASE_CONFLICT` 且不覆盖当前记录；同 UUID 跨操作者、种类、期间或内容复用返回 `409 REPORT_SUMMARY_UPDATE_REQUEST_CONFLICT`。旧客户端不带恢复字段时仍沿用原 upsert 合同。
 - 月报状态为 `GET /api/report-summaries/monthly/requests/{requestId}?year={year}&month={month}&fingerprint={sha256}`，年报状态为 `/api/report-summaries/yearly/requests/{requestId}?year={year}&fingerprint={sha256}`。仅返回 `processed` 与原请求保存快照、`not_found`，或指纹冲突 `409 conflict`；状态查询按当前操作者、种类、周期和 UUID 隔离，响应均 `Cache-Control: no-store`。SAFE_EXPAND 迁移 065 仅新增回执表，不改动月报/年报表或历史迁移 006/007。
 
+### 匿名意见提交结果恢复（Legacy）
+
+- `POST /api/anonymous-feedback` 继续要求登录并保留原有意见字段。旧客户端可不带编号；新客户端提供随机 UUID `client_request_id`。服务端只保存该编号、规范化载荷的 SHA-256 指纹、关联意见 ID 和创建时间，不保存提交人身份，也不在回执中复制意见正文。
+- 带编号的首次提交与回执在同一事务中写入；相同编号和载荷重放返回原成功结果，不产生第二条意见；相同编号搭配不同载荷返回 `409 ANONYMOUS_FEEDBACK_SUBMISSION_REQUEST_CONFLICT`。客户端在当前标签会话先保存待核实编号和原内容，页面刷新后先只读核实；只有明确返回 `not_found` 时才提供沿用同一编号的显式重试。处理中、冲突或状态读取失败时锁定原内容，不自动重发。
+- `GET /api/anonymous-feedback/submission-requests/{requestId}?request_fingerprint={sha256}` 需要登录，只返回 `processed`、`not_found` 或 `conflict`，不返回意见正文或提交人信息，所有响应均 `Cache-Control: no-store`。SAFE_EXPAND 迁移 066 新增永久回执表，不自动清理；管理端删除意见时，在同一事务中删除对应回执，外键级联作为额外保护。真实数据库迁移仍须走受控发布流程。
+
 ### Creator Reports 发布作品日期窗口（Legacy）
 
 - 日报、周报、月报 `work_performance.published` 始终按已采集作品数统计：有效官方周期文件存在时用其校验通过的日期窗口；缺失或无效时统一回退到包含报告生成日的北京时间自然日，日报为当天 1 日、周报为近 7 日、月报为近 30 日。发布时间按共享 BJT 解析并依作品身份去重，不以最近快照日期代替报表窗口。完整官方日报文件仍表示平台的“昨天”窗口。

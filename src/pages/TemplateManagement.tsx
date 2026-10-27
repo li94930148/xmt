@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText } from 'lucide-react';
 import { createTemplate, deleteTemplate, getTemplateMutationStatus, getTemplates, TemplateMutationHttpError, updateTemplate, type ManagedTemplate } from '../api/templates';
 import { ActionButton, EmptyState, GlassPanel, PageHeader, PageShell } from '../components/studio';
-import LoadingState from '../components/common/LoadingState';
+import { ConfirmModal, LoadingState } from '../components/common';
 import { useAuthStore } from '../store';
 import {
   markTopicTemplateMutationRecoveryRejected,
@@ -50,6 +50,7 @@ function payloadMatchesTemplate(template: ManagedTemplate, payload: TopicTemplat
 export default function TemplateManagement() {
   const actorId = useAuthStore((state) => Number(state.user?.id) || 0);
   const [templates, setTemplates] = useState<ManagedTemplate[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<ManagedTemplate | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingBaseline, setEditingBaseline] = useState<TopicTemplateMutationRecovery['baseline']>(null);
   const [form, setForm] = useState<TopicTemplateDraft>(emptyForm);
@@ -548,7 +549,6 @@ export default function TemplateManagement() {
       if (!template.base_fingerprint) setNotice('当前模板缺少有效版本标记，请重新加载后再删除。');
       return;
     }
-    if (!window.confirm(`删除“${template.name}”？已有选题不会被删除。`)) return;
     const generation = mutationGenerationRef.current;
     operationLockRef.current = true;
     setBusy(true);
@@ -713,8 +713,26 @@ export default function TemplateManagement() {
       </GlassPanel>
       <GlassPanel className="studio-sheen p-6">
         <h2 className="mb-5 text-lg font-semibold text-studio-text-primary">已有模板</h2>
-        {loading ? <LoadingState text="正在加载模板…" /> : initialLoadFailed && templates.length === 0 ? <p role="status" className="text-sm text-studio-text-secondary">列表读取失败，暂时无法确认已有模板。请使用上方按钮重新加载。</p> : templates.length === 0 ? <EmptyState icon={FileText} title="还没有选题模板" description="在左侧创建团队的第一个选题模板。" /> : <ul className="space-y-3">{templates.map((template) => <li key={template.id} className="rounded-card border border-studio-border-soft bg-studio-surface-soft p-4 transition-colors hover:border-studio-border-active"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="font-medium text-studio-text-primary">{template.name}</p><p className="mt-1 text-sm text-studio-text-secondary">{template.platform || '通用'} · {template.creator_name || '团队成员'}</p>{template.description ? <p className="mt-2 text-sm text-studio-text-secondary">{template.description}</p> : null}</div><div className="flex shrink-0 gap-2"><ActionButton type="button" variant="ghost" disabled={busy || Boolean(activeRecovery) || storageBlocked} onClick={() => edit(template)}>编辑</ActionButton><ActionButton type="button" variant="danger" disabled={busy || Boolean(activeRecovery) || storageBlocked} onClick={() => void remove(template)}>删除</ActionButton></div></div></li>)}</ul>}
+        {loading ? <LoadingState text="正在加载模板…" /> : initialLoadFailed && templates.length === 0 ? <p role="status" className="text-sm text-studio-text-secondary">列表读取失败，暂时无法确认已有模板。请使用上方按钮重新加载。</p> : templates.length === 0 ? <EmptyState icon={FileText} title="还没有选题模板" description="在左侧创建团队的第一个选题模板。" /> : <ul className="space-y-3">{templates.map((template) => <li key={template.id} className="rounded-card border border-studio-border-soft bg-studio-surface-soft p-4 transition-colors hover:border-studio-border-active"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="font-medium text-studio-text-primary">{template.name}</p><p className="mt-1 text-sm text-studio-text-secondary">{template.platform || '通用'} · {template.creator_name || '团队成员'}</p>{template.description ? <p className="mt-2 text-sm text-studio-text-secondary">{template.description}</p> : null}</div><div className="flex shrink-0 gap-2"><ActionButton type="button" variant="ghost" disabled={busy || Boolean(activeRecovery) || storageBlocked} onClick={() => edit(template)}>编辑</ActionButton><ActionButton type="button" variant="danger" disabled={busy || Boolean(activeRecovery) || storageBlocked} onClick={() => setPendingDelete(template)}>删除</ActionButton></div></div></li>)}</ul>}
       </GlassPanel>
     </div>
+    <ConfirmModal
+      open={Boolean(pendingDelete)}
+      title="确认删除选题模板？"
+      description={pendingDelete ? pendingDelete.base_fingerprint
+        ? `删除“${pendingDelete.name}”？已有选题不会被删除。`
+        : `无法安全删除“${pendingDelete.name}”：当前模板缺少有效版本标记，请重新加载列表后再试。`
+        : undefined}
+      confirmText="删除模板"
+      variant="danger"
+      loading={busy}
+      confirmDisabled={!pendingDelete?.base_fingerprint}
+      onCancel={() => setPendingDelete(null)}
+      onConfirm={async () => {
+        if (!pendingDelete) return;
+        await remove(pendingDelete);
+        setPendingDelete(null);
+      }}
+    />
   </PageShell>;
 }

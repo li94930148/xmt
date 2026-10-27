@@ -64,6 +64,7 @@ import { resourceCategoryMutationIdempotencyMigration } from './062_resource_cat
 import { anonymousFeedbackUpdateIdempotencyMigration } from './063_anonymous_feedback_update_idempotency';
 import { topicTemplateMutationIdempotencyMigration } from './064_topic_template_mutation_idempotency';
 import { reportSummaryUpdateIdempotencyMigration } from './065_report_summary_update_idempotency';
+import { anonymousFeedbackSubmitIdempotencyMigration } from './066_anonymous_feedback_submit_idempotency';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -131,4 +132,5 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   anonymousFeedbackUpdateIdempotencyMigration,
   topicTemplateMutationIdempotencyMigration,
   reportSummaryUpdateIdempotencyMigration,
+  anonymousFeedbackSubmitIdempotencyMigration,
 ];

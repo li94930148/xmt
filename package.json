@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "9.4.7",
+  "version": "9.4.11",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -253,6 +253,9 @@
     "test:anonymous-feedback-admin-responsive-browser": "tsx tests/browser/anonymous-feedback-admin-responsive.spec.ts",
     "test:anonymous-feedback-delete-recovery": "tsx tests/anonymous-feedback/anonymous-feedback-delete-recovery-http.test.ts",
     "test:anonymous-feedback-delete-recovery-migration": "tsx tests/database/anonymous-feedback-delete-idempotency-migration.test.ts",
+    "test:anonymous-feedback-submit-recovery": "tsx tests/anonymous-feedback/anonymous-feedback-submit-recovery-http.test.ts",
+    "test:anonymous-feedback-submit-recovery-migration": "tsx tests/database/anonymous-feedback-submit-idempotency-migration.test.ts",
+    "test:anonymous-feedback-submit-recovery-storage": "tsx --test tests/anonymous-feedback/anonymous-feedback-submission-recovery.test.ts",
     "test:anonymous-feedback-update-recovery": "tsx tests/anonymous-feedback/anonymous-feedback-update-recovery-http.test.ts",
     "test:anonymous-feedback-update-recovery-store": "tsx --test tests/anonymous-feedback/anonymous-feedback-update-recovery.test.ts",
     "test:anonymous-feedback-update-recovery-migration": "tsx tests/database/anonymous-feedback-update-idempotency-migration.test.ts",

@@ -34,6 +34,14 @@ try {
       (1, 'private comment body', 'comment-request-key', '2026-10-21 00:00:00'),
       (2, 'legacy comment body', NULL, '2026-10-22 00:00:00');
     CREATE TABLE creator_agent_bind_result_recovery (request_id_hash TEXT, created_at TEXT);
+    CREATE TABLE anonymous_feedback_submission_request_keys (
+      client_request_id TEXT PRIMARY KEY,
+      target_feedback_id INTEGER NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO anonymous_feedback_submission_request_keys VALUES
+      ('private-anonymous-feedback-key', 1, 'private-anonymous-feedback-fingerprint', '2026-10-25 01:00:00');
   `);
 
   const beforeHash = crypto.createHash('sha256').update(fs.readFileSync(databasePath)).digest('hex');
@@ -42,15 +50,17 @@ try {
   const inventory = JSON.parse(result.stdout);
   assert.equal(inventory.readOnly, true);
   assert.equal(inventory.cleanupPerformed, false);
-  assert.equal(inventory.tables.length, 2, 'unrelated and expiring recovery tables are out of scope');
+  assert.equal(inventory.tables.length, 3, 'unrelated and expiring recovery tables are out of scope');
   assert.deepEqual(inventory.tables.map((table) => [table.table, table.rowCount]), [
+    ['anonymous_feedback_submission_request_keys', 1],
     ['inspiration_comments', 1],
     ['retrospective_update_request_keys', 2],
   ]);
-  assert.equal(inventory.tables[0].kind, 'embedded_request_key');
-  assert.equal(inventory.tables[1].oldestCreatedAtRaw, '2026-10-20 01:00:00');
-  assert.equal(inventory.tables[1].newestCreatedAtRaw, '2026-10-24 01:00:00');
-  assert.equal(/private-request|private-fingerprint|private comment|comment-request-key/.test(result.stdout), false);
+  assert.equal(inventory.tables[0].kind, 'request_receipt');
+  assert.equal(inventory.tables[1].kind, 'embedded_request_key');
+  assert.equal(inventory.tables[2].oldestCreatedAtRaw, '2026-10-20 01:00:00');
+  assert.equal(inventory.tables[2].newestCreatedAtRaw, '2026-10-24 01:00:00');
+  assert.equal(/private-request|private-fingerprint|private comment|comment-request-key|private-anonymous-feedback/.test(result.stdout), false);
   assert.equal(crypto.createHash('sha256').update(fs.readFileSync(databasePath)).digest('hex'), beforeHash, 'inventory must not modify the database file');
 
   const missingDbArgument = spawnSync(process.execPath, [script], { encoding: 'utf8' });

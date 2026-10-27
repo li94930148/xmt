@@ -7,6 +7,7 @@ import { Editor } from '@tiptap/react';
 import { BubbleMenu as TiptapBubbleMenu } from '@tiptap/react/menus';
 import { useAppStore } from '../../store';
 import { shouldShowEditorBubbleMenu } from './menuBehavior';
+import { useEditorTextPrompt } from './useEditorTextPrompt';
 import { EDITOR_HIGHLIGHT_COLORS as HIGHLIGHT_COLORS, EDITOR_TEXT_COLORS as TEXT_COLORS } from './editorColorPalette';
 import {
   Bold, Italic, Underline, Strikethrough,
@@ -26,6 +27,7 @@ const DEFAULT_POPOVER_LAYOUT: PopoverLayout = { placement: 'below', maxHeight: 4
 
 export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = false }: BubbleMenuProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
+  const { prompt: promptEditorText, dialog: editorTextPromptDialog } = useEditorTextPrompt();
   const [showHighlight, setShowHighlight] = useState(false);
   const [showTextColor, setShowTextColor] = useState(false);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -91,9 +93,16 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
 
   const divider = <div className={`w-px h-5 mx-0.5 bg-studio-border-soft`} />;
 
-  const setLink = () => {
+  const setLink = async () => {
     const previousUrl = editor.getAttributes('link').href;
-    const url = window.prompt('输入链接 URL', previousUrl);
+    const url = await promptEditorText({
+      title: previousUrl ? '编辑链接' : '插入链接',
+      label: '链接 URL',
+      description: '输入要应用到所选文字的链接地址。留空并确认可移除当前链接。',
+      initialValue: typeof previousUrl === 'string' ? previousUrl : '',
+      placeholder: 'https://example.com',
+    });
+    editor.commands.focus();
     if (url === null) return;
     if (url === '') {
       editor.chain().focus().extendMarkRange('link').unsetLink().run();
@@ -124,9 +133,10 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
     editor.chain().focus().toggleHeading({ level }).run();
   };
 
-  if (contextMenuOpen) return null;
+  if (contextMenuOpen) return editorTextPromptDialog;
 
   return (
+    <>
     <TiptapBubbleMenu
       editor={editor}
       appendTo={() => document.body}
@@ -221,7 +231,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
       {divider}
 
       {/* 链接 */}
-      <button onClick={setLink} className={btnClass(editor.isActive('link'))} title="链接">
+      <button onClick={() => void setLink()} className={btnClass(editor.isActive('link'))} title="链接">
         <LinkIcon className="w-3.5 h-3.5" />
       </button>
 
@@ -255,5 +265,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
         <MessageSquare className="w-3.5 h-3.5" />
       </button>
     </TiptapBubbleMenu>
+    {editorTextPromptDialog}
+    </>
   );
 }

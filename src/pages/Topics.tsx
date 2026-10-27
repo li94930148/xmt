@@ -139,6 +139,7 @@ export default function Topics() {
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [batchActionLoading, setBatchActionLoading] = useState(false);
+  const [batchDeleteConfirmationOpen, setBatchDeleteConfirmationOpen] = useState(false);
   const [batchRefreshNotice, setBatchRefreshNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Topic | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -590,9 +591,6 @@ export default function Topics() {
     }
     if (ids.some((id) => uncertainTopicStatusWritesRef.current.has(id))) {
       addNotification({ title: '请先核实状态结果', message: '所选项目中有审核或状态更新结果待核实；只读核实完成前不会删除这些记录。', type: 'warning' });
-      return;
-    }
-    if (!confirm(`确定删除选中的 ${ids.length} 个选题吗？`)) {
       return;
     }
     batchActionInFlightRef.current = true;
@@ -1099,7 +1097,7 @@ export default function Topics() {
             <XCircle className="h-4 w-4" />
             {batchActionLoading ? '正在处理…' : '驳回'}
           </ActionButton>
-          <ActionButton onClick={handleBatchDelete} disabled={batchActionLoading || [...selected].some((id) => statusVerificationIds.has(id) || deleteVerificationIds.has(id))} variant="danger" className="px-3 py-2">
+          <ActionButton onClick={() => setBatchDeleteConfirmationOpen(true)} disabled={batchActionLoading || [...selected].some((id) => statusVerificationIds.has(id) || deleteVerificationIds.has(id))} variant="danger" className="px-3 py-2">
             <Trash2 className="h-4 w-4" />
             {batchActionLoading ? '正在处理…' : '删除'}
           </ActionButton>
@@ -1129,6 +1127,19 @@ export default function Topics() {
             </ActionButton>
           </div>
         ) : `确定要删除选题“${deleteTarget.title}”吗？` : ''}
+      />
+      <ConfirmModal
+        open={batchDeleteConfirmationOpen}
+        title={`确认删除选中的 ${selected.size} 个选题？`}
+        description="删除选题后无法恢复。系统会逐条处理并核实结果，已成功删除的项目不会重复提交。"
+        confirmText={`删除 ${selected.size} 个选题`}
+        variant="danger"
+        loading={batchActionLoading}
+        onCancel={() => setBatchDeleteConfirmationOpen(false)}
+        onConfirm={() => {
+          setBatchDeleteConfirmationOpen(false);
+          void handleBatchDelete();
+        }}
       />
     </PageShell></ReactBitsPageScene>
   );

@@ -11,6 +11,42 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.4.11',
+    date: '2026-10-27',
+    title: '编辑器输入改用站内弹窗',
+    impactScope: ['桌面编辑器', '链接与图片', '批注'],
+    changes: [
+      { type: 'improvement', description: '链接和图片地址输入使用 Studio 弹窗；取消保留正文，确认恢复编辑器焦点与原选区。无选区添加批注时显示站内提示。' },
+    ],
+  },
+  {
+    version: '9.4.10',
+    date: '2026-10-27',
+    title: '站内确认统一使用 Studio 弹窗',
+    impactScope: ['选题管理', '灵感', '复盘', '桌面与移动编辑器'],
+    changes: [
+      { type: 'improvement', description: '删除、复盘替换/发布/归档和编辑器离开未保存内容等站内确认统一使用 Studio 弹窗；取消不写入，确认后执行既有操作。' },
+    ],
+  },
+  {
+    version: '9.4.9',
+    date: '2026-10-27',
+    title: '清理旧版创作者数据页面',
+    impactScope: ['创作者中心'],
+    changes: [
+      { type: 'improvement', description: '移除没有路由或文件外引用的旧创作者数据页面；当前创作者中心工作台、作品库和详情入口保持不变。' },
+    ],
+  },
+  {
+    version: '9.4.8',
+    date: '2026-10-27',
+    title: '匿名意见提交结果恢复',
+    impactScope: ['匿名意见箱'],
+    changes: [
+      { type: 'improvement', description: '提交响应中断或刷新后可只读核实匿名意见结果；只有服务器明确未处理时才允许沿用原请求编号人工重试，回执随意见删除。' },
+    ],
+  },
+  {
     version: '9.4.7',
     date: '2026-10-27',
     title: '成员列表失败提示本地化',

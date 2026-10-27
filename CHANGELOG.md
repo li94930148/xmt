@@ -18,7 +18,7 @@
 
 ### Validation
 
-- Focused and full validation results, browser-suite limitations, and protected release evidence are recorded in `docs/UPGRADE_PROGRESS.md`. Android metadata is 9.5.0 / 90500; no Android package was built.
+- PR #93 merged and deployed as `94a2e4a84842c29eed2467aee0d82959c59a48fe`; tag `v9.5.0` points to that SHA. All six CI jobs passed on both the PR head and exact merged SHA. CI produced a Debug Android acceptance APK artifact; no Android app was distributed. Production backup, Restore Drill, migration/runtime/build gates, PM2/Caddy, SQLite, internal-exposure, and public health checks passed; detailed evidence is in `docs/UPGRADE_PROGRESS.md`.
 
 ## v9.4.15 - 2026-10-28
 

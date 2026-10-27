@@ -33,6 +33,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:topics
+      - run: npm run test:topics-list-notify
+      - run: npm run test:user-api-error-copy
       - run: npm run test:api-contract
       - run: npm run test:production-materials
       - run: npm run test:auth

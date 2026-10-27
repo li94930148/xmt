@@ -1,5 +1,28 @@
 # Changelog
 
+## v9.4.7 - 2026-10-27
+
+### User-facing language
+
+- User-management API failures without a server message now use Chinese fallbacks for member lists/details, role lists, verification, writes, and logs. A server-provided message remains intact.
+
+### Validation
+
+- `npm run test:user-api-error-copy` covers every user-management API fallback with malformed responses and preserves server-provided errors. Type, lint, version-governance, build, and checklist browser results are recorded in `docs/UPGRADE_PROGRESS.md`.
+- No API behavior, permissions, database, or business data changed. Android metadata is synchronized to 9.4.7 / 90407; no APK was built. This version remains local and is not pushed or deployed.
+
+## v9.4.6 - 2026-10-27
+
+### Topic list recovery
+
+- Mobile topic-list reads now stop after the first failure and wait for the user to choose “重试加载选题”, avoiding a hidden duplicate GET. During the initial read, the count stays unknown and the action says “正在加载…” instead of showing a false zero.
+- Added desktop and 390px mobile regressions for the initial loading, failure, and explicit retry states; recovery performs one read-only request.
+
+### Validation
+
+- Playwright MCP in Google Chrome verified the mobile 503 error and explicit retry recovery at 390px. Type, version-governance, lint, build, and browser-suite status are recorded in `docs/UPGRADE_PROGRESS.md`.
+- No API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.6 / 90406; no APK was built. This version remains local and is not pushed or deployed.
+
 ## v9.4.5 - 2026-10-27
 
 ### Task feedback
@@ -9,7 +32,7 @@
 ### Validation
 
 - Chrome MCP isolated 390px failure/retry checks and automated test status are recorded in `docs/UPGRADE_PROGRESS.md`.
-- No API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.5 / 90405; no APK was built. This update remains local and is not pushed or deployed.
+- No API, permissions, database, or business data changed. Android metadata is synchronized to 9.4.5 / 90405; no APK was built. PR #87 merged and deployed commit `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`; actual VoiceOver speech remains unverified.
 
 ## v9.4.4 - 2026-10-27
 

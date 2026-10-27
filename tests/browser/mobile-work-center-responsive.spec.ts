@@ -1566,7 +1566,7 @@ try {
         return;
       }
       topicListReads += 1;
-      if (topicListReads <= 2) {
+      if (topicListReads === 1) {
         await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '模拟选题列表读取失败' }) });
         return;
       }
@@ -1578,19 +1578,19 @@ try {
     });
     try {
       expectConsoleFailure();
-      expectConsoleFailure();
       await page.goto(`${baseUrl}/topics`, { waitUntil: 'domcontentloaded' });
       await page.getByRole('alert').getByText('选题列表读取失败：模拟选题列表读取失败', { exact: true }).waitFor();
+      await page.waitForTimeout(1250);
       await page.getByText('选题数量暂不可用', { exact: true }).waitFor();
       await page.getByText('暂时无法确认符合条件的选题，请重试。', { exact: true }).waitFor();
       assert.equal(await page.getByText('没有符合条件的选题', { exact: true }).count(), 0, 'failed mobile topic loading is not presented as an empty result');
-      assert.equal(topicListReads, 2, 'the page waits until the configured read retry is exhausted');
+      assert.equal(topicListReads, 1, 'failed mobile topic loading does not trigger a hidden automatic retry');
       const recoveredRead = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/topics' && response.status() === 200);
       await page.getByRole('button', { name: '重试加载选题', exact: true }).click();
       await recoveredRead;
       await page.getByText(unknownStatusTopic.title, { exact: true }).waitFor();
       assert.equal(await page.getByRole('alert').count(), 0, 'a successful explicit retry clears the topic list error');
-      assert.equal(topicListReads, 3, 'explicit recovery adds one read and no writes');
+      assert.equal(topicListReads, 2, 'explicit recovery adds exactly one read and no writes');
       await assertMobileLayout(page, 390, 'topic-list-read-recovery');
       assert.deepEqual(errors, [], `topic list read recovery: ${errors.join('\n')}`);
     } finally {
@@ -1624,6 +1624,9 @@ try {
       await topicReadStarted;
       const loadingStatus = page.getByRole('status').filter({ hasText: '正在加载选题…' });
       await loadingStatus.waitFor();
+      await page.getByText('正在读取选题数量…', { exact: true }).waitFor();
+      assert.equal(await page.getByText('0 个选题', { exact: true }).count(), 0, `${theme} ${width}px initial loading does not imply an empty result`);
+      assert.equal(await page.getByRole('button', { name: '正在加载…', exact: true }).isDisabled(), true, `${theme} ${width}px initial loading action is disabled`);
       assert.equal(await loadingStatus.getAttribute('aria-live'), 'polite', `${theme} ${width}px mobile topic loading status is politely announced`);
       releaseTopicRead();
       await topicResponse;

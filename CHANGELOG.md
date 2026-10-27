@@ -1,5 +1,51 @@
 # Changelog
 
+## v9.4.11 - 2026-10-27
+
+### Editor input
+
+- Replaced blocking browser URL prompts for editor links and images with accessible Studio dialogs across the toolbar, bubble menu, context menu, and floating menu. Confirmation restores the editor focus and selection; cancel leaves the manuscript unchanged.
+- Replaced the native alert for adding a comment without a text selection with an in-app status notification.
+
+### Validation
+
+- Type check, targeted ESLint, production build, BaseModal accessibility tests, anonymous-feedback recovery tests, API contract tests, and production-review server tests passed. Isolated browser checks covered link/image dialog behavior and comment guidance. The repository browser suite was attempted but Chromium startup failed with macOS `bootstrap_check_in` permission denied (1100), before assertions ran. See `docs/UPGRADE_PROGRESS.md` for exact scope.
+- Android metadata is 9.4.11 / 90411; no APK was built. Changes remain local and are not pushed or deployed.
+
+## v9.4.10 - 2026-10-27
+
+### Confirmation dialogs
+
+- Replaced in-app native confirmation prompts with the shared Studio dialog for deleting topic templates, local topic drafts, selected topics, and inspirations; replacing retrospective snapshots or saved summaries; publishing or archiving retrospectives; and leaving editors with unsaved changes across desktop and mobile flows. Cancel keeps the current data or route; confirmation invokes the existing action.
+- Existing write recovery and authorization rules remain in place. The browser's native warning for refreshing or closing a page with unsaved changes remains browser-controlled.
+
+### Validation
+
+- Chrome MCP isolated fixtures verified cancel/confirm behavior for retrospective actions, topic batch deletion, inspiration deletion, template deletion, local topic drafts, and leaving an edited publishing detail page. Cancel caused no mutation; explicit confirmation invoked the original action. Type, targeted lint, version/document governance, and build results are recorded in `docs/UPGRADE_PROGRESS.md`; automated browser suites are not represented as passing unless listed there.
+- The user confirmed hearing the homepage loading announcements for today's tasks, inspiration count, and followed items. This confirms those homepage prompts only, not site-wide VoiceOver coverage.
+- Android metadata is 9.4.10 / 90410; no APK was built. Changes remain local and are not pushed or deployed.
+
+## v9.4.9 - 2026-10-27
+
+### Cleanup
+
+- Removed the unreferenced legacy `DouyinCreatorDataCenter` page. The active Creator Center routes and APIs are unchanged.
+
+### Validation
+
+- Type checking, production build, version/changelog governance, and `git diff --check` passed. Android metadata is 9.4.9 / 90409; no APK was built. Changes remain local and are not pushed or deployed.
+
+## v9.4.8 - 2026-10-27
+
+### Anonymous feedback recovery
+
+- Anonymous feedback submissions now use a client-generated request ID and an atomic server receipt. If the response is lost or the page is refreshed, the client checks the result without resubmitting; an explicit retry reuses the same ID only after the server reports `not_found`.
+- The server stores no submitter identity. Receipts do not expire automatically and are removed with the associated feedback. Legacy unkeyed clients remain supported.
+
+### Validation
+
+- Isolated HTTP, migration, and session-storage recovery tests, type checking, version governance, lint, and production build results are recorded in `docs/UPGRADE_PROGRESS.md`. Migration 066 was exercised only against temporary SQLite databases; no production database migration or Android package build was run. Changes remain local and are not pushed or deployed.
+
 ## v9.4.7 - 2026-10-27
 
 ### User-facing language

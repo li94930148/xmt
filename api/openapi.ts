@@ -306,6 +306,21 @@ const AnonymousFeedbackAdminRow = registerSchema('AnonymousFeedbackAdminRow', z.
   base_fingerprint: Sha256Fingerprint,
 }).passthrough());
 const AnonymousFeedbackAdminListResponse = registerSchema('AnonymousFeedbackAdminListResponse', z.object({ data: z.array(AnonymousFeedbackAdminRow) }).strict());
+const AnonymousFeedbackSubmissionRequest = registerSchema('AnonymousFeedbackSubmissionRequest', z.object({
+  type: z.enum(['feature', 'usage', 'process', 'team', 'other']),
+  content: z.string().trim().min(1).max(2000),
+  needReply: z.boolean(),
+  client_request_id: z.string().uuid().optional(),
+}).passthrough());
+const AnonymousFeedbackSubmissionResponse = registerSchema('AnonymousFeedbackSubmissionResponse', z.object({
+  success: z.literal(true),
+  idempotent_replay: z.boolean().optional(),
+}).strict());
+const AnonymousFeedbackSubmissionStatusParams = registerSchema('AnonymousFeedbackSubmissionStatusParams', z.object({ requestId: z.string().uuid() }).strict());
+const AnonymousFeedbackSubmissionStatusQuery = registerSchema('AnonymousFeedbackSubmissionStatusQuery', z.object({ request_fingerprint: Sha256Fingerprint }).strict());
+const AnonymousFeedbackSubmissionStatusResponse = registerSchema('AnonymousFeedbackSubmissionStatusResponse', z.object({
+  data: z.object({ state: z.enum(['processed', 'not_found', 'conflict']) }).strict(),
+}).strict());
 const AnonymousFeedbackUpdateIdParams = registerSchema('AnonymousFeedbackUpdateIdParams', z.object({ id: idSchema }).strict());
 const AnonymousFeedbackUpdateRequest = registerSchema('AnonymousFeedbackUpdateRequest', z.object({
   status: z.enum(['pending', 'processing', 'completed']).optional(),
@@ -903,6 +918,39 @@ registry.registerPath({
     401: { description: '未登录或登录已失效', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } } },
     409: { description: '请求指纹与回执不匹配', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: ReportSummaryStatusConflictResponse } } },
     500: { description: '暂时无法核实年报更新结果', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } } },
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/api/anonymous-feedback',
+  tags: ['Anonymous Feedback (Legacy)'],
+  summary: '提交匿名意见',
+  description: '需要登录但不记录提交人身份。旧客户端可不带请求编号；新客户端提供 UUID client_request_id，服务端原子写入意见和载荷指纹回执。相同编号/载荷重放返回原结果，其他载荷返回 409。回执不自动过期，删除意见时一并清除。',
+  security: [{ bearerAuth: [] }],
+  request: { body: { content: { 'application/json': { schema: AnonymousFeedbackSubmissionRequest } } } },
+  responses: {
+    201: { description: '意见已提交', content: { 'application/json': { schema: AnonymousFeedbackSubmissionResponse } } },
+    200: { description: '同一请求已处理并安全返回原结果', content: { 'application/json': { schema: AnonymousFeedbackSubmissionResponse } } },
+    400: { description: '意见类型、内容、回复选项或请求编号无效' },
+    401: { description: '未登录或登录已失效' },
+    409: { description: '请求编号已用于其他内容' },
+    500: { description: '提交意见失败' },
+  },
+});
+registry.registerPath({
+  method: 'get',
+  path: '/api/anonymous-feedback/submission-requests/{requestId}',
+  tags: ['Anonymous Feedback (Legacy)'],
+  summary: '只读核实匿名意见提交结果',
+  description: '需要登录。客户端必须提供 64 位载荷 SHA-256 指纹；状态仅返回 processed/not_found/conflict，不返回意见正文或提交人信息。回执在对应意见删除时清除，响应均禁止缓存。',
+  security: [{ bearerAuth: [] }],
+  request: { params: AnonymousFeedbackSubmissionStatusParams, query: AnonymousFeedbackSubmissionStatusQuery },
+  responses: {
+    200: { description: '最小化提交状态', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: AnonymousFeedbackSubmissionStatusResponse } } },
+    400: { description: '请求编号或指纹无效', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } } },
+    401: { description: '未登录或登录已失效', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } } },
+    500: { description: '暂时无法核实意见提交结果', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } } },
   },
 });
 

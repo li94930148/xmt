@@ -16,6 +16,7 @@ import { getPlatformLabel } from '../platform/platform-labels';
 import { workflowScriptSourceLabel, workflowScriptSourceReference, workflowScriptSourceTimestamp } from '../utils/workflow-script-source';
 import { usePermission } from '../hooks/usePermission';
 import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
+import ConfirmModal from '../components/common/ConfirmModal';
 
 interface PublishingDetailData {
   id: number;
@@ -171,6 +172,7 @@ export default function PublishingDetail() {
   const [editMode, setEditMode] = useState(false);
   const [scriptContent, setScriptContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [pendingLeaveAttempt, setPendingLeaveAttempt] = useState<Pick<RouteNavigationAttempt, 'proceed' | 'stay'> | null>(null);
   const scriptSaveInFlightRef = useRef(false);
   const scriptSaveVerificationInFlightRef = useRef(false);
   const [pendingScriptSaveVerification, setPendingScriptSaveVerification] = useState<PublishingScriptSaveVerification | null>(
@@ -243,8 +245,8 @@ export default function PublishingDetail() {
       stay();
       return;
     }
-    if (hasUnsavedScript && !window.confirm('当前剧本还有未保存的修改，离开后可能无法恢复。是否放弃修改并离开？')) {
-      stay();
+    if (hasUnsavedScript) {
+      setPendingLeaveAttempt({ proceed, stay });
       return;
     }
     proceed();
@@ -978,6 +980,23 @@ export default function PublishingDetail() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        open={pendingLeaveAttempt !== null}
+        title="剧本还有未保存的修改"
+        description="离开后当前未保存的剧本修改可能无法恢复。"
+        confirmText="放弃修改并离开"
+        cancelText="继续编辑"
+        variant="warning"
+        onCancel={() => {
+          pendingLeaveAttempt?.stay();
+          setPendingLeaveAttempt(null);
+        }}
+        onConfirm={() => {
+          const attempt = pendingLeaveAttempt;
+          setPendingLeaveAttempt(null);
+          attempt?.proceed();
+        }}
+      />
     </PageShell>
   );
 }

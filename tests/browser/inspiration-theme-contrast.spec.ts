@@ -853,13 +853,19 @@ async function run() {
           await page.locator('div.fixed.inset-0').last().getByRole('button').first().click();
 
           const deleteButton = createdCard.getByRole('button', { name: `删除灵感：${title}`, exact: true });
-          page.on('dialog', (dialog) => { void dialog.accept(); });
           await page.evaluate(async () => {
             await fetch('/__qa/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextDelete: true }) });
           });
           const failedDelete = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/902') && response.request().method() === 'DELETE' && response.status() === 503);
           const preservedDeleteRead = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/902') && response.request().method() === 'GET' && response.status() === 200);
           await deleteButton.click();
+          const firstDeleteDialog = page.getByRole('dialog', { name: '删除这条灵感？' });
+          await firstDeleteDialog.waitFor();
+          assert.equal(deleteWriteRequests, 0, 'opening the delete confirmation does not send a request');
+          await firstDeleteDialog.getByRole('button', { name: '取消', exact: true }).click();
+          assert.equal(deleteWriteRequests, 0, 'cancelling the delete confirmation preserves the inspiration');
+          await deleteButton.click();
+          await page.getByRole('dialog', { name: '删除这条灵感？' }).getByRole('button', { name: '删除灵感', exact: true }).click();
           await Promise.all([failedDelete, preservedDeleteRead]);
           await page.getByText('删除未完成', { exact: true }).waitFor();
           assert.equal(await page.getByRole('heading', { name: title, exact: true }).count(), 1, 'failed deletion leaves the inspiration visible');
@@ -869,10 +875,8 @@ async function run() {
             await fetch('/__qa/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delayNextDelete: true }) });
           });
           const deleteResponse = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/902') && response.request().method() === 'DELETE' && response.status() === 200);
-          await deleteButton.evaluate((element) => {
-            element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-          });
+          await deleteButton.click();
+          await page.getByRole('dialog', { name: '删除这条灵感？' }).getByRole('button', { name: '删除灵感', exact: true }).dblclick({ delay: 10 });
           await deleteResponse;
           await page.getByRole('heading', { name: title, exact: true }).waitFor({ state: 'detached' });
           await page.getByText('删除成功', { exact: true }).waitFor();
@@ -922,6 +926,7 @@ async function run() {
           const committedDeleteWithoutResponse = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/901') && response.request().method() === 'DELETE' && response.status() === 503);
           const missingDeleteRead = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/901') && response.request().method() === 'GET' && response.status() === 404);
           await ambiguousDeleteCard.getByRole('button', { name: `删除灵感：${inspiration.title}`, exact: true }).click();
+          await page.getByRole('dialog', { name: '删除这条灵感？' }).getByRole('button', { name: '删除灵感', exact: true }).click();
           await Promise.all([committedDeleteWithoutResponse, missingDeleteRead]);
           await page.getByText('删除状态已核实', { exact: true }).waitFor();
           await page.getByRole('heading', { name: inspiration.title, exact: true }).waitFor({ state: 'detached' });
@@ -939,6 +944,7 @@ async function run() {
           const uncertainDeleteResponse = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/903') && response.request().method() === 'DELETE' && response.status() === 503);
           const uncertainDeleteRead = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/903') && response.request().method() === 'GET' && response.status() === 503);
           await uncertainDeleteCard.getByRole('button', { name: '删除灵感：删除状态核实：仍保留', exact: true }).click();
+          await page.getByRole('dialog', { name: '删除这条灵感？' }).getByRole('button', { name: '删除灵感', exact: true }).click();
           await Promise.all([uncertainDeleteResponse, uncertainDeleteRead]);
           await uncertainDeleteCard.getByText('删除结果待确认；再次删除已暂停。', { exact: true }).waitFor();
           const pausedDeleteButton = uncertainDeleteCard.getByRole('button', { name: '删除灵感：删除状态核实：仍保留', exact: true });
@@ -952,6 +958,7 @@ async function run() {
           assert.equal(await pausedDeleteButton.isDisabled(), false, 'read-back confirms the item still exists and re-enables an explicit delete');
           const finalDeleteResponse = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/903') && response.request().method() === 'DELETE' && response.status() === 200);
           await pausedDeleteButton.click();
+          await page.getByRole('dialog', { name: '删除这条灵感？' }).getByRole('button', { name: '删除灵感', exact: true }).click();
           await finalDeleteResponse;
           await page.getByRole('heading', { name: '删除状态核实：仍保留', exact: true }).waitFor({ state: 'detached' });
           assert.equal(deleteWriteRequests, 5, 'only the user-confirmed retry deletes the verified remaining item');

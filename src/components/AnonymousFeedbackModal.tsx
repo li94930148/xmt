@@ -2,9 +2,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { MessageSquareText } from 'lucide-react';
 import FormModal from './common/FormModal';
 import LoadingState from './common/LoadingState';
-import { getPublicAnonymousFeedback, submitAnonymousFeedback, type AnonymousFeedbackType, type PublicAnonymousFeedback } from '../api/anonymousFeedback';
+import {
+  getAnonymousFeedbackSubmissionRequestStatus,
+  getPublicAnonymousFeedback,
+  submitAnonymousFeedback,
+  type AnonymousFeedbackSubmissionRequestStatus,
+  type AnonymousFeedbackType,
+  type PublicAnonymousFeedback,
+} from '../api/anonymousFeedback';
 import { useAppStore } from '../store';
 import { formatBeijingDate } from '../lib/utils';
+import { ActionButton } from './studio';
+import {
+  clearPendingAnonymousFeedbackSubmission,
+  fingerprintAnonymousFeedbackSubmission,
+  readPendingAnonymousFeedbackSubmission,
+  savePendingAnonymousFeedbackSubmission,
+  type PendingAnonymousFeedbackSubmission,
+} from '../features/anonymous-feedback/submissionRecovery';
 
 const types: Array<{ value: AnonymousFeedbackType; label: string }> = [
   { value: 'feature', label: '功能建议' },
@@ -31,9 +46,15 @@ export default function AnonymousFeedbackModal({
   const [content, setContent] = useState('');
   const [needReply, setNeedReply] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingRecovery, setPendingRecovery] = useState<PendingAnonymousFeedbackSubmission | null>(null);
+  const [recoveryState, setRecoveryState] = useState<AnonymousFeedbackSubmissionRequestStatus | 'idle' | 'checking' | 'submitting' | 'unavailable'>('idle');
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [storageIssue, setStorageIssue] = useState<string | null>(null);
   const addNotification = useAppStore((state) => state.addNotification);
   const submitLockRef = useRef(false);
   const feedbackRequestSequenceRef = useRef(0);
+  const onSubmittedRef = useRef(onSubmitted);
+  onSubmittedRef.current = onSubmitted;
 
   const loadFeedback = useCallback(async () => {
     const requestSequence = ++feedbackRequestSequenceRef.current;
@@ -50,17 +71,116 @@ export default function AnonymousFeedbackModal({
     }
   }, [addNotification]);
 
+  const completeSubmission = useCallback(async () => {
+    try {
+      clearPendingAnonymousFeedbackSubmission(window.sessionStorage);
+    } catch {
+      // A retained marker is safe: reopening the modal will confirm the same receipt without reposting.
+    }
+    setPendingRecovery(null);
+    setRecoveryState('idle');
+    setRecoveryError(null);
+    setStorageIssue(null);
+    setType(''); setContent(''); setNeedReply(false);
+    setSubmitting(false);
+    submitLockRef.current = false;
+    addNotification({ title: '提交成功', message: '感谢你的声音，意见已匿名发布', type: 'success' });
+    void loadFeedback();
+    try {
+      await onSubmittedRef.current?.();
+    } catch (error) {
+      addNotification({ title: '意见已提交，页面暂未刷新', message: error instanceof Error ? error.message : '稍后可重新加载列表', type: 'warning' });
+    }
+  }, [addNotification, loadFeedback]);
+
+  const verifySubmission = useCallback(async (pending: PendingAnonymousFeedbackSubmission) => {
+    setRecoveryState('checking');
+    setRecoveryError(null);
+    try {
+      const state = await getAnonymousFeedbackSubmissionRequestStatus(pending.clientRequestId, pending.requestFingerprint);
+      if (state === 'processed') {
+        await completeSubmission();
+        return;
+      }
+      setRecoveryState(state);
+      if (state === 'conflict') setRecoveryError('服务器记录与当前恢复内容不一致。为避免重复提交，内容已锁定；请联系管理员核对。');
+    } catch (error) {
+      setRecoveryState('unavailable');
+      setRecoveryError(error instanceof Error ? error.message : '暂时无法核实意见提交结果');
+    }
+  }, [completeSubmission]);
+
+  const postSubmission = useCallback(async (pending: PendingAnonymousFeedbackSubmission, lockAlreadyHeld = false) => {
+    if (submitLockRef.current && !lockAlreadyHeld) return;
+    if (!lockAlreadyHeld) submitLockRef.current = true;
+    setSubmitting(true);
+    setRecoveryState('submitting');
+    setRecoveryError(null);
+    try {
+      await submitAnonymousFeedback(pending.payload, pending.clientRequestId);
+      await completeSubmission();
+    } catch {
+      setSubmitting(false);
+      submitLockRef.current = false;
+      void verifySubmission(pending);
+      return;
+    }
+    setSubmitting(false);
+    submitLockRef.current = false;
+  }, [completeSubmission, verifySubmission]);
+
   useEffect(() => {
-    if (open) void loadFeedback();
-  }, [loadFeedback, open]);
+    if (!open) return;
+    void loadFeedback();
+    setStorageIssue(null);
+    try {
+      const pending = readPendingAnonymousFeedbackSubmission(window.sessionStorage);
+      if (!pending) {
+        setPendingRecovery(null);
+        setRecoveryState('idle');
+        setRecoveryError(null);
+        return;
+      }
+      setPendingRecovery(pending);
+      setType(pending.payload.type);
+      setContent(pending.payload.content);
+      setNeedReply(pending.payload.needReply);
+      void verifySubmission(pending);
+    } catch {
+      setStorageIssue('浏览器无法读取当前标签会话中的意见恢复记录。请先核实恢复记录，再继续提交。');
+    }
+  }, [loadFeedback, open, verifySubmission]);
 
   const handleClose = () => {
     if (submitLockRef.current) return;
-    setType(''); setContent(''); setNeedReply(false); onClose();
+    if (!pendingRecovery && !storageIssue) {
+      setType(''); setContent(''); setNeedReply(false);
+    }
+    onClose();
+  };
+
+  const clearBrokenRecovery = () => {
+    try {
+      clearPendingAnonymousFeedbackSubmission(window.sessionStorage);
+      setStorageIssue(null);
+      setRecoveryState('idle');
+      addNotification({
+        title: '本地恢复记录已清除',
+        message: '服务器结果仍未核实。若此前已提交，重新提交可能产生重复意见。',
+        type: 'warning',
+      });
+    } catch {
+      setStorageIssue('浏览器无法清除当前标签会话中的恢复记录，请稍后重试。');
+    }
   };
 
   const handleSubmit = async () => {
     if (submitLockRef.current) return;
+    if (pendingRecovery) {
+      if (recoveryState === 'not_found') void postSubmission(pendingRecovery);
+      return;
+    }
+    if (storageIssue) return;
     if (!type || !content.trim()) {
       addNotification({ title: '请完善意见', message: '意见类型和意见内容均为必填项', type: 'warning' });
       return;
@@ -69,29 +189,92 @@ export default function AnonymousFeedbackModal({
     submitLockRef.current = true;
     setSubmitting(true);
     try {
-      await submitAnonymousFeedback(payload);
+      const pending: PendingAnonymousFeedbackSubmission = {
+        clientRequestId: window.crypto.randomUUID(),
+        requestFingerprint: await fingerprintAnonymousFeedbackSubmission(payload),
+        payload,
+      };
+      savePendingAnonymousFeedbackSubmission(window.sessionStorage, pending);
+      setPendingRecovery(pending);
+      setContent(payload.content);
+      void postSubmission(pending, true);
     } catch (error) {
-      setSubmitting(false);
       submitLockRef.current = false;
-      addNotification({ title: '提交失败', message: error instanceof Error ? error.message : '请稍后重试', type: 'error' });
-      return;
-    }
-
-    setType(''); setContent(''); setNeedReply(false);
-    setSubmitting(false);
-    submitLockRef.current = false;
-    addNotification({ title: '提交成功', message: '感谢你的声音，意见已匿名发布', type: 'success' });
-    void loadFeedback();
-    try {
-      await onSubmitted?.();
-    } catch (error) {
-      addNotification({ title: '意见已提交，页面暂未刷新', message: error instanceof Error ? error.message : '稍后可重新加载列表', type: 'warning' });
+      setSubmitting(false);
+      setRecoveryState('idle');
+      addNotification({
+        title: '无法安全开始提交',
+        message: error instanceof Error && error.message === '当前浏览器无法安全生成意见恢复校验值'
+          ? error.message
+          : '浏览器无法保存意见恢复记录，意见尚未发送。请稍后重试。',
+        type: 'error',
+      });
     }
   };
 
+  const recoveryFooter = pendingRecovery || storageIssue ? (
+    <div className="flex flex-wrap justify-end gap-3">
+      <ActionButton variant="ghost" onClick={handleClose} disabled={submitting} className="min-h-10 whitespace-normal">
+        暂时关闭并保留记录
+      </ActionButton>
+      {pendingRecovery && recoveryState === 'not_found' ? (
+        <ActionButton variant="primary" onClick={() => void postSubmission(pendingRecovery)} disabled={submitting} className="min-h-10 whitespace-normal">
+          用原请求编号重试
+        </ActionButton>
+      ) : null}
+      {pendingRecovery && recoveryState === 'unavailable' ? (
+        <ActionButton variant="ghost" onClick={() => void verifySubmission(pendingRecovery)} className="min-h-10 whitespace-normal">
+          重新核实结果
+        </ActionButton>
+      ) : null}
+      {storageIssue ? (
+        <ActionButton variant="primary" onClick={clearBrokenRecovery} className="min-h-10 whitespace-normal">
+          清除损坏的恢复记录
+        </ActionButton>
+      ) : null}
+    </div>
+  ) : undefined;
+
   return (
-    <FormModal open={open} onCancel={handleClose} onSubmit={handleSubmit} loading={submitting} size="lg" title="匿名意见箱" description="所有意见均匿名展示，管理员回复后团队成员都能看到" submitText="提交意见">
+    <FormModal
+      open={open}
+      onCancel={handleClose}
+      onSubmit={handleSubmit}
+      footer={recoveryFooter}
+      locked={Boolean(pendingRecovery || storageIssue)}
+      loading={submitting}
+      size="lg"
+      title="匿名意见箱"
+      description="所有意见均匿名展示，管理员回复后团队成员都能看到"
+      submitText="提交意见"
+    >
       <div className="space-y-6">
+        {storageIssue ? (
+          <div className="rounded-card border border-studio-coral/30 bg-studio-coral/10 p-3 text-sm leading-6 text-studio-coral-contrast" role="alert">
+            <p className="font-semibold">本地意见恢复记录无法读取</p>
+            <p className="mt-1">{storageIssue}。服务器结果尚未核实，因此暂时锁定意见内容。清除这条损坏记录后，如果此前已提交，重新提交可能会产生重复意见。</p>
+          </div>
+        ) : null}
+        {pendingRecovery ? (
+          <div className={`rounded-card border p-3 text-sm leading-6 ${recoveryState === 'conflict' || recoveryState === 'unavailable' ? 'border-studio-coral/30 bg-studio-coral/10 text-studio-coral-contrast' : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-primary'}`} role={recoveryState === 'conflict' || recoveryState === 'unavailable' ? 'alert' : 'status'} aria-live="polite">
+            <p className="font-semibold">
+              {recoveryState === 'checking' ? '正在核实意见提交结果' : null}
+              {recoveryState === 'submitting' ? '正在提交意见' : null}
+              {recoveryState === 'not_found' ? '尚未查到这次意见提交' : null}
+              {recoveryState === 'unavailable' ? '暂时无法核实意见提交结果' : null}
+              {recoveryState === 'conflict' ? '恢复记录与服务器不一致' : null}
+              {recoveryState === 'idle' ? '等待核实意见提交结果' : null}
+            </p>
+            <p className="mt-1">
+              {recoveryState === 'checking' ? '正在只读核实；核实完成前不会再次提交。' : null}
+              {recoveryState === 'submitting' ? '提交请求正在处理，请稍候。' : null}
+              {recoveryState === 'not_found' ? '内容已保留。只有点击“用原请求编号重试”后，系统才会再次提交。' : null}
+              {recoveryState === 'unavailable' ? `${recoveryError || '请稍后重试核实'}。意见保持锁定，不会自动重发。` : null}
+              {recoveryState === 'conflict' ? (recoveryError || '为避免重复提交，意见保持锁定。请联系管理员核对。') : null}
+              {recoveryState === 'idle' ? '意见保持锁定，不会自动重发。' : null}
+            </p>
+          </div>
+        ) : null}
         <section>
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-studio-text-primary">大家的意见</h3>

@@ -24,6 +24,7 @@ import {
   MoreHorizontal, IndentIncrease, Paintbrush, List, ListOrdered,
 } from 'lucide-react';
 import { captureFormatSnapshot, createFormatPainterTransaction, type FormatPainterMode, type FormatSnapshot } from './formatPainter';
+import { useEditorTextPrompt } from './useEditorTextPrompt';
 
 interface ToolbarProps {
   editor: Editor | null;
@@ -87,6 +88,7 @@ export default function Toolbar({
   const [collapsed, setCollapsed] = useState(false);
   const [compact, setCompact] = useState(false);
   const [formatPainterMode, setFormatPainterMode] = useState<FormatPainterMode>('idle');
+  const { prompt: promptEditorText, dialog: editorTextPromptDialog } = useEditorTextPrompt();
   const formatPainterModeRef = useRef<FormatPainterMode>('idle');
   const formatSnapshotRef = useRef<FormatSnapshot | null>(null);
   const singleClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -360,9 +362,16 @@ export default function Toolbar({
     setShowFileMenu(false);
   };
 
-  const setLink = () => {
+  const setLink = async () => {
     const previousUrl = editor.getAttributes('link').href;
-    const url = window.prompt('输入链接 URL', previousUrl);
+    const url = await promptEditorText({
+      title: previousUrl ? '编辑链接' : '插入链接',
+      label: '链接 URL',
+      description: '输入要应用到所选文字的链接地址。留空并确认可移除当前链接。',
+      initialValue: typeof previousUrl === 'string' ? previousUrl : '',
+      placeholder: 'https://example.com',
+    });
+    editor.commands.focus();
     if (url === null) return;
     if (url === '') {
       editor.chain().focus().extendMarkRange('link').unsetLink().run();
@@ -371,8 +380,14 @@ export default function Toolbar({
     editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
   };
 
-  const addImage = () => {
-    const url = window.prompt('输入图片 URL');
+  const addImage = async () => {
+    const url = await promptEditorText({
+      title: '插入图片',
+      label: '图片 URL',
+      description: '输入图片地址，确认后插入到当前光标位置。',
+      placeholder: 'https://example.com/image.jpg',
+    });
+    editor.commands.focus();
     if (url) editor.chain().focus().setImage({ src: url }).run();
   };
 
@@ -454,6 +469,7 @@ export default function Toolbar({
 
   if (variant === 'basic') {
     return (
+      <>
       <div
         className={`editor-toolbar flex shrink-0 flex-wrap items-center gap-1 border-b px-3 py-2 ${
           isDark ? 'border-studio-border-soft bg-studio-surface-soft' : 'border-studio-border-soft bg-studio-surface'
@@ -483,10 +499,12 @@ export default function Toolbar({
         <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive('orderedList'))} title="编号列表" aria-label="编号列表">
           <ListOrdered className="h-4 w-4" />
         </button>
-        <button type="button" onClick={setLink} className={btnClass(editor.isActive('link'))} title="链接" aria-label="链接">
+        <button type="button" onClick={() => void setLink()} className={btnClass(editor.isActive('link'))} title="链接" aria-label="链接">
           <LinkIcon className="h-4 w-4" />
         </button>
       </div>
+      {editorTextPromptDialog}
+      </>
     );
   }
 
@@ -710,7 +728,7 @@ export default function Toolbar({
       {/* 插入组 */}
       <div className="flex items-center gap-0.5">
         {groupLabel('插入')}
-        <button onClick={addImage} className={btnClass()} title="图片">
+        <button onClick={() => void addImage()} className={btnClass()} title="图片">
           <ImageIcon className="w-4 h-4" />
         </button>
         <button onClick={insertTable} className={btnClass()} title="表格">
@@ -728,7 +746,7 @@ export default function Toolbar({
         <button onClick={() => editor.chain().focus().toggleTaskList().run()} className={btnClass(editor.isActive('taskList'))} title="待办">
           <CheckSquare className="w-4 h-4" />
         </button>
-        <button onClick={setLink} className={btnClass(editor.isActive('link'))} title="链接">
+        <button onClick={() => void setLink()} className={btnClass(editor.isActive('link'))} title="链接">
           <LinkIcon className="w-4 h-4" />
         </button>
         <button onClick={onAddComment} className={btnClass()} title="批注">
@@ -739,6 +757,7 @@ export default function Toolbar({
   );
 
   return (
+    <>
     <div
       ref={toolbarRef}
       className={`editor-toolbar shrink-0 flex items-center flex-wrap gap-1 px-3 py-2 border-b ${compact ? 'editor-toolbar-compact' : ''} ${
@@ -818,7 +837,7 @@ export default function Toolbar({
                 <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />
                 {/* 插入 */}
                 <div className={`px-3 py-1 text-xs font-medium text-studio-text-muted`}>插入</div>
-                <button onClick={() => { addImage(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
+                <button onClick={() => { void addImage(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <ImageIcon className="w-4 h-4" /> 图片
                 </button>
                 <button onClick={() => { insertTable(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
@@ -836,7 +855,7 @@ export default function Toolbar({
                 <button onClick={() => { editor.chain().focus().toggleTaskList().run(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <CheckSquare className="w-4 h-4" /> 待办
                 </button>
-                <button onClick={() => { setLink(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
+                <button onClick={() => { void setLink(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                   <LinkIcon className="w-4 h-4" /> 链接
                 </button>
                 <button onClick={() => { onAddComment?.(); setShowMoreMenu(false); }} className={`flex items-center gap-2 w-full px-3 py-2 text-sm transition-colors ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
@@ -876,5 +895,7 @@ export default function Toolbar({
       </div>
       <style>{`.editor-toolbar-compact .editor-group-label{display:none}.editor-toolbar-compact .editor-toolbar-divider{display:none}`}</style>
     </div>
+    {editorTextPromptDialog}
+    </>
   );
 }

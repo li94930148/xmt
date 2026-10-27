@@ -140,9 +140,14 @@ try {
 
   await page.goto(`${base}/__qa`);
   await selectBothTopics();
-  const dialogPromise = page.waitForEvent('dialog').then((dialog) => dialog.accept());
   await page.getByRole('button', { name: '删除', exact: true }).click();
-  await dialogPromise;
+  const batchDeleteDialog = page.getByRole('dialog', { name: '确认删除选中的 2 个选题？' });
+  await batchDeleteDialog.waitFor();
+  assert.deepEqual((await page.request.get(`${base}/__qa/state`).then((response) => response.json())).deleteRequests, {}, 'opening batch deletion confirmation does not write');
+  await batchDeleteDialog.getByRole('button', { name: '取消', exact: true }).click();
+  assert.deepEqual((await page.request.get(`${base}/__qa/state`).then((response) => response.json())).deleteRequests, {}, 'cancelling batch deletion preserves every selected topic');
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await page.getByRole('dialog', { name: '确认删除选中的 2 个选题？' }).getByRole('button', { name: '删除 2 个选题', exact: true }).click();
   const deleteAlert = await waitForBatchRefreshFailure('删除');
   await page.screenshot({ path: '/tmp/xmt-topics-batch-delete-refresh-failure.png', fullPage: false });
   const deleteFailureState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());

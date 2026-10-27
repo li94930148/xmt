@@ -6,6 +6,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Editor } from '@tiptap/react';
 import { FloatingMenu as TiptapFloatingMenu } from '@tiptap/react/menus';
 import { useAppStore } from '../../store';
+import { useEditorTextPrompt } from './useEditorTextPrompt';
 import {
   Plus, GripVertical,
   Heading1, Heading2, Heading3, Heading4,
@@ -26,6 +27,7 @@ const positioningOptions = {
 
 export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
+  const { prompt: promptEditorText, dialog: editorTextPromptDialog } = useEditorTextPrompt();
   const [showInsertMenu, setShowInsertMenu] = useState(false);
   const [showBlockMenu, setShowBlockMenu] = useState(false);
   const insertRef = useRef<HTMLDivElement>(null);
@@ -54,8 +56,15 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
     closeAll();
   };
 
-  const addImage = () => {
-    const url = window.prompt('输入图片 URL');
+  const addImage = async () => {
+    const url = await promptEditorText({
+      title: '插入图片',
+      label: '图片 URL',
+      description: '输入图片地址，确认后插入到当前光标位置。',
+      placeholder: 'https://example.com/image.jpg',
+    });
+    editor.commands.focus();
+    closeAll();
     if (url) editor.chain().focus().setImage({ src: url }).run();
   };
 
@@ -126,11 +135,12 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
   const menuBg = isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft';
 
   return (
+    <>
     <TiptapFloatingMenu
       editor={editor}
       appendTo={() => document.body}
       options={positioningOptions}
-      shouldShow={({ editor: e, state }) => {
+      shouldShow={({ state }) => {
         const { $from } = state.selection;
         // 只在空段落或段落开头显示
         return $from.parent.type.name === 'paragraph';
@@ -169,7 +179,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
               <Heading4 className="w-4 h-4" /> 标题 4
             </button>
             <div className={`my-1 border-t ${isDark ? 'border-studio-border-soft' : 'border-studio-border-soft'}`} />
-            <button onClick={() => handleInsert(addImage)} className={menuBtnClass}>
+            <button onClick={() => void addImage()} className={menuBtnClass}>
               <ImageIcon className="w-4 h-4" /> 图片
             </button>
             <button onClick={() => handleInsert(insertTable)} className={menuBtnClass}>
@@ -223,5 +233,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
         )}
       </div>
     </TiptapFloatingMenu>
+    {editorTextPromptDialog}
+    </>
   );
 }

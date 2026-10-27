@@ -4726,8 +4726,15 @@ try {
     await desktopDraftPage.reload({ waitUntil: 'domcontentloaded' });
     await desktopDraftPage.getByPlaceholder('请输入选题标题').waitFor();
     assert.equal(await desktopDraftPage.getByPlaceholder('请输入选题标题').inputValue(), secondDraftTitle, 'the active draft selection survives reload');
-    desktopDraftPage.once('dialog', (dialog) => dialog.accept());
     await desktopDraftPage.getByRole('button', { name: `删除本机草稿：${secondDraftTitle}` }).click();
+    const draftDeleteDialog = desktopDraftPage.getByRole('dialog', { name: '确认删除本机草稿？' });
+    await draftDeleteDialog.waitFor();
+    assert.equal(await desktopDraftPage.evaluate((key) => JSON.parse(localStorage.getItem(key) || 'null')?.value?.drafts?.length, desktopDraftKey), 2, 'opening the confirmation does not delete a local draft');
+    await draftDeleteDialog.getByRole('button', { name: '取消', exact: true }).click();
+    await draftDeleteDialog.waitFor({ state: 'detached' });
+    assert.equal(await desktopDraftPage.evaluate((key) => JSON.parse(localStorage.getItem(key) || 'null')?.value?.drafts?.length, desktopDraftKey), 2, 'canceling keeps both local drafts');
+    await desktopDraftPage.getByRole('button', { name: `删除本机草稿：${secondDraftTitle}` }).click();
+    await desktopDraftPage.getByRole('dialog', { name: '确认删除本机草稿？' }).getByRole('button', { name: '删除草稿', exact: true }).click();
     await desktopDraftPage.getByRole('button', { name: `打开本机草稿：${desktopDraftTitle}` }).waitFor();
     assert.equal(await desktopDraftPage.evaluate((key) => JSON.parse(localStorage.getItem(key) || 'null')?.value?.drafts?.length, desktopDraftKey), 1, 'deleting one draft keeps the other draft');
 

@@ -8,6 +8,7 @@ import ProductionMaterialHistorySnapshot from '@/components/production/Productio
 import ProductionOriginPanel from '@/components/production/ProductionOriginPanel';
 import { productionStatusLabel } from '@/components/production/productionStatusLabel';
 import { ActionButton } from '@/components/studio';
+import ConfirmModal from '@/components/common/ConfirmModal';
 import { getProductionVersionRoomId } from '@/collaboration/core/events';
 import { createProductionEditorAdapter } from '@/editor/adapters/productionEditorAdapter';
 import type { ContentEditorRuntimeHandle } from '@/editor/contracts/contentEditorAdapter';
@@ -134,6 +135,7 @@ export default function MobileProductionEditor() {
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(Boolean(id));
   const [saving, setSaving] = useState(false);
+  const [pendingLeaveAttempt, setPendingLeaveAttempt] = useState<Pick<RouteNavigationAttempt, 'proceed' | 'stay'> | null>(null);
   const [pendingCreateRecovery, setPendingCreateRecovery] = useState<MobileProductionCreateRecovery | null>(null);
   const [createRecoveryInvalid, setCreateRecoveryInvalid] = useState(false);
   const [pendingWriteRecovery, setPendingWriteRecovery] = useState<MobileProductionWriteRecovery | null>(null);
@@ -471,11 +473,7 @@ export default function MobileProductionEditor() {
       stay();
       return;
     }
-    if (!window.confirm('当前稿件尚未提交，正文草稿已尽可能保存在本机。确认离开并稍后续写吗？')) {
-      stay();
-      return;
-    }
-    proceed();
+    setPendingLeaveAttempt({ proceed, stay });
   }, [reviewSuggestionAccepting, saving]);
   useRouteNavigationGuard(hasUnsavedChanges, handleRouteNavigationAttempt);
 
@@ -1021,6 +1019,23 @@ export default function MobileProductionEditor() {
           )}
         </div>
       ) : null}
+      <ConfirmModal
+        open={pendingLeaveAttempt !== null}
+        title="稿件尚未提交"
+        description="正文草稿已尽可能保存在本机。离开后可以稍后继续修改并提交审核。"
+        confirmText="离开并稍后续写"
+        cancelText="继续编辑"
+        variant="warning"
+        onCancel={() => {
+          pendingLeaveAttempt?.stay();
+          setPendingLeaveAttempt(null);
+        }}
+        onConfirm={() => {
+          const attempt = pendingLeaveAttempt;
+          setPendingLeaveAttempt(null);
+          attempt?.proceed();
+        }}
+      />
     </div>
   );
 }

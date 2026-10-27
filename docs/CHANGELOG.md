@@ -24,7 +24,7 @@
 
 ### 测试情况
 
-- 定向 ESLint、全局类型检查与 Chrome DevTools MCP 隔离夹具检查结果见 `docs/UPGRADE_PROGRESS.md`。VoiceOver 已临时开启后恢复关闭；实际语音输出未能通过当前窗口工具核实，仍待验收。未访问真实业务数据库或修改真实业务数据。Android 版本元数据同步至 9.4.2 / 90402，未构建 APK。
+- 定向 ESLint、全局类型检查与 Chrome DevTools MCP 隔离夹具检查结果见 `docs/UPGRADE_PROGRESS.md`。VoiceOver 已临时开启后恢复关闭；实际语音输出未能通过当前窗口工具核实，仍待验收。未访问真实业务数据库或修改真实业务数据。Android 版本元数据同步至 9.4.2 / 90402；GitHub CI 生成并上传了 debug 验收 APK artifact，但没有发布 Android 安装包。
 
 ## v9.4.1 - 2026-10-26
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { JSDOM } from 'jsdom';
 
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://xmt.test/' });
@@ -62,11 +62,14 @@ async function settle() {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
-function mount(onCreated: () => void) {
+function mount(onCreated: () => void, initialDraftsReady = true) {
   document.body.innerHTML = '<div id="root"></div>';
   let current: RecoveryHook | null = null;
+  let updateDraftReadiness!: (ready: boolean) => void;
   function Harness() {
-    const hook = useTopicCreateRecovery(17, () => onCreated());
+    const [draftsReady, setDraftsReady] = useState(initialDraftsReady);
+    updateDraftReadiness = setDraftsReady;
+    const hook = useTopicCreateRecovery(17, () => onCreated(), draftsReady);
     current = hook;
     return createElement('output', { 'data-phase': hook.pending?.phase ?? 'none' }, hook.message);
   }
@@ -75,6 +78,7 @@ function mount(onCreated: () => void) {
   return {
     root,
     get hook() { assert(current); return current; },
+    setDraftsReady(ready: boolean) { act(() => updateDraftReadiness(ready)); },
   };
 }
 
@@ -104,6 +108,83 @@ function reset() {
 
 test('topic create recovery hook blocks false completion, ignores unmounted results, and suppresses deterministic retries', async (t) => {
   try {
+    await t.test('刷新后等待本机草稿加载完毕再核实并完成已创建的选题', async () => {
+      reset();
+      const requestId = '11111111-1111-4111-8111-111111111111';
+      storage.setItem('xmt:topic-create-pending:v1:actor:17', JSON.stringify({
+        version: 1,
+        actorId: 17,
+        requestId,
+        payload,
+        draftId: 'draft-mobile-1',
+        draftSnapshot: {
+          title: payload.title, platform: payload.platform, deadline: payload.deadline,
+          assignee_id: '', projectBackground: '', targetAudience: '', expectedGoal: '', budget: '', outline: '',
+        },
+      }));
+      const completions: number[] = [];
+      const mounted = mount(() => completions.push(1), false);
+      try {
+        await settle();
+        assert.equal(mounted.hook.ready, false, 'submission and recovery stay locked until the caller has loaded its draft collection');
+        assert.equal(statusRequests, 0, 'server recovery lookup waits for local draft hydration');
+        assert.equal(completions.length, 0);
+        assert.notEqual(storage.getItem('xmt:topic-create-pending:v1:actor:17'), null, 'the recovery receipt remains until draft cleanup can be evaluated');
+
+        mounted.setDraftsReady(true);
+        await settle();
+        assert.equal(statusRequests, 1, 'draft hydration starts exactly one read-only status lookup');
+        assert.equal(completions.length, 1, 'confirmed creation completes only after draft hydration');
+        assert.equal(storage.getItem('xmt:topic-create-pending:v1:actor:17'), null, 'the recovery receipt is cleared only after a safe completion callback');
+      } finally {
+        await act(async () => mounted.root.unmount());
+      }
+    });
+
+    await t.test('状态查询进行时草稿就绪状态变化会保留恢复记录并重新核实', async () => {
+      reset();
+      const recoveryKey = 'xmt:topic-create-pending:v1:actor:17';
+      storage.setItem(recoveryKey, JSON.stringify({
+        version: 1,
+        actorId: 17,
+        requestId: '22222222-2222-4222-8222-222222222222',
+        payload,
+        draftId: 'draft-mobile-2',
+        draftSnapshot: {
+          title: payload.title, platform: payload.platform, deadline: payload.deadline,
+          assignee_id: '', projectBackground: '', targetAudience: '', expectedGoal: '', budget: '', outline: '',
+        },
+      }));
+      let resolveFirstStatus!: (response: Response) => void;
+      fetchHandler = async (input) => {
+        if (!String(input).includes('/api/topics/create-requests/')) return jsonResponse(404, { message: 'unexpected request' });
+        statusRequests += 1;
+        if (statusRequests === 1) return new Promise<Response>((resolve) => { resolveFirstStatus = resolve; });
+        return jsonResponse(200, { state: 'created', topicId: 172 });
+      };
+      const completions: number[] = [];
+      const mounted = mount(() => completions.push(1), true);
+      try {
+        await settle();
+        assert.equal(statusRequests, 1, 'the first status read starts after the initial draft collection is ready');
+        mounted.setDraftsReady(false);
+        await settle();
+        resolveFirstStatus(jsonResponse(200, { state: 'created', topicId: 172 }));
+        await settle();
+        assert.equal(completions.length, 0, 'a response from an obsolete not-ready scope cannot complete or navigate');
+        assert.notEqual(storage.getItem(recoveryKey), null, 'the receipt remains available for a later safe read');
+        assert.equal(mounted.hook.ready, false, 'the recovery hook locks while the draft collection is not ready');
+
+        mounted.setDraftsReady(true);
+        await settle();
+        assert.equal(statusRequests, 2, 'restoring readiness performs one fresh read-only check');
+        assert.equal(completions.length, 1, 'completion occurs only after readiness is restored');
+        assert.equal(storage.getItem(recoveryKey), null, 'the recovery marker is cleared after the safe completion');
+      } finally {
+        await act(async () => mounted.root.unmount());
+      }
+    });
+
     await t.test('恢复标记删除失败时保持锁定，显式重试清理成功后才回调', async () => {
       reset();
       const completions: number[] = [];

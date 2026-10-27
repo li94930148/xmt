@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import express from 'express';
 import http from 'node:http';
 import { Server as SocketServer } from 'socket.io';
@@ -57,7 +58,16 @@ let submissionRequestCount = 0;
 let nextSubmissionGate: Promise<void> | null = null;
 let releaseSubmissionGate: (() => void) | null = null;
 let failNextSubmission = false;
+let commitNextSubmissionThenFailResponse = false;
 let failedFeedbackReadsRemaining = 0;
+const submissionRequestIds: string[] = [];
+const submissionStatusRequestIds: string[] = [];
+const processedSubmissionRequestIds = new Set<string>();
+const deletedRecoveryRequestId = 'ab7e2011-a635-445f-9c3b-884f93cb7d21';
+const deletedRecoveryPayload = { type: 'process', content: '删除后不得用旧编号恢复意见', needReply: false };
+const deletedRecoveryFingerprint = createHash('sha256')
+  .update(JSON.stringify([deletedRecoveryPayload.type, deletedRecoveryPayload.content, deletedRecoveryPayload.needReply]), 'utf8')
+  .digest('hex');
 app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','anonymous-feedback-theme-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/anonymous-feedback');</script>`);
@@ -75,11 +85,15 @@ app.post('/__qa/fail-next-submission', (_req, res) => {
   failNextSubmission = true;
   res.json({ success: true });
 });
+app.post('/__qa/commit-next-submission-then-fail-response', (_req, res) => {
+  commitNextSubmissionThenFailResponse = true;
+  res.json({ success: true });
+});
 app.post('/__qa/fail-feedback-reads', (req, res) => {
   failedFeedbackReadsRemaining = Number(req.body.count) || 0;
   res.json({ success: true });
 });
-app.get('/__qa/submission-state', (_req, res) => res.json({ requestCount: submissionRequestCount, savedCount: feedbackItems.length }));
+app.get('/__qa/submission-state', (_req, res) => res.json({ requestCount: submissionRequestCount, savedCount: feedbackItems.length, requestIds: submissionRequestIds, statusRequestIds: submissionStatusRequestIds }));
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
@@ -90,8 +104,13 @@ app.get('/api/anonymous-feedback', (_req, res) => {
   }
   return res.json({ data: feedbackItems });
 });
+app.get('/api/anonymous-feedback/submission-requests/:requestId', (req, res) => {
+  submissionStatusRequestIds.push(req.params.requestId);
+  return res.json({ data: { state: processedSubmissionRequestIds.has(req.params.requestId) ? 'processed' : 'not_found' } });
+});
 app.post('/api/anonymous-feedback', async (req, res) => {
   submissionRequestCount += 1;
+  submissionRequestIds.push(String(req.body.client_request_id || ''));
   const gate = nextSubmissionGate;
   nextSubmissionGate = null;
   if (gate) await gate;
@@ -110,6 +129,11 @@ app.post('/api/anonymous-feedback', async (req, res) => {
     updated_at: '2026-10-16 09:00:00',
   };
   feedbackItems = [...feedbackItems, created];
+  if (commitNextSubmissionThenFailResponse) {
+    commitNextSubmissionThenFailResponse = false;
+    processedSubmissionRequestIds.add(String(req.body.client_request_id || ''));
+    return res.status(503).json({ message: '提交已保存，但客户端未收到成功响应' });
+  }
   return res.status(201).json({ success: true });
 });
 app.use('/api', (_req, res) => res.json({ data: [] }));
@@ -123,6 +147,12 @@ await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
 const address = server.address();
 assert(address && typeof address !== 'string');
 const base = `http://127.0.0.1:${address.port}`;
+
+if (process.env.XMT_ANONYMOUS_FEEDBACK_QA_SERVE === '1') {
+  console.log(`Isolated anonymous feedback recovery fixture: ${base}/__qa`);
+  await new Promise(() => {});
+}
+
 const browser = await chromium.launch({ headless: true });
 
 try {
@@ -146,8 +176,13 @@ try {
 
   const submissionPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   const submissionErrors: string[] = [];
+  const expectedSubmissionHttpErrors: string[] = [];
   submissionPage.on('pageerror', (error) => submissionErrors.push(error.message));
-  submissionPage.on('console', (message) => { if (message.type() === 'error') submissionErrors.push(message.text()); });
+  submissionPage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (/503 \(Service Unavailable\)/.test(message.text())) expectedSubmissionHttpErrors.push(message.text());
+    else submissionErrors.push(message.text());
+  });
   await submissionPage.goto(`${base}/__qa?theme=light`);
   await submissionPage.getByRole('heading', { name: '匿名意见箱' }).waitFor();
   await submissionPage.getByRole('button', { name: '提交意见', exact: true }).first().click();
@@ -161,11 +196,11 @@ try {
     (element as HTMLButtonElement).click();
     (element as HTMLButtonElement).click();
   });
-  await dialog.getByRole('button', { name: '提交中...', exact: true }).waitFor();
+  await dialog.getByText('正在提交意见', { exact: true }).waitFor();
   assert.equal(await dialog.locator('textarea').isDisabled(), true, 'the form locks during the confirmed write');
   await submissionPage.waitForFunction(async () => (await (await fetch('/__qa/submission-state')).json()).requestCount === 1);
   await submissionPage.request.post(`${base}/__qa/release-submission`);
-  await submissionPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).waitFor();
+  await submissionPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).first().waitFor();
   assert.equal(await submissionPage.getByPlaceholder('请输入你的想法...').inputValue(), '', 'confirmed submission clears only after success');
   let submissionState = await (await submissionPage.request.get(`${base}/__qa/submission-state`)).json() as { requestCount: number; savedCount: number };
   assert.equal(submissionState.requestCount, 1, 'two same-event submits create one request');
@@ -175,27 +210,88 @@ try {
   await dialog.getByPlaceholder('请输入你的想法...').fill('失败保留后重试验收');
   await submissionPage.request.post(`${base}/__qa/fail-next-submission`);
   await submitButton.click();
-  await submissionPage.getByText('意见提交服务暂时不可用', { exact: true }).waitFor();
+  await dialog.getByText('尚未查到这次意见提交', { exact: true }).waitFor();
   assert.equal(await dialog.locator('select').inputValue(), 'feature', 'failed writes preserve the selected type');
   assert.equal(await dialog.getByPlaceholder('请输入你的想法...').inputValue(), '失败保留后重试验收', 'failed writes preserve the content for retry');
+  const failedRequestId = submissionRequestIds.at(-1);
+  assert.ok(failedRequestId, 'the ambiguous write used a request ID');
+  await dialog.getByRole('button', { name: '检查后开始新提交' }).click();
+  assert.equal(await submissionPage.evaluate(() => window.sessionStorage.getItem('xmt:anonymous-feedback-submission-pending:v1')), null,
+    'starting a new request clears the not-found recovery marker');
   await submitButton.click();
-  await submissionPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).waitFor();
+  await submissionPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).first().waitFor();
   submissionState = await (await submissionPage.request.get(`${base}/__qa/submission-state`)).json() as { requestCount: number; savedCount: number };
   assert.equal(submissionState.requestCount, 3, 'failed write and explicit retry each submit once');
   assert.equal(submissionState.savedCount, 3, 'only confirmed writes are persisted');
+  assert.notEqual(submissionRequestIds.at(-1), failedRequestId, 'an explicit resubmission uses a new request ID after not_found');
 
   await dialog.locator('select').selectOption('usage');
   await dialog.getByPlaceholder('请输入你的想法...').fill('刷新失败仍应确认已提交');
   await submissionPage.request.post(`${base}/__qa/fail-feedback-reads`, { data: { count: 2 } });
   await submitButton.click();
-  await submissionPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).waitFor();
+  await submissionPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).first().waitFor();
   await submissionPage.getByText('意见列表暂时不可用', { exact: true }).waitFor();
   assert.equal(await dialog.getByPlaceholder('请输入你的想法...').inputValue(), '', 'post-write read failures do not restore submitted text');
   assert.equal(await submissionPage.getByText('提交失败', { exact: true }).count(), 0, 'a confirmed write is never reported as failed due to a later read failure');
   submissionState = await (await submissionPage.request.get(`${base}/__qa/submission-state`)).json() as { requestCount: number; savedCount: number };
   assert.equal(submissionState.requestCount, 4);
   assert.equal(submissionState.savedCount, 4);
+
+  await dialog.locator('select').selectOption('team');
+  await dialog.getByPlaceholder('请输入你的想法...').fill('首次响应丢失后按回执确认');
+  const stateBeforeLostResponse = await (await submissionPage.request.get(`${base}/__qa/submission-state`)).json() as {
+    requestCount: number; savedCount: number;
+  };
+  await submissionPage.request.post(`${base}/__qa/commit-next-submission-then-fail-response`);
+  const lostResponsePost = submissionPage.waitForResponse((response) => response.url().endsWith('/api/anonymous-feedback') && response.request().method() === 'POST');
+  await submitButton.click();
+  assert.equal((await lostResponsePost).status(), 503, 'the isolated server commits the feedback but withholds a success response');
+  await submissionPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).first().waitFor();
+  const stateAfterLostResponse = await (await submissionPage.request.get(`${base}/__qa/submission-state`)).json() as {
+    requestCount: number; savedCount: number; requestIds: string[]; statusRequestIds: string[];
+  };
+  const lostResponseRequestId = stateAfterLostResponse.requestIds.at(-1);
+  assert.ok(lostResponseRequestId, 'the committed submission used a recovery request ID');
+  assert.equal(stateAfterLostResponse.requestCount, stateBeforeLostResponse.requestCount + 1, 'recovery verifies the committed write without sending a second POST');
+  assert.equal(stateAfterLostResponse.savedCount, stateBeforeLostResponse.savedCount + 1, 'the ambiguous response leaves exactly one saved feedback item');
+  assert.equal(stateAfterLostResponse.statusRequestIds.filter((requestId) => requestId === lostResponseRequestId).length, 1, 'the UI checks the matching durable receipt once');
+  assert.equal(await submissionPage.evaluate(() => window.sessionStorage.getItem('xmt:anonymous-feedback-submission-pending:v1')), null,
+    'a processed receipt clears the temporary browser recovery record');
+
+  const deletedRecoveryPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  await deletedRecoveryPage.addInitScript(({ key, pending }) => {
+    window.sessionStorage.setItem(key, JSON.stringify(pending));
+  }, {
+    key: 'xmt:anonymous-feedback-submission-pending:v1',
+    pending: {
+      clientRequestId: deletedRecoveryRequestId,
+      requestFingerprint: deletedRecoveryFingerprint,
+      payload: deletedRecoveryPayload,
+    },
+  });
+  await deletedRecoveryPage.goto(`${base}/__qa?theme=light`);
+  await deletedRecoveryPage.getByRole('button', { name: '提交意见', exact: true }).first().click();
+  const deletedRecoveryDialog = deletedRecoveryPage.getByRole('dialog', { name: '匿名意见箱' });
+  await deletedRecoveryDialog.getByText(/可能对应意见已被删除/).waitFor();
+  assert.equal(await deletedRecoveryDialog.getByRole('button', { name: '用原请求编号重试' }).count(), 0, 'a deleted or absent request key is never retried');
+  const requestCountBeforeFreshSubmit = submissionRequestCount;
+  await deletedRecoveryDialog.getByRole('button', { name: '检查后开始新提交' }).click();
+  assert.equal(await deletedRecoveryPage.evaluate(() => window.sessionStorage.getItem('xmt:anonymous-feedback-submission-pending:v1')), null,
+    'starting a new submission clears the old recovery key');
+  assert.equal(await deletedRecoveryDialog.locator('select').inputValue(), 'process', 'starting a new submission retains the selected type');
+  assert.equal(await deletedRecoveryDialog.getByPlaceholder('请输入你的想法...').inputValue(), deletedRecoveryPayload.content,
+    'starting a new submission retains the content for explicit review');
+  await deletedRecoveryDialog.getByRole('button', { name: '提交意见', exact: true }).click();
+  await deletedRecoveryPage.getByText('感谢你的声音，意见已匿名发布', { exact: true }).first().waitFor();
+  const afterFreshSubmit = await (await deletedRecoveryPage.request.get(`${base}/__qa/submission-state`)).json() as {
+    requestCount: number; savedCount: number; requestIds: string[];
+  };
+  assert.equal(afterFreshSubmit.requestCount, requestCountBeforeFreshSubmit + 1, 'only an explicit new submission sends a write');
+  assert.notEqual(afterFreshSubmit.requestIds.at(-1), deletedRecoveryRequestId, 'a new submission receives a fresh request id');
+  await deletedRecoveryPage.close();
+
   assert.equal(await submissionPage.getByText('页面出错了', { exact: true }).count(), 0, 'framework error boundary is not visible');
+  assert.equal(expectedSubmissionHttpErrors.length, 4, 'only the deliberately injected failed write, lost response, and two failed reads are logged');
   assert.deepEqual(submissionErrors, [], submissionErrors.join('\n'));
   await submissionPage.screenshot({ path: '/tmp/xmt-anonymous-feedback-submit-v9.2.1.png', fullPage: false });
   await submissionPage.close();

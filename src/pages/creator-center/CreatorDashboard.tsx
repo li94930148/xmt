@@ -254,7 +254,7 @@ export default function CreatorDashboard() {
     <section className="grid gap-6 xl:grid-cols-[1fr_1.4fr]">
       <Panel title="周期表现" description={official ? '播放、互动按官方周期逐日合计；粉丝按真实期初与期末总量计算' : `${data.snapshot_count} 个日快照`}>
         <div className="grid gap-4"><GrowthBlock title="近 7 天" data={data.growth_7d} official={official} /><GrowthBlock title="近 30 天" data={data.growth_30d} official={official} /></div>
-        <button type="button" onClick={() => navigate('/analytics/creator-center/trends')} className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-studio-cyan-contrast"><CalendarRange className="h-4 w-4" />查看完整趋势</button>
+        <button type="button" onClick={() => navigate('/analytics/creator-center/trends')} className="xmt-btn xmt-btn-ghost mt-4 min-h-10 px-3 py-2 text-sm font-medium text-studio-cyan-contrast hover:text-studio-cyan-contrast"><CalendarRange className="h-4 w-4" />查看完整趋势</button>
       </Panel>
       <ReactBitsCardSlot semantic="content-highlight" className="min-w-0"><Panel title="作品表现 TOP 5">
         <div className="space-y-2">

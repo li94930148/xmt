@@ -155,10 +155,60 @@ try {
   assert.equal(await toggle.isDisabled(), true, 'an unknown outcome locks preference edits');
   assert.equal(await save.isDisabled(), true, 'an unknown outcome locks repeated saves');
   assert.equal(saveRequests, 5, 'a failed verification does not resend the PUT');
+  const warnsOnUnknownUnload = await page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  assert.equal(warnsOnUnknownUnload, true, 'an unknown save result installs a browser unload warning');
+  await back.click();
+  const recoveryLeaveDialog = page.getByRole('dialog');
+  await recoveryLeaveDialog.getByRole('heading', { name: '通知偏好结果尚未核实' }).waitFor();
+  assert.equal(saveRequests, 5, 'leaving with an unknown result does not retry the save');
+  await recoveryLeaveDialog.getByRole('button', { name: '继续编辑' }).click();
   await page.getByRole('button', { name: '只读重新核实', exact: true }).click();
   await page.getByText('已核实通知偏好已保存。', { exact: true }).waitFor();
   assert.equal(persistedPreferences[0]?.enabled, false, 'a read-only retry resolves the unknown outcome');
   assert.equal(saveRequests, 5, 'read-only recovery never sends another PUT');
+
+  await toggle.click();
+  const warnsOnDirtyUnload = await page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  assert.equal(warnsOnDirtyUnload, true, 'an unsaved preference draft installs a browser unload warning');
+  await back.click();
+  const leaveDialog = page.getByRole('dialog');
+  await leaveDialog.getByRole('heading', { name: '通知偏好尚未保存' }).waitFor();
+  assert.equal(saveRequests, 5, 'attempting to leave a dirty page does not save automatically');
+  await leaveDialog.getByRole('button', { name: '继续编辑' }).click();
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'canceling navigation keeps the unsaved preference selection');
+
+  saveDelayMs = 200;
+  const saveDuringLeave = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/notifications/preferences'));
+  await save.click();
+  await page.getByText('保存中…', { exact: false }).waitFor();
+  await back.click();
+  await page.getByText('通知偏好仍在保存或核实，请等待处理完成后再离开。', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('heading', { name: '消息通知偏好' }).count(), 1, 'navigation is blocked while a save is in flight');
+  assert.equal(await page.getByRole('dialog').count(), 0, 'an in-flight save cannot be discarded from the navigation prompt');
+  await saveDuringLeave;
+  saveDelayMs = 0;
+  await page.getByText('通知偏好已保存。', { exact: true }).waitFor();
+  assert.equal(saveRequests, 6, 'the in-flight save completes exactly once');
+
+  await toggle.click();
+  await back.click();
+  const discardDialog = page.getByRole('dialog');
+  await discardDialog.getByRole('heading', { name: '通知偏好尚未保存' }).waitFor();
+  await discardDialog.getByRole('button', { name: '离开并放弃本页更改' }).click();
+  await page.getByRole('heading', { name: '个人设置夹具' }).waitFor();
+  assert.equal(saveRequests, 6, 'explicitly discarding local preference edits does not send a PUT');
+  await page.getByRole('button', { name: '返回通知偏好夹具' }).click();
+  await page.getByRole('heading', { name: '消息通知偏好' }).waitFor();
+  await page.getByRole('button', { name: /审核结果/ }).waitFor();
+  assert.equal(await page.getByRole('button', { name: /审核结果/ }).getAttribute('aria-pressed'), 'true', 'reopening reloads the server-confirmed preference instead of the discarded local draft');
   assert.equal(expectedSaveRequestFailures.length, 2, 'both injected response losses are observed');
   assert.equal(expectedSaveConsoleErrors.length, 2, 'both injected response losses are expected browser errors');
   assert.equal(expectedHttpErrors.length, 2, 'the expected HTTP errors are the failed save and failed verification GET');

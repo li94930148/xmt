@@ -73,7 +73,7 @@ export default function AddTopic() {
     celebrateMilestone();
     navigate(`/topics/${topicId}`);
   }, [appStore, draftState, navigate]);
-  const createRecovery = useTopicCreateRecovery(userId, finishTopicCreation);
+  const createRecovery = useTopicCreateRecovery(userId, finishTopicCreation, draftState.ready);
 
   useEffect(() => {
     setSimilarTopicReview(null);
@@ -191,26 +191,26 @@ export default function AddTopic() {
       <section role="status" aria-live="polite" className="mb-5 rounded-xl border border-studio-amber/30 bg-studio-amber/10 px-4 py-3 text-sm text-studio-text-secondary">
         <p>{createRecovery.message || '选题创建结果尚未核实；为避免重复创建，原表单已锁定。'}</p>
         {createRecovery.pending?.phase === 'uncertain' || createRecovery.pending?.phase === 'rejected' ? (
-          <button type="button" onClick={() => void createRecovery.verify()} className="mt-3 rounded-lg border border-studio-border-soft px-3 py-2 font-medium text-studio-text-primary">
+          <button type="button" onClick={() => void createRecovery.verify()} className="xmt-btn xmt-btn-secondary mt-3 min-h-10 px-3 py-2 font-medium">
             只读重新核实创建状态
           </button>
         ) : null}
         {createRecovery.pending?.phase === 'rejected' && createRecovery.pending.confirmedNotFound ? (
-          <button type="button" onClick={createRecovery.releaseRejected} className="mt-3 ml-2 rounded-lg bg-studio-primary-button px-3 py-2 font-medium text-white">
+          <button type="button" onClick={createRecovery.releaseRejected} className="xmt-btn xmt-btn-primary mt-3 ml-2 min-h-10 px-3 py-2 font-medium text-white">
             确认服务端未创建并解除本次锁定
           </button>
         ) : null}
         {createRecovery.pending?.phase === 'cleanup_failed' ? (
-          <button type="button" onClick={createRecovery.retryCleanup} className="mt-3 rounded-lg border border-studio-border-soft px-3 py-2 font-medium text-studio-text-primary">
+          <button type="button" onClick={createRecovery.retryCleanup} className="xmt-btn xmt-btn-secondary mt-3 min-h-10 px-3 py-2 font-medium">
             重试清理恢复记录并继续
           </button>
         ) : null}
         {createRecovery.pending?.phase === 'not_found' ? (
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={() => void createRecovery.retry()} className="rounded-lg bg-studio-primary-button px-3 py-2 font-medium text-white">
+            <button type="button" onClick={() => void createRecovery.retry()} className="xmt-btn xmt-btn-primary min-h-10 px-3 py-2 font-medium text-white">
               确认用原内容和同一编号重试
             </button>
-            <button type="button" onClick={() => void createRecovery.verify()} className="rounded-lg border border-studio-border-soft px-3 py-2 font-medium text-studio-text-primary">
+            <button type="button" onClick={() => void createRecovery.verify()} className="xmt-btn xmt-btn-secondary min-h-10 px-3 py-2 font-medium">
               再次只读核实
             </button>
           </div>
@@ -262,7 +262,9 @@ export default function AddTopic() {
 
       {draftStorageUnavailable && (
         <p role="status" className="rounded-panel border border-studio-coral/30 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral-contrast">
-          本机存储不可用，最新内容未能保存；请检查浏览器存储空间。当前页面仍保留输入。
+          {createRecovery.pending
+            ? '本机草稿未能保存，请勿关闭此页；当前页面仍保留输入。请按下方提示完成提交结果核实。'
+            : '本机存储不可用，最新内容未能保存；请检查浏览器存储空间。当前页面仍保留输入。'}
         </p>
       )}
 
@@ -406,7 +408,7 @@ export default function AddTopic() {
                   onChange={(value) => setFormData({ ...formData, outline: value })}
                   placeholder="请填写大纲内容..."
                   mode="rich"
-                  readOnly={submitting}
+                  readOnly={submitting || createRecovery.locked}
                 />
               )}
             </div>

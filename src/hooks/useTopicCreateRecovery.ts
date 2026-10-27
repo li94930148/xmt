@@ -26,9 +26,15 @@ type TopicCreateConfirmed = (topicId: number, recovery: TopicCreateRecovery, rec
 
 const validActorId = (value: number | null | undefined) => Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
 
-export function useTopicCreateRecovery(actorIdValue: number | null | undefined, onCreated: TopicCreateConfirmed) {
+export function useTopicCreateRecovery(
+  actorIdValue: number | null | undefined,
+  onCreated: TopicCreateConfirmed,
+  topicDraftsReady = true,
+) {
   const actorId = validActorId(actorIdValue);
   const scopeRef = useRef({ actorId, generation: 0 });
+  const topicDraftsReadyRef = useRef(topicDraftsReady);
+  topicDraftsReadyRef.current = topicDraftsReady;
   const mountedRef = useRef(false);
   if (scopeRef.current.actorId !== actorId) {
     scopeRef.current = { actorId, generation: scopeRef.current.generation + 1 };
@@ -51,6 +57,7 @@ export function useTopicCreateRecovery(actorIdValue: number | null | undefined, 
 
   const isCurrentActorScope = useCallback((expectedActorId: number, generation: number) => (
     mountedRef.current
+      && topicDraftsReadyRef.current
       && scopeRef.current.actorId === expectedActorId
       && scopeRef.current.generation === generation
       && Number(useAuthStore.getState().user?.id) === expectedActorId
@@ -157,7 +164,7 @@ export function useTopicCreateRecovery(actorIdValue: number | null | undefined, 
     setStorageUnavailable(false);
     setMessage('');
     setReadyActorId(null);
-    if (scope.actorId === null) return;
+    if (scope.actorId === null || !topicDraftsReady) return;
 
     const result = readTopicCreateRecovery(scope.actorId);
     if (result.state === 'invalid') {
@@ -179,7 +186,7 @@ export function useTopicCreateRecovery(actorIdValue: number | null | undefined, 
       setPending(entry);
       void verifyRecovery(result.recovery, scope.generation);
     }
-  }, [actorId, verifyRecovery]);
+  }, [actorId, topicDraftsReady, verifyRecovery]);
 
   const create = useCallback(async (
     payload: TopicCreatePayload,
@@ -248,7 +255,7 @@ export function useTopicCreateRecovery(actorIdValue: number | null | undefined, 
   }, [actorId, isCurrentActorScope, updateMessage, updatePending]);
 
   const visiblePending = pending?.recovery.actorId === actorId ? pending : null;
-  const ready = actorId !== null && readyActorId === actorId;
+  const ready = actorId !== null && readyActorId === actorId && topicDraftsReady;
   const currentInvalidRecovery = stateActorId === actorId && invalidRecovery;
   const currentStorageUnavailable = stateActorId === actorId && storageUnavailable;
   const currentMessage = stateActorId === actorId

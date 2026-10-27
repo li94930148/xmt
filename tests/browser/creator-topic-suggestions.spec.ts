@@ -38,6 +38,8 @@ const data = buildCreatorTopicSuggestions(works, 'suggestion-fixture', now);
 const app = express();
 app.use(express.json());
 app.get('/__qa', (req, res) => {
+  if (req.query.mode === 'no-create') mode = 'no-create';
+  else if (req.query.mode === 'ready' || (req.query.mode === undefined && mode === 'no-create')) mode = 'ready';
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','browser-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/analytics/creator-center');</script>`);
 });

@@ -10,12 +10,13 @@ import type { WorkflowDocumentVersion } from '../api';
 import { ChevronLeft, Clock, User as UserIcon, Calendar, FileText, CheckCircle, XCircle, ArrowRight, Save, AlertTriangle, Camera, Scissors, Send, List, FileText as FileIcon } from 'lucide-react';
 import ContentEditor from '../components/ContentEditor';
 import BaseModal from '../components/common/BaseModal';
+import ConfirmModal from '../components/common/ConfirmModal';
 import { useModalLifecycle } from '../components/common/useModalLifecycle';
 import { createTopicDetailManualAdapter } from '../editor/adapters/topicDetailManualAdapter';
 import type { ContentEditorRuntimeHandle, ContentEditorSaveContext } from '../editor/contracts/contentEditorAdapter';
 import { getCurrentTopicEditorModePolicy } from '../editor/topic/topicEditorModePolicy';
 import { useTopicDetailLeaveGuard } from '../hooks/useTopicDetailLeaveGuard';
-import { useRouteNavigationGuard } from '../hooks/useRouteNavigationGuard';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
@@ -49,8 +50,95 @@ import TopicAssetDimensionsPanel from '../components/topics/TopicAssetDimensions
 import { startOrResumeTopicProduction } from '../utils/topicProductionHandoff';
 import { ActionButton } from '../components/studio';
 
+type PendingTopicStatusWrite = {
+  kind: 'write';
+  topicId: number;
+  userId: number;
+  before: Topic['status'];
+  target: Topic['status'];
+  createdAt: number;
+};
+
+type InvalidTopicStatusRecovery = {
+  kind: 'invalid';
+  topicId: number;
+  userId: number;
+  reason: 'expired' | 'corrupt';
+};
+
+type TopicStatusRecovery = PendingTopicStatusWrite | InvalidTopicStatusRecovery;
+
+const TOPIC_STATUS_RECOVERY_PREFIX = 'xmt:topic-status-pending:v1';
+const TOPIC_STATUS_RECOVERY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const TOPIC_STATUSES: readonly Topic['status'][] = ['pending', 'approved', 'production', 'shooting', 'publishing', 'completed', 'rejected'];
+
+function topicStatusRecoveryKey(userId: number, topicId: number) {
+  return `${TOPIC_STATUS_RECOVERY_PREFIX}:user:${userId}:topic:${topicId}`;
+}
+
+function isTopicStatus(value: unknown): value is Topic['status'] {
+  return typeof value === 'string' && TOPIC_STATUSES.includes(value as Topic['status']);
+}
+
+function loadPendingTopicStatusWrite(userId: number | undefined, topicId: number | undefined): TopicStatusRecovery | null {
+  if (!userId || !topicId || typeof window === 'undefined') return null;
+  const key = topicStatusRecoveryKey(userId, topicId);
+  let raw: string | null;
+  try {
+    raw = sessionStorage.getItem(key);
+  } catch {
+    return { kind: 'invalid', topicId, userId, reason: 'corrupt' };
+  }
+  if (raw === null) return null;
+
+  try {
+    const value = JSON.parse(raw) as Partial<PendingTopicStatusWrite>;
+    if (value.kind !== 'write' || Number(value.topicId) !== topicId || Number(value.userId) !== userId
+      || !isTopicStatus(value.before) || !isTopicStatus(value.target)
+      || !Number.isFinite(value.createdAt) || Number(value.createdAt) <= 0) {
+      return { kind: 'invalid', topicId, userId, reason: 'corrupt' };
+    }
+    if (Date.now() - Number(value.createdAt) > TOPIC_STATUS_RECOVERY_MAX_AGE_MS) {
+      return { kind: 'invalid', topicId, userId, reason: 'expired' };
+    }
+    return {
+      kind: 'write',
+      topicId,
+      userId,
+      before: value.before,
+      target: value.target,
+      createdAt: Number(value.createdAt),
+    };
+  } catch {
+    return { kind: 'invalid', topicId, userId, reason: 'corrupt' };
+  }
+}
+
+function persistPendingTopicStatusWrite(pending: PendingTopicStatusWrite) {
+  if (typeof window === 'undefined') throw new Error('当前环境无法保存阶段核实标记');
+  const key = topicStatusRecoveryKey(pending.userId, pending.topicId);
+  sessionStorage.setItem(key, JSON.stringify(pending));
+  const stored = loadPendingTopicStatusWrite(pending.userId, pending.topicId);
+  if (!stored || stored.kind !== 'write' || stored.target !== pending.target
+    || stored.before !== pending.before || stored.createdAt !== pending.createdAt) {
+    throw new Error('阶段核实标记未能完整保存，本次未发送状态更新');
+  }
+}
+
+function removePendingTopicStatusWrite(userId: number, topicId: number) {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.removeItem(topicStatusRecoveryKey(userId, topicId));
+  } catch {
+    // A remaining marker will trigger a read-only verification after reopening.
+  }
+}
+
 export default function TopicDetail() {
   const { id } = useParams<{ id: string }>();
+  const currentUserId = useAuthStore((state) => state.user?.id);
+  const currentUserRole = useAuthStore((state) => state.user?.role);
+  const currentAuthToken = useAuthStore((state) => state.token);
   const currentTopicIdRef = useRef(id);
   currentTopicIdRef.current = id;
   const topicEditorModePolicy = useMemo(() => getCurrentTopicEditorModePolicy(), []);
@@ -70,11 +158,18 @@ export default function TopicDetail() {
   const auditOverlayRef = useRef<HTMLDivElement>(null);
   const auditDialogTitleId = useId();
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [pendingTopicStatusWrite, setPendingTopicStatusWrite] = useState<TopicStatusRecovery | null>(null);
+  const [statusRecoveryReadyScope, setStatusRecoveryReadyScope] = useState('');
+  const [pendingStatusLeaveAttempt, setPendingStatusLeaveAttempt] = useState<{ proceed: () => void; stay: () => void } | null>(null);
+  const [statusVerificationNotice, setStatusVerificationNotice] = useState('');
+  const [verifyingTopicStatus, setVerifyingTopicStatus] = useState(false);
   const [startingProduction, setStartingProduction] = useState(false);
   const [repairingStageRecord, setRepairingStageRecord] = useState(false);
   const auditSubmissionInFlightRef = useRef(false);
   const auditVerificationInFlightRef = useRef(false);
   const statusUpdateInFlightRef = useRef(false);
+  const topicStatusVerificationInFlightRef = useRef(false);
+  const pendingTopicStatusWriteRef = useRef<TopicStatusRecovery | null>(pendingTopicStatusWrite);
   const startProductionInFlight = useRef(false);
   const [auditData, setAuditData] = useState({ status: 'approved' as 'approved' | 'rejected', comment: '', assignee_id: 0 });
   const auditDismissalAllowed = !auditSubmitting && !auditNeedsVerification && !verifyingAudit;
@@ -124,9 +219,6 @@ export default function TopicDetail() {
   
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const currentUserId = useAuthStore((state) => state.user?.id);
-  const currentUserRole = useAuthStore((state) => state.user?.role);
-  const currentAuthToken = useAuthStore((state) => state.token);
   const appStore = useAppStore();
   const [topicSaveRecoveryMode, setTopicSaveRecoveryModeState] = useState<'none' | 'unknown' | 'retryable' | 'conflict' | 'invalid'>('none');
   const topicSaveRecoveryModeRef = useRef<'none' | 'unknown' | 'retryable' | 'conflict' | 'invalid'>('none');
@@ -153,6 +245,26 @@ export default function TopicDetail() {
   const userDirectoryScope = `${id ?? ''}:${currentUserId ?? ''}:${currentUserRole ?? ''}:${currentAuthToken ?? ''}`;
   const userDirectoryScopeRef = useRef(userDirectoryScope);
   userDirectoryScopeRef.current = userDirectoryScope;
+  const topicStatusRecoveryScope = `${Number(currentUserId) || 0}:${Number(id) || 0}`;
+  const statusRecoveryNeedsVerificationRef = useRef(false);
+  useEffect(() => {
+    const actorId = Number(currentUserId);
+    const topicId = Number(id);
+    const recovery = Number.isSafeInteger(actorId) && actorId > 0 && Number.isSafeInteger(topicId) && topicId > 0
+      ? loadPendingTopicStatusWrite(actorId, topicId)
+      : null;
+    pendingTopicStatusWriteRef.current = recovery;
+    setPendingTopicStatusWrite(recovery);
+    setStatusRecoveryReadyScope(topicStatusRecoveryScope);
+    statusRecoveryNeedsVerificationRef.current = recovery !== null;
+    setStatusVerificationNotice(recovery?.kind === 'invalid'
+      ? recovery.reason === 'expired'
+        ? '阶段核实记录已过期，正在只读读取当前选题状态；核实前不会再次提交。'
+        : '阶段核实记录无法读取，正在只读读取当前选题状态；核实前不会再次提交。'
+      : recovery
+        ? '正在只读核实上次阶段更新结果；核实前不会再次提交。'
+        : '');
+  }, [currentUserId, id, topicStatusRecoveryScope]);
   const styles = useThemeStyles();
   const { hasPermission, loading: permissionsLoading } = usePermission();
   const requestedOutlineVersion = searchParams.get('outlineVersion')?.trim() || '';
@@ -462,30 +574,169 @@ export default function TopicDetail() {
     }
   };
 
-  const handleUpdateStatus = async (status: string) => {
+  const rememberPendingTopicStatusWrite = (pending: TopicStatusRecovery | null) => {
+    const previous = pendingTopicStatusWriteRef.current;
+    if (pending?.kind === 'write') {
+      try {
+        persistPendingTopicStatusWrite(pending);
+      } catch (error) {
+        setStatusVerificationNotice(error instanceof Error ? error.message : '无法保存阶段核实标记；本次未发送状态更新。');
+        return false;
+      }
+    } else if (!pending && previous) {
+      removePendingTopicStatusWrite(previous.userId, previous.topicId);
+    }
+    pendingTopicStatusWriteRef.current = pending;
+    setPendingTopicStatusWrite(pending);
+    if (!pending) setStatusVerificationNotice('');
+    return true;
+  };
+
+  const verifyPendingTopicStatusWrite = useCallback(async (pendingOverride?: TopicStatusRecovery) => {
+    const pending = pendingOverride ?? pendingTopicStatusWriteRef.current;
+    if (!pending || topicStatusVerificationInFlightRef.current) return;
+    if (Number(currentUserId) !== pending.userId) return;
+    topicStatusVerificationInFlightRef.current = true;
+    setVerifyingTopicStatus(true);
+    setStatusVerificationNotice('正在只读核实选题状态；核实期间不会再次提交。');
+    try {
+      const latest = await getTopic(pending.topicId);
+      if (pendingTopicStatusWriteRef.current !== pending) return;
+      if (Number(currentTopicIdRef.current) === pending.topicId) {
+        setTopic(latest);
+      }
+      rememberPendingTopicStatusWrite(null);
+
+      if (pending.kind === 'invalid') {
+        const reason = pending.reason === 'expired' ? '已过期' : '无法读取';
+        appStore.addNotification({
+          title: '阶段核实记录已处理',
+          message: `上次阶段核实记录${reason}；已只读读取服务器当前状态「${STATUS_TEXT[latest.status] ?? latest.status}」。请核对后再继续。`,
+          type: 'warning',
+        });
+        return;
+      }
+
+      if (latest.status === pending.target) {
+        if (pending.target === 'shooting' || pending.target === 'completed') celebrateMilestone();
+        appStore.addNotification({
+          title: '状态已更新',
+          message: `选题状态已更新为${STATUS_TEXT[pending.target] ?? pending.target}；服务端结果已只读确认。`,
+          type: 'success',
+        });
+      } else if (latest.status === pending.before) {
+        appStore.addNotification({
+          title: '状态未更新',
+          message: `服务器仍显示${STATUS_TEXT[pending.before] ?? pending.before}。没有自动重发；确认后可再次明确操作。`,
+          type: 'warning',
+        });
+      } else {
+        appStore.addNotification({
+          title: '选题状态已变化',
+          message: `服务器当前状态为${STATUS_TEXT[latest.status] ?? latest.status}，已显示最新状态；请确认后再继续。`,
+          type: 'warning',
+        });
+      }
+    } catch (error) {
+      if (pendingTopicStatusWriteRef.current !== pending) return;
+      if (error instanceof TopicApiError && error.status === 404) {
+        if (Number(currentTopicIdRef.current) === pending.topicId) {
+          setTopic(null);
+          setTopicLoadFailure('not-found');
+        }
+        rememberPendingTopicStatusWrite(null);
+        return;
+      }
+      const message = error instanceof Error ? error.message : '暂时无法读取选题状态';
+      setStatusVerificationNotice(`状态更新结果暂时无法确认（${message}）；状态操作已锁定，请先只读核实。`);
+    } finally {
+      topicStatusVerificationInFlightRef.current = false;
+      setVerifyingTopicStatus(false);
+    }
+  }, [appStore, currentUserId]);
+
+  useEffect(() => {
+    if (statusRecoveryReadyScope !== topicStatusRecoveryScope || !topic
+      || Number(topic.id) !== Number(id) || !statusRecoveryNeedsVerificationRef.current) return;
+    statusRecoveryNeedsVerificationRef.current = false;
+    const pending = pendingTopicStatusWriteRef.current;
+    if (pending) void verifyPendingTopicStatusWrite(pending);
+  }, [id, statusRecoveryReadyScope, topic, topicStatusRecoveryScope, verifyPendingTopicStatusWrite]);
+
+  const handleUpdateStatus = async (status: Topic['status']) => {
     if (topicSaveRecoveryModeRef.current !== 'none') {
       setTopicSaveRecoveryNotice('请先核实上一次选题内容保存结果；核实前不会推进阶段。');
       return;
     }
-    if (statusUpdateInFlightRef.current) return;
-    const requestedTopicId = Number(id);
+    if (statusRecoveryReadyScope !== topicStatusRecoveryScope) {
+      appStore.addNotification({ title: '正在读取阶段状态', message: '请等待上次阶段操作核实记录加载完成后再继续。', type: 'warning' });
+      return;
+    }
+    const currentPending = pendingTopicStatusWriteRef.current;
+    if (statusUpdateInFlightRef.current || topicStatusVerificationInFlightRef.current) return;
+    if (currentPending) {
+      appStore.addNotification({
+        title: '状态待核实',
+        message: `选题 #${currentPending.topicId} 的阶段更新结果尚未确认；只读核实完成前不会提交其他阶段操作。`,
+        type: 'warning',
+      });
+      return;
+    }
+    if (!topic) return;
+    const requestedTopicId = topic.id;
+    const actorId = Number(currentUserId);
+    if (!Number.isSafeInteger(actorId) || actorId <= 0) {
+      appStore.addNotification({ title: '状态更新暂不可用', message: '当前登录身份尚未确认；本次没有发送阶段更新。', type: 'error' });
+      return;
+    }
+    const pending: PendingTopicStatusWrite = {
+      kind: 'write',
+      topicId: requestedTopicId,
+      userId: actorId,
+      before: topic.status,
+      target: status,
+      createdAt: Date.now(),
+    };
+    if (!rememberPendingTopicStatusWrite(pending)) {
+      appStore.addNotification({ title: '状态更新未发送', message: '阶段核实标记未能安全保存；本次没有提交状态变更。', type: 'error' });
+      return;
+    }
     statusUpdateInFlightRef.current = true;
     setStatusUpdating(true);
     try {
       try {
         await updateTopicStatus(requestedTopicId, status);
       } catch (error) {
-        appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+        if (Number(currentTopicIdRef.current) !== requestedTopicId) {
+          const responseStatus = error instanceof TopicApiError ? error.status : 0;
+          if (responseStatus >= 400 && responseStatus < 500 && ![408, 425, 429].includes(responseStatus)) return;
+        }
+        const responseStatus = error instanceof TopicApiError ? error.status : 0;
+        const definitelyRejected = responseStatus >= 400 && responseStatus < 500
+          && ![408, 425, 429].includes(responseStatus);
+        if (definitelyRejected) {
+          rememberPendingTopicStatusWrite(null);
+          if (Number(currentTopicIdRef.current) === requestedTopicId) {
+            appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+          }
+          return;
+        }
+        setStatusVerificationNotice('状态更新响应未确认，正在只读核实；核实前不会再次提交。');
+        await verifyPendingTopicStatusWrite(pending);
         return;
       }
 
+      rememberPendingTopicStatusWrite(null);
+      if (Number(currentTopicIdRef.current) !== requestedTopicId) return;
       if (status === 'shooting' || status === 'completed') celebrateMilestone();
       try {
         const refreshed = await getTopic(requestedTopicId);
-        if (Number(currentTopicIdRef.current) === requestedTopicId) setTopic(refreshed);
+        if (Number(currentTopicIdRef.current) !== requestedTopicId) return;
+        setTopic(refreshed);
         appStore.addNotification({ title: '状态更新成功', message: '选题状态已更新', type: 'success' });
       } catch {
-        setTopic((current) => current?.id === requestedTopicId ? { ...current, status: status as Topic['status'] } : current);
+        if (Number(currentTopicIdRef.current) !== requestedTopicId) return;
+        setTopic((current) => current?.id === requestedTopicId ? { ...current, status } : current);
         appStore.addNotification({ title: '状态已更新', message: '状态更新已成功提交，但详情暂时未能刷新；请稍后手动刷新确认最新信息。', type: 'warning' });
       }
     } finally {
@@ -889,7 +1140,12 @@ export default function TopicDetail() {
   });
 
   const pendingRouteStayRef = useRef<(() => void) | null>(null);
-  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: { proceed: () => void; stay: () => void }) => {
+  const handleRouteNavigationAttempt = useCallback((attempt: RouteNavigationAttempt) => {
+    const { proceed, stay } = attempt;
+    if (statusUpdating || pendingTopicStatusWrite || statusRecoveryReadyScope !== topicStatusRecoveryScope) {
+      setPendingStatusLeaveAttempt({ proceed, stay });
+      return;
+    }
     let continued = false;
     const continueOnce = () => {
       if (continued) return;
@@ -903,11 +1159,43 @@ export default function TopicDetail() {
         if (result.decision === 'proceeded') continueOnce();
       })
       .catch(stay);
-  }, [requestTopicLeave]);
+  }, [pendingTopicStatusWrite, requestTopicLeave, statusRecoveryReadyScope, statusUpdating, topicStatusRecoveryScope]);
   useRouteNavigationGuard(
-    Boolean(topic && !loading && (isTopicDirty || isAggregateSaving || isCurrentDraftDirty())),
+    Boolean(topic && !loading && (isTopicDirty || isAggregateSaving || isCurrentDraftDirty()
+      || statusUpdating || pendingTopicStatusWrite || statusRecoveryReadyScope !== topicStatusRecoveryScope)),
     handleRouteNavigationAttempt,
   );
+
+  useEffect(() => {
+    const hasPendingStatusRecovery = statusUpdating || pendingTopicStatusWrite !== null
+      || statusRecoveryReadyScope !== topicStatusRecoveryScope;
+    if (!hasPendingStatusRecovery) return undefined;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [pendingTopicStatusWrite, statusRecoveryReadyScope, statusUpdating, topicStatusRecoveryScope]);
+
+  const leaveWithPendingStatusRecovery = useCallback(() => {
+    const attempt = pendingStatusLeaveAttempt;
+    setPendingStatusLeaveAttempt(null);
+    if (!attempt) return;
+    let continued = false;
+    const continueOnce = () => {
+      if (continued) return;
+      continued = true;
+      pendingRouteStayRef.current = null;
+      attempt.proceed();
+    };
+    pendingRouteStayRef.current = attempt.stay;
+    void requestTopicLeave(continueOnce)
+      .then((result) => {
+        if (result.decision === 'proceeded') continueOnce();
+      })
+      .catch(attempt.stay);
+  }, [pendingStatusLeaveAttempt, requestTopicLeave]);
 
   const handleContinueTopicEditing = useCallback(() => {
     continueTopicEditing();
@@ -948,7 +1236,7 @@ export default function TopicDetail() {
     { status: 'completed', label: '完成归档', icon: CheckCircle },
   ];
 
-  const nextStatuses: Record<string, string> = {
+  const nextStatuses: Record<string, Topic['status']> = {
     pending: 'approved',
     approved: 'production',
     production: 'shooting',
@@ -1063,6 +1351,8 @@ export default function TopicDetail() {
     ...topicEditorBranch,
     readonly: !canEditTopic || !editOutline || topicSaveRecoveryMode !== 'none',
   };
+  const statusWritePendingForCurrentTopic = pendingTopicStatusWrite?.topicId === topic.id;
+  const statusWriteLocked = pendingTopicStatusWrite !== null || statusRecoveryReadyScope !== topicStatusRecoveryScope;
 
   return (
     <div
@@ -1070,6 +1360,7 @@ export default function TopicDetail() {
       data-topic-dirty={isTopicDirty ? 'true' : 'false'}
       data-topic-manual-runtime={hasTopicManualRuntimeHandle ? 'ready' : 'unavailable'}
       data-topic-leave-state={topicLeaveState}
+      data-topic-status-recovery={pendingTopicStatusWrite?.kind ?? 'none'}
       data-topic-editor-mode={topicEditorBranch.topicEditorMode}
     >
       <div className="flex items-center gap-4">
@@ -1509,15 +1800,33 @@ export default function TopicDetail() {
             {canEditTopic && !missingCurrentStageRecord && (topic.status === 'shooting' || topic.status === 'publishing') && (
               <button
                 onClick={() => handleUpdateStatus(nextStatuses[topic.status])}
-                disabled={statusUpdating || topicSaveRecoveryMode !== 'none'}
+                disabled={statusUpdating || statusWriteLocked || verifyingTopicStatus || topicSaveRecoveryMode !== 'none'}
                 aria-busy={statusUpdating}
                 className="xmt-btn xmt-btn-primary"
               >
                 <ArrowRight className="w-4 h-4" />
-                {statusUpdating ? '阶段处理中…' : '推进到下一阶段'}
+                {statusUpdating ? '阶段处理中…' : statusWriteLocked ? '先核实状态' : '推进到下一阶段'}
               </button>
             )}
           </div>
+          {pendingTopicStatusWrite ? (
+            <div
+              role="alert"
+              data-testid="topic-status-recovery"
+              className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm text-studio-amber-contrast"
+            >
+              <span>
+                {verifyingTopicStatus
+                  ? `正在只读核实选题 #${pendingTopicStatusWrite.topicId} 的状态…`
+                  : statusWritePendingForCurrentTopic
+                    ? statusVerificationNotice
+                    : `选题 #${pendingTopicStatusWrite.topicId} 的阶段更新结果尚未确认；状态写入已暂停。`}
+              </span>
+              <ActionButton type="button" variant="secondary" disabled={verifyingTopicStatus} onClick={() => void verifyPendingTopicStatusWrite()}>
+                {verifyingTopicStatus ? '核实中…' : '只读核实状态'}
+              </ActionButton>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -1694,6 +2003,20 @@ export default function TopicDetail() {
           系统检测到当前选题还有未保存的修改。保存完成后会自动前往你刚才选择的页面。
         </p>
       </BaseModal>
+
+      <ConfirmModal
+        open={pendingStatusLeaveAttempt !== null}
+        title="阶段更新结果尚未核实"
+        description="离开后，系统会保留本次阶段核实记录。重新打开此选题时会先只读读取服务器状态，不会自动重发阶段更新。"
+        confirmText="离开并保留核实记录"
+        cancelText="留在本页核实"
+        variant="warning"
+        onCancel={() => {
+          pendingStatusLeaveAttempt?.stay();
+          setPendingStatusLeaveAttempt(null);
+        }}
+        onConfirm={leaveWithPendingStatusRecovery}
+      />
     </div>
   );
 }

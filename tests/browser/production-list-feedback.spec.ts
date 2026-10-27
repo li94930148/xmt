@@ -13,9 +13,11 @@ type FixtureProduction = {
   topic_id: number;
   version: string;
   content: string;
+  content_json: string | null;
+  content_markdown: string | null;
   status: string;
   file_path: string;
-  operator_id: number;
+  operator_id: number | null;
   operator_name: string;
   topic_title: string;
   topic_status: string;
@@ -27,6 +29,8 @@ const originalProduction: FixtureProduction = {
   topic_id: topics[0].id,
   version: 'v1.0',
   content: '原始稿件内容',
+  content_json: '原始稿件内容',
+  content_markdown: '原始稿件内容',
   status: 'draft',
   file_path: '',
   operator_id: editor.id,
@@ -41,6 +45,12 @@ let createWrites = 0;
 const productionCreateRequests = new Map<string, { fingerprint: string; productionId: number }>();
 const productionCreateRequestIds: string[] = [];
 let updateWrites = 0;
+let failNextProductionUpdateWithoutCommit = false;
+let commitNextProductionUpdateAndFail = false;
+let failNextProductionDetailRead = false;
+let failNextProductionListRead = false;
+let changeNextProductionDetailRead: Partial<FixtureProduction> | null = null;
+let productionDetailReadAttempts = 0;
 let qaProductionListEnabled = false;
 let productionTotalOverride: number | null = null;
 const mutationDelayMs = 180;
@@ -64,9 +74,53 @@ app.get('/api/workflow/production', (req, res) => {
   if (!qaProductionListEnabled || req.query.page === undefined) {
     return res.json({ data: [], total: 0, page: 1, limit: 12 });
   }
+  if (failNextProductionListRead) {
+    failNextProductionListRead = false;
+    return res.status(503).json({ message: '隔离验收：确认写入后的列表读取失败' });
+  }
   const page = Number(req.query.page) || 1;
   const limit = Number(req.query.limit) || 20;
   return res.json({ data: productions.slice((page - 1) * limit, page * limit), total: productionTotalOverride ?? productions.length, page, limit });
+});
+app.get('/api/workflow/production/:id', (req, res) => {
+  productionDetailReadAttempts += 1;
+  if (failNextProductionDetailRead) {
+    failNextProductionDetailRead = false;
+    return res.status(503).json({ message: '隔离验收：创作详情只读核实失败' });
+  }
+  const production = productions.find((item) => item.id === Number(req.params.id));
+  if (!production) return res.status(404).json({ message: '创作记录不存在' });
+  if (changeNextProductionDetailRead) {
+    Object.assign(production, changeNextProductionDetailRead);
+    changeNextProductionDetailRead = null;
+  }
+  return res.json(production);
+});
+app.post('/__qa-production/fail-next-production-update-without-commit', (_req, res) => {
+  failNextProductionUpdateWithoutCommit = true;
+  return res.json({ ok: true });
+});
+app.post('/__qa-production/commit-next-production-update-and-fail', (_req, res) => {
+  commitNextProductionUpdateAndFail = true;
+  return res.json({ ok: true });
+});
+app.post('/__qa-production/fail-next-production-detail-read', (_req, res) => {
+  failNextProductionDetailRead = true;
+  return res.json({ ok: true });
+});
+app.post('/__qa-production/fail-next-production-list-read', (_req, res) => {
+  failNextProductionListRead = true;
+  return res.json({ ok: true });
+});
+app.post('/__qa-production/change-next-production-detail-read', (req, res) => {
+  changeNextProductionDetailRead = req.body as Partial<FixtureProduction>;
+  return res.json({ ok: true });
+});
+app.post('/__qa-production/set-production-operator-null/:id', (req, res) => {
+  const production = productions.find((item) => item.id === Number(req.params.id));
+  if (!production) return res.status(404).json({ message: '创作记录不存在' });
+  production.operator_id = null;
+  return res.json({ ok: true });
 });
 app.get('/api/workflow/production/create-request/:requestId', (req, res) => {
   const request = productionCreateRequests.get(String(req.params.requestId).toLowerCase());
@@ -136,13 +190,25 @@ app.put('/api/workflow/production/:id', async (req, res) => {
   const id = Number(req.params.id);
   const production = productions.find((item) => item.id === id);
   if (!production) return res.status(404).json({ message: '创作记录不存在' });
+  if (failNextProductionUpdateWithoutCommit) {
+    failNextProductionUpdateWithoutCommit = false;
+    return res.status(503).json({ message: '隔离验收：创作修改未提交，响应不确定' });
+  }
   Object.assign(production, {
     topic_id: Number(req.body?.topic_id),
     version: String(req.body?.version ?? production.version),
     content: String(req.body?.content ?? production.content),
+    content_json: String(req.body?.content ?? production.content),
+    content_markdown: String(req.body?.content ?? production.content),
     status: String(req.body?.status ?? production.status),
+    operator_id: editor.id,
+    operator_name: editor.name,
     updated_at: '2026-10-09 10:30:00',
   });
+  if (commitNextProductionUpdateAndFail) {
+    commitNextProductionUpdateAndFail = false;
+    return res.status(503).json({ message: '隔离验收：创作修改已提交但响应丢失' });
+  }
   io.to('production').emit('production:updated', { id });
   await new Promise((resolve) => setTimeout(resolve, mutationDelayMs));
   return res.json({ message: '创作记录已更新' });
@@ -181,7 +247,7 @@ try {
   });
   page.on('response', (response) => {
     if (response.status() < 400) return;
-    const description = `${response.status()} ${response.url()}`;
+    const description = `${response.request().method()} ${response.status()} ${response.url()}`;
     if (response.url().includes('/api/workflow/production') && [404, 503].includes(response.status())) expectedHttpErrors.push(description);
     else errors.push(`Unexpected HTTP error: ${description}`);
   });
@@ -203,12 +269,18 @@ try {
   type HeldProductionRead = { page: number; respond: (status: number, data?: FixtureProduction[], total?: number) => Promise<void> };
   const heldProductionReads: HeldProductionRead[] = [];
   const heldReadWaiters: Array<{ count: number; resolve: () => void }> = [];
-  const waitForHeldProductionReads = (count: number) => new Promise<void>((resolve) => {
+  const waitForHeldProductionReads = (count: number) => new Promise<void>((resolve, reject) => {
     if (heldProductionReads.length >= count) {
       resolve();
       return;
     }
-    heldReadWaiters.push({ count, resolve });
+    const timeout = setTimeout(() => {
+      reject(new Error(`Timed out waiting for held production reads: expected ${count}, received ${heldProductionReads.length}`));
+    }, 15_000);
+    heldReadWaiters.push({ count, resolve: () => {
+      clearTimeout(timeout);
+      resolve();
+    } });
   });
   const emitProductionCreated = async () => {
     const response = await fetch(`${base}/__qa-production/emit-created`, { method: 'POST' });
@@ -225,8 +297,17 @@ try {
     const result = await response.json() as { count: number };
     return result.count > 0;
   });
+  let releaseCreatePost!: () => void;
+  let nextCreatePostGate: Promise<void> | null = null;
   const holdProductionListRoute = async (route: Route) => {
     const requestUrl = new URL(route.request().url());
+    if (route.request().method() === 'POST' && requestUrl.pathname === '/api/workflow/production' && nextCreatePostGate) {
+      const gate = nextCreatePostGate;
+      nextCreatePostGate = null;
+      await gate;
+      await route.continue();
+      return;
+    }
     if (route.request().method() !== 'GET' || !requestUrl.searchParams.has('page')) {
       await route.continue();
       return;
@@ -448,31 +529,34 @@ try {
   await page.getByPlaceholder('如：v1.0').fill('v1.1');
   await page.getByPlaceholder('请输入创作内容描述').fill('通过隔离浏览器验证的新增稿件。');
   await page.route('**/api/workflow/production**', holdProductionListRoute);
+  nextCreatePostGate = new Promise<void>((resolve) => { releaseCreatePost = resolve; });
   const createReadStart = heldProductionReads.length;
-  const createRequest = page.waitForResponse((response) => response.url().endsWith('/api/workflow/production') && response.request().method() === 'POST' && response.status() === 201);
+  const createRequestStarted = page.waitForRequest((request) => request.url().endsWith('/api/workflow/production') && request.method() === 'POST', { timeout: 60000 });
   const createButton = page.getByRole('button', { name: '保存', exact: true });
   await createButton.evaluate((button) => {
     (button as HTMLButtonElement).click();
     (button as HTMLButtonElement).click();
   });
-  const pendingCreateButton = page.getByRole('button', { name: '保存中...', exact: true });
-  await pendingCreateButton.waitFor();
-  assert.equal(await pendingCreateButton.isDisabled(), true, 'create is visibly locked while the confirmed server write is pending');
-  await page.keyboard.press('Escape');
-  assert.equal(await page.getByRole('dialog', { name: '添加创作记录' }).count(), 1, 'Escape cannot close the dialog while the create request is pending');
+  await page.getByRole('alert').filter({ hasText: '创建结果正在核实' }).waitFor();
+  assert.equal(await page.getByRole('dialog', { name: '添加创作记录' }).count(), 0, 'the form closes as the durable recovery banner takes over');
+  assert.equal(await page.getByRole('button', { name: '添加创作' }).isDisabled(), true, 'other create writes stay locked while the original request is pending');
+  await createRequestStarted;
+  const createRequest = page.waitForResponse((response) => response.url().endsWith('/api/workflow/production') && response.request().method() === 'POST', { timeout: 15000 });
+  releaseCreatePost();
   await waitForHeldProductionReads(createReadStart + 1);
   assert.equal(heldProductionReads[createReadStart].page, 1, 'the create broadcast refresh reads the first page');
   const confirmedCreatedProduction = { ...originalProduction, id: 963, version: 'v1.1', content: '通过隔离浏览器验证的新增稿件。' };
   await heldProductionReads[createReadStart].respond(200, [confirmedCreatedProduction, originalProduction], 2);
   await page.getByText('共 2 条', { exact: false }).waitFor();
-  await createRequest;
+  const createResponse = await createRequest;
+  assert.equal(createResponse.status(), 201, `isolated create returns 201 after its delayed request; received ${createResponse.status()}`);
   await waitForHeldProductionReads(createReadStart + 2);
   assert.equal(heldProductionReads[createReadStart + 1].page, 1, 'the post-confirmation refresh remains on page one');
   await page.getByText('共 2 条', { exact: false }).waitFor();
   assert.equal(await page.getByText('共 3 条', { exact: false }).count(), 0, 'a successful socket refresh is not counted twice when the POST response arrives');
   await heldProductionReads[createReadStart + 1].respond(503);
   await page.getByText('创建成功', { exact: true }).waitFor();
-  await page.getByText('服务端已确认创作记录「创作列表反馈验收选题」（v1.1）已创建，但列表刷新失败；请重新加载列表确认，不要重复提交。', { exact: true }).waitFor();
+  await page.getByText('服务端已确认创作记录「创作列表反馈验收选题」已创建，但列表刷新失败；请重新加载列表确认，不要重复提交。', { exact: true }).waitFor();
   assert.equal(createWrites, 1, 'the server confirms one create before the list refresh fails');
   assert.equal(await page.getByText('创建成功', { exact: true }).count(), 1, 'double click produces one success notification');
   assert.equal(await page.getByRole('heading', { name: '添加创作记录', exact: true }).count(), 0, 'confirmed create closes the editor to prevent repeating the mutation');
@@ -548,6 +632,171 @@ try {
   assert.equal(updateWrites, 1, 'list retry does not repeat the confirmed update');
   await page.unroute('**/api/workflow/production**', holdProductionListRoute);
 
+  const ambiguousEditRow = page.locator('tbody tr')
+    .filter({ hasText: originalProduction.topic_title })
+    .filter({ hasText: 'v2.0' });
+  await ambiguousEditRow.getByTitle('编辑记录').click();
+  const ambiguousEditDialog = page.getByRole('dialog', { name: '编辑创作记录' });
+  await ambiguousEditDialog.waitFor();
+  await page.getByPlaceholder('如：v1.0').fill('v3.0');
+  await page.getByPlaceholder('请输入创作内容描述').fill('已提交但响应丢失的列表编辑');
+  await ambiguousEditDialog.locator('select').last().selectOption('review');
+  await page.request.post(`${base}/__qa-production/commit-next-production-update-and-fail`);
+  await page.request.post(`${base}/__qa-production/fail-next-production-list-read`);
+  const writesBeforeCommittedUpdate = updateWrites;
+  const detailReadsBeforeCommittedUpdate = productionDetailReadAttempts;
+  const committedUpdateResponse = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/production/${originalProduction.id}`)
+    && response.request().method() === 'PUT');
+  const committedUpdateReadback = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/production/${originalProduction.id}`)
+    && response.request().method() === 'GET' && response.status() === 200);
+  const confirmedUpdateListFailure = page.waitForResponse((response) => response.url().includes('/api/workflow/production?')
+    && response.request().method() === 'GET' && response.status() === 503);
+  await page.getByRole('button', { name: '更新', exact: true }).click();
+  assert.equal((await committedUpdateResponse).status(), 503, 'the isolated server commits the list update before returning 503');
+  await committedUpdateReadback;
+  await page.getByText('更新结果已核实', { exact: true }).waitFor();
+  await confirmedUpdateListFailure;
+  await page.getByText('服务端已确认创作记录「创作列表反馈验收选题」已保存，但列表刷新失败；请重新加载列表确认，不要重复提交。', { exact: true }).waitFor();
+  assert.equal(updateWrites, writesBeforeCommittedUpdate + 1, 'a committed update with a lost response is sent only once');
+  assert.equal(productionDetailReadAttempts, detailReadsBeforeCommittedUpdate + 1, 'the committed update is reconciled with exactly one detail GET');
+  assert.equal(await page.getByRole('dialog', { name: '编辑创作记录' }).count(), 0, 'read-back confirmation closes the edit modal');
+  assert.equal(await page.getByText('更新失败', { exact: true }).count(), 0, 'a committed update is not reported as failed when only list refresh fails');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-update-pending:v1:user:96')), null,
+    'confirmed update clears its recovery marker');
+  const confirmedUpdateListRetryResponse = page.waitForResponse((response) => response.url().includes('/api/workflow/production?')
+    && response.request().method() === 'GET' && response.status() === 200);
+  await page.getByRole('button', { name: '重新加载列表', exact: true }).click();
+  await confirmedUpdateListRetryResponse;
+  await page.getByText('v3.0', { exact: true }).waitFor();
+  assert.equal(updateWrites, writesBeforeCommittedUpdate + 1, 'retrying the failed list GET does not repeat the confirmed update');
+
+  const nullOperatorResponse = await page.request.post(`${base}/__qa-production/set-production-operator-null/${originalProduction.id}`);
+  assert.equal(nullOperatorResponse.status(), 200, 'the isolated fixture restores a legacy row with no operator ID');
+  const nullOperatorRecordResponse = await page.request.get(`${base}/api/workflow/production/${originalProduction.id}`);
+  assert.equal(nullOperatorRecordResponse.status(), 200, 'the isolated fixture can read the legacy record after clearing its operator ID');
+  assert.equal((await nullOperatorRecordResponse.json() as FixtureProduction).operator_id, null,
+    'the server returns the legacy null operator ID before the next update recovery');
+  await page.setViewportSize({ width: 1440, height: 960 });
+  const nullOperatorListRead = page.waitForResponse((response) => response.url().includes('/api/workflow/production?')
+    && response.request().method() === 'GET' && response.status() === 200);
+  await page.reload();
+  await nullOperatorListRead;
+  await page.getByText('v3.0', { exact: true }).waitFor();
+
+  const uncertainEditRow = page.locator('tbody tr')
+    .filter({ hasText: originalProduction.topic_title })
+    .filter({ hasText: 'v3.0' });
+  await uncertainEditRow.getByTitle('编辑记录').click();
+  const uncertainEditDialog = page.getByRole('dialog', { name: '编辑创作记录' });
+  await uncertainEditDialog.waitFor();
+  await page.getByPlaceholder('如：v1.0').fill('v4.0');
+  await page.getByPlaceholder('请输入创作内容描述').fill('未确认后等待明确重试的列表编辑');
+  await page.request.post(`${base}/__qa-production/fail-next-production-update-without-commit`);
+  await page.request.post(`${base}/__qa-production/fail-next-production-detail-read`);
+  const writesBeforeFailedReadback = updateWrites;
+  const notCommittedUpdateResponse = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/production/${originalProduction.id}`)
+    && response.request().method() === 'PUT');
+  const failedUpdateReadback = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/production/${originalProduction.id}`)
+    && response.request().method() === 'GET' && response.status() === 503);
+  await page.getByRole('button', { name: '更新', exact: true }).click();
+  assert.equal((await notCommittedUpdateResponse).status(), 503, 'the isolated server rejects the next update before commit');
+  await failedUpdateReadback;
+  await page.getByText('更新结果尚未确认', { exact: false }).waitFor();
+  assert.equal(updateWrites, writesBeforeFailedReadback + 1, 'a failed read-back does not automatically send another PUT');
+  assert.equal(await page.getByRole('button', { name: '添加创作' }).isDisabled(), true, 'create writes stay locked while update status is unknown');
+  assert.equal(await page.locator('tbody tr')
+    .filter({ hasText: originalProduction.topic_title })
+    .filter({ hasText: 'v3.0' })
+    .getByTitle('编辑记录').isDisabled(), true,
+    'row editing stays locked while update status is unknown');
+  const failedReadObservation = await page.getByRole('alert').innerText();
+  assert.match(failedReadObservation, /写入已锁定/);
+  assert.ok(await page.evaluate(() => sessionStorage.getItem('xmt:production-update-pending:v1:user:96')),
+    'the ambiguous patch and original record snapshot survive a failed status read');
+  await page.request.post(`${base}/__qa-production/fail-next-production-detail-read`);
+  const manualUpdateReadbackFailure = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/production/${originalProduction.id}`)
+    && response.request().method() === 'GET' && response.status() === 503);
+  await page.getByRole('button', { name: '只读核实更新状态' }).click();
+  await manualUpdateReadbackFailure;
+  assert.equal(updateWrites, writesBeforeFailedReadback + 1, 'an explicit read-only check still does not resubmit the update');
+  assert.ok(await page.evaluate(() => sessionStorage.getItem('xmt:production-update-pending:v1:user:96')),
+    'a second failed check keeps the recovery marker available for reload');
+  const updateReadsBeforeReload = productionDetailReadAttempts;
+  const updateWritesBeforeReload = updateWrites;
+  await page.setViewportSize({ width: 1440, height: 960 });
+  const reloadUpdateReadback = page.waitForRequest((request) => request.url().endsWith(`/api/workflow/production/${originalProduction.id}`)
+    && request.method() === 'GET', { timeout: 10_000 }).catch(() => null);
+  await page.reload();
+  const reloadUpdateRequest = await reloadUpdateReadback;
+  if (!reloadUpdateRequest) {
+    const reloadState = await page.evaluate((storageKey) => {
+      const savedUser = localStorage.getItem('xmt_user');
+      let userId: number | null = null;
+      try { userId = Number(JSON.parse(savedUser || 'null')?.id) || null; } catch { userId = null; }
+      return {
+        url: location.href,
+        readyState: document.readyState,
+        pendingMarkerPresent: sessionStorage.getItem(storageKey) !== null,
+        userId,
+        body: document.body.innerText.slice(0, 1000),
+      };
+    }, 'xmt:production-update-pending:v1:user:96');
+    assert.fail(`reload recovery did not issue the expected read-only detail GET: ${JSON.stringify(reloadState)}`);
+  }
+  const reloadUpdateResponse = await reloadUpdateRequest.response();
+  assert(reloadUpdateResponse, 'the reload recovery detail request receives a response');
+  assert.equal(reloadUpdateResponse.status(), 200,
+    `reload recovery GET should succeed; received ${reloadUpdateResponse.status()} from ${reloadUpdateResponse.url()} at ${page.url()}`);
+  await page.getByRole('dialog', { name: '编辑创作记录' }).waitFor();
+  assert.equal(productionDetailReadAttempts, updateReadsBeforeReload + 1, 'reload restores the pending update with one automatic read-only GET');
+  assert.equal(updateWrites, updateWritesBeforeReload, 'reload recovery never automatically resends the update');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-update-pending:v1:user:96')), null,
+    'a read-back confirming the original legacy row clears the recovery marker');
+  await page.getByRole('dialog', { name: '编辑创作记录' }).waitFor();
+  assert.equal(await page.getByPlaceholder('如：v1.0').inputValue(), 'v4.0', 'an unchanged readback restores the requested version');
+  assert.equal(await page.getByPlaceholder('请输入创作内容描述').inputValue(), '未确认后等待明确重试的列表编辑', 'an unchanged readback restores the edit body');
+  assert.equal(updateWrites, writesBeforeFailedReadback + 1, 'read-only verification does not resubmit the update');
+  assert.equal(await page.getByRole('button', { name: '添加创作', exact: true, includeHidden: true }).isDisabled(), false,
+    'writes unlock after read-back confirms the original record is unchanged');
+  const explicitUpdateRetry = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/production/${originalProduction.id}`)
+    && response.request().method() === 'PUT' && response.status() === 200);
+  await page.getByRole('button', { name: '更新', exact: true }).click();
+  await explicitUpdateRetry;
+  await page.getByText('更新成功', { exact: true }).waitFor();
+  assert.equal(updateWrites, writesBeforeFailedReadback + 2, 'only the user-confirmed retry sends a second update PUT');
+
+  const changedEditRow = page.locator('tbody tr')
+    .filter({ hasText: originalProduction.topic_title })
+    .filter({ hasText: 'v4.0' });
+  await changedEditRow.getByTitle('编辑记录').click();
+  const changedEditDialog = page.getByRole('dialog', { name: '编辑创作记录' });
+  await changedEditDialog.waitFor();
+  await page.getByPlaceholder('如：v1.0').fill('v5.0');
+  await page.getByPlaceholder('请输入创作内容描述').fill('保留待核对的第三方变化前草稿');
+  await page.request.post(`${base}/__qa-production/commit-next-production-update-and-fail`);
+  await page.request.post(`${base}/__qa-production/change-next-production-detail-read`, {
+    data: { operator_id: 97, status: 'rejected', content: '第三方最新正文', updated_at: '2026-10-09 11:00:00' },
+  });
+  const writesBeforeThirdPartyChange = updateWrites;
+  const changedUpdateResponse = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/production/${originalProduction.id}`)
+    && response.request().method() === 'PUT');
+  const changedUpdateReadback = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/production/${originalProduction.id}`)
+    && response.request().method() === 'GET' && response.status() === 200);
+  await page.getByRole('button', { name: '更新', exact: true }).click();
+  assert.equal((await changedUpdateResponse).status(), 503, 'the third-party scenario begins with a committed update and lost response');
+  await changedUpdateReadback;
+  await page.getByText('服务器记录在本次保存前后发生了其他变化', { exact: false }).waitFor();
+  assert.equal(updateWrites, writesBeforeThirdPartyChange + 1, 'a changed server record does not trigger a second PUT');
+  assert.equal(await page.getByRole('button', { name: '添加创作' }).isDisabled(), true, 'third-party changes keep create writes locked');
+  await page.getByRole('button', { name: '保留草稿并基于最新记录继续' }).click();
+  await page.getByRole('dialog', { name: '编辑创作记录' }).waitFor();
+  assert.equal(await page.getByPlaceholder('请输入创作内容描述').inputValue(), '保留待核对的第三方变化前草稿', 'explicit conflict resolution preserves the local draft');
+  assert.equal(await page.getByPlaceholder('如：v1.0').inputValue(), 'v5.0', 'explicit conflict resolution preserves the requested version');
+  assert.equal(updateWrites, writesBeforeThirdPartyChange + 1, 'choosing to preserve the draft does not itself write');
+  assert.equal(await page.getByRole('button', { name: '添加创作', exact: true, includeHidden: true }).isDisabled(), false,
+    'explicit resolution releases the write lock');
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+
   const fillCreateForm = async (version: string, content: string) => {
     await page.getByRole('button', { name: '添加创作', exact: false }).click();
     await page.locator('select').first().selectOption(String(topics[0].id));
@@ -573,8 +822,10 @@ try {
 
   const uncommittedCreateCount = createWrites;
   await fillCreateForm('v3.1', '未提交后等待显式安全重试的稿件');
+  let failUncommittedCreateRequest = true;
   await page.route('**/api/workflow/production', async (route) => {
-    if (route.request().method() === 'POST') {
+    if (route.request().method() === 'POST' && failUncommittedCreateRequest) {
+      failUncommittedCreateRequest = false;
       await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '隔离测试模拟请求未到达服务端' }) });
       return;
     }
@@ -625,7 +876,11 @@ try {
   assert.equal(createWrites, reloadCreateCount + 1, 'reload performs read-only recovery and does not repeat the create');
   await page.unroute('**/api/workflow/production**');
 
-  assert.equal(expectedHttpErrors.length, 10, 'only the five pre-existing list failures and five expected create/status responses return errors');
+  assert.equal(expectedHttpErrors.length, 16, `only the injected list, update and create-recovery fixtures return errors: ${JSON.stringify(expectedHttpErrors)}`);
+  assert.equal(expectedHttpErrors.filter((description) => description.includes('GET ') && description.includes('/api/workflow/production?')).length, 6, 'the six expected list-read failures are the injected stale/read-recovery fixtures');
+  assert.equal(expectedHttpErrors.filter((description) => description.includes('GET ') && /\/api\/workflow\/production\/\d+$/.test(description.split(' ').at(-1) || '')).length, 2, 'the two expected detail-read failures are injected update-recovery fixtures');
+  assert.equal(expectedHttpErrors.filter((description) => description.startsWith('PUT 503 ') && /\/api\/workflow\/production\/\d+$/.test(description.split(' ').at(-1) || '')).length, 3, 'the three expected update failures simulate ambiguous before-commit and after-commit responses');
+  assert.equal(expectedHttpErrors.filter((description) => description.startsWith('POST 503 ') && description.endsWith('/api/workflow/production')).length, 3, 'the three expected create POST failures are injected lost or uncommitted responses');
   assert.equal(expectedHttpErrors.filter((description) => description.includes('/create-request/')).length, 2, 'create recovery only expects the missing-key 404 and one injected status-read 503');
   assert.deepEqual(errors, [], 'the production list and create-recovery flows render without unexpected browser errors');
   assert.deepEqual(errors, [], 'the production list flow renders without unexpected browser errors');

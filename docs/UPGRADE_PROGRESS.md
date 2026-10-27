@@ -1,39 +1,57 @@
 # XMT 升级阶段记录
 
-## 2026-10-27 清单 B4：编辑器链接/图片输入与批注提示（v9.4.11，本地）
+## 2026-10-27 清单 B8：写入结果核实与离页保护（v9.4.13，本地未部署）
+
+- **改造内容**：创作管理列表编辑在发送前按账号保存待核实快照，保留现有 `expected_content` 与 `version_action: 'none'`；网络/超时/限流/服务端异常或无效成功响应后只读读取详情，目标值匹配才确认成功，原值匹配时保留草稿并允许用户明确重试，第三方变化时锁定普通写入并要求明确处理。兼容历史创作记录 `operator_id = null`。选题阶段状态按账号和选题保存 session 标记；刷新、损坏或过期标记均先只读读取服务器状态，不自动重发，站内离页和刷新前均保留/提示未决核实。桌面系统设置、桌面个人资料、移动个人资料以及桌面/移动通知偏好增加结果恢复与离页保护；移动改密结果不确定时锁定重复提交，密码不落地保存，并提示退出后重新登录核验。匿名意见回执继续按用户确认保留至意见删除时清除；若旧编号的回执不存在，恢复流程不再复用该编号，而是保留内容并要求用户明确开始新提交，以免恢复已删除意见。
+- **手工核验**：Chrome DevTools MCP 的本地隔离创作夹具复核“服务端已提交但返回 503”后通过详情 GET 确认，无重复 PUT；将旧记录操作人编号设为 null 后模拟未提交 503，系统正确恢复原编辑草稿；模拟首次详情核实失败后刷新，session 标记触发只读 GET，恢复原记录且无自动 PUT。选题阶段夹具模拟未提交 503 和首次只读 GET 503 后，阶段按钮保持锁定；离页弹窗可取消，刷新时 session 标记只触发只读 GET，确认服务端仍为原阶段后解锁，未发送第二个状态 POST。beforeunload 事件也被拦截。之前的隔离 Chrome 手工证据还覆盖手机通知偏好离页取消/放弃和桌面通知设置离页保护。没有连接真实账号、生产服务或业务数据库。
+- **自动化与边界**：本地隔离 Chromium 浏览器套件已通过：`test:topic-stage-record-repair-browser`、`test:mobile-work-center-browser`（320/390px）、`test:production-list-feedback-browser`、`test:system-settings-browser`、`test:mobile-notification-settings-browser`、`test:anonymous-feedback-theme-browser`。阶段恢复与手动保存回归确认普通保存在结果待核实期间锁定；只有专用明确重试操作才产生第二次写入。系统设置品牌保存回归覆盖 503 后只读核实与明确覆盖。Chrome DevTools MCP 仍用于创作记录提交后响应丢失、历史空操作人、刷新恢复以及阶段离页保护的手工复核。以上仅使用本机隔离夹具，没有真实业务账号、数据库或生产写入。用户确认听到首页今日任务、灵感数量和关注事项加载提示；真实语音证据只覆盖这三条首页提示，不代表全站 VoiceOver 验收。Android 原生专项按用户要求后置。
+- **验证结果**：`npm run check -- --pretty false`、`npm run build`、定向 ESLint（0 错误，9 条 hook/unused 警告）、`npm run test:production-list-update`、`npm run test:system-settings`、匿名意见提交恢复 HTTP/迁移/sessionStorage 回归、以上六项浏览器套件、`npm run version:check`、更新说明治理（528 个版本）、测试入口检查（291 个文件）及 `git diff --check` 通过。生产构建保留既有 Silk 843.50 kB 大分包提示。Android 元数据为 v9.4.13 / 90413，未构建 APK。
+- **部署状态**：仅本地修改，未提交、推送或部署。整体 B8/B4/B5 清单仍有未完成项；Android 原生专项按用户要求后置。
+
+## 2026-10-27 清单 B5：移动与桌面操作及卡片悬停反馈（v9.4.12，本地未部署）
+
+- **改造内容**：移动工作中心、选题列表与成片列表卡片采用共享卡片悬停状态；工作入口、选题提报本机草稿/提交、选题详情保存、开始审核、审核确认及创作阶段推进等主要操作统一使用 Studio 主/次按钮状态。选题详情资料重试和大纲历史入口补齐按钮基础样式。桌面选题创建结果恢复、内容动态“查看”、创作者趋势周期切换和创作者工作台“查看完整趋势”也采用共享按钮状态。新增减少动态效果规则，在用户启用系统减少动态效果时抑制 `.xmt-btn` 与 `.xmt-card` 的悬停/按压位移，同时保留颜色反馈。操作处理器、权限和写入行为不变。浏览器隔离夹具增加 `mode=no-create` 参数，便于检查没有提报权限时的 403 恢复按钮。
+- **浏览器核验**：Google Chrome 经 Playwright MCP 与 Chrome DevTools MCP 在隔离夹具中仅悬停，不点击提交、保存、审核或导航按钮。390×844 下核验移动工作中心卡片、选题卡片、成片卡片、移动主操作与资料重试；卡片尺寸保持不变，hover 边框/阴影变化。移动提报、选题保存、审核入口、工作中心和列表主要按钮均呈现主题反馈。Creator Trends 的 7/30/90 周期按钮，以及 Creator Dashboard“查看完整趋势”在浅/深主题下反馈正常。1440×900 桌面夹具核验选题创建 `not_found` 的主/次恢复按钮及内容动态“查看”按钮。320×844 下文档宽度 312px、无横向溢出。新增减少动态效果规则后，在 390×844 深色视口启用 `prefers-reduced-motion: reduce` 并悬停移动资料重试按钮：主题背景/边框仍变化、`transform: none`，页面无横向溢出。公告发布、404 返回工作台和 403 返回首页按钮作为对照也有主题反馈。悬停交互期间未触发业务写入；唯一 POST 是 Socket.IO polling 握手。控制台唯一错误是夹具注入资源读取 503 所产生的预期失败，没有额外运行错误。以上为 MCP 手工证据，不计作仓库 Playwright suite 通过。
+- **修改文件**：`src/index.css`、`src/pages/creator-center/CreatorDashboard.tsx`、`src/pages/creator-center/CreatorTrends.tsx`、`src/pages/mobile/MobileAddTopic.tsx`、`src/pages/mobile/MobileTopicDetail.tsx`、`src/pages/mobile/MobileWorkHub.tsx`、`src/pages/mobile/MobileProduction.tsx`、`src/pages/mobile/MobileTopics.tsx`、`src/pages/AddTopic.tsx`、`src/pages/ContentTimelineView.tsx`、`tests/browser/creator-topic-suggestions.spec.ts` 及版本、更新说明和改造记录。
+- **影响边界**：无 API、权限、数据库或业务数据变化；只使用本机隔离内存 fixture，没有真实账号/数据库访问。版本为 v9.4.12 / Android 元数据 90412；没有构建 Android 安装包。依用户此前要求，本轮不提交、不推送、不部署。
+- **验证结果**：`npm run check -- --pretty false`、本批变更 TypeScript 文件定向 ESLint（0 errors）、`npm run build`、`npm run version:check`、版本/更新说明治理（527 个版本）、测试入口检查（291 个文件）与 `git diff --check` 通过。构建保留既有 Silk 843.50 kB 大分包提示。仓库 Chromium 自动套件未运行；本轮通过 Playwright MCP 与 Chrome DevTools MCP 在 Google Chrome 手工悬停核验，结果不冒充自动 suite 通过。
+- **未完成与下一步**：本条只覆盖已列页面和操作，不代表 B5 全站关闭。待审查项仍包括 CreatorWorks/CreatorWorkDetail 的只读重试、AuthRolloutStatus“重新检查”、移动筛选/查看/分页以及移动稿件编辑器和通知设置的返回操作，并继续核对徽标、错误/空态、主题与辅助技术。用户确认的 VoiceOver 语音证据只覆盖首页三条加载提示；Android 原生专项后置。
+
+## 2026-10-27 清单 B4：编辑器链接/图片输入与批注提示（v9.4.11，已部署）
 
 - **改造内容**：工具栏、气泡菜单、右键菜单和浮动菜单中的链接/图片地址输入改用可访问的 Studio 弹窗，确认后恢复编辑器焦点并应用到原文字选区/光标，取消不改正文。无选区添加批注时显示站内状态通知。全仓编辑器源码不再调用原生 `window.prompt` 或 `alert`。
 - **浏览器核验**：隔离夹具中确认链接地址取消后不改正文；确认 URL 后链接应用到选择的文字。图片弹窗取消后没有内容变化。Playwright MCP 页面检查确认无选区批注通知由主工具栏触发并显示；Chrome DevTools MCP 确认 Shift+F10 右键菜单可打开新链接弹窗，主工具栏更多菜单可打开图片弹窗。独立手工运行覆盖了主工具栏与右键入口；气泡菜单和浮动菜单的运行时点击未单独验收，已由类型检查、定向 lint 和构建覆盖源码正确性。仓库浏览器套件已尝试运行，但 Chromium 在启动阶段报 macOS `bootstrap_check_in … Permission denied (1100)` 并退出，未进入断言，不计自动化通过。
 - **验证结果**：`npm run check`、目标文件 ESLint、`npm run build`、`npm run test:base-modal-accessibility`（2 项）、`npm run test:production-review`、匿名意见提交恢复 HTTP/迁移/sessionStorage 测试、回执库存测试、API 合同测试、`npm run test:entrypoints`（291 个文件）、`npm run test:changelog-governance`（526 个版本）、`npm run version:check` 与 `git diff --check` 通过。生产构建有既有 Silk 843.50 kB 大分包提示。
-- **边界**：本版本没有 API 或数据库变更；匿名意见提交回执继续按用户确认永久保留、随意见删除，迁移 066 只在隔离 SQLite 验证。Android 元数据为 9.4.11 / 90411，未构建 APK。本地修改，不提交、推送或部署。
+- **边界**：编辑器输入改造本身没有 API 或数据库变更；v9.4.11 合并发布同时包含 v9.4.8 的匿名意见恢复 API 与 SAFE_EXPAND 迁移 066。回执不自动过期、随意见删除，按用户确认口径执行。Android 元数据为 9.4.11 / 90411，GitHub CI 生成 Debug 验收 APK artifact，未发布 Android 安装包。
+- **合并与部署**：PR #90 六项 CI 全部通过并合并；精确合并 SHA `fdc787e1df4df07597b395dbe35f404d06573c28`，标签 `v9.4.11` 指向同一 SHA。受保护部署备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261027-163909-3692855.db`；Restore Drill PASS、66 项迁移兼容检查 GO（迁移 066 已 applied）、权威运行环境检查与读回 PASS、4 条公网内部路由均为 404。PM2 v9.4.11 online、Caddy active；服务器与公网健康 API 返回 v9.4.11，公开首页 HTTP 200；SQLite `quick_check=ok`、外键违规 0。服务器 `main` 与合并 SHA 一致且工作区干净。
 - **未完成与下一步**：继续核对改造清单中 B4/B5 剩余响应式、主题和辅助技术验收，以及 B8 其他写入恢复路径；首页 VoiceOver 语音确认仍只覆盖首页三条加载提示。Android 原生专项按用户要求后置。
 
-## 2026-10-27 清单 B4/B5：站内确认弹窗统一与辅助技术复核（v9.4.10，本地）
+## 2026-10-27 清单 B4/B5：站内确认弹窗统一与辅助技术复核（v9.4.10，随 v9.4.11 合并部署）
 
 - **改造内容**：模板、本机选题草稿、选题批量删除和灵感删除，以及复盘快照/摘要替换、复盘发布/归档、发布剧本和移动端编辑器离开未保存内容的站内确认统一使用 Studio `ConfirmModal`。取消保留当前数据或页面，确认后执行既有操作；既有权限、服务端结果恢复、删除语义和本地草稿范围保持不变。浏览器刷新/关闭页面时的原生 `beforeunload` 提示仍由浏览器控制。全仓源码检索未发现 `confirm()` 调用。
 - **浏览器核验**：Playwright MCP 隔离夹具覆盖复盘快照替换、发布、归档、本地摘要恢复、编辑器离开；选题批量删除与灵感删除的取消无业务写入，明确确认才调用原操作；发布详情离开取消保留路由和脚本，确认后才离开。模板和本机草稿确认/取消此前已在隔离夹具复核。补充在 390×844 Android 模拟视口（先设窄屏再加载，使应用初始化为移动布局）手工核验移动选题与制作编辑器：取消离开分别保留 `/topics/933` 的本机标题草稿及 `/production/content/new` 的正文草稿；确认后才离开；新建稿件离开后通过“开始写稿”恢复正文。Chrome DevTools MCP 截图确认制作页弹窗在窄屏可读、按钮可操作；两条流程仅有 GET 读取、无业务写入，视口无横向溢出，控制台无错误/警告。仓库自动 Chromium suite 本轮未运行；既往启动受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断、未进入断言。
 - **验证结果**：`npm run check`、`npm run build`、`npm run version:check`、`npm run test:changelog-governance`（525 个版本）、`npm run test:entrypoints`（291 个文件）、本批产品代码和浏览器用例的定向 ESLint、最终 `git diff --check` 均通过；生产构建保留既有 843.50 kB Silk 分包提示。
 - **VoiceOver**：按授权临时开启 VoiceOver 后，用户确认听到了首页今日任务、灵感数量和关注事项的加载提示；随后已恢复关闭。该真实语音证据仅覆盖首页这三条提示，不代表全站语音验收完成。
 - **匿名意见边界复核**：用户确认首次提交恢复回执不自动过期，仅在对应意见被删除时清除；v9.4.8 现有实现/迁移与文档记录遵循此口径。本条是已确认规则，不表示本批次新增改动或生产数据操作。
-- **影响边界**：站内确认组件替换不更改服务端 API、权限或业务操作；匿名意见迁移 066 仍只在临时隔离 SQLite 验证。Android 元数据为 9.4.10 / 90410，未构建 APK。本地修改，不提交、推送或部署。
+- **影响边界**：站内确认组件替换不更改服务端 API、权限或业务操作；匿名意见迁移 066 后随 v9.4.11 受保护部署应用。Android 元数据为 9.4.10 / 90410，未发布 Android 安装包。
 - **未完成与下一步**：继续 B4/B5 全站响应式、主题和辅助技术验收，以及 B8 其余写入路径；本次移动验收为模拟视口和 Android UA，不代表真机验收；VoiceOver 语音证据仍仅覆盖首页三条加载提示。Android 原生专项按用户要求后置。
 
-## 2026-10-27 清单 E：删除孤儿创作者数据页面（v9.4.9，本地）
+## 2026-10-27 清单 E：删除孤儿创作者数据页面（v9.4.9，随 v9.4.11 合并部署）
 
 - **改造内容**：删除 `src/pages/DouyinCreatorDataCenter.tsx`。全仓引用检索确认该文件没有路由导入或文件外使用；当前 `/analytics/creator-center/work/:id` 路由由 `src/pages/creator-center/CreatorWorkDetail.tsx` 处理，作品列表/工作台及 API helper 继续使用，不改现有深链、权限和数据读取。
 - **验证结果**：`npm run check`、`npm run build`、版本与更新说明治理、`git diff --check` 通过；删除后的生产 bundle 无需再包含该旧组件。构建输出中的现有大分包提示保持记录。
 - **清单 E 同批复核**：报告中心当前只有日报、周报、导出三个权限可见页签；Chrome 隔离夹具确认无独立的月报/总结占位页签。月报、年报归档仍由 `/daily-report/summary` 提供，页面只在相应权限下显示入口。源码确认五个内容/协作分析地址保留为内容实验室对应 Tab 的兼容跳转，`/resources` 跳转至资料中心，`/kanban` 跳转至选题管理看板；日报、团队日报、总结归档路径复用同一日报页面。以上为既有实现核对，不涉及新代码或业务请求。
-- **影响边界**：无 API、权限、数据库、业务数据或 Android 原生代码变化；Android 元数据为 9.4.9 / 90409，未构建 APK。本地修改，不提交、推送或部署。
+- **影响边界**：无 API、权限、数据库、业务数据或 Android 原生代码变化；该改造随 PR #90 的 v9.4.11 合并部署。Android 元数据为 9.4.9 / 90409，未发布 Android 安装包。
 - **未完成与下一步**：继续 B4/B5 全站响应式、主题与辅助技术验收，以及 B8 剩余写入路径；清单 G 中依赖产品责任规则或可信数据口径的项目继续按证据处理，Android 原生专项后置。
 
-## 2026-10-27 清单 B8：匿名意见首次提交结果恢复（v9.4.8，本地）
+## 2026-10-27 清单 B8：匿名意见首次提交结果恢复（v9.4.8，随 v9.4.11 合并部署）
 
 - **改造内容**：意见提交在发送前保存随机请求编号；服务端在同一事务内写入意见和回执。响应丢失或刷新后只读核实，不自动重复提交；仅状态明确为 `not_found` 时开放同编号、同内容的人工重试。已处理时确认成功，编号/载荷冲突或核实不可用时保留并锁定原稿。服务器不保存提交人身份；回执不自动过期，删除对应意见时通过外键级联清除。旧客户端不带请求编号仍兼容。
 - **验证结果**：HTTP/事务回归覆盖成功、同请求重放、异载荷冲突、响应丢失后核实、回执写入失败时整体回滚；迁移、sessionStorage 恢复和回执库存保护测试通过。`npm run check`、版本检查、更新说明治理、测试入口检查、API 合同检查、迁移 readiness、`git diff --check` 与生产构建通过。全仓 `npm run lint` 退出码为 0，0 错误、283 条警告。生产构建保留既有大分包提示。
 - **浏览器核验**：Playwright MCP 隔离夹具在 390px 验证三条结果路径：`processed` 不二次提交；`not_found` 刷新后保持原编号并只在用户点击后重试；核实暂不可用时保留草稿并锁定写入，只读重核不会增加 POST。三条路径均无横向溢出，控制台无错误。未连接真实账号或生产服务。
 - **VoiceOver**：用户确认实际听到首页“正在整理今日任务”“正在读取灵感数量”“正在读取关注事项”三条加载提示；VoiceOver 按授权临时开启后已恢复关闭。该证据只覆盖首页这三条提示，不代表全站语音验收完成。
 - **清单附录复核**：旧 `Production.tsx` 编辑转新增问题已由当前 `handleUpdate → updateProduction` 与 `expected_content` 保护确认修复；旧 `TopicDetail.tsx:863` 文案线索在当前目标源码无匹配。`useThemeStyles` 有 83 个引用，但 `theme-*` 类经 Tailwind 映射到 `tokens.css` 的 Studio 变量，剩余是统一样式抽象的维护项；`DouyinCreatorDataCenter.tsx` 无路由或文件外引用，外部直达/书签用途未确认前不删除。
-- **影响边界**：新增 SAFE_EXPAND 迁移 066，仅在临时隔离 SQLite 验证，未迁移生产数据库；Android 仅同步 9.4.8 / 90408 元数据，未构建 APK。本地修改，未提交、推送或部署。
+- **影响边界**：新增 SAFE_EXPAND 迁移 066；最初仅在临时隔离 SQLite 验证，后随 v9.4.11 安全部署并确认已 applied。Android 元数据同步至 9.4.8 / 90408，GitHub CI 生成 Debug 验收 APK artifact，未发布 Android 安装包。
 - **未完成与下一步**：继续清单 B4/B5 全站响应式、主题和辅助技术验收，并逐项盘点 B8 其余写入路径；Android 原生专项按用户要求后置。
 
 ## 2026-10-27 清单 B4/B5：成就空榜窄屏与键盘复验（v9.4.7 部署后）
@@ -72,8 +90,8 @@
 - **改造内容**：移动首页仅在关注事项摘要及负责人待处理消息等相关来源读取成功后，才显示“当前没有需要立即处理的任务”。任一来源失败且没有其它已确认任务时，改为提示“暂时无法确认是否有需要立即处理的任务”；原有错误提示和只读重试入口继续保留。无 API、权限、数据库或业务查询范围变化。
 - **验证结果**：`npm run test:home-dashboard`、`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、版本治理、更新说明治理（520 个版本）、测试入口检查（287 个文件）、`npm run build` 与 `git diff --check` 通过；生产构建保留既有 Silk 843.50 kB 大分包提示。`npm run test:topic-stage-record-repair-browser` 在 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 启动阶段退出，未进入测试断言。随后 Playwright MCP 连接 Chrome，用隔离 fixture 在 390px 分别注入关注摘要和负责人待处理消息 GET 503：两种错误态均显示“暂时无法确认”，不显示空任务；点击重试后只发生 GET 200，随后才显示确认空态。两场景文档宽度 382px/视口 390px，无横向溢出；控制台只有各自预期注入的 503 错误，无 warning；API 请求均为 GET，未触发业务写入。
 - **修改文件**：`src/pages/mobile/MobileHome.tsx`、`tests/browser/topic-stage-record-repair.spec.ts` 及版本、更新说明、改造清单和验收文档。
-- **影响边界**：没有服务端 API、权限、数据库或真实业务数据变化；Android 元数据为 9.4.5 / 90405，PR CI 生成 Debug 验收 APK artifact，未发布 Android 安装包。PR #87 合并并部署到服务器，目标 SHA `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`；六项 CI 通过，受保护部署的备份、Restore Drill、迁移/运行环境/内部路由门禁，以及 PM2/Caddy/公网健康/SQLite 复核通过。真实 VoiceOver 语音仍未确认。
-- **未完成与下一步**：VoiceOver 实际语音仍未验收（此前设备锁定，本轮未启用）；继续 B4/B5 全站可见性/主题/响应式验收、B8 其它路径清点。匿名意见首次提交响应丢失的匿名范围与回执保留期限仍需业务口径；Android 原生专项后置。
+- **影响边界**：没有服务端 API、权限、数据库或真实业务数据变化；Android 元数据为 9.4.5 / 90405，PR CI 生成 Debug 验收 APK artifact，未发布 Android 安装包。PR #87 合并并部署到服务器，目标 SHA `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`；六项 CI 通过，受保护部署的备份、Restore Drill、迁移/运行环境/内部路由门禁，以及 PM2/Caddy/公网健康/SQLite 复核通过。该版本发布时尚未取得 VoiceOver 语音确认；用户于 2026-10-27 后续确认听到首页三条加载提示，证据仅覆盖首页。
+- **未完成与下一步**：VoiceOver 实际语音仍未验收（此前设备锁定，本轮未启用）；继续 B4/B5 全站可见性/主题/响应式验收、B8 其它路径清点。匿名意见回执保留口径后来由用户确认不自动过期、对应意见删除时清除，详见 v9.4.11；Android 原生专项后置。
 
 ## 2026-10-27 清单 B4/B5：移动首页关注事项加载播报（v9.4.4）
 
@@ -81,7 +99,7 @@
 - **验证结果**：Playwright MCP 连接 Google Chrome，在 390px 视口确认今日任务、灵感数量和关注事项三条加载提示均以 `role=status` / `aria-live=polite` 暴露；释放本地只读验收夹具后，三条提示均消失并显示关注事项数据。页面宽 382px、视口 390px，无横向溢出；控制台错误 0，未触发业务写入。`npm run version:check`、`npm run check`、目标 ESLint、版本治理、更新说明治理、287 个测试入口检查、`npm run build` 与 `git diff --check` 通过；构建保留既有 Silk 843.50 kB 大分包提示。完整仓库移动浏览器套件未运行。
 - **VoiceOver 边界**：本轮尝试进行真实播报验收时 Mac 处于锁定状态，无法操作系统设置；没有开启 VoiceOver，设备此前状态为关闭。故真实语音播报仍未验收，不将其标记为通过。
 - **影响边界**：仅修改移动首页 JSX、对应浏览器断言及版本/说明文件；Android 元数据曾同步至 90404，未单独构建 Android 安装包。该改造包含在 PR #87 的 v9.4.5 部署中，SHA `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`。
-- **下一步**：完成三类首页加载提示的辅助技术验收，继续 B4/B5、B8 未完成项；匿名意见首次提交响应丢失的匿名范围/回执保留期仍需业务口径，Android 原生专项后置。
+- **下一步**：完成三类首页加载提示的辅助技术验收，继续 B4/B5、B8 未完成项；匿名意见回执保留口径后来由用户确认不自动过期、对应意见删除时清除，详见 v9.4.11，Android 原生专项后置。
 
 ## 2026-10-27 清单 B4/B5：移动首页加载状态验收夹具（v9.4.3）
 
@@ -90,7 +108,7 @@
 - **VoiceOver 边界**：按既有授权临时开启系统 VoiceOver 后，未能捕获页面实际播报文本，因此不将语音验收标记为通过；验收结束已恢复 VoiceOver 关闭。浏览器辅助功能树只证明可访问名称和状态，不等同真实语音确认。
 - **修改文件**：浏览器验收夹具及版本、更新说明和 Android 版本元数据。
 - **部署结果**：PR #86 合并 SHA `cd0d9f646a29847cb1b3bb2fa46140a244f70213`，六项 CI 全通过，标签 `v9.4.3` 指向该 SHA。受保护部署备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261027-114845-3680969.db`，Restore Drill PASS、65 项迁移检查 GO、运行环境读回与 4 条内部路由检查 PASS；部署后 PM2 v9.4.3 online、Caddy active，公网首页/健康接口 HTTP 200，SQLite `quick_check=ok`、外键违规 0。重启期间首次健康探测未就绪，受控重试后成功；无数据库迁移或业务数据写入。
-- **下一步**：补齐真实 VoiceOver 语音验收，并继续清单 B4/B5 与 B8 其余可本地处理项；匿名意见首次提交响应丢失的匿名范围/回执保留期仍需业务口径，Android 原生专项后置。
+- **下一步**：补齐真实 VoiceOver 语音验收，并继续清单 B4/B5 与 B8 其余可本地处理项；匿名意见回执保留口径后来由用户确认不自动过期、对应意见删除时清除，详见 v9.4.11，Android 原生专项后置。
 
 ## 2026-10-26 清单 B4/B5：修复移动端验收夹具连接（v9.4.2）
 
@@ -99,7 +117,7 @@
 - **VoiceOver 边界**：已临时开启系统 VoiceOver，确认字幕面板设置原为开启且语音效果未静音；验收结束后已将 VoiceOver 恢复关闭。页面辅助功能树能识别加载状态，但窗口工具未显示实际播报文本，故真实语音仍未确认。
 - **影响边界**：只改浏览器测试夹具和版本/说明文件；无产品 API、权限、数据库、真实业务数据或 Android 原生界面变化。Android 元数据同步至 90402；GitHub CI 生成并上传 debug 验收 APK artifact，未发布 Android 安装包。
 - **部署结果**：PR #84 合并至 main，目标 SHA `957b0a7c0b8b74183c225dc2e89c1bf3108f7f9d`；该合并 SHA 的六项 CI 全部通过。受保护部署完成在线 SQLite 备份、Restore Drill PASS、65 项迁移检查 GO、运行环境读回 PASS、内部路由暴露检查 PASS，之后 PM2 运行 v9.4.2、Caddy active。公网健康接口和首页均为 HTTP 200；部署后 SQLite `quick_check=ok`、外键违规 0。生产依赖审计 `npm audit --omit=dev` 为 0 漏洞，无数据库迁移或业务数据写入。
-- **下一步**：继续推进 B4/B5 页面与辅助技术验收、B8 剩余写入恢复链路；匿名意见首次响应丢失仍需明确匿名范围与回执保留期，Android 原生专项后置。
+- **下一步**：继续推进 B4/B5 页面与辅助技术验收、B8 剩余写入恢复链路；匿名意见回执保留口径后来由用户确认不自动过期、对应意见删除时清除，详见 v9.4.11，Android 原生专项后置。
 
 ## 2026-10-26 清单 B8：桌面与移动通知偏好结果核实（v9.4.1）
 
@@ -132,7 +150,7 @@
 - **浏览器套件边界**：`npm run test:mobile-work-center-browser` 在 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 启动阶段退出，未进入断言；MCP 隔离页手测不计自动套件通过。真实 VoiceOver 语音仍待验收。
 - **影响范围**：无 API、权限、数据库或真实业务数据变化；Android 仅同步版本元数据至 90370，未构建 APK；本地不提交、推送或部署。
 - **修改文件**：`src/pages/mobile/MobileHome.tsx`、`src/pages/mobile/MobileTopics.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts` 及版本/更新说明文件。
-- **下一步**：继续 B4/B5 全站窄屏、主题和辅助技术验收，并收敛 B8 剩余写入恢复路径；匿名意见首次响应丢失的匿名范围与回执保留期仍等待业务规则，Android 原生专项后置。
+- **下一步**：继续 B4/B5 全站窄屏、主题和辅助技术验收，并收敛 B8 剩余写入恢复路径；匿名意见回执保留口径后来由用户确认不自动过期、对应意见删除时清除，详见 v9.4.11，Android 原生专项后置。
 
 ## 2026-10-26 清单 B4/B5 续项：移动消息状态与作品详情操作（v9.3.69）
 

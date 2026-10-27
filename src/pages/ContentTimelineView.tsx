@@ -169,7 +169,7 @@ export default function ContentTimelineView() {
           <div><p className={`text-xs font-medium ${styles.textMuted}`}>内容生产记录</p><h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>内容动态</h1><p className={`mt-2 text-sm ${styles.textMuted}`}>按时间查看这篇内容的编辑、保存和版本变化</p></div>
           <div className="flex w-full gap-2 lg:w-auto">
             <ContentDocumentPicker value={input} onChange={setInput} onPick={chooseDocument} className={`h-10 min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm lg:w-80 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`} />
-            <button type="button" onClick={applyInput} className="inline-flex h-10 items-center gap-2 rounded-lg bg-studio-primary-button px-4 py-2 text-sm font-medium text-white"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>查看</button>
+            <button type="button" onClick={applyInput} className="xmt-btn xmt-btn-primary h-10 px-4 py-2 text-sm font-medium text-white"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>查看</button>
           </div>
         </div>
       </header>

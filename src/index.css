@@ -528,6 +528,14 @@
     background: color-mix(in srgb, var(--xmt-amber) 22%, transparent);
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .xmt-card:hover,
+    .xmt-btn:hover,
+    .xmt-btn:active {
+      transform: none;
+    }
+  }
+
   .xmt-field {
     min-height: 2.5rem;
     width: 100%;

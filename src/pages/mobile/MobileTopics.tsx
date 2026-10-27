@@ -51,6 +51,19 @@ export default function MobileTopics() {
   const status = filter === 'pending' || filter === 'creation' ? filter : undefined;
   const limit = view === 'board' ? 200 : 20;
   const { data, error: topicsError, isError, isLoading, refetch, isFetching } = useTopics({ status, search: deferredSearch || undefined, page: view === 'board' ? 1 : page, limit });
+  const isInitialListLoading = isLoading && !data;
+  const topicCountLabel = isError && !data
+    ? '选题数量暂不可用'
+    : isInitialListLoading
+      ? '正在读取选题数量…'
+      : `${data?.total ?? 0} 个选题`;
+  const refreshListLabel = isInitialListLoading
+    ? '正在加载…'
+    : isFetching
+      ? '正在刷新…'
+      : isError
+        ? '重试加载选题'
+        : '刷新列表';
   useEffect(() => {
     setFilter(filterFromUrl);
     setPage(1);
@@ -174,7 +187,7 @@ export default function MobileTopics() {
     <div className="flex gap-2"><label className="flex min-h-11 flex-1 items-center gap-2 rounded-xl border border-studio-border-soft bg-studio-surface px-3"><Search className="h-4 w-4 text-studio-text-muted" /><input id="mobile-topics-search" name="mobileTopicsSearch" aria-label="搜索选题" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} className="min-w-0 flex-1 bg-transparent text-sm outline-none" placeholder="搜索选题" /></label><button type="button" onClick={() => navigate('/topics/add')} aria-label="新建选题" className="flex h-11 w-11 items-center justify-center rounded-xl bg-studio-primary-button text-white"><Plus className="h-5 w-5" /></button></div>
     <div className="flex gap-2" aria-label="选题视图切换"><button type="button" aria-pressed={view === 'list'} onClick={() => setTopicsView('list')} className={`min-h-10 flex-1 rounded-xl px-3 text-sm ${view === 'list' ? 'bg-studio-primary-button text-white' : 'border border-studio-border-soft bg-studio-surface text-studio-text-secondary'}`}>列表</button><button type="button" aria-pressed={view === 'board'} onClick={() => setTopicsView('board')} className={`min-h-10 flex-1 rounded-xl px-3 text-sm ${view === 'board' ? 'bg-studio-primary-button text-white' : 'border border-studio-border-soft bg-studio-surface text-studio-text-secondary'}`}>看板</button></div>
     <div className="flex flex-wrap gap-2" role="group" aria-label="选题筛选">{filters.map((item) => <button type="button" key={item.id} aria-pressed={filter === item.id} onClick={() => chooseFilter(item.id)} className={`min-h-10 rounded-full px-4 text-sm ${filter === item.id ? 'bg-studio-primary-button text-white' : 'border border-studio-border-soft bg-studio-surface text-studio-text-secondary'}`}>{item.label}</button>)}</div>
-    <div className="flex items-center justify-between"><p className="text-sm text-studio-text-muted">{isError && !data ? '选题数量暂不可用' : `${data?.total ?? 0} 个选题`}</p><button type="button" disabled={isFetching} aria-busy={isFetching} onClick={() => void refetch()} className="xmt-btn xmt-btn-secondary inline-flex min-h-11 items-center px-3 text-sm disabled:opacity-50">{isFetching ? '正在刷新…' : isError ? '重试加载选题' : '刷新列表'}</button></div>
+    <div className="flex items-center justify-between"><p className="text-sm text-studio-text-muted">{topicCountLabel}</p><button type="button" disabled={isFetching} aria-busy={isFetching} onClick={() => void refetch()} className="xmt-btn xmt-btn-secondary inline-flex min-h-11 items-center px-3 text-sm disabled:opacity-50">{refreshListLabel}</button></div>
     {isError ? <div className="space-y-2 rounded-xl border border-studio-coral/30 bg-studio-coral/10 p-3">
       <p role="alert" className="text-sm text-studio-coral-contrast">选题列表读取失败：{topicsError instanceof Error ? topicsError.message : '请稍后重试。'}</p>
       {data ? <p role="status" className="text-sm text-studio-text-secondary">仍显示上次成功读取的列表，当前结果可能不是最新。</p> : <p className="text-sm text-studio-text-secondary">暂时无法确认符合条件的选题，请重试。</p>}

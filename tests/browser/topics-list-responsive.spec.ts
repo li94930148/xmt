@@ -47,6 +47,11 @@ const mobileAdvanceTopic = {
   stage_record_presence: { production: true, shooting: true, publishing: false },
 };
 let topicExists = true;
+let topicListGetRequests = 0;
+let failNextTopicListRead = false;
+let delayNextTopicListRead = false;
+let topicListReadStarted = false;
+let releaseTopicListRead: (() => void) | null = null;
 let failNextTopicDelete = false;
 let commitNextTopicDeleteThenFail = false;
 let failNextTopicDetailRead = false;
@@ -183,15 +188,43 @@ async function assertMainButtonTouchTargets(page: import('playwright').Page, sur
 
 const app = express();
 app.use(express.json());
-app.get('/__qa', (req, res) => res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','topics-list-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(req.query.theme === 'dark' ? 'dark' : 'light')});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics');</script>`));
+app.get('/__qa', (req, res) => {
+  if (req.query.fail_list_get === 'true') {
+    topicListGetRequests = 0;
+    failNextTopicListRead = true;
+  }
+  if (req.query.delay_list_get === 'true') {
+    topicListGetRequests = 0;
+    delayNextTopicListRead = true;
+    topicListReadStarted = false;
+  }
+  return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','topics-list-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(req.query.theme === 'dark' ? 'dark' : 'light')});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/topics');</script>`);
+});
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.get('/api/permissions/my', (_req, res) => res.json(['*']));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
-app.get('/api/topics', (req, res) => {
+app.get('/api/topics', async (req, res) => {
+  topicListGetRequests += 1;
+  if (delayNextTopicListRead) {
+    delayNextTopicListRead = false;
+    topicListReadStarted = true;
+    await new Promise<void>((resolve) => { releaseTopicListRead = resolve; });
+    releaseTopicListRead = null;
+  }
+  if (failNextTopicListRead) {
+    failNextTopicListRead = false;
+    return res.status(503).json({ message: '模拟选题列表读取失败' });
+  }
   const isBoardRequest = Number(req.query.limit) >= 200;
   const data = topicExists ? (isBoardRequest ? [topic, boardAuditTopic] : [topic]) : [];
   return res.json({ data, total: topicExists ? 31 : 30, page: 1, limit: Number(req.query.limit) || 15 });
+});
+app.get('/__qa/topic-list-state', (_req, res) => res.json({ topicListGetRequests, topicListReadStarted }));
+app.post('/__qa/release-topic-list-read', (_req, res) => {
+  releaseTopicListRead?.();
+  releaseTopicListRead = null;
+  return res.json({ released: true });
 });
 app.get('/api/topics/:id/resources', (_req, res) => res.json({ data: [] }));
 app.get('/api/topics/:id/asset-dimensions', (_req, res) => res.json({ data: [] }));
@@ -392,6 +425,104 @@ try {
     if (message.text().includes('503 (Service Unavailable)') || message.text().includes('404 (Not Found)')) expectedHttpErrors.push(message.text());
     else errors.push(message.text());
   });
+
+  const mobileListLoadingPage = await context.newPage();
+  await mobileListLoadingPage.setViewportSize({ width: 390, height: 844 });
+  mobileListLoadingPage.setDefaultTimeout(5000);
+  mobileListLoadingPage.on('pageerror', (error) => errors.push(error.message));
+  mobileListLoadingPage.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  const initialTopicListMethods: string[] = [];
+  mobileListLoadingPage.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/topics') initialTopicListMethods.push(request.method());
+  });
+  try {
+    await mobileListLoadingPage.goto(`${base}/__qa?delay_list_get=true`);
+    await mobileListLoadingPage.getByRole('status').filter({ hasText: '正在加载选题…' }).waitFor();
+    await mobileListLoadingPage.getByText('正在读取选题数量…', { exact: true }).waitFor();
+    assert.equal(await mobileListLoadingPage.getByText('0 个选题', { exact: true }).count(), 0, 'initial mobile loading does not show a zero-result count before the read succeeds');
+    assert.equal(await mobileListLoadingPage.getByRole('button', { name: '正在加载…', exact: true }).isDisabled(), true, 'the initial loading action is clearly labeled and disabled');
+    const delayedListState = await mobileListLoadingPage.request.get(`${base}/__qa/topic-list-state`).then((response) => response.json());
+    assert.equal(delayedListState.topicListGetRequests, 1, 'the delayed initial list state uses one read');
+    assert.equal(delayedListState.topicListReadStarted, true, 'the loading labels are checked while the list request is still pending');
+    await mobileListLoadingPage.request.post(`${base}/__qa/release-topic-list-read`);
+    await mobileListLoadingPage.getByRole('heading', { name: topic.title, exact: true }).waitFor();
+    await mobileListLoadingPage.getByText('31 个选题', { exact: true }).waitFor();
+    assert.deepEqual(initialTopicListMethods, ['GET'], 'initial mobile loading performs a read only');
+  } finally {
+    await mobileListLoadingPage.request.post(`${base}/__qa/release-topic-list-read`).catch(() => undefined);
+    await mobileListLoadingPage.close();
+  }
+
+  const listReadFailurePage = await context.newPage();
+  listReadFailurePage.setDefaultTimeout(5000);
+  listReadFailurePage.on('pageerror', (error) => errors.push(error.message));
+  listReadFailurePage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    else errors.push(message.text());
+  });
+  const topicListMethods: string[] = [];
+  listReadFailurePage.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/topics') topicListMethods.push(request.method());
+  });
+  await listReadFailurePage.goto(`${base}/__qa?fail_list_get=true`);
+  await listReadFailurePage.getByRole('heading', { name: '选题管理' }).waitFor();
+  const listFailureNotification = listReadFailurePage.getByRole('status').getByText('获取选题列表失败', { exact: true });
+  await listFailureNotification.waitFor();
+  await listReadFailurePage.getByText('模拟选题列表读取失败', { exact: true }).waitFor();
+  await listReadFailurePage.getByRole('button', { name: '重试', exact: true }).waitFor();
+  const initialListFailureState = await listReadFailurePage.request.get(`${base}/__qa/topic-list-state`).then((response) => response.json());
+  assert.equal(initialListFailureState.topicListGetRequests, 1, 'the failed desktop list read does not repeat before an explicit retry');
+  assert.equal(await listFailureNotification.count(), 1, 'an initial list failure presents one understandable error notification');
+  assert.equal(await listReadFailurePage.getByText('暂无选题', { exact: true }).count(), 0, 'a failed list read is not misreported as an empty result');
+  await listReadFailurePage.screenshot({ path: '/tmp/xmt-topics-list-failure-single-toast.png', fullPage: false });
+  const retryListRead = listReadFailurePage.waitForResponse((response) => new URL(response.url()).pathname === '/api/topics' && response.status() === 200);
+  await listReadFailurePage.getByRole('button', { name: '重试', exact: true }).click();
+  await retryListRead;
+  await listReadFailurePage.getByRole('table').getByText('创作中', { exact: true }).waitFor();
+  const recoveredListState = await listReadFailurePage.request.get(`${base}/__qa/topic-list-state`).then((response) => response.json());
+  assert.equal(recoveredListState.topicListGetRequests, 2, 'an explicit retry adds exactly one list read');
+  assert.deepEqual(topicListMethods, ['GET', 'GET'], 'initial read and retry are both read-only');
+  assert.deepEqual(errors, [], 'topic list failure and recovery render without unexpected browser errors');
+  assert.equal(expectedHttpErrors.length, 1, 'only the deliberately injected initial 503 is expected');
+  await listReadFailurePage.screenshot({ path: '/tmp/xmt-topics-list-failure-recovered.png', fullPage: false });
+  await listReadFailurePage.close();
+
+  const mobileListFailurePage = await context.newPage();
+  await mobileListFailurePage.setViewportSize({ width: 390, height: 844 });
+  mobileListFailurePage.setDefaultTimeout(5000);
+  mobileListFailurePage.on('pageerror', (error) => errors.push(error.message));
+  mobileListFailurePage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    else errors.push(message.text());
+  });
+  const mobileTopicListMethods: string[] = [];
+  mobileListFailurePage.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/topics') mobileTopicListMethods.push(request.method());
+  });
+  await mobileListFailurePage.goto(`${base}/__qa?fail_list_get=true`);
+  await mobileListFailurePage.getByRole('alert').getByText('选题列表读取失败：模拟选题列表读取失败', { exact: true }).waitFor();
+  await mobileListFailurePage.waitForTimeout(1250);
+  const mobileInitialListFailureState = await mobileListFailurePage.request.get(`${base}/__qa/topic-list-state`).then((response) => response.json());
+  assert.equal(mobileInitialListFailureState.topicListGetRequests, 1, 'a mobile topic-list failure does not trigger a hidden React Query retry');
+  assert.equal(await mobileListFailurePage.getByRole('alert').count(), 1, 'mobile list failure presents one inline error');
+  assert.equal(await mobileListFailurePage.getByText('没有符合条件的选题', { exact: true }).count(), 0, 'a failed mobile list read is not misreported as an empty result');
+  await mobileListFailurePage.screenshot({ path: '/tmp/xmt-mobile-topics-list-failure.png', fullPage: false });
+  const mobileRetryListRead = mobileListFailurePage.waitForResponse((response) => new URL(response.url()).pathname === '/api/topics' && response.status() === 200);
+  await mobileListFailurePage.getByRole('button', { name: '重试加载选题', exact: true }).click();
+  await mobileRetryListRead;
+  await mobileListFailurePage.getByRole('heading', { name: topic.title, exact: true }).waitFor();
+  const mobileRecoveredListState = await mobileListFailurePage.request.get(`${base}/__qa/topic-list-state`).then((response) => response.json());
+  assert.equal(mobileRecoveredListState.topicListGetRequests, 2, 'an explicit mobile retry adds exactly one list read');
+  assert.deepEqual(mobileTopicListMethods, ['GET', 'GET'], 'mobile failure and recovery remain read-only');
+  assert.deepEqual(errors, [], 'desktop and mobile list loading/failure recovery render without unexpected browser errors');
+  assert.equal(expectedHttpErrors.length, 2, 'only the deliberately injected desktop and mobile 503s are expected');
+  await mobileListFailurePage.screenshot({ path: '/tmp/xmt-mobile-topics-list-recovered.png', fullPage: false });
+  await mobileListFailurePage.close();
+
   await page.goto(`${base}/__qa`);
   await page.getByRole('table').getByText('创作中', { exact: true }).waitFor();
   await page.getByRole('heading', { name: '选题管理' }).waitFor();

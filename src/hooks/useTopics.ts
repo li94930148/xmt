@@ -12,6 +12,7 @@ export function useTopics(params: {
   return useQuery({
     queryKey: ['topics', params],
     queryFn: () => getTopics(params),
+    retry: false, // 列表失败留在错误态，只由页面重试入口发起新请求。
   });
 }
 

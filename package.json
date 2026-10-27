@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "9.4.5",
+  "version": "9.4.7",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -170,6 +170,7 @@
     "test:message-clear-idempotency-migration": "tsx tests/database/message-clear-idempotency-migration.test.ts",
     "test:message-read-all-idempotency-migration": "tsx tests/database/message-read-all-idempotency-migration.test.ts",
     "test:user-list-pagination": "tsx tests/users/user-list-pagination.test.ts",
+    "test:user-api-error-copy": "tsx tests/users/user-api-error-copy.test.ts",
     "test:users-refresh-query-race-browser": "tsx tests/browser/users-refresh-query-race.spec.ts",
     "test:backup-inventory-request-race-browser": "tsx tests/browser/backup-inventory-request-race.spec.ts",
     "test:asset-center-partial-read-browser": "tsx tests/browser/asset-center-partial-read.spec.ts",

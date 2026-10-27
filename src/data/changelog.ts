@@ -11,6 +11,24 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.4.7',
+    date: '2026-10-27',
+    title: '成员列表失败提示本地化',
+    impactScope: ['用户管理'],
+    changes: [
+      { type: 'improvement', description: '用户管理的成员、角色、日志、写入与结果核实请求在服务端没有具体提示时使用中文错误说明；服务端有具体错误时仍显示原始说明。' },
+    ],
+  },
+  {
+    version: '9.4.6',
+    date: '2026-10-27',
+    title: '移动端选题列表失败重试收敛',
+    impactScope: ['移动端选题'],
+    changes: [
+      { type: 'fix', description: '首次读取时不再用 0 伪装选题数量；读取失败后不自动发送重复 GET，保留错误和显式重试入口，用户点击后再重新读取。' },
+    ],
+  },
+  {
     version: '9.4.5',
     date: '2026-10-27',
     title: '移动首页任务状态反馈修复',

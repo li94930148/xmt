@@ -1,11 +1,27 @@
 # XMT 升级阶段记录
 
+## 2026-10-27 清单 B4：用户列表错误兜底文案本地化（v9.4.7）
+
+- **改造内容**：用户管理 API 在服务端错误响应缺少可用 `message` 时，成员列表/详情、角色列表、操作日志、成员创建/更新/删除及请求结果核实使用中文兜底；服务端提供的明确错误消息继续透传。
+- **验证结果**：`npm run test:user-api-error-copy` 覆盖 11 类用户管理请求，验证错误响应不是 JSON 时使用对应中文兜底、服务端给出具体消息时不覆盖。`npm run check -- --pretty false`、`npm run build`、`npm run version:check`、更新说明治理（522 个版本）、测试入口检查（288 个文件）、目标 ESLint 与 `git diff --check` 均通过。构建仍有既有 Silk 843.50 kB 大分包提示。
+- **修改文件**：`src/api/users.ts`、`tests/users/user-api-error-copy.test.ts`、CI、版本与更新说明。
+- **影响边界**：无产品 API 行为、权限、数据库或业务数据变化；Android 同步至 9.4.7 / 90407 元数据，未构建 APK。仅本地修改，不提交、推送或部署。
+- **未完成与下一步**：继续清单 B4/B5、B8 的其它本地项；真实 VoiceOver 语音仍需等 Mac 解锁后验收。
+
+## 2026-10-27 清单 B8：移动端选题列表失败只由用户重试（v9.4.6）
+
+- **改造内容**：移动端 `useTopics` 查询关闭自动失败重试；503 后保留 inline 错误及“重试加载选题”按钮，用户明确点击后才再次 GET。首次加载时，数量和刷新入口分别提示“正在读取选题数量…”与“正在加载…”，避免结果未到时误显示 0。同步扩展隔离浏览器回归，覆盖桌面与移动端的一次初始请求、错误/非空状态区分、显式重试及只读恢复；修正移动工作中心旧回归，使其不再把自动重试当作预期行为。
+- **验证结果**：Playwright MCP 连接 Google Chrome 的隔离夹具在 390px 将首个选题 GET 挂起，确认播报状态可见、数量显示正在读取而非 0、加载按钮禁用；放行后得到 31 个选题，只有 1 次 GET，页面宽度/视口均为 390px、无横向溢出、控制台错误/警告为 0。另在 390px 注入 GET 503，验证只发生 1 次初始请求并显示错误与手动重试；点击后仅再请求 1 次 GET 200 并恢复。`npm run check -- --pretty false`、`npm run build`、`npm run version:check`、更新说明治理（521 个版本）、测试入口检查（287 个文件）、目标 ESLint 与 `git diff --check` 通过；生产构建仍有既有 Silk 843.50 kB 大分包提示。`npm run test:topics-responsive-browser` 在 macOS Chromium 启动阶段因 `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言；Playwright MCP 手工隔离验收已完成。
+- **修改文件**：`src/hooks/useTopics.ts`、`src/pages/mobile/MobileTopics.tsx`、`tests/browser/topics-list-responsive.spec.ts`、`tests/browser/mobile-work-center-responsive.spec.ts`、版本与更新说明。
+- **影响边界**：无 API、权限、数据库或业务数据变化；Android 同步至 9.4.6 / 90406 元数据，未构建 APK。本版本只做本地修改，不提交、推送或部署。
+- **未完成与下一步**：实际 VoiceOver 语音验收仍未完成；尝试检查时 macOS 显示已锁定且无法自动解锁，因此没有更改 VoiceOver 状态。自动浏览器回归仍需在可启动仓库 Chromium 的环境执行；继续清单 B4/B5 与 B8 其它路径。
+
 ## 2026-10-27 清单 B8：移动首页读取失败时避免误报任务为空（v9.4.5）
 
 - **改造内容**：移动首页仅在关注事项摘要及负责人待处理消息等相关来源读取成功后，才显示“当前没有需要立即处理的任务”。任一来源失败且没有其它已确认任务时，改为提示“暂时无法确认是否有需要立即处理的任务”；原有错误提示和只读重试入口继续保留。无 API、权限、数据库或业务查询范围变化。
 - **验证结果**：`npm run test:home-dashboard`、`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、版本治理、更新说明治理（520 个版本）、测试入口检查（287 个文件）、`npm run build` 与 `git diff --check` 通过；生产构建保留既有 Silk 843.50 kB 大分包提示。`npm run test:topic-stage-record-repair-browser` 在 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 启动阶段退出，未进入测试断言。随后 Playwright MCP 连接 Chrome，用隔离 fixture 在 390px 分别注入关注摘要和负责人待处理消息 GET 503：两种错误态均显示“暂时无法确认”，不显示空任务；点击重试后只发生 GET 200，随后才显示确认空态。两场景文档宽度 382px/视口 390px，无横向溢出；控制台只有各自预期注入的 503 错误，无 warning；API 请求均为 GET，未触发业务写入。
 - **修改文件**：`src/pages/mobile/MobileHome.tsx`、`tests/browser/topic-stage-record-repair.spec.ts` 及版本、更新说明、改造清单和验收文档。
-- **影响边界**：没有服务端 API、权限、数据库或真实业务数据变化；Android 仅同步 9.4.5 / 90405 元数据，未构建 APK。本版本只在本地工作树，未提交、推送或部署。
+- **影响边界**：没有服务端 API、权限、数据库或真实业务数据变化；Android 仅同步 9.4.5 / 90405 元数据，未构建 APK。PR #87 合并并部署到服务器，目标 SHA `7d58e9d067b4c6a71e8cf14e83b44996a4458df0`；六项 CI 通过，受保护部署的备份、Restore Drill、迁移/运行环境/内部路由门禁，以及 PM2/Caddy/公网健康/SQLite 复核通过。真实 VoiceOver 语音仍未确认。
 - **未完成与下一步**：VoiceOver 实际语音仍未验收（此前设备锁定，本轮未启用）；继续 B4/B5 全站可见性/主题/响应式验收、B8 其它路径清点。匿名意见首次提交响应丢失的匿名范围与回执保留期限仍需业务口径；Android 原生专项后置。
 
 ## 2026-10-27 清单 B4/B5：移动首页关注事项加载播报（v9.4.4）

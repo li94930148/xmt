@@ -73,7 +73,11 @@ export default function CreatorWorks({ reviewMode = false }: { reviewMode?: bool
     />
 
     {error ? <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-coral/30 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral-contrast sm:flex-row sm:items-center sm:justify-between">
-      <p>{works.length ? `作品列表刷新失败，仍保留已确认的 ${works.length} 条作品。` : '作品列表暂时无法读取。'} {error}</p>
+      <p>{failedCursor !== null
+        ? `下一页作品暂时无法读取，已保留已加载的 ${works.length} 条作品。`
+        : works.length
+          ? `作品列表刷新失败，仍保留已确认的 ${works.length} 条作品。`
+          : '作品列表暂时无法读取。'} {error}</p>
       {failedCursor === null ? <button
         type="button"
         disabled={loading || loadingMore}

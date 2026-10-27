@@ -3,12 +3,12 @@ import { twMerge } from 'tailwind-merge';
 export type StatusTone = 'primary' | 'cyan' | 'violet' | 'coral' | 'amber' | 'success' | 'muted';
 
 const toneClass: Record<StatusTone, string> = {
-  primary: 'border-studio-primary/35 bg-studio-primary/12 text-studio-primary-contrast',
-  cyan: 'border-studio-cyan/35 bg-studio-cyan/12 text-studio-cyan-contrast',
-  violet: 'border-studio-violet/35 bg-studio-violet/12 text-studio-violet-contrast',
-  coral: 'border-studio-coral/35 bg-studio-coral/12 text-studio-coral-contrast',
-  amber: 'border-studio-amber/35 bg-studio-amber/12 text-studio-amber-contrast',
-  success: 'border-studio-success/35 bg-studio-success/12 text-studio-success-contrast',
+  primary: 'border-studio-primary/35 bg-studio-primary-soft text-studio-primary-contrast',
+  cyan: 'border-studio-cyan/35 bg-studio-cyan-soft text-studio-cyan-contrast',
+  violet: 'border-studio-violet/35 bg-studio-violet-soft text-studio-violet-contrast',
+  coral: 'border-studio-coral/35 bg-studio-coral-soft text-studio-coral-contrast',
+  amber: 'border-studio-amber/35 bg-studio-amber-soft text-studio-amber-contrast',
+  success: 'border-studio-success/35 bg-studio-success-soft text-studio-success-contrast',
   muted: 'border-studio-border-soft bg-[var(--xmt-overlay-tint)] text-studio-text-secondary',
 };
 

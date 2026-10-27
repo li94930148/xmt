@@ -43,12 +43,18 @@ function buildListFilter(filter: TopicListFilter) {
     }
   }
 
+  if (filter.topic_filter === 'active') {
+    where += " AND t.status IN ('approved', 'production', 'shooting', 'publishing')";
+  }
+
   if (filter.search) {
     where += ' AND (t.title LIKE ? OR t.description LIKE ?)';
     params.push(`%${filter.search}%`, `%${filter.search}%`);
   }
 
-  if (!filter.viewAll) {
+  // `mine` is a per-topic creator/assignee filter, even for roles whose default
+  // list scope can view all topics. It does not change the authorization policy.
+  if (filter.topic_filter === 'mine' || !filter.viewAll) {
     where += ' AND (t.creator_id = ? OR t.assignee_id = ?)';
     params.push(filter.actorId, filter.actorId);
   }

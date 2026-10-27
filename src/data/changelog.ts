@@ -11,6 +11,31 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.4.15',
+    date: '2026-10-28',
+    title: '移动选题筛选与分页一致',
+    impactScope: ['移动选题列表', '选题列表 API'],
+    changes: [
+      { type: 'improvement', description: '“我的”和“进行中”筛选由服务端在分页和计数前执行，页面总数与实际结果保持一致；“我的”只显示本人创建或负责的选题。' },
+      { type: 'fix', description: '状态、搜索和选题筛选共同生效，翻页不会把不符合筛选条件的选题混入结果。' },
+      { type: 'fix', description: '选题看板状态徽标使用明暗主题有效的柔和背景令牌，修复状态徽标透明问题。' },
+      { type: 'fix', description: '补全 Studio 令牌颜色透明度刻度，修复全站多处透明度类没有生成样式的问题。' },
+      { type: 'fix', description: '修复番茄钟使用不可解析的 CSS 变量颜色透明度类，改为等值 Studio 背景令牌。' },
+      { type: 'improvement', description: '移动选题筛选结果、页码和空结果现可由读屏识别；看板结果数量也提供状态播报。' },
+      { type: 'fix', description: '移动个人资料姓名或邮箱有未保存修改时，离开页面会先确认；取消保留草稿，确认离开不提交。' },
+    ],
+  },
+  {
+    version: '9.4.14',
+    date: '2026-10-28',
+    title: '作品库分页失败提示与恢复',
+    impactScope: ['创作者作品库', '作品详情', '移动通知偏好', '移动稿件编辑器'],
+    changes: [
+      { type: 'fix', description: '作品库下一页读取失败时明确说明失败位置并保留已加载作品；重试继续读取下一页，不再误称为列表刷新失败。' },
+      { type: 'improvement', description: '在隔离 Google Chrome 夹具中核对作品列表/详情只读恢复、登录安全重新检查及移动通知和稿件编辑器返回保护。' },
+    ],
+  },
+  {
     version: '9.4.13',
     date: '2026-10-27',
     title: '写入结果核实与离页保护',

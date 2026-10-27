@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import resolveConfig from 'tailwindcss/resolveConfig.js';
 import tailwindConfig from '../../tailwind.config.js';
 
 const sourceExtensions = new Set(['.js', '.jsx', '.ts', '.tsx']);
@@ -8,7 +9,12 @@ const studioColors = new Set(Object.keys(tailwindConfig.theme.extend.colors.stud
 const tokenSource = readFileSync('src/styles/tokens.css', 'utf8');
 const designSource = readFileSync('DESIGN.md', 'utf8');
 const colorUtilityPattern = /(?:^|[^a-z0-9-])(?:bg|text|border|ring|from|via|to|divide|placeholder|decoration|outline|fill|stroke)-studio-([a-z0-9-]+)/g;
+const alphaUtilityPattern = /(?:^|[^a-z0-9-])(?:bg|text|border|ring|from|via|to|divide|placeholder|decoration|outline|fill|stroke)-studio-[a-z0-9-]+\/(\d+)(?=$|[^0-9])/g;
+const unsupportedThemeAlphaPattern = /(?:^|[^a-z0-9-])(?:bg|text|border|ring|from|via|to|divide|placeholder|decoration|outline|fill|stroke)-theme-[a-z0-9-]+\/\d+(?=$|[^0-9])/g;
 const usedColors = new Set();
+const usedOpacityValues = new Set();
+const unsupportedThemeAlphaUtilities = new Set();
+const resolvedOpacityValues = new Set(Object.keys(resolveConfig(tailwindConfig).theme.opacity));
 
 function parseHex(value) {
   return value.slice(1).match(/../g).map((channel) => Number.parseInt(channel, 16));
@@ -63,9 +69,14 @@ function collectSourceFiles(directory) {
 for (const path of collectSourceFiles('src')) {
   const source = readFileSync(path, 'utf8');
   for (const match of source.matchAll(colorUtilityPattern)) usedColors.add(match[1]);
+  for (const match of source.matchAll(alphaUtilityPattern)) usedOpacityValues.add(match[1]);
+  for (const match of source.matchAll(unsupportedThemeAlphaPattern)) unsupportedThemeAlphaUtilities.add(match[0].trim());
 }
 
 const missingColors = [...usedColors].filter((color) => !studioColors.has(color)).sort();
 assert.deepEqual(missingColors, [], `Studio color utilities must map to design tokens: ${missingColors.join(', ')}`);
+const missingOpacityValues = [...usedOpacityValues].filter((value) => !resolvedOpacityValues.has(value)).sort((a, b) => Number(a) - Number(b));
+assert.deepEqual(missingOpacityValues, [], `Studio color alpha utilities must resolve to generated opacity values: ${missingOpacityValues.join(', ')}`);
+assert.deepEqual([...unsupportedThemeAlphaUtilities], [], `theme-* CSS variable colors cannot use slash opacity modifiers: ${[...unsupportedThemeAlphaUtilities].join(', ')}`);
 
-console.log(`Studio token usage passed: ${usedColors.size} referenced color utilities map to the Studio token palette.`);
+console.log(`Studio token usage passed: ${usedColors.size} referenced color utilities map to Studio tokens; all ${usedOpacityValues.size} used alpha values resolve in Tailwind.`);

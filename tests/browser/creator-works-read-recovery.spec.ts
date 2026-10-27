@@ -201,6 +201,7 @@ try {
   await page.evaluate(async () => { await fetch('/__test__/fail-next-works-get', { method: 'POST' }); });
   await page.getByRole('button', { name: '下一页' }).click();
   await page.getByRole('alert').waitFor();
+  assert.match(await page.getByRole('alert').innerText(), /下一页作品暂时无法读取，已保留已加载的 1 条作品/);
   assert.equal(await page.getByRole('button', { name: /测试作品一/ }).count(), 1, '下一页失败时保留已加载内容');
   await page.getByRole('button', { name: '重试加载下一页' }).click();
   await page.getByRole('button', { name: /测试作品二/ }).waitFor();

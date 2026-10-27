@@ -4096,6 +4096,30 @@ try {
   try {
     await profilePage.goto(`${baseUrl}/me`, { waitUntil: 'domcontentloaded' });
     await profilePage.getByText('普通人员', { exact: true }).waitFor();
+    const initialProfileWriteCount = profileUpdateAttempts;
+    await profilePage.getByRole('textbox', { name: '姓名' }).fill('尚未保存的移动姓名');
+    await profilePage.getByRole('textbox', { name: '邮箱' }).fill('unsaved-mobile-profile@example.test');
+    const unsavedProfileWarnsOnUnload = await profilePage.evaluate(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(unsavedProfileWarnsOnUnload, true, 'an unsaved mobile profile draft warns before page unload');
+    const mobileProfileNavigation = profilePage.getByRole('navigation', { name: '移动主导航' }).getByRole('button', { name: '工作', exact: true });
+    await mobileProfileNavigation.click();
+    const unsavedProfileLeaveDialog = profilePage.getByRole('dialog', { name: '个人资料尚未保存' });
+    await unsavedProfileLeaveDialog.waitFor();
+    assert.equal(new URL(profilePage.url()).pathname, '/me', 'an unsaved profile draft blocks mobile navigation');
+    await unsavedProfileLeaveDialog.getByRole('button', { name: '留在当前页面', exact: true }).click();
+    assert.equal(await profilePage.getByRole('textbox', { name: '姓名' }).inputValue(), '尚未保存的移动姓名', 'canceling leave preserves the unsaved profile name');
+    assert.equal(await profilePage.getByRole('textbox', { name: '邮箱' }).inputValue(), 'unsaved-mobile-profile@example.test', 'canceling leave preserves the unsaved profile email');
+    assert.equal(profileUpdateAttempts, initialProfileWriteCount, 'unsaved profile guard performs no PUT');
+    await mobileProfileNavigation.click();
+    await profilePage.getByRole('dialog', { name: '个人资料尚未保存' }).getByRole('button', { name: '离开并放弃草稿', exact: true }).click();
+    await profilePage.waitForURL((url) => url.pathname === '/production');
+    assert.equal(profileUpdateAttempts, initialProfileWriteCount, 'confirming leave discards the local draft without writing it');
+    await profilePage.goto(`${baseUrl}/me`, { waitUntil: 'domcontentloaded' });
+    await profilePage.getByText('普通人员', { exact: true }).waitFor();
     await profilePage.getByRole('textbox', { name: '姓名' }).fill('资料修改后名称');
     await profilePage.getByRole('textbox', { name: '邮箱' }).fill('profile-recovery@example.test');
     expectProfileFailure();

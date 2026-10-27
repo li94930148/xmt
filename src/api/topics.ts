@@ -30,11 +30,13 @@ async function getErrorMessage(response: Response, fallback: string) {
   return fallback;
 }
 
-function buildTopicsQuery(params?: { status?: string; search?: string; page?: number; limit?: number }): string {
+function buildTopicsQuery(params?: { status?: string; topic_filter?: 'mine' | 'active'; search?: string; page?: number; limit?: number }): string {
   const query = new URLSearchParams();
   const status = params?.status?.trim();
+  const topicFilter = params?.topic_filter;
   const search = params?.search?.trim();
   if (status) query.set('status', status);
+  if (topicFilter) query.set('topic_filter', topicFilter);
   if (search) query.set('search', search);
   query.set('page', String(params?.page ?? 1));
   query.set('limit', String(params?.limit ?? 10));
@@ -48,7 +50,7 @@ type TopicsListResponse = {
   limit: number;
 };
 
-export async function getTopics(params?: { status?: string; search?: string; page?: number; limit?: number }): Promise<TopicsListResponse> {
+export async function getTopics(params?: { status?: string; topic_filter?: 'mine' | 'active'; search?: string; page?: number; limit?: number }): Promise<TopicsListResponse> {
   const query = buildTopicsQuery(params);
   const response = await fetch(`${BASE_URL}/topics?${query}`, {
     headers: getAuthHeader()

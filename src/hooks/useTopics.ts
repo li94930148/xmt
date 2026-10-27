@@ -5,6 +5,7 @@ import { useAppStore } from '../store';
 // 选题列表查询 Hook
 export function useTopics(params: {
   status?: string;
+  topic_filter?: 'mine' | 'active';
   search?: string;
   page?: number;
   limit?: number;

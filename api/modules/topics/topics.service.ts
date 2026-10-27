@@ -116,7 +116,7 @@ export type TopicServiceDependencies = {
 export class TopicService {
   constructor(private readonly dependencies: TopicServiceDependencies) {}
 
-  async listTopics(actor: TopicActor, query: { status?: unknown; search?: unknown; page: number; limit: number }): Promise<TopicPage> {
+  async listTopics(actor: TopicActor, query: { status?: unknown; topic_filter?: 'mine' | 'active'; search?: unknown; page: number; limit: number }): Promise<TopicPage> {
     return this.dependencies.repository.list({
       ...query,
       actorId: actor.id,

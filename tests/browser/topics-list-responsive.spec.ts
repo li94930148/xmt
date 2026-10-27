@@ -46,7 +46,17 @@ const mobileAdvanceTopic = {
   status: 'shooting' as string,
   stage_record_presence: { production: true, shooting: true, publishing: false },
 };
+const topicFilterFixtureTopics = Array.from({ length: 23 }, (_, index) => ({
+  ...topic,
+  id: 1000 + index,
+  title: `筛选分页验收选题 ${index + 1}`,
+  description: '仅用于移动端筛选与服务端分页隔离验收。',
+  status: ['approved', 'production', 'shooting', 'publishing', 'pending', 'rejected', 'completed'][index % 7],
+  creator_id: index < 21 && index % 2 === 0 ? user.id : 96,
+  assignee_id: index < 21 && index % 2 === 1 ? user.id : null,
+}));
 let topicExists = true;
+let topicFilterFixtureEnabled = false;
 let topicListGetRequests = 0;
 let failNextTopicListRead = false;
 let delayNextTopicListRead = false;
@@ -168,6 +178,18 @@ async function assertTopicsBoardContrast(page: import('playwright').Page, theme:
     const ratio = await contrastRatio(locator);
     assert(ratio >= 4.5, `${theme} topic board ${label} text contrast is ${ratio.toFixed(2)}:1`);
   }
+  await page.getByRole('status', { name: /^显示 \d+ \/ \d+ 个选题$/ }).waitFor({ state: 'visible' });
+
+  const statusPills = page.locator('article span.inline-flex[class*="border-studio-"]');
+  const statusPillCount = await statusPills.count();
+  assert.ok(statusPillCount > 0, `${theme} topic board renders status badges`);
+  for (let index = 0; index < statusPillCount; index += 1) {
+    const pill = statusPills.nth(index);
+    const backgroundColor = await pill.evaluate((element) => getComputedStyle(element).backgroundColor);
+    assert.notEqual(backgroundColor, 'rgba(0, 0, 0, 0)', `${theme} topic board status badge ${index + 1} has a rendered theme background`);
+    const ratio = await contrastRatio(pill);
+    assert(ratio >= 4.5, `${theme} topic board status badge ${index + 1} text contrast is ${ratio.toFixed(2)}:1`);
+  }
 }
 
 async function assertMainButtonTouchTargets(page: import('playwright').Page, surface: string) {
@@ -189,6 +211,7 @@ async function assertMainButtonTouchTargets(page: import('playwright').Page, sur
 const app = express();
 app.use(express.json());
 app.get('/__qa', (req, res) => {
+  topicFilterFixtureEnabled = req.query.filter_fixture === 'true';
   if (req.query.fail_list_get === 'true') {
     topicListGetRequests = 0;
     failNextTopicListRead = true;
@@ -215,6 +238,24 @@ app.get('/api/topics', async (req, res) => {
   if (failNextTopicListRead) {
     failNextTopicListRead = false;
     return res.status(503).json({ message: '模拟选题列表读取失败' });
+  }
+  if (topicFilterFixtureEnabled) {
+    const status = String(req.query.status || '');
+    const topicFilter = String(req.query.topic_filter || '');
+    const search = String(req.query.search || '').trim().toLocaleLowerCase();
+    let filtered = topicFilterFixtureTopics.filter((item) => {
+      if (status === 'creation') return item.status === 'approved' || item.status === 'production';
+      if (status && item.status !== status) return false;
+      if (topicFilter === 'mine' && item.creator_id !== user.id && item.assignee_id !== user.id) return false;
+      if (topicFilter === 'active' && !['approved', 'production', 'shooting', 'publishing'].includes(item.status)) return false;
+      if (search && !`${item.title} ${item.description}`.toLocaleLowerCase().includes(search)) return false;
+      return true;
+    });
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 15;
+    const total = filtered.length;
+    filtered = filtered.slice((page - 1) * limit, page * limit);
+    return res.json({ data: filtered, total, page, limit });
   }
   const isBoardRequest = Number(req.query.limit) >= 200;
   const data = topicExists ? (isBoardRequest ? [topic, boardAuditTopic] : [topic]) : [];
@@ -909,6 +950,10 @@ try {
 
   const mobileListPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   mobileListPage.setDefaultTimeout(5000);
+  const mobileTopicListRequests: string[] = [];
+  mobileListPage.on('request', (request) => {
+    if (request.method() === 'GET' && request.url().includes('/api/topics?')) mobileTopicListRequests.push(request.url());
+  });
   mobileListPage.on('pageerror', (error) => errors.push(error.message));
   mobileListPage.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await mobileListPage.goto(`${base}/__qa`);
@@ -945,6 +990,32 @@ try {
       assert.ok(button.bottom > button.top, `${button.label} has a visible layout box at ${width}px`);
     }
   }
+  await mobileListPage.goto(`${base}/__qa?filter_fixture=true`);
+  await mobileListPage.getByText('23 个选题', { exact: true }).waitFor();
+  await mobileListPage.getByRole('status', { name: '筛选结果：全部，共 23 个选题，第 1 页。', exact: true }).waitFor();
+  await mobileTopicFilters.getByRole('button', { name: '我的', exact: true }).click();
+  await mobileListPage.getByText('21 个选题', { exact: true }).waitFor();
+  await mobileListPage.getByRole('status', { name: '筛选结果：我的，共 21 个选题，第 1 页。', exact: true }).waitFor();
+  assert.equal(new URL(mobileListPage.url()).searchParams.get('topic_filter'), 'mine', 'the mobile mine filter remains reflected in the URL');
+  let lastTopicListRequest = mobileTopicListRequests.at(-1);
+  assert.ok(lastTopicListRequest && new URL(lastTopicListRequest).searchParams.get('topic_filter') === 'mine', 'mine is requested from the server, not filtered only in the loaded page');
+  assert.equal(await mobileListPage.locator('button.xmt-card').count(), 20, 'the first filtered page contains 20 of the 21 owned topics');
+  await mobileListPage.getByRole('button', { name: '下一页', exact: true }).click();
+  await mobileListPage.getByRole('button', { name: '第 2 页', exact: true }).waitFor();
+  await mobileListPage.getByRole('status', { name: '筛选结果：我的，共 21 个选题，第 2 页。', exact: true }).waitFor();
+  assert.equal(await mobileListPage.locator('button.xmt-card').count(), 1, 'the final mine page contains the one remaining owned topic');
+  assert.equal(await mobileListPage.getByRole('button', { name: /筛选分页验收选题 21/ }).count(), 1, 'the second page contains the final matching topic');
+  lastTopicListRequest = mobileTopicListRequests.at(-1);
+  assert.ok(lastTopicListRequest && new URL(lastTopicListRequest).searchParams.get('page') === '2', 'the filtered page number is sent to the server');
+  await mobileTopicFilters.getByRole('button', { name: '进行中', exact: true }).click();
+  await mobileListPage.getByText('14 个选题', { exact: true }).waitFor();
+  assert.equal(await mobileListPage.locator('button.xmt-card').count(), 14, 'active filter displays only the 14 server-matched topics');
+  await mobileListPage.getByRole('status', { name: '筛选结果：进行中，共 14 个选题，第 1 页。', exact: true }).waitFor();
+  lastTopicListRequest = mobileTopicListRequests.at(-1);
+  assert.ok(lastTopicListRequest && new URL(lastTopicListRequest).searchParams.get('topic_filter') === 'active', 'active is requested from the server');
+  await mobileListPage.getByRole('textbox', { name: '搜索选题' }).fill('本地夹具不存在的标题');
+  await mobileListPage.getByRole('status', { name: '进行中筛选没有符合条件的选题。', exact: true }).waitFor();
+  await mobileListPage.getByText('没有符合条件的选题', { exact: true }).waitFor();
   await mobileListPage.close();
 
   const darkContext = await browser.newContext({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });

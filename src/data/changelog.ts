@@ -11,6 +11,25 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.4.13',
+    date: '2026-10-27',
+    title: '写入结果核实与离页保护',
+    impactScope: ['创作记录', '选题阶段', '系统设置', '个人资料', '移动端偏好'],
+    changes: [
+      { type: 'improvement', description: '创作记录、选题阶段、系统设置和个人资料遇到响应不确定时先只读核实，不自动重发；未决核实按账号保留，离开页面前明确提示。' },
+      { type: 'improvement', description: '桌面与移动通知偏好保留未保存草稿并在离页时提醒；移动端改密结果不明时锁定重复提交，并提示通过重新登录核验。' },
+    ],
+  },
+  {
+    version: '9.4.12',
+    date: '2026-10-27',
+    title: '移动与桌面操作及卡片悬停反馈完善',
+    impactScope: ['移动工作中心', '移动选题列表', '移动成片列表', '移动主要操作', '桌面选题创建恢复', '桌面内容动态', 'Creator Center 趋势'],
+    changes: [
+      { type: 'improvement', description: '移动工作中心、选题与成片列表卡片及主要操作，以及桌面选题创建恢复、内容动态查看和 Creator Center 趋势入口统一使用 Studio 悬停状态；启用减少动态效果时保留颜色反馈并取消位移，业务处理和权限规则保持不变。' },
+    ],
+  },
+  {
     version: '9.4.11',
     date: '2026-10-27',
     title: '编辑器输入改用站内弹窗',

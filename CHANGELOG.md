@@ -1,5 +1,31 @@
 # Changelog
 
+## v9.4.13 - 2026-10-28
+
+### Write recovery
+
+- Production record edits, topic-stage updates, desktop system settings, and desktop/mobile profile updates now verify ambiguous outcomes with read-only requests before allowing a deliberate retry. Pending state is scoped to the account; refresh or leaving a page does not silently resend a write. Profile verification remains valid across routine access-token rotation within the same auth mode and applies the result with the current token. Mobile password changes with an unknown result lock repeat submission and explain how to verify by signing in again.
+- A late topic-stage write completion clears only its captured account/topic recovery marker, preserving another topic's pending state.
+- Desktop and mobile notification settings warn before leaving unsaved changes or unresolved recovery state. Historical production records with no operator ID remain eligible for safe read-back comparison.
+- Anonymous feedback recovery no longer retries an old request ID when the server reports no receipt, because that ID may have been cleared after an administrator deleted the feedback. The text stays in the form, and a deliberate fresh submission gets a new request ID.
+
+### Validation
+
+- Type check, production build, targeted ESLint, version governance, and test-entrypoint checks passed. Isolated Chromium suites passed for topic-stage/save recovery, the mobile work center (320/390px), production-list feedback, system settings, mobile notification settings, and anonymous-feedback submission recovery. Additional tests cover auth failure contracts, same-account profile token rotation on desktop/mobile, and a pending recovery from topic A completing while topic B stays locked. Chrome DevTools MCP also verified isolated commit-then-503 recovery, historical null-operator records, refresh-time read-only recovery, and stage leave confirmation. No repeated business writes or real business data were involved. The user confirmed hearing the three homepage loading announcements; this does not establish site-wide VoiceOver coverage. See `docs/UPGRADE_PROGRESS.md` for scope and test results.
+- Android metadata is 9.4.13 / 90413; no Android package was built. PR #91 is awaiting CI and protected deployment; production remains on the prior version.
+
+## v9.4.12 - 2026-10-27
+
+### Shared action feedback
+
+- Applied shared Studio hover states to mobile work/topic/production cards and primary actions, topic creation recovery actions, the desktop content timeline view action, and creator trend navigation. Added reduced-motion handling that removes card/button hover and active translation while preserving color feedback. Handlers, permissions, and business behavior are unchanged.
+
+### Validation
+
+- Google Chrome through Playwright MCP and Chrome DevTools MCP verified hover-only state changes in isolated fixtures at 390×844 and 1440×900, including mobile cards, Creator Trends period controls, AddTopic's recovery actions, and the desktop content timeline's “查看” button; no horizontal overflow was found at 320px. With reduced motion enabled, a mobile retry button retained color feedback while its transform remained `none`. The 404/403 recovery and announcement publish actions were also checked without activation. No business API writes were triggered. This is manual MCP evidence, not an automated browser-suite pass.
+- Type, targeted lint, production build, version and changelog governance results are recorded in `docs/UPGRADE_PROGRESS.md`. Android metadata is 9.4.12 / 90412; no Android installer was built or published.
+- Local changes only; not committed, pushed, or deployed.
+
 ## v9.4.11 - 2026-10-27
 
 ### Editor input
@@ -10,7 +36,7 @@
 ### Validation
 
 - Type check, targeted ESLint, production build, BaseModal accessibility tests, anonymous-feedback recovery tests, API contract tests, and production-review server tests passed. Isolated browser checks covered link/image dialog behavior and comment guidance. The repository browser suite was attempted but Chromium startup failed with macOS `bootstrap_check_in` permission denied (1100), before assertions ran. See `docs/UPGRADE_PROGRESS.md` for exact scope.
-- Android metadata is 9.4.11 / 90411; no APK was built. Changes remain local and are not pushed or deployed.
+- Merged and deployed through PR #90 at exact merge SHA `fdc787e1df4df07597b395dbe35f404d06573c28`; tag `v9.4.11` points to the same SHA. Android metadata is 9.4.11 / 90411; CI produced a Debug APK artifact, but no Android installer was released.
 
 ## v9.4.10 - 2026-10-27
 
@@ -23,7 +49,7 @@
 
 - Chrome MCP isolated fixtures verified cancel/confirm behavior for retrospective actions, topic batch deletion, inspiration deletion, template deletion, local topic drafts, and leaving an edited publishing detail page. Cancel caused no mutation; explicit confirmation invoked the original action. Type, targeted lint, version/document governance, and build results are recorded in `docs/UPGRADE_PROGRESS.md`; automated browser suites are not represented as passing unless listed there.
 - The user confirmed hearing the homepage loading announcements for today's tasks, inspiration count, and followed items. This confirms those homepage prompts only, not site-wide VoiceOver coverage.
-- Android metadata is 9.4.10 / 90410; no APK was built. Changes remain local and are not pushed or deployed.
+- Included in the PR #90 merge and v9.4.11 deployment. Android metadata is 9.4.10 / 90410; no Android installer was released.
 
 ## v9.4.9 - 2026-10-27
 
@@ -33,7 +59,7 @@
 
 ### Validation
 
-- Type checking, production build, version/changelog governance, and `git diff --check` passed. Android metadata is 9.4.9 / 90409; no APK was built. Changes remain local and are not pushed or deployed.
+- Type checking, production build, version/changelog governance, and `git diff --check` passed. Included in the PR #90 merge and v9.4.11 deployment. Android metadata is 9.4.9 / 90409; no Android installer was released.
 
 ## v9.4.8 - 2026-10-27
 
@@ -44,7 +70,7 @@
 
 ### Validation
 
-- Isolated HTTP, migration, and session-storage recovery tests, type checking, version governance, lint, and production build results are recorded in `docs/UPGRADE_PROGRESS.md`. Migration 066 was exercised only against temporary SQLite databases; no production database migration or Android package build was run. Changes remain local and are not pushed or deployed.
+- Isolated HTTP, migration, and session-storage recovery tests, type checking, version governance, lint, and production build results are recorded in `docs/UPGRADE_PROGRESS.md`. Migration 066 was first exercised against temporary SQLite databases, then applied during the protected v9.4.11 deployment after the migration gate passed. Android metadata is 9.4.8 / 90408; no Android installer was released.
 
 ## v9.4.7 - 2026-10-27
 

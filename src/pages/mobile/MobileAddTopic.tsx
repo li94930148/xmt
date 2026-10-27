@@ -60,7 +60,7 @@ export default function MobileAddTopic() {
     void topicId;
     void recovered;
   }, [appStore, draftState, navigate]);
-  const createRecovery = useTopicCreateRecovery(userId, finishTopicCreation);
+  const createRecovery = useTopicCreateRecovery(userId, finishTopicCreation, draftState.ready);
 
   useEffect(() => {
     setSimilarTopicReview(null);
@@ -204,7 +204,7 @@ export default function MobileAddTopic() {
     <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><label className="block"><span className="mb-2 block text-base font-semibold">大纲结构</span><textarea value={form.outline} onChange={(event) => change('outline', event.target.value)} className="min-h-48 w-full resize-y rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm leading-6 outline-none focus:border-studio-cyan" placeholder="列出内容结构、核心观点和素材方向" /></label></section>
     {draftStorageUnavailable ? <p role="status" className="px-1 text-sm text-studio-coral-contrast">本机存储不可用，草稿未能保存；请检查设备存储后重试。</p> : null}
     {notice ? <p role="status" className="px-1 text-sm text-studio-text-secondary">{notice}</p> : null}
-    <div className="grid grid-cols-2 gap-3"><button type="button" onClick={saveLocalDraft} disabled={saving} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-studio-border-soft text-sm font-semibold disabled:opacity-50"><Save className="h-4 w-4" />存本地草稿</button><button type="button" onClick={() => void submit()} disabled={saving || networkState !== 'online'} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{saving ? '提交中…' : networkState === 'offline' ? '等待联网' : '提交选题'}</button></div>
+    <div className="grid grid-cols-2 gap-3"><button type="button" onClick={saveLocalDraft} disabled={saving} className="xmt-btn xmt-btn-secondary min-h-12 w-full text-sm font-semibold disabled:opacity-50"><Save className="h-4 w-4" />存本地草稿</button><button type="button" onClick={() => void submit()} disabled={saving || networkState !== 'online'} className="xmt-btn xmt-btn-primary min-h-12 w-full text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{saving ? '提交中…' : networkState === 'offline' ? '等待联网' : '提交选题'}</button></div>
     <SimilarTopicReview
       open={similarTopicReview !== null}
       title={similarTopicReview?.title ?? ''}

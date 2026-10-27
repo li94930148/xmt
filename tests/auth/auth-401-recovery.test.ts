@@ -38,6 +38,31 @@ const nativeInterceptor = createApiFetchInterceptor(async (request) => {
 assert.equal((await nativeInterceptor(`${origin}/api/topics`, { headers: { Authorization: 'Bearer old' } })).status, 200);
 assert.equal(nativeRefreshCalls, 1);
 
+// A wrong current password is an authentication business rejection, not an expired session.
+let passwordRejectionRefreshes = 0; let passwordRejectionExpiries = 0;
+const passwordRejectionInterceptor = createApiFetchInterceptor(async () => new Response(
+  JSON.stringify({ code: 'OLD_PASSWORD_INCORRECT', message: '旧密码错误' }),
+  { status: 401, headers: { 'Content-Type': 'application/json' } },
+), baseDependencies({
+  refreshWeb: async () => { passwordRejectionRefreshes += 1; return null; },
+  expireSession: () => { passwordRejectionExpiries += 1; },
+}));
+const passwordRejection = await passwordRejectionInterceptor(`${origin}/api/auth/change-password`, { method: 'POST', body: '{}' });
+assert.equal(passwordRejection.status, 401);
+assert.deepEqual(await passwordRejection.json(), { code: 'OLD_PASSWORD_INCORRECT', message: '旧密码错误' });
+assert.equal(passwordRejectionRefreshes, 0, 'a wrong-password business rejection does not refresh the session');
+assert.equal(passwordRejectionExpiries, 0, 'a wrong-password business rejection does not expire the session');
+
+let passwordExpiredRefreshes = 0;
+const passwordExpiredSessionInterceptor = createApiFetchInterceptor(async (request) => {
+  const actual = request as Request;
+  return actual.headers.get('authorization') === 'Bearer password-session-fresh'
+    ? new Response('ok', { status: 200 })
+    : new Response(JSON.stringify({ message: '未登录' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+}, baseDependencies({ refreshWeb: async () => { passwordExpiredRefreshes += 1; return 'password-session-fresh'; } }));
+assert.equal((await passwordExpiredSessionInterceptor(`${origin}/api/auth/change-password`, { method: 'POST', body: '{}' })).status, 200);
+assert.equal(passwordExpiredRefreshes, 1, 'an expired session on the password endpoint still uses normal token refresh');
+
 // Request + init semantics: init forms the first effective request and retry changes only Authorization.
 const initRequests: Request[] = [];
 const initInterceptor = createApiFetchInterceptor(async (request) => { initRequests.push((request as Request).clone()); return initRequests.length === 1 ? new Response('', { status: 401 }) : new Response('ok'); }, baseDependencies({ refreshWeb: async () => 'fresh' }));

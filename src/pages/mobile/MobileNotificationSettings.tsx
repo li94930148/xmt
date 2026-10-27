@@ -9,6 +9,8 @@ import {
 } from '@/api/notificationSettings';
 import { useAuthStore } from '@/store';
 import ErrorState from '@/components/common/ErrorState';
+import ConfirmModal from '@/components/common/ConfirmModal';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '@/hooks/useRouteNavigationGuard';
 
 type Preference = Awaited<ReturnType<typeof getNotificationSettings>>['preferences'][number];
 type EventType = Awaited<ReturnType<typeof getNotificationSettings>>['events'][number];
@@ -17,10 +19,17 @@ type PreferenceRecovery =
   | { kind: 'unknown'; draft: Preference[]; message: string }
   | { kind: 'conflict'; draft: Preference[]; currentPreferences: Preference[] };
 
+function preferenceFingerprint(preferences: Preference[]) {
+  return JSON.stringify(preferences
+    .map(({ channel, event_type, enabled }) => ({ channel, event_type, enabled }))
+    .sort((left, right) => `${left.channel}:${left.event_type}`.localeCompare(`${right.channel}:${right.event_type}`)));
+}
+
 export default function MobileNotificationSettings() {
   const navigate = useNavigate();
   const token = useAuthStore((state) => state.token);
   const [preferences, setPreferences] = useState<Preference[]>([]);
+  const [savedPreferences, setSavedPreferences] = useState<Preference[]>([]);
   const [events, setEvents] = useState<EventType[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -28,6 +37,7 @@ export default function MobileNotificationSettings() {
   const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState<SaveNotice | null>(null);
   const [recovery, setRecovery] = useState<PreferenceRecovery | null>(null);
+  const [pendingLeaveAttempt, setPendingLeaveAttempt] = useState<Pick<RouteNavigationAttempt, 'proceed' | 'stay'> | null>(null);
   const saveLockRef = useRef(false);
   const load = useCallback(async () => {
     setLoading(true); setLoaded(false); setLoadError(''); setNotice(null);
@@ -35,6 +45,7 @@ export default function MobileNotificationSettings() {
     try {
       const data = await getNotificationSettings(token, fetch, (path) => apiUrl(path.replace(/^\/api/, '')));
       setPreferences(data.preferences);
+      setSavedPreferences(data.preferences);
       setEvents(data.events);
       setLoaded(true);
     } catch (error) { setLoadError(error instanceof Error ? error.message : '通知偏好加载失败，请重试。'); }
@@ -57,6 +68,7 @@ export default function MobileNotificationSettings() {
   const applySaveResult = (result: Awaited<ReturnType<typeof saveNotificationPreferences>>, draft: Preference[]) => {
     if (result.kind === 'saved') {
       setPreferences(result.preferences);
+      setSavedPreferences(result.preferences);
       setRecovery(null);
       setNotice({ kind: 'success', message: result.recovered ? '已核实通知偏好已保存。' : '通知偏好已保存。' });
       return;
@@ -97,14 +109,41 @@ export default function MobileNotificationSettings() {
   const restoreCurrentPreferences = () => {
     if (recovery?.kind !== 'conflict') return;
     setPreferences(recovery.currentPreferences);
+    setSavedPreferences(recovery.currentPreferences);
     setRecovery(null);
     setNotice({ kind: 'success', message: '已载入服务器当前保存的通知偏好。' });
   };
 
+  const hasUnsavedPreferences = loaded
+    && preferenceFingerprint(preferences) !== preferenceFingerprint(savedPreferences);
+  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    if (saveLockRef.current || saving) {
+      setNotice({ kind: 'error', message: '通知偏好仍在保存或核实，请等待处理完成后再离开。' });
+      stay();
+      return;
+    }
+    if (hasUnsavedPreferences || recovery) {
+      setPendingLeaveAttempt({ proceed, stay });
+      return;
+    }
+    proceed();
+  }, [hasUnsavedPreferences, recovery, saving]);
+  useRouteNavigationGuard(loaded, handleRouteNavigationAttempt);
+
+  useEffect(() => {
+    if (!loaded || (!hasUnsavedPreferences && !recovery && !saving)) return undefined;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [hasUnsavedPreferences, loaded, recovery, saving]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <button type="button" onClick={() => navigate('/me')} className="flex h-11 w-11 items-center justify-center rounded-xl border border-studio-border-soft" aria-label="返回个人设置">
+        <button type="button" onClick={() => navigate('/me')} className="xmt-btn xmt-btn-ghost h-11 w-11 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary" aria-label="返回个人设置">
           <ChevronLeft className="h-5 w-5" />
         </button>
         <div>
@@ -125,7 +164,7 @@ export default function MobileNotificationSettings() {
               aria-pressed={enabled(event.id)}
               disabled={saving || Boolean(recovery)}
               onClick={() => toggle(event.id)}
-              className="flex min-h-16 w-full items-center justify-between gap-4 border-b border-studio-border-soft px-4 text-left last:border-b-0 disabled:cursor-wait disabled:opacity-60"
+              className="flex min-h-16 w-full items-center justify-between gap-4 border-b border-studio-border-soft px-4 text-left transition-colors hover:bg-studio-surface-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-studio-primary last:border-b-0 disabled:cursor-wait disabled:opacity-60"
             >
               <span>
                 <span className="block text-sm font-medium">{event.name}</span>
@@ -167,10 +206,31 @@ export default function MobileNotificationSettings() {
         </div>
       ) : null}
       {notice ? <p role={notice.kind === 'error' ? 'alert' : 'status'} className="text-sm text-studio-text-secondary">{notice.message}</p> : null}
-      <button type="button" disabled={loading || saving || !loaded || Boolean(loadError) || Boolean(recovery)} onClick={() => void save()} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-studio-primary-button px-4 text-sm text-white disabled:opacity-50">
+      <button type="button" disabled={loading || saving || !loaded || Boolean(loadError) || Boolean(recovery)} onClick={() => void save()} className="xmt-btn xmt-btn-primary inline-flex min-h-11 items-center gap-2 px-4 text-sm disabled:opacity-50">
         <Save className="h-4 w-4" />{saving ? '保存中…' : '保存通知偏好'}
       </button>
       <p className="flex items-center gap-2 text-xs text-studio-text-muted"><Bell className="h-4 w-4" />Android 系统推送需由管理员配置推送服务后启用。</p>
+      <ConfirmModal
+        open={pendingLeaveAttempt !== null}
+        title={recovery ? '通知偏好结果尚未核实' : '通知偏好尚未保存'}
+        description={recovery?.kind === 'unknown'
+          ? '离开后会丢失本页保留的设置和待核实状态。重新打开后会重新读取服务器当前值，不会自动重复保存。'
+          : recovery?.kind === 'conflict'
+            ? '离开会放弃本页保留的设置差异。重新打开后会读取服务器当前值，不会自动覆盖。'
+            : '离开后本页尚未保存的通知选择会丢失。重新打开后会重新读取服务器当前设置。'}
+        confirmText="离开并放弃本页更改"
+        cancelText="继续编辑"
+        variant="warning"
+        onCancel={() => {
+          pendingLeaveAttempt?.stay();
+          setPendingLeaveAttempt(null);
+        }}
+        onConfirm={() => {
+          const attempt = pendingLeaveAttempt;
+          setPendingLeaveAttempt(null);
+          attempt?.proceed();
+        }}
+      />
     </div>
   );
 }

@@ -142,6 +142,7 @@ export function useTopicDraftCollection(userId: number | null | undefined, enabl
   }, [legacyKey, persist, saveCurrentDraft, storageKey]);
 
   return {
+    ready,
     activeDraftId: ready ? collection.activeDraftId : null,
     drafts: ready ? collection.drafts : [],
     form: ready ? form : emptyTopicDraft,

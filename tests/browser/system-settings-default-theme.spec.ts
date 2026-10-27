@@ -13,6 +13,11 @@ async function assertRenderedSettingsPage(page: Page) {
   assert((await page.locator('body').innerText()).trim().length > 0, 'the settings page is not blank');
   assert.equal(await page.locator('vite-error-overlay, #vite-error-overlay, nextjs-portal').count(), 0, 'no framework error overlay is visible');
 }
+async function navigateToWorkbench(page: Page) {
+  const workbenchGroup = page.locator('nav button[aria-expanded]').filter({ hasText: '工作台' }).first();
+  await workbenchGroup.click();
+  await page.locator('nav ul[aria-hidden="false"]').getByRole('button', { name: '工作台', exact: true }).click();
+}
 function parseColor(raw: string) {
   const srgb = raw.match(/^color\(\s*srgb\s+([^\s/]+)\s+([^\s/]+)\s+([^\s/]+)(?:\s*\/\s*([^\s)]+))?\s*\)/i);
   if (srgb) {
@@ -78,9 +83,11 @@ let settings = {
   branding: { brandName: '测试系统', logo: '', brandDescription: '隔离验收' },
   login: { layout: 'style1', welcomeTitle: '欢迎', welcomeMessage: '登录验收' },
 };
-let failNextSettingsSave: string | null = null;
+let failNextSettingsSave: { message: string; status: number; afterCommit: boolean } | null = null;
+let failNextSettingsRead: string | null = null;
 let settingsSaveDelayMs = 0;
 const settingsSaveRequests: unknown[] = [];
+let systemSettingsReadRequests = 0;
 let notificationPreferences = [{ id: 1, channel: 'email', event_type: 'review', enabled: true }];
 let failNextNotificationSave: string | null = null;
 let failNextNotificationRead: string | null = null;
@@ -89,9 +96,11 @@ let notificationSaveRequests = 0;
 let notificationPreferenceReadRequests = 0;
 let dropNextNotificationSaveResponseAfterCommit = false;
 let profile = { ...admin };
-let failNextProfileSave: string | null = null;
+let failNextProfileSave: { message: string; status: number; afterCommit: boolean } | null = null;
+let failNextProfileRead: string | null = null;
 let profileSaveDelayMs = 0;
 let profileSaveRequests = 0;
+let profileReadRequests = 0;
 let fixturePassword = 'current-pass';
 let passwordChangeDelayMs = 0;
 let passwordChangeRequests = 0;
@@ -114,17 +123,32 @@ app.get('/__qa', (req, res) => {
   const preference = typeof req.query.theme === 'string' ? `localStorage.setItem('xmt_theme',${JSON.stringify(req.query.theme)});` : "localStorage.removeItem('xmt_theme');";
   res.type('html').send(`<script>${preference}localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(admin))});localStorage.setItem('xmt_token','settings-fixture');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/notification-settings');</script>`);
 });
-app.get('/api/auth/me', (_req, res) => res.json(profile));
-app.put('/api/auth/profile', async (req, res) => {
-  profileSaveRequests += 1;
-  if (profileSaveDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, profileSaveDelayMs));
-  if (failNextProfileSave) {
-    const message = failNextProfileSave;
-    failNextProfileSave = null;
+app.get('/api/auth/me', (_req, res) => {
+  profileReadRequests += 1;
+  if (failNextProfileRead) {
+    const message = failNextProfileRead;
+    failNextProfileRead = null;
     res.status(503).json({ message });
     return;
   }
-  profile = { ...profile, name: req.body?.name, email: req.body?.email };
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(profile);
+});
+app.put('/api/auth/profile', async (req, res) => {
+  profileSaveRequests += 1;
+  if (profileSaveDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, profileSaveDelayMs));
+  const failure = failNextProfileSave;
+  if (failure && !failure.afterCommit) {
+    failNextProfileSave = null;
+    res.status(failure.status).json({ message: failure.message });
+    return;
+  }
+  profile = { ...profile, name: String(req.body?.name ?? '').trim(), email: String(req.body?.email ?? '').trim() };
+  if (failure) {
+    failNextProfileSave = null;
+    res.status(failure.status).json({ message: failure.message });
+    return;
+  }
   res.json(profile);
 });
 app.post('/api/auth/change-password', async (req, res) => {
@@ -170,14 +194,24 @@ app.delete('/api/backup/:name', async (req, res) => {
   res.json({ message: '备份已删除' });
 });
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
-app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({ ...settings, version }));
+app.get('/api/system-settings', (_req, res) => {
+  systemSettingsReadRequests += 1;
+  if (failNextSettingsRead) {
+    const message = failNextSettingsRead;
+    failNextSettingsRead = null;
+    res.status(503).json({ message });
+    return;
+  }
+  res.json({ ...settings, version });
+});
+app.get('/api/system-settings/public', (_req, res) => res.json({ ...settings, version }));
 app.put('/api/system-settings', async (req, res) => {
   settingsSaveRequests.push(req.body);
   if (settingsSaveDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, settingsSaveDelayMs));
-  if (failNextSettingsSave) {
-    const message = failNextSettingsSave;
+  const failure = failNextSettingsSave;
+  if (failure && !failure.afterCommit) {
     failNextSettingsSave = null;
-    res.status(503).json({ message });
+    res.status(failure.status).json({ message: failure.message });
     return;
   }
   settings = {
@@ -186,6 +220,11 @@ app.put('/api/system-settings', async (req, res) => {
     branding: { ...settings.branding, ...(req.body?.branding ?? {}) },
     login: { ...settings.login, ...(req.body?.login ?? {}) },
   };
+  if (failure) {
+    failNextSettingsSave = null;
+    res.status(failure.status).json({ message: failure.message });
+    return;
+  }
   res.json({ ...settings, version });
 });
 app.get('/api/notifications/preferences', (_req, res) => {
@@ -238,7 +277,7 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
-    if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    if (message.text().includes('503 (Service Unavailable)') || message.text().includes('400 (Bad Request)')) expectedHttpErrors.push(message.text());
     else errors.push(message.text());
   });
 
@@ -254,11 +293,67 @@ try {
   await page.screenshot({ path: '/tmp/xmt-system-default-theme-1440.png', fullPage: true });
 
   await page.getByRole('combobox', { name: '默认主题' }).selectOption('dark');
-  failNextSettingsSave = '系统设置暂时无法保存，请重试。';
+  const systemWritesBeforeCommitThen503 = settingsSaveRequests.length;
+  const systemReadsBeforeCommitThen503 = systemSettingsReadRequests;
+  failNextSettingsSave = { message: '设置已提交，但响应暂时失败。', status: 503, afterCommit: true };
   await page.getByRole('button', { name: '保存系统设置', exact: true }).click();
-  await page.getByText('系统设置暂时无法保存，请重试。', { exact: true }).waitFor();
-  assert.equal(settings.system.defaultTheme, 'light', 'a failed settings save does not mutate the isolated persisted value');
-  assert.equal(expectedHttpErrors.length, 1, 'the isolated failure fixture returns exactly one intentional 503 response');
+  await page.getByText('已核实系统设置已保存', { exact: true }).waitFor();
+  assert.equal(settings.system.defaultTheme, 'dark', 'read-back confirms a settings update that committed before a 503 response');
+  assert.equal(settingsSaveRequests.length, systemWritesBeforeCommitThen503 + 1, 'commit-then-503 recovery does not repeat the PUT');
+  assert.equal(systemSettingsReadRequests, systemReadsBeforeCommitThen503 + 1, 'commit-then-503 recovery uses one read-only GET');
+
+  await page.getByRole('combobox', { name: '默认主题' }).selectOption('light');
+  const systemWritesBeforeUnknown = settingsSaveRequests.length;
+  const systemReadsBeforeUnknown = systemSettingsReadRequests;
+  failNextSettingsSave = { message: '系统设置暂时无法保存，请重试。', status: 503, afterCommit: false };
+  failNextSettingsRead = '系统设置核实暂时不可用。';
+  await page.getByRole('button', { name: '保存系统设置', exact: true }).click();
+  await page.getByText(/系统设置保存结果尚未核实/).waitFor();
+  assert.equal(settings.system.defaultTheme, 'dark', 'a pre-commit failure leaves persisted settings unchanged');
+  assert.equal(settingsSaveRequests.length, systemWritesBeforeUnknown + 1, 'a failed verification does not automatically repeat the PUT');
+  assert.equal(systemSettingsReadRequests, systemReadsBeforeUnknown + 1, 'the ambiguous save performs one GET even when verification fails');
+  assert.equal(await page.getByRole('button', { name: '保存系统设置', exact: true }).isDisabled(), true, 'ordinary save stays locked while the result is unknown');
+  assert.equal(await page.getByRole('combobox', { name: '默认主题' }).isDisabled(), true, 'the submitted settings snapshot stays locked while recovery is pending');
+
+  await page.getByRole('button', { name: '只读重新核实', exact: true }).click();
+  await page.getByText(/服务器当前系统设置与本次提交内容不同/).waitFor();
+  await page.waitForFunction(() => {
+    const button = Array.from(document.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === '确认覆盖服务器设置');
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  assert.equal(settingsSaveRequests.length, systemWritesBeforeUnknown + 1, 'manual verification is read-only and does not repeat the PUT');
+  assert.equal(systemSettingsReadRequests, systemReadsBeforeUnknown + 2, 'manual verification performs only one additional GET');
+  await navigateToWorkbench(page);
+  await page.waitForTimeout(100);
+  assert.equal(new URL(page.url()).pathname, '/notification-settings', 'unresolved settings recovery blocks navigation before opening its confirmation');
+  const settingsLeaveDialog = page.getByRole('dialog', { name: '设置尚有未完成事项' });
+  const settingsLeaveDialogOpened = await settingsLeaveDialog.waitFor({ timeout: 10_000 }).then(() => true).catch(() => false);
+  if (!settingsLeaveDialogOpened) {
+    const navigationState = await page.evaluate(() => ({
+      url: location.href,
+      alerts: Array.from(document.querySelectorAll('[role="alert"]'), (element) => element.textContent?.trim() || ''),
+      dialogs: Array.from(document.querySelectorAll('[role="dialog"]'), (element) => element.textContent?.trim().slice(0, 300) || ''),
+    }));
+    assert.fail(`navigation was blocked without the unresolved-settings confirmation dialog: ${JSON.stringify(navigationState)}`);
+  }
+  assert.equal(new URL(page.url()).pathname, '/notification-settings', 'system settings recovery blocks in-app navigation');
+  await settingsLeaveDialog.getByRole('button', { name: '继续留在设置', exact: true }).click();
+  assert.equal(settingsSaveRequests.length, systemWritesBeforeUnknown + 1, 'canceling navigation does not repeat an unresolved system settings write');
+  await page.getByRole('button', { name: '确认覆盖服务器设置', exact: true }).click();
+  await page.getByText('系统设置已更新', { exact: true }).waitFor();
+  assert.equal(settings.system.defaultTheme, 'light', 'an explicit overwrite applies the preserved settings snapshot');
+  assert.equal(settingsSaveRequests.length, systemWritesBeforeUnknown + 2, 'explicit overwrite sends exactly one additional PUT');
+
+  await page.getByRole('combobox', { name: '默认主题' }).selectOption('dark');
+  const systemWritesBeforeRejected = settingsSaveRequests.length;
+  const systemReadsBeforeRejected = systemSettingsReadRequests;
+  failNextSettingsSave = { message: '系统设置输入不合法。', status: 400, afterCommit: false };
+  await page.getByRole('button', { name: '保存系统设置', exact: true }).click();
+  await page.getByText('系统设置输入不合法。', { exact: true }).waitFor();
+  assert.equal(settingsSaveRequests.length, systemWritesBeforeRejected + 1, 'a definite 4xx is sent once');
+  assert.equal(systemSettingsReadRequests, systemReadsBeforeRejected, 'a definite 4xx does not trigger a verification GET');
+  assert.equal(await page.getByRole('button', { name: '保存系统设置', exact: true }).isDisabled(), false, 'a definite rejection releases the ordinary save action');
+  assert.equal(expectedHttpErrors.length, 4, 'system settings has one committed 503, one failed PUT/GET pair, and one definite 400');
 
   await page.reload();
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
@@ -356,7 +451,7 @@ try {
   notificationPage.on('pageerror', (error) => errors.push(error.message));
   notificationPage.on('console', (message) => {
     if (message.type() !== 'error') return;
-    if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    if (message.text().includes('503 (Service Unavailable)') || message.text().includes('400 (Bad Request)')) expectedHttpErrors.push(message.text());
     else if (message.text().includes('401 (Unauthorized)') && !expectedPasswordConsoleErrors.some((text) => text.includes('401 (Unauthorized)'))) expectedPasswordConsoleErrors.push(message.text());
     else if (message.text().includes('net::ERR_FAILED') && pendingNotificationSaveResponseLossConsoleErrors > 0) {
       pendingNotificationSaveResponseLossConsoleErrors -= 1;
@@ -476,19 +571,102 @@ try {
   const profileInputs = notificationPage.locator('input');
   await profileInputs.nth(0).fill('资料重试验收');
   await profileInputs.nth(1).fill('profile-retry@example.test');
-  failNextProfileSave = '个人资料暂时无法保存，请重试。';
+  const profileReadsBeforeRejected = profileReadRequests;
+  failNextProfileSave = { message: '个人资料格式不正确。', status: 400, afterCommit: false };
   profileSaveDelayMs = 160;
   await notificationPage.getByRole('button', { name: '保存个人资料', exact: true }).dblclick();
-  await notificationPage.getByText('个人资料暂时无法保存，请重试。', { exact: true }).waitFor();
+  await notificationPage.getByText('个人资料格式不正确。', { exact: true }).waitFor();
   profileSaveDelayMs = 0;
   assert.equal(profileSaveRequests, 1, 'rapid repeated profile submission sends one request');
   assert.equal(profile.name, admin.name, 'a failed profile save leaves the persisted profile unchanged');
+  assert.equal(profileReadRequests, profileReadsBeforeRejected, 'a definite profile rejection does not trigger a verification GET');
   assert.equal(await profileInputs.nth(0).inputValue(), '资料重试验收', 'failed profile input is retained for retry');
   assert.equal(await profileInputs.nth(1).inputValue(), 'profile-retry@example.test', 'failed profile email is retained for retry');
   await notificationPage.getByRole('button', { name: '保存个人资料', exact: true }).click();
   await notificationPage.getByText('个人资料已更新', { exact: true }).waitFor();
   assert.equal(profile.name, '资料重试验收', 'explicit profile retry persists the edited name');
   assert.equal(profileSaveRequests, 2, 'profile retry sends exactly one additional update');
+
+  await profileInputs.nth(0).fill('响应丢失后已保存');
+  await profileInputs.nth(1).fill('profile-committed@example.test');
+  const profileWritesBeforeCommitThen503 = profileSaveRequests;
+  const profileReadsBeforeCommitThen503 = profileReadRequests;
+  failNextProfileSave = { message: '资料已保存，但响应暂时失败。', status: 503, afterCommit: true };
+  await notificationPage.getByRole('button', { name: '保存个人资料', exact: true }).click();
+  await notificationPage.getByText('已核实个人资料已更新。', { exact: true }).waitFor();
+  assert.equal(profile.name, '响应丢失后已保存', 'read-back confirms a profile update committed before its 503 response');
+  assert.equal(profileSaveRequests, profileWritesBeforeCommitThen503 + 1, 'commit-then-503 recovery does not repeat the profile PUT');
+  assert.equal(profileReadRequests, profileReadsBeforeCommitThen503 + 1, 'commit-then-503 recovery uses one read-only profile GET');
+
+  await profileInputs.nth(0).fill('资料明确恢复验收');
+  await profileInputs.nth(1).fill('profile-recovery@example.test');
+  const profileWritesBeforeUnknown = profileSaveRequests;
+  const profileReadsBeforeUnknown = profileReadRequests;
+  failNextProfileSave = { message: '个人资料服务暂时不可用。', status: 503, afterCommit: false };
+  failNextProfileRead = '个人资料核实暂时不可用。';
+  await notificationPage.getByRole('button', { name: '保存个人资料', exact: true }).click();
+  await notificationPage.getByText(/个人资料保存结果尚未核实/).waitFor();
+  assert.equal(profile.name, '响应丢失后已保存', 'a pre-commit profile failure leaves the server value unchanged');
+  assert.equal(profileSaveRequests, profileWritesBeforeUnknown + 1, 'a failed profile read-back does not automatically repeat the PUT');
+  assert.equal(profileReadRequests, profileReadsBeforeUnknown + 1, 'an ambiguous profile write is followed by one failed read-only GET');
+  assert.equal(await profileInputs.nth(0).isDisabled(), true, 'profile inputs lock while the write result is unknown');
+  const profileRecoveryWarnsOnUnload = await notificationPage.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  assert.equal(profileRecoveryWarnsOnUnload, true, 'an unresolved profile update warns before the settings page is unloaded');
+  await navigateToWorkbench(notificationPage);
+  const profileLeaveDialog = notificationPage.getByRole('dialog', { name: '设置尚有未完成事项' });
+  await profileLeaveDialog.waitFor();
+  assert.equal(new URL(notificationPage.url()).pathname, '/notification-settings', 'unresolved profile recovery blocks in-app navigation');
+  await profileLeaveDialog.getByRole('button', { name: '继续留在设置', exact: true }).click();
+  assert.equal(profileSaveRequests, profileWritesBeforeUnknown + 1, 'canceling navigation does not repeat an unresolved profile write');
+  await notificationPage.getByRole('button', { name: '只读重新核实', exact: true }).click();
+  await notificationPage.getByText(/服务器仍是本次编辑前的资料/).waitFor();
+  assert.equal(profileSaveRequests, profileWritesBeforeUnknown + 1, 'manual profile verification does not repeat the PUT');
+  assert.equal(profileReadRequests, profileReadsBeforeUnknown + 2, 'manual profile recovery performs one additional GET');
+  await notificationPage.getByRole('button', { name: '确认重新保存', exact: true }).click();
+  await notificationPage.getByText('个人资料已更新', { exact: true }).waitFor();
+  assert.equal(profile.name, '资料明确恢复验收', 'the explicit profile retry persists the preserved draft');
+  assert.equal(profileSaveRequests, profileWritesBeforeUnknown + 2, 'explicit profile retry sends exactly one additional PUT');
+
+  await notificationPage.evaluate(async () => {
+    const { useAuthStore } = await import('/src/store/index.ts');
+    const auth = useAuthStore.getState();
+    if (!auth.user) throw new Error('the isolated profile fixture must be authenticated');
+    auth.loginV1(auth.user, 'settings-profile-session-token-before-refresh');
+  });
+  await profileInputs.nth(0).fill('令牌刷新后仍能保存');
+  await profileInputs.nth(1).fill('token-refresh-profile@example.test');
+  profileSaveDelayMs = 160;
+  const tokenRefreshProfileRequest = notificationPage.waitForRequest((request) => request.method() === 'PUT' && request.url().endsWith('/api/auth/profile'));
+  const tokenRefreshProfileResponse = notificationPage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/auth/profile') && response.status() === 200);
+  await notificationPage.getByRole('button', { name: '保存个人资料', exact: true }).click();
+  await tokenRefreshProfileRequest;
+  await notificationPage.evaluate(async () => {
+    const { useAuthStore } = await import('/src/store/index.ts');
+    const auth = useAuthStore.getState();
+    if (!auth.user) throw new Error('the isolated profile fixture must remain authenticated during token refresh');
+    auth.loginV1(auth.user, 'settings-profile-session-token-after-refresh');
+  });
+  await tokenRefreshProfileResponse;
+  profileSaveDelayMs = 0;
+  await notificationPage.getByText('个人资料已更新', { exact: true }).last().waitFor();
+  const refreshedProfileAuth = await notificationPage.evaluate(async () => {
+    const { useAuthStore } = await import('/src/store/index.ts');
+    const auth = useAuthStore.getState();
+    return { token: auth.token, user: auth.user };
+  });
+  assert.equal(refreshedProfileAuth.token, 'settings-profile-session-token-after-refresh', 'profile read-back keeps the access token refreshed during the request');
+  assert.equal(refreshedProfileAuth.user?.name, '令牌刷新后仍能保存', 'a same-account profile response still applies after routine token rotation');
+  assert.equal(profile.name, '令牌刷新后仍能保存', 'the isolated server fixture records the profile update once');
+  await notificationPage.evaluate(async () => {
+    const { useAuthStore } = await import('/src/store/index.ts');
+    const auth = useAuthStore.getState();
+    if (!auth.user) throw new Error('the isolated profile fixture must remain authenticated after token refresh');
+    auth.login(auth.user, 'settings-fixture', { persist: 'local' });
+  });
 
   await notificationPage.getByRole('button', { name: '账号安全', exact: true }).click();
   const passwordInputs = notificationPage.locator('input[type="password"]');
@@ -625,7 +803,7 @@ try {
   assert.equal(expectedBackupDeleteRequestFailures.length, 1, 'the committed delete response is withheld exactly once in the isolated browser fixture');
   assert.equal(expectedBackupDeleteConsoleErrors.length, 1, 'the only backup network console error is the intentional response-loss fixture');
   assert.equal(backupListRequests, 9, 'response-loss recovery uses one list GET and does not repeat DELETE');
-  assert.equal(expectedHttpErrors.length, 8, 'system, notification, profile, backup create/list/delete fixtures each produce the expected isolated 503 responses');
+  assert.equal(expectedHttpErrors.length, 14, 'system, notification, profile, and backup fixtures produce the expected isolated HTTP error responses');
   assert.deepEqual(errors, [], 'notification preference feedback has no browser runtime or unexpected console errors');
   await notificationPage.goto(`${base}/__qa?theme=dark`);
   await notificationPage.getByRole('button', { name: '通知偏好', exact: true }).click();
@@ -658,6 +836,7 @@ try {
   const appearanceTheme = notificationPage.getByRole('combobox', { name: '主题', exact: true });
   await notificationPage.locator('details').filter({ hasText: '高级设置' }).locator('summary').click();
   await notificationPage.getByRole('combobox', { name: '标题文本动画', exact: true }).selectOption('gradient-text');
+  await notificationPage.getByRole('combobox', { name: '动效强度', exact: true }).selectOption('balanced');
   for (const theme of ['dark', 'light'] as const) {
     await appearanceTheme.selectOption(theme);
     const preview = notificationPage.locator(`[data-reactbits-scene="home"][data-theme="${theme}"]`);
@@ -868,15 +1047,18 @@ try {
   assert.equal(settings.branding.logo, '', 'choosing an image does not persist or upload the logo');
   assert.equal(await brandingPage.getByText('品牌设置已更新', { exact: true }).count(), 0, 'local selection is not reported as a saved brand setting');
 
-  failNextSettingsSave = '品牌设置暂时无法保存，请重试。';
+  const brandReadsBeforeSave = systemSettingsReadRequests;
+  failNextSettingsSave = { message: '品牌设置暂时无法保存，请重试。', status: 503, afterCommit: false };
   await brandingPage.getByRole('button', { name: '保存品牌设置', exact: true }).click();
-  await brandingPage.getByText('品牌设置暂时无法保存，请重试。', { exact: true }).waitFor();
+  await brandingPage.getByText(/服务器当前系统设置与本次提交内容不同/).waitFor();
   assert.equal(settings.branding.logo, '', 'failed save leaves the persisted brand logo unchanged');
   assert.equal(await logoPreview.getAttribute('src'), previewSource, 'failed save keeps the selected preview available for retry');
+  assert.equal(systemSettingsReadRequests, brandReadsBeforeSave + 1, 'the ambiguous brand save uses one read-only verification');
+  assert.equal(await brandingPage.getByRole('button', { name: '保存品牌设置', exact: true }).isDisabled(), true, 'ordinary branding save remains locked until the read-back conflict is resolved');
   settingsSaveDelayMs = 160;
   const brandSaveRetry = brandingPage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/system-settings') && response.status() === 200);
   const pendingBrandSave = brandingPage.waitForRequest((request) => request.method() === 'PUT' && request.url().endsWith('/api/system-settings'));
-  await brandingPage.getByRole('button', { name: '保存品牌设置', exact: true }).dblclick();
+  await brandingPage.getByRole('button', { name: '确认覆盖服务器设置', exact: true }).dblclick();
   await pendingBrandSave;
   assert.equal(await brandingPage.locator('input[type="text"]').first().isDisabled(), true, 'brand fields are locked while the server save is pending');
   assert.equal(await logoInput.isDisabled(), true, 'logo selection is locked while the server save is pending');
@@ -886,7 +1068,7 @@ try {
   settingsSaveDelayMs = 0;
   assert.equal(settings.branding.logo, previewSource, 'logo is persisted only after the explicit save succeeds');
   assert.equal(settingsSaveRequests.length, 2, 'logo persistence uses one failed save and one request for a rapid double-click retry');
-  assert.equal(expectedHttpErrors.length, 8, 'system, notification, profile, backup create/list/delete, and brand-save failures each produce one intentional fixture 503');
+  assert.equal(expectedHttpErrors.length, 15, 'system, notification, profile, backup, and brand-save fixtures produce the expected isolated HTTP error responses');
   await brandingPage.reload();
   await brandingPage.getByRole('button', { name: '品牌设置', exact: true }).click();
   assert.equal(await brandingPage.locator('img[alt="系统 Logo"]').getAttribute('src'), previewSource, 'successful save persists the logo for the next visit');

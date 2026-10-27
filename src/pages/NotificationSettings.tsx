@@ -1,6 +1,8 @@
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore, useAppStore } from '../store';
-import { updateMyProfile, getSystemSettings, updateSystemSettings } from '../api';
+import { updateMyProfile, getMe, getSystemSettings, updateSystemSettings } from '../api';
+import { AuthRequestError } from '../api/auth';
+import { verifySystemSettingsUpdate } from '../api/systemSettings';
 import { apiUrl } from '../api/transport';
 import {
   getBackupList,
@@ -17,6 +19,7 @@ import { ReactBitsAppearancePanel } from '@/features/reactbits-appearance/ReactB
 import { useDesktopNotification } from '../hooks/useDesktopNotification';
 import { isSecureContext } from '../utils/notification';
 import { useBackupCreateRecovery } from '../hooks/useBackupCreateRecovery';
+import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
 import ErrorState from '../components/common/ErrorState';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -86,6 +89,36 @@ type BackupDeleteRecoveryMarker = { version: 1; actorId: number; name: string };
 type NotificationPreferenceRecovery =
   | { kind: 'unknown'; draft: NotificationPreference[]; message: string }
   | { kind: 'conflict'; draft: NotificationPreference[]; currentPreferences: NotificationPreference[] };
+type SystemSettingsRecovery =
+  | { kind: 'unknown'; patch: Partial<ManagedSystemSettings>; successMessage: string; message: string }
+  | { kind: 'conflict'; patch: Partial<ManagedSystemSettings>; successMessage: string; currentSettings: ManagedSystemSettings };
+type ProfileFields = { name: string; email: string };
+type ProfileRecovery = {
+  kind: 'unknown' | 'unchanged' | 'conflict';
+  actorId: number;
+  token: string;
+  authMode: 'legacy' | 'v1-web';
+  draft: ProfileFields;
+  before: ProfileFields;
+  currentUser?: Awaited<ReturnType<typeof getMe>>;
+  message: string;
+};
+
+function notificationPreferenceFingerprint(preferences: NotificationPreference[]) {
+  return JSON.stringify(preferences
+    .map(({ channel, event_type, enabled }) => ({ channel, event_type, enabled }))
+    .sort((left, right) => `${left.channel}:${left.event_type}`.localeCompare(`${right.channel}:${right.event_type}`)));
+}
+
+function normalizeProfileFields(value: ProfileFields): ProfileFields {
+  return { name: value.name.trim(), email: value.email.trim() };
+}
+
+function sameProfileFields(left: ProfileFields, right: ProfileFields) {
+  const normalizedLeft = normalizeProfileFields(left);
+  const normalizedRight = normalizeProfileFields(right);
+  return normalizedLeft.name === normalizedRight.name && normalizedLeft.email === normalizedRight.email;
+}
 
 const BACKUP_DELETE_RECOVERY_PREFIX = 'xmt:backup-delete-pending:v1:actor:';
 
@@ -170,6 +203,7 @@ export default function NotificationSettings() {
   });
 
   const [preferences, setPreferences] = useState<NotificationPreference[]>([]);
+  const [savedPreferences, setSavedPreferences] = useState<NotificationPreference[]>([]);
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [events, setEvents] = useState<NotificationEvent[]>([]);
   const [notifyLoading, setNotifyLoading] = useState(true);
@@ -177,12 +211,15 @@ export default function NotificationSettings() {
   const [notifyLoadError, setNotifyLoadError] = useState('');
   const [notifySaving, setNotifySaving] = useState(false);
   const [notifyRecovery, setNotifyRecovery] = useState<NotificationPreferenceRecovery | null>(null);
+  const [pendingLeaveAttempt, setPendingLeaveAttempt] = useState<Pick<RouteNavigationAttempt, 'proceed' | 'stay'> | null>(null);
+  const [navigationGuardNotice, setNavigationGuardNotice] = useState('');
   const notifySaveLockRef = useRef(false);
   const logoReaderRef = useRef<FileReader | null>(null);
 
   const [profileName, setProfileName] = useState(authStore.user?.name || '');
   const [profileEmail, setProfileEmail] = useState(authStore.user?.email || '');
   const [profileSaving, setProfileSaving] = useState(false);
+  const [profileRecovery, setProfileRecovery] = useState<ProfileRecovery | null>(null);
   const profileSaveLockRef = useRef(false);
 
   const [oldPassword, setOldPassword] = useState('');
@@ -201,6 +238,7 @@ export default function NotificationSettings() {
   const [systemSettingsLoaded, setSystemSettingsLoaded] = useState(false);
   const [systemSettingsError, setSystemSettingsError] = useState('');
   const [systemSettingsSaving, setSystemSettingsSaving] = useState(false);
+  const [systemSettingsRecovery, setSystemSettingsRecovery] = useState<SystemSettingsRecovery | null>(null);
   const systemSettingsSaveLockRef = useRef(false);
   const [fontSize, setFontSize] = useState(appStore.fontSize);
   const [appearanceTheme, setAppearanceTheme] = useState<'light' | 'dark'>(appStore.theme);
@@ -352,6 +390,7 @@ export default function NotificationSettings() {
     try {
       const data = await getNotificationSettings(token);
       setPreferences(data.preferences);
+      setSavedPreferences(data.preferences);
       setChannels(data.channels);
       setEvents(data.events);
       setNotifyLoaded(true);
@@ -407,6 +446,7 @@ export default function NotificationSettings() {
   ) {
     if (result.kind === 'saved') {
       setPreferences(result.preferences);
+      setSavedPreferences(result.preferences);
       setNotifyRecovery(null);
       appStore.addNotification({
         title: '保存成功',
@@ -461,27 +501,129 @@ export default function NotificationSettings() {
   function restoreCurrentNotificationPreferences() {
     if (notifyRecovery?.kind !== 'conflict') return;
     setPreferences(notifyRecovery.currentPreferences);
+    setSavedPreferences(notifyRecovery.currentPreferences);
     setNotifyRecovery(null);
     appStore.addNotification({ title: '已载入服务器设置', message: '页面现在显示服务器当前保存的通知偏好。', type: 'info' });
   }
 
-  async function handleSaveProfile() {
-    if (!authStore.user || profileSaveLockRef.current) {
-      return;
-    }
+  function saveProfileFromServer(profile: Awaited<ReturnType<typeof getMe>>, actorId: number, actorAuthMode: 'legacy' | 'v1-web') {
+    const currentAuth = useAuthStore.getState();
+    const currentToken = currentAuth.token;
+    if (Number(profile.id) !== actorId || Number(currentAuth.user?.id) !== actorId || currentAuth.authMode !== actorAuthMode || !currentToken) return false;
+    currentAuth.login(profile, currentToken);
+    setProfileName(profile.name);
+    setProfileEmail(profile.email ?? '');
+    setProfileRecovery(null);
+    return true;
+  }
 
+  async function verifyProfileSnapshot(recovery: ProfileRecovery) {
+    try {
+      const currentProfile = await getMe(recovery.token);
+      if (Number(currentProfile.id) !== recovery.actorId) {
+        setProfileRecovery({
+          ...recovery,
+          kind: 'unknown',
+          currentUser: undefined,
+          message: '个人资料结果尚未核实：当前会话返回了其他账号资料。草稿已保留，请保持页面并只读重核。',
+        });
+        return;
+      }
+
+      const currentFields = normalizeProfileFields({ name: currentProfile.name, email: currentProfile.email ?? '' });
+      if (sameProfileFields(currentFields, recovery.draft)) {
+        if (!saveProfileFromServer(currentProfile, recovery.actorId, recovery.authMode)) return;
+        appStore.addNotification({ title: '保存结果已核实', message: '已核实个人资料已更新。', type: 'success' });
+        return;
+      }
+
+      const unchanged = sameProfileFields(currentFields, recovery.before);
+      setProfileRecovery({
+        ...recovery,
+        kind: unchanged ? 'unchanged' : 'conflict',
+        currentUser: currentProfile,
+        message: unchanged
+          ? '服务器仍是本次编辑前的资料。系统没有自动重发；确认后可明确重新保存。'
+          : '服务器资料与本次编辑前及提交内容均不同。为避免覆盖其他修改，普通保存已暂停。',
+      });
+    } catch {
+      setProfileRecovery({
+        ...recovery,
+        kind: 'unknown',
+        currentUser: undefined,
+        message: '个人资料保存结果尚未核实。页面中的修改已保留；请只读重新核实，确认前不要重复保存。',
+      });
+    }
+  }
+
+  async function verifyProfileRecovery() {
+    if (!profileRecovery || profileSaveLockRef.current) return;
+    const recovery = profileRecovery;
     profileSaveLockRef.current = true;
     setProfileSaving(true);
     try {
-      const profile = await updateMyProfile({ name: profileName, email: profileEmail });
-      authStore.login({ ...authStore.user, name: profile.name, email: profile.email }, authStore.token!);
-      appStore.addNotification({ title: '保存成功', message: '个人资料已更新', type: 'success' });
-    } catch (error) {
-      appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+      await verifyProfileSnapshot(recovery);
     } finally {
       profileSaveLockRef.current = false;
       setProfileSaving(false);
     }
+  }
+
+  async function handleSaveProfile(confirmOverwrite = false) {
+    const recovery = profileRecovery;
+    const currentAuth = useAuthStore.getState();
+    const currentUser = currentAuth.user;
+    const actorToken = currentAuth.token;
+    if (!currentUser || !actorToken || profileSaveLockRef.current || (recovery && !confirmOverwrite)) return;
+
+    const actorId = Number(currentUser.id);
+    if (!Number.isSafeInteger(actorId) || actorId <= 0) return;
+    const draft = normalizeProfileFields(confirmOverwrite && recovery ? recovery.draft : { name: profileName, email: profileEmail });
+    const before = normalizeProfileFields(confirmOverwrite && recovery?.currentUser
+      ? { name: recovery.currentUser.name, email: recovery.currentUser.email ?? '' }
+      : { name: currentUser.name, email: currentUser.email ?? '' });
+    const snapshot: ProfileRecovery = {
+      kind: 'unknown',
+      actorId,
+      token: actorToken,
+      authMode: currentAuth.authMode,
+      draft,
+      before,
+      message: '个人资料保存结果尚未核实，正在只读核实；核实前不会再次提交。',
+    };
+
+    profileSaveLockRef.current = true;
+    setProfileSaving(true);
+    try {
+      const profile = await updateMyProfile(draft);
+      if (!saveProfileFromServer(profile, actorId, currentAuth.authMode)) return;
+      appStore.addNotification({ title: '保存成功', message: '个人资料已更新', type: 'success' });
+    } catch (error) {
+      const status = error instanceof AuthRequestError ? error.status : null;
+      const definitelyRejected = status !== null && status >= 400 && status < 500
+        && ![408, 425, 429].includes(status);
+      if (definitelyRejected) {
+        setProfileRecovery(null);
+        appStore.addNotification({
+          title: '保存失败',
+          message: error instanceof Error ? error.message : '更新个人资料失败。',
+          type: 'error',
+        });
+        return;
+      }
+
+      setProfileRecovery(snapshot);
+      await verifyProfileSnapshot(snapshot);
+    } finally {
+      profileSaveLockRef.current = false;
+      setProfileSaving(false);
+    }
+  }
+
+  function restoreCurrentProfile() {
+    if (!profileRecovery?.currentUser) return;
+    if (!saveProfileFromServer(profileRecovery.currentUser, profileRecovery.actorId, profileRecovery.authMode)) return;
+    appStore.addNotification({ title: '已载入服务器资料', message: '页面现在显示服务器当前保存的姓名和邮箱。', type: 'info' });
   }
 
   async function handleChangePassword() {
@@ -582,23 +724,106 @@ export default function NotificationSettings() {
     }
   }
 
-  async function handleSaveSystemSection(patch: Partial<ManagedSystemSettings>, successMessage: string) {
-    if (!canManageSystem || !systemSettingsLoaded || systemSettingsLoading || systemSettingsSaving || systemSettingsSaveLockRef.current) return;
+  function applySystemSettings(settings: ManagedSystemSettings, successMessage: string, recovered = false) {
+    setSystemSettings(settings);
+    setGlobalSystemSettings(settings);
+    applyDocumentBranding(settings);
+    emitSystemSettingsChanged();
+    setSystemSettingsRecovery(null);
+    appStore.addNotification({
+      title: recovered ? '保存结果已核实' : '保存成功',
+      message: recovered ? '已核实系统设置已保存' : successMessage,
+      type: 'success',
+    });
+  }
+
+  function applySystemSettingsSaveResult(
+    result: Awaited<ReturnType<typeof updateSystemSettings>>,
+    patch: Partial<ManagedSystemSettings>,
+    successMessage: string,
+  ) {
+    if (result.kind === 'saved') {
+      applySystemSettings(result.settings, successMessage, result.recovered);
+      return;
+    }
+    if (result.kind === 'rejected') {
+      setSystemSettingsRecovery(null);
+      appStore.addNotification({ title: '保存失败', message: result.message, type: 'error' });
+      return;
+    }
+    if (result.kind === 'conflict') {
+      setSystemSettingsRecovery({ kind: 'conflict', patch, successMessage, currentSettings: result.currentSettings });
+      return;
+    }
+    setSystemSettingsRecovery({ kind: 'unknown', patch, successMessage, message: result.message });
+  }
+
+  async function handleSaveSystemSection(
+    patch: Partial<ManagedSystemSettings>,
+    successMessage: string,
+    confirmOverwrite = false,
+  ) {
+    if (!canManageSystem || !systemSettingsLoaded || systemSettingsLoading || systemSettingsSaving
+      || systemSettingsSaveLockRef.current || (systemSettingsRecovery && !confirmOverwrite)) return;
+    const selectedPatch = confirmOverwrite && systemSettingsRecovery
+      ? {
+        ...(systemSettingsRecovery.patch.system ? { system: { ...systemSettingsRecovery.patch.system } } : {}),
+        ...(systemSettingsRecovery.patch.branding ? { branding: { ...systemSettingsRecovery.patch.branding } } : {}),
+        ...(systemSettingsRecovery.patch.login ? { login: { ...systemSettingsRecovery.patch.login } } : {}),
+      }
+      : patch;
+    const selectedSuccessMessage = confirmOverwrite && systemSettingsRecovery
+      ? systemSettingsRecovery.successMessage
+      : successMessage;
     systemSettingsSaveLockRef.current = true;
     setSystemSettingsSaving(true);
     try {
-      const next = await updateSystemSettings(patch);
-      setSystemSettings(next);
-      setGlobalSystemSettings(next);
-      applyDocumentBranding(next);
-      emitSystemSettingsChanged();
-      appStore.addNotification({ title: '保存成功', message: successMessage, type: 'success' });
-    } catch (error) {
-      appStore.addNotification({ title: '保存失败', message: (error as Error).message, type: 'error' });
+      const result = await updateSystemSettings(selectedPatch);
+      applySystemSettingsSaveResult(result, selectedPatch, selectedSuccessMessage);
     } finally {
       systemSettingsSaveLockRef.current = false;
       setSystemSettingsSaving(false);
     }
+  }
+
+  async function verifySystemSettingsRecovery() {
+    if (!systemSettingsRecovery || systemSettingsSaveLockRef.current) return;
+    const recovery = systemSettingsRecovery;
+    systemSettingsSaveLockRef.current = true;
+    setSystemSettingsSaving(true);
+    try {
+      const result = await verifySystemSettingsUpdate(recovery.patch);
+      applySystemSettingsSaveResult(result, recovery.patch, recovery.successMessage);
+    } finally {
+      systemSettingsSaveLockRef.current = false;
+      setSystemSettingsSaving(false);
+    }
+  }
+
+  function restoreCurrentSystemSettings() {
+    if (systemSettingsRecovery?.kind !== 'conflict') return;
+    const recovery = systemSettingsRecovery;
+    const restoreSubmittedFields = <T extends object>(local: T, server: T, submitted: Partial<T> | undefined): T => {
+      if (!submitted) return local;
+      const restoredFields = Object.fromEntries(
+        (Object.keys(submitted) as Array<keyof T>).map((key) => [key, server[key]]),
+      );
+      return Object.assign({}, local, restoredFields) as T;
+    };
+    setSystemSettings((local) => ({
+      system: restoreSubmittedFields(local.system, recovery.currentSettings.system, recovery.patch.system),
+      branding: restoreSubmittedFields(local.branding, recovery.currentSettings.branding, recovery.patch.branding),
+      login: restoreSubmittedFields(local.login, recovery.currentSettings.login, recovery.patch.login),
+    }));
+    setGlobalSystemSettings(recovery.currentSettings);
+    applyDocumentBranding(recovery.currentSettings);
+    emitSystemSettingsChanged();
+    setSystemSettingsRecovery(null);
+    appStore.addNotification({
+      title: '已载入服务器设置',
+      message: '本次提交涉及的字段已恢复为服务器当前值，其他未提交的设置保留在页面中。',
+      type: 'info',
+    });
   }
 
   function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -702,6 +927,55 @@ export default function NotificationSettings() {
   }
   const backupRecovery = useBackupCreateRecovery(handleBackupConfirmed);
 
+  const notificationsDirty = notifyLoaded
+    && notificationPreferenceFingerprint(preferences) !== notificationPreferenceFingerprint(savedPreferences);
+  const profileDirty = Boolean(authStore.user)
+    && !sameProfileFields(
+      { name: profileName, email: profileEmail },
+      { name: authStore.user?.name ?? '', email: authStore.user?.email ?? '' },
+    );
+  const systemSettingsDirty = canManageSystem && systemSettingsLoaded
+    && JSON.stringify(systemSettings) !== JSON.stringify(savedSettings);
+  const hasUnsavedSettings = notificationsDirty || profileDirty || systemSettingsDirty;
+  const hasRecoveryToConfirm = Boolean(
+    notifyRecovery || profileRecovery || passwordOutcomeUnknown || systemSettingsRecovery
+      || backupRecovery.pending || backupDeleteRecovery,
+  );
+  const hasSettingsWriteInFlight = notifySaving || profileSaving || pwdSaving || systemSettingsSaving
+    || backupCreating || backupRecovery.busy || backupDeleting !== null || backupDeleteVerifying
+    || notifySaveLockRef.current || profileSaveLockRef.current || passwordSaveLockRef.current
+    || systemSettingsSaveLockRef.current || backupMutationLockRef.current
+    || backupDeleteVerificationLocksRef.current.size > 0;
+  const shouldGuardSettingsNavigation = hasUnsavedSettings || hasRecoveryToConfirm || hasSettingsWriteInFlight;
+  const handleSettingsNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+    if (notifySaveLockRef.current || profileSaveLockRef.current || passwordSaveLockRef.current
+      || systemSettingsSaveLockRef.current || backupMutationLockRef.current
+      || backupDeleteVerificationLocksRef.current.size > 0 || notifySaving || profileSaving
+      || pwdSaving || systemSettingsSaving || backupCreating || backupRecovery.busy
+      || backupDeleting !== null || backupDeleteVerifying) {
+      setNavigationGuardNotice('设置仍在保存或核实，请等待完成后再离开。');
+      stay();
+      return;
+    }
+    if (hasUnsavedSettings || hasRecoveryToConfirm) {
+      setNavigationGuardNotice('');
+      setPendingLeaveAttempt({ proceed, stay });
+      return;
+    }
+    proceed();
+  }, [backupCreating, backupDeleteVerifying, backupDeleting, backupRecovery.busy, hasRecoveryToConfirm, hasUnsavedSettings, notifySaving, profileSaving, pwdSaving, systemSettingsSaving]);
+  useRouteNavigationGuard(shouldGuardSettingsNavigation, handleSettingsNavigationAttempt);
+
+  useEffect(() => {
+    if (!shouldGuardSettingsNavigation) return undefined;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [shouldGuardSettingsNavigation]);
+
   async function handleCreateBackup() {
     if (backupMutationLockRef.current || backupLoading || backupRecovery.busy || backupRecovery.pending || backupDeleteRecovery || backupDeleteVerifying) return;
     backupMutationLockRef.current = true;
@@ -797,8 +1071,10 @@ export default function NotificationSettings() {
     );
   }
 
+  const systemSettingsLocked = systemSettingsSaving || Boolean(systemSettingsRecovery);
+
   function renderSystemInput(label: string, value: string, onChange: (value: string) => void) {
-    return renderInput(label, value, onChange, 'text', undefined, systemSettingsSaving);
+    return renderInput(label, value, onChange, 'text', undefined, systemSettingsLocked);
   }
 
   return (
@@ -809,6 +1085,11 @@ export default function NotificationSettings() {
           ? '个人偏好在“我的设置”中调整，团队共用配置在“系统管理”中维护。'
           : '管理你的资料、账号安全、外观与通知偏好。'}
       />
+      {navigationGuardNotice ? (
+        <div role="alert" className={`rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm ${styles.textPrimary}`}>
+          {navigationGuardNotice}
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <GlassPanel className="w-full flex-shrink-0 self-start p-2 lg:w-56">
@@ -843,6 +1124,38 @@ export default function NotificationSettings() {
         </GlassPanel>
 
         <GlassPanel className="min-w-0 flex-1 overflow-visible p-4 sm:p-6">
+          {systemSettingsRecovery && ['system', 'branding', 'login'].includes(activeTab) ? (
+            <div
+              role={systemSettingsRecovery.kind === 'unknown' ? 'alert' : 'status'}
+              className={`mb-5 space-y-3 rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm ${styles.textPrimary}`}
+            >
+              <p>
+                {systemSettingsRecovery.kind === 'unknown'
+                  ? systemSettingsRecovery.message
+                  : '服务器当前系统设置与本次提交内容不同。为避免自动覆盖，普通保存已暂停。'}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => void verifySystemSettingsRecovery()} disabled={systemSettingsSaving} className="xmt-btn xmt-btn-secondary">
+                  {systemSettingsSaving ? '正在核实…' : '只读重新核实'}
+                </button>
+                {systemSettingsRecovery.kind === 'conflict' ? (
+                  <>
+                    <button type="button" onClick={restoreCurrentSystemSettings} disabled={systemSettingsSaving} className="xmt-btn xmt-btn-secondary">
+                      载入服务器设置
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveSystemSection(systemSettingsRecovery.patch, systemSettingsRecovery.successMessage, true)}
+                      disabled={systemSettingsSaving}
+                      className="xmt-btn xmt-btn-primary"
+                    >
+                      {systemSettingsSaving ? '正在保存…' : '确认覆盖服务器设置'}
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {canManageSystem && ['system', 'branding', 'login'].includes(activeTab) && !systemSettingsLoaded && (
             systemSettingsError ? (
               <ErrorState title="系统配置未能加载" description={systemSettingsError} onRetry={() => void fetchSystemSettings()} />
@@ -1012,18 +1325,42 @@ export default function NotificationSettings() {
                 <p className={`mt-1 text-sm ${styles.textMuted}`}>更新你的姓名和邮箱信息。</p>
               </div>
 
+              {profileRecovery ? (
+                <div
+                  role={profileRecovery.kind === 'unknown' ? 'alert' : 'status'}
+                  className={`space-y-3 rounded-xl border border-studio-amber/30 bg-studio-amber-soft px-4 py-3 text-sm ${styles.textPrimary}`}
+                >
+                  <p>{profileRecovery.message}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => void verifyProfileRecovery()} disabled={profileSaving} className="xmt-btn xmt-btn-secondary">
+                      {profileSaving ? '正在核实…' : '只读重新核实'}
+                    </button>
+                    {profileRecovery.currentUser ? (
+                      <button type="button" onClick={restoreCurrentProfile} disabled={profileSaving} className="xmt-btn xmt-btn-secondary">
+                        载入服务器资料
+                      </button>
+                    ) : null}
+                    {profileRecovery.kind !== 'unknown' ? (
+                      <button type="button" onClick={() => void handleSaveProfile(true)} disabled={profileSaving} className="xmt-btn xmt-btn-primary">
+                        {profileRecovery.kind === 'conflict' ? '确认覆盖服务器资料' : '确认重新保存'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="grid gap-5 md:max-w-xl">
-                {renderInput('姓名', profileName, setProfileName)}
-                {renderInput('邮箱', profileEmail, setProfileEmail, 'email')}
+                {renderInput('姓名', profileName, setProfileName, 'text', undefined, profileSaving || Boolean(profileRecovery))}
+                {renderInput('邮箱', profileEmail, setProfileEmail, 'email', undefined, profileSaving || Boolean(profileRecovery))}
               </div>
 
               <button
-                onClick={handleSaveProfile}
-                disabled={profileSaving}
+                onClick={() => void handleSaveProfile()}
+                disabled={profileSaving || Boolean(profileRecovery)}
                 className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
               >
                 {profileSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {profileSaving ? '保存中...' : '保存个人资料'}
+                {profileSaving ? '保存中...' : profileRecovery ? '结果待核实' : '保存个人资料'}
               </button>
             </div>
           )}
@@ -1153,7 +1490,7 @@ export default function NotificationSettings() {
                   id="system-default-theme"
                   aria-label="默认主题"
                   value={systemSettings.system.defaultTheme}
-                  disabled={systemSettingsSaving}
+                  disabled={systemSettingsLocked}
                   onChange={(event) => setSystemSettings((current) => ({
                     ...current,
                     system: { ...current.system, defaultTheme: event.target.value as 'light' | 'dark' },
@@ -1173,7 +1510,7 @@ export default function NotificationSettings() {
 
               <button
                 onClick={() => void handleSaveSystemSection({ system: systemSettings.system }, '系统设置已更新')}
-                disabled={systemSettingsSaving}
+                disabled={systemSettingsLocked}
                 className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
               >
                 {systemSettingsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1206,14 +1543,14 @@ export default function NotificationSettings() {
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <label aria-disabled={systemSettingsSaving} className={`rounded-lg px-4 py-2 ${styles.buttonPrimary} ${systemSettingsSaving ? 'pointer-events-none cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+                    <label aria-disabled={systemSettingsLocked} className={`rounded-lg px-4 py-2 ${styles.buttonPrimary} ${systemSettingsLocked ? 'pointer-events-none cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
                       选择图片
-                      <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={systemSettingsSaving} className="hidden" />
+                      <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={systemSettingsLocked} className="hidden" />
                     </label>
                     {systemSettings.branding.logo && (
                       <button
                         onClick={() => setSystemSettings((current) => ({ ...current, branding: { ...current.branding, logo: '' } }))}
-                        disabled={systemSettingsSaving}
+                        disabled={systemSettingsLocked}
                         className="rounded-lg border border-studio-coral/30 px-4 py-2 text-studio-coral-contrast hover:bg-studio-coral/10"
                       >
                         移除 Logo
@@ -1225,7 +1562,7 @@ export default function NotificationSettings() {
 
               <button
                 onClick={() => void handleSaveSystemSection({ branding: systemSettings.branding }, '品牌设置已更新')}
-                disabled={systemSettingsSaving}
+                disabled={systemSettingsLocked}
                 className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
               >
                 {systemSettingsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1244,7 +1581,7 @@ export default function NotificationSettings() {
               <div className="grid gap-6 md:grid-cols-2">
                 <div>
                   <label className={`mb-2 block text-sm font-medium ${styles.textSecondary}`}>登录页布局</label>
-                  <select value={systemSettings.login.layout} disabled={systemSettingsSaving} onChange={(event) => setSystemSettings((current) => ({ ...current, login: { ...current.login, layout: event.target.value as ManagedSystemSettings['login']['layout'] } }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
+                  <select value={systemSettings.login.layout} disabled={systemSettingsLocked} onChange={(event) => setSystemSettings((current) => ({ ...current, login: { ...current.login, layout: event.target.value as ManagedSystemSettings['login']['layout'] } }))} className={`w-full px-4 py-2.5 ${styles.input}`}>
                     <option value="style1">样式一（暗色经典）</option>
                     <option value="style2">样式二（金色聚焦）</option>
                     <option value="style3">样式三（双栏对比）</option>
@@ -1259,7 +1596,7 @@ export default function NotificationSettings() {
 
               <button
                 onClick={() => void handleSaveSystemSection({ login: systemSettings.login }, '登录页设置已更新')}
-                disabled={systemSettingsSaving}
+                disabled={systemSettingsLocked}
                 className={`flex items-center gap-2 rounded-xl px-4 py-2 ${styles.buttonPrimary} disabled:opacity-60`}
               >
                 {systemSettingsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1469,6 +1806,24 @@ export default function NotificationSettings() {
           )}
         </GlassPanel>
       </div>
+      <ConfirmModal
+        open={pendingLeaveAttempt !== null}
+        title="设置尚有未完成事项"
+        description="离开后，未保存的设置草稿和仅保存在本页的核实状态会丢失；已写入本机的恢复记录仍可在重新打开设置时继续核实。不会自动重复提交。"
+        confirmText="离开并放弃本页更改"
+        cancelText="继续留在设置"
+        variant="warning"
+        onCancel={() => {
+          pendingLeaveAttempt?.stay();
+          setPendingLeaveAttempt(null);
+        }}
+        onConfirm={() => {
+          const attempt = pendingLeaveAttempt;
+          setPendingLeaveAttempt(null);
+          setNavigationGuardNotice('');
+          attempt?.proceed();
+        }}
+      />
     </PageShell>
   );
 }

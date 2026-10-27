@@ -211,9 +211,24 @@ export async function mobileRefresh(refreshToken: string): Promise<MobileRefresh
 export async function getMe(accessToken?: string): Promise<User> {
   const response = await fetch(`${BASE_URL}/auth/me`, {
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : getAuthHeader(),
+    cache: 'no-store',
   });
   if (!response.ok) throw new Error('获取用户信息失败');
   return response.json();
+}
+
+export class AuthRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'AuthRequestError';
+  }
+}
+
+export class PasswordChangeRequestError extends AuthRequestError {
+  constructor(message: string, status: number) {
+    super(message, status);
+    this.name = 'PasswordChangeRequestError';
+  }
 }
 
 export async function updateMyProfile(data: { name: string; email: string }): Promise<User> {
@@ -224,9 +239,20 @@ export async function updateMyProfile(data: { name: string; email: string }): Pr
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || '更新个人资料失败');
+    const message = typeof error?.message === 'string' && error.message ? error.message : '更新个人资料失败';
+    throw new AuthRequestError(message, response.status);
   }
-  return response.json();
+  const profile = await response.json().catch(() => null) as unknown;
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+    throw new AuthRequestError('个人资料保存响应格式异常', response.status);
+  }
+  const record = profile as Partial<User>;
+  if (!Number.isSafeInteger(record.id) || Number(record.id) <= 0
+    || typeof record.name !== 'string'
+    || (record.email !== undefined && record.email !== null && typeof record.email !== 'string')) {
+    throw new AuthRequestError('个人资料保存响应格式异常', response.status);
+  }
+  return profile as User;
 }
 
 export async function changePassword(oldPassword: string, newPassword: string): Promise<{ message: string }> {
@@ -237,9 +263,13 @@ export async function changePassword(oldPassword: string, newPassword: string): 
   });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    throw new Error(err.message || '修改密码失败');
+    throw new PasswordChangeRequestError(err.message || '修改密码失败', response.status);
   }
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    throw new PasswordChangeRequestError('修改密码响应无效', response.status);
+  }
 }
 
 function readRateLimitDimension(body: Record<string, unknown>): LoginRateLimitDimension | undefined {

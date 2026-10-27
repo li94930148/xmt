@@ -58,6 +58,20 @@ function isRecoverableLegacyApi(request: Request, dependencies: ApiInterceptorDe
     && !['/api/auth/login', '/api/auth/logout', '/api/auth/refresh', '/api/v1/auth/refresh', '/api/v1/auth/mobile/refresh'].includes(path);
 }
 
+async function isDefinitePasswordRejection(request: Request, response: Response) {
+  if (response.status !== 401) return false;
+  let requestPath: string;
+  try {
+    requestPath = new URL(request.url).pathname;
+  } catch {
+    return false;
+  }
+  if (requestPath !== '/api/auth/change-password') return false;
+
+  const payload = await response.clone().json().catch(() => null) as { code?: unknown; message?: unknown } | null;
+  return payload?.code === 'OLD_PASSWORD_INCORRECT' || payload?.message === '旧密码错误';
+}
+
 function requestWithNewBearer(request: Request, accessToken: string) {
   const headers = new Headers(request.headers);
   headers.set('Authorization', `Bearer ${accessToken}`);
@@ -77,6 +91,7 @@ export function createApiFetchInterceptor(originalFetch: typeof fetch, dependenc
     try {
       const response = await originalFetch(effectiveRequest.clone());
       if (response.status !== 401 || !isRecoverableLegacyApi(effectiveRequest, dependencies)) return response;
+      if (await isDefinitePasswordRejection(effectiveRequest, response)) return response;
 
       const token = await (native ? dependencies.refreshNative() : dependencies.refreshWeb());
       if (token) {

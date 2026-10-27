@@ -121,7 +121,7 @@ export default function TopicsBoardView({
       ) : filteredTopics.length === 0 ? (
         <EmptyState title="没有匹配的选题" description="调整平台或负责人筛选条件后再试。" />
       ) : (
-        <div className="flex min-w-0 gap-4 overflow-x-auto pb-4" aria-label="选题状态看板">
+        <div role="region" className="flex min-w-0 gap-4 overflow-x-auto pb-4" aria-label="选题状态看板">
           {visibleColumns.map((column) => {
             const Icon = column.icon;
             const items = filteredTopics.filter((topic) => topic.status === column.status);

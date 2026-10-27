@@ -174,12 +174,26 @@ export default function AnonymousFeedbackModal({
     }
   };
 
+  const beginNewSubmission = () => {
+    if (!pendingRecovery || recoveryState !== 'not_found' || submitting) return;
+    try {
+      clearPendingAnonymousFeedbackSubmission(window.sessionStorage);
+      setPendingRecovery(null);
+      setRecoveryState('idle');
+      setRecoveryError(null);
+      addNotification({
+        title: '原请求当前不存在',
+        message: '它可能尚未提交，也可能对应意见已被删除。系统不会复用原请求编号；如需再次提出，请检查保留内容后明确提交。',
+        type: 'warning',
+      });
+    } catch {
+      setRecoveryError('浏览器无法清除旧请求编号，请稍后重试。');
+    }
+  };
+
   const handleSubmit = async () => {
     if (submitLockRef.current) return;
-    if (pendingRecovery) {
-      if (recoveryState === 'not_found') void postSubmission(pendingRecovery);
-      return;
-    }
+    if (pendingRecovery) return;
     if (storageIssue) return;
     if (!type || !content.trim()) {
       addNotification({ title: '请完善意见', message: '意见类型和意见内容均为必填项', type: 'warning' });
@@ -218,8 +232,8 @@ export default function AnonymousFeedbackModal({
         暂时关闭并保留记录
       </ActionButton>
       {pendingRecovery && recoveryState === 'not_found' ? (
-        <ActionButton variant="primary" onClick={() => void postSubmission(pendingRecovery)} disabled={submitting} className="min-h-10 whitespace-normal">
-          用原请求编号重试
+        <ActionButton variant="primary" onClick={beginNewSubmission} disabled={submitting} className="min-h-10 whitespace-normal">
+          检查后开始新提交
         </ActionButton>
       ) : null}
       {pendingRecovery && recoveryState === 'unavailable' ? (
@@ -268,7 +282,7 @@ export default function AnonymousFeedbackModal({
             <p className="mt-1">
               {recoveryState === 'checking' ? '正在只读核实；核实完成前不会再次提交。' : null}
               {recoveryState === 'submitting' ? '提交请求正在处理，请稍候。' : null}
-              {recoveryState === 'not_found' ? '内容已保留。只有点击“用原请求编号重试”后，系统才会再次提交。' : null}
+              {recoveryState === 'not_found' ? '服务器未找到原请求。它可能尚未提交，也可能对应意见已被删除。为避免恢复已删除意见，系统不会用旧编号重试。若要重新提出，请先检查保留内容，再明确开始新提交。' : null}
               {recoveryState === 'unavailable' ? `${recoveryError || '请稍后重试核实'}。意见保持锁定，不会自动重发。` : null}
               {recoveryState === 'conflict' ? (recoveryError || '为避免重复提交，意见保持锁定。请联系管理员核对。') : null}
               {recoveryState === 'idle' ? '意见保持锁定，不会自动重发。' : null}

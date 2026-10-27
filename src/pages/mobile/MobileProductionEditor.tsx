@@ -845,10 +845,10 @@ export default function MobileProductionEditor() {
       setSaving(false);
     }
   };
-  if (!permissionsLoading && (isNewProduction ? !canEditPermission : !canView)) return <div className="space-y-4"><button type="button" onClick={() => navigate('/production/content')} className="inline-flex min-h-11 items-center gap-2 text-sm text-studio-cyan-contrast"><ArrowLeft className="h-4 w-4" />返回创作</button><AccessDeniedState title="当前账号无法打开这份稿件" description={isNewProduction ? '新建稿件需要创作权限。' : '查看稿件需要相应的创作查看权限。'} /></div>;
+  if (!permissionsLoading && (isNewProduction ? !canEditPermission : !canView)) return <div className="space-y-4"><button type="button" onClick={() => navigate('/production/content')} className="xmt-btn xmt-btn-ghost inline-flex min-h-11 items-center gap-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary"><ArrowLeft className="h-4 w-4" />返回创作</button><AccessDeniedState title="当前账号无法打开这份稿件" description={isNewProduction ? '新建稿件需要创作权限。' : '查看稿件需要相应的创作查看权限。'} /></div>;
   return (
     <div className="space-y-4">
-      <button type="button" onClick={() => navigate(returnPath)} className="inline-flex min-h-11 items-center gap-2 text-sm text-studio-cyan-contrast">
+      <button type="button" onClick={() => navigate(returnPath)} className="xmt-btn xmt-btn-ghost inline-flex min-h-11 items-center gap-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary">
         <ArrowLeft className="h-4 w-4" />
         {returnPath.startsWith('/topics/') || returnPath === '/topics?view=board'
           ? '返回选题'
@@ -922,7 +922,7 @@ export default function MobileProductionEditor() {
       {isHistoricalView && routeDataReady ? (
         <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-studio-border-soft bg-studio-surface p-3 text-sm">
           <span className="text-studio-text-secondary">历史版本 {displayedVersion} · 只读</span>
-          <button type="button" onClick={() => navigate(`/production/${production!.id}`, { state: { mobileReturnTo: returnPath } })} className="min-h-10 rounded-xl border border-studio-border-soft px-3 font-semibold text-studio-cyan-contrast">
+          <button type="button" onClick={() => navigate(`/production/${production!.id}`, { state: { mobileReturnTo: returnPath } })} className="xmt-btn xmt-btn-ghost min-h-10 rounded-xl px-3 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-studio-primary">
             返回当前版本
           </button>
         </div>

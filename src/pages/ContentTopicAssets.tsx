@@ -485,7 +485,7 @@ export default function ContentTopicAssets() {
           </div>
         </section>
       ) : null}
-      {loading ? <LoadingState type="section" rows={6} /> : errorMessage ? <ErrorState description={`主题资产读取失败：${errorMessage}。现有内容没有被修改。`} onRetry={load} /> : items.length ? (
+      {loading && items.length === 0 ? <LoadingState type="section" rows={6} /> : errorMessage ? <ErrorState description={`主题资产读取失败：${errorMessage}。现有内容没有被修改。`} onRetry={load} /> : items.length ? (
         <div className="grid gap-4 xl:grid-cols-2">{items.map((item) => <TopicAssetCard key={item.id} item={item} analyticsVisible={analyticsVisible} userId={userId} pendingMutation={userId ? pendingDimensionMutations[pendingDimensionStorageKey(userId, item.id)] ?? null : null} onPendingMutationChange={handlePendingDimensionMutationChange} onDimensionsChanged={load} onActionNotice={setActionNotice} />)}</div>
       ) : keyword ? (
         <EmptySearch onAction={() => setKeyword('')} />

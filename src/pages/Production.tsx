@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppStore, useAuthStore } from '../store';
-import { getProduction, createProduction, getProductionCreateStatus, getTopics, updateProduction } from '../api';
+import { getProduction, getProductionById, createProduction, getProductionCreateStatus, getTopics, updateProduction } from '../api';
 import { Production as ProductionType, Topic } from '../types';
 import { Plus, Search, FileText, Edit3, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ActionButton, ResponsiveTableShell } from '@/components/studio';
@@ -16,6 +16,16 @@ const PAGE_SIZE = 20;
 const PRODUCTION_CREATE_REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type ProductionCreatePayload = { topic_id: number; version: string; content: string; status: string };
+type ProductionUpdatePayload = Pick<ProductionType, 'topic_id' | 'version' | 'content' | 'status'>;
+type ProductionUpdateSnapshot = Pick<ProductionType, 'id' | 'topic_id' | 'version' | 'content' | 'status' | 'created_at' | 'updated_at'> & {
+  content_json: string | null;
+  content_markdown: string | null;
+  file_path: string | null;
+  operator_id: number | null;
+  operator_name: string;
+  topic_title: string;
+  topic_status: string;
+};
 type PendingProductionCreateVerification = {
   clientRequestId: string;
   userId: number;
@@ -24,6 +34,20 @@ type PendingProductionCreateVerification = {
   page: number;
   status: 'uncertain' | 'ready' | 'checking';
   readError: string | null;
+};
+type PendingProductionUpdateVerification = {
+  id: number;
+  userId: number;
+  page: number;
+  topicTitle: string;
+  targetTopicTitle: string;
+  targetTopicStatus: string;
+  targetOperatorName: string;
+  original: ProductionUpdateSnapshot;
+  payload: ProductionUpdatePayload;
+  status: 'saving' | 'checking' | 'uncertain' | 'changed' | 'missing';
+  readError: string | null;
+  observedRecord?: ProductionType;
 };
 
 function productionCreateVerificationKey(userId: number | undefined) {
@@ -93,6 +117,166 @@ function removeStoredProductionCreateVerification(userId: number, clientRequestI
   }
 }
 
+function productionUpdateVerificationKey(userId: number | undefined) {
+  return userId ? `xmt:production-update-pending:v1:user:${userId}` : null;
+}
+
+function isProductionUpdateSnapshot(value: unknown): value is ProductionUpdateSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const snapshot = value as Partial<ProductionUpdateSnapshot>;
+  return Number.isSafeInteger(snapshot.id) && Number(snapshot.id) > 0
+    && Number.isSafeInteger(snapshot.topic_id) && Number(snapshot.topic_id) > 0
+    && typeof snapshot.version === 'string' && typeof snapshot.content === 'string'
+    && typeof snapshot.status === 'string' && (typeof snapshot.file_path === 'string' || snapshot.file_path === null)
+    && (typeof snapshot.content_json === 'string' || snapshot.content_json === null)
+    && (typeof snapshot.content_markdown === 'string' || snapshot.content_markdown === null)
+    && (snapshot.operator_id === null || (Number.isSafeInteger(snapshot.operator_id) && Number(snapshot.operator_id) > 0))
+    && typeof snapshot.operator_name === 'string' && typeof snapshot.topic_title === 'string'
+    && typeof snapshot.topic_status === 'string' && typeof snapshot.created_at === 'string'
+    && typeof snapshot.updated_at === 'string';
+}
+
+function isProductionUpdateRecord(value: unknown): value is ProductionType {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Partial<ProductionType>;
+  return Number.isSafeInteger(record.id) && Number(record.id) > 0
+    && Number.isSafeInteger(record.topic_id) && Number(record.topic_id) > 0
+    && typeof record.version === 'string' && typeof record.content === 'string'
+    && typeof record.status === 'string' && (typeof record.file_path === 'string' || record.file_path == null)
+    // Historical production rows may legitimately have no operator ID.
+    && (record.operator_id == null || (Number.isSafeInteger(record.operator_id) && Number(record.operator_id) > 0))
+    && typeof record.operator_name === 'string'
+    && typeof record.created_at === 'string' && typeof record.updated_at === 'string'
+    && typeof record.topic_title === 'string' && typeof record.topic_status === 'string'
+    && (record.content_json === undefined || record.content_json === null || typeof record.content_json === 'string')
+    && (record.content_markdown === undefined || record.content_markdown === null || typeof record.content_markdown === 'string');
+}
+
+function isProductionUpdatePayload(value: unknown): value is ProductionUpdatePayload {
+  if (!value || typeof value !== 'object') return false;
+  const payload = value as Partial<ProductionUpdatePayload>;
+  return Number.isSafeInteger(payload.topic_id) && Number(payload.topic_id) > 0
+    && typeof payload.version === 'string' && typeof payload.content === 'string'
+    && typeof payload.status === 'string';
+}
+
+function loadPendingProductionUpdateVerification(userId: number | undefined): PendingProductionUpdateVerification | null {
+  const key = productionUpdateVerificationKey(userId);
+  if (!key || userId === undefined || typeof window === 'undefined') return null;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(key) || 'null') as Partial<PendingProductionUpdateVerification> | null;
+    if (!value || value.userId !== userId || !Number.isSafeInteger(value.id) || Number(value.id) <= 0
+      || !Number.isSafeInteger(value.page) || Number(value.page) <= 0
+      || typeof value.topicTitle !== 'string' || typeof value.targetTopicTitle !== 'string'
+      || typeof value.targetTopicStatus !== 'string' || typeof value.targetOperatorName !== 'string'
+      || !isProductionUpdateSnapshot(value.original)
+      || value.original.id !== value.id || !isProductionUpdatePayload(value.payload)
+      || !['saving', 'checking', 'uncertain', 'changed', 'missing'].includes(String(value.status))) return null;
+    return {
+      id: Number(value.id),
+      userId,
+      page: Number(value.page),
+      topicTitle: value.topicTitle,
+      targetTopicTitle: value.targetTopicTitle,
+      targetTopicStatus: value.targetTopicStatus,
+      targetOperatorName: value.targetOperatorName,
+      original: value.original,
+      payload: value.payload,
+      // A refresh always starts with a read-only server check.
+      status: 'uncertain',
+      readError: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistPendingProductionUpdateVerification(pending: PendingProductionUpdateVerification) {
+  const key = productionUpdateVerificationKey(pending.userId);
+  if (!key || typeof window === 'undefined') throw new Error('当前账号尚未确认，无法安全保存创作更新恢复状态');
+  sessionStorage.setItem(key, JSON.stringify({
+    id: pending.id,
+    userId: pending.userId,
+    page: pending.page,
+    topicTitle: pending.topicTitle,
+    targetTopicTitle: pending.targetTopicTitle,
+    targetTopicStatus: pending.targetTopicStatus,
+    targetOperatorName: pending.targetOperatorName,
+    original: pending.original,
+    payload: pending.payload,
+    status: pending.status,
+  }));
+  const stored = loadPendingProductionUpdateVerification(pending.userId);
+  if (!stored || stored.id !== pending.id || stored.userId !== pending.userId
+    || !(Object.keys(pending.original) as Array<keyof ProductionUpdateSnapshot>)
+      .every((key) => stored.original[key] === pending.original[key])
+    || stored.targetTopicTitle !== pending.targetTopicTitle
+    || stored.targetTopicStatus !== pending.targetTopicStatus
+    || stored.targetOperatorName !== pending.targetOperatorName
+    || stored.payload.topic_id !== pending.payload.topic_id || stored.payload.version !== pending.payload.version
+    || stored.payload.content !== pending.payload.content || stored.payload.status !== pending.payload.status) {
+    throw new Error('创作更新恢复状态未能完整保存，本次未发送修改');
+  }
+}
+
+function removeStoredProductionUpdateVerification(userId: number, id: number) {
+  const key = productionUpdateVerificationKey(userId);
+  if (!key || typeof window === 'undefined') return;
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(key) || 'null') as { id?: unknown } | null;
+    if (Number(stored?.id) === id) sessionStorage.removeItem(key);
+  } catch {
+    // A leftover marker only triggers another read-only check after reload.
+  }
+}
+
+function snapshotProductionRecord(record: ProductionType): ProductionUpdateSnapshot {
+  return {
+    id: Number(record.id),
+    topic_id: Number(record.topic_id),
+    version: String(record.version ?? ''),
+    content: String(record.content ?? ''),
+    status: String(record.status ?? ''),
+    content_json: record.content_json == null ? null : String(record.content_json),
+    content_markdown: record.content_markdown == null ? null : String(record.content_markdown),
+    file_path: record.file_path == null ? null : String(record.file_path),
+    operator_id: record.operator_id == null ? null : Number(record.operator_id),
+    operator_name: String(record.operator_name ?? ''),
+    topic_title: String(record.topic_title ?? ''),
+    topic_status: String(record.topic_status ?? ''),
+    created_at: String(record.created_at ?? ''),
+    updated_at: String(record.updated_at ?? ''),
+  };
+}
+
+function matchesProductionUpdateTarget(record: ProductionType, pending: PendingProductionUpdateVerification) {
+  const current = snapshotProductionRecord(record);
+  return current.id === pending.id
+    && current.topic_id === pending.payload.topic_id
+    && current.version === pending.payload.version
+    && current.content === pending.payload.content
+    && current.content_json === pending.payload.content
+    && current.content_markdown === pending.payload.content
+    && current.status === pending.payload.status
+    && current.file_path === pending.original.file_path
+    && current.created_at === pending.original.created_at
+    && current.operator_id === pending.userId
+    && current.operator_name === pending.targetOperatorName
+    && current.topic_title === pending.targetTopicTitle
+    && current.topic_status === pending.targetTopicStatus;
+}
+
+function matchesProductionUpdateOriginal(record: ProductionType, pending: PendingProductionUpdateVerification) {
+  const current = snapshotProductionRecord(record);
+  return (Object.keys(pending.original) as Array<keyof ProductionUpdateSnapshot>)
+    .every((key) => current[key] === pending.original[key]);
+}
+
+function isDefinitiveProductionUpdateRejection(error: unknown) {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500 && ![408, 425, 429].includes(status);
+}
+
 function isDefinitiveProductionCreateRejection(error: unknown) {
   const status = (error as { status?: unknown } | null)?.status;
   return typeof status === 'number' && status >= 400 && status < 500 && ![404, 408, 425, 429].includes(status);
@@ -134,6 +318,7 @@ const useAutoResizeTextarea = (value: string, minHeight = 100, maxHeight = 300) 
 
 export default function Production() {
   const authUserId = useAuthStore((store) => store.user?.id);
+  const authUserName = useAuthStore((store) => store.user?.name);
   const [productions, setProductions] = useState<ProductionType[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -154,11 +339,23 @@ export default function Production() {
   const [pendingCreateVerification, setPendingCreateVerification] = useState<PendingProductionCreateVerification | null>(
     () => loadPendingProductionCreateVerification(authUserId),
   );
+  const [pendingUpdateVerification, setPendingUpdateVerification] = useState<PendingProductionUpdateVerification | null>(
+    () => loadPendingProductionUpdateVerification(authUserId),
+  );
+  const [updateRecoveryOwnerUserId, setUpdateRecoveryOwnerUserId] = useState(authUserId);
   const [createVerificationLoading, setCreateVerificationLoading] = useState(false);
   const initialPendingCreateVerificationRef = useRef(pendingCreateVerification);
+  const initialPendingUpdateVerificationRef = useRef(pendingUpdateVerification);
   const restoredCreateVerificationStartedRef = useRef(false);
+  const restoredUpdateVerificationStartedRef = useRef(false);
   const createVerificationLockRef = useRef(false);
-  const createWritesLocked = Boolean(pendingCreateVerification && pendingCreateVerification.userId === authUserId);
+  const updateVerificationLockRef = useRef(false);
+  const [updateVerificationNotice, setUpdateVerificationNotice] = useState<string | null>(null);
+  const createWritesLocked = Boolean(
+    (pendingCreateVerification && pendingCreateVerification.userId === authUserId)
+    || updateRecoveryOwnerUserId !== authUserId
+    || (pendingUpdateVerification && pendingUpdateVerification.userId === authUserId),
+  );
   const pendingRefreshContextRef = useRef<string | null>(null);
   const pendingDeletedProductionIdsRef = useRef(new Set<number>());
   const saveInFlightRef = useRef(false);
@@ -238,6 +435,12 @@ export default function Production() {
 
   useEffect(() => {
     if (permissionsLoading || searchParams.get('action') !== 'write') return;
+    // A browser Back can land on the previous route before this passive effect
+    // runs. Never let stale action-query cleanup replace that newer route.
+    const currentSearchParams = new URLSearchParams(window.location.search);
+    if (window.location.pathname !== '/production'
+      || currentSearchParams.get('action') !== 'write'
+      || currentSearchParams.toString() !== searchParams.toString()) return;
     const canWrite = hasPermission('production:update');
     const nextSearchParams = new URLSearchParams(searchParams);
     nextSearchParams.delete('action');
@@ -271,6 +474,86 @@ export default function Production() {
       : { title: '创建成功', message: `「${pending.topicTitle}」的创作记录已添加，没有重复创建。`, type: 'success' });
     refreshAfterConfirmedWrite(`创作记录「${pending.topicTitle}」已创建`, 1);
   }, [addNotification, refreshAfterConfirmedWrite]);
+
+  const resolvePendingProductionUpdate = useCallback(async (pending: PendingProductionUpdateVerification) => {
+    try {
+      const current = await getProductionById(pending.id);
+      if (!isProductionUpdateRecord(current)) throw new Error('服务器返回的创作记录格式不完整。');
+      if (Number(current.id) !== pending.id) throw new Error('服务器返回的创作记录与待核实记录不一致。');
+      if (matchesProductionUpdateTarget(current, pending)) {
+        removeStoredProductionUpdateVerification(pending.userId, pending.id);
+        setPendingUpdateVerification(null);
+        setUpdateVerificationNotice(null);
+        setProductions((items) => items.map((item) => item.id === pending.id ? { ...item, ...current } : item));
+        setShowEditModal(false);
+        setEditingProduction(null);
+        setFormData({ topic_id: '', version: '', content: '', status: 'draft' });
+        addNotification({
+          title: '更新结果已核实',
+          message: `服务器确认创作记录「${pending.topicTitle}」已更新，没有重复提交。`,
+          type: 'success',
+        });
+        refreshAfterConfirmedWrite(`创作记录「${pending.topicTitle}」已保存`, pending.page);
+        return;
+      }
+
+      if (matchesProductionUpdateOriginal(current, pending)) {
+        removeStoredProductionUpdateVerification(pending.userId, pending.id);
+        setPendingUpdateVerification(null);
+        setEditingProduction(current);
+        setFormData({
+          topic_id: String(pending.payload.topic_id),
+          version: pending.payload.version,
+          content: pending.payload.content,
+          status: pending.payload.status,
+        });
+        setShowEditModal(true);
+        setUpdateVerificationNotice('服务器仍保留原记录；本次修改没有自动重试。编辑内容已保留，核对后可由你明确再次点击“更新”。');
+        addNotification({ title: '更新尚未应用', message: '服务器记录与保存前一致；编辑内容已保留，没有自动重试。', type: 'warning' });
+        return;
+      }
+
+      const changed = { ...pending, status: 'changed' as const, readError: '服务器记录在本次保存前后发生了其他变化。请先核对最新记录；系统不会覆盖或自动重试。', observedRecord: current };
+      setPendingUpdateVerification(changed);
+      setProductions((items) => items.map((item) => item.id === pending.id ? { ...item, ...current } : item));
+      setShowEditModal(false);
+      addNotification({ title: '服务器记录已变化', message: '本机编辑草稿已保留并锁定写入；请查看最新服务器记录后明确解决。', type: 'warning' });
+    } catch (error) {
+      if ((error as { status?: unknown } | null)?.status === 404) {
+        setShowEditModal(false);
+        setPendingUpdateVerification({
+          ...pending,
+          status: 'missing',
+          readError: `服务器当前未找到创作记录「${pending.topicTitle}」。为避免在记录状态未解决时继续写入，创作列表写入仍被锁定；可再次只读核实，或确认记录已不存在以解除限制。`,
+        });
+        addNotification({ title: '更新结果仍待处理', message: '服务器当前未找到原记录；本次没有重发。确认记录状态后再解除创作列表写入限制。', type: 'warning' });
+        return;
+      }
+
+      const readError = error instanceof Error ? error.message : '只读读取失败';
+      const uncertain = {
+        ...pending,
+        status: 'uncertain' as const,
+        readError: `创作记录更新结果尚未确认，当前服务器状态也无法读取（${readError}）。写入已锁定；请只读核实，不要重复提交。`,
+      };
+      setPendingUpdateVerification(uncertain);
+      setShowEditModal(false);
+      addNotification({ title: '更新结果待确认', message: '服务器状态暂时无法读取；创作列表写入已暂停，请先只读核实。', type: 'warning' });
+    }
+  }, [addNotification, refreshAfterConfirmedWrite]);
+
+  const verifyPendingProductionUpdate = useCallback(async (pending: PendingProductionUpdateVerification) => {
+    if (updateVerificationLockRef.current || saveInFlightRef.current || pending.userId !== authUserId) return;
+    updateVerificationLockRef.current = true;
+    setSavingRecord(true);
+    setPendingUpdateVerification({ ...pending, status: 'checking', readError: null });
+    try {
+      await resolvePendingProductionUpdate(pending);
+    } finally {
+      updateVerificationLockRef.current = false;
+      setSavingRecord(false);
+    }
+  }, [authUserId, resolvePendingProductionUpdate]);
 
   const resolvePendingProductionCreate = useCallback(async (pending: PendingProductionCreateVerification) => {
     try {
@@ -394,6 +677,46 @@ export default function Production() {
     void verifyPendingProductionCreate(pending);
   }, [verifyPendingProductionCreate]);
 
+  useEffect(() => {
+    if (authUserId === undefined) return;
+    if (updateRecoveryOwnerUserId !== authUserId) {
+      const pending = loadPendingProductionUpdateVerification(authUserId);
+      initialPendingUpdateVerificationRef.current = pending;
+      restoredUpdateVerificationStartedRef.current = false;
+      setPendingUpdateVerification(pending);
+      setUpdateRecoveryOwnerUserId(authUserId);
+      return;
+    }
+    const key = productionUpdateVerificationKey(authUserId);
+    if (!key) return;
+    try {
+      if (pendingUpdateVerification?.userId === authUserId) {
+        persistPendingProductionUpdateVerification(pendingUpdateVerification);
+      } else {
+        sessionStorage.removeItem(key);
+      }
+    } catch {
+      // Keep the in-memory write lock when recovery storage is unavailable.
+    }
+  }, [authUserId, pendingUpdateVerification, updateRecoveryOwnerUserId]);
+
+  useEffect(() => {
+    if (initialPendingUpdateVerificationRef.current || authUserId === undefined) return;
+    const pending = loadPendingProductionUpdateVerification(authUserId);
+    if (!pending) return;
+    initialPendingUpdateVerificationRef.current = pending;
+    setPendingUpdateVerification(pending);
+  }, [authUserId]);
+
+  useEffect(() => {
+    const pending = initialPendingUpdateVerificationRef.current;
+    if (restoredUpdateVerificationStartedRef.current || !pending || pending.userId !== authUserId) return;
+    restoredUpdateVerificationStartedRef.current = true;
+    initialPendingUpdateVerificationRef.current = null;
+    setPendingUpdateVerification(pending);
+    void verifyPendingProductionUpdate(pending);
+  }, [authUserId, verifyPendingProductionUpdate]);
+
   const socket = useSocket();
 
   const refreshProductionListFromSocket = (requestedPage = pageRef.current) => {
@@ -507,21 +830,95 @@ export default function Production() {
       addNotification({ title: '更新失败', message: '请选择关联选题', type: 'error' });
       return;
     }
+    if (authUserId === undefined || !Number.isSafeInteger(authUserId) || authUserId <= 0) {
+      addNotification({ title: '更新暂不可用', message: '当前登录身份尚未确认；本次没有发送修改。', type: 'error' });
+      return;
+    }
 
     const productionToUpdate = editingProduction;
     const nextTopicId = parseInt(formData.topic_id);
+    if (typeof authUserName !== 'string' || !authUserName.trim()) {
+      addNotification({ title: '更新暂不可用', message: '当前操作人信息尚未确认；本次没有发送修改。', type: 'error' });
+      return;
+    }
+    const original = snapshotProductionRecord(productionToUpdate);
+    const targetTopic = topics.find((topic) => Number(topic.id) === nextTopicId);
+    if (nextTopicId !== productionToUpdate.topic_id && !targetTopic) {
+      addNotification({ title: '更新暂不可用', message: '关联选题信息尚未读取完整；请重新加载选题后再保存。', type: 'error' });
+      return;
+    }
+    const targetTopicTitle = targetTopic?.title ?? productionToUpdate.topic_title ?? '当前选题';
+    const currentTargetTopicStatus = targetTopic?.status ?? productionToUpdate.topic_status ?? '';
+    const pending: PendingProductionUpdateVerification = {
+      id: productionToUpdate.id,
+      userId: authUserId,
+      page,
+      topicTitle: productionToUpdate.topic_title || '该创作记录',
+      targetTopicTitle,
+      targetTopicStatus: formData.status === 'approved' && productionToUpdate.status !== 'approved'
+        && currentTargetTopicStatus === 'production' ? 'shooting' : currentTargetTopicStatus,
+      targetOperatorName: authUserName,
+      original,
+      payload: {
+        topic_id: nextTopicId,
+        version: formData.version,
+        content: formData.content,
+        status: formData.status,
+      },
+      status: 'saving',
+      readError: null,
+    };
     saveInFlightRef.current = true;
     setSavingRecord(true);
+    setUpdateVerificationNotice(null);
     try {
-      await updateProduction(productionToUpdate.id, {
-        topic_id: nextTopicId,
-        version: formData.version, 
-        content: formData.content, 
-        expected_content: productionToUpdate.content,
-        status: formData.status,
-        version_action: 'none',
-      });
+      try {
+        persistPendingProductionUpdateVerification(pending);
+      } catch (error) {
+        addNotification({
+          title: '更新未发送',
+          message: error instanceof Error ? error.message : '创作恢复状态无法保存；本次没有发送修改。',
+          type: 'error',
+        });
+        return;
+      }
+      setPendingUpdateVerification(pending);
+
+      try {
+        const result = await updateProduction(productionToUpdate.id, {
+          ...pending.payload,
+          expected_content: productionToUpdate.content,
+          version_action: 'none',
+        });
+        if (!result || typeof result !== 'object' || typeof result.message !== 'string' || !result.message.trim()
+          || (result.version !== undefined && (typeof result.version !== 'string' || result.version !== pending.payload.version))) {
+          throw new Error('更新响应内容无效；正在只读核实服务器状态。');
+        }
+      } catch (error) {
+        if (isDefinitiveProductionUpdateRejection(error)) {
+          removeStoredProductionUpdateVerification(pending.userId, pending.id);
+          setPendingUpdateVerification(null);
+          addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+          return;
+        }
+        const uncertain = { ...pending, status: 'checking' as const, readError: null };
+        setPendingUpdateVerification(uncertain);
+        setShowEditModal(false);
+        addNotification({ title: '正在核实更新结果', message: '服务器响应不确定；先只读核实创作记录，不会自动重复提交。', type: 'warning' });
+        updateVerificationLockRef.current = true;
+        try {
+          await resolvePendingProductionUpdate(uncertain);
+        } finally {
+          updateVerificationLockRef.current = false;
+        }
+        return;
+      }
+
+      removeStoredProductionUpdateVerification(pending.userId, pending.id);
+      setPendingUpdateVerification(null);
     } catch (error) {
+      removeStoredProductionUpdateVerification(pending.userId, pending.id);
+      setPendingUpdateVerification(null);
       addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
       return;
     } finally {
@@ -539,6 +936,48 @@ export default function Production() {
     setEditingProduction(null);
     setFormData({ topic_id: '', version: '', content: '', status: 'draft' });
     refreshAfterConfirmedWrite(`创作记录「${confirmedTopicTitle}」${formData.version.trim() ? `（${formData.version.trim()}）` : ''}已保存`);
+  };
+
+  const resolveChangedProductionUpdate = (keepDraft: boolean) => {
+    const pending = pendingUpdateVerification;
+    const latest = pending?.observedRecord;
+    if (!pending || pending.status !== 'changed' || !latest || pending.userId !== authUserId) return;
+    removeStoredProductionUpdateVerification(pending.userId, pending.id);
+    setPendingUpdateVerification(null);
+    setEditingProduction(latest);
+    setFormData(keepDraft
+      ? {
+        topic_id: String(pending.payload.topic_id),
+        version: pending.payload.version,
+        content: pending.payload.content,
+        status: pending.payload.status,
+      }
+      : {
+        topic_id: String(latest.topic_id),
+        version: latest.version,
+        content: latest.content,
+        status: latest.status,
+      });
+    setUpdateVerificationNotice(keepDraft
+      ? '你已选择保留本机草稿并基于服务器最新记录继续。请先核对内容，再明确点击“更新”；后续并发变化仍会被服务器拦截。'
+      : '已载入服务器最新记录。本次没有重新提交；如需修改，请先检查后再编辑。');
+    setShowEditModal(true);
+    addNotification({
+      title: keepDraft ? '已保留编辑草稿' : '已载入服务器记录',
+      message: keepDraft ? '已将服务器最新正文设为并发检查基线；只有你明确再次点击“更新”才会发送修改。' : '请核对服务器当前记录后再决定是否修改。',
+      type: 'info',
+    });
+  };
+
+  const acknowledgeMissingProductionUpdate = () => {
+    const pending = pendingUpdateVerification;
+    if (!pending || pending.status !== 'missing' || pending.userId !== authUserId) return;
+    removeStoredProductionUpdateVerification(pending.userId, pending.id);
+    setPendingUpdateVerification(null);
+    setEditingProduction(null);
+    setUpdateVerificationNotice('你已确认服务器未找到该记录；本次编辑没有重发，表单内容仍保留在当前页面。需要另建记录时，请先核对草稿再手动保存。');
+    addNotification({ title: '记录状态已由你确认', message: '写入限制已解除；本次更新没有重发，表单内容仍保留。', type: 'info' });
+    retryProductionList();
   };
 
   const topicStatusColors: Record<string, string> = {
@@ -619,6 +1058,49 @@ export default function Production() {
               ? '正在处理…'
               : pendingCreateVerification.status === 'ready' ? '使用原请求安全重试' : '只读核实创建状态'}
           </ActionButton>
+        </div>
+      ) : null}
+
+      {pendingUpdateVerification && pendingUpdateVerification.userId === authUserId ? (
+        <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-amber/25 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">
+          <p className="min-w-0">
+            {pendingUpdateVerification.readError || (pendingUpdateVerification.status === 'saving'
+              ? `正在保存创作记录「${pendingUpdateVerification.topicTitle}」；请等待结果。`
+              : pendingUpdateVerification.status === 'checking'
+                ? `正在只读核实创作记录「${pendingUpdateVerification.topicTitle}」的更新结果。`
+                : `创作记录「${pendingUpdateVerification.topicTitle}」更新结果尚未确认；核实期间，创作列表的写入操作已暂停。`)}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <ActionButton
+              type="button"
+              variant="secondary"
+              disabled={savingRecord || updateVerificationLockRef.current || pendingUpdateVerification.status === 'saving' || pendingUpdateVerification.status === 'checking'}
+              onClick={() => void verifyPendingProductionUpdate(pendingUpdateVerification)}
+            >
+              {pendingUpdateVerification.status === 'saving' || pendingUpdateVerification.status === 'checking' ? '正在核实…' : '只读核实更新状态'}
+            </ActionButton>
+            {pendingUpdateVerification.status === 'changed' && pendingUpdateVerification.observedRecord ? (
+              <>
+                <ActionButton type="button" variant="secondary" onClick={() => resolveChangedProductionUpdate(false)}>
+                  按服务器最新记录重新编辑
+                </ActionButton>
+                <ActionButton type="button" variant="primary" onClick={() => resolveChangedProductionUpdate(true)}>
+                  保留草稿并基于最新记录继续
+                </ActionButton>
+              </>
+            ) : null}
+            {pendingUpdateVerification.status === 'missing' ? (
+              <ActionButton type="button" variant="secondary" onClick={acknowledgeMissingProductionUpdate}>
+                确认记录已不存在并解除限制
+              </ActionButton>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {updateVerificationNotice ? (
+        <div role="status" className="rounded-xl border border-studio-border-soft bg-studio-surface-soft px-4 py-3 text-sm text-studio-text-secondary">
+          {updateVerificationNotice}
         </div>
       ) : null}
 

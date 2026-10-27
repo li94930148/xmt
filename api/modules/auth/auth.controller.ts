@@ -70,7 +70,7 @@ export class AuthController {
           return res.status(404).json({ message: '用户不存在' });
         }
         if (error.code === 'OLD_PASSWORD_INCORRECT') {
-          return res.status(401).json({ message: '旧密码错误' });
+          return res.status(401).json({ code: 'OLD_PASSWORD_INCORRECT', message: '旧密码错误' });
         }
         return res.status(401).json({ message: '未登录' });
       }

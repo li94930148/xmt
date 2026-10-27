@@ -242,10 +242,17 @@ export default function MobileMessages() {
     }
   }, [currentBulkReadRecovery, load, userId]);
   useEffect(() => {
-    const refreshMessages = () => { void load(true); };
+    const refreshMessages = () => {
+      if (currentBulkReadRecovery) {
+        if (currentBulkReadRecoveryState?.phase === 'checking' || currentBulkReadRecoveryState?.phase === 'submitting') return;
+        void load(true, true);
+        return;
+      }
+      void load(true);
+    };
     window.addEventListener('xmt-messages-refresh', refreshMessages);
     return () => window.removeEventListener('xmt-messages-refresh', refreshMessages);
-  }, [load]);
+  }, [currentBulkReadRecovery, currentBulkReadRecoveryState?.phase, load]);
 
   const visible = useMemo(() => items.filter((item) => {
     if (filter === 'all') return true;

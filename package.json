@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "9.4.11",
+  "version": "9.4.13",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -24,7 +24,7 @@
     "test:creator-trends-browser": "tsx tests/browser/creator-trends-official-daily.spec.ts",
     "test:creator-works-browser": "tsx tests/browser/creator-works-read-recovery.spec.ts",
     "test:rate-limit": "tsx scripts/rate-limit-contract-test.ts",
-    "test:topics": "tsx tests/topics/topics.test.ts",
+    "test:topics": "tsx tests/topics/topics.test.ts && tsx --test tests/topics/topic-status-recovery.test.ts",
     "test:topic-state-machine": "tsx tests/topics/topic-state-machine.test.ts",
     "test:topic-create-recovery": "tsx --test tests/topics/topic-create-recovery.test.ts tests/topics/topic-create-recovery-hook.test.tsx",
     "test:workflow-stage-crud": "tsx tests/integrity/workflow-stage-crud.test.ts",

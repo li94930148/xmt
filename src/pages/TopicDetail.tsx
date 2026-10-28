@@ -11,6 +11,7 @@ import { ChevronLeft, Clock, User as UserIcon, Calendar, FileText, CheckCircle, 
 import ContentEditor from '../components/ContentEditor';
 import BaseModal from '../components/common/BaseModal';
 import ConfirmModal from '../components/common/ConfirmModal';
+import LoadingState from '../components/common/LoadingState';
 import { useModalLifecycle } from '../components/common/useModalLifecycle';
 import { createTopicDetailManualAdapter } from '../editor/adapters/topicDetailManualAdapter';
 import type { ContentEditorRuntimeHandle, ContentEditorSaveContext } from '../editor/contracts/contentEditorAdapter';
@@ -1315,11 +1316,7 @@ export default function TopicDetail() {
   };
 
   if (loading || (topic && topic.id !== Number(id))) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-studio-primary border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
+    return <LoadingState type="inline" text="正在加载选题详情…" className="flex h-64 w-full justify-center" />;
   }
 
   if (!topic) {

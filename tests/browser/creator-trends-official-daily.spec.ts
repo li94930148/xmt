@@ -87,6 +87,19 @@ async function assertTrendCopyContrast(page: import('playwright').Page, theme: '
   assert.ok(checked >= 8, `${theme}主题趋势页至少应检查 8 项普通说明，实际检查 ${checked} 项`);
 }
 
+async function assertTrendChartToken(page: import('playwright').Page, metric: string, token: string, theme: 'light' | 'dark') {
+  const chart = page.getByRole('img', { name: `${metric}折线图，周期内 2 个日数据`, exact: true });
+  const colors = await chart.locator('polyline').evaluate((line, customProperty) => {
+    const probe = document.createElement('span');
+    probe.style.color = `var(${customProperty})`;
+    document.body.append(probe);
+    const expected = getComputedStyle(probe).color;
+    probe.remove();
+    return { actual: getComputedStyle(line).stroke, expected };
+  }, token);
+  assert.equal(colors.actual, colors.expected, `${theme}主题${metric}曲线应使用 ${token} Studio 令牌`);
+}
+
 const server = http.createServer(app);
 const io = new SocketIOServer(server, { cors: { origin: '*' } });
 const fixturePort = Number(process.env.XMT_BROWSER_MCP_PORT) || 0;
@@ -118,6 +131,12 @@ try {
     await page.goto(`http://127.0.0.1:${address.port}/analytics/creator-center/trends`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('heading', { name: '数据趋势中心' }).waitFor();
     await page.getByText('播放、互动和投稿是官方导出的逐日流量，周期卡片按日求和。', { exact: false }).waitFor();
+    for (const metric of ['播放趋势', '粉丝趋势', '互动趋势', '日互动率', '投稿数量']) {
+      assert.equal(await page.getByRole('img', { name: `${metric}折线图，周期内 2 个日数据`, exact: true }).count(), 1, `${name}页的${metric}图表应有独立可访问名称`);
+    }
+    for (const [metric, token] of [['播放趋势', '--xmt-cyan'], ['粉丝趋势', '--xmt-success'], ['互动趋势', '--xmt-coral'], ['日互动率', '--xmt-amber'], ['投稿数量', '--xmt-violet']] as const) {
+      await assertTrendChartToken(page, metric, token, 'dark');
+    }
     await assertTrendCopyContrast(page, 'dark');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${name}暗色趋势页无横向溢出`);
     assert.equal(await page.getByText('周期合计', { exact: true }).count(), 4);
@@ -138,6 +157,10 @@ try {
   await lightPage.goto(`http://127.0.0.1:${address.port}/analytics/creator-center/trends`, { waitUntil: 'domcontentloaded' });
   await lightPage.getByRole('heading', { name: '数据趋势中心' }).waitFor();
   await lightPage.getByText('播放、互动和投稿是官方导出的逐日流量，周期卡片按日求和。', { exact: false }).waitFor();
+  assert.equal(await lightPage.getByRole('img', { name: '播放趋势折线图，周期内 2 个日数据', exact: true }).count(), 1, '亮色趋势图表应保留指标名称');
+  for (const [metric, token] of [['播放趋势', '--xmt-cyan'], ['粉丝趋势', '--xmt-success'], ['互动趋势', '--xmt-coral'], ['日互动率', '--xmt-amber'], ['投稿数量', '--xmt-violet']] as const) {
+    await assertTrendChartToken(lightPage, metric, token, 'light');
+  }
   await assertTrendCopyContrast(lightPage, 'light');
   assert.ok(await lightPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '390px 亮色趋势页无横向溢出');
   await lightContext.close();

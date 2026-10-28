@@ -21,6 +21,7 @@ type FixtureProduction = {
   operator_name: string;
   topic_title: string;
   topic_status: string;
+  can_edit?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -37,6 +38,7 @@ const originalProduction: FixtureProduction = {
   operator_name: editor.name,
   topic_title: '创作列表反馈验收选题',
   topic_status: 'approved',
+  can_edit: true,
   created_at: '2026-10-09 09:00:00',
   updated_at: '2026-10-09 09:00:00',
 };
@@ -49,15 +51,21 @@ let failNextProductionUpdateWithoutCommit = false;
 let commitNextProductionUpdateAndFail = false;
 let failNextProductionDetailRead = false;
 let failNextProductionListRead = false;
+let holdNextProductionDetailRead = false;
 let changeNextProductionDetailRead: Partial<FixtureProduction> | null = null;
 let productionDetailReadAttempts = 0;
 let qaProductionListEnabled = false;
+let holdNextProductionListRead = false;
+let releaseHeldProductionDetailRead: (() => void) | null = null;
+let releaseHeldProductionListRead: (() => void) | null = null;
 let productionTotalOverride: number | null = null;
 const mutationDelayMs = 180;
 const app = express();
 app.use(express.json());
 app.get('/__qa-production', (req, res) => {
   qaProductionListEnabled = true;
+  holdNextProductionDetailRead = req.query.holdDetail === '1';
+  holdNextProductionListRead = req.query.holdList === '1';
   const theme = req.query.theme === 'light' ? 'light' : 'dark';
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(editor))});localStorage.setItem('xmt_token','production-list-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/production');</script>`);
 });
@@ -70,9 +78,24 @@ app.get('/api/topics', (req, res) => {
   const limit = Number(req.query.limit) || 10;
   res.json({ success: true, data: data.slice(0, limit), pagination: { total: data.length, page: 1, limit } });
 });
+app.get('/api/topics/:id', (req, res) => {
+  const topic = topics.find((item) => item.id === Number(req.params.id));
+  if (!topic) return res.status(404).json({ message: '选题不存在' });
+  return res.json({ success: true, data: topic });
+});
 app.get('/api/workflow/production', (req, res) => {
   if (!qaProductionListEnabled || req.query.page === undefined) {
     return res.json({ data: [], total: 0, page: 1, limit: 12 });
+  }
+  if (holdNextProductionListRead) {
+    holdNextProductionListRead = false;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 20;
+    releaseHeldProductionListRead = () => {
+      releaseHeldProductionListRead = null;
+      res.json({ data: productions.slice((page - 1) * limit, page * limit), total: productionTotalOverride ?? productions.length, page, limit });
+    };
+    return;
   }
   if (failNextProductionListRead) {
     failNextProductionListRead = false;
@@ -84,6 +107,16 @@ app.get('/api/workflow/production', (req, res) => {
 });
 app.get('/api/workflow/production/:id', (req, res) => {
   productionDetailReadAttempts += 1;
+  if (holdNextProductionDetailRead) {
+    holdNextProductionDetailRead = false;
+    releaseHeldProductionDetailRead = () => {
+      releaseHeldProductionDetailRead = null;
+      const heldProduction = productions.find((item) => item.id === Number(req.params.id));
+      if (!heldProduction) return void res.status(404).json({ message: '创作记录不存在' });
+      return void res.json(heldProduction);
+    };
+    return;
+  }
   if (failNextProductionDetailRead) {
     failNextProductionDetailRead = false;
     return res.status(503).json({ message: '隔离验收：创作详情只读核实失败' });
@@ -111,6 +144,16 @@ app.post('/__qa-production/fail-next-production-detail-read', (_req, res) => {
 app.post('/__qa-production/fail-next-production-list-read', (_req, res) => {
   failNextProductionListRead = true;
   return res.json({ ok: true });
+});
+app.post('/__qa-production/release-held-production-list-read', (_req, res) => {
+  if (!releaseHeldProductionListRead) return res.status(409).json({ message: '当前没有挂起的创作列表读取' });
+  releaseHeldProductionListRead();
+  return res.json({ released: true });
+});
+app.post('/__qa-production/release-held-production-detail-read', (_req, res) => {
+  if (!releaseHeldProductionDetailRead) return res.status(409).json({ message: '当前没有挂起的创作详情读取' });
+  releaseHeldProductionDetailRead();
+  return res.json({ released: true });
 });
 app.post('/__qa-production/change-next-production-detail-read', (req, res) => {
   changeNextProductionDetailRead = req.body as Partial<FixtureProduction>;

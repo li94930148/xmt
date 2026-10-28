@@ -120,8 +120,8 @@ export default function RetroDailyRiskPanel({
             </p>
           </div>
         </div>
-        <ActionButton variant="ghost" onClick={onRefresh} disabled={loading || locked}>
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        <ActionButton variant="ghost" onClick={onRefresh} disabled={loading || locked} aria-busy={loading}>
+          <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
           刷新日报风险
         </ActionButton>
       </div>
@@ -135,7 +135,7 @@ export default function RetroDailyRiskPanel({
 
       <div className="mt-4 space-y-3">
         {loading ? (
-          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-secondary">
+          <div role="status" aria-live="polite" aria-atomic="true" className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-secondary">
             正在加载日报风险...
           </div>
         ) : error && risks.length === 0 ? null : risks.length === 0 ? (

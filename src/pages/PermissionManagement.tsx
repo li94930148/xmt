@@ -7,6 +7,7 @@ import {
   Shield, Users, Settings, Plus, Trash2, Edit2, X, ChevronDown, ChevronRight
 } from 'lucide-react';
 import ConfirmModal from '../components/common/ConfirmModal';
+import LoadingState from '../components/common/LoadingState';
 import ActionButton from '../components/studio/ActionButton';
 
 interface Role {
@@ -767,11 +768,7 @@ export default function PermissionManagement() {
   );
 
   if (loading && !hasLoadedOnce) {
-    return (
-      <div className={`flex items-center justify-center h-64 ${styles.textMuted}`}>
-        <div className={`animate-spin rounded-8 h-8 w-8 border-2 ${styles.spinner} border-t-transparent`} />
-      </div>
-    );
+    return <LoadingState type="inline" text="正在加载角色权限…" className="flex h-64 w-full justify-center" />;
   }
 
   return (

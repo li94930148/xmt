@@ -42,8 +42,8 @@ export default function RetroList({ retrospectives, loading, error, canCreate, o
           <h2 className="text-base font-bold text-studio-text-primary">复盘列表</h2>
           <p className="mt-1 text-xs text-studio-text-secondary">查看周期复盘进展和行动项跟进情况。</p>
         </div>
-        <ActionButton onClick={onRefresh} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        <ActionButton onClick={onRefresh} disabled={loading} aria-busy={loading}>
+          <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
           刷新
         </ActionButton>
       </div>
@@ -74,7 +74,7 @@ export default function RetroList({ retrospectives, loading, error, canCreate, o
             {loading ? (
               <tr>
                 <td className="px-5 py-10 text-center text-studio-text-secondary" colSpan={9}>
-                  正在加载复盘列表...
+                  <span role="status" aria-live="polite" aria-atomic="true">正在加载复盘列表…</span>
                 </td>
               </tr>
             ) : retrospectives.length === 0 ? (

@@ -98,8 +98,8 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
           </p>
         </div>
         {status === 'draft' && canGenerate ? (
-          <ActionButton onClick={onGenerate} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          <ActionButton onClick={onGenerate} disabled={loading} aria-busy={loading}>
+            <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
             {hasSnapshots ? '刷新快照' : '生成快照'}
           </ActionButton>
         ) : (
@@ -108,6 +108,12 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
           </span>
         )}
       </div>
+
+      {loading ? (
+        <p role="status" aria-live="polite" aria-atomic="true" className="mt-4 text-sm text-studio-text-secondary">
+          正在生成指标快照…
+        </p>
+      ) : null}
 
       {!hasSnapshots ? (
         <div className="mt-5 rounded-panel border border-dashed border-studio-border-soft p-8 text-center">

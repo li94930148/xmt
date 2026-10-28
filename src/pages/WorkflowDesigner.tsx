@@ -16,6 +16,15 @@ import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCar
 import { ReactBitsButtonSlot } from '../features/reactbits-appearance/ReactBitsButtonSlot';
 import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
 import {
+  persistWorkflowTemplateDeleteRecovery,
+  readWorkflowTemplateDeleteRecovery,
+  removeWorkflowTemplateDeleteRecovery,
+  sameWorkflowTemplateDeleteRecovery,
+  WORKFLOW_TEMPLATE_DELETE_RECOVERY_VERSION,
+  type WorkflowTemplateDeleteRecovery,
+  type WorkflowTemplateDeleteRecoveryRead,
+} from './workflowTemplateDeleteRecovery';
+import {
   createWorkflowTemplateUpdateFingerprint,
   createWorkflowTemplateUpdateRequestFingerprint,
   isWorkflowTemplateUpdatePayload,
@@ -84,6 +93,30 @@ interface WorkflowTemplateCreateRecovery {
 type WorkflowTemplateCreateRecoveryRead = WorkflowTemplateCreateRecovery | 'invalid' | null;
 type WorkflowTemplateCreateRecoveryState = 'submitting' | 'checking' | 'not_found' | 'unavailable' | 'conflict' | null;
 type WorkflowTemplateUpdateRecoveryState = 'submitting' | 'checking' | 'not_found' | 'unavailable' | 'conflict' | 'rejected' | 'confirmed' | null;
+type WorkflowTemplateDeleteRecoveryState = 'submitting' | 'checking' | 'unavailable' | null;
+
+function readDeleteRecoveryForActor(actorId: number | null | undefined): WorkflowTemplateDeleteRecoveryRead {
+  if (typeof window === 'undefined') return null;
+  try {
+    return readWorkflowTemplateDeleteRecovery(window.sessionStorage, actorId);
+  } catch {
+    return 'invalid';
+  }
+}
+
+function persistDeleteRecovery(recovery: WorkflowTemplateDeleteRecovery) {
+  if (typeof window === 'undefined') throw new Error('当前环境无法安全保存删除请求');
+  persistWorkflowTemplateDeleteRecovery(window.sessionStorage, recovery);
+}
+
+function removeDeleteRecovery(recovery: WorkflowTemplateDeleteRecovery) {
+  if (typeof window === 'undefined') return false;
+  try {
+    return removeWorkflowTemplateDeleteRecovery(window.sessionStorage, recovery);
+  } catch {
+    return false;
+  }
+}
 
 function readUpdateRecoveryForActor(actorId: number | null | undefined): WorkflowTemplateUpdateRecoveryRead {
   if (typeof window === 'undefined') return null;
@@ -300,11 +333,17 @@ export default function WorkflowDesigner() {
   const [initialUpdateRecovery] = useState<WorkflowTemplateUpdateRecoveryRead>(
     () => readUpdateRecoveryForActor(useAuthStore.getState().user?.id),
   );
+  const [initialDeleteRecovery] = useState<WorkflowTemplateDeleteRecoveryRead>(
+    () => readDeleteRecoveryForActor(useAuthStore.getState().user?.id),
+  );
   const initialValidCreateRecovery = initialCreateRecovery && initialCreateRecovery !== 'invalid'
     ? initialCreateRecovery
     : null;
   const initialValidUpdateRecovery = initialUpdateRecovery && initialUpdateRecovery !== 'invalid'
     ? initialUpdateRecovery
+    : null;
+  const initialValidDeleteRecovery = initialDeleteRecovery && initialDeleteRecovery !== 'invalid'
+    ? initialDeleteRecovery
     : null;
 
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
@@ -320,8 +359,10 @@ export default function WorkflowDesigner() {
   const fetchShadowLogsRef = useRef<() => Promise<void>>(async () => {});
   const createRecoveryStatusRequestRef = useRef<string | null>(null);
   const updateRecoveryStatusRequestRef = useRef<WorkflowTemplateUpdateRecovery | null>(null);
+  const deleteRecoveryStatusRequestRef = useRef<WorkflowTemplateDeleteRecovery | null>(null);
   const activeCreateRecoveryActorRef = useRef<number | null>(currentUserId);
   const activeUpdateRecoveryActorRef = useRef<number | null>(currentUserId);
+  const activeDeleteRecoveryActorRef = useRef<number | null>(currentUserId);
   const [pendingCreateRecovery, setPendingCreateRecovery] = useState<WorkflowTemplateCreateRecovery | null>(initialValidCreateRecovery);
   const [createRecoveryState, setCreateRecoveryState] = useState<WorkflowTemplateCreateRecoveryState>(initialValidCreateRecovery ? 'checking' : null);
   const [createRecoveryInvalid, setCreateRecoveryInvalid] = useState(initialCreateRecovery === 'invalid');
@@ -332,6 +373,12 @@ export default function WorkflowDesigner() {
   const [updateRecoveryState, setUpdateRecoveryState] = useState<WorkflowTemplateUpdateRecoveryState>(initialValidUpdateRecovery ? 'checking' : null);
   const [updateRecoveryInvalid, setUpdateRecoveryInvalid] = useState(initialUpdateRecovery === 'invalid');
   const [updateRecoveryNotice, setUpdateRecoveryNotice] = useState<string | null>(null);
+  const [pendingDeleteRecovery, setPendingDeleteRecovery] = useState<WorkflowTemplateDeleteRecovery | null>(initialValidDeleteRecovery);
+  const pendingDeleteRecoveryRef = useRef<WorkflowTemplateDeleteRecovery | null>(initialValidDeleteRecovery);
+  pendingDeleteRecoveryRef.current = pendingDeleteRecovery;
+  const [deleteRecoveryState, setDeleteRecoveryState] = useState<WorkflowTemplateDeleteRecoveryState>(initialValidDeleteRecovery ? 'checking' : null);
+  const [deleteRecoveryInvalid, setDeleteRecoveryInvalid] = useState(initialDeleteRecovery === 'invalid');
+  const [deleteRecoveryNotice, setDeleteRecoveryNotice] = useState<string | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<WorkflowTemplate | null>(
     initialValidUpdateRecovery ? workflowTemplateUpdateRecoveryPlaceholder(initialValidUpdateRecovery) : null,
   );
@@ -356,6 +403,15 @@ export default function WorkflowDesigner() {
   const isCurrentTemplateUpdateActor = (actorId: number) => (
     useAuthStore.getState().user?.id === actorId
     && activeUpdateRecoveryActorRef.current === actorId
+  );
+  const isCurrentTemplateDeleteRecovery = (recovery: WorkflowTemplateDeleteRecovery) => (
+    useAuthStore.getState().user?.id === recovery.actorId
+    && activeDeleteRecoveryActorRef.current === recovery.actorId
+    && sameWorkflowTemplateDeleteRecovery(pendingDeleteRecoveryRef.current, recovery)
+  );
+  const isCurrentTemplateDeleteActor = (actorId: number) => (
+    useAuthStore.getState().user?.id === actorId
+    && activeDeleteRecoveryActorRef.current === actorId
   );
 
   useEffect(() => {
@@ -430,6 +486,8 @@ export default function WorkflowDesigner() {
     || createRecoveryInvalid
     || Boolean(pendingUpdateRecovery)
     || updateRecoveryInvalid
+    || Boolean(pendingDeleteRecovery)
+    || deleteRecoveryInvalid
   );
 
   const fetchTemplateDetail = async (id: number, authToken = useAuthStore.getState().token || token) => {
@@ -810,6 +868,90 @@ export default function WorkflowDesigner() {
   const verifyTemplateUpdateStatusRef = useRef(verifyTemplateUpdateStatus);
   verifyTemplateUpdateStatusRef.current = verifyTemplateUpdateStatus;
 
+  const clearTemplateDeleteRecovery = (recovery: WorkflowTemplateDeleteRecovery) => {
+    if (!isCurrentTemplateDeleteRecovery(recovery)) return false;
+    if (!removeDeleteRecovery(recovery)) {
+      setDeleteRecoveryState('unavailable');
+      setDeleteRecoveryNotice('当前删除结果已读取，但本地恢复记录暂时无法清理。为避免重复操作，模板写入继续暂停；可重新只读核实。');
+      return false;
+    }
+    pendingDeleteRecoveryRef.current = null;
+    setPendingDeleteRecovery(null);
+    setDeleteRecoveryState(null);
+    setDeleteRecoveryInvalid(false);
+    setDeleteRecoveryNotice(null);
+    return true;
+  };
+
+  const verifyTemplateDeleteStatus = async (
+    recovery: WorkflowTemplateDeleteRecovery,
+  ): Promise<'deleted' | 'exists' | 'unavailable'> => {
+    if (!isCurrentTemplateDeleteRecovery(recovery)
+      || sameWorkflowTemplateDeleteRecovery(deleteRecoveryStatusRequestRef.current, recovery)) return 'unavailable';
+
+    deleteRecoveryStatusRequestRef.current = recovery;
+    setDeleteRecoveryState('checking');
+    setDeleteRecoveryNotice(null);
+    try {
+      const response = await fetch(`/api/workflow-templates/${recovery.templateId}`, {
+        headers: {
+          Authorization: `Bearer ${useAuthStore.getState().token || ''}`,
+          'Cache-Control': 'no-store',
+        },
+      });
+      if (!isCurrentTemplateDeleteRecovery(recovery)) return 'unavailable';
+
+      if (response.status === 404) {
+        const markerCleared = clearTemplateDeleteRecovery(recovery);
+        setDeleteTarget(null);
+        setTemplates((current) => current.filter((template) => template.id !== recovery.templateId));
+        if (!markerCleared) return 'unavailable';
+        appStore.addNotification({
+          title: '删除状态已核实',
+          message: `审批流模板“${recovery.name}”已不存在；没有重复提交删除。`,
+          type: 'success',
+        });
+        const listRefreshed = await fetchTemplates();
+        if (!listRefreshed && useAuthStore.getState().user?.id === recovery.actorId) {
+          setConfirmedTemplateRefreshFailure({ action: '删除', name: recovery.name });
+        }
+        return 'deleted';
+      }
+
+      if (response.ok) {
+        const detail: unknown = await response.json().catch(() => null);
+        if (!isWorkflowTemplateDetail(detail, recovery.templateId)) throw new Error('审批流模板详情读取结果无效');
+        const markerCleared = clearTemplateDeleteRecovery(recovery);
+        setDeleteTarget(null);
+        if (!markerCleared) return 'unavailable';
+        appStore.addNotification({
+          title: '模板仍然存在',
+          message: `审批流模板“${recovery.name}”仍在服务器上，本次删除未确认；如仍需删除，请重新确认操作。`,
+          type: 'warning',
+        });
+        await fetchTemplates();
+        return 'exists';
+      }
+
+      setDeleteRecoveryState('unavailable');
+      setDeleteRecoveryNotice('暂时无法核实上次删除结果；恢复记录已保留，所有模板写入暂停。请重试只读核实，不要重复删除。');
+      return 'unavailable';
+    } catch {
+      if (isCurrentTemplateDeleteRecovery(recovery)) {
+        setDeleteRecoveryState('unavailable');
+        setDeleteRecoveryNotice('暂时无法核实上次删除结果；恢复记录已保留，所有模板写入暂停。请重试只读核实，不要重复删除。');
+      }
+      return 'unavailable';
+    } finally {
+      if (sameWorkflowTemplateDeleteRecovery(deleteRecoveryStatusRequestRef.current, recovery)) {
+        deleteRecoveryStatusRequestRef.current = null;
+      }
+    }
+  };
+
+  const verifyTemplateDeleteStatusRef = useRef(verifyTemplateDeleteStatus);
+  verifyTemplateDeleteStatusRef.current = verifyTemplateDeleteStatus;
+
   const handleRetryPendingTemplateUpdate = async () => {
     if (!pendingUpdateRecovery || pendingUpdateRecovery.rejected || updateRecoveryState !== 'not_found' || !hasPermission('system:template')) return;
     await submitTemplateUpdate(pendingUpdateRecovery, true);
@@ -895,15 +1037,21 @@ export default function WorkflowDesigner() {
 
   useEffect(() => {
     if (activeCreateRecoveryActorRef.current === currentUserId
-      && activeUpdateRecoveryActorRef.current === currentUserId) return;
+      && activeUpdateRecoveryActorRef.current === currentUserId
+      && activeDeleteRecoveryActorRef.current === currentUserId) return;
     activeCreateRecoveryActorRef.current = currentUserId;
     activeUpdateRecoveryActorRef.current = currentUserId;
+    activeDeleteRecoveryActorRef.current = currentUserId;
     updateRecoveryStatusRequestRef.current = null;
+    deleteRecoveryStatusRequestRef.current = null;
     const stored = readWorkflowTemplateCreateRecovery(currentUserId);
     const createRecovery = stored && stored !== 'invalid' ? stored : null;
     const updateStored = readUpdateRecoveryForActor(currentUserId);
     const updateRecovery = updateStored && updateStored !== 'invalid' ? updateStored : null;
+    const deleteStored = readDeleteRecoveryForActor(currentUserId);
+    const deleteRecovery = deleteStored && deleteStored !== 'invalid' ? deleteStored : null;
     pendingUpdateRecoveryRef.current = updateRecovery;
+    pendingDeleteRecoveryRef.current = deleteRecovery;
     setPendingCreateRecovery(createRecovery);
     setCreateRecoveryState(createRecovery ? 'checking' : null);
     setCreateRecoveryInvalid(stored === 'invalid');
@@ -912,10 +1060,15 @@ export default function WorkflowDesigner() {
     setUpdateRecoveryState(updateRecovery ? 'checking' : null);
     setUpdateRecoveryInvalid(updateStored === 'invalid');
     setUpdateRecoveryNotice(null);
+    setPendingDeleteRecovery(deleteRecovery);
+    setDeleteRecoveryState(deleteRecovery ? 'checking' : null);
+    setDeleteRecoveryInvalid(deleteStored === 'invalid');
+    setDeleteRecoveryNotice(null);
     setShowCreateForm(Boolean(createRecovery) && !updateRecovery);
     setEditingTemplate(updateRecovery ? workflowTemplateUpdateRecoveryPlaceholder(updateRecovery) : null);
     setFormData(updateRecovery?.payload ?? createRecovery?.payload ?? { name: '', description: '', nodes: [] });
     setSavingTemplate(false);
+    setDeleteLoading(false);
     templateMutationInFlight.current = false;
   }, [currentUserId]);
 
@@ -928,6 +1081,11 @@ export default function WorkflowDesigner() {
     if (!pendingUpdateRecovery || updateRecoveryState !== 'checking') return;
     void verifyTemplateUpdateStatusRef.current(pendingUpdateRecovery);
   }, [pendingUpdateRecovery, updateRecoveryState]);
+
+  useEffect(() => {
+    if (!pendingDeleteRecovery || deleteRecoveryState !== 'checking') return;
+    void verifyTemplateDeleteStatusRef.current(pendingDeleteRecovery);
+  }, [pendingDeleteRecovery, deleteRecoveryState]);
 
   const submitTemplateCreate = async (recovery: WorkflowTemplateCreateRecovery, allowDuringListFailure = false) => {
     if (templateMutationInFlight.current || useAuthStore.getState().user?.id !== recovery.actorId) return;
@@ -1107,15 +1265,38 @@ export default function WorkflowDesigner() {
     if (!deleteTarget || isTemplateActionBlocked() || templateListReadInFlight.current || templateMutationInFlight.current) return;
 
     const target = deleteTarget;
+    if (!currentUserId || !isCurrentTemplateDeleteActor(currentUserId)) {
+      appStore.addNotification({ title: '无法安全删除', message: '当前登录账号尚未确认，本次删除未提交。请刷新后重试。', type: 'error' });
+      return;
+    }
+    const recovery: WorkflowTemplateDeleteRecovery = {
+      version: WORKFLOW_TEMPLATE_DELETE_RECOVERY_VERSION,
+      actorId: currentUserId,
+      templateId: target.id,
+      name: target.name,
+    };
+    try {
+      persistDeleteRecovery(recovery);
+    } catch {
+      appStore.addNotification({ title: '无法安全删除', message: '浏览器无法保存删除恢复记录，本次删除未提交。', type: 'error' });
+      return;
+    }
+
     templateMutationInFlight.current = true;
+    pendingDeleteRecoveryRef.current = recovery;
+    setPendingDeleteRecovery(recovery);
+    setDeleteRecoveryState('submitting');
+    setDeleteRecoveryNotice(null);
     setDeleteLoading(true);
     try {
       const response = await fetch(`/api/workflow-templates/${target.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!isCurrentTemplateDeleteRecovery(recovery)) return;
 
       if (response.ok) {
+        if (!clearTemplateDeleteRecovery(recovery)) return;
         appStore.addNotification({ title: '删除成功', message: '审批流模板已删除', type: 'success' });
         setTemplates((current) => current.filter((template) => template.id !== target.id));
         setDeleteTarget(null);
@@ -1124,15 +1305,28 @@ export default function WorkflowDesigner() {
         if (!listRefreshed) {
           setConfirmedTemplateRefreshFailure({ action: '删除', name: target.name });
         }
+      } else if (response.status >= 500 || response.status === 404 || response.status === 408 || response.status === 429) {
+        setDeleteTarget(null);
+        setDeleteRecoveryState('checking');
+        setDeleteRecoveryNotice('删除响应未能明确确认结果；正在只读核实模板是否仍存在，不会再次提交删除。');
+        await verifyTemplateDeleteStatus(recovery);
       } else {
         const data = await response.json().catch(() => null) as { message?: unknown } | null;
-        appStore.addNotification({ title: '删除失败', message: typeof data?.message === 'string' ? data.message : '审批流模板未删除，请检查后重试。', type: 'error' });
+        const message = typeof data?.message === 'string' ? data.message : '审批流模板未删除，请检查后重试。';
+        if (clearTemplateDeleteRecovery(recovery)) {
+          appStore.addNotification({ title: '删除失败', message, type: 'error' });
+        }
       }
     } catch {
-      appStore.addNotification({ title: '删除失败', message: '网络错误', type: 'error' });
+      if (isCurrentTemplateDeleteRecovery(recovery)) {
+        setDeleteTarget(null);
+        setDeleteRecoveryState('checking');
+        setDeleteRecoveryNotice('删除请求可能已到达服务器，但未收到确认；正在只读核实模板状态，不会自动重试。');
+        await verifyTemplateDeleteStatus(recovery);
+      }
     } finally {
       templateMutationInFlight.current = false;
-      setDeleteLoading(false);
+      if (isCurrentTemplateDeleteActor(recovery.actorId)) setDeleteLoading(false);
     }
   };
 
@@ -1379,6 +1573,32 @@ export default function WorkflowDesigner() {
           <p>{createRecoveryInvalid
             ? '上次审批流模板创建恢复记录无法读取。为避免重复创建，创建操作已暂停；请保留当前账号并联系管理员核对模板列表。'
             : createRecoveryNotice}</p>
+        </section>
+      ) : null}
+
+      {authScopeReady && deleteRecoveryInvalid ? (
+        <section role="alert" className="rounded-xl border border-studio-coral/40 bg-studio-coral/5 p-4 text-sm text-studio-text-secondary">
+          上次审批流模板删除恢复记录无法安全读取；为避免重复删除，当前账号的模板写入已暂停。
+        </section>
+      ) : null}
+
+      {authScopeReady && pendingDeleteRecovery ? (
+        <section role="alert" className="rounded-xl border border-studio-amber/50 bg-studio-amber/10 p-4 text-sm text-studio-text-secondary">
+          <p>{deleteRecoveryNotice || (deleteRecoveryState === 'submitting'
+            ? `正在提交删除“${pendingDeleteRecovery.name}”；恢复记录已保存在当前标签页。`
+            : '正在只读核实上次审批流模板删除结果；核实期间不会重复提交。')}</p>
+          {deleteRecoveryState === 'unavailable' ? (
+            <ReactBitsButtonSlot
+              type="button"
+              variant="secondary"
+              disabled={deleteLoading || !hasPermission('system:template')}
+              onClick={() => void verifyTemplateDeleteStatus(pendingDeleteRecovery)}
+              aria-label="只读核实审批流模板删除结果"
+              className="mt-3"
+            >
+              只读核实删除状态
+            </ReactBitsButtonSlot>
+          ) : null}
         </section>
       ) : null}
 

@@ -946,10 +946,13 @@ export default function Topics() {
               {loading ? (
                 <tr>
                   <td colSpan={9} className="p-5">
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {Array.from({ length: 6 }).map((_, index) => (
-                        <StudioSkeletonCard key={index} />
-                      ))}
+                    <div role="status" aria-live="polite" aria-atomic="true">
+                      <span className="sr-only">正在加载选题列表…</span>
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        {Array.from({ length: 6 }).map((_, index) => (
+                          <StudioSkeletonCard key={index} />
+                        ))}
+                      </div>
                     </div>
                   </td>
                 </tr>

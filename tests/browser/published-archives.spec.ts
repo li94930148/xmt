@@ -256,7 +256,7 @@ try {
     else errors.push(message.text());
   });
   await desktop.goto(`${base}/__qa`);
-  await desktop.getByRole('heading', { name: '资料中心' }).waitFor();
+  await desktop.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
   const contentProductionGroup = desktop.locator('nav.flex-1 > div').filter({ has: desktop.getByRole('button', { name: '内容生产', exact: true }) });
   const contentProductionToggle = contentProductionGroup.getByRole('button', { name: '内容生产', exact: true });
   const collapsedContentLinks = contentProductionGroup.locator('ul');
@@ -288,7 +288,7 @@ try {
   assert.equal(await desktop.getByRole('button', { name: '收起侧边栏', exact: true }).count(), 1, 'activating an icon-only section expands the desktop sidebar');
   assert.equal(await contentProductionToggle.getAttribute('aria-expanded'), 'true', 'activating an icon-only section opens that group');
   assert.equal(await collapsedContentLinks.getAttribute('aria-hidden'), 'false', 'the selected group links become visible after expanding the sidebar');
-  const mobileNavigationDrawer = desktop.locator('div.fixed.inset-0[aria-hidden="true"]').filter({ has: desktop.locator('button[aria-label="关闭导航菜单"]') });
+  const mobileNavigationDrawer = desktop.locator('div.fixed.inset-0').filter({ has: desktop.locator('button[aria-label="关闭导航菜单"]') });
   assert.equal(await mobileNavigationDrawer.evaluate((drawer) => (drawer as HTMLElement).inert), true, 'the closed mobile navigation drawer cannot receive keyboard focus');
   await desktop.setViewportSize({ width: 390, height: 844 });
   await desktop.getByRole('button', { name: '打开导航菜单', exact: true }).click();
@@ -361,7 +361,10 @@ try {
   assert.equal(await desktop.getByRole('button', { name: '删除', exact: true }).count(), 0, 'a member without resource:delete does not see the archive delete action');
   const sourceTopicLink = desktop.getByRole('link', { name: '查看归档来源选题', exact: true });
   assert.equal(await sourceTopicLink.getAttribute('href'), '/topics/71', 'the archive links back to its exact source topic');
+  assert.equal(await desktop.getByRole('button', { name: '发布信息', exact: true }).getAttribute('aria-pressed'), 'true', 'the default publishing detail view exposes its selected state');
+  assert.equal(await desktop.getByRole('button', { name: '稿件', exact: true }).getAttribute('aria-pressed'), 'false', 'the inactive script detail view exposes its unselected state');
   await desktop.getByRole('button', { name: '稿件', exact: true }).click();
+  assert.equal(await desktop.getByRole('button', { name: '稿件', exact: true }).getAttribute('aria-pressed'), 'true', 'the script detail view exposes its selected state after activation');
   const sourcePanel = desktop.getByTestId('archive-script-sources');
   await sourcePanel.getByText('成片剧本', { exact: true }).waitFor();
   const sourceVersionLink = sourcePanel.getByRole('link', { name: '查看成片剧本来源创作稿 v2.0', exact: true });
@@ -398,6 +401,7 @@ try {
   await sourcePanel.getByText('发布剧本引用的 v1.0 创作历史正文。', { exact: true }).waitFor();
   await desktop.screenshot({ path: '/tmp/xmt-published-archives-source-lineage-1440.png', fullPage: true });
   await desktop.getByRole('button', { name: '发布信息', exact: true }).click();
+  assert.equal(await desktop.getByRole('button', { name: '发布信息', exact: true }).getAttribute('aria-pressed'), 'true', 'the publishing detail view restores selected state after activation');
   for (const [label, locator] of [
     ['当前“发布信息”页签', desktop.getByRole('button', { name: '发布信息', exact: true })],
     ['发布链接', desktop.getByRole('link', { name: '打开发布链接' }).first()],
@@ -470,7 +474,7 @@ try {
   const unavailableSourcePage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   unavailableSourcePage.on('pageerror', (error) => errors.push(error.message));
   await unavailableSourcePage.goto(`${base}/__qa?source_unavailable=1`);
-  await unavailableSourcePage.getByRole('heading', { name: '资料中心' }).waitFor();
+  await unavailableSourcePage.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
   await unavailableSourcePage.locator('a[href="/asset-center/published-archives"]').last().click();
   await unavailableSourcePage.getByRole('heading', { name: '发布归档' }).waitFor();
   await unavailableSourcePage.getByRole('button', { name: /多平台早餐主题/ }).click();
@@ -484,7 +488,7 @@ try {
   mobile.on('pageerror', (error) => errors.push(error.message));
   mobile.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   await mobile.goto(`${base}/__qa`);
-  await mobile.getByRole('heading', { name: '资料中心' }).waitFor();
+  await mobile.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
   await mobile.locator('a[href="/asset-center/published-archives"]').last().click();
   await mobile.getByRole('heading', { name: '发布归档' }).waitFor();
   await mobile.getByRole('button', { name: /多平台早餐主题/ }).click();
@@ -517,7 +521,7 @@ try {
   const restrictedPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   restrictedPage.on('pageerror', (error) => errors.push(error.message));
   await restrictedPage.goto(`${base}/__qa?source_permission=0`);
-  await restrictedPage.getByRole('heading', { name: '资料中心' }).waitFor();
+  await restrictedPage.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
   await restrictedPage.locator('a[href="/asset-center/published-archives"]').last().click();
   await restrictedPage.getByRole('heading', { name: '发布归档' }).waitFor();
   await restrictedPage.getByRole('button', { name: /多平台早餐主题/ }).click();
@@ -534,7 +538,7 @@ try {
   for (const theme of ['light', 'dark'] as const) {
     const themedPage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
     await themedPage.goto(`${base}/__qa?theme=${theme}`);
-    await themedPage.getByRole('heading', { name: '资料中心' }).waitFor();
+    await themedPage.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
     await themedPage.locator('a[href="/asset-center/published-archives"]').last().click();
     await themedPage.getByRole('heading', { name: '发布归档' }).waitFor();
     await themedPage.getByRole('button', { name: /多平台早餐主题/ }).click();
@@ -558,7 +562,7 @@ try {
 
   const adminPage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
   await adminPage.goto(`${base}/__qa?admin=1`);
-  await adminPage.getByRole('heading', { name: '资料中心' }).waitFor();
+  await adminPage.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
   await adminPage.locator('a[href="/asset-center/published-archives"]').last().click();
   await adminPage.getByRole('heading', { name: '发布归档' }).waitFor();
   await adminPage.getByRole('button', { name: /多平台早餐主题/ }).click();

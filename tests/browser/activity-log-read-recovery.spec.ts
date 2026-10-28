@@ -113,7 +113,20 @@ let failNextUserListRead = true;
 let activityLogReads = 0;
 let userListReads = 0;
 let writes = 0;
+let holdNextActivityLogRead = false;
+let releaseHeldActivityLogRead: (() => void) | null = null;
 const app = express();
+app.post('/__qa/hold-next-activity-log-read', (_req, res) => {
+  holdNextActivityLogRead = true;
+  res.json({ ok: true });
+});
+app.post('/__qa/release-held-activity-log-read', (_req, res) => {
+  if (!releaseHeldActivityLogRead) return res.status(409).json({ message: '没有等待释放的活动日志读取' });
+  const release = releaseHeldActivityLogRead;
+  releaseHeldActivityLogRead = null;
+  release();
+  return res.json({ ok: true });
+});
 app.post('/__qa/fail-next-activity-log-read', (_req, res) => {
   failNextActivityLogRead = true;
   res.json({ ok: true });
@@ -137,15 +150,20 @@ app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
 app.get('/api/users/activity-logs', (req, res) => {
   activityLogReads += 1;
+  const page = Number(req.query.page || 1);
+  const response = req.get('referer')?.includes('activity_matrix=1')
+    ? { data: logRecordsForActionMatrix(), total: actionMatrix.length, page: 1, limit: Number(req.query.limit || 20) }
+    : { data: [logRecordForPage(page)], total: 41, page, limit: Number(req.query.limit || 20) };
+  if (holdNextActivityLogRead) {
+    holdNextActivityLogRead = false;
+    releaseHeldActivityLogRead = () => res.json(response);
+    return;
+  }
   if (failNextActivityLogRead) {
     failNextActivityLogRead = false;
     return res.status(503).json({ message: '模拟活动日志读取失败' });
   }
-  const page = Number(req.query.page || 1);
-  if (req.get('referer')?.includes('activity_matrix=1')) {
-    return res.json({ data: logRecordsForActionMatrix(), total: actionMatrix.length, page: 1, limit: Number(req.query.limit || 20) });
-  }
-  return res.json({ data: [logRecordForPage(page)], total: 41, page, limit: Number(req.query.limit || 20) });
+  return res.json(response);
 });
 app.get('/api/users', (_req, res) => {
   userListReads += 1;
@@ -249,8 +267,17 @@ try {
   await waitForNoHorizontalOverflow();
   await page.screenshot({ path: '/tmp/xmt-activity-log-read-error-390.png' });
 
+  await page.request.post(`${base}/__qa/hold-next-activity-log-read`);
+  const recoveredActivityLogRead = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().includes('/api/users/activity-logs') && response.status() === 200);
   await page.getByRole('button', { name: '重新加载日志', exact: true }).click();
+  const activityLogLoadingStatus = page.getByRole('status').getByText('正在加载活动日志…', { exact: true });
+  await activityLogLoadingStatus.waitFor();
+  assert.equal(activityLogReads, 2, 'the pending retry performs one activity-log GET');
+  await page.request.post(`${base}/__qa/release-held-activity-log-read`);
+  await recoveredActivityLogRead;
   await page.getByText(logRecord.target, { exact: true }).waitFor();
+  await activityLogLoadingStatus.waitFor({ state: 'hidden' });
   assert.equal(activityLogReads, 2, 'the log recovery control performs one additional GET');
   assert.equal(writes, 0, 'read recovery does not issue any write');
   const createBadgeColors = await readActivityBadgeColors(page);

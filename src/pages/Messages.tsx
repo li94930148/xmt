@@ -15,7 +15,7 @@ import {
   Trash2,
   XCircle,
 } from 'lucide-react';
-import { getMessages, getMessageClearRequestStatus, getMessageReadAllRequestStatus, markMessageAsRead, markAllAsRead, clearMessages } from '../api';
+import { getMessages, getMessageClearRequestStatus, getMessageReadAllRequestStatus, getMessageReadStatus, markMessageAsRead, markAllAsRead, clearMessages } from '../api';
 import { ConfirmModal, LoadingState } from '../components/common';
 import {
   ActionButton,
@@ -50,6 +50,11 @@ interface StoredMessageReadAllRecovery {
 }
 
 type MessageReadAllRecoveryState = 'checking' | 'not_found' | 'unavailable' | 'submitting' | null;
+
+interface PendingSingleMessageReadVerification {
+  message: Message;
+  error: string;
+}
 
 type MessageReadAllRecoveryRead =
   | { recovery: StoredMessageReadAllRecovery | null; error: null }
@@ -180,9 +185,10 @@ export default function Messages() {
   const [initialClearRecovery] = useState(() => readMessageClearRecovery(useAuthStore.getState().user?.id));
   const [pendingClearRecovery, setPendingClearRecovery] = useState<StoredMessageClearRecovery | null>(initialClearRecovery);
   const [clearRecoveryState, setClearRecoveryState] = useState<MessageClearRecoveryState>(initialClearRecovery ? 'checking' : null);
-  const [clearOutcomeNotice, setClearOutcomeNotice] = useState<string | null>(null);
+  const [clearOutcomeNotice, setClearOutcomeNotice] = useState<{ actorId: number; message: string } | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(Boolean(initialClearRecovery));
-  const [clearing, setClearing] = useState(false);
+  const [clearConfirmActorId, setClearConfirmActorId] = useState<number | null>(initialClearRecovery?.actorId ?? null);
+  const [clearingActorIds, setClearingActorIds] = useState<Set<number>>(() => new Set());
   const [markingAll, setMarkingAll] = useState(false);
   const [pendingMessageReadAllRecovery, setPendingMessageReadAllRecoveryState] = useState<StoredMessageReadAllRecovery | null>(initialMessageReadAllRecovery.recovery);
   const [messageReadAllRecoveryState, setMessageReadAllRecoveryState] = useState<MessageReadAllRecoveryState>(
@@ -192,19 +198,21 @@ export default function Messages() {
   const [messageReadAllOutcomeNotice, setMessageReadAllOutcomeNotice] = useState<string | null>(
     initialMessageReadAllRecovery.recovery ? '正在只读核实此前的批量已读请求；核实期间不会再次提交。' : initialMessageReadAllRecovery.error,
   );
+  const [singleMessageReadVerificationByActor, setSingleMessageReadVerificationByActor] = useState<Map<number, PendingSingleMessageReadVerification>>(() => new Map());
+  const [verifyingSingleMessageReadActors, setVerifyingSingleMessageReadActors] = useState<Set<number>>(() => new Set());
   const [activeFilter, setActiveFilter] = useState<MessageFilter>(() => searchParams.get('filter') === 'actionable' ? 'actionable' : 'all');
-  const markingMessageIdsRef = useRef(new Set<number>());
+  const markingMessageIdsByActorRef = useRef(new Map<number, Set<number>>());
   const markingAllRefreshPendingRef = useRef(false);
   const markingAllRef = useRef(false);
   const pendingMessageReadAllRecoveryRef = useRef(initialMessageReadAllRecovery.recovery);
   const messageReadAllVerificationRef = useRef<string | null>(null);
   const activeMessageReadAllActorRef = useRef(userId);
-  const clearingRef = useRef(false);
+  const clearingActorIdsRef = useRef(new Set<number>());
   const activeClearActorRef = useRef(userId);
   const latestMessageRequestRef = useRef(0);
   const loadedQueryKeyRef = useRef<string | null>(null);
   const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null);
-  const [markingMessageIds, setMarkingMessageIds] = useState<Set<number>>(() => new Set());
+  const [markingMessageIdsByActor, setMarkingMessageIdsByActor] = useState<Map<number, Set<number>>>(() => new Map());
 
   const navigate = useNavigate();
   const messageQueryKey = JSON.stringify([userId ?? null, page, activeFilter]);
@@ -214,6 +222,18 @@ export default function Messages() {
   const setStoreMessages = useMessageStore((state) => state.setMessages);
   const setUnreadCount = useMessageStore((state) => state.setUnreadCount);
   const markStoreMessageAsRead = useMessageStore((state) => state.markAsRead);
+  const currentSingleMessageReadVerification = userId == null ? null : singleMessageReadVerificationByActor.get(userId) ?? null;
+  const currentActorMarkingMessageIds = userId == null ? null : markingMessageIdsByActor.get(userId) ?? null;
+  const currentActorClearing = userId != null && clearingActorIds.has(userId);
+  const currentPendingClearRecovery = userId != null && pendingClearRecovery?.actorId === userId ? pendingClearRecovery : null;
+  const currentClearRecoveryState = currentPendingClearRecovery ? clearRecoveryState : null;
+  const currentClearOutcomeNotice = clearOutcomeNotice && clearOutcomeNotice.actorId === userId
+    ? clearOutcomeNotice.message : null;
+  const currentShowClearConfirm = userId != null && showClearConfirm && clearConfirmActorId === userId;
+
+  const setClearOutcomeNoticeForActor = useCallback((actorId: number, message: string) => {
+    setClearOutcomeNotice({ actorId, message });
+  }, []);
 
   const setPendingMessageReadAllRecovery = useCallback((recovery: StoredMessageReadAllRecovery | null) => {
     pendingMessageReadAllRecoveryRef.current = recovery;
@@ -316,6 +336,7 @@ export default function Messages() {
     const recovery = readMessageClearRecovery(userId);
     setPendingClearRecovery(recovery);
     setClearRecoveryState(recovery ? 'checking' : null);
+    setClearConfirmActorId(recovery?.actorId ?? userId ?? null);
     setShowClearConfirm(Boolean(recovery));
   }, [userId]);
 
@@ -341,7 +362,7 @@ export default function Messages() {
   }, [messageReadAllRecoveryState, pendingMessageReadAllRecovery, verifyMessageReadAllStatus]);
 
   useEffect(() => {
-    if (!pendingClearRecovery || clearRecoveryState !== 'checking') return;
+    if (!pendingClearRecovery || pendingClearRecovery.actorId !== userId || clearRecoveryState !== 'checking') return;
     let active = true;
     const recovery = pendingClearRecovery;
     void getMessageClearRequestStatus(recovery.requestId)
@@ -352,7 +373,7 @@ export default function Messages() {
           setPendingClearRecovery(null);
           setClearRecoveryState(null);
           setShowClearConfirm(false);
-          setClearOutcomeNotice(`上次清空请求已确认（处理 ${status.deletedCount} 条原有消息）；正在重新读取，以保留之后到达的新消息。`);
+          setClearOutcomeNoticeForActor(recovery.actorId, `上次清空请求已确认（处理 ${status.deletedCount} 条原有消息）；正在重新读取，以保留之后到达的新消息。`);
           setLoading(true);
           latestMessageRequestRef.current += 1;
           setPage(1);
@@ -361,15 +382,15 @@ export default function Messages() {
           return;
         }
         setClearRecoveryState('not_found');
-        setClearOutcomeNotice('服务器暂未找到这条清空请求的完成记录。确认重试会沿用原请求编号；若原请求稍后完成，服务器只返回原结果，不会再次删除后来到达的消息。');
+        setClearOutcomeNoticeForActor(recovery.actorId, '服务器暂未找到这条清空请求的完成记录。确认重试会沿用原请求编号；若原请求稍后完成，服务器只返回原结果，不会再次删除后来到达的消息。');
       })
       .catch(() => {
         if (!active || useAuthStore.getState().user?.id !== recovery.actorId) return;
         setClearRecoveryState('unavailable');
-        setClearOutcomeNotice('暂时无法核实上次清空结果。恢复编号已保留，请只读重新核实；核实前不会再次发送删除请求。');
+        setClearOutcomeNoticeForActor(recovery.actorId, '暂时无法核实上次清空结果。恢复编号已保留，请只读重新核实；核实前不会再次发送删除请求。');
       });
     return () => { active = false; };
-  }, [addNotification, clearRecoveryState, pendingClearRecovery, userId]);
+  }, [addNotification, clearRecoveryState, pendingClearRecovery, setClearOutcomeNoticeForActor, userId]);
 
   useEffect(() => {
     let active = true;
@@ -438,47 +459,150 @@ export default function Messages() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  const applyConfirmedMessageRead = (message: Message, requestQueryKey: string, requestSequence: number) => {
+    markStoreMessageAsRead(message.id);
+    if (messageQueryKeyRef.current !== requestQueryKey || latestMessageRequestRef.current !== requestSequence) {
+      // The user changed filters/pages or started another read while this write was pending.
+      // Keep the active query eligible to finish, then refresh it against the confirmed state.
+      setLoading(true);
+      setReloadKey((current) => current + 1);
+      return;
+    }
+
+    latestMessageRequestRef.current += 1;
+    setLoading(false);
+    setMessages((current) => showUnreadOnly
+      ? current.filter((item) => item.id !== message.id)
+      : current.map((item) => (item.id === message.id ? { ...item, read: true } : item)));
+    if (showUnreadOnly) setTotal((current) => Math.max(0, current - 1));
+    setSummary((current) => ({
+      ...current,
+      unread: Math.max(0, current.unread - 1),
+      actionable: message.link ? Math.max(0, current.actionable - 1) : current.actionable,
+    }));
+  };
+
+  const setSingleMessageReadVerification = (actorId: number, recovery: PendingSingleMessageReadVerification | null) => {
+    setSingleMessageReadVerificationByActor((current) => {
+      const next = new Map(current);
+      if (recovery) next.set(actorId, recovery);
+      else next.delete(actorId);
+      return next;
+    });
+  };
+
+  const verifyPendingSingleMessageRead = async () => {
+    const recovery = currentSingleMessageReadVerification;
+    if (!recovery || userId == null || useAuthStore.getState().user?.id !== userId
+      || verifyingSingleMessageReadActors.has(userId)) return;
+    const actorId = userId;
+    const requestQueryKey = messageQueryKeyRef.current;
+    const requestSequence = latestMessageRequestRef.current;
+    setVerifyingSingleMessageReadActors((current) => new Set(current).add(actorId));
+    try {
+      const status = await getMessageReadStatus(recovery.message.id);
+      if (useAuthStore.getState().user?.id !== actorId) return;
+      if (status.state === 'missing') {
+        setSingleMessageReadVerification(actorId, null);
+        addNotification({ title: '消息已不可用', message: '正在重新读取当前账号的消息列表。', type: 'warning' });
+        setLoading(true);
+        setReloadKey((current) => current + 1);
+        return;
+      }
+      if (status.read) {
+        setSingleMessageReadVerification(actorId, null);
+        applyConfirmedMessageRead(recovery.message, requestQueryKey, requestSequence);
+        addNotification({ title: '已读状态已核实', message: '消息已确认标记为已读。', type: 'success' });
+        if (recovery.message.link) navigate(recovery.message.link);
+        return;
+      }
+      setSingleMessageReadVerification(actorId, null);
+      addNotification({ title: '消息仍未读', message: '服务器已确认消息仍未读；没有自动重试。再次点击消息可明确重试。', type: 'info' });
+    } catch (error) {
+      if (useAuthStore.getState().user?.id !== actorId) return;
+      const reason = error instanceof Error ? error.message : '暂时无法核实消息状态';
+      setSingleMessageReadVerification(actorId, { ...recovery, error: reason });
+      addNotification({ title: '消息结果待核实', message: '暂时无法核实这条消息。核实前不会再次提交。', type: 'warning' });
+    } finally {
+      setVerifyingSingleMessageReadActors((current) => {
+        if (!current.has(actorId)) return current;
+        const next = new Set(current);
+        next.delete(actorId);
+        return next;
+      });
+    }
+  };
+
   const handleMessageClick = async (message: Message) => {
     if (!message.read) {
-      if (markingMessageIdsRef.current.has(message.id)) return;
+      if (currentSingleMessageReadVerification) return;
       const requestQueryKey = messageQueryKey;
       const requestSequence = latestMessageRequestRef.current;
-      markingMessageIdsRef.current.add(message.id);
-      setMarkingMessageIds(new Set(markingMessageIdsRef.current));
+      const requestActorId = userId;
+      if (requestActorId == null || useAuthStore.getState().user?.id !== requestActorId) return;
+      const actorMarkingIds = markingMessageIdsByActorRef.current.get(requestActorId);
+      if (actorMarkingIds?.size) return;
+      const nextMarkingByActor = new Map(markingMessageIdsByActorRef.current);
+      const nextActorMarkingIds = new Set(actorMarkingIds ?? []);
+      nextActorMarkingIds.add(message.id);
+      nextMarkingByActor.set(requestActorId, nextActorMarkingIds);
+      markingMessageIdsByActorRef.current = nextMarkingByActor;
+      setMarkingMessageIdsByActor(nextMarkingByActor);
+      let confirmedRead = false;
 
       try {
         await markMessageAsRead(message.id);
-        markStoreMessageAsRead(message.id);
-
-        if (messageQueryKeyRef.current !== requestQueryKey || latestMessageRequestRef.current !== requestSequence) {
-          // The user changed filters/pages or started another read while this write was pending.
-          // Keep the active query eligible to finish, then refresh it against the confirmed write.
-          setLoading(true);
-          setReloadKey((current) => current + 1);
-        } else {
-          latestMessageRequestRef.current += 1;
-          setLoading(false);
-          setMessages((current) => showUnreadOnly
-            ? current.filter((item) => item.id !== message.id)
-            : current.map((item) => (item.id === message.id ? { ...item, read: true } : item)));
-          if (showUnreadOnly) setTotal((current) => Math.max(0, current - 1));
-          setSummary((current) => ({
-            ...current,
-            unread: Math.max(0, current.unread - 1),
-            actionable: message.link ? Math.max(0, current.actionable - 1) : current.actionable,
-          }));
+        if (useAuthStore.getState().user?.id !== requestActorId) return;
+        applyConfirmedMessageRead(message, requestQueryKey, requestSequence);
+        confirmedRead = true;
+      } catch {
+        if (useAuthStore.getState().user?.id !== requestActorId) return;
+        try {
+          const status = await getMessageReadStatus(message.id);
+          if (useAuthStore.getState().user?.id !== requestActorId) return;
+          if (status.state === 'available' && status.read) {
+            applyConfirmedMessageRead(message, requestQueryKey, requestSequence);
+            confirmedRead = true;
+          } else if (status.state === 'missing') {
+            addNotification({ title: '消息已不可用', message: '正在重新读取当前账号的消息列表。', type: 'warning' });
+            setLoading(true);
+            setReloadKey((current) => current + 1);
+          } else {
+            addNotification({
+              title: '标记已读失败',
+              message: '服务器已确认消息仍未读；没有自动重试。再次点击消息可明确重试。',
+              type: 'error',
+            });
+          }
+        } catch (verificationError) {
+          if (useAuthStore.getState().user?.id !== requestActorId) return;
+          const reason = verificationError instanceof Error ? verificationError.message : '暂时无法核实消息状态';
+          setSingleMessageReadVerification(requestActorId, { message, error: reason });
+          addNotification({
+            title: '消息结果待核实',
+            message: '暂时无法核实这条消息。核实前不会再次提交。',
+            type: 'warning',
+          });
         }
-      } catch (error) {
-        addNotification({
-          title: '标记已读失败',
-          message: error instanceof Error ? error.message : '消息仍保持未读，请稍后重试',
-          type: 'error',
-        });
-        return;
+        if (!confirmedRead) return;
+        addNotification({ title: '已读状态已核实', message: '消息已确认标记为已读。', type: 'success' });
       } finally {
-        markingMessageIdsRef.current.delete(message.id);
-        setMarkingMessageIds(new Set(markingMessageIdsRef.current));
+        const activeActorMarkingIds = markingMessageIdsByActorRef.current.get(requestActorId);
+        if (activeActorMarkingIds?.has(message.id)) {
+          const nextMarkingByActor = new Map(markingMessageIdsByActorRef.current);
+          const nextActorMarkingIds = new Set(activeActorMarkingIds);
+          nextActorMarkingIds.delete(message.id);
+          if (nextActorMarkingIds.size === 0) nextMarkingByActor.delete(requestActorId);
+          else nextMarkingByActor.set(requestActorId, nextActorMarkingIds);
+          markingMessageIdsByActorRef.current = nextMarkingByActor;
+          setMarkingMessageIdsByActor(nextMarkingByActor);
+        }
       }
+
+      if (confirmedRead && message.link && useAuthStore.getState().user?.id === requestActorId) {
+        navigate(message.link);
+      }
+      return;
     }
 
     if (message.link) {
@@ -488,7 +612,7 @@ export default function Messages() {
 
   const handleMarkAllAsRead = async () => {
     const canExplicitlyRetry = pendingMessageReadAllRecovery !== null && messageReadAllRecoveryState === 'not_found';
-    if (markingAllRef.current || markingAll || loading || !userId
+    if (markingAllRef.current || markingAll || loading || !userId || currentSingleMessageReadVerification
       || messageReadAllRecoveryError !== null
       || (pendingMessageReadAllRecovery !== null && !canExplicitlyRetry)
       || (!canExplicitlyRetry && unreadCount === 0)) return;
@@ -560,10 +684,8 @@ export default function Messages() {
   };
 
   const handleClearAll = async () => {
-    if (clearingRef.current) return;
-
-    if (pendingClearRecovery && clearRecoveryState !== 'not_found') {
-      if (clearRecoveryState === 'unavailable') setClearRecoveryState('checking');
+    if (currentPendingClearRecovery && currentClearRecoveryState !== 'not_found') {
+      if (currentClearRecoveryState === 'unavailable') setClearRecoveryState('checking');
       return;
     }
 
@@ -572,7 +694,9 @@ export default function Messages() {
       return;
     }
 
-    let recovery = pendingClearRecovery;
+    if (clearingActorIdsRef.current.has(userId)) return;
+
+    let recovery = currentPendingClearRecovery;
     if (!recovery) {
       try {
         recovery = { version: MESSAGE_CLEAR_RECOVERY_VERSION, actorId: userId, requestId: createMessageClearRequestId() };
@@ -585,27 +709,36 @@ export default function Messages() {
     }
 
     if (recovery.actorId !== userId) return;
-    clearingRef.current = true;
-    setClearing(true);
+    const nextClearingActorIds = new Set(clearingActorIdsRef.current).add(recovery.actorId);
+    clearingActorIdsRef.current = nextClearingActorIds;
+    setClearingActorIds(nextClearingActorIds);
     setClearRecoveryState('submitting');
     try {
       const result = await clearMessages(recovery.requestId);
       removeMessageClearRecovery(recovery.actorId);
+      // A late response from a previous account must not update the current account's inbox.
+      if (useAuthStore.getState().user?.id !== recovery.actorId) return;
       setPendingClearRecovery(null);
       setClearRecoveryState(null);
       setShowClearConfirm(false);
-      setClearOutcomeNotice(`清空请求已确认（处理 ${result.deletedCount} 条原有消息）；正在重新读取，以保留之后到达的新消息。`);
+      setClearOutcomeNoticeForActor(recovery.actorId, `清空请求已确认（处理 ${result.deletedCount} 条原有消息）；正在重新读取，以保留之后到达的新消息。`);
       latestMessageRequestRef.current += 1;
       setLoading(true);
       setPage(1);
       setReloadKey((current) => current + 1);
       addNotification({ title: '操作成功', message: `已清空 ${result.deletedCount} 条消息，正在重新读取最新消息。`, type: 'success' });
     } catch (error) {
+      if (useAuthStore.getState().user?.id !== recovery.actorId) return;
       setClearRecoveryState('checking');
       addNotification({ title: '清空结果待核实', message: error instanceof Error ? error.message : '服务端结果未确认；系统将先只读核实，不会盲目重复删除。', type: 'error' });
     } finally {
-      clearingRef.current = false;
-      setClearing(false);
+      const activeClearingActorIds = clearingActorIdsRef.current;
+      if (activeClearingActorIds.has(recovery.actorId)) {
+        const nextActiveClearingActorIds = new Set(activeClearingActorIds);
+        nextActiveClearingActorIds.delete(recovery.actorId);
+        clearingActorIdsRef.current = nextActiveClearingActorIds;
+        setClearingActorIds(nextActiveClearingActorIds);
+      }
     }
   };
 
@@ -623,7 +756,7 @@ export default function Messages() {
                 </ActionButton>
               ) : null}
               <ActionButton onClick={handleMarkAllAsRead}
-                disabled={loading || markingAll || messageReadAllRecoveryError !== null
+                disabled={loading || markingAll || (currentActorMarkingMessageIds?.size ?? 0) > 0 || currentSingleMessageReadVerification !== null || messageReadAllRecoveryError !== null
                   || (pendingMessageReadAllRecovery !== null && messageReadAllRecoveryState !== 'not_found')
                   || (unreadCount === 0 && !(pendingMessageReadAllRecovery && messageReadAllRecoveryState === 'not_found'))}>
                 <CheckCircle2 className="h-4 w-4" />
@@ -635,9 +768,13 @@ export default function Messages() {
                       ? '确认重试全部已读'
                       : '全部已读'}
               </ActionButton>
-              <ActionButton onClick={() => setShowClearConfirm(true)} variant="danger" disabled={clearing}>
+              <ActionButton onClick={() => {
+                if (userId == null) return;
+                setClearConfirmActorId(userId);
+                setShowClearConfirm(true);
+              }} variant="danger" disabled={currentActorClearing}>
                 <Trash2 className="h-4 w-4" />
-                {pendingClearRecovery ? '核实清空' : '清空'}
+                {currentPendingClearRecovery ? '核实清空' : '清空'}
               </ActionButton>
             </>
           }
@@ -650,14 +787,26 @@ export default function Messages() {
         </div>
 
         <GlassPanel className="overflow-hidden">
+          {currentSingleMessageReadVerification ? (
+            <div role="status" aria-live="polite" className="flex flex-col gap-3 border-b border-studio-amber/30 bg-studio-amber/10 px-5 py-4 text-sm text-studio-text-primary sm:flex-row sm:items-center sm:justify-between">
+              <p className="min-w-0">《{currentSingleMessageReadVerification.message.title}》的已读状态暂时无法确认。只读核实前不会再次提交。{currentSingleMessageReadVerification.error ? ` ${currentSingleMessageReadVerification.error}` : ''}</p>
+              <ActionButton
+                type="button"
+                disabled={verifyingSingleMessageReadActors.has(userId ?? -1)}
+                onClick={() => void verifyPendingSingleMessageRead()}
+              >
+                {verifyingSingleMessageReadActors.has(userId ?? -1) ? '核实中…' : '只读核实'}
+              </ActionButton>
+            </div>
+          ) : null}
           {messageReadAllOutcomeNotice ? (
             <div role="status" className="border-b border-studio-border-soft bg-studio-primary-soft px-5 py-3 text-sm leading-6 text-studio-text-primary">
               {messageReadAllOutcomeNotice}
             </div>
           ) : null}
-          {clearOutcomeNotice ? (
+          {currentClearOutcomeNotice ? (
             <div role="status" className="border-b border-studio-border-soft bg-studio-primary-soft px-5 py-3 text-sm leading-6 text-studio-text-primary">
-              {clearOutcomeNotice}
+              {currentClearOutcomeNotice}
             </div>
           ) : null}
           <div className="flex flex-col gap-3 border-b border-studio-border-soft px-5 py-4 md:flex-row md:items-center md:justify-between">
@@ -719,14 +868,16 @@ export default function Messages() {
                 <div className="divide-y divide-studio-border-soft">
                   {filteredMessages.map((message) => {
                     const meta = typeMeta[message.type] || typeMeta.info;
-                    const isMarking = markingMessageIds.has(message.id);
+                    const isMarking = currentActorMarkingMessageIds?.has(message.id) ?? false;
+                    const isReadLocked = !message.read
+                      && (currentSingleMessageReadVerification !== null || (currentActorMarkingMessageIds?.size ?? 0) > 0);
 
                     return (
                       <button
                         key={message.id}
                         type="button"
                         onClick={() => handleMessageClick(message)}
-                        disabled={isMarking}
+                        disabled={isMarking || isReadLocked}
                         aria-busy={isMarking}
                         className={`group w-full px-5 py-4 text-left transition hover:bg-studio-surface-soft ${
                           !message.read ? 'bg-studio-primary/[0.055] shadow-[inset_3px_0_0_rgba(34,211,238,0.65)]' : ''
@@ -794,27 +945,27 @@ export default function Messages() {
       </PageShell>
 
       <ConfirmModal
-        open={showClearConfirm}
-        title={pendingClearRecovery ? '核实清空消息结果' : '确认清空消息'}
-        description={pendingClearRecovery
-          ? clearRecoveryState === 'checking'
+        open={currentShowClearConfirm}
+        title={currentPendingClearRecovery ? '核实清空消息结果' : '确认清空消息'}
+        description={currentPendingClearRecovery
+          ? currentClearRecoveryState === 'checking'
             ? '正在只读核实此前的清空请求；核实期间不会再次发送删除。'
-            : clearRecoveryState === 'unavailable'
+            : currentClearRecoveryState === 'unavailable'
               ? '暂时无法核实此前的清空请求。恢复编号已保留，点击“只读重新核实”再次查询，不会重复删除。'
-              : clearRecoveryState === 'not_found'
+              : currentClearRecoveryState === 'not_found'
                 ? '服务器暂未找到此前请求的完成记录。确认后将沿用原请求编号；如果原请求稍后完成，服务器会返回原结果，避免再次删除后来到达的消息。本次显式重试仍会清空当时账户内的消息。'
                 : '清空请求正在提交，请稍候。'
           : '确定要清空当前账户的所有消息吗？操作不可恢复；若响应丢失，系统会先核实原请求，不会盲目重复清空。'}
-        confirmText={pendingClearRecovery
-          ? clearRecoveryState === 'unavailable' ? '只读重新核实' : clearRecoveryState === 'not_found' ? '同编号安全重试' : '正在核实'
+        confirmText={currentPendingClearRecovery
+          ? currentClearRecoveryState === 'unavailable' ? '只读重新核实' : currentClearRecoveryState === 'not_found' ? '同编号安全重试' : '正在核实'
           : '确认清空'}
         cancelText="取消"
         variant="danger"
-        loading={clearing}
-        confirmDisabled={Boolean(pendingClearRecovery && clearRecoveryState !== 'unavailable' && clearRecoveryState !== 'not_found')}
+        loading={currentActorClearing}
+        confirmDisabled={currentActorClearing || Boolean(currentPendingClearRecovery && currentClearRecoveryState !== 'unavailable' && currentClearRecoveryState !== 'not_found')}
         onConfirm={handleClearAll}
         onCancel={() => {
-          if (!clearing) {
+          if (!currentActorClearing) {
             setShowClearConfirm(false);
           }
         }}

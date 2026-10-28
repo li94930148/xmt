@@ -11,6 +11,215 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '9.6.21',
+    date: '2026-10-28',
+    title: '视图切换选中状态完善',
+    impactScope: ['系统设置', '成就', '人员管理', '资源归档', '可访问性'],
+    changes: [
+      { type: 'improvement', description: '设置分类、成就状态筛选、人员管理视图和归档信息视图向辅助技术暴露当前选中状态。' },
+    ],
+  },
+  {
+    version: '9.6.20',
+    date: '2026-10-28',
+    title: '写入结果恢复与页签状态完善',
+    impactScope: ['审批流', '模板管理', '报告中心', '可访问性'],
+    changes: [
+      { type: 'improvement', description: '审批流模板删除响应不明时只读核实当前状态，核实失败则保持锁定且不自动重发。' },
+      { type: 'improvement', description: '报告中心页签暴露读屏选中状态；选题模板首读失败时提供重新加载操作。' },
+    ],
+  },
+  {
+    version: '9.6.19',
+    date: '2026-10-28',
+    title: '分页加载状态说明补齐',
+    impactScope: ['移动首页', '作品库', '消息', '可访问性'],
+    changes: [
+      { type: 'improvement', description: '移动进行中选题、创作历史、创作者作品和消息分页显示明确的加载范围，并在读取期间暴露忙碌状态。' },
+    ],
+  },
+  {
+    version: '9.6.18',
+    date: '2026-10-28',
+    title: '日报首次创建并发保护',
+    impactScope: ['日报', '写入一致性'],
+    changes: [
+      { type: 'fix', description: '桌面和移动端创建日报草稿时以版本 0 声明预期记录不存在，避免安全重试覆盖另一标签页并发创建的日报。' },
+    ],
+  },
+  {
+    version: '9.6.17',
+    date: '2026-10-28',
+    title: '加载状态读屏播报补齐',
+    impactScope: ['日报', '移动创作', '番茄钟', '辅助技术'],
+    changes: [
+      { type: 'improvement', description: '桌面日报、移动稿件详情、番茄排行榜和创作批注列表的加载过程提供礼貌、原子的读屏状态。' },
+    ],
+  },
+  {
+    version: '9.6.16',
+    date: '2026-10-28',
+    title: '移动日报加载状态读屏播报',
+    impactScope: ['移动端', '日报', '辅助技术'],
+    changes: [
+      { type: 'improvement', description: '移动端日报初次读取和重试期间提供明确、礼貌的读屏加载状态。' },
+    ],
+  },
+  {
+    version: '9.6.15',
+    date: '2026-10-28',
+    title: '移动日报草稿结果恢复',
+    impactScope: ['移动端', '日报', '写入恢复'],
+    changes: [
+      { type: 'fix', description: '移动日报保存结果不明时通过只读内容与版本核对恢复；仅在确认服务器仍为原状态后提供同载荷显式重试，并锁定冲突写入。' },
+    ],
+  },
+  {
+    version: '9.6.14',
+    date: '2026-10-28',
+    title: '创作者图表主题语义色',
+    impactScope: ['数据趋势', '作品复盘', 'Studio 主题'],
+    changes: [
+      { type: 'improvement', description: '创作者趋势和作品复盘曲线统一改用 Studio 语义色彩令牌，浅色与深色主题采用对应的指标颜色。' },
+    ],
+  },
+  {
+    version: '9.6.13',
+    date: '2026-10-28',
+    title: '创作者趋势图表读屏名称',
+    impactScope: ['数据趋势', '作品复盘', '辅助技术'],
+    changes: [
+      { type: 'improvement', description: '为创作者趋势和作品复盘中的每张曲线图提供对应指标名称及数据点数量，读屏时可以区分图表。' },
+    ],
+  },
+  {
+    version: '9.6.12',
+    date: '2026-10-28',
+    title: '复盘与创作者数据读取反馈',
+    impactScope: ['内容复盘', '作品库', '数据趋势', '辅助技术'],
+    changes: [
+      { type: 'improvement', description: '个人行动项与日报风险加载期间增加礼貌状态播报，刷新按钮明确表示忙碌。' },
+      { type: 'improvement', description: '生成指标快照和重新读取创作者作品数据时播报处理状态；按钮忙碌期间禁用，装饰图标遵循减少动态效果设置。' },
+    ],
+  },
+  {
+    version: '9.6.11',
+    date: '2026-10-28',
+    title: '复盘列表加载读屏状态',
+    impactScope: ['内容复盘', '复盘列表', '辅助技术'],
+    changes: [
+      { type: 'improvement', description: '复盘列表首读提供礼貌状态播报，刷新按钮明确表示忙碌并在读取期间锁定。' },
+      { type: 'improvement', description: '复盘刷新图标对读屏隐藏，并尊重减少动态效果设置。' },
+    ],
+  },
+  {
+    version: '9.6.10',
+    date: '2026-10-28',
+    title: '内容动态读取反馈',
+    impactScope: ['内容动态', '辅助技术', '响应反馈'],
+    changes: [
+      { type: 'improvement', description: '内容动态首读和刷新期间提供明确的礼貌状态播报，并禁用重复读取操作。' },
+      { type: 'improvement', description: '读取状态图标对读屏隐藏，并遵循减少动态效果设置。' },
+    ],
+  },
+  {
+    version: '9.6.9',
+    date: '2026-10-28',
+    title: '首屏加载读屏提示',
+    impactScope: ['工作台', '选题与发布', '权限管理', '备份', '辅助技术'],
+    changes: [
+      { type: 'improvement', description: '工作台、成就、权限、看板、选题详情、发布详情和备份列表的首次读取增加具体、礼貌的加载提示。' },
+      { type: 'improvement', description: '首页、选题、创作和公告骨架读取期间说明当前状态，Studio 骨架标记为装饰并隐藏于辅助技术。' },
+    ],
+  },
+  {
+    version: '9.6.8',
+    date: '2026-10-28',
+    title: '周报加载读屏播报',
+    impactScope: ['报告中心', '周报生成', '辅助技术'],
+    changes: [
+      { type: 'improvement', description: '周报首次读取和重试期间会礼貌播报加载状态，spinner 作为装饰不重复朗读。' },
+      { type: 'improvement', description: '周报隔离回归覆盖挂起读取、加载状态呈现、读取恢复与状态消失。' },
+    ],
+  },
+  {
+    version: '9.6.7',
+    date: '2026-10-28',
+    title: '共用加载状态读屏播报',
+    impactScope: ['匿名意见管理', '意见列表', '创作者数据', '辅助技术'],
+    changes: [
+      { type: 'improvement', description: '共用 table、inline、page、section 加载状态统一提供礼貌状态播报和单次完整提示；骨架屏、旋转图标作为装饰对读屏隐藏。' },
+      { type: 'improvement', description: '新增四种状态的语义合同测试，并使用隔离页面核对挂起读取与恢复后的真实辅助树状态。' },
+    ],
+  },
+  {
+    version: '9.6.6',
+    date: '2026-10-28',
+    title: '活动日志加载提示与消息状态防缓存',
+    impactScope: ['活动日志', '消息结果核实', '辅助技术', 'API 合同'],
+    changes: [
+      { type: 'improvement', description: '活动日志读取期间通过礼貌状态播报“正在加载活动日志…”，装饰性旋转图标不重复朗读。' },
+      { type: 'fix', description: '批量已读和清空状态查询在认证前设置 no-store，确保未认证响应也不被缓存，并补齐 OpenAPI 与 API 合同。' },
+    ],
+  },
+  {
+    version: '9.6.5',
+    date: '2026-10-28',
+    title: '协作编辑保存核验与资料面板修复',
+    impactScope: ['桌面稿件编辑', '手机稿件编辑', '创作资料', '编辑器无障碍'],
+    changes: [
+      { type: 'fix', description: '临时保存或审核锁定不会卸载实时协作文档；状态切换前检查当前编辑器内容是否与已确认保存内容一致，避免提交过期正文。' },
+      { type: 'fix', description: '创作资料独立滚动面板中的工具栏贴合面板顶部吸附，不再遮挡首段文字；编辑器颜色子菜单支持在鼠标悬停时按 Escape 收起。' },
+    ],
+  },
+  {
+    version: '9.6.4',
+    date: '2026-10-28',
+    title: '全局搜索弹窗可访问性',
+    impactScope: ['全局搜索', '弹窗焦点管理', '浏览器回归'],
+    changes: [
+      { type: 'fix', description: '全局搜索面板接入统一弹窗生命周期并挂载到页面顶层，在确认弹窗打开时仍可访问；补齐对话框语义、焦点约束和关闭后的焦点恢复。' },
+      { type: 'improvement', description: '修正资源删除、发布候选响应和灵感删除恢复的隔离浏览器回归夹具与状态断言。' },
+    ],
+  },
+  {
+    version: '9.6.3',
+    date: '2026-10-28',
+    title: '登录安全状态读屏提示',
+    impactScope: ['登录安全升级', '辅助技术'],
+    changes: [
+      { type: 'improvement', description: '登录安全页的首次读取和手动重新检查状态使用礼貌读屏播报；失败结果以可访问的错误提示呈现，装饰性刷新图标不重复朗读。' },
+    ],
+  },
+  {
+    version: '9.6.2',
+    date: '2026-10-28',
+    title: '作品评分对比度修复',
+    impactScope: ['创作者作品库', '辅助可读性'],
+    changes: [
+      { type: 'fix', description: '桌面作品评分改用满足正文对比度要求的 Studio 语义文字令牌；浏览器回归按桌面表格行与移动卡片分别读取评分。' },
+    ],
+  },
+  {
+    version: '9.6.1',
+    date: '2026-10-28',
+    title: '消息清空账号隔离',
+    impactScope: ['桌面消息中心', '消息清空恢复'],
+    changes: [
+      { type: 'fix', description: '清空消息期间切换账号后，旧账号的迟到响应、确认弹窗、恢复提示和处理中状态均不再覆盖新账号；新账号可以独立处理自己的请求。' },
+    ],
+  },
+  {
+    version: '9.6.0',
+    date: '2026-10-28',
+    title: '消息已读状态恢复',
+    impactScope: ['桌面消息中心', '移动消息中心', '消息状态接口'],
+    changes: [
+      { type: 'fix', description: '标记消息已读后若响应丢失，先只读核实服务器状态；确认已读才继续跳转，避免误报或重复提交。' },
+      { type: 'improvement', description: '暂时无法核实的消息会锁定后续未读写入，并提供只读重试；确认仍未读后才允许用户明确重试。' },
+    ],
+  },
+  {
     version: '9.5.0',
     date: '2026-10-28',
     title: '番茄钟恢复与选题读取可靠性',

@@ -502,6 +502,20 @@ const LegacyPomodoroActiveSession = registerSchema('LegacyPomodoroActiveSession'
 const LegacyPomodoroActiveResponse = registerSchema('LegacyPomodoroActiveResponse', z.object({
   session: LegacyPomodoroActiveSession.nullable(),
 }).strict());
+const LegacyMessageReadStatusResponse = registerSchema('LegacyMessageReadStatusResponse', z.discriminatedUnion('state', [
+  z.object({ state: z.literal('available'), id: z.number().int().positive(), read: z.boolean() }).strict(),
+  z.object({ state: z.literal('missing') }).strict(),
+]));
+const LegacyMessageReadStatusError = registerSchema('LegacyMessageReadStatusError', z.object({ message: z.string() }).strict());
+const LegacyMessageRequestStatusParams = registerSchema('LegacyMessageRequestStatusParams', z.object({ requestId: z.string().uuid() }).strict());
+const LegacyMessageReadAllRequestStatusResponse = registerSchema('LegacyMessageReadAllRequestStatusResponse', z.discriminatedUnion('state', [
+  z.object({ state: z.literal('processed'), updatedCount: z.number().int().nonnegative() }).strict(),
+  z.object({ state: z.literal('not_found') }).strict(),
+]));
+const LegacyMessageClearRequestStatusResponse = registerSchema('LegacyMessageClearRequestStatusResponse', z.discriminatedUnion('state', [
+  z.object({ state: z.literal('cleared'), deletedCount: z.number().int().nonnegative() }).strict(),
+  z.object({ state: z.literal('not_found') }).strict(),
+]));
 const LegacyIdParams = registerSchema('LegacyIdParams', z.object({ id: idSchema }).strict());
 
 registry.registerComponent('securitySchemes', 'bearerAuth', {
@@ -1129,6 +1143,55 @@ registry.registerPath({ method: 'put', path: '/api/templates/{id}', tags: ['Temp
 registry.registerPath({ method: 'delete', path: '/api/templates/{id}', tags: ['Templates (Legacy)'], summary: '删除选题模板', security: [{ bearerAuth: [] }], request: { params: LegacyIdParams }, responses: { 200: { description: '模板已删除' }, ...errorResponses } });
 registry.registerPath({ method: 'post', path: '/api/pomodoro/start', tags: ['Pomodoro (Legacy)'], summary: '开始专注计时', security: [{ bearerAuth: [] }], request: { body: { content: { 'application/json': { schema: LegacyPomodoroStart } } } }, responses: { 200: { description: '计时已开始' }, ...errorResponses } });
 registry.registerPath({ method: 'get', path: '/api/pomodoro/active', tags: ['Pomodoro (Legacy)'], summary: '读取当前活动专注计时', description: '只读返回当前认证用户最新的未完成番茄钟；没有活动会话时 session 为 null。会话按当前用户隔离，不返回其他用户的记录。', security: [{ bearerAuth: [] }], responses: { 200: { description: '当前活动会话或空结果', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: LegacyPomodoroActiveResponse } } }, ...errorResponses } });
+registry.registerPath({
+  method: 'get',
+  path: '/api/messages/{id}/read-status',
+  tags: ['Messages (Legacy)'],
+  summary: '只读核实单条消息的已读状态',
+  description: '按当前登录账号隔离，仅用于核实单条消息标记已读的结果。本人可见消息返回 available、消息编号和已读布尔值；不存在或属于其他账号时统一返回 missing，避免泄露消息。所有响应（含认证和参数错误）均禁止缓存。此查询不会修改消息状态，也不授予写权限。',
+  security: [{ bearerAuth: [] }],
+  request: { params: LegacyIdParams },
+  responses: {
+    200: { description: '本人消息的状态或隐藏的缺失状态', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: LegacyMessageReadStatusResponse } } },
+    400: { description: '消息编号无效', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: LegacyMessageReadStatusError } } },
+    401: { description: '未登录或登录已失效', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: LegacyMessageReadStatusError } } },
+    500: { description: '暂时无法核实消息状态', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: LegacyMessageReadStatusError } } },
+  },
+});
+for (const statusRoute of [
+  {
+    path: '/api/messages/read-all-requests/{requestId}',
+    summary: '只读核实批量已读结果',
+    description: '按当前登录操作者隔离批量已读回执，仅返回 processed + updatedCount 或 not_found，不读取消息正文、不授予写权限。所有响应（含认证与参数错误）均禁止缓存。',
+    response: LegacyMessageReadAllRequestStatusResponse,
+    successDescription: '当前操作者的最小化批量已读状态',
+    errorDescription: '暂时无法核实批量已读结果',
+  },
+  {
+    path: '/api/messages/clear-requests/{requestId}',
+    summary: '只读核实清空消息结果',
+    description: '按当前登录操作者隔离清空回执，仅返回 cleared + deletedCount 或 not_found，不读取消息正文、不授予写权限。所有响应（含认证与参数错误）均禁止缓存。',
+    response: LegacyMessageClearRequestStatusResponse,
+    successDescription: '当前操作者的最小化清空状态',
+    errorDescription: '暂时无法核实清空结果',
+  },
+] as const) {
+  registry.registerPath({
+    method: 'get',
+    path: statusRoute.path,
+    tags: ['Messages (Legacy)'],
+    summary: statusRoute.summary,
+    description: statusRoute.description,
+    security: [{ bearerAuth: [] }],
+    request: { params: LegacyMessageRequestStatusParams },
+    responses: {
+      200: { description: statusRoute.successDescription, headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: statusRoute.response } } },
+      400: { description: '请求编号格式不正确', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: LegacyMessageReadStatusError } } },
+      401: { description: '未登录或登录已失效', headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: LegacyMessageReadStatusError } } },
+      500: { description: statusRoute.errorDescription, headers: { 'Cache-Control': { schema: { type: 'string', enum: ['no-store'] } } }, content: { 'application/json': { schema: LegacyMessageReadStatusError } } },
+    },
+  });
+}
 for (const action of ['complete', 'cancel'] as const) registry.registerPath({ method: 'post', path: `/api/pomodoro/{id}/${action}`, tags: ['Pomodoro (Legacy)'], summary: action === 'complete' ? '完成专注计时' : '放弃专注计时', security: [{ bearerAuth: [] }], request: { params: LegacyIdParams }, responses: { 200: { description: '操作完成' }, ...errorResponses } });
 for (const path of ['/api/pomodoro/stats', '/api/pomodoro/ranking'] as const) registry.registerPath({ method: 'get', path, tags: ['Pomodoro (Legacy)'], summary: path.endsWith('stats') ? '获取个人专注统计' : '获取脱敏团队排行', security: [{ bearerAuth: [] }], responses: { 200: { description: '统计结果' }, ...errorResponses } });
 
@@ -1138,7 +1201,7 @@ export function generateOpenApiDocument() {
     info: {
       title: 'XMT API',
       version: '1.0.0',
-      description: 'XMT v1 API 契约，以及已完成 schema 化的首页关注事项/最近变化、模板和专注计时 legacy 接口。未列出的 legacy /api/* 不在此契约内。',
+      description: 'XMT v1 API 契约，以及已完成 schema 化的首页关注事项/最近变化、模板、专注计时和消息状态 legacy 接口。未列出的 legacy /api/* 不在此契约内。',
     },
     servers: [{ url: '/' }],
   });

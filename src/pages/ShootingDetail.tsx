@@ -26,6 +26,7 @@ import GlassPanel from '../components/studio/GlassPanel';
 import { usePermission } from '../hooks/usePermission';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
+import LoadingState from '../components/common/LoadingState';
 
 interface ShootingDetailData extends ShootingType {
   production: {
@@ -908,11 +909,7 @@ export default function ShootingDetail() {
   }, [shooting, sourceProduction, sourceProductionTimestamp]);
 
   if (loading || (shooting && shooting.id !== Number(id))) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-studio-primary border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
+    return <LoadingState type="inline" text="正在加载拍摄计划…" className="flex h-64 w-full justify-center" />;
   }
 
   if (!shooting) {

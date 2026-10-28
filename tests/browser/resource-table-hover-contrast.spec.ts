@@ -131,7 +131,7 @@ app.get('/api/resource-center/resources/:id', (req, res) => {
     return res.json(createdResource);
   }
   const requestedId = Number(req.params.id);
-  const resource = [detailResource, raceFirstResource, raceSecondResource].find((item) => item.id === requestedId);
+  const resource = [listResource, detailResource, raceFirstResource, raceSecondResource].find((item) => item.id === requestedId);
   if (!resource || !existingResourceIds.has(requestedId)) return res.status(404).json({ message: '资料不存在' });
   if (requestedId === raceFirstResource.id && delayNextRaceDetailRead) {
     delayNextRaceDetailRead = false;
@@ -363,8 +363,12 @@ try {
     await page.getByRole('heading', { name: '资料搜索', exact: true }).waitFor();
     const searchInput = page.getByRole('textbox', { name: '搜索资料关键词', exact: true });
     await page.getByLabel('资料库').selectOption('knowledge');
-    await page.getByRole('option', { name: '浅色主题分类', exact: true }).waitFor();
-    await page.getByLabel('分类').selectOption('81');
+    const categorySelect = page.getByLabel('分类');
+    const categoryOption = categorySelect.locator('option[value="81"]');
+    await categoryOption.waitFor({ state: 'attached' });
+    assert.equal((await categoryOption.textContent())?.trim(), '浅色主题分类', `${theme} knowledge category option is present in the native select`);
+    await categorySelect.selectOption('81');
+    assert.equal(await categorySelect.inputValue(), '81', `${theme} native category select applies the selected option`);
     await page.getByLabel('标签').fill('内容 规划');
     await page.getByLabel('排序').selectOption('title_asc');
     await searchInput.fill('验收');
@@ -598,16 +602,23 @@ try {
   failNextDeleteId = listResource.id;
   await page.getByRole('button', { name: `删除资料 ${listResource.title}`, exact: true }).click();
   await page.getByRole('heading', { name: '删除资料', exact: true }).waitFor();
+  const failedDeleteResponse = page.waitForResponse((response) => response.request().method() === 'DELETE'
+    && response.url().endsWith(`/api/resource-center/resources/${listResource.id}`) && response.status() === 503);
+  const deleteStatusResponse = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().endsWith(`/api/resource-center/resources/${listResource.id}`) && response.status() === 200);
   await page.getByRole('button', { name: '删除', exact: true }).click();
-  await page.getByText('删除失败', { exact: true }).waitFor();
+  await Promise.all([failedDeleteResponse, deleteStatusResponse]);
+  const deleteNotice = page.getByRole('status').filter({ hasText: '仍未移入回收站，可以安全地重新确认删除。' });
+  await deleteNotice.waitFor();
   assert.equal(existingResourceIds.has(listResource.id), true, 'failed list deletion keeps the resource in the isolated fixture');
-  assert.equal(await page.getByRole('heading', { name: '删除资料', exact: true }).count(), 1, 'failed list deletion leaves its confirmation open for retry');
+  assert.equal(resourceDeleteRequests, 1, 'uncertain deletion is followed by a read-only status lookup, not a repeated delete');
+  assert.equal(await page.getByRole('heading', { name: '删除资料', exact: true }).count(), 0, 'read-back closes the delete confirmation and keeps retry deliberate');
+  await page.getByRole('button', { name: `删除资料 ${listResource.title}`, exact: true }).click();
+  await page.getByRole('heading', { name: '删除资料', exact: true }).waitFor();
   await page.evaluate(() => document.documentElement.style.setProperty('--xmt-z-modal', '250'));
   const deleteDialog = page.getByRole('dialog', { name: '删除资料', exact: true });
   assert.equal(await deleteDialog.evaluate((element) => getComputedStyle(element).zIndex), '250', 'the modal layer must consume the shared token');
-  const failureNotification = page.getByRole('status').filter({ hasText: '删除失败' });
-  assert.equal(await failureNotification.evaluate((element) => getComputedStyle(element).zIndex), '260', 'operation feedback remains above the modal when the shared layer changes');
-  await page.keyboard.press('Meta+k');
+  await page.keyboard.press('Control+k');
   const globalSearch = page.getByRole('textbox', { name: '全局搜索' });
   await globalSearch.waitFor();
   await globalSearch.click();
@@ -619,14 +630,20 @@ try {
   await page.keyboard.press('Escape');
   await globalSearch.waitFor({ state: 'hidden' });
   await deleteDialog.waitFor();
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await deleteDialog.waitFor({ state: 'detached' });
   await page.evaluate(() => document.documentElement.style.removeProperty('--xmt-z-modal'));
+  await page.getByRole('button', { name: `删除资料 ${listResource.title}`, exact: true }).click();
+  await page.getByRole('heading', { name: '删除资料', exact: true }).waitFor();
   failNextResourceListRead = true;
   await page.getByRole('button', { name: '删除', exact: true }).click();
   await page.getByText('删除成功', { exact: true }).waitFor();
   assert.equal(existingResourceIds.has(listResource.id), false, 'successful list deletion removes the isolated resource');
   const confirmedDeleteMessage = `服务端已确认资料「${listResource.title}」已删除，但列表刷新失败；请重新加载列表确认，不要重复删除。`;
   await page.getByRole('alert').getByText(confirmedDeleteMessage, { exact: true }).waitFor();
-  assert.equal(await page.getByRole('link', { name: listResource.title, exact: true }).count(), 0, 'the confirmed deletion is removed from the current list even when refresh fails');
+  assert.equal(await page.getByRole('link', { name: listResource.title, exact: true }).count(), 1, 'the confirmed deletion remains visible with an explicit deleted status when refresh fails');
+  await page.getByText('已移入回收站', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: `删除资料 ${listResource.title}`, exact: true }).count(), 0, 'a confirmed deleted resource cannot be submitted for deletion again');
   assert.equal(successfulResourceDeletes, 1, 'the fixture confirms exactly one resource deletion');
   const resourceReadsBeforeRetry = resourceListReads;
   await page.getByRole('button', { name: '重新加载列表', exact: true }).click();
@@ -715,14 +732,20 @@ try {
   await page.screenshot({ path: '/tmp/xmt-resource-detail-business-labels-1440.png', fullPage: true });
   await page.getByRole('button', { name: '删除', exact: true }).click();
   await page.getByRole('heading', { name: '删除资料', exact: true }).waitFor();
+  const failedDetailDeleteResponse = page.waitForResponse((response) => response.request().method() === 'DELETE'
+    && response.url().endsWith(`/api/resource-center/resources/${detailResource.id}`) && response.status() === 503);
+  const detailDeleteStatusResponse = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().endsWith(`/api/resource-center/resources/${detailResource.id}`) && response.status() === 200);
   await page.getByRole('button', { name: '删除', exact: true }).last().click();
-  await page.getByText('删除失败', { exact: true }).waitFor();
+  await Promise.all([failedDetailDeleteResponse, detailDeleteStatusResponse]);
+  await page.getByRole('status').filter({ hasText: '仍未移入回收站，可以安全地重新确认删除。' }).waitFor();
   assert.equal(existingResourceIds.has(detailResource.id), true, 'failed detail deletion keeps the isolated resource');
   assert.equal(await page.getByRole('heading', { name: detailResource.title, exact: true }).count(), 1, 'failed detail deletion does not navigate away');
-  await page.getByRole('button', { name: '关闭通知', exact: true }).click();
   const detailDeleteRequestsBeforeRetry = resourceDeleteRequests;
   delayedDeleteId = detailResource.id;
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await page.getByRole('heading', { name: '删除资料', exact: true }).waitFor();
   await page.getByRole('button', { name: '删除', exact: true }).last().evaluate((button) => {
     button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     button.dispatchEvent(new MouseEvent('click', { bubbles: true }));

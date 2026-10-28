@@ -964,7 +964,7 @@ export default function ProductionReviewPanel({
       {error ? <p role="alert" className="mx-5 mt-4 rounded-lg border border-studio-coral/30 bg-studio-coral/10 px-3 py-2 text-sm text-studio-coral-contrast">{error}</p> : null}
 
       {loading ? (
-        <p className="px-5 py-8 text-center text-sm text-studio-text-muted">正在加载批注与建议…</p>
+        <p role="status" aria-live="polite" aria-atomic="true" className="px-5 py-8 text-center text-sm text-studio-text-muted">正在加载批注与建议…</p>
       ) : threads.length === 0 ? (
         <div className="px-5 py-8 text-center">
           <p className="text-sm font-medium text-studio-text-primary">这个版本还没有批注或修改建议</p>

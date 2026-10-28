@@ -315,6 +315,17 @@ export default function ProductionDetail() {
     const handle = runtimeHandleRef.current;
     return handle ? handle.flush({ timeoutMs: 15_000 }) : { status: 'failed' };
   }, []);
+  const getFlushedProductionEditorContent = () => {
+    const content = outlineEditorHandleRef.current?.getContent();
+    if (content === null || content === undefined) {
+      throw new Error('编辑器尚未准备好，正文操作未发送，请稍后重试。');
+    }
+    if (content !== persistedContentRef.current) {
+      throw new Error('正文与最近一次确认保存内容不一致，当前操作未发送；请检查保存状态后重试。');
+    }
+    latestEditContentRef.current = content;
+    return content;
+  };
   const flushProductionEditorBeforeMutation = useCallback(async () => {
     const result = await flushReviewEditor();
     if (result.status === 'synced') return true;
@@ -934,7 +945,7 @@ export default function ProductionDetail() {
     let transitionWriteStarted = false;
     try {
       if (!await flushProductionEditorBeforeMutation()) return;
-      const versionedContent = latestEditContentRef.current;
+      const versionedContent = getFlushedProductionEditorContent();
       const baseVersion = production.version || 'v1.0';
       await prepareStatusTransition(
         'version-save',
@@ -1037,7 +1048,7 @@ export default function ProductionDetail() {
         return;
       }
 
-      const submittedContent = latestEditContentRef.current;
+      const submittedContent = getFlushedProductionEditorContent();
       await prepareStatusTransition(
         'review-submit',
         production.status,
@@ -1124,7 +1135,7 @@ export default function ProductionDetail() {
       let statusUpdateContent = production.content || '';
       if (!reviewOnlyApproval) {
         if (!await flushProductionEditorBeforeMutation()) return;
-        statusUpdateContent = latestEditContentRef.current;
+        statusUpdateContent = getFlushedProductionEditorContent();
       }
       await prepareStatusTransition(
         'status-update',
@@ -1213,7 +1224,7 @@ export default function ProductionDetail() {
         'delete',
         production.status,
         'deleted',
-        latestEditContentRef.current,
+        getFlushedProductionEditorContent(),
         retryingRecovery ? pendingRecovery : undefined,
         { previousVersion: production.version || 'v1.0' },
       );
@@ -1238,6 +1249,7 @@ export default function ProductionDetail() {
   if (loading && !recoveryReadInFlight) {
     return (
       <PageShell>
+        <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载创作稿件…</span>
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <StudioSkeletonCard />
           <StudioSkeletonCard />
@@ -1736,7 +1748,7 @@ export default function ProductionDetail() {
                 </button>
               ))}
               {sidebarVersionEntries.length === 0 ? <EmptyState title="暂无版本历史" description="保存版本后会在这里形成时间线。" /> : null}
-              {history.length < historyTotal && <ActionButton type="button" variant="secondary" disabled={historyLoading || hasProductionMutation} onClick={() => void loadMoreHistory()} className="min-h-10 w-full px-3 py-2 text-sm">{historyLoading ? '正在加载…' : '查看更多历史版本'}</ActionButton>}
+              {history.length < historyTotal && <ActionButton type="button" variant="secondary" aria-busy={historyLoading} disabled={historyLoading || hasProductionMutation} onClick={() => void loadMoreHistory()} className="min-h-10 w-full px-3 py-2 text-sm">{historyLoading ? '正在加载历史版本…' : '查看更多历史版本'}</ActionButton>}
             </div>
 
             <ProductionOriginPanel

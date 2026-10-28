@@ -104,6 +104,9 @@ let workflowUpdateRecoveryStatusRequests = 0;
 let loseNextWorkflowMutationUpdateResponse = false;
 let workflowUpdateRecoveryLedger = new Map<string, { actorId: number; templateId: number; fingerprint: string }>();
 let workflowMutationDeleteRequests = 0;
+let loseNextWorkflowMutationDeleteResponse = false;
+let failNextWorkflowMutationDelete = false;
+let workflowMutationDeleteVerificationReadFailures = 0;
 let failNextWorkflowMutationListRead = false;
 let failNextWorkflowMutationCreate = false;
 let failNextWorkflowMutationUpdate = false;
@@ -168,7 +171,7 @@ app.get('/__qa', (req, res) => {
     workflowMutationDetailFailureMode = detailFailureModes.find((mode) => mode === String(req.query.detailFailureMode || '')) || '';
     workflowMutationDetailDelayMs = Number(req.query.detailDelayMs) || 0;
     workflowMutationDetailDelayRequest = Number(req.query.detailDelayRequest) || 1;
-    const initialWorkflowMutationTemplates = req.query.deleteRefreshFailOnce === '1'
+    const initialWorkflowMutationTemplates = req.query.deleteRefreshFailOnce === '1' || req.query.includeSurvivor === '1'
       ? [workflowMutationInitialTemplate, workflowMutationSurvivorTemplate]
       : [workflowMutationInitialTemplate];
     workflowMutationTemplates = initialWorkflowMutationTemplates.map((item) => ({ ...item, nodes: undefined }));
@@ -205,6 +208,9 @@ app.get('/__qa', (req, res) => {
     loseNextWorkflowMutationUpdateResponse = req.query.updateCommitLost === '1';
     workflowUpdateRecoveryLedger = new Map();
     workflowMutationDeleteRequests = 0;
+    loseNextWorkflowMutationDeleteResponse = req.query.deleteCommitLost === '1';
+    failNextWorkflowMutationDelete = req.query.deleteFailOnce === '1';
+    workflowMutationDeleteVerificationReadFailures = Number(req.query.deleteVerifyReadFailOnce) || 0;
     failNextWorkflowMutationListRead = req.query.initialListFail === '1';
     failNextWorkflowMutationCreate = req.query.createFailOnce === '1';
     failNextWorkflowMutationUpdate = req.query.updateFailOnce === '1';
@@ -415,6 +421,10 @@ app.get('/api/workflow-templates/:id', async (req, res) => {
       workflowMutationDetailDelayMs = 0;
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
+    if (id === workflowMutationInitialTemplate.id && workflowMutationDeleteVerificationReadFailures > 0) {
+      workflowMutationDeleteVerificationReadFailures -= 1;
+      return res.status(503).json({ message: '模拟审批流模板删除结果读取失败' });
+    }
     if (id === workflowMutationInitialTemplate.id && requestCount === 1 && workflowMutationDetailFailureMode) {
       const failureMode = workflowMutationDetailFailureMode;
       workflowMutationDetailFailureMode = '';
@@ -524,9 +534,17 @@ app.delete('/api/workflow-templates/:id', async (_req, res) => {
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
     const id = Number(_req.params.id);
+    if (failNextWorkflowMutationDelete) {
+      failNextWorkflowMutationDelete = false;
+      return res.status(503).json({ message: '模拟审批流模板删除请求失败' });
+    }
     workflowMutationTemplates = workflowMutationTemplates.filter((item) => item.id !== id);
     workflowMutationDetails.delete(id);
     if (failWorkflowMutationListAfterDelete) failNextWorkflowMutationListRead = true;
+    if (loseNextWorkflowMutationDeleteResponse) {
+      loseNextWorkflowMutationDeleteResponse = false;
+      return res.status(503).json({ message: '模拟服务器已删除但响应丢失' });
+    }
     return res.json({ message: '模拟审批流模板已删除' });
   }
   if (failNextWorkflowTemplateDelete) {
@@ -543,6 +561,10 @@ app.get('/api/templates', (_req, res) => {
     return res.status(503).json({ message: '模拟选题模板列表刷新失败' });
   }
   return res.json({ data: templateManagementTemplates });
+});
+app.post('/__qa/fail-next-template-management-read', (_req, res) => {
+  failNextTemplateManagementRead = true;
+  return res.json({ ok: true });
 });
 app.post('/api/templates', async (req, res) => {
   templateManagementCreateCount += 1;
@@ -578,7 +600,11 @@ function parseCssColor(value: string) {
     if (expanded.length === 6) return { rgb: [0, 2, 4].map((offset) => Number.parseInt(expanded.slice(offset, offset + 2), 16)), alpha: 1 };
   }
   const channels = value.match(/[\d.]+/g)?.map(Number) || [];
-  return channels.length >= 3 ? { rgb: channels.slice(0, 3), alpha: channels[3] ?? 1 } : null;
+  if (channels.length < 3) return null;
+  const rgb = value.startsWith('color(srgb ')
+    ? channels.slice(0, 3).map((channel) => channel * 255)
+    : channels.slice(0, 3);
+  return { rgb, alpha: channels[3] ?? 1 };
 }
 
 function relativeLuminance(rgb: number[]) {
@@ -678,12 +704,15 @@ try {
   const expectedRecoveryErrors: ObservedConsoleError[] = [];
   const expectedRoleDeleteNotFoundResponses: ObservedHttpResponse[] = [];
   const expectedRoleDeleteNotFoundErrors: ObservedConsoleError[] = [];
+  const expectedWorkflowDeleteNotFoundResponses: ObservedHttpResponse[] = [];
+  const expectedWorkflowDeleteNotFoundErrors: ObservedConsoleError[] = [];
   const expectedWorkflowCreateConflictResponses: ObservedHttpResponse[] = [];
   const expectedWorkflowCreateConflictErrors: ObservedConsoleError[] = [];
   const classifiedExpectedResponses = new Set<ObservedHttpResponse>();
   const expectedConsoleErrorBuckets = [
     { responses: expectedRecoveryResponses, errors: expectedRecoveryErrors },
     { responses: expectedRoleDeleteNotFoundResponses, errors: expectedRoleDeleteNotFoundErrors },
+    { responses: expectedWorkflowDeleteNotFoundResponses, errors: expectedWorkflowDeleteNotFoundErrors },
     { responses: expectedWorkflowCreateConflictResponses, errors: expectedWorkflowCreateConflictErrors },
   ];
   const expectedPermissionFailureLogs: string[] = [];
@@ -706,6 +735,9 @@ try {
     }
     if (method === 'GET' && responseUrl.pathname === '/api/roles/3' && status === 404) {
       expectedRoleDeleteNotFoundResponses.push(observedResponse);
+    }
+    if (method === 'GET' && responseUrl.pathname === '/api/workflow-templates/961' && status === 404) {
+      expectedWorkflowDeleteNotFoundResponses.push(observedResponse);
     }
     if (method === 'POST' && responseUrl.pathname === '/api/workflow-templates' && status === 409) {
       expectedWorkflowCreateConflictResponses.push(observedResponse);
@@ -1235,21 +1267,31 @@ try {
   await page.getByRole('heading', { name: '确认删除', exact: true }).waitFor();
   failNextWorkflowTemplateDelete = true;
   await page.getByRole('button', { name: '确认删除', exact: true }).click();
-  await page.getByText('删除失败', { exact: true }).waitFor();
+  await page.getByText('审批流模板“阶段顺序验收模板”仍在服务器上，本次删除未确认；如仍需删除，请重新确认操作。', { exact: true }).waitFor();
   assert.equal(workflowTemplateExists, true, 'failed workflow template deletion leaves the isolated template intact');
-  assert.equal(await page.getByRole('heading', { name: '确认删除', exact: true }).count(), 1, 'failed workflow template deletion keeps its confirmation open for retry');
+  assert.equal(await page.getByRole('heading', { name: '确认删除', exact: true }).count(), 0, 'ambiguous deletion closes its confirmation after read-back confirms the template still exists');
+  await page.getByTitle('删除').click();
+  await page.getByRole('heading', { name: '确认删除', exact: true }).waitFor();
   await page.getByRole('button', { name: '确认删除', exact: true }).click();
   await page.getByText('删除成功', { exact: true }).waitFor();
   assert.equal(workflowTemplateExists, false, 'successful workflow template deletion removes the isolated template');
 
   await page.goto(`${base}/__qa?page=templates&initialReadFail=1`);
   await page.getByRole('heading', { name: '选题模板', exact: true }).waitFor();
-  await page.getByText('模板列表加载失败；当前列表不可用，请重新加载。', { exact: true }).waitFor();
+  await page.getByText('列表读取失败，暂时无法确认已有模板。请重新加载列表后再试。', { exact: true }).waitFor();
   assert.equal(await page.getByText('还没有选题模板', { exact: true }).count(), 0, 'a failed initial read must not look like an empty template library');
   const failedInitialReadCount = templateManagementReadCount;
+  await page.request.post(`${base}/__qa/fail-next-template-management-read`);
+  const failedTemplateRetry = page.waitForResponse((response) => response.url().endsWith('/api/templates') && response.request().method() === 'GET' && response.status() === 503);
   await page.getByRole('button', { name: '重新加载列表', exact: true }).click();
+  await failedTemplateRetry;
+  await page.getByRole('status').getByText('模板列表仍无法刷新，请稍后重试；不要重复提交已确认的操作。', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '重新加载列表', exact: true }).count(), 1, 'an unavailable retry keeps one visible list-reload action');
+  const recoveredInitialTemplateRead = page.waitForResponse((response) => response.url().endsWith('/api/templates') && response.request().method() === 'GET' && response.status() === 200);
+  await page.getByRole('button', { name: '重新加载列表', exact: true }).click();
+  await recoveredInitialTemplateRead;
   await page.getByText('还没有选题模板', { exact: true }).waitFor();
-  assert.equal(templateManagementReadCount, failedInitialReadCount + 1, 'initial load retry performs one read only');
+  assert.equal(templateManagementReadCount, failedInitialReadCount + 2, 'each explicit initial-load retry performs one GET and the final read recovers');
 
   await page.goto(`${base}/__qa?page=templates`);
   await page.getByRole('heading', { name: '选题模板', exact: true }).waitFor();
@@ -1266,7 +1308,7 @@ try {
     form.requestSubmit();
   });
   await Promise.all([templateCreate, failedTemplateRefresh]);
-  await page.getByText('服务端已确认模板保存，但列表刷新失败；请重新加载确认，不要重复保存。', { exact: true }).waitFor();
+  await page.getByText('模板已创建；列表刷新失败，请重新加载列表确认。', { exact: true }).waitFor();
   assert.equal(templateManagementTemplates.length, 1, 'the create mutation persisted despite the failed list refresh');
   assert.equal(templateManagementCreateCount, 1, 'template create was submitted once before the refresh retry');
   await page.getByRole('button', { name: '重新加载列表', exact: true }).click();
@@ -1544,8 +1586,7 @@ try {
   const failedWorkflowUpdate = page.waitForResponse((response) => response.url().endsWith('/api/workflow-templates/961') && response.request().method() === 'PUT' && response.status() === 503);
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await failedWorkflowUpdate;
-  await page.getByText('更新失败', { exact: true }).waitFor();
-  await page.getByText('模拟审批流模板更新失败', { exact: true }).waitFor();
+  await page.getByRole('alert').getByText('服务器暂未找到这次更新记录。原内容与请求编号已保留；只有点击“使用同一请求编号安全重试”才会再次提交。', { exact: true }).waitFor();
   assert.equal(await page.getByRole('heading', { name: '编辑审批流', exact: true }).count(), 1, 'a rejected workflow template update keeps its form open');
   assert.equal(await page.getByLabel('模板名称', { exact: true }).inputValue(), '更新失败后重试审批流', 'a not-found update recovery retains the original submitted name');
   assert.equal(await page.getByLabel('描述', { exact: true }).inputValue(), '显式重试并验证更新列表只读恢复', 'a not-found update recovery retains the original submitted description');
@@ -1698,6 +1739,51 @@ try {
   assert.equal(await page.getByRole('button', { name: '删除审批流 保留审批流模板', exact: true }).isEnabled(), true, 'successful delete recovery re-enables deletion of retained rows');
   assert.equal(workflowMutationDeleteRequests, 1, 'the final recovery state still records exactly one DELETE');
 
+  await page.goto(`${base}/__qa?page=workflow-mutations&deleteCommitLost=1&deleteVerifyReadFailOnce=1&includeSurvivor=1`);
+  await page.getByRole('heading', { name: '审批流设计' }).waitFor();
+  await page.getByRole('button', { name: '删除审批流 隔离审批流模板', exact: true }).click();
+  await page.getByRole('heading', { name: '确认删除', exact: true }).waitFor();
+  const lostWorkflowDelete = page.waitForResponse((response) => response.url().endsWith('/api/workflow-templates/961')
+    && response.request().method() === 'DELETE' && response.status() === 503);
+  const unavailableWorkflowDeleteVerification = page.waitForResponse((response) => response.url().endsWith('/api/workflow-templates/961')
+    && response.request().method() === 'GET' && response.status() === 503);
+  await page.getByRole('button', { name: '确认删除', exact: true }).click();
+  await Promise.all([lostWorkflowDelete, unavailableWorkflowDeleteVerification]);
+  await page.getByRole('alert').getByText('暂时无法核实上次删除结果；恢复记录已保留，所有模板写入暂停。请重试只读核实，不要重复删除。', { exact: true }).waitFor();
+  assert.equal(workflowMutationDeleteRequests, 1, 'a lost DELETE response is never retried while its result is unknown');
+  assert.equal(workflowMutationTemplates.some((item) => item.id === 961), false, 'the fixture commits deletion before losing the response');
+  assert.deepEqual(await page.evaluate(() => {
+    const raw = window.sessionStorage.getItem('xmt:workflow-template-delete-pending:v1:actor:96');
+    return raw ? JSON.parse(raw) as Record<string, unknown> : null;
+  }), { version: 1, actorId: 96, templateId: 961, name: '隔离审批流模板' }, 'the actor-scoped recovery marker records only the target needed for a read-only status check');
+
+  const recoveredWorkflowDelete = page.waitForResponse((response) => response.url().endsWith('/api/workflow-templates/961')
+    && response.request().method() === 'GET' && response.status() === 404);
+  const recoveredWorkflowDeleteList = page.waitForResponse((response) => response.url().endsWith('/api/workflow-templates')
+    && response.request().method() === 'GET' && response.status() === 200);
+  await page.reload();
+  await Promise.all([recoveredWorkflowDelete, recoveredWorkflowDeleteList]);
+  await page.getByText('审批流模板“隔离审批流模板”已不存在；没有重复提交删除。', { exact: true }).waitFor();
+  assert.equal(workflowMutationDetailReadRequests.get(961), 2, 'reload recovery performs a second direct GET after the first read was unavailable');
+  assert.equal(workflowMutationDeleteRequests, 1, 'reload recovery verifies deletion without sending another DELETE');
+  assert.equal(await page.evaluate(() => window.sessionStorage.getItem('xmt:workflow-template-delete-pending:v1:actor:96')), null, 'verified deletion clears the recovery marker');
+  assert.equal(await page.getByText('隔离审批流模板', { exact: true }).count(), 0, 'read-back confirms the deleted template is absent after reload');
+  assert.equal(await page.getByText('保留审批流模板', { exact: true }).count(), 1, 'read-back preserves unrelated templates');
+  assert.equal(await page.getByRole('button', { name: '新建模板', exact: true }).isEnabled(), true, 'verified deletion restores template actions');
+
+  await page.goto(`${base}/__qa?page=workflow-mutations&deleteFailOnce=1`);
+  await page.getByRole('heading', { name: '审批流设计' }).waitFor();
+  await page.getByRole('button', { name: '删除审批流 隔离审批流模板', exact: true }).click();
+  await page.getByRole('button', { name: '确认删除', exact: true }).click();
+  await page.getByText('审批流模板“隔离审批流模板”仍在服务器上，本次删除未确认；如仍需删除，请重新确认操作。', { exact: true }).waitFor();
+  assert.equal(workflowMutationDeleteRequests, 1, 'a failed DELETE with the template still present is not automatically repeated');
+  assert.equal(workflowMutationTemplates.some((item) => item.id === 961), true, 'read-back confirms the unsuccessful deletion left the template intact');
+  assert.equal(await page.evaluate(() => window.sessionStorage.getItem('xmt:workflow-template-delete-pending:v1:actor:96')), null, 'a read-back showing the template still present clears the resolved recovery marker');
+  await page.getByRole('button', { name: '删除审批流 隔离审批流模板', exact: true }).click();
+  await page.getByRole('button', { name: '确认删除', exact: true }).click();
+  await page.getByText('审批流模板已删除', { exact: true }).waitFor();
+  assert.equal(workflowMutationDeleteRequests, 2, 'a second DELETE occurs only after the user reopens and confirms the action');
+
   for (const failureMode of ['status', 'network', 'invalid'] as const) {
     await page.goto(`${base}/__qa?page=workflow-mutations&detailFailureMode=${failureMode}&detailDelayMs=180&detailDelayRequest=2&detailNodeFixture=1`);
     await page.getByRole('heading', { name: '审批流设计' }).waitFor();
@@ -1797,6 +1883,9 @@ try {
   assert.equal(expectedRoleDeleteNotFoundResponses.length, 1, 'the only separately allowed role 404 is the explicitly covered role status read after delete');
   assert.equal(expectedRoleDeleteNotFoundErrors.length, expectedRoleDeleteNotFoundResponses.length, 'the role delete 404 console error matches its exact response');
   assert(expectedRoleDeleteNotFoundResponses.every(({ method, pathname, status }) => method === 'GET' && pathname === '/api/roles/3' && status === 404), 'role 404 classification is limited to GET /api/roles/3');
+  assert.equal(expectedWorkflowDeleteNotFoundResponses.length, 1, 'the only separately allowed workflow-template 404 is the read-back after an ambiguous delete');
+  assert.equal(expectedWorkflowDeleteNotFoundErrors.length, expectedWorkflowDeleteNotFoundResponses.length, 'the workflow-template delete 404 console error matches its exact response');
+  assert(expectedWorkflowDeleteNotFoundResponses.every(({ method, pathname, status }) => method === 'GET' && pathname === '/api/workflow-templates/961' && status === 404), 'workflow-template 404 classification is limited to the tested read-back endpoint');
   assert.equal(expectedWorkflowCreateConflictResponses.length, 1, 'the only separately allowed workflow create conflict is the explicit conflict fixture');
   assert.equal(expectedWorkflowCreateConflictErrors.length, expectedWorkflowCreateConflictResponses.length, 'the workflow create conflict console error matches its exact response');
   assert(expectedWorkflowCreateConflictResponses.every(({ method, pathname, status }) => method === 'POST' && pathname === '/api/workflow-templates' && status === 409), 'workflow create conflict classification is limited to POST /api/workflow-templates');
@@ -1807,13 +1896,13 @@ try {
     { method: 'PUT', pathname: '/api/roles/3', status: 503, count: 2 },
     { method: 'GET', pathname: '/api/roles/3', status: 503, count: 2 },
     { method: 'DELETE', pathname: '/api/roles/3', status: 503, count: 2 },
-    { method: 'DELETE', pathname: '/api/workflow-templates/961', status: 503, count: 1 },
-    { method: 'GET', pathname: '/api/templates', status: 503, count: 2 },
+    { method: 'DELETE', pathname: '/api/workflow-templates/961', status: 503, count: 3 },
+    { method: 'GET', pathname: '/api/templates', status: 503, count: 3 },
     { method: 'GET', pathname: '/api/workflow-templates', status: 503, count: 4 },
     { method: 'POST', pathname: '/api/workflow-templates', status: 503, count: 1 },
     { method: 'GET', pathname: '/api/workflow-templates/create-requests/:id', status: 503, count: 2 },
     { method: 'PUT', pathname: '/api/workflow-templates/961', status: 503, count: 2 },
-    { method: 'GET', pathname: '/api/workflow-templates/961', status: 503, count: 1 },
+    { method: 'GET', pathname: '/api/workflow-templates/961', status: 503, count: 2 },
     { method: 'GET', pathname: '/api/workflow-templates/:id/update-requests/:id', status: 503, count: 1 },
   ];
   const observedUnavailableTupleCounts = [...new Set(unavailableResponses.map(({ method, pathname, status }) => JSON.stringify({ method, pathname, status })))]

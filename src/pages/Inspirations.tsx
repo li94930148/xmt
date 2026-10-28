@@ -16,6 +16,7 @@ import {
 import { getInspirationDeleteStatus, InspirationDeleteError } from '../api/inspirations';
 import type { Inspiration, InspirationComment } from '../api/inspirations';
 import ConfirmModal from '../components/common/ConfirmModal';
+import LoadingState from '../components/common/LoadingState';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useModalLifecycle } from '../components/common/useModalLifecycle';
 import { usePermission } from '../hooks/usePermission';
@@ -1323,9 +1324,7 @@ export default function Inspirations() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className={`w-8 h-8 border-4 ${styles.spinner} border-t-transparent rounded-full animate-spin`} />
-        </div>
+        <LoadingState type="inline" text="正在加载灵感列表…" className="flex h-64 w-full justify-center" />
       ) : inspirations.length === 0 ? (
         <div className={`${styles.card} p-12 text-center`}>
           <Lightbulb className={`w-12 h-12 ${styles.textMuted} mx-auto mb-4`} />
@@ -1665,9 +1664,7 @@ export default function Inspirations() {
             </div>
 
             {detailLoading ? (
-              <div className="flex-1 flex items-center justify-center">
-                <div className={`w-8 h-8 border-4 ${styles.spinner} border-t-transparent rounded-full animate-spin`} />
-              </div>
+              <LoadingState type="inline" text="正在加载灵感详情…" className="flex flex-1 items-center justify-center" />
             ) : detailData ? (
               <div className="flex-1 min-h-0 flex flex-col">
                 <div className="flex-1 min-h-0 overflow-y-auto">

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useAppStore } from '../store';
 import ActionButton from './studio/ActionButton';
+import LoadingState from './common/LoadingState';
 import { getWeeklyReport } from '../api/export';
 import { FileText, Video, Eye, Heart, Copy, Loader2, RefreshCw, Lightbulb } from 'lucide-react';
 import { formatBeijingTime } from '../lib/utils';
@@ -145,9 +146,7 @@ export default function WeeklyReport() {
   if (loading && !data) {
     return (
       <div className={`${styles.card} p-6`}>
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-studio-primary" />
-        </div>
+        <LoadingState type="inline" text="正在加载周报…" className="w-full justify-center py-12" />
       </div>
     );
   }

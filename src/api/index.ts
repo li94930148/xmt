@@ -7,7 +7,7 @@ export { getHomeAttention, getHomeActivity } from './homeDashboard';
 export type { HomeAttentionSummary, HomeAttentionTopic, HomePipelineTopic, HomeDraftTask, HomeTodayPublishingTask, HomeSyncAnomalyTask, HomeActivitySummary, HomeActivityEvent } from './homeDashboard';
 export { TopicApiError } from './topics';
 export { getUsers, getUser, getUserCreateRequestStatus, getUserDeleteRequestStatus, getUserUpdateRequestStatus, getAssignableRoles, createUser, updateUser, deleteUser, getLogs } from './users';
-export { getMessages, getUnreadCount, markMessageAsRead, clearMessages, getMessageClearRequestStatus, getMessageReadAllRequestStatus, markAllAsRead } from './messages';
+export { getMessages, getUnreadCount, getMessageReadStatus, markMessageAsRead, clearMessages, getMessageClearRequestStatus, getMessageReadAllRequestStatus, markAllAsRead } from './messages';
 export { getTeamStats, getMonthlyStats, getUserStats, createAnalytics, getTopicAnalytics } from './analytics';
 export { deleteResource, getCategories, getArchives, getArchiveDetail } from './resources';
 export {

@@ -32,6 +32,10 @@ export interface MessageReadResult {
   ignoredCount?: number;
 }
 
+export type MessageReadStatus =
+  | { state: 'available'; id: number; read: boolean }
+  | { state: 'missing' };
+
 export interface MessageClearResult {
   message: string;
   deletedCount: number;
@@ -78,6 +82,23 @@ export async function markMessageAsRead(id: number): Promise<{ message: string }
   });
   if (!response.ok) throw new Error('标记消息失败');
   return response.json();
+}
+
+export async function getMessageReadStatus(id: number): Promise<MessageReadStatus> {
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error('消息编号无效');
+  const response = await fetch(`${BASE_URL}/messages/${id}/read-status`, {
+    headers: getAuthHeader(),
+    cache: 'no-store',
+  });
+  if (!response.ok) throw new Error('暂时无法核实消息状态');
+  const result: unknown = await response.json();
+  if (!result || typeof result !== 'object') throw new Error('消息状态响应格式无法确认');
+  const status = result as Record<string, unknown>;
+  if (status.state === 'missing') return { state: 'missing' };
+  if (status.state !== 'available' || status.id !== id || typeof status.read !== 'boolean') {
+    throw new Error('消息状态响应格式无法确认');
+  }
+  return { state: 'available', id, read: status.read };
 }
 
 export async function clearMessages(clientRequestId: string): Promise<MessageClearResult> {

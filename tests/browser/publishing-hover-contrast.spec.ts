@@ -160,6 +160,7 @@ app.get('/__qa/state', (_req, res) => res.json({
   douyinLinkRequests,
   douyinLinkTargets,
   currentDouyinWorkId,
+  heldDouyinCandidateTargets: [...heldDouyinCandidateTargets],
   douyinCandidateRequestCounts: Object.fromEntries(douyinCandidateRequestCounts),
   pendingDouyinCandidateResponseCounts: Object.fromEntries([...pendingDouyinCandidateResponses].map(([id, responses]) => [id, responses.length])),
 }));
@@ -488,11 +489,29 @@ const setCandidateResponseHold = async (publishingId: number, hold: boolean, opt
 const waitForPendingCandidateResponse = async (publishingId: number, expectedCount = 1) => {
   for (let attempt = 0; attempt < 150; attempt += 1) {
     const response = await fetch(`${base}/__qa/state`);
-    const state = await response.json() as { pendingDouyinCandidateResponseCounts: Record<string, number> };
+    const state = await response.json() as {
+      pendingDouyinCandidateResponseCounts: Record<string, number>;
+      douyinCandidateRequestCounts: Record<string, number>;
+      heldDouyinCandidateTargets: number[];
+    };
     if ((state.pendingDouyinCandidateResponseCounts[String(publishingId)] || 0) >= expectedCount) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  assert.fail(`publishing ${publishingId} candidate response count did not reach ${expectedCount}`);
+  const response = await fetch(`${base}/__qa/state`);
+  const state = await response.json() as {
+    pendingDouyinCandidateResponseCounts: Record<string, number>;
+    douyinCandidateRequestCounts: Record<string, number>;
+    heldDouyinCandidateTargets: number[];
+  };
+  assert.fail(`publishing ${publishingId} candidate response count did not reach ${expectedCount}: pending=${state.pendingDouyinCandidateResponseCounts[String(publishingId)] || 0}, requests=${state.douyinCandidateRequestCounts[String(publishingId)] || 0}, held=${state.heldDouyinCandidateTargets.includes(publishingId)}`);
+};
+
+const waitForEnabledAction = async (locator: Locator, description: string) => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await locator.isEnabled()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.fail(`${description} did not become enabled`);
 };
 
 const setCandidateResponseSequence = async (publishingId: number, enabled: boolean) => {
@@ -523,11 +542,21 @@ try {
   page.setDefaultTimeout(5000);
   const errors: string[] = [];
   const expectedHttpErrors: string[] = [];
+  const expectedHttpErrorResponses: string[] = [];
+  const expectedHttpNotFoundResponses: string[] = [];
+  const consoleNotFoundMessages: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    else if (message.text().includes('404 (Not Found)')) consoleNotFoundMessages.push(message.text());
     else errors.push(message.text());
+  });
+  page.on('response', (response) => {
+    if (response.status() === 503) expectedHttpErrorResponses.push(`${response.request().method()} ${new URL(response.url()).pathname}`);
+    if (response.status() === 404 && /^\/api\/workflow\/publishing\/\d+$/.test(new URL(response.url()).pathname)) {
+      expectedHttpNotFoundResponses.push(response.url());
+    } else if (response.status() >= 400 && response.status() !== 503) errors.push(`HTTP ${response.status()} ${response.url()}`);
   });
 
   for (const theme of ['light', 'dark'] as const) {
@@ -854,7 +883,7 @@ try {
   await page.getByRole('button', { name: '刷新抖音关联' }).click();
   await partialReconcileResponse;
   await page.getByText('抖音关联已刷新，归档待同步', { exact: true }).waitFor();
-  await page.getByText('2 个选题的发布归档暂未同步，可在对应发布详情页重试。', { exact: true }).waitFor();
+  await page.getByText(/2 个选题的发布归档暂未同步，可在对应发布详情页重试。/).waitFor();
   assert.equal(douyinReconcileRequests, partialReconcileRequestsBefore + 1, 'partial archive synchronization is reported without repeating the reconciliation request');
   douyinReconcileArchiveSyncPending = 0;
 
@@ -862,23 +891,24 @@ try {
   const secondPublishingRow = page.locator('tbody tr').filter({ hasText: createdPublishing.topic_title });
   const douyinLinkRequestsBeforeCandidateRace = douyinLinkRequests;
   await setCandidateResponseHold(publishing.id, true);
-  const firstCandidateRequest = page.waitForRequest((request) => request.url().endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`));
+  const firstCandidateRequest = page.waitForRequest((request) => request.method() === 'GET' && new URL(request.url()).pathname.endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`));
   await linkedPublishingRow.getByTitle('调整抖音作品关联').click();
   await page.getByRole('heading', { name: '关联抖音作品' }).waitFor();
   await firstCandidateRequest;
   await waitForPendingCandidateResponse(publishing.id);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.getByRole('heading', { name: '关联抖音作品' }).waitFor({ state: 'detached' });
 
   await setCandidateResponseHold(createdPublishing.id, true);
-  const secondCandidateRequest = page.waitForRequest((request) => request.url().endsWith(`/api/workflow/publishing/${createdPublishing.id}/douyin-candidates`));
-  await secondPublishingRow.getByTitle('调整抖音作品关联').click();
+  const secondCandidateRequest = page.waitForRequest((request) => request.method() === 'GET' && new URL(request.url()).pathname.endsWith(`/api/workflow/publishing/${createdPublishing.id}/douyin-candidates`));
+  await secondPublishingRow.getByTitle('关联抖音作品').click();
   await page.getByRole('heading', { name: '关联抖音作品' }).waitFor();
   await secondCandidateRequest;
   await waitForPendingCandidateResponse(createdPublishing.id);
   const releasedSecondCandidates = await setCandidateResponseHold(createdPublishing.id, false);
   assert.equal(releasedSecondCandidates.released, 1, 'the second publishing candidate response is released first');
   await page.getByText('第二发布记录候选', { exact: true }).waitFor();
-  const staleFirstCandidateResponse = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`));
+  const staleFirstCandidateResponse = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`));
   const releasedFirstCandidates = await setCandidateResponseHold(publishing.id, false);
   assert.equal(releasedFirstCandidates.released, 1, 'the original publishing candidate response is released after the current target loads');
   await staleFirstCandidateResponse;
@@ -890,23 +920,35 @@ try {
   await page.getByRole('button', { name: '关联此作品', exact: true }).click();
   await secondTargetLinkResponse;
   await page.getByText('关联成功', { exact: true }).waitFor();
+  await page.getByRole('heading', { name: '关联抖音作品' }).waitFor({ state: 'detached' });
   assert.deepEqual(douyinLinkTargets.at(-1), { publishingId: createdPublishing.id, workId: 966 }, 'the second target can only be linked to its own candidate');
 
   await setCandidateResponseSequence(publishing.id, true);
   await setCandidateResponseHold(publishing.id, true);
-  const firstSameTargetRequest = page.waitForRequest((request) => request.url().endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`));
+  await waitForEnabledAction(linkedPublishingRow.getByTitle('调整抖音作品关联'), 'the linked publishing candidate action');
+  const firstSameTargetRequest = page.waitForRequest((request) => request.method() === 'GET' && new URL(request.url()).pathname.endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`));
   await linkedPublishingRow.getByTitle('调整抖音作品关联').click();
   await firstSameTargetRequest;
   await waitForPendingCandidateResponse(publishing.id);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
-  const reopenedSameTargetRequest = page.waitForRequest((request) => request.url().endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`));
+  await page.getByRole('heading', { name: '关联抖音作品' }).waitFor({ state: 'detached' });
+  await waitForEnabledAction(linkedPublishingRow.getByTitle('调整抖音作品关联'), 'the linked publishing candidate action after closing the dialog');
   await linkedPublishingRow.getByTitle('调整抖音作品关联').click();
+  await page.getByRole('heading', { name: '关联抖音作品' }).waitFor();
+  const reopenedSameTargetRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return request.method() === 'GET'
+      && url.pathname.endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`)
+      && url.searchParams.get('query') === '重新打开';
+  });
+  await page.getByRole('textbox', { name: '搜索抖音作品标题关键词' }).fill('重新打开');
+  await page.getByRole('button', { name: '搜索候选', exact: true }).click();
   await reopenedSameTargetRequest;
   await waitForPendingCandidateResponse(publishing.id, 2);
   const reopenedCandidate = await setCandidateResponseHold(publishing.id, false, { latest: true, keepHeld: true });
   assert.equal(reopenedCandidate.released, 1, 'the reopened same-target candidate response is released before the prior request');
   await page.getByText('重新打开后的候选', { exact: true }).waitFor();
-  const oldSameTargetResponse = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`));
+  const oldSameTargetResponse = page.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith(`/api/workflow/publishing/${publishing.id}/douyin-candidates`));
   const oldCandidate = await setCandidateResponseHold(publishing.id, false);
   assert.equal(oldCandidate.released, 1, 'the earlier same-target response is released last');
   await oldSameTargetResponse;
@@ -915,6 +957,7 @@ try {
   assert.equal(await page.getByText('旧候选响应', { exact: true }).count(), 0, 'the earlier same-target response cannot replace the reopened result');
   assert.equal(douyinLinkRequests, douyinLinkRequestsBeforeCandidateRace + 1, 'stale same-target results do not trigger an additional link write');
   await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.getByRole('heading', { name: '关联抖音作品' }).waitFor({ state: 'detached' });
   await setCandidateResponseSequence(publishing.id, false);
 
   await linkedPublishingRow.getByTitle('调整抖音作品关联').click();
@@ -1039,7 +1082,7 @@ try {
   await scriptEditor.fill('异步成功稿');
   await page.request.post(`${base}/__qa/delay-next-publishing-script-save`);
   const scriptSaveRequestsBefore = publishingUpdateRequests;
-  const delayedScriptSave = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith(`/api/workflow/publishing/${publishing.id}`));
+  const delayedScriptSave = page.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith(`/api/workflow/publishing/${publishing.id}`), { timeout: 15_000 });
   await scriptEditor.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
   await page.locator('.save-status').getByText('保存中...', { exact: true }).waitFor();
   assert.equal(await page.locator('.save-status').getByText('已同步', { exact: true }).count(), 0,
@@ -1066,7 +1109,10 @@ try {
   assert.ok(!String(unchangedScript.publishingScriptContent).includes('未提交保留稿'), 'the unsaved text is not presented as server-confirmed');
 
   assert.deepEqual(errors, [], 'publishing light/dark contrast fixture renders without browser errors');
-  assert.equal(expectedHttpErrors.length, 12, 'the isolated fixture returns only intentional delete, create, update, reconciliation, link, script-save, and verification 503 responses');
+  assert.equal(expectedHttpNotFoundResponses.length, 1, 'the only publishing-detail 404 is the read-only check confirming a deleted record');
+  assert.equal(consoleNotFoundMessages.length, expectedHttpNotFoundResponses.length, 'each expected deleted-record 404 has exactly one browser console message');
+  assert.equal(expectedHttpErrors.length, 16, `the isolated fixture returns only its intentional 503 responses: ${JSON.stringify(expectedHttpErrorResponses)}`);
+  assert.equal(expectedHttpErrorResponses.length, expectedHttpErrors.length, 'every expected 503 console message corresponds to exactly one isolated fixture response');
   console.log('Publishing browser test passed: responsive contrast and confirmed/ambiguous publishing writes, including asynchronous manual script save, retain safe state without automatic retries.');
 } finally {
   await browser?.close();

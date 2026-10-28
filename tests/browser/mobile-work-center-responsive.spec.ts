@@ -166,6 +166,9 @@ const messageLoadFailureTokens = new Set<string>();
 let messageReadFailures = 0;
 let messageReadAttempts = 0;
 const messageReadFailureIds = new Set<number>();
+let messageReadStatusAttempts = 0;
+let messageReadStatusFailures = 0;
+const messageReadCommitThenLoseResponseIds = new Set<number>();
 let messageReadDelayMs = 0;
 let messageReadHold = false;
 let messageReadStarted: (() => void) | null = null;
@@ -432,6 +435,19 @@ fixtureApi.use('/api', async (request, response) => {
     const record = messageClearRequestRecords.get(requestId);
     if (!record || record.actorId !== fixtureUser.id) return response.json({ state: 'not_found' });
     return response.json({ state: 'cleared', deletedCount: record.deletedCount });
+  }
+  if (/^\/messages\/\d+\/read-status$/.test(request.path) && request.method === 'GET') {
+    messageReadStatusAttempts += 1;
+    if (messageReadStatusFailures > 0) {
+      messageReadStatusFailures -= 1;
+      return response.status(503).json({ message: '暂时无法核实消息状态' });
+    }
+    const segments = request.path.split('/');
+    const messageId = Number(segments.at(-2));
+    const message = mobileMessagesFixture.find((candidate) => candidate.id === messageId);
+    return response.json(message
+      ? { state: 'available', id: messageId, read: message.read }
+      : { state: 'missing' });
   }
   if (request.path === '/auth/change-password' && request.method === 'POST') {
     passwordChangeAttempts += 1;
@@ -972,6 +988,7 @@ fixtureApi.use('/api', async (request, response) => {
     if (messageReadFailureIds.delete(messageId)) return response.status(503).json({ message: '消息服务暂不可用，标记失败' });
     if (messageReadFailures > 0) { messageReadFailures -= 1; return response.status(503).json({ message: '消息服务暂不可用，标记失败' }); }
     mobileMessagesFixture = mobileMessagesFixture.map((message) => message.id === messageId ? { ...message, read: true } : message);
+    if (messageReadCommitThenLoseResponseIds.delete(messageId)) return response.status(503).json({ message: '已读状态已提交，但响应丢失' });
     return response.json({ message: '消息已标记为已读' });
   }
   if (request.path === '/messages' && request.method === 'DELETE') {
@@ -1716,7 +1733,9 @@ try {
       const taskStatus = page.getByRole('status').filter({ hasText: '正在整理今日任务…' });
       const inspirationStatus = page.getByRole('status').filter({ hasText: '正在读取灵感数量…' });
       const attentionStatus = page.getByRole('status').filter({ hasText: '正在读取关注事项…' });
+      const activeTopicLoading = page.getByText('正在读取进行中的选题…', { exact: true });
       await Promise.all([taskStatus.waitFor(), inspirationStatus.waitFor(), attentionStatus.waitFor()]);
+      await activeTopicLoading.waitFor();
       assert.equal(await taskStatus.getAttribute('aria-live'), 'polite', 'mobile home task loading status is politely announced');
       assert.equal(await inspirationStatus.getAttribute('aria-live'), 'polite', 'mobile home inspiration loading status is politely announced');
       assert.equal(await attentionStatus.getAttribute('aria-live'), 'polite', 'mobile home attention loading status is politely announced');
@@ -1724,6 +1743,7 @@ try {
       releaseInspirationRead();
       await Promise.all([attentionResponse, inspirationResponse]);
       await Promise.all([taskStatus.waitFor({ state: 'detached' }), inspirationStatus.waitFor({ state: 'detached' }), attentionStatus.waitFor({ state: 'detached' })]);
+      await activeTopicLoading.waitFor({ state: 'detached' });
       await page.getByTestId('mobile-home-active-topic-summary').waitFor();
       assert.deepEqual(businessWrites, [], 'mobile home loading fixture performs no business writes');
       await assertMobileLayout(page, 390, 'home-loading-status-light');
@@ -3195,9 +3215,11 @@ try {
     await messageCard.waitFor();
     expectMessageReadFailure();
     const failedMessageRead = messageReadPage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/messages/992') && response.status() === 503);
+    const confirmedUnreadStatus = messageReadPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().endsWith('/api/messages/992/read-status') && response.status() === 200);
     await messageCard.click();
-    await failedMessageRead;
-    assert.equal(await messageReadPage.getByText('标记消息失败', { exact: true }).count(), 1, 'mark failure remains visible on the inbox');
+    await Promise.all([failedMessageRead, confirmedUnreadStatus]);
+    assert.equal(await messageReadPage.getByText(/服务器已确认消息仍未读/).count(), 1, 'a read-only status lookup confirms the message remains unread');
     assert.equal(await messageReadPage.url(), `${baseUrl}/messages`, 'failed mark must not navigate away from its recovery message');
     const successfulMessageRead = messageReadPage.waitForResponse((response) => response.request().method() === 'PUT' && response.url().endsWith('/api/messages/992') && response.status() === 200);
     await messageCard.click();
@@ -3207,6 +3229,35 @@ try {
     assert.deepEqual(messageReadErrors, [], messageReadErrors.join('\n'));
   } finally {
     await messageReadContext.close();
+  }
+
+  const committedReadMessageId = 1291;
+  mobileMessagesFixture = [{ id: committedReadMessageId, title: '手机已读响应丢失', content: '服务端提交成功后丢失 PUT 响应。', read: false, link: `/topics/${linkedTopic.id}`, type: 'info' }];
+  messageReadAttempts = 0;
+  messageReadStatusAttempts = 0;
+  messageReadStatusFailures = 0;
+  messageReadCommitThenLoseResponseIds.clear();
+  messageReadCommitThenLoseResponseIds.add(committedReadMessageId);
+  const { context: committedReadContext, page: committedReadPage, errors: committedReadErrors, expectConsoleFailure: expectCommittedReadFailure } = await openMobilePage(390, messageUser);
+  try {
+    expectCommittedReadFailure();
+    await committedReadPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+    const message = committedReadPage.getByRole('button', { name: /手机已读响应丢失/ });
+    await message.waitFor();
+    const lostPut = committedReadPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${committedReadMessageId}`) && response.status() === 503);
+    const readStatus = committedReadPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().endsWith(`/api/messages/${committedReadMessageId}/read-status`) && response.status() === 200);
+    await message.click();
+    await Promise.all([lostPut, readStatus]);
+    await committedReadPage.waitForURL(`**/topics/${linkedTopic.id}`);
+    assert.equal(messageReadAttempts, 1, 'a lost response after commit must not send a second PUT');
+    assert.equal(messageReadStatusAttempts, 1, 'the client confirms the committed state with one read-only GET');
+    assert.equal(mobileMessagesFixture[0]?.read, true, 'the fixture commits before returning its simulated lost response');
+    assert.deepEqual(committedReadErrors, [], committedReadErrors.join('\n'));
+  } finally {
+    messageReadCommitThenLoseResponseIds.clear();
+    await committedReadContext.close();
   }
 
   mobileMessagesFixture = Array.from({ length: 45 }, (_, index) => ({
@@ -3228,24 +3279,53 @@ try {
   loseNextMessageBulkReadResponseAfterCommit = false;
   messageBulkReadFailures = 0;
   const { context: mobileBulkReadContext, page: mobileBulkReadPage, errors: mobileBulkReadErrors, expectConsoleFailure: expectMobileBulkReadFailure } = await openMobilePage(390, messageUser);
+  let releaseDelayedMobilePageRead: (() => void) | null = null;
   try {
     await mobileBulkReadPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
     await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 1(?:\s|$)/ }).waitFor();
     await mobileBulkReadPage.getByText('未读 30 条', { exact: true }).waitFor();
     assert.equal(await mobileBulkReadPage.getByLabel('移动主导航').getByText('9+', { exact: true }).count(), 1, 'mobile navigation badge uses the account-wide unread summary rather than the first page count');
     await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 45 条）', exact: true }).waitFor();
+
+    let resolveDelayedPageStarted!: () => void;
+    const delayedPageStarted = new Promise<void>((resolve) => { resolveDelayedPageStarted = resolve; });
+    let releaseDelayedPage!: () => void;
+    const delayedPageGate = new Promise<void>((resolve) => {
+      releaseDelayedPage = resolve;
+      releaseDelayedMobilePageRead = resolve;
+    });
+    await mobileBulkReadPage.route('**/api/messages?*', async (route) => {
+      const url = new URL(route.request().url());
+      if (route.request().method() === 'GET' && url.searchParams.get('page') === '2') {
+        resolveDelayedPageStarted();
+        await delayedPageGate;
+      }
+      await route.fallback();
+    });
+    const delayedPageResponse = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET'
+      && new URL(response.url()).searchParams.get('page') === '2' && response.status() === 200);
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 45 条）', exact: true }).click();
+    await delayedPageStarted;
+    const loadingMoreButton = mobileBulkReadPage.getByRole('button', { name: '正在加载更多消息…', exact: true });
+    await loadingMoreButton.waitFor();
+    assert.equal(await loadingMoreButton.getAttribute('aria-busy'), 'true', 'mobile message pagination exposes its busy state while loading');
+    releaseDelayedPage();
+    releaseDelayedMobilePageRead = null;
+    await delayedPageResponse;
+    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 21(?:\s|$)/ }).waitFor();
+    await mobileBulkReadPage.unroute('**/api/messages?*');
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 40 / 45 条）', exact: true }).waitFor();
+
     messageLoadFailures = 1;
     expectMobileBulkReadFailure();
-    const failedNextPage = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).searchParams.get('page') === '2' && response.status() === 503);
-    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 20 / 45 条）', exact: true }).click();
+    const failedNextPage = mobileBulkReadPage.waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).searchParams.get('page') === '3' && response.status() === 503);
+    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 40 / 45 条）', exact: true }).click();
     await failedNextPage;
     await mobileBulkReadPage.getByRole('button', { name: '重试加载更多', exact: true }).waitFor();
     assert.equal(await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 1(?:\s|$)/ }).count(), 1, 'failed next page retains the already loaded first page');
-    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 21(?:\s|$)/ }).count(), 0, 'failed next page does not render incomplete data');
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 21(?:\s|$)/ }).count(), 1, 'failed third page preserves the already loaded second page');
+    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 41(?:\s|$)/ }).count(), 0, 'failed third page does not render incomplete data');
     await mobileBulkReadPage.getByRole('button', { name: '重试加载更多', exact: true }).click();
-    await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 21(?:\s|$)/ }).waitFor();
-    assert.equal(await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 21(?:\s|$)/ }).count(), 1, 'retry appends the next page exactly once');
-    await mobileBulkReadPage.getByRole('button', { name: '加载更多（已显示 40 / 45 条）', exact: true }).click();
     await mobileBulkReadPage.getByRole('button', { name: /^移动分页消息 45(?:\s|$)/ }).waitFor();
     assert.equal(await mobileBulkReadPage.getByText('未读 30 条', { exact: true }).count(), 1, 'loading additional pages does not replace the account-wide unread count with a page count');
 
@@ -3403,6 +3483,7 @@ try {
     });
     assert.deepEqual(mobileBulkReadErrors, [], mobileBulkReadErrors.join('\n'));
   } finally {
+    releaseDelayedMobilePageRead?.();
     releaseMessageListRead?.();
     releaseMessageListRead = null;
     messageListReadHold = false;
@@ -3430,7 +3511,7 @@ try {
     assert.equal(await desktopMessageCard.isDisabled(), true, 'the in-flight message action must not be submitted again');
     await failedDesktopMessageRead;
     assert.equal(messageReadAttempts, 1, 'one click must issue one read request');
-    await desktopMessagePage.getByText('标记消息失败', { exact: true }).waitFor();
+    await desktopMessagePage.getByText(/服务器已确认消息仍未读/).waitFor();
     assert.equal(await desktopMessagePage.url(), `${baseUrl}/messages`, 'a failed mark must preserve the inbox and its retry opportunity');
     assert.equal(await desktopMessageCard.getByText('未读', { exact: true }).count(), 1, 'a failed mark must preserve unread state');
     await desktopMessagePage.screenshot({ path: '/tmp/xmt-desktop-message-read-failed.png', fullPage: true });
@@ -3449,6 +3530,137 @@ try {
   } finally {
     messageReadDelayMs = 0;
     await desktopMessageContext.close();
+  }
+
+  const desktopUncertainReadUser = { ...user, id: 14, username: 'desktop-message-read-uncertain', name: '桌面消息只读核实验收', role: 'member' };
+  fixtureUser = desktopUncertainReadUser;
+  fixturePermissions = [];
+  const desktopUncertainReadId = 1292;
+  mobileMessagesFixture = [{ id: desktopUncertainReadId, title: '桌面待核实已读状态', content: '状态读取不可用时必须锁定后续写入。', read: false, link: `/topics/${linkedTopic.id}`, type: 'info', created_at: '2026-09-28T09:00:00.000Z' }];
+  messageReadAttempts = 0;
+  messageReadFailureIds.clear();
+  messageReadFailureIds.add(desktopUncertainReadId);
+  messageReadStatusAttempts = 0;
+  messageReadStatusFailures = 1;
+  const { context: desktopUncertainReadContext, page: desktopUncertainReadPage, errors: desktopUncertainReadErrors, expectConsoleFailure: expectDesktopUncertainReadFailure } = await openMobilePage(1440, desktopUncertainReadUser);
+  try {
+    expectDesktopUncertainReadFailure();
+    expectDesktopUncertainReadFailure();
+    await desktopUncertainReadPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+    const message = desktopUncertainReadPage.getByRole('button', { name: /桌面待核实已读状态/ });
+    await message.waitFor();
+    const failedPut = desktopUncertainReadPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${desktopUncertainReadId}`) && response.status() === 503);
+    const unavailableStatus = desktopUncertainReadPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().endsWith(`/api/messages/${desktopUncertainReadId}/read-status`) && response.status() === 503);
+    await message.click();
+    await Promise.all([failedPut, unavailableStatus]);
+    await desktopUncertainReadPage.getByRole('button', { name: '只读核实', exact: true }).waitFor();
+    assert.equal(await message.isDisabled(), true, 'an unknown read result locks the unread action');
+    assert.equal(messageReadAttempts, 1, 'status lookup failure never triggers an automatic second PUT');
+
+    const unreadStatus = desktopUncertainReadPage.waitForResponse((response) => response.request().method() === 'GET'
+      && response.url().endsWith(`/api/messages/${desktopUncertainReadId}/read-status`) && response.status() === 200);
+    await desktopUncertainReadPage.getByRole('button', { name: '只读核实', exact: true }).click();
+    await unreadStatus;
+    await desktopUncertainReadPage.getByText(/服务器已确认消息仍未读/).waitFor();
+    assert.equal(messageReadAttempts, 1, 'read-only recheck does not retry the write');
+    assert.equal(await message.isDisabled(), false, 'after unread is confirmed, an explicit retry is available');
+
+    const retry = desktopUncertainReadPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${desktopUncertainReadId}`) && response.status() === 200);
+    await message.click();
+    await retry;
+    await desktopUncertainReadPage.waitForURL(`**/topics/${linkedTopic.id}`);
+    assert.equal(messageReadAttempts, 2, 'only the user-confirmed retry sends the second PUT');
+    assert.equal(messageReadStatusAttempts, 2, 'the flow performs one automatic status lookup and one manual recheck');
+    assert.deepEqual(desktopUncertainReadErrors, [], desktopUncertainReadErrors.join('\n'));
+  } finally {
+    messageReadStatusFailures = 0;
+    messageReadFailureIds.clear();
+    await desktopUncertainReadContext.close();
+  }
+
+  const desktopActorA = { ...user, id: 71, username: 'desktop-message-actor-a', name: '桌面消息账号A', role: 'member' };
+  const desktopActorB = { ...user, id: 72, username: 'desktop-message-actor-b', name: '桌面消息账号B', role: 'member' };
+  const desktopSharedMessageId = 14992;
+  fixtureUser = desktopActorA;
+  fixturePermissions = [];
+  mobileMessagesFixture = [{ id: desktopSharedMessageId, title: '桌面账号A同编号消息', content: '账号A请求尚未返回。', read: false, type: 'info' }];
+  const { context: desktopActorContext, page: desktopActorPage, errors: desktopActorErrors, expectConsoleFailure: expectDesktopActorFailure } = await openMobilePage(1440, desktopActorA);
+  let releaseDesktopActorARead: (() => void) | null = null;
+  let releaseDesktopActorBRead: (() => void) | null = null;
+  try {
+    expectDesktopActorFailure();
+    await desktopActorPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
+    const actorAMessage = desktopActorPage.getByRole('button', { name: /桌面账号A同编号消息/ });
+    await actorAMessage.waitFor();
+    await desktopActorPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'desktop-actor-a-token', { persist: 'memory' });
+    }, desktopActorA);
+    const actorAReadGate = new Promise<void>((resolve) => { releaseDesktopActorARead = resolve; });
+    let resolveActorAReadStarted!: () => void;
+    const actorAReadStarted = new Promise<void>((resolve) => { resolveActorAReadStarted = resolve; });
+    const actorBReadGate = new Promise<void>((resolve) => { releaseDesktopActorBRead = resolve; });
+    let resolveActorBReadStarted!: () => void;
+    const actorBReadStarted = new Promise<void>((resolve) => { resolveActorBReadStarted = resolve; });
+    await desktopActorPage.route(`**/api/messages/${desktopSharedMessageId}`, async (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      const authorization = route.request().headers().authorization ?? '';
+      if (authorization === 'Bearer desktop-actor-a-token') {
+        resolveActorAReadStarted();
+        await actorAReadGate;
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: '账号A消息服务暂不可用' }) });
+        return;
+      }
+      if (authorization === 'Bearer desktop-actor-b-token') {
+        resolveActorBReadStarted();
+        await actorBReadGate;
+        mobileMessagesFixture = mobileMessagesFixture.map((message) => message.id === desktopSharedMessageId ? { ...message, read: true } : message);
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: '消息已标记为已读' }) });
+        return;
+      }
+      await route.continue();
+    });
+    const actorAResponse = desktopActorPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${desktopSharedMessageId}`) && response.status() === 503);
+    await actorAMessage.click();
+    await actorAReadStarted;
+
+    fixtureUser = desktopActorB;
+    mobileMessagesFixture = [{ id: desktopSharedMessageId, title: '桌面账号B同编号消息', content: '账号B可独立标记同编号消息。', read: false, type: 'info' }];
+    await desktopActorPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'desktop-actor-b-token', { persist: 'memory' });
+    }, desktopActorB);
+    const actorBMessage = desktopActorPage.getByRole('button', { name: /桌面账号B同编号消息/ });
+    await actorBMessage.waitFor();
+    assert.equal(await actorBMessage.isDisabled(), false, 'actor A in-flight state does not block the same message ID for desktop actor B');
+    const actorBResponse = desktopActorPage.waitForResponse((response) => response.request().method() === 'PUT'
+      && response.url().endsWith(`/api/messages/${desktopSharedMessageId}`) && response.status() === 200);
+    await actorBMessage.click();
+    await actorBReadStarted;
+    assert.equal(await actorBMessage.isDisabled(), true, 'desktop actor B gets its own in-flight marker');
+
+    releaseDesktopActorARead?.();
+    releaseDesktopActorARead = null;
+    await actorAResponse;
+    await desktopActorPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    assert.equal(await actorBMessage.isDisabled(), true, 'actor A cleanup does not clear actor B in-flight state for the same ID');
+    assert.equal(await desktopActorPage.getByText('标记已读失败', { exact: true }).count(), 0, 'actor A failure does not show in actor B desktop inbox');
+
+    releaseDesktopActorBRead?.();
+    releaseDesktopActorBRead = null;
+    await actorBResponse;
+    await actorBMessage.getByText('已读', { exact: true }).waitFor();
+    assert.equal(desktopActorPage.url(), `${baseUrl}/messages`, 'actor B remains in its inbox because the message has no destination');
+    assert.deepEqual(desktopActorErrors, [], desktopActorErrors.join('\n'));
+  } finally {
+    releaseDesktopActorARead?.();
+    releaseDesktopActorBRead?.();
+    await desktopActorPage.unroute(`**/api/messages/${desktopSharedMessageId}`);
+    await desktopActorContext.close();
   }
 
   const messageReadRaceUser = { ...user, id: 13, username: 'desktop-message-read-race', name: '消息已读查询竞态验收', role: 'member' };
@@ -3578,6 +3790,7 @@ try {
   nextMessageAfterClearCommit = null;
   messageClearRequestRecords.clear();
   const { context: messagePaginationContext, page: messagePaginationPage, errors: messagePaginationErrors, expectConsoleFailure: expectMessageClearFailure } = await openMobilePage(1440, paginationUser);
+  let releaseStaleClearResponse: (() => void) | null = null;
   try {
     await messagePaginationPage.goto(`${baseUrl}/messages`, { waitUntil: 'domcontentloaded' });
     assert.equal(new URL(messagePaginationPage.url()).pathname, '/messages', 'the desktop message flow remains on the intended inbox route');
@@ -3814,8 +4027,102 @@ try {
     assert.equal(await messagePaginationPage.getByRole('dialog').count(), 0, 'confirmed recovery closes the pending clear dialog');
     assert.equal(await messagePaginationPage.evaluate(() => Object.keys(sessionStorage).some((key) => key.startsWith('xmt:message-clear-pending:'))), false, 'verified recovery removes only the resolved session marker');
     assert.ok(messageClearStatusAttempts >= 3, 'status endpoint was used for not-found, unavailable, and recovered outcomes');
+
+    const staleClearActor = { ...user, id: 14, username: 'desktop-stale-clear-actor', name: '迟到清空账号', role: 'member' };
+    const currentClearActor = { ...user, id: 15, username: 'desktop-current-clear-actor', name: '当前清空账号', role: 'member' };
+    fixtureUser = staleClearActor;
+    mobileMessagesFixture = [{ id: 1301, title: '旧账号待清空消息', content: '旧账号清空请求的迟到响应不能影响新账号。', read: false, type: 'info' }];
+    await messagePaginationPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'stale-clear-actor-token', { persist: 'memory' });
+    }, staleClearActor);
+    await messagePaginationPage.getByRole('heading', { name: '旧账号待清空消息', exact: true }).waitFor();
+
+    let resolveStaleClearStarted!: () => void;
+    const staleClearStarted = new Promise<void>((resolve) => { resolveStaleClearStarted = resolve; });
+    let resolveStaleClearGate!: () => void;
+    const staleClearGate = new Promise<void>((resolve) => {
+      resolveStaleClearGate = resolve;
+      releaseStaleClearResponse = resolve;
+    });
+    let interceptedClearCount = 0;
+    await messagePaginationPage.route('**/api/messages', async (route) => {
+      if (route.request().method() !== 'DELETE') return route.fallback();
+      interceptedClearCount += 1;
+      if (interceptedClearCount === 1) {
+        resolveStaleClearStarted();
+        await staleClearGate;
+      } else {
+        mobileMessagesFixture = [];
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: '消息已清空', deletedCount: 1, replayed: false }),
+      });
+    });
+
+    const staleClearResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'DELETE'
+      && response.url().endsWith('/api/messages') && response.status() === 200);
+    await messagePaginationPage.getByRole('button', { name: '清空', exact: true }).click();
+    await messagePaginationPage.getByRole('heading', { name: '确认清空消息' }).waitFor();
+    const staleClearRequest = messagePaginationPage.waitForRequest((request) => request.method() === 'DELETE'
+      && request.url().endsWith('/api/messages'));
+    await messagePaginationPage.getByRole('button', { name: '确认清空', exact: true }).click();
+    await staleClearRequest;
+    await staleClearStarted;
+    assert.equal(await messagePaginationPage.evaluate((actorId) => Boolean(sessionStorage.getItem(`xmt:message-clear-pending:v1:actor:${actorId}`)), staleClearActor.id), true,
+      'the original actor recovery marker remains while its clear request is pending');
+
+    fixtureUser = currentClearActor;
+    mobileMessagesFixture = [{ id: 1302, title: '当前账号待清空消息', content: '新账号可在旧请求完成前独立操作。', read: false, type: 'info' }];
+    await messagePaginationPage.evaluate(async (nextUser) => {
+      const { useAuthStore } = await import('/src/store/index.ts');
+      useAuthStore.getState().login(nextUser, 'current-clear-actor-token', { persist: 'memory' });
+    }, currentClearActor);
+    await messagePaginationPage.getByRole('heading', { name: '当前账号待清空消息', exact: true }).waitFor();
+    assert.equal(await messagePaginationPage.getByRole('dialog').count(), 0, 'the prior actor confirmation dialog is not shown to the new actor');
+    await messagePaginationPage.getByRole('button', { name: '清空', exact: true }).waitFor();
+    await messagePaginationPage.getByRole('button', { name: '清空', exact: true }).click();
+    await messagePaginationPage.getByRole('heading', { name: '确认清空消息' }).waitFor();
+    const currentClearResponse = messagePaginationPage.waitForResponse((response) => response.request().method() === 'DELETE'
+      && response.url().endsWith('/api/messages') && response.status() === 200);
+    await messagePaginationPage.getByRole('button', { name: '确认清空', exact: true }).click();
+    await currentClearResponse;
+    await messagePaginationPage.getByText('清空请求已确认（处理 1 条原有消息）；正在重新读取，以保留之后到达的新消息。', { exact: true }).waitFor();
+    await messagePaginationPage.getByText('暂无消息', { exact: true }).waitFor();
+    assert.equal(interceptedClearCount, 2, 'the new actor can complete a separate clear while the original actor request is pending');
+    const notificationIdsBeforeStaleClear = await messagePaginationPage.evaluate(async () => {
+      const { useAppStore } = await import('/src/store/index.ts');
+      return useAppStore.getState().notifications.map((notification) => notification.id);
+    });
+
+    resolveStaleClearGate();
+    releaseStaleClearResponse = null;
+    await staleClearResponse;
+    await messagePaginationPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const notificationIdsAfterStaleClear = await messagePaginationPage.evaluate(async () => {
+      const { useAppStore } = await import('/src/store/index.ts');
+      return useAppStore.getState().notifications.map((notification) => notification.id);
+    });
+    assert.deepEqual(notificationIdsAfterStaleClear, notificationIdsBeforeStaleClear,
+      'a late clear response from the previous actor does not add feedback to the current actor');
+    await messagePaginationPage.getByRole('button', { name: '清空', exact: true }).waitFor();
+    assert.equal(await messagePaginationPage.getByRole('dialog').count(), 0,
+      'a late clear response does not reopen a dialog in the current actor inbox');
+    assert.equal(await messagePaginationPage.getByText('暂无消息', { exact: true }).count(), 1,
+      'a late clear response does not replace the current actor list');
+    assert.equal(await messagePaginationPage.getByRole('heading', { name: '旧账号待清空消息', exact: true }).count(), 0,
+      'a late clear response does not restore the prior actor inbox');
+    assert.equal(await messagePaginationPage.evaluate((actorId) => sessionStorage.getItem(`xmt:message-clear-pending:v1:actor:${actorId}`), staleClearActor.id), null,
+      'the old request completion clears only the old actor recovery marker');
+    assert.equal(await messagePaginationPage.evaluate((actorId) => sessionStorage.getItem(`xmt:message-clear-pending:v1:actor:${actorId}`), currentClearActor.id), null,
+      'the current actor recovery marker is resolved independently');
+    await messagePaginationPage.unroute('**/api/messages');
     assert.deepEqual(messagePaginationErrors, [], messagePaginationErrors.join('\n'));
   } finally {
+    releaseStaleClearResponse?.();
+    releaseStaleClearResponse = null;
     releaseMessageListRead?.();
     releaseMessageListRead = null;
     messageListReadHold = false;
@@ -4659,6 +4966,7 @@ try {
       if (authorization === 'Bearer actor-b-delayed-read-token') {
         resolveCurrentActorReadStarted();
         await currentActorReadGate;
+        mobileMessagesFixture = mobileMessagesFixture.map((message) => message.id === sharedReadFailureId ? { ...message, read: true } : message);
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: '消息已标记为已读' }) });
         return;
       }
@@ -4696,7 +5004,9 @@ try {
     releaseCurrentActorReadGate?.();
     releaseCurrentActorReadGate = null;
     await currentActorReadResponse;
-    await sharedPage.getByText('消息已标记为已读', { exact: true }).waitFor();
+    assert.equal(mobileMessagesFixture.find((message) => message.id === sharedReadFailureId)?.read, true, 'the fixture confirms actor B read its own same-ID message');
+    await sharedPage.getByText('消息已确认标记为已读', { exact: true }).waitFor();
+    assert.equal(await actorBMessage.isDisabled(), false, 'the mobile message action unlocks after actor B is confirmed');
     await sharedPage.unroute(`**/api/messages/${staleReadSuccessId}`);
     await sharedPage.unroute(`**/api/messages/${sharedReadFailureId}`);
 

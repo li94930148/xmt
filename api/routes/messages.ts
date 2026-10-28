@@ -91,6 +91,26 @@ router.get('/unread', authenticate, async (req, res) => {
   }
 });
 
+// 只读核实单条消息的已读状态；包括认证失败在内的所有响应均禁止缓存。
+router.get('/:id/read-status', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, async (req, res) => {
+  const id = parsePositiveInteger(req.params.id, 0);
+  if (!id) return res.status(400).json({ message: '消息编号无效' });
+
+  try {
+    const message = await queryOne<{ id: number; read: number }>(
+      'SELECT id, read FROM messages WHERE id = ? AND user_id = ?',
+      [id, req.user!.id],
+    );
+    if (!message) return res.json({ state: 'missing' });
+    return res.json({ state: 'available', id: Number(message.id), read: Number(message.read) === 1 });
+  } catch {
+    return res.status(500).json({ message: '暂时无法核实消息状态' });
+  }
+});
+
 // 标记单条消息为已读
 router.put('/:id', authenticate, async (req, res) => {
   try {
@@ -201,9 +221,12 @@ router.post('/read-all', authenticate, async (req, res) => {
   }
 });
 
-// Read-only verification for a keyed account-wide read-all request.
-router.get('/read-all-requests/:requestId', authenticate, async (req, res) => {
+// Read-only verification for a keyed account-wide read-all request; all
+// responses, including authentication failures, must not be cached.
+router.get('/read-all-requests/:requestId', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, async (req, res) => {
   const { requestId } = req.params;
   if (!isValidMessageClearRequestId(requestId)) {
     return res.status(400).json({ message: '批量已读请求编号格式不正确' });
@@ -221,9 +244,11 @@ router.get('/read-all-requests/:requestId', authenticate, async (req, res) => {
   }
 });
 
-// 只读核实清空结果；记录按当前操作者隔离。
-router.get('/clear-requests/:requestId', authenticate, async (req, res) => {
+// 只读核实清空结果；记录按当前操作者隔离，认证失败也禁止缓存。
+router.get('/clear-requests/:requestId', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, async (req, res) => {
   const { requestId } = req.params;
   if (!isValidMessageClearRequestId(requestId)) {
     return res.status(400).json({ message: '清空请求编号格式不正确' });

@@ -3,6 +3,7 @@ import { useAuthStore } from '../store';
 import { usePermission } from '../hooks/usePermission';
 import type { UserRole } from '../types';
 import AccessDeniedState from './AccessDeniedState';
+import LoadingState from './common/LoadingState';
 
 interface RoleGuardProps {
   roles?: UserRole[];
@@ -21,7 +22,7 @@ export default function RoleGuard({ roles, permissions, requireAll = false }: Ro
 
   if (permissions && permissions.length > 0) {
     if (loading) {
-      return null;
+      return <LoadingState type="page" text="正在确认页面访问权限…" />;
     }
 
     const hasRequiredPermission = requireAll

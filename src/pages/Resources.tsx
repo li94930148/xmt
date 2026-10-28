@@ -434,7 +434,7 @@ export default function Resources() {
         ) : null}
 
         <GlassPanel className="overflow-hidden">
-          <div className="flex min-w-0 overflow-x-auto border-b border-studio-border-soft">
+          <div role="group" aria-label="归档信息视图" className="flex min-w-0 overflow-x-auto border-b border-studio-border-soft">
             {[
               { key: 'script', label: '稿件', icon: FileText },
               { key: 'shooting', label: '制作批注', icon: Package },
@@ -448,6 +448,7 @@ export default function Resources() {
                   key={tab.key}
                   type="button"
                   onClick={() => setActiveTab(tab.key as typeof activeTab)}
+                  aria-pressed={activeTab === tab.key}
                   className={`flex min-h-12 shrink-0 items-center gap-2 border-b-2 px-5 text-sm font-semibold transition ${
                     activeTab === tab.key
                       ? 'border-studio-cyan bg-studio-cyan/10 text-studio-cyan-contrast'

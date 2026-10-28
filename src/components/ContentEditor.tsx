@@ -42,6 +42,7 @@ export interface ContentEditorProps {
   onRuntimeHandleChange?: (handle: ContentEditorRuntimeHandle | null) => void;
   onEditorCommandHandleChange?: (handle: EditorCommandHandle | null) => void;
   toolbarVariant?: 'full' | 'basic';
+  toolbarStickyTop?: string | number;
 }
 
 const noop = () => {};
@@ -66,6 +67,7 @@ export default function ContentEditor({
   onRuntimeHandleChange,
   onEditorCommandHandleChange,
   toolbarVariant = 'full',
+  toolbarStickyTop,
 }: ContentEditorProps) {
   const resolvedReadOnly = readOnly || mode === 'readonly';
   const wrapperStyle = minHeight === undefined ? undefined : { minHeight };
@@ -81,7 +83,9 @@ export default function ContentEditor({
   const runtimeHandleBridgeRef = useRef<RuntimeHandleBridge | null>(null);
   if (!runtimeHandleBridgeRef.current) runtimeHandleBridgeRef.current = new RuntimeHandleBridge();
   const runtimeRevisionRef = useRef(0);
-  const collaborationRequested = mode === 'rich' && collaborationEnabled && !resolvedReadOnly;
+  // A temporary save/review lock makes Tiptap non-editable, but must not tear
+  // down its shared Yjs document or rebuild the editor from a stale prop value.
+  const collaborationRequested = mode === 'rich' && collaborationEnabled;
   const collaborationAvailable = collaborationRequested && Boolean(socket?.connected);
   const collaboration = useCollaborativeDocument({
     enabled: collaborationAvailable,
@@ -297,6 +301,7 @@ export default function ContentEditor({
             writingGoalStorageKey={writingGoalStorageKey}
             onCommandHandleChange={onEditorCommandHandleChange}
             toolbarVariant={toolbarVariant}
+            toolbarStickyTop={toolbarStickyTop}
           />
         )}
       </ContentEditorRuntime>

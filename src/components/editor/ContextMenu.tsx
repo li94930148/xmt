@@ -321,7 +321,7 @@ export default function EditorContextMenu({
             <span className="flex items-center gap-2.5"><Type className="w-4 h-4" /> 文字颜色</span>
             {submenuSide === 'left' ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
-          <div id={`editor-context-color-${menuInstanceId}`} role="group" aria-label="文字颜色选项" data-context-submenu-panel="text-color" data-testid="editor-context-color-submenu" data-side={submenuSide} className={`absolute ${submenuSide === 'left' ? 'right-full mr-0.5' : 'left-full ml-0.5'} top-0 w-[160px] rounded-lg shadow-xl border py-1.5 ${openSubmenu === 'text-color' ? 'block' : 'hidden group-hover:block'} ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
+          <div id={`editor-context-color-${menuInstanceId}`} role="group" aria-label="文字颜色选项" data-context-submenu-panel="text-color" data-testid="editor-context-color-submenu" data-side={submenuSide} className={`absolute ${submenuSide === 'left' ? 'right-full mr-0.5' : 'left-full ml-0.5'} top-0 w-[160px] rounded-lg shadow-xl border py-1.5 ${openSubmenu === 'text-color' ? 'block' : 'hidden'} ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {TEXT_COLORS.map((c) => (
                 <button key={c.value || 'default'}
@@ -359,7 +359,7 @@ export default function EditorContextMenu({
             <span className="flex items-center gap-2.5"><Highlighter className="w-4 h-4" /> 高亮颜色</span>
             {submenuSide === 'left' ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
-          <div id={`editor-context-highlight-${menuInstanceId}`} role="group" aria-label="高亮颜色选项" data-context-submenu-panel="highlight-color" data-testid="editor-context-highlight-submenu" data-side={submenuSide} className={`absolute ${submenuSide === 'left' ? 'right-full mr-0.5' : 'left-full ml-0.5'} top-0 w-[160px] rounded-lg shadow-xl border py-1.5 ${openSubmenu === 'highlight-color' ? 'block' : 'hidden group-hover:block'} ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
+          <div id={`editor-context-highlight-${menuInstanceId}`} role="group" aria-label="高亮颜色选项" data-context-submenu-panel="highlight-color" data-testid="editor-context-highlight-submenu" data-side={submenuSide} className={`absolute ${submenuSide === 'left' ? 'right-full mr-0.5' : 'left-full ml-0.5'} top-0 w-[160px] rounded-lg shadow-xl border py-1.5 ${openSubmenu === 'highlight-color' ? 'block' : 'hidden'} ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}>
             <div className="grid grid-cols-4 gap-1.5 px-2 py-1">
               {HIGHLIGHT_COLORS.map((c) => (
                 <button key={c.value}

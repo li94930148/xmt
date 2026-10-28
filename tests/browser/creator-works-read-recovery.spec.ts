@@ -7,6 +7,7 @@ import { createServer as createViteServer } from 'vite';
 const app = express();
 const user = { id: 1, username: 'browser-admin', role: 'admin', name: '浏览器管理员', enabled: true, force_change_password: false };
 let failNextWorksGet = false;
+let delayNextWorksGetMs = 0;
 let worksGetCount = 0;
 let failNextReviewGet = false;
 let reviewGetCount = 0;
@@ -32,6 +33,12 @@ app.use('/socket.io', (request, response) => request.method === 'GET'
   : response.type('text/plain').send('ok'));
 app.get('/api/creator-agent/douyin/works', (request, response) => {
   worksGetCount += 1;
+  const delayMs = delayNextWorksGetMs;
+  delayNextWorksGetMs = 0;
+  if (delayMs > 0) return setTimeout(() => sendWorksResponse(request, response), delayMs);
+  return sendWorksResponse(request, response);
+});
+function sendWorksResponse(request: express.Request, response: express.Response) {
   if (failNextWorksGet) {
     failNextWorksGet = false;
     return response.status(503).json({ message: '抖音作品库加载失败' });
@@ -42,7 +49,7 @@ app.get('/api/creator-agent/douyin/works', (request, response) => {
   } : {
     items: [work(11, '测试作品一')], next_cursor: 'cursor-two', has_more: true, page_size: 20,
   });
-});
+}
 app.get('/api/creator-agent/douyin/works/:id/review', (_request, response) => {
   reviewGetCount += 1;
   if (failNextReviewGet) {
@@ -60,6 +67,10 @@ app.get('/api/creator-agent/douyin/works/:id/review', (_request, response) => {
 });
 app.post('/__test__/fail-next-works-get', (_request, response) => {
   failNextWorksGet = true;
+  response.sendStatus(204);
+});
+app.post('/__test__/delay-next-works-get', express.json(), (request, response) => {
+  delayNextWorksGetMs = Math.max(0, Number(request.body.delayMs) || 0);
   response.sendStatus(204);
 });
 app.get('/__test__/works-get-count', (_request, response) => response.json({ worksGetCount }));
@@ -133,9 +144,32 @@ async function assertCreatorPageCopyContrast(page: Page, theme: 'light' | 'dark'
 }
 
 async function assertWorkScoreContrast(page: Page, theme: 'light' | 'dark', screen: string) {
-  const score = page.getByRole('button', { name: /测试作品一/ }).getByText('85', { exact: true });
+  let score: import('playwright').Locator;
+  if (await page.evaluate(() => window.innerWidth < 768)) {
+    const workCard = page.getByRole('button', { name: /测试作品一/ });
+    await workCard.waitFor();
+    score = workCard.getByText('85', { exact: true });
+  } else {
+    const workLink = page.getByRole('link', { name: '打开作品 测试作品一', exact: true });
+    await workLink.waitFor();
+    const workRow = page.getByRole('row').filter({ has: workLink });
+    score = workRow.getByRole('cell').nth(2).getByText('85', { exact: true });
+  }
   const ratio = await contrastRatio(score);
   assert.ok(ratio >= 4.5, `${screen} ${theme}主题作品评分对比度为 ${ratio.toFixed(2)}:1，应不低于 4.5:1`);
+}
+
+async function assertWorkChartToken(page: Page, label: string, theme: 'light' | 'dark', screen: string) {
+  const chart = page.getByRole('img', { name: label, exact: true });
+  const colors = await chart.locator('polyline').evaluate((line) => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--xmt-coral)';
+    document.body.append(probe);
+    const expected = getComputedStyle(probe).color;
+    probe.remove();
+    return { actual: getComputedStyle(line).stroke, expected };
+  });
+  assert.equal(colors.actual, colors.expected, `${screen} ${theme}主题${label}应使用 coral Studio 令牌`);
 }
 
 async function assertSequentialHeadingLevels(page: Page, screen: string) {
@@ -189,6 +223,28 @@ try {
   await assertCreatorPageCopyContrast(page, 'dark', '390px作品库');
   await assertWorkScoreContrast(page, 'dark', '390px作品库');
 
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.evaluate(async () => {
+    await fetch('/__test__/delay-next-works-get', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delayMs: 800 }),
+    });
+  });
+  const delayedRefresh = page.waitForResponse((response) => response.url().includes('/api/creator-agent/douyin/works') && response.request().method() === 'GET' && response.status() === 200);
+  const creatorRefreshButton = page.getByRole('button', { name: '重新读取', exact: true });
+  await creatorRefreshButton.click();
+  const creatorRefreshStatus = page.getByRole('status').filter({ hasText: '正在重新读取作品库…' });
+  await creatorRefreshStatus.waitFor();
+  assert.equal(await creatorRefreshButton.isDisabled(), true, 'creator work refresh is locked while the request is pending');
+  assert.equal(await creatorRefreshButton.getAttribute('aria-busy'), 'true', 'creator work refresh exposes its busy state');
+  const creatorRefreshSpinner = creatorRefreshButton.locator('svg');
+  assert.equal(await creatorRefreshSpinner.getAttribute('aria-hidden'), 'true', 'creator work refresh icon is decorative');
+  assert.equal(await creatorRefreshSpinner.evaluate((icon) => getComputedStyle(icon).animationName), 'none', 'creator work refresh respects reduced motion');
+  await delayedRefresh;
+  await creatorRefreshStatus.waitFor({ state: 'detached' });
+  assert.equal(await creatorRefreshButton.getAttribute('aria-busy'), 'false', 'creator work refresh clears busy state after success');
+
   await page.evaluate(async () => { await fetch('/__test__/fail-next-works-get', { method: 'POST' }); });
   await page.getByRole('button', { name: '重新读取' }).click();
   await page.getByRole('alert').waitFor();
@@ -198,6 +254,23 @@ try {
   await page.getByRole('alert').waitFor({ state: 'detached' });
   await page.getByRole('button', { name: /测试作品一/ }).waitFor();
 
+  await page.evaluate(async () => {
+    await fetch('/__test__/delay-next-works-get', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delayMs: 800 }),
+    });
+  });
+  const delayedNextPage = page.waitForResponse((response) => response.url().includes('/api/creator-agent/douyin/works') && response.request().method() === 'GET' && response.status() === 200);
+  await page.getByRole('button', { name: '下一页', exact: true }).click();
+  const nextPageLoadingButton = page.getByRole('button', { name: '正在加载下一页作品…', exact: true });
+  await nextPageLoadingButton.waitFor();
+  assert.equal(await nextPageLoadingButton.getAttribute('aria-busy'), 'true', 'creator works pagination exposes its busy state while loading');
+  await delayedNextPage;
+  await page.getByRole('button', { name: /测试作品二/ }).waitFor();
+  await page.getByRole('combobox', { name: '作品排序' }).selectOption('latest');
+  await page.getByRole('button', { name: '下一页', exact: true }).waitFor();
+
   await page.evaluate(async () => { await fetch('/__test__/fail-next-works-get', { method: 'POST' }); });
   await page.getByRole('button', { name: '下一页' }).click();
   await page.getByRole('alert').waitFor();
@@ -206,7 +279,7 @@ try {
   await page.getByRole('button', { name: '重试加载下一页' }).click();
   await page.getByRole('button', { name: /测试作品二/ }).waitFor();
   assert.equal(await page.getByRole('button', { name: /测试作品一/ }).count(), 1, '下一页恢复后保留上一页内容');
-  assert.equal(await page.evaluate(async () => (await fetch('/__test__/works-get-count')).json().then(value => value.worksGetCount)), 6, '初次读取、列表重试与下一页恢复均只发送预期 GET');
+  assert.equal(await page.evaluate(async () => (await fetch('/__test__/works-get-count')).json().then(value => value.worksGetCount)), 9, '初次读取、列表重试、刷新和分页加载/恢复均只发送预期 GET');
   await page.evaluate(async () => { await fetch('/__test__/fail-next-review-get', { method: 'POST' }); });
   await page.getByRole('button', { name: /测试作品一/ }).click();
   await page.getByRole('heading', { name: '作品复盘暂不可用' }).waitFor();
@@ -218,6 +291,8 @@ try {
   assert.ok(failedMobileNavigation && failedDetailReturnRect && failedDetailReturnRect.y + failedDetailReturnRect.height <= failedMobileNavigation.y, '错误详情返回入口不被移动底栏遮挡');
   await page.getByRole('button', { name: '重试读取' }).click();
   await page.getByRole('heading', { name: '测试作品一', exact: true }).waitFor();
+  assert.equal(await page.getByRole('img', { name: '播放曲线，1 个历史快照', exact: true }).count(), 1, 'mobile work detail chart identifies its play metric');
+  assert.equal(await page.getByRole('img', { name: '互动曲线，1 个历史快照', exact: true }).count(), 1, 'mobile work detail chart identifies its interaction metric');
   await assertCreatorPageCopyContrast(page, 'dark', '390px作品详情');
   assert.equal(await page.evaluate(async () => (await fetch('/__test__/review-get-count')).json().then(value => value.reviewGetCount)), 2, '详情重试仅重新读取一次作品复盘');
   await page.getByRole('button', { name: '返回作品库' }).click();
@@ -245,6 +320,9 @@ try {
   await desktopPage.keyboard.press('Enter');
   await desktopPage.waitForURL('**/analytics/creator-center/work/11');
   await desktopPage.getByRole('heading', { name: '测试作品一', exact: true }).waitFor();
+  assert.equal(await desktopPage.getByRole('img', { name: '播放曲线，1 个历史快照', exact: true }).count(), 1, 'desktop work detail chart identifies its play metric');
+  assert.equal(await desktopPage.getByRole('img', { name: '互动曲线，1 个历史快照', exact: true }).count(), 1, 'desktop work detail chart identifies its interaction metric');
+  await assertWorkChartToken(desktopPage, '互动曲线，1 个历史快照', 'light', '1440px作品详情');
   await assertCreatorPageCopyContrast(desktopPage, 'light', '1440px作品详情');
   await desktopPage.screenshot({ path: '/tmp/xmt-creator-works-desktop-keyboard.png', fullPage: false });
   assert.deepEqual(desktopErrors, [], 'desktop work navigation should render without browser errors');
@@ -268,6 +346,9 @@ try {
   assert.ok(await narrowPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '320px 作品库无横向溢出');
   await narrowPage.getByRole('button', { name: /测试作品一/ }).click();
   await narrowPage.getByRole('heading', { name: '测试作品一', exact: true }).waitFor();
+  assert.equal(await narrowPage.getByRole('img', { name: '播放曲线，1 个历史快照', exact: true }).count(), 1, '320px work detail chart identifies its play metric');
+  assert.equal(await narrowPage.getByRole('img', { name: '互动曲线，1 个历史快照', exact: true }).count(), 1, '320px work detail chart identifies its interaction metric');
+  await assertWorkChartToken(narrowPage, '互动曲线，1 个历史快照', 'dark', '320px作品详情');
   await assertCreatorPageCopyContrast(narrowPage, 'dark', '320px作品详情');
   assert.ok(await narrowPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), '320px 作品详情无横向溢出');
   const narrowReturnButton = narrowPage.getByRole('button', { name: '返回作品库', exact: true });

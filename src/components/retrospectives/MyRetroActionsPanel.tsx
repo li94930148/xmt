@@ -27,8 +27,8 @@ export default function MyRetroActionsPanel({ actions, loading, error, onRefresh
           <h2 className="text-base font-bold text-studio-text-primary">我的复盘行动项</h2>
           <p className="mt-1 text-xs text-studio-text-secondary">仅显示待处理和进行中的行动项。</p>
         </div>
-        <ActionButton variant="ghost" onClick={onRefresh} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        <ActionButton variant="ghost" onClick={onRefresh} disabled={loading} aria-busy={loading}>
+          <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
           刷新
         </ActionButton>
       </div>
@@ -42,7 +42,7 @@ export default function MyRetroActionsPanel({ actions, loading, error, onRefresh
 
       <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
         {loading ? (
-          <div className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-secondary">
+          <div role="status" aria-live="polite" aria-atomic="true" className="rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-secondary">
             正在加载行动项...
           </div>
         ) : error && actions.length === 0 ? null : actions.length === 0 ? (

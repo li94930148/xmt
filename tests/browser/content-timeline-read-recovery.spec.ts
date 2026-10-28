@@ -45,7 +45,9 @@ async function maybeDelayRead(id: number) {
 
 const app = express();
 app.use(express.json());
-app.get('/__qa', (_req, res) => res.type('html').send(`<script>
+app.get('/__qa', (req, res) => {
+  if (req.query.delayInitial === '1') delayedReads.set(firstDocumentId, { pending: 0, releases: [] });
+  return res.type('html').send(`<script>
   localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});
   localStorage.setItem('xmt_token','content-timeline-fixture');
   localStorage.setItem('xmt_theme','light');
@@ -53,7 +55,8 @@ app.get('/__qa', (_req, res) => res.type('html').send(`<script>
   localStorage.setItem('xmt_current_content_doc',${JSON.stringify(JSON.stringify(documents[0]))});
   localStorage.setItem('xmt_recent_content_docs',${JSON.stringify(JSON.stringify(documents))});
   location.replace('/content-timeline');
-</script>`));
+</script>`);
+});
 app.post('/__qa/fail-next-read', (req, res) => {
   const key = String(req.body?.key || '');
   failures.set(key, (failures.get(key) || 0) + 1);
@@ -149,15 +152,36 @@ try {
     else unexpectedErrors.push(message.text());
   });
 
-  await fetch(`${base}/__qa/fail-next-read`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: '201:detail' }),
-  });
-  await page.goto(`${base}/__qa`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${base}/__qa?delayInitial=1`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: '内容动态', exact: true }).waitFor();
   assert.match(page.url(), /\/content-timeline$/);
   assert.equal(await page.locator('vite-error-overlay, [data-vite-error-overlay]').count(), 0, 'the page has no Vite error overlay');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, 'the page fits the initial 1440px desktop viewport');
+  const initialLoadingStatus = page.getByRole('status').filter({ hasText: '正在读取内容动态…' });
+  await initialLoadingStatus.waitFor();
+  const initialReadButton = page.getByRole('button', { name: '查看', exact: true });
+  assert.equal(await initialReadButton.isDisabled(), true, 'the view action is disabled while the initial read is pending');
+  assert.equal(await initialReadButton.getAttribute('aria-busy'), 'true', 'the pending view action exposes its busy state');
+  assert.equal(await initialReadButton.locator('svg').getAttribute('aria-hidden'), 'true', 'the loading icon is decorative');
+  await page.waitForFunction(async (id) => {
+    const status = await fetch('/__qa/status').then((response) => response.json());
+    return status.delayed[id] === 2;
+  }, firstDocumentId);
+  await page.evaluate(async (id) => {
+    await fetch('/__qa/release-document', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+    });
+  }, firstDocumentId);
+  await page.getByText('归档了版本 A-v1', { exact: false }).waitFor();
+  assert.equal(await page.getByRole('status').filter({ hasText: '正在读取内容动态…' }).count(), 0, 'the initial loading announcement clears after the successful read');
+
+  await page.evaluate(async () => {
+    await fetch('/__qa/fail-next-read', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: '201:detail' }),
+    });
+  });
+  await initialReadButton.click();
   await page.getByRole('alert').getByText('创作详情暂时无法读取').waitFor();
   assert.equal(await page.getByText('这篇内容还没有可展示的动态', { exact: true }).count(), 0, 'a detail GET failure is not presented as a confirmed empty timeline');
   assert.equal(await page.getByText('读取失败，记录数暂不可用', { exact: true }).count(), 1, 'failed reads do not show zero as an authoritative record count');
@@ -197,6 +221,9 @@ try {
     const status = await fetch('/__qa/status').then((response) => response.json());
     return status.delayed[id] === 2;
   }, firstDocumentId);
+  assert.equal(await page.getByRole('button', { name: '查看', exact: true }).isDisabled(), true, 'refresh is disabled while its reads are pending');
+  assert.equal(await page.getByRole('button', { name: '查看', exact: true }).getAttribute('aria-busy'), 'true', 'refresh exposes its busy state');
+  await page.getByRole('status').filter({ hasText: '正在重新读取内容动态，暂时保留上次成功结果。' }).waitFor();
 
   await page.getByPlaceholder('选择最近协作文档或输入选题名称').fill('隔离创作 B');
   await page.getByRole('heading', { name: '隔离创作 B', exact: true }).waitFor();
@@ -223,8 +250,8 @@ try {
   await page.getByText('这篇内容还没有可展示的动态', { exact: true }).waitFor();
   const finalStatus = await page.evaluate(async () => (await fetch('/__qa/status')).json());
   assert.equal(finalStatus.writes, 0, 'all displayed recovery and switching actions remain read-only');
-  assert.equal(finalStatus.detailReads[firstDocumentId], 5, 'initial read, retries, and delayed refresh use only expected detail GETs');
-  assert.equal(finalStatus.historyReads[firstDocumentId], 5, 'initial read, retries, and delayed refresh use only expected history GETs');
+  assert.equal(finalStatus.detailReads[firstDocumentId], 6, 'initial read, retries, and delayed refresh use only expected detail GETs');
+  assert.equal(finalStatus.historyReads[firstDocumentId], 6, 'initial read, retries, and delayed refresh use only expected history GETs');
   assert.equal(finalStatus.detailReads[emptyDocumentId], 1, 'switching to document B performs one detail GET');
   assert.equal(finalStatus.historyReads[emptyDocumentId], 1, 'switching to document B performs one history GET');
   assert.deepEqual(unexpectedErrors, [], 'the page has no unexpected browser runtime or console errors');

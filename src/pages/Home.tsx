@@ -404,7 +404,7 @@ export default function Home() {
   ];
 
   if (loading) {
-    return <PageShell><StudioSkeletonCard /><div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]"><StudioSkeletonCard /><StudioSkeletonCard /></div><StudioSkeletonCard /></PageShell>;
+    return <PageShell><span className="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载工作台…</span><StudioSkeletonCard /><div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]"><StudioSkeletonCard /><StudioSkeletonCard /></div><StudioSkeletonCard /></PageShell>;
   }
 
   return (

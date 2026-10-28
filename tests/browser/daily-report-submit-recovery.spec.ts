@@ -577,7 +577,7 @@ try {
   await page.getByRole('alert').filter({ hasText: '服务器已确认草稿保存成功' }).waitFor();
   const afterExplicitRetry = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(afterExplicitRetry.draftRequests, 2, 'only the explicit retry sends the second draft POST');
-  assert.deepEqual(afterExplicitRetry.draftVersions, [null, null], 'both create attempts retain the original no-version payload');
+  assert.deepEqual(afterExplicitRetry.draftVersions, [0, 0], 'both create attempts assert that no server version existed');
   assert.deepEqual(afterExplicitRetry.draftPayloads[1], afterExplicitRetry.draftPayloads[0], 'the retry resends the exact original payload');
   assert.equal(afterExplicitRetry.report?.items[0]?.contentMd, originalDraftText, 'the exact locally retained content is saved on explicit retry');
   assert.equal(afterExplicitRetry.submitRequests, 0, 'saving the explicitly retried draft does not implicitly submit it');
@@ -642,7 +642,7 @@ try {
   assert.equal(afterFailure.report?.id, 990, 'the successful draft save created one server report');
   assert.equal(afterFailure.report?.status, 'draft', 'the report remains a draft until submission succeeds');
   assert.equal(afterFailure.report?.version, 1, 'the first server-saved draft version is retained');
-  assert.deepEqual(afterFailure.draftVersions, [null], 'the initial draft has no prior server version');
+  assert.deepEqual(afterFailure.draftVersions, [0], 'the initial draft asserts that no server version existed');
   assert.equal(afterFailure.submitRequests, 1, 'the initial submit is attempted once');
   assert.equal(afterFailure.dailyReportReadRequests, 2, 'a failed submit is reconciled with one read-only report request');
   await page.screenshot({ path: '/tmp/xmt-daily-report-submit-failure.png', fullPage: false });
@@ -656,7 +656,7 @@ try {
   assert.equal(await page.getByText('日报草稿已保存，尚未提交', { exact: true }).count(), 0, 'successful retry must not leave a stale global failure notice beside the success message');
   await page.getByText('提交成功', { exact: true }).waitFor();
   const afterRetry = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
-  assert.deepEqual(afterRetry.draftVersions, [null, 1], 'the retry saves against the confirmed server version, not the stale initial version');
+  assert.deepEqual(afterRetry.draftVersions, [0, 1], 'the retry saves against the confirmed server version, not the stale initial version');
   assert.equal(afterRetry.draftRequests, 2, 'retry updates the same report instead of creating a duplicate');
   assert.equal(afterRetry.submitRequests, 2, 'the user-triggered retry makes one new submit request');
   assert.equal(afterRetry.report?.id, afterFailure.report.id, 'both attempts operate on the same report');

@@ -9,6 +9,7 @@ import { formatBeijingDate } from '../lib/utils';
 import { celebrateMilestone } from '../utils/confetti';
 import { getKanbanTopicDestination } from '../platform/kanban-navigation';
 import { getPlatformLabel } from '../platform/platform-labels';
+import LoadingState from '../components/common/LoadingState';
 import {
   Clock, CheckCircle, XCircle, FileText, Camera, Send,
   ChevronLeft, ChevronRight, Filter, User as UserIcon, ExternalLink
@@ -115,11 +116,7 @@ export default function Kanban() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className={`w-8 h-8 border-4 ${styles.spinner} border-t-transparent rounded-full animate-spin`}></div>
-      </div>
-    );
+    return <LoadingState type="inline" text="正在加载选题看板…" className="flex h-64 w-full justify-center" />;
   }
 
   return (

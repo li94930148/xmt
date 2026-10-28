@@ -283,7 +283,12 @@ try {
 
   await page.goto(`${base}/__qa`);
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
-  await page.getByRole('button', { name: '系统设置', exact: true }).click();
+  const notificationPreferencesTab = page.getByRole('button', { name: '通知偏好', exact: true });
+  const systemSettingsTab = page.getByRole('button', { name: '系统设置', exact: true });
+  assert.equal(await notificationPreferencesTab.getAttribute('aria-pressed'), 'true', 'the default settings category exposes its selected state');
+  assert.equal(await systemSettingsTab.getAttribute('aria-pressed'), 'false', 'inactive settings categories expose an unselected state');
+  await systemSettingsTab.click();
+  assert.equal(await systemSettingsTab.getAttribute('aria-pressed'), 'true', 'the selected settings category updates after activation');
   await page.getByRole('combobox', { name: '默认主题' }).selectOption('light');
   await page.getByRole('button', { name: '保存系统设置', exact: true }).click();
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');

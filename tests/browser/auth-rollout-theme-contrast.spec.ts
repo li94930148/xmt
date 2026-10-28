@@ -140,9 +140,41 @@ browser = await chromium.launch({ headless: true });
       page.setDefaultTimeout(10000);
       page.on('pageerror', (error) => errors.push(theme + '/' + width + ': ' + error.message));
       page.on('console', (message) => { if (message.type() === 'error') errors.push(theme + '/' + width + ': ' + message.text()); });
+      let releaseInitialStatus!: () => void;
+      let releaseRefreshStatus!: () => void;
+      const initialStatusGate = new Promise<void>((resolve) => { releaseInitialStatus = resolve; });
+      const refreshStatusGate = new Promise<void>((resolve) => { releaseRefreshStatus = resolve; });
+      let statusRequestCount = 0;
+      await page.route('**/api/v1/auth-rollout/status', async (route) => {
+        statusRequestCount += 1;
+        if (statusRequestCount === 1) await initialStatusGate;
+        if (statusRequestCount === 2) await refreshStatusGate;
+        await route.continue();
+      });
       await page.goto(base + '/__qa?theme=' + theme);
+      const initialStatus = page.getByText('正在检查登录安全状态', { exact: true });
+      await initialStatus.waitFor();
+      assert.equal(await initialStatus.evaluate((element) => element.closest('[role="status"]')?.getAttribute('aria-live')), 'polite', theme + '/' + width + 'px initial loading is announced politely');
+      releaseInitialStatus();
       await page.getByRole('heading', { name: '登录安全升级', exact: true }).waitFor();
       assert.equal(new URL(page.url()).pathname, '/admin/auth-rollout', theme + '/' + width + 'px reaches the intended admin route');
+      await initialStatus.waitFor({ state: 'detached' });
+
+      const refresh = page.getByRole('button', { name: '重新检查', exact: true });
+      await refresh.focus();
+      assert.equal(await refresh.evaluate((element) => element === document.activeElement), true, theme + '/' + width + 'px refresh can receive keyboard focus');
+      const refreshResponse = page.waitForResponse((response) => response.url().includes('/api/v1/auth-rollout/status') && response.request().method() === 'GET');
+      await page.keyboard.press('Enter');
+      const refreshStatus = page.getByText('正在重新检查登录安全状态', { exact: true });
+      await refreshStatus.waitFor();
+      assert.equal(await refreshStatus.evaluate((element) => element.closest('[role="status"]')?.getAttribute('aria-live')), 'polite', theme + '/' + width + 'px recheck progress is announced politely');
+      assert.equal(await refresh.isDisabled(), true, theme + '/' + width + 'px recheck stays disabled while loading');
+      releaseRefreshStatus();
+      const refreshResponseResult = await refreshResponse;
+      assert.equal(refreshResponseResult.request().method(), 'GET', theme + '/' + width + 'px recheck is read-only');
+      await refreshStatus.waitFor({ state: 'detached' });
+      assert.equal(await refresh.isEnabled(), true, theme + '/' + width + 'px recheck unlocks after its read completes');
+      assert.equal(statusRequestCount, 2, theme + '/' + width + 'px initial load and recheck each issue one status request');
 
       for (const label of dashboardLabels) {
         const locator = page.getByText(label, { exact: true });
@@ -177,10 +209,39 @@ browser = await chromium.launch({ headless: true });
 
       const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
       assert.ok(documentWidth <= width, theme + '/' + width + 'px page has no horizontal overflow: document=' + documentWidth);
-      if (theme === 'dark' && width === 320) await page.screenshot({ path: '/tmp/xmt-auth-rollout-dark-320.png', fullPage: true });
+      if (theme === 'dark' && width === 320) await page.screenshot({ path: '/tmp/xmt-auth-rollout-dark-320.png', fullPage: false });
       await page.close();
     }
   }
+
+  const recoveryPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  let statusRequestCount = 0;
+  let releaseRetryStatus!: () => void;
+  const retryStatusGate = new Promise<void>((resolve) => { releaseRetryStatus = resolve; });
+  await recoveryPage.route('**/api/v1/auth-rollout/status', async (route) => {
+    statusRequestCount += 1;
+    if (statusRequestCount === 1) {
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'isolated status failure' }) });
+      return;
+    }
+    await retryStatusGate;
+    await route.continue();
+  });
+  await recoveryPage.goto(base + '/__qa?theme=dark');
+  await recoveryPage.getByRole('heading', { name: '登录安全升级', exact: true }).waitFor();
+  await recoveryPage.getByRole('alert').getByText('登录安全状态暂时无法读取，请稍后重新检查。', { exact: true }).waitFor();
+  const retry = recoveryPage.getByRole('button', { name: '重新检查', exact: true });
+  await retry.focus();
+  const retryResponse = recoveryPage.waitForResponse((response) => response.url().includes('/api/v1/auth-rollout/status') && response.request().method() === 'GET');
+  await recoveryPage.keyboard.press('Enter');
+  await recoveryPage.getByText('正在检查登录安全状态', { exact: true }).waitFor();
+  releaseRetryStatus();
+  const retryResponseResult = await retryResponse;
+  assert.equal(retryResponseResult.request().method(), 'GET', 'rechecking a failed status is read-only');
+  await recoveryPage.getByRole('heading', { name: '登录安全升级', exact: true }).waitFor();
+  assert.equal(statusRequestCount, 2, 'retry reads status once after the injected read failure');
+  await recoveryPage.close();
+
   assert.deepEqual(unexpectedWrites, [], 'theme and responsive verification uses no business writes');
   assert.deepEqual(errors, [], 'auth rollout page has no browser errors: ' + errors.join(' | '));
   console.log('Auth rollout theme contrast and responsive checks passed.');

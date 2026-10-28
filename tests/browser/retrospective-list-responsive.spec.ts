@@ -95,6 +95,7 @@ app.get('/__qa', (req, res) => {
     retrospectiveListReadFailures = 1;
     myActionReadFailures = 1;
   }
+  if (req.query.holdActions === '1') holdNextActionsRead = true;
   const destination = req.query.detail === '1' ? `/retrospectives/${retrospective.id}` : '/retrospectives';
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(fixtureUser))});localStorage.setItem('xmt_token','retrospective-responsive-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace(${JSON.stringify(destination)});</script>`);
 });
@@ -102,6 +103,13 @@ app.post('/__qa/fail-next-reads', (req, res) => {
   if (req.query.scope === 'both' || req.query.scope === 'list') retrospectiveListReadFailures += 1;
   if (req.query.scope === 'both' || req.query.scope === 'actions') myActionReadFailures += 1;
   res.json({ ok: true });
+});
+app.post('/__qa/release-action-read', (_req, res) => {
+  if (!releaseActionsRead) return res.status(409).json({ ok: false, message: '当前没有等待释放的行动项读取' });
+  const release = releaseActionsRead;
+  releaseActionsRead = null;
+  release();
+  return res.json({ ok: true });
 });
 app.post('/__qa/configure-create', (req, res) => {
   retrospectiveCreateFailures = Number(req.body.failures) || 0;
@@ -675,6 +683,14 @@ try {
   await raceList.getByRole('button', { name: '刷新', exact: true }).click();
   await raceActions.getByRole('button', { name: '刷新', exact: true }).click();
   await Promise.all([oldAccountListStarted, oldAccountActionsStarted]);
+  const actionRefreshButton = raceActions.getByRole('button', { name: '刷新', exact: true });
+  const actionLoadingStatus = raceActions.getByRole('status').filter({ hasText: '正在加载行动项...' });
+  await actionLoadingStatus.waitFor();
+  assert.equal(await actionRefreshButton.isDisabled(), true, 'personal actions refresh locks while the delayed read is pending');
+  assert.equal(await actionRefreshButton.getAttribute('aria-busy'), 'true', 'personal actions refresh exposes its busy state');
+  const actionSpinner = actionRefreshButton.locator('svg');
+  assert.equal(await actionSpinner.getAttribute('aria-hidden'), 'true', 'the refresh spinner is decorative');
+  assert.equal(await actionSpinner.evaluate((icon) => getComputedStyle(icon).animationName), 'none', 'the refresh spinner respects reduced motion');
   const nextUser = { ...admin, id: 100, name: '新账号复盘验收', username: 'retrospective-second-account' };
   fixtureUser = nextUser;
   await racePage.evaluate(async (user) => {
@@ -691,6 +707,8 @@ try {
   releaseActionsRead = null;
   await Promise.all([oldAccountListResponse, oldAccountActionsResponse]);
   await racePage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  assert.equal(await actionLoadingStatus.count(), 0, 'the action loading announcement clears after the current account response arrives');
+  assert.equal(await actionRefreshButton.getAttribute('aria-busy'), 'false', 'the action refresh button clears its busy state after recovery');
   assert.equal(await raceList.getByRole('button', { name: '新账号published筛选结果', exact: true }).count(), 1, 'old account list responses cannot overwrite the new account');
   assert.equal(await raceActions.getByRole('button', { name: /新账号行动项/ }).count(), 1, 'old account action responses cannot overwrite the new account');
   assert.equal(await racePage.getByText(/旧账号.*(?:筛选结果|行动项)/).count(), 0, 'previous account content stays hidden after delayed reads finish');

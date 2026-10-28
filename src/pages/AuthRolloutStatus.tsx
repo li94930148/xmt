@@ -50,6 +50,16 @@ function ReadinessCheck({ check }: { check: Check }) {
   </div>;
 }
 
+function RecheckAction({ loading, onClick }: { loading: boolean; onClick: () => void }) {
+  return <>
+    <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{loading ? '正在重新检查登录安全状态' : ''}</span>
+    <button type="button" onClick={onClick} disabled={loading} className="xmt-btn xmt-btn-secondary inline-flex h-10 items-center gap-2 px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring">
+      <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>
+      重新检查
+    </button>
+  </>;
+}
+
 export default function AuthRolloutStatus() {
   const [data, setData] = useState<AuthRolloutStatusData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,13 +101,16 @@ export default function AuthRolloutStatus() {
     };
   }, [data]);
 
-  if (loading && !data) return <PageShell><div className="flex min-h-64 items-center justify-center text-studio-text-secondary"><RefreshCw className="mr-3 h-5 w-5 animate-spin"/>正在检查登录安全状态</div></PageShell>;
-  if (!data || !decision) return <PageShell><PageHeader title="登录安全升级" actions={<button type="button" onClick={() => void load()} disabled={loading} className="xmt-btn xmt-btn-secondary inline-flex h-10 items-center gap-2 px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>重新检查</button>}/><GlassPanel className="p-6 text-studio-coral-contrast">{error || '暂时无法读取状态'}</GlassPanel></PageShell>;
+  if (loading && !data) return <PageShell><div role="status" aria-live="polite" aria-atomic="true" className="flex min-h-64 items-center justify-center text-studio-text-secondary"><RefreshCw aria-hidden="true" className="mr-3 h-5 w-5 animate-spin"/>正在检查登录安全状态</div></PageShell>;
+  if (!data || !decision) return <PageShell>
+    <PageHeader title="登录安全升级" actions={<RecheckAction loading={loading} onClick={() => void load()} />}/>
+    <GlassPanel className="p-6"><p role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'} className="text-studio-coral-contrast">{error || '暂时无法读取状态'}</p></GlassPanel>
+  </PageShell>;
 
   const hour = data.metrics.lastHour;
   const lastExternalScrape = data.exporters.status.filter((item) => item.kind !== 'memory' && item.lastExportAt).map((item) => String(item.lastExportAt)).sort().at(-1);
   return <PageShell>
-    <PageHeader title="登录安全升级" description="确认系统是否已准备好让少量内部账号试用新版登录方式" actions={<button type="button" onClick={() => void load()} disabled={loading} className="xmt-btn xmt-btn-secondary inline-flex h-10 items-center gap-2 px-4 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}/>重新检查</button>}/>
+    <PageHeader title="登录安全升级" description="确认系统是否已准备好让少量内部账号试用新版登录方式" actions={<RecheckAction loading={loading} onClick={() => void load()} />}/>
     {error ? <div role="alert" className="rounded-button border border-studio-coral/30 bg-studio-coral/10 px-4 py-3 text-sm text-studio-coral-contrast">{error}</div> : null}
 
     <GlassPanel className={`p-6 ${decision.ready ? 'border-studio-success/30' : 'border-studio-amber/30'}`}>

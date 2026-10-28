@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '../store';
-import { ErrorState } from '../components/common';
+import { ErrorState, LoadingState } from '../components/common';
 import {
   getAchievements, getMyAchievements, getAchievementProgress,
   getAchievementStats, getLeaderboard, getRecentAchievements,
@@ -131,11 +131,7 @@ export default function Achievements() {
   const totalCount = allAchievements.length;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className={`w-8 h-8 border-4 ${styles.spinner} border-t-transparent rounded-full animate-spin`}></div>
-      </div>
-    );
+    return <LoadingState type="inline" text="正在加载成就数据…" className="flex h-64 w-full justify-center" />;
   }
 
   if (loadError) {
@@ -268,7 +264,7 @@ export default function Achievements() {
       {/* 视图切换 + 筛选 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         {/* Tab 切换 */}
-              <div className={`flex items-center gap-1 p-1 rounded-xl ${styles.bgTertiary}`}>
+        <div role="group" aria-label="按成就状态筛选" className={`flex items-center gap-1 p-1 rounded-xl ${styles.bgTertiary}`}>
           {[
             { key: 'all', label: '全部', count: totalCount },
             { key: 'earned', label: '已获得', count: earnedCount },
@@ -276,7 +272,9 @@ export default function Achievements() {
           ].map(tab => (
             <button
               key={tab.key}
+              type="button"
               onClick={() => setActiveTab(tab.key as TabKey)}
+              aria-pressed={activeTab === tab.key}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                 activeTab === tab.key
                   ? `${styles.bgCard} ${styles.textPrimary} shadow-sm`

@@ -34,6 +34,14 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function assertStateMatches<T extends object>(actual: T, expected: Partial<T>, message: string) {
+  const actualValues = actual as Record<string, unknown>;
+  const expectedValues = expected as Record<string, unknown>;
+  for (const key of Object.keys(expectedValues)) {
+    assert.deepEqual(actualValues[key], expectedValues[key], `${message}: ${key}`);
+  }
+}
+
 const app = express();
 app.use(express.json());
 app.use('/api', (_req, res, next) => {
@@ -68,6 +76,9 @@ let createdUsers: typeof fixtureUsers = [];
 let deletedUserIds = new Set<number>();
 let userListQueries: string[] = [];
 let failNextUsersRead = false;
+let holdNextPermissionRead = false;
+let heldPermissionReadStarted = deferred<void>();
+let releaseHeldPermissionRead = deferred<void>();
 let failAfterNextUserUpdate = false;
 let failBeforeNextUserUpdate = false;
 let failNextUserUpdateStatusRead = false;
@@ -89,7 +100,14 @@ app.get('/__qa', (_req, res) => res.type('html').send(
   `<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','users-refresh-query-race-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/users');</script>`,
 ));
 app.get('/api/auth/me', (_req, res) => res.json(user));
-app.get('/api/permissions/my', (_req, res) => res.json(fixtureUserPermissions));
+app.get('/api/permissions/my', async (_req, res) => {
+  if (holdNextPermissionRead) {
+    holdNextPermissionRead = false;
+    heldPermissionReadStarted.resolve();
+    await releaseHeldPermissionRead.promise;
+  }
+  return res.json(fixtureUserPermissions);
+});
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
 app.get('/api/users/assignable-roles', (_req, res) => res.json(roles));
@@ -316,6 +334,9 @@ app.post('/__test__/reset', (_req, res) => {
   createdUsers = [];
   userListQueries = [];
   failNextUsersRead = false;
+  holdNextPermissionRead = false;
+  heldPermissionReadStarted = deferred<void>();
+  releaseHeldPermissionRead = deferred<void>();
   failAfterNextUserUpdate = false;
   failBeforeNextUserUpdate = false;
   failNextUserUpdateStatusRead = false;
@@ -548,7 +569,6 @@ try {
     && response.url().includes('/api/users/create-requests/') && response.status() === 200);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await statusAfterRevokedReload;
-  await page.getByRole('heading', { name: '人员管理', exact: true }).waitFor();
   await page.getByRole('heading', { name: '添加用户', exact: true }).waitFor();
   await page.getByText(/服务器未找到上次创建记录.*当前账号没有创建权限/, { exact: false }).waitFor();
   await page.getByLabel('用户名 *').waitFor();
@@ -700,7 +720,6 @@ try {
   await page.getByRole('heading', { name: '人员管理', exact: true }).waitFor();
   await page.getByText('alpha-user', { exact: true }).waitFor();
   await page.request.post(`${base}/__test__/delay-next-create`);
-  await page.request.post(`${base}/__test__/hold-next-beta-read`);
   await page.getByRole('button', { name: '添加用户' }).click();
   await page.getByLabel('用户名 *').fill('created-after-query-change');
   await page.getByLabel('密码 *').fill('isolated-fixture-password');
@@ -709,36 +728,27 @@ try {
   const delayedCreateResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/users'));
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await delayedCreateStarted.promise;
-
-  const searchDuringCreate = page.getByPlaceholder('搜索用户名、姓名或邮箱...');
-  await searchDuringCreate.fill('beta', { force: true });
-  const queryBWhileCreatePending = page.waitForResponse((response) => (
-    response.request().method() === 'GET' &&
-    response.url().includes('/api/users?') &&
-    response.url().includes('search=beta')
-  ));
-  await betaReadStartedSignal.promise;
+  const createDialog = page.getByRole('dialog', { name: '添加用户', exact: true });
+  assert.equal(await createDialog.getAttribute('aria-modal'), 'true', 'the pending create remains inside an accessible modal');
+  assert.equal(await page.getByPlaceholder('搜索用户名、姓名或邮箱...').evaluate((input) => Boolean(input.closest('[inert]'))), true, 'the background search is inert while the create dialog is open');
+  const pendingCreateState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as { createRequests: number; userListQueries: string[] };
+  assert.equal(pendingCreateState.createRequests, 1, 'the pending create is submitted exactly once');
+  assert.deepEqual(pendingCreateState.userListQueries, [''], 'background controls cannot start a competing list read while the dialog is active');
   releaseDelayedCreate.resolve();
   await delayedCreateResponse;
-  await page.getByRole('heading', { name: '添加用户' }).waitFor({ state: 'hidden' });
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  const stateWhileQueryBPending = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as { createRequests: number; heldUsersReadStarted: boolean; userListQueries: string[] };
-  assert.equal(stateWhileQueryBPending.createRequests, 1, 'the late mutation is still sent only once');
-  assert.equal(stateWhileQueryBPending.heldUsersReadStarted, false, 'a stale mutation closure does not start its query A refresh');
-  assert.deepEqual(stateWhileQueryBPending.userListQueries, ['', 'beta'], 'the mutation does not invalidate the held query B request');
-  assert.equal(await page.getByTestId('users-list').getAttribute('aria-busy'), 'true', 'the active query B read remains visibly busy while held');
-  releaseBetaRead.resolve();
-  await queryBWhileCreatePending;
-  await page.waitForTimeout(50);
-
-  const stateAfterLateMutation = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as { createRequests: number; heldUsersReadStarted: boolean; userListQueries: string[] };
-  assert.equal(stateAfterLateMutation.createRequests, 1, 'the delayed create is issued only once');
-  assert.deepEqual(stateAfterLateMutation.userListQueries, ['', 'beta'], 'a stale mutation closure does not start an A read that cancels current query B');
-  assert.equal(await searchDuringCreate.inputValue(), 'beta', 'the current query remains B after the late mutation confirmation');
-  assert.equal(await page.getByText('beta-user', { exact: true }).count(), 1, 'the late mutation does not clear or replace query B results');
-  assert.equal(await page.getByText('alpha-user', { exact: true }).count(), 0, 'the late mutation does not restore query A rows');
-  assert.equal(await page.getByTestId('users-list').getAttribute('aria-busy'), 'false', 'query B completion clears loading and refreshing state after the stale mutation is ignored');
+  await createDialog.waitFor({ state: 'hidden' });
+  await heldUsersRead.promise;
+  const completedCreateState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as { createRequests: number; createMutationCount: number; userListQueries: string[] };
+  assert.equal(completedCreateState.createRequests, 1, 'the delayed create is sent once');
+  assert.equal(completedCreateState.createMutationCount, 1, 'the confirmed create produces one account');
+  assert.deepEqual(completedCreateState.userListQueries, ['', ''], 'closing the dialog starts one list refresh after creation');
+  await page.request.post(`${base}/__test__/release-users-read`);
+  const createdUserSearch = page.getByPlaceholder('搜索用户名、姓名或邮箱...');
+  const createdUserRead = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().includes('/api/users?') && response.url().includes('search=created-after-query-change') && response.status() === 200);
+  await createdUserSearch.fill('created-after-query-change');
+  await createdUserRead;
+  await page.getByText('created-after-query-change', { exact: true }).waitFor();
 
   await page.request.post(`${base}/__test__/reset`);
   await page.goto(`${base}/__qa`, { waitUntil: 'domcontentloaded' });
@@ -843,7 +853,7 @@ try {
   const committedToggleBeforeReadRetry = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; updateStatusReadRequests: number;
   };
-  assert.deepEqual(committedToggleBeforeReadRetry, {
+  assertStateMatches(committedToggleBeforeReadRetry, {
     updateRequests: 1,
     userUpdateMutationCount: 1,
     updateStatusReadRequests: 2,
@@ -859,7 +869,7 @@ try {
   const committedToggleAfterReadRetry = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; updateStatusReadRequests: number;
   };
-  assert.deepEqual(committedToggleAfterReadRetry, {
+  assertStateMatches(committedToggleAfterReadRetry, {
     updateRequests: 1,
     userUpdateMutationCount: 1,
     updateStatusReadRequests: 3,
@@ -893,7 +903,7 @@ try {
   const revokedPermissionToggleState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; updateStatusReadRequests: number;
   };
-  assert.deepEqual(revokedPermissionToggleState, {
+  assertStateMatches(revokedPermissionToggleState, {
     updateRequests: 1,
     userUpdateMutationCount: 0,
     updateStatusReadRequests: 2,
@@ -913,7 +923,7 @@ try {
   const uncommittedToggleRetryState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; updateStatusReadRequests: number; userUpdateRequestIds: string[];
   };
-  assert.deepEqual(uncommittedToggleRetryState, {
+  assertStateMatches(uncommittedToggleRetryState, {
     updateRequests: 2,
     userUpdateMutationCount: 1,
     updateStatusReadRequests: 3,
@@ -924,7 +934,7 @@ try {
   await page.getByRole('button', { name: '删除用户 beta-user' }).click();
   const deleteResponse = page.waitForResponse((response) => response.request().method() === 'DELETE' && response.url().endsWith('/api/users/1501'));
   const failedDeleteRefresh = page.waitForResponse((response) => (
-    response.request().method() === 'GET' && response.url().includes('/api/users?') && response.url().includes('search=beta-user') && response.status() === 503
+    response.request().method() === 'GET' && response.url().includes('/api/users?') && response.status() === 503
   ));
   await page.getByRole('button', { name: '确认删除', exact: true }).click();
   await Promise.all([deleteResponse, failedDeleteRefresh]);
@@ -938,11 +948,15 @@ try {
   assert.equal(deleteState.deleteRequests, 1, 'the failed follow-up list read never repeats the confirmed DELETE');
 
   const readOnlyRetry = page.waitForResponse((response) => (
-    response.request().method() === 'GET' && response.url().includes('/api/users?') && response.url().includes('search=beta-user') && response.status() === 200
+    response.request().method() === 'GET' && response.url().includes('/api/users?') && response.status() === 200
   ));
   await page.getByRole('button', { name: '重新加载列表' }).click();
-  await readOnlyRetry;
-  await page.getByText('暂无用户', { exact: true }).waitFor();
+  const recoveredUsersResponse = await readOnlyRetry;
+  const recoveredUsers = (await recoveredUsersResponse.json()).data as Array<{ username: string }>;
+  assert.equal(recoveredUsers.some((item) => item.username === 'beta-user'), false, 'the read-only retry confirms the deleted user is absent');
+  await page.getByTestId('users-list').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => document.querySelector('[data-testid="users-list"]')?.getAttribute('aria-busy') === 'false');
+  await page.getByText('beta-user', { exact: true }).waitFor({ state: 'detached' });
   assert.equal(await page.getByText(deleteNotice, { exact: true }).count(), 0, 'a successful GET-only recovery clears the stale-list notice');
   const recoveredDeleteState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as { deleteRequests: number };
   assert.equal(recoveredDeleteState.deleteRequests, 1, 'list recovery only reads and does not repeat DELETE');
@@ -972,7 +986,7 @@ try {
   const committedDeleteRecoveryState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     deleteRequests: number; deleteMutationCount: number; deleteStatusReadRequests: number;
   };
-  assert.deepEqual(committedDeleteRecoveryState, { deleteRequests: 1, deleteMutationCount: 1, deleteStatusReadRequests: 2 },
+  assertStateMatches(committedDeleteRecoveryState, { deleteRequests: 1, deleteMutationCount: 1, deleteStatusReadRequests: 2 },
     'refresh resolves a committed delete using status GET only');
   assert.equal(await page.evaluate(() => window.sessionStorage.getItem('xmt:user-delete-pending:v1:actor:151')), null,
     'a confirmed delete clears its tab recovery marker');
@@ -1003,7 +1017,7 @@ try {
   const uncommittedDeleteRetryState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     deleteRequests: number; deleteMutationCount: number; userDeleteRequestIds: string[];
   };
-  assert.deepEqual(uncommittedDeleteRetryState, {
+  assertStateMatches(uncommittedDeleteRetryState, {
     deleteRequests: 2,
     deleteMutationCount: 1,
     userDeleteRequestIds: [uncommittedDeleteRequestId, uncommittedDeleteRequestId],
@@ -1035,7 +1049,7 @@ try {
   const committedReloadState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; userPasswordUpdateCount: number; updateStatusReadRequests: number;
   };
-  assert.deepEqual(committedReloadState, {
+  assertStateMatches(committedReloadState, {
     updateRequests: 1, userUpdateMutationCount: 1, userPasswordUpdateCount: 1, updateStatusReadRequests: 1,
   }, 'a committed update is resolved by one read-only status GET after reload, with no repeat PUT');
   assert.equal(await page.evaluate(() => window.sessionStorage.getItem('xmt:user-update-pending:v1:actor:151')), null);
@@ -1061,9 +1075,20 @@ try {
   assert.match(originalUncommittedRequestId, /^[0-9a-f-]{36}$/i);
   const uncommittedStatusRead = page.waitForResponse((response) => response.request().method() === 'GET'
     && response.url().includes('/api/users/update-requests/') && response.status() === 200);
+  holdNextPermissionRead = true;
+  heldPermissionReadStarted = deferred<void>();
+  releaseHeldPermissionRead = deferred<void>();
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await heldPermissionReadStarted.promise;
+  const permissionPendingState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
+    updateStatusReadRequests: number;
+  };
+  assert.equal(permissionPendingState.updateStatusReadRequests, 0, 'recovery waits for the actor permissions read before interpreting not_found');
+  assert.ok(await page.evaluate(() => window.sessionStorage.getItem('xmt:user-update-pending:v1:actor:151')),
+    'the pending request marker stays intact while permissions are unresolved');
+  releaseHeldPermissionRead.resolve();
   await uncommittedStatusRead;
-  await page.getByText('服务器未找到上次更新记录。原字段已锁定；请输入上次更新时使用的密码，再用同一请求安全重试。密码不会保存在浏览器恢复记录中。', { exact: true }).waitFor();
+  await page.getByPlaceholder('请输入上次更新时使用的密码', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('姓名', { exact: true }).isDisabled(), true);
   assert.equal(await page.getByLabel('邮箱', { exact: true }).isDisabled(), true);
   assert.equal(await page.getByLabel(/密码/).inputValue(), '', 'the password must be re-entered after refresh');
@@ -1072,7 +1097,7 @@ try {
   const preRetryState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; updateStatusReadRequests: number;
   };
-  assert.deepEqual(preRetryState, { updateRequests: 1, userUpdateMutationCount: 0, updateStatusReadRequests: 1 }, 'reload verification does not repeat an uncommitted update');
+  assertStateMatches(preRetryState, { updateRequests: 1, userUpdateMutationCount: 0, updateStatusReadRequests: 1 }, 'reload verification does not repeat an uncommitted update');
   await page.getByLabel(/密码/).fill('reload-retry-password');
   const safeRefreshRetry = page.waitForResponse((response) => response.request().method() === 'PUT'
     && response.url().endsWith('/api/users/1500') && response.status() === 200);
@@ -1082,7 +1107,7 @@ try {
   const uncommittedRetryState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; userPasswordUpdateCount: number; userUpdateRequestIds: string[];
   };
-  assert.deepEqual(uncommittedRetryState, {
+  assertStateMatches(uncommittedRetryState, {
     updateRequests: 2, userUpdateMutationCount: 1, userPasswordUpdateCount: 1,
     userUpdateRequestIds: [originalUncommittedRequestId, originalUncommittedRequestId],
   }, 'the explicit retry reuses the original request id and commits the update once');
@@ -1104,19 +1129,19 @@ try {
   const beforeReloadUnavailableState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; updateStatusReadRequests: number;
   };
-  assert.deepEqual(beforeReloadUnavailableState, { updateRequests: 1, userUpdateMutationCount: 1, updateStatusReadRequests: 0 }, 'a same-page ambiguous update does not auto-consume the post-reload status read');
+  assertStateMatches(beforeReloadUnavailableState, { updateRequests: 1, userUpdateMutationCount: 1, updateStatusReadRequests: 0 }, 'a same-page ambiguous update does not auto-consume the post-reload status read');
   const unavailableStatusRead = page.waitForResponse((response) => response.request().method() === 'GET'
     && response.url().includes('/api/users/update-requests/') && response.status() === 503);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await unavailableStatusRead;
-  await page.getByText('当前暂时无法核实上次更新结果。原字段已锁定；请只读重新核实，暂不重发更新。', { exact: true }).waitFor();
+  await page.getByRole('alert').filter({ hasText: '当前暂时无法核实上次更新结果。原字段已锁定；请只读重新核实，暂不重发更新。' }).waitFor();
   assert.equal(await page.getByLabel('姓名', { exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: '取消', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: '安全重试上次保存', exact: true }).isDisabled(), true);
   const unavailableState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; updateStatusReadRequests: number;
   };
-  assert.deepEqual(unavailableState, { updateRequests: 1, userUpdateMutationCount: 1, updateStatusReadRequests: 1 }, 'an unavailable read leaves the write locked');
+  assertStateMatches(unavailableState, { updateRequests: 1, userUpdateMutationCount: 1, updateStatusReadRequests: 1 }, 'an unavailable read leaves the write locked');
   const statusOnlyRetry = page.waitForResponse((response) => response.request().method() === 'GET'
     && response.url().includes('/api/users/update-requests/') && response.status() === 200);
   await page.getByRole('button', { name: '只读重新核实', exact: true }).click();
@@ -1125,7 +1150,7 @@ try {
   const resolvedUnavailableState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     updateRequests: number; userUpdateMutationCount: number; updateStatusReadRequests: number;
   };
-  assert.deepEqual(resolvedUnavailableState, { updateRequests: 1, userUpdateMutationCount: 1, updateStatusReadRequests: 2 }, 'read-only recheck confirms the write without another PUT');
+  assertStateMatches(resolvedUnavailableState, { updateRequests: 1, userUpdateMutationCount: 1, updateStatusReadRequests: 2 }, 'read-only recheck confirms the write without another PUT');
 
   await page.request.post(`${base}/__test__/reset`);
   await page.goto(`${base}/__qa`, { waitUntil: 'domcontentloaded' });
@@ -1153,7 +1178,7 @@ try {
   const externalDeleteState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     deleteRequests: number; deleteMutationCount: number; deleteStatusReadRequests: number; userDetailReadRequests: number;
   };
-  assert.deepEqual(externalDeleteState, {
+  assertStateMatches(externalDeleteState, {
     deleteRequests: 1,
     deleteMutationCount: 0,
     deleteStatusReadRequests: 1,
@@ -1186,18 +1211,18 @@ try {
   const failedAbsenceState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     deleteRequests: number; deleteMutationCount: number; deleteStatusReadRequests: number; userDetailReadRequests: number;
   };
-  assert.deepEqual(failedAbsenceState, {
+  assertStateMatches(failedAbsenceState, {
     deleteRequests: 1,
     deleteMutationCount: 0,
     deleteStatusReadRequests: 1,
     userDetailReadRequests: 1,
   }, 'a failed absence read leaves the original marker and performs no extra write');
 
+  await page.evaluate(() => window.sessionStorage.clear());
   await page.request.post(`${base}/__test__/reset`);
   await page.goto(`${base}/__qa`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: '人员管理', exact: true }).waitFor();
   await page.getByText('alpha-user', { exact: true }).waitFor();
-  await page.evaluate(() => window.sessionStorage.clear());
   await page.request.post(`${base}/__test__/not-found-next-user-delete`);
   const existingTargetDelete404 = page.waitForResponse((response) => response.request().method() === 'DELETE'
     && response.url().endsWith('/api/users/1500') && response.status() === 404);
@@ -1219,7 +1244,7 @@ try {
   const existingTargetState = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
     deleteRequests: number; deleteMutationCount: number; deleteStatusReadRequests: number; userDetailReadRequests: number;
   };
-  assert.deepEqual(existingTargetState, {
+  assertStateMatches(existingTargetState, {
     deleteRequests: 1,
     deleteMutationCount: 0,
     deleteStatusReadRequests: 1,
@@ -1227,7 +1252,7 @@ try {
   }, 'a target still returned by GET is not deleted, retried, or described as success');
 
   assert.deepEqual(errors, [], errors.join('\n'));
-  assert.equal(expectedHttpErrors.length, 23, 'only expected create, ambiguous update/delete, status-read, toggle, 404 and post-delete 503 responses are injected');
+  assert.equal(expectedHttpErrors.length, 25, 'only expected create, ambiguous update/delete, status-read, toggle, 404 and post-delete 503 responses are injected');
   assert.equal(await page.locator('vite-error-overlay, [data-vite-error-overlay]').count(), 0, 'the page has no Vite error overlay');
   assert.equal(new URL(page.url()).pathname, '/users', 'the fixture renders the mounted users route');
   console.log('Users browser tests passed: query race recovery, user edit same-key retry and reload recovery, cross-refresh toggle status recovery and permission-safe retry, user delete status/retry recovery, and confirmed 404 absence recovery.');

@@ -1,5 +1,450 @@
 # Changelog
 
+## v9.6.21 - 2026-10-28
+
+### Improved
+
+- 设置分类、成就状态筛选、人员管理视图和归档信息视图通过 `aria-pressed` 暴露当前选中状态，并为切换按钮指定明确的按钮类型。
+
+### Validation
+
+- 成就筛选、人员视图切换及完整恢复长套件、系统设置、发布归档浏览器回归通过。权限读取未完成时，人员编辑恢复会保留请求记录并等待权限核实，避免误判为撤权。类型、lint、构建与其它治理证据见 `docs/UPGRADE_PROGRESS.md`。
+
+### Release state
+
+- Android 元数据为 9.6.21 / 90621，未构建 APK。仅本地修改，未提交、推送或部署；无 API、权限或数据库变更。
+
+## v9.6.20 - 2026-10-28
+
+### Improved
+
+- 审批流模板删除响应不明时会保存当前标签页的恢复标记，并只读核实服务端当前状态；读回失败则继续锁定写入，刷新后重试只读核实，绝不自动重复删除。
+- 报告中心页签通过 `aria-pressed` 暴露选中状态；选题模板首次读取失败时展示实际可用的重新加载按钮。
+
+### Validation
+
+- 审批流设计器和报告中心隔离 Playwright 浏览器回归通过，覆盖删除响应丢失、只读核实失败、刷新恢复、用户显式重新确认和页签选中状态。类型检查、定向 ESLint、版本与构建结果见 `docs/UPGRADE_PROGRESS.md`。
+
+### Release state
+
+- Android 元数据为 9.6.20 / 90620，未构建 APK。仅本地修改，未提交、推送或部署；无 API、权限或数据库变更。
+
+## v9.6.19 - 2026-10-28
+
+### Improved
+
+- 手机首页加载进行中选题时显示清楚的内容范围；创作历史、作品库和移动消息的分页控件增加具体加载文案与忙碌状态。
+
+### Validation
+
+- 类型检查、定向 ESLint、生产构建、版本一致性、加载状态语义合同、差异格式检查及本地隔离浏览器回归均通过。Playwright MCP 已断开，Chrome DevTools MCP 浏览器配置仍被占用；仓库 Playwright 在本地隔离环境完成页面验证。
+
+### Release state
+
+- Android 元数据为 9.6.19 / 90619，未构建 APK。仅本地修改，未提交、推送或部署；无 API、权限或数据库变更。
+
+## v9.6.18 - 2026-10-28
+
+### Fixed
+
+- 桌面和移动日报首次创建草稿时以版本 `0` 表示预期服务端尚无记录。若只读核实后另一标签页已先创建，用户显式重试会因版本冲突停止，不会覆盖并发创建的日报。
+- 同步调整现有日报写入恢复浏览器规格中的版本断言。
+
+### Validation
+
+- TypeScript 检查、定向 ESLint、生产构建、版本一致性和 `git diff --check` 通过；浏览器回归已更新但本轮未运行。
+
+### Release state
+
+- Android 元数据为 9.6.18 / 90618，未构建 APK。仅本地修改，未提交、推送或部署；无 API、权限或数据库变更。
+
+## v9.6.17 - 2026-10-28
+
+### Improved
+
+- 桌面日报、移动稿件详情、番茄排行榜、创作批注与建议列表的加载状态增加礼貌、原子读屏播报；桌面日报隐藏重复的页头加载文字播报。
+
+### Validation
+
+- TypeScript 检查、定向 ESLint、生产构建、版本一致性和 `git diff --check` 通过。浏览器回归及 VoiceOver 实际语音核验未运行。
+
+### Release state
+
+- Android 元数据为 9.6.17 / 90617，未构建 APK。仅本地修改，未提交、推送或部署；无 API、权限或数据库变更。
+
+## v9.6.16 - 2026-10-28
+
+### Improved
+
+- 移动端日报初次读取和重试期间显示“正在加载今日日报…”，并通过礼貌、原子的 `role=status` 状态播报给读屏用户。
+
+### Validation
+
+- TypeScript 检查、定向 ESLint、生产构建、版本一致性和 `git diff --check` 通过。浏览器回归及 VoiceOver 实际语音核验未运行。
+
+### Release state
+
+- Android 元数据为 9.6.16 / 90616，未构建 APK。仅本地修改，未提交、推送或部署；无 API、权限或数据库变更。
+
+## v9.6.15 - 2026-10-28
+
+### Improved
+
+- 移动端日报保存草稿前先记录恢复快照。写入响应丢失时只读核对服务器完整内容和版本；结果匹配则确认已保存，仍为原状态则仅允许用户显式使用同载荷安全重试，出现其它变化则保留本地内容并锁定写入。
+- 草稿结果待确认时不自动重复保存或自动提交，刷新后仍可继续核实。
+
+### Validation
+
+- TypeScript 检查、定向 ESLint、生产构建、版本一致性和 `git diff --check` 通过。Vite 仍提示部分分包体积较大；本轮未运行浏览器回归或视觉验收。
+
+### Release state
+
+- Android 元数据为 9.6.15 / 90615，未构建 APK。仅本地修改，未提交、推送或部署；无 API、权限或数据库变更。
+
+## v9.6.14 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- 创作者趋势和作品复盘图表改用 Studio 语义色彩令牌，浅色与深色主题使用各自定义的指标色。
+
+### Fixed
+
+- None.
+
+### Technical upgrades
+
+- 为创作者趋势和作品详情浏览器回归增加 SVG 曲线颜色与主题令牌的一致性断言。
+
+### Database changes
+
+- None.
+
+### Test results
+
+- 验证结果见 `docs/UPGRADE_PROGRESS.md`。
+
+## v9.6.13 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- Creator Trends 的播放、粉丝、互动、日互动率和投稿图表，以及作品复盘的播放/互动曲线，现有各自的指标名称和数据点数量，读屏用户可以区分图表。
+
+### Fixed
+
+- None.
+
+### Technical upgrades
+
+- 为创作者趋势和作品详情浏览器回归增加图表可访问名称断言。
+
+### Database changes
+
+- None.
+
+### Test results
+
+- 验证结果见 `docs/UPGRADE_PROGRESS.md`。
+
+### Release status
+
+- Android 元数据为 9.6.13 / 90613，未构建 APK。本地修改，未提交、推送或部署；无 API、权限或数据库变化。
+
+## v9.6.12 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- 个人复盘行动项和日报风险加载期间提供礼貌、原子的状态播报；刷新按钮说明忙碌状态并在请求期间禁用。
+- 生成指标快照和重新读取创作者作品时提供处理中播报；相关按钮暴露忙碌状态，装饰图标隐藏于辅助技术并遵循减少动态效果设置。
+
+### Fixed
+
+- None.
+
+### Technical upgrades
+
+- 扩展复盘加载语义合同及隔离浏览器回归，覆盖个人行动项、日报风险、指标快照生成和创作者作品刷新。
+
+### Database changes
+
+- None. No API, permission, or database changes.
+
+### Validation
+
+- 共用加载状态语义合同、类型检查、改动文件定向 ESLint、生产构建、版本治理、更新说明治理、Android runtime、Studio 令牌检查和差异检查通过。Playwright MCP 在隔离本地内存夹具手工检查四处异步状态及恢复；仓库 Chromium 自动套件受 macOS 启动权限 1100 阻挡，未进入断言。本轮没有单独进行这些页面的 VoiceOver 实际听音核验。
+- Android 元数据为 9.6.12 / 90612，未构建 APK。本地修改，未提交、推送或部署。
+
+## v9.6.11 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- 复盘列表初次读取增加礼貌、原子的实时状态；刷新期间按钮禁用并暴露忙碌状态。
+- 刷新图标对辅助技术隐藏，并遵循减少动态效果设置。
+
+### Fixed
+
+- None.
+
+### Technical upgrades
+
+- 共用可访问性合同测试增加复盘列表加载语义，覆盖状态播报、忙碌按钮、装饰图标和减少动态效果类。
+
+### Database changes
+
+- None. No API, permission, or database changes.
+
+### Validation
+
+- 类型检查、全仓 ESLint（0 错误、280 条既有警告）、生产构建、共用加载状态可访问性合同、版本/更新说明治理（543 个版本）、测试入口治理（293 个文件）、Android runtime、Studio 令牌和 `git diff --check` 通过。Playwright MCP 手动验证挂起列表读取、320px 状态和按钮、成功后状态清除、无水平溢出和控制台无错误；仓库 Chromium 自动套件本轮未运行。
+- Android 元数据为 9.6.11 / 90611，未构建 APK。本地修改，未提交、推送或部署。
+
+## v9.6.10 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- 内容动态首读和刷新期间提供礼貌加载状态；读取期间禁用“查看”并暴露忙碌状态，避免重复读取。
+- 读取图标从辅助树隐藏，并遵循减少动态效果设置。
+
+### Fixed
+
+- None.
+
+### Technical upgrades
+
+- 扩展内容动态隔离浏览器回归，覆盖挂起读取时的加载播报、按钮忙碌状态、恢复后状态清除与只读行为。
+
+### Database changes
+
+- None. No API, permission, or database changes.
+
+### Validation
+
+- 类型检查、全仓 ESLint（0 错误、280 条既有警告）、生产构建、共用加载状态语义测试、版本/更新说明治理（542 个版本）、测试入口治理（293 个文件）、Android runtime、Studio 令牌和 `git diff --check` 通过。Playwright MCP 手动验收首读和刷新挂起、成功恢复、减少动态效果、320px 无溢出、业务写入数为 0 和控制台无错误；仓库 Chromium 自动套件本轮未运行。
+- Android 元数据为 9.6.10 / 90610，未构建 APK。本地修改，未提交、推送或部署。
+
+## v9.6.9 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- 工作台壳层、灵感/创作列表、成就、权限、选题看板、选题/拍摄/发布详情、通知偏好和备份列表的初始读取增加明确的礼貌播报；权限核验期间也会说明等待状态。
+- 工作台、选题列表、创作稿件详情和公告骨架加载增加状态提示；共享 Studio 骨架占位统一对辅助技术隐藏。随机选题组件的灵感读取也增加具体提示。
+
+### Fixed
+
+- None.
+
+### Technical upgrades
+
+- 扩充共用加载状态合同测试，覆盖 Studio 卡片、列表和表格骨架不会进入辅助树。
+
+### Database changes
+
+- None. No API, permission, or database changes.
+
+### Validation
+
+- 类型检查、全仓 ESLint（0 错误、280 条警告）、加载状态和骨架语义测试、版本治理（541 个版本、293 个测试入口）、Android runtime、Studio 令牌与生产构建通过。本次未进行逐页浏览器或全站 VoiceOver 验收，详见 `docs/UPGRADE_PROGRESS.md`。
+- Android 元数据为 9.6.9 / 90609，未构建 APK。本地修改，未提交、推送或部署。
+
+## v9.6.8 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- 报告中心周报首次读取和重试改用共用可访问加载状态，向读屏用户礼貌播报“正在加载周报…”。
+
+### Fixed
+
+- None.
+
+### Technical upgrades
+
+- 周报浏览器回归新增挂起 GET、检查加载播报、释放读取并核对状态消失和记录恢复的路径。
+
+### Database changes
+
+- None. No API, permission, or database changes.
+
+### Validation
+
+- 类型检查、定向 ESLint、共用加载状态合同测试、版本和更新说明治理（540 个版本）、测试入口治理（293 个文件）、Android runtime、Studio 令牌与生产构建通过。Playwright MCP 本地隔离夹具在 390px 验证注入读取失败后，重试期间显示可访问状态，响应释放后显示周报且无横向溢出；只执行一条失败 GET 和一条成功 GET，无业务写入。用户确认听到本次涉及的加载提示；该确认不代表全站 VoiceOver 验收。仓库 `npm run test:analytics-browser` 因 macOS Chromium `bootstrap_check_in` 权限 1100 未进入自动断言。分包提示和完整验证边界见 `docs/UPGRADE_PROGRESS.md`。
+- Android 元数据为 9.6.8 / 90608，未构建 APK。本地修改，未提交、推送或部署。
+
+## v9.6.7 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- 共用加载状态统一提供 polite/atomic 状态播报；表格骨架屏对辅助技术隐藏并提供读屏专用加载文案，spinner 不再重复朗读。
+
+### Fixed
+
+- None.
+
+### Technical upgrades
+
+- 为 table、inline、page、section 四种共用加载样式增加服务端渲染语义回归。
+
+### Database changes
+
+- None. No API, permission, or database changes.
+
+### Validation
+
+- 共用加载状态四种形态的语义测试、类型检查和定向 ESLint 通过。Playwright MCP 隔离匿名意见夹具挂起列表 GET，确认加载期间存在状态播报、释放读取后显示合成记录并移除加载状态；320px 无横向溢出，夹具仅 1 次 GET、0 次更新/删除。本地修改，未提交、推送或部署；完整门禁见 `docs/UPGRADE_PROGRESS.md`。
+- Android 元数据为 9.6.7 / 90607，未构建 APK。
+
+## v9.6.6 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- 活动日志读取中的加载状态现在会通过礼貌播报提供明确提示，旋转图标不再重复朗读。
+- 批量已读与清空结果核实接口在认证前设置 `Cache-Control: no-store`，未认证错误也不会缓存；OpenAPI 与 API 合同补充了这两个 Legacy 查询接口。
+
+### Fixed
+
+- None.
+
+### Technical upgrades
+
+- None.
+
+### Database changes
+
+- None. No permission or database changes.
+
+### Validation
+
+- 消息分页与 API 合同测试、类型检查和定向 ESLint 通过。Playwright MCP 隔离本地夹具验证加载状态、读取恢复及仅执行预期 GET、无业务写入；320px 页面无横向溢出，筛选与分页控件为 40px。仓库活动日志浏览器套件因 macOS 拒绝启动 Chromium（`bootstrap_check_in` 权限 1100）未进入自动断言；Chrome DevTools MCP 专用浏览器 profile 正被占用，未能附加。完整 lint、版本治理与构建结果见 `docs/UPGRADE_PROGRESS.md`。
+- Android 元数据为 9.6.6 / 90606，未构建 APK。本地修改，未提交、推送或部署。
+
+## v9.6.5 - 2026-10-28
+
+### Added
+
+- None.
+
+### Improved
+
+- Temporary save and review locks keep the live collaborative editor mounted, and status transitions verify that the current Tiptap content matches the confirmed saved content on desktop and mobile.
+- The material draft editor toolbar sticks to its nested scroll panel, preserving pointer access to the first paragraph. Escape also closes editor color submenus while the pointer remains over the context menu.
+
+### Fixed
+
+- Browser regression coverage now checks saved content on review requests, preserves text through failed saves, and uses a real pointer click to verify the material editor paragraph is not covered by its toolbar.
+
+### Technical upgrades
+
+- None.
+
+### Database changes
+
+- None. No API, permission, or database changes.
+
+### Validation
+
+- The production-review browser suite passed with isolated local fixtures. The 390px mobile work-center browser suite, content-document resolution, Yjs persistence and acknowledgement, editor format-painter tests, type check, and scoped ESLint passed. Independent Playwright MCP geometry inspection confirmed the material editor toolbar does not overlap the first paragraph. Version governance, Android runtime, Studio token usage, and production build results are recorded in `docs/UPGRADE_PROGRESS.md`. Android metadata is 9.6.5 / 90605; no APK was built. Local only; not committed, pushed, or deployed.
+
+## v9.6.4 - 2026-10-28
+
+### 优化
+
+- 全局搜索面板接入统一弹窗生命周期并通过门户挂载，可在确认弹窗上方继续使用；补齐对话框语义、焦点约束与关闭后的焦点恢复，修复弹窗打开时命令面板被背景隔离的问题。
+- 修复资源、发布和灵感隔离浏览器回归中的夹具数据冲突、确认时序及错误恢复断言，使测试覆盖真实页面状态。
+
+### 验证与发布
+
+- 资源、发布、灵感及全局搜索浏览器套件均使用本地隔离夹具并通过。`npm run version:check`、类型检查、定向 ESLint、版本治理、更新说明治理（536 个版本）、Android runtime 合同、Studio 令牌门禁、生产构建和 `git diff --check` 通过。构建仍有现存 Tiptap、应用主包和 Silk 大分包提示。本地修改，未提交、推送或部署。
+
+## v9.6.3 - 2026-10-28
+
+### 优化
+
+- 登录安全页的首次状态读取、手动重新检查增加读屏可识别的礼貌状态播报；状态读取失败使用可访问的错误提示，刷新图标不重复朗读。
+
+### 验证与发布
+
+- `npm run test:auth-rollout-theme-contrast-browser`、版本与类型检查、生产构建、版本/更新说明治理、Android runtime 合同、Studio 令牌门禁、定向 ESLint 和 `git diff --check` 均通过。浏览器验收只用本地合成数据和只读请求；仅本地修改，未提交、推送或部署。
+
+## v9.6.2 - 2026-10-28
+
+### 修复
+
+- 创作者作品库桌面表格的表现评分改用高对比度 Studio 文字令牌；浏览器对比度回归分别从桌面表格评分单元格和移动作品卡读取目标文字。
+
+### 验证与发布
+
+- `npm run test:creator-works-browser` 使用隔离夹具通过 320px/390px 手机和 1440px 桌面矩阵，覆盖浅/深主题文字对比度、键盘导航、减少动态效果和作品读取恢复。本轮未使用真实账号或业务数据；类型/版本/构建与差异检查见 `docs/UPGRADE_PROGRESS.md`。仅本地修改，未提交、推送或部署。
+
+## v9.6.1 - 2026-10-28
+
+### 修复
+
+- 清空消息的恢复记录、确认弹窗、结果提示和处理中锁均按账号隔离；切换账号后旧账号迟到响应不会覆盖新账号页面，新账号可以独立处理自己的请求。
+
+### 验证与发布
+
+- `npm run version:check`、`npm run check -- --pretty false`、`npm run build`、`npm run test:message-pagination` 和 `git diff --check` 通过。隔离内存夹具的 Playwright 浏览器套件在 320px 与 390px 均通过，覆盖移动工作台、流程页、1440px 桌面消息恢复，以及账号 A 清空请求挂起时账号 B 独立清空、迟到回包不污染 B 状态。当前工作树登录页在 320px/390px 无横向溢出。其 Vite 公开设置代理因 `127.0.0.1:3001` 没有 API 服务监听（`ECONNREFUSED`）而返回 HTTP 500，因此未使用真实账号验证消息中心。构建保留既有大分包提示。本版本仅本地修改，未提交、推送或部署。
+
+
+## v9.6.0 - 2026-10-28
+
+### 新增
+
+- 新增登录态、按当前账号隔离且禁止缓存的单条消息已读状态查询；其他账号的消息与不存在编号统一返回“缺失”，不泄露消息。
+
+### 优化
+
+- 桌面和手机消息中心在标记已读响应不确定时先只读核实；确认已读才更新页面并进入关联页面。状态暂不可用时锁定未读操作并提供只读核实入口。
+
+### 修复
+
+- 确认消息仍未读后不自动重复请求，只在用户再次点击后重试，避免将响应丢失误报为失败或重复执行。
+
+### 技术升级
+
+- 同步 OpenAPI 与 API 合同，新增服务端隔离和桌面/移动消息恢复回归。Android 元数据为 9.6.0 / 90600，未构建 APK。
+
+### 数据库变化
+
+- 无；未扩展权限，无真实业务数据写入。
+
+### 测试情况
+
+- 验证进行中；本地修改，未提交、推送或部署。
 
 ## v9.5.0 - 2026-10-28
 

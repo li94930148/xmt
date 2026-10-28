@@ -493,6 +493,16 @@ export default function MobileProductionEditor() {
     const handle = runtimeHandleRef.current;
     return handle ? handle.flush({ timeoutMs: 15_000 }) : { status: 'failed' };
   }, []);
+  const getFlushedEditorContent = () => {
+    const currentContent = reviewEditorHandle?.getContent();
+    if (currentContent === null || currentContent === undefined) {
+      throw new Error('编辑器尚未准备好，正文操作未发送，请稍后重试。');
+    }
+    if (currentContent !== persistedContentRef.current) {
+      throw new Error('正文与最近一次确认保存内容不一致，当前操作未发送；请检查保存状态后重试。');
+    }
+    return currentContent;
+  };
   const applyRecoveredProduction = useCallback((serverRecord: Production, preserveLocalDraft: boolean) => {
     const serverContent = String(serverRecord.content || '');
     const localDraft = draftKey ? readSafeDraftValue<string>(draftKey) : null;
@@ -751,11 +761,12 @@ export default function MobileProductionEditor() {
               : '正文保存结果未确认，本次操作未执行；请检查保存状态后重试。');
           return;
         }
-        const shouldWrite = submit || content !== persistedContentRef.current;
+        const currentContent = getFlushedEditorContent();
+        const shouldWrite = submit || currentContent !== persistedContentRef.current;
         const outcome = shouldWrite ? await writeMobileProduction(
           submit ? 'review-submit' : 'draft-save',
           submit ? 'review' : production.status,
-          content,
+          currentContent,
         ) : 'saved' as const;
         if (!outcome) return;
         clearSafeDraft(draftKey);
@@ -825,7 +836,7 @@ export default function MobileProductionEditor() {
             : '正文保存结果未确认，审核未执行；请检查保存状态后重试。');
         return;
       }
-      const approvedContent = persistedContentRef.current;
+      const approvedContent = getFlushedEditorContent();
       const outcome = await writeMobileProduction('review-approve', 'approved', approvedContent);
       if (!outcome) return;
       clearSafeDraft(draftKey);
@@ -936,7 +947,7 @@ export default function MobileProductionEditor() {
           </select>
         </label>
       ) : null}
-      {routeDataLoading ? <p className="text-sm text-studio-text-muted">正在载入稿件…</p> : null}
+      {routeDataLoading ? <p role="status" aria-live="polite" aria-atomic="true" className="text-sm text-studio-text-muted">正在载入稿件…</p> : null}
       {!routeDataLoading && loadFailed ? (
         <div className="space-y-3">
           <p role="alert" className="rounded-2xl border border-studio-coral/30 bg-studio-coral-soft p-4 text-sm text-studio-coral-contrast">

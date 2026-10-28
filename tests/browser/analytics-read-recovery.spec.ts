@@ -47,6 +47,8 @@ let userReads = 0;
 let topicListReads = 0;
 let topicDetailReads = 0;
 let weeklyReportReads = 0;
+let holdNextWeeklyReportRead = false;
+let releaseHeldWeeklyReportRead: (() => void) | null = null;
 let failNextTopicsExport = false;
 let topicsExportReads = 0;
 let analyticsExportReads = 0;
@@ -122,6 +124,17 @@ app.post('/__qa/fail-next-weekly-report-read', (_req, res) => {
   failNextWeeklyReportRead = true;
   res.json({ ok: true });
 });
+app.post('/__qa/hold-next-weekly-report-read', (_req, res) => {
+  holdNextWeeklyReportRead = true;
+  res.json({ ok: true });
+});
+app.post('/__qa/release-held-weekly-report-read', (_req, res) => {
+  if (!releaseHeldWeeklyReportRead) return res.status(409).json({ message: '没有等待释放的周报读取' });
+  const release = releaseHeldWeeklyReportRead;
+  releaseHeldWeeklyReportRead = null;
+  release();
+  return res.json({ ok: true });
+});
 app.post('/__qa/fail-next-topics-export', (_req, res) => {
   failNextTopicsExport = true;
   res.json({ ok: true });
@@ -189,6 +202,11 @@ app.get('/api/analytics/topic/:id', (_req, res) => {
 });
 app.get('/api/export/weekly-report', (_req, res) => {
   weeklyReportReads += 1;
+  if (holdNextWeeklyReportRead) {
+    holdNextWeeklyReportRead = false;
+    releaseHeldWeeklyReportRead = () => res.json(weeklyReport);
+    return;
+  }
   if (failNextWeeklyReportRead) {
     failNextWeeklyReportRead = false;
     return res.status(503).json({ message: '模拟周报读取失败' });
@@ -548,6 +566,8 @@ try {
   await page.goto(`${base}/export`);
   await page.getByRole('heading', { name: '报告中心', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: '日报', exact: true }).count(), 0, 'report-only permission does not expose unavailable daily-report shortcuts');
+  assert.equal(await page.getByRole('button', { name: '周报', exact: true }).getAttribute('aria-pressed'), 'true', 'the active report tab is exposed as pressed');
+  assert.equal(await page.getByRole('button', { name: '导出', exact: true }).getAttribute('aria-pressed'), 'false', 'the inactive report tab is exposed as unpressed');
   await page.getByRole('button', { name: '周报', exact: true }).click();
   await page.getByRole('heading', { name: '周报生成', exact: true }).waitFor();
   await assertPageHeadingsAndCopyContrast(page);
@@ -560,8 +580,17 @@ try {
   assert.equal(weeklyReportReads, 1, 'the weekly report makes one initial read');
   assert.equal(await page.getByText('本周暂无完成的选题和发布的视频', { exact: true }).count(), 0, 'a failed weekly report read is not presented as a real empty week');
   assert.equal(await page.getByRole('button', { name: '一键复制', exact: true }).isDisabled(), true, 'an unavailable weekly report cannot be copied');
+  await page.evaluate(async () => { await fetch('/__qa/hold-next-weekly-report-read', { method: 'POST' }); });
+  const recoveredWeeklyReportRead = page.waitForResponse((response) => response.request().method() === 'GET'
+    && response.url().includes('/api/export/weekly-report') && response.status() === 200);
   await page.getByRole('button', { name: '重试周报', exact: true }).click();
+  const weeklyReportLoadingStatus = page.getByRole('status').getByText('正在加载周报…', { exact: true });
+  await weeklyReportLoadingStatus.waitFor();
+  assert.equal(weeklyReportReads, 2, 'the first weekly-report retry performs one held GET');
+  await page.evaluate(async () => { await fetch('/__qa/release-held-weekly-report-read', { method: 'POST' }); });
+  await recoveredWeeklyReportRead;
   await page.getByText('隔离周报选题', { exact: true }).waitFor();
+  await weeklyReportLoadingStatus.waitFor({ state: 'hidden' });
   await assertPageHeadingsAndCopyContrast(page);
   assert.equal(weeklyReportReads, 2, 'weekly report retry performs one additional read');
 
@@ -593,6 +622,8 @@ try {
   assert.equal(await page.locator('textarea[aria-hidden="true"]').count(), 0, 'the temporary fallback textarea is removed after a successful copy');
 
   await page.getByRole('button', { name: '导出', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '导出', exact: true }).getAttribute('aria-pressed'), 'true', 'switching tabs updates the pressed state');
+  assert.equal(await page.getByRole('button', { name: '周报', exact: true }).getAttribute('aria-pressed'), 'false', 'the former active tab is announced as unpressed');
   await assertPageHeadingsAndCopyContrast(page);
   await page.evaluate(async () => { await fetch('/__qa/fail-next-topics-export', { method: 'POST' }); });
   await page.getByRole('button', { name: '开始导出', exact: true }).dblclick({ delay: 50 });

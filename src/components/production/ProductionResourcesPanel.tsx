@@ -342,6 +342,7 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
           mode="rich"
           immersive
           toolbarVariant="basic"
+          toolbarStickyTop="0px"
           minHeight="100%"
           className="min-h-full [&_.editor-content]:px-5 [&_.editor-content]:py-5 [&_.editor-content]:text-[15px] [&_.editor-content]:leading-7 [&_.editor-content_a]:break-all"
           placeholder="可从资料库插入资料，也可以直接在这里粘贴或整理文字……"

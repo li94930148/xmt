@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Search, FileText, Users, ArrowRight, BookOpen, ClipboardList, Lightbulb, RotateCcw, ScrollText } from 'lucide-react';
 import { useThemeStyles } from '../hooks/useThemeStyles';
@@ -6,6 +7,7 @@ import { usePermission } from '../hooks/usePermission';
 import { navigationSections, canAccessNavigationItem, canAccessNavigationSection } from '../config/navigation';
 import { useAuthStore } from '../store';
 import { searchGlobalContent, type GlobalSearchHit, type GlobalSearchScopes } from '../api/globalSearch';
+import { useModalLifecycle } from './common/useModalLifecycle';
 
 interface CommandItem {
   id: string;
@@ -39,12 +41,13 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
   const [retryNonce, setRetryNonce] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const styles = useThemeStyles();
   const user = useAuthStore((state) => state.user);
   const { loading, permissions, hasAnyPermission, hasAllPermissions } = usePermission();
   const isAdmin = user?.role === 'admin';
+  useModalLifecycle(isOpen, overlayRef, onClose);
   const scopes = useMemo<GlobalSearchScopes>(() => {
     const hasPermission = (code: string) => isAdmin || permissions.includes('*') || permissions.includes(code);
     return {
@@ -147,21 +150,6 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
   }, [filteredItems]);
 
   useEffect(() => {
-    if (isOpen) {
-      const activeElement = document.activeElement;
-      previousFocusRef.current = activeElement instanceof HTMLElement && activeElement !== document.body
-        ? activeElement
-        : null;
-      inputRef.current?.focus();
-      return;
-    }
-
-    const previousFocus = previousFocusRef.current;
-    previousFocusRef.current = null;
-    if (previousFocus?.isConnected) previousFocus.focus();
-  }, [isOpen]);
-
-  useEffect(() => {
     if (!listRef.current) return;
     const element = listRef.current.querySelector(`[data-index="${selectedIndex}"]`);
     element?.scrollIntoView({ block: 'nearest' });
@@ -193,8 +181,15 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
   const normalizedQuery = query.trim();
   const showNoResults = filteredItems.length === 0 && Array.from(normalizedQuery).length >= 2 && !searching;
 
-  return (
-    <div className="xmt-overlay xmt-overlay-top z-command" onClick={onClose}>
+  return createPortal((
+    <div
+      ref={overlayRef}
+      className="xmt-overlay xmt-overlay-top z-command"
+      role="dialog"
+      aria-modal="true"
+      aria-label="全局搜索"
+      onClick={onClose}
+    >
       <div
         className={`${styles.modal} studio-sheen xmt-panel-enter relative mx-4 w-full max-w-xl overflow-hidden rounded-panel border border-studio-border-soft shadow-floating`}
         onClick={(event) => event.stopPropagation()}
@@ -271,5 +266,5 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }

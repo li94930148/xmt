@@ -22,6 +22,7 @@ import { useBackupCreateRecovery } from '../hooks/useBackupCreateRecovery';
 import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 import { emitClientLog, safeClientErrorClass } from '../observability/client-logger';
 import ErrorState from '../components/common/ErrorState';
+import LoadingState from '../components/common/LoadingState';
 import ConfirmModal from '../components/common/ConfirmModal';
 import PageShell from '../components/studio/PageShell';
 import PageHeader from '../components/studio/PageHeader';
@@ -1105,7 +1106,7 @@ export default function NotificationSettings() {
                       <button
                         key={key}
                         type="button"
-                        aria-current={activeTab === key ? 'page' : undefined}
+                        aria-pressed={activeTab === key}
                         onClick={() => setActiveTab(key)}
                         className={`xmt-btn xmt-btn-ghost min-w-0 w-full justify-start gap-2 px-3 text-sm ${
                           activeTab === key ? 'bg-studio-surface-soft text-studio-text-primary' : styles.textSecondary
@@ -1263,9 +1264,7 @@ export default function NotificationSettings() {
 
               <div className={`overflow-hidden rounded-2xl ${styles.card}`}>
                 {notifyLoading ? (
-                  <div className={`flex h-40 items-center justify-center ${styles.textMuted}`}>
-                    <Loader2 className="h-7 w-7 animate-spin" />
-                  </div>
+                  <LoadingState type="inline" text="正在加载通知偏好…" className="flex h-40 w-full justify-center" />
                 ) : notifyLoadError ? (
                   <ErrorState
                     className="py-2"
@@ -1662,9 +1661,7 @@ export default function NotificationSettings() {
 
               <div className={`rounded-2xl ${styles.card} p-4`}>
                 {backupLoading ? (
-                  <div className={`flex h-24 items-center justify-center ${styles.textMuted}`}>
-                    <Loader2 className="h-6 w-6 animate-spin" />
-                  </div>
+                  <LoadingState type="inline" text="正在读取备份列表…" className="flex h-24 w-full justify-center" />
                 ) : backupError ? (
                   <ErrorState title="备份列表未能加载" description={backupError} onRetry={() => void handleRefreshBackupList()} />
                 ) : backupList.length === 0 ? (

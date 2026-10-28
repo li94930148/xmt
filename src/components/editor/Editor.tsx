@@ -52,9 +52,11 @@ interface EditorProps {
   writingGoalStorageKey?: string;
   onCommandHandleChange?: (handle: EditorCommandHandle | null) => void;
   toolbarVariant?: 'full' | 'basic';
+  toolbarStickyTop?: string | number;
 }
 
 export interface EditorCommandHandle {
+  getContent(): string | null;
   insertHtmlAtSelectionOrEnd(html: string): boolean;
   appendHtml(html: string): boolean;
   getSelectedText(): string | null;
@@ -142,6 +144,7 @@ export default function Editor({
   writingGoalStorageKey,
   onCommandHandleChange,
   toolbarVariant = 'full',
+  toolbarStickyTop,
 }: EditorProps) {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const lastValueRef = useRef(value);
@@ -177,6 +180,8 @@ export default function Editor({
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [formatPainterMode, setFormatPainterMode] = useState<FormatPainterMode>('idle');
   const lastFocusedSelectionRef = useRef<{ from: number; to: number } | null>(null);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const baseExtensions = useMemo(() => createEditorExtensions(placeholder), [placeholder]);
 
   // 立即保存（仅 Ctrl+S 触发）
@@ -317,7 +322,9 @@ export default function Editor({
         return false;
       },
     },
-  }, [readOnly, collaboration?.provider, baseExtensions]);
+  // Read-only transitions use editor.setEditable below. Recreating Tiptap here
+  // would detach the live document and command handle during save/review locks.
+  }, [collaboration?.provider, baseExtensions]);
 
   const closeFindReplace = useCallback(() => {
     setShowFindReplace(false);
@@ -358,14 +365,18 @@ export default function Editor({
   useEffect(() => {
     if (!editor || editor.isDestroyed || !onCommandHandleChange) return;
     const handle: EditorCommandHandle = {
+      getContent() {
+        if (editor.isDestroyed) return null;
+        return editor.getHTML();
+      },
       insertHtmlAtSelectionOrEnd(html) {
-        if (!html || readOnly) return false;
+        if (!html || readOnlyRef.current) return false;
         const docEnd = editor.state.doc.content.size;
         const target = resolveEditorInsertionSelection(lastFocusedSelectionRef.current, docEnd);
         return editor.chain().focus().setTextSelection(target).insertContent(html).run();
       },
       appendHtml(html) {
-        if (!html || readOnly || editor.isDestroyed) return false;
+        if (!html || readOnlyRef.current || editor.isDestroyed) return false;
         return editor.chain().focus().insertContentAt(editor.state.doc.content.size, html).run();
       },
       getSelectedText() {
@@ -391,7 +402,7 @@ export default function Editor({
         return editor.chain().focus().setTextSelection(range).run();
       },
       applyReviewSuggestion(anchor, proposedText) {
-        if (editor.isDestroyed || readOnly) return 'missing';
+        if (editor.isDestroyed || readOnlyRef.current) return 'missing';
         const originalRange = findReviewAnchorRange(editor, anchor);
         if (originalRange) {
           const transaction = proposedText
@@ -406,7 +417,7 @@ export default function Editor({
     };
     onCommandHandleChange(handle);
     return () => onCommandHandleChange(null);
-  }, [editor, onCommandHandleChange, readOnly]);
+  }, [editor, onCommandHandleChange]);
 
   const handleCopyAll = useCallback(async () => {
     if (!editor) return;
@@ -666,7 +677,7 @@ export default function Editor({
         className={`flex flex-wrap sm:flex-nowrap items-center justify-between shrink-0 relative z-sticky sticky top-0 ${
           isDark ? 'bg-[var(--editor-panel)]' : 'bg-[var(--editor-panel)]'
         } ${focusMode ? 'hidden' : ''}`}
-        style={{ top: isFullscreen ? 0 : 'calc(var(--xmt-app-topbar-height, 0px) + 1px)' }}
+        style={{ top: isFullscreen ? 0 : toolbarStickyTop ?? 'calc(var(--xmt-app-topbar-height, 0px) + 1px)' }}
       >
         <div className="min-w-0 w-full sm:w-auto sm:flex-1">
           {editor && !readOnly && (

@@ -12,6 +12,7 @@ const { initDatabase, closeDatabase } = await import('../../api/database/db.js')
 const { execute, executeInsert, queryOne } = await import('../../api/database/utils.js');
 const { signToken } = await import('../../api/utils/jwt.js');
 const { default: messagesRoutes } = await import('../../api/routes/messages.js');
+const { generateOpenApiDocument } = await import('../../api/openapi.js');
 
 await initDatabase();
 const ownerId = await executeInsert(
@@ -67,6 +68,20 @@ assert(address && typeof address !== 'string');
 const base = `http://127.0.0.1:${address.port}/api/messages`;
 const headers = { Authorization: `Bearer ${signToken({ userId: ownerId })}`, 'Content-Type': 'application/json' };
 const otherHeaders = { Authorization: `Bearer ${signToken({ userId: otherUserId })}`, 'Content-Type': 'application/json' };
+const messageOpenApi = generateOpenApiDocument();
+for (const path of [
+  '/api/messages/read-all-requests/{requestId}',
+  '/api/messages/clear-requests/{requestId}',
+] as const) {
+  const operation = messageOpenApi.paths[path]?.get;
+  assert.ok(operation, `OpenAPI documents ${path}`);
+  const responses = operation.responses as unknown as Record<string, {
+    headers?: Record<string, { schema?: { enum?: string[] } }>;
+  }>;
+  for (const status of ['200', '400', '401', '500']) {
+    assert.equal(responses[status]?.headers?.['Cache-Control']?.schema?.enum?.[0], 'no-store', `${path} ${status} is documented as non-cacheable`);
+  }
+}
 
 async function getList(query: string) {
   const response = await fetch(`${base}${query ? `?${query}` : ''}`, { headers });
@@ -144,9 +159,27 @@ try {
 
   const secondOwnerUnread = await queryOne<{ id: number }>(`SELECT id FROM messages WHERE user_id=? AND read=0 ORDER BY id LIMIT 1`, [ownerId]);
   assert(secondOwnerUnread);
+  const unreadReadStatus = await fetch(`${base}/${secondOwnerUnread.id}/read-status`, { headers });
+  assert.equal(unreadReadStatus.status, 200);
+  assert.equal(unreadReadStatus.headers.get('cache-control'), 'no-store', 'single-message read status must never be cached');
+  assert.deepEqual(await unreadReadStatus.json(), { state: 'available', id: secondOwnerUnread.id, read: false });
+  assert.equal(Number((await queryOne<{ read: number }>(`SELECT read FROM messages WHERE id=? AND user_id=?`, [secondOwnerUnread.id, ownerId]))?.read), 0, 'status lookup is read-only');
   const singleRead = await fetch(`${base}/${secondOwnerUnread.id}`, { method: 'PUT', headers });
   assert.equal(singleRead.status, 200, 'single-message read uses an account-scoped update');
   assert.deepEqual(await singleRead.json(), { message: '消息已标记为已读' });
+  const confirmedReadStatus = await fetch(`${base}/${secondOwnerUnread.id}/read-status`, { headers });
+  assert.equal(confirmedReadStatus.status, 200);
+  assert.deepEqual(await confirmedReadStatus.json(), { state: 'available', id: secondOwnerUnread.id, read: true });
+  const foreignReadStatus = await fetch(`${base}/${otherMessage.id}/read-status`, { headers });
+  assert.equal(foreignReadStatus.status, 200);
+  assert.equal(foreignReadStatus.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await foreignReadStatus.json(), { state: 'missing' }, 'another account message is indistinguishable from a missing ID');
+  const invalidReadStatus = await fetch(`${base}/not-an-id/read-status`, { headers });
+  assert.equal(invalidReadStatus.status, 400);
+  assert.equal(invalidReadStatus.headers.get('cache-control'), 'no-store', 'validation errors must also be non-cacheable');
+  const unauthenticatedReadStatus = await fetch(`${base}/${secondOwnerUnread.id}/read-status`);
+  assert.equal(unauthenticatedReadStatus.status, 401);
+  assert.equal(unauthenticatedReadStatus.headers.get('cache-control'), 'no-store', 'authentication failures must also be non-cacheable');
   const foreignSingleRead = await fetch(`${base}/${otherMessage.id}`, { method: 'PUT', headers });
   assert.equal(foreignSingleRead.status, 404, 'single-message read does not expose another account message');
   assert.equal(Number((await queryOne<{ read: number }>(`SELECT read FROM messages WHERE id=? AND user_id=?`, [otherMessage.id, otherUserId]))?.read), 0);
@@ -182,6 +215,7 @@ try {
   ))?.count), 2, 'read-only recovery lookup does not mutate messages');
   const unauthenticatedReadAllStatus = await fetch(`${base}/read-all-requests/${readAllRequestId}`);
   assert.equal(unauthenticatedReadAllStatus.status, 401, 'read-all status requires authentication');
+  assert.equal(unauthenticatedReadAllStatus.headers.get('cache-control'), 'no-store', 'unauthenticated read-all status must not be cached');
   const invalidReadAllStatus = await fetch(`${base}/read-all-requests/not-a-request-id`, { headers });
   assert.equal(invalidReadAllStatus.status, 400, 'read-all status rejects malformed request IDs');
   const invalidReadAllRequest = await fetch(`${base}/read-all`, {
@@ -257,6 +291,7 @@ try {
   assert.equal(Number((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM messages WHERE user_id=?', [ownerId]))?.count), 45, 'read-only status lookup does not mutate messages');
   const unauthenticatedClearStatus = await fetch(`${base}/clear-requests/${clearRequestId}`);
   assert.equal(unauthenticatedClearStatus.status, 401, 'clear status is not publicly discoverable');
+  assert.equal(unauthenticatedClearStatus.headers.get('cache-control'), 'no-store', 'unauthenticated clear status must not be cached');
   const invalidClearStatus = await fetch(`${base}/clear-requests/not-a-request-id`, { headers });
   assert.equal(invalidClearStatus.status, 400, 'malformed clear request IDs are rejected');
   const invalidClearMutation = await fetch(base, {

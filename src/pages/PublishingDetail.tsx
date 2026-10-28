@@ -17,6 +17,7 @@ import { workflowScriptSourceLabel, workflowScriptSourceReference, workflowScrip
 import { usePermission } from '../hooks/usePermission';
 import { useRouteNavigationGuard, type RouteNavigationAttempt } from '../hooks/useRouteNavigationGuard';
 import ConfirmModal from '../components/common/ConfirmModal';
+import LoadingState from '../components/common/LoadingState';
 
 interface PublishingDetailData {
   id: number;
@@ -561,9 +562,7 @@ export default function PublishingDetail() {
   if (loading || (data && data.id !== Number(id))) {
     return (
       <PageShell>
-        <div className="flex h-64 items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-studio-primary border-t-transparent" />
-        </div>
+        <LoadingState type="inline" text="正在加载发布记录…" className="flex h-64 w-full justify-center" />
       </PageShell>
     );
   }

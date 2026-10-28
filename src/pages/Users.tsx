@@ -480,7 +480,7 @@ export default function Users() {
 
   const addNotification = useAppStore((state) => state.addNotification);
   const styles = useThemeStyles();
-  const { hasPermission } = usePermission();
+  const { hasPermission, loading: permissionsLoading } = usePermission();
 
   useEffect(() => {
     setSearchTerm(requestedSearch);
@@ -854,7 +854,7 @@ export default function Users() {
   };
 
   const verifyUserToggleRecovery = async (recovery: StoredUserToggleRecovery) => {
-    if (useAuthStore.getState().user?.id !== recovery.actorId || userMutationLockRef.current) return;
+    if (permissionsLoading || useAuthStore.getState().user?.id !== recovery.actorId || userMutationLockRef.current) return;
     userMutationLockRef.current = true;
     setUserMutationPending(true);
     setPendingUserToggleRequest({ ...recovery, recoveryCheck: 'checking' });
@@ -891,7 +891,7 @@ export default function Users() {
   };
 
   const verifyUserEditRecovery = useCallback(async (recovery: StoredUserEditRecovery) => {
-    if (useAuthStore.getState().user?.id !== recovery.actorId) return;
+    if (permissionsLoading || useAuthStore.getState().user?.id !== recovery.actorId) return;
     const pending: PendingUserEditRequest = {
       ...recovery,
       requiresPasswordReentry: recovery.hasPassword,
@@ -943,7 +943,7 @@ export default function Users() {
       if (useAuthStore.getState().user?.id !== recovery.actorId) return;
       setPendingUserEditRequest({ ...recovery, requiresPasswordReentry: recovery.hasPassword, recoveryCheck: 'unavailable' });
     }
-  }, [addNotification, canUpdateUser]);
+  }, [addNotification, canUpdateUser, permissionsLoading]);
 
   const verifyUserEditRecoveryRef = useRef(verifyUserEditRecovery);
 
@@ -962,7 +962,7 @@ export default function Users() {
       setEditingUser(null);
       setFormData(buildDefaultForm());
     }
-    if (!currentUserId) {
+    if (!currentUserId || permissionsLoading) {
       return;
     }
 
@@ -978,7 +978,7 @@ export default function Users() {
     if (userEditRecoveryLookupStartedRef.current.has(storageKey)) return;
     userEditRecoveryLookupStartedRef.current.add(storageKey);
     void verifyUserEditRecoveryRef.current(recovery);
-  }, [currentUserId]);
+  }, [currentUserId, permissionsLoading]);
 
   const verifyUserDeleteRecoveryRef = useRef(verifyUserDeleteRecovery);
   verifyUserDeleteRecoveryRef.current = verifyUserDeleteRecovery;
@@ -999,7 +999,7 @@ export default function Users() {
   }, [currentUserId]);
 
   useEffect(() => {
-    if (!currentUserId || pendingUserCreateRequest || activePendingUserEditRequest || activePendingUserDeleteRequest) return;
+    if (!currentUserId || permissionsLoading || pendingUserCreateRequest || activePendingUserEditRequest || activePendingUserDeleteRequest) return;
     const recovery = readUserToggleRecovery(currentUserId);
     if (!recovery) return;
 
@@ -1008,7 +1008,7 @@ export default function Users() {
     if (userToggleRecoveryLookupStartedRef.current.has(storageKey)) return;
     userToggleRecoveryLookupStartedRef.current.add(storageKey);
     void verifyUserToggleRecoveryRef.current(recovery);
-  }, [activePendingUserDeleteRequest, activePendingUserEditRequest, currentUserId, pendingUserCreateRequest]);
+  }, [activePendingUserDeleteRequest, activePendingUserEditRequest, currentUserId, pendingUserCreateRequest, permissionsLoading]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -1400,16 +1400,20 @@ export default function Users() {
   };
 
   const tabSwitch = (
-    <div className={`flex w-fit gap-2 rounded-xl p-1 ${styles.bgSecondary} ${styles.border}`}>
+    <div role="group" aria-label="人员管理视图" className={`flex w-fit gap-2 rounded-xl p-1 ${styles.bgSecondary} ${styles.border}`}>
       <button
+        type="button"
         onClick={() => setActiveTab('users')}
+        aria-pressed={activeTab === 'users'}
         className={`rounded-lg px-4 py-2 transition-colors ${activeTab === 'users' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`}`}
       >
         用户列表
       </button>
       {canViewLogs && (
         <button
+          type="button"
           onClick={() => setActiveTab('logs')}
+          aria-pressed={activeTab === 'logs'}
           className={`flex items-center gap-2 rounded-lg px-4 py-2 transition-colors ${activeTab === 'logs' ? styles.buttonPrimary : `${styles.textSecondary} ${styles.hoverBg}`}`}
         >
           <History className="h-4 w-4" />
@@ -1501,13 +1505,13 @@ export default function Users() {
             ) : activePendingUserToggleRequest ? (
               <button
                 type="button"
-                disabled={userMutationPending || activePendingUserToggleRequest.recoveryCheck === 'checking'}
+                disabled={permissionsLoading || userMutationPending || activePendingUserToggleRequest.recoveryCheck === 'checking'}
                 onClick={() => activePendingUserToggleRequest.recoveryCheck === 'not_found' && canUpdateUser
                   ? void handleToggleEnable(recoveredUserFromToggle(activePendingUserToggleRequest))
                   : void verifyUserToggleRecovery(activePendingUserToggleRequest)}
                 className={`self-start rounded-lg px-4 py-2 ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto`}
               >
-                {userMutationPending || activePendingUserToggleRequest.recoveryCheck === 'checking'
+                {permissionsLoading || userMutationPending || activePendingUserToggleRequest.recoveryCheck === 'checking'
                   ? '正在核实启停'
                   : activePendingUserToggleRequest.recoveryCheck === 'not_found' && canUpdateUser
                     ? '安全重试上次启停'
@@ -1734,7 +1738,7 @@ export default function Users() {
                     ? '当前暂时无法核实上次更新结果。原字段已锁定；请只读重新核实，暂不重发更新。'
                     : '上次保存结果尚未确认。为避免重复修改密码、角色或会话，表单已锁定；再次保存会安全重试同一请求。'}
               {activePendingUserEditRequest.recoveryCheck === 'unavailable' ? (
-                <button type="button" disabled={userMutationPending} onClick={() => void verifyUserEditRecovery(activePendingUserEditRequest)} className={`ml-2 min-h-10 rounded-lg px-3 py-1 ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-50`}>
+                <button type="button" disabled={permissionsLoading || userMutationPending} onClick={() => void verifyUserEditRecovery(activePendingUserEditRequest)} className={`ml-2 min-h-10 rounded-lg px-3 py-1 ${styles.buttonSecondary} disabled:cursor-not-allowed disabled:opacity-50`}>
                   {userMutationPending ? '正在核实' : '只读重新核实'}
                 </button>
               ) : null}

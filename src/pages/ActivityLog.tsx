@@ -172,8 +172,9 @@ export default function ActivityLog() {
           <ActionButton type="button" variant="secondary" disabled={loading} onClick={() => void fetchLogs()}>{loading ? '正在重新加载…' : '重新加载日志'}</ActionButton>
         </div> : null}
         {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-6 h-6 animate-spin text-studio-primary" />
+          <div role="status" aria-live="polite" aria-atomic="true" className="flex items-center justify-center gap-3 py-16">
+            <Loader2 aria-hidden="true" className="w-6 h-6 animate-spin text-studio-primary" />
+            <span className={styles.textSecondary}>正在加载活动日志…</span>
           </div>
         ) : logsError && logs.length === 0 ? null : logs.length === 0 ? (
           <div className="text-center py-16">

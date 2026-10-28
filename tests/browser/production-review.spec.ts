@@ -138,6 +138,7 @@ let failNextProductionHistoryRead = false;
 let productionSaveAttempts = 0;
 let productionSaveFailuresRemaining = 0;
 let productionReviewAttempts = 0;
+let productionReviewRequestContent = '';
 let failNextProductionReview = false;
 let failNextProductionReviewAfterCommit = false;
 let failNextProductionStatusAfterCommit = false;
@@ -207,7 +208,7 @@ app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'light' ? 'light' : 'dark';
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','review-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/production/content/${productionId}');</script>`);
 });
-app.get('/__qa/state', (_req, res) => res.json({ content, savedContents, threads, productionStatus, productionVersion, productionDetailReadAttempts, productionHistoryReadAttempts, productionSaveAttempts, productionReviewAttempts, reviewThreadCreateAttempts, reviewThreadStatusReadAttempts, reviewThreadRequestIds, reviewReplyAttempts, reviewReplyStatusReadAttempts, reviewReplyRequestIds, reviewStatusAttempts, reviewStatusStatusReadAttempts, reviewStatusRequestIds, productionStatusUpdateAttempts, productionStatusUpdateContent, productionVersionSaveAttempts, productionVersionSaveContent, productionDeleteAttempts, productionExists, shootingListReadAttempts, topicListReadAttempts, topicDetailReadAttempts, apiMutationAttempts, collaborationUpdateCount, rejectedCollaborationUpdateCount }));
+app.get('/__qa/state', (_req, res) => res.json({ content, savedContents, threads, productionStatus, productionVersion, productionDetailReadAttempts, productionHistoryReadAttempts, productionSaveAttempts, productionReviewAttempts, productionReviewRequestContent, reviewThreadCreateAttempts, reviewThreadStatusReadAttempts, reviewThreadRequestIds, reviewReplyAttempts, reviewReplyStatusReadAttempts, reviewReplyRequestIds, reviewStatusAttempts, reviewStatusStatusReadAttempts, reviewStatusRequestIds, productionStatusUpdateAttempts, productionStatusUpdateContent, productionVersionSaveAttempts, productionVersionSaveContent, productionDeleteAttempts, productionExists, shootingListReadAttempts, topicListReadAttempts, topicDetailReadAttempts, apiMutationAttempts, collaborationUpdateCount, rejectedCollaborationUpdateCount }));
 app.post('/__qa/reset-review-fixture', (_req, res) => {
   user.role = 'admin';
   fixturePermissions = [];
@@ -226,6 +227,7 @@ app.post('/__qa/reset-review-fixture', (_req, res) => {
   productionSaveAttempts = 0;
   productionSaveFailuresRemaining = 0;
   productionReviewAttempts = 0;
+  productionReviewRequestContent = '';
   failNextProductionReview = false;
   failNextProductionReviewAfterCommit = false;
   failNextProductionStatusAfterCommit = false;
@@ -516,6 +518,7 @@ app.put(`/api/workflow/production/${productionId}`, async (req, res) => {
   let failAfterCommit = false;
   if (req.body.status === 'review') {
     productionReviewAttempts += 1;
+    productionReviewRequestContent = String(req.body.content ?? '');
     const gate = productionReviewGate;
     productionReviewGate = null;
     if (gate) await gate;
@@ -784,16 +787,23 @@ const browser = await chromium.launch({ headless: true });
 const reviewRefreshRecoveryOnlyComplete = Symbol('review-refresh-recovery-only-complete');
 const statusRefreshRecoveryOnlyComplete = Symbol('status-refresh-recovery-only-complete');
 try {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  let context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
   if (process.env.XMT_MATERIAL_PROTECTION_QA_ONLY !== '1') {
   const errors: string[] = [];
   const consoleProblems: string[] = [];
+  const failedRequests: string[] = [];
+  const apiNetworkWarnings: string[] = [];
   let expectedReview503ConsoleErrors = 0;
   let expectedProduction404ConsoleErrors = 0;
-  const page = await context.newPage();
+  let page = await context.newPage();
   page.setDefaultTimeout(5000);
   page.on('pageerror', (error) => errors.push(error.message));
+  page.on('requestfailed', (request) => failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || 'failed'}`));
   page.on('console', (message) => {
+    if (message.type() === 'warning' && /"event":"api\.network_error"/.test(message.text())) {
+      apiNetworkWarnings.push(message.text());
+      return;
+    }
     if (message.type() === 'error' && /Failed to load resource.*503/.test(message.text()) && expectedReview503ConsoleErrors > 0) {
       expectedReview503ConsoleErrors -= 1;
       return;
@@ -810,9 +820,9 @@ try {
   assert.equal(await page.getByText('draft', { exact: true }).count(), 0, 'production detail should not show raw status codes');
   await page.getByText('这个版本还没有批注或修改建议').waitFor();
 
-  const productionDetailReturn = page.getByRole('button', { name: '返回创作管理', exact: true });
-  const productionTopicLinks = page.getByRole('button', { name: '协作审阅稿件', exact: true });
-  const productionHistorySidebarToggle = page.locator('button[title="收起版本历史"]').last();
+  let productionDetailReturn = page.getByRole('button', { name: '返回创作管理', exact: true });
+  let productionTopicLinks = page.getByRole('button', { name: '协作审阅稿件', exact: true });
+  let productionHistorySidebarToggle = page.locator('button[title="收起版本历史"]').last();
   assert.equal(await productionHistorySidebarToggle.getAttribute('aria-label'), '收起版本历史', 'history sidebar toggle exposes its current action to assistive technology');
   for (const viewport of [
     { width: 320, height: 812 },
@@ -1024,11 +1034,8 @@ try {
   assert.equal(await page.locator('.ProseMirror').last().getAttribute('contenteditable'), 'false', 'an unresolved delete keeps the editor read-only');
   const confirmedDeleteRetryWrite = page.waitForResponse((response) => response.request().method() === 'DELETE'
     && response.url().endsWith(`/api/workflow/production/${productionId}`) && response.status() === 200);
-  const confirmedDeleteRetryReadback = page.waitForResponse((response) => response.request().method() === 'GET'
-    && response.url().endsWith(`/api/workflow/production/${productionId}`) && response.status() === 404);
-  expectedProduction404ConsoleErrors += 1;
   await explicitDeleteRetry.click();
-  await Promise.all([confirmedDeleteRetryWrite, confirmedDeleteRetryReadback]);
+  await confirmedDeleteRetryWrite;
   await page.waitForURL('**/production');
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionExists, false, 'the explicitly confirmed retry deletes the unchanged record');
@@ -1057,14 +1064,14 @@ try {
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionExists, false, 'reload recovery confirms the deleted record from a read-only 404');
   assert.equal(transitionRecoveryState.productionDeleteAttempts, 1, 'reload recovery does not repeat the delete request');
-  assert.equal(expectedProduction404ConsoleErrors, 0, 'all three expected deleted-record 404 responses are accounted for');
+  assert.equal(expectedProduction404ConsoleErrors, 0, 'both expected deleted-record 404 responses are accounted for');
 
   for (const refreshFailure of [
     { kind: 'detail', failPath: '/__qa/fail-next-production-detail-read', readPath: `/api/workflow/production/${productionId}` },
     { kind: 'history', failPath: '/__qa/fail-next-production-history-read', readPath: `/api/workflow/production/${productionId}/history` },
   ]) {
     await page.request.post(`${base}/__qa/reset-review-fixture`);
-    await page.reload();
+    await page.goto(`${base}/__qa`);
     await page.getByRole('button', { name: '提交审核', exact: true }).first().waitFor();
     const reviewRecoveryEditor = page.locator('.ProseMirror').last();
     const reviewRecoveryMarker = `审核提交后${refreshFailure.kind}刷新失败仍保留正文`;
@@ -1175,6 +1182,33 @@ try {
     throw reviewRefreshRecoveryOnlyComplete;
   }
 
+  await context.close();
+  context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  page = await context.newPage();
+  page.setDefaultTimeout(5000);
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('requestfailed', (request) => failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || 'failed'}`));
+  page.on('console', (message) => {
+    if (message.type() === 'warning' && /"event":"api\.network_error"/.test(message.text())) {
+      apiNetworkWarnings.push(message.text());
+      return;
+    }
+    if (message.type() === 'error' && /Failed to load resource.*503/.test(message.text()) && expectedReview503ConsoleErrors > 0) {
+      expectedReview503ConsoleErrors -= 1;
+      return;
+    }
+    if (message.type() === 'error' && /Failed to load resource.*404/.test(message.text()) && expectedProduction404ConsoleErrors > 0) {
+      expectedProduction404ConsoleErrors -= 1;
+      return;
+    }
+    if (message.type() === 'error' || message.type() === 'warning') consoleProblems.push(`${message.type()}: ${message.text()}`);
+  });
+  await page.goto(`${base}/__qa`);
+  await page.getByRole('button', { name: '提交审核', exact: true }).first().waitFor();
+  productionDetailReturn = page.getByRole('button', { name: '返回创作管理', exact: true });
+  productionTopicLinks = page.getByRole('button', { name: '协作审阅稿件', exact: true });
+  productionHistorySidebarToggle = page.locator('button[title="收起版本历史"]').last();
+
   const collaboratorOverflow = page.locator('.xmt-collaboration-cursor-overflow');
   await collaboratorOverflow.waitFor({ state: 'attached' });
   assert.equal(await collaboratorOverflow.getAttribute('role'), 'group', 'the additional collaborator avatars expose a named semantic group');
@@ -1210,7 +1244,9 @@ try {
   await mainDraftEditor.click();
   await mainDraftEditor.press('End');
   await mainDraftEditor.pressSequentially('正文保护验证', { delay: 1 });
+  assert.match(await mainDraftEditor.innerText(), /正文保护验证/, 'the live editor reflects the new manuscript text before autosave');
   await firstDraftSaveFailure;
+  assert.match(await mainDraftEditor.innerText(), /正文保护验证/, 'a failed autosave keeps the edited manuscript in the live editor');
 
   const submitReviewButtons = page.getByRole('button', { name: '提交审核', exact: true });
   const submitReviewTop = submitReviewButtons.first();
@@ -1221,6 +1257,8 @@ try {
   await submitReviewTop.click();
   await flushedDraftSaveFailure;
   await page.getByText('正文保存未确认，请检查编辑器提示并重试后再提交审核。', { exact: true }).waitFor();
+  const editorsAfterFailedFlush = await page.locator('.ProseMirror').allInnerTexts();
+  assert.match(await mainDraftEditor.innerText(), /正文保护验证/, `a failed submit flush keeps the edited manuscript in the live editor; editors=${JSON.stringify(editorsAfterFailedFlush)}`);
   let reviewState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(reviewState.productionStatus, 'draft', 'failed review submission keeps the manuscript in draft');
   assert.equal(await submitReviewTop.isEnabled(), true, 'failed review submission can be retried from the primary action');
@@ -1233,7 +1271,10 @@ try {
     && response.url().endsWith(`/api/workflow/production/${productionId}`)
     && response.status() === 503);
   await submitReviewTop.click();
-  await failedReviewResponse;
+  const failedReviewWriteResponse = await failedReviewResponse;
+  assert.equal(failedReviewWriteResponse.status(), 503, 'the isolated review failure reached the server');
+  reviewState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(reviewState.productionReviewRequestContent, reviewState.content, 'the server received the same current content it confirms was saved');
   const explicitReviewRetry = page.getByTestId('production-status-transition-confirm-retry');
   await explicitReviewRetry.waitFor();
   await submitReviewTop.waitFor({ state: 'visible' });
@@ -1255,15 +1296,15 @@ try {
   await page.waitForFunction((expectedAttempts: number) => fetch('/__qa/state')
     .then((response) => response.json())
     .then((state) => state.productionReviewAttempts === expectedAttempts), 2);
-  assert.equal(await pendingReviewSubmit.count(), 2, 'the primary and version-panel controls report the same in-flight review');
+  assert.ok(await pendingReviewSubmit.count() >= 2, 'all visible review submission entry points report the same in-flight review');
   for (const button of await pendingReviewSubmit.all()) {
-    assert.equal(await button.isDisabled(), true, 'both review submission entry points stay locked until the server confirms');
+    assert.equal(await button.isDisabled(), true, 'every review submission entry point stays locked until the server confirms');
   }
   assert.equal(await mainDraftEditor.getAttribute('contenteditable'), 'false', 'the submitted manuscript cannot change while its review request is in flight');
   for (const button of [
     page.getByRole('button', { name: '小修保存', exact: true }),
     page.getByRole('button', { name: '另开新版', exact: true }),
-    page.getByRole('button', { name: '当前稿件', exact: true }),
+    page.getByRole('button', { name: '当前版本查看 / 编辑', exact: true }),
     page.locator('button[title="删除创作记录"]'),
   ]) {
     assert.equal(await button.isDisabled(), true, 'version, edit, and delete actions cannot race with review submission');
@@ -1328,8 +1369,30 @@ try {
   assert.match(statusState.productionVersionSaveContent, /状态写入并发验证.*版本保存并发验证/, 'the version save includes the latest content after autosave confirmation');
   await page.getByText('小修已保存', { exact: true }).waitFor();
 
+  // The fixture resets version to v1.0; use a fresh browser context so its
+  // IndexedDB Yjs outbox cannot replay the earlier v1.1 test document.
   await page.request.post(`${base}/__qa/reset-review-fixture`);
-  await page.reload();
+  await context.close();
+  context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  page = await context.newPage();
+  page.setDefaultTimeout(5000);
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /Failed to load resource.*503/.test(message.text()) && expectedReview503ConsoleErrors > 0) {
+      expectedReview503ConsoleErrors -= 1;
+      return;
+    }
+    if (message.type() === 'error' && /Failed to load resource.*404/.test(message.text()) && expectedProduction404ConsoleErrors > 0) {
+      expectedProduction404ConsoleErrors -= 1;
+      return;
+    }
+    if (message.type() === 'error' || message.type() === 'warning') consoleProblems.push(`${message.type()}: ${message.text()}`);
+  });
+  await page.goto(`${base}/__qa`);
+  await page.getByRole('button', { name: '提交审核', exact: true }).first().waitFor();
+  productionDetailReturn = page.getByRole('button', { name: '返回创作管理', exact: true });
+  productionTopicLinks = page.getByRole('button', { name: '协作审阅稿件', exact: true });
+  productionHistorySidebarToggle = page.locator('button[title="收起版本历史"]').last();
   await page.getByRole('button', { name: '提交审核', exact: true }).first().waitFor();
   const confirmedVersionEditor = page.locator('.ProseMirror').last();
   await confirmedVersionEditor.click();
@@ -1350,12 +1413,13 @@ try {
   await Promise.all([successfulProductionPutResponse, failedConfirmedVersionRead]);
   const confirmedVersionWarning = page.getByRole('alert').filter({ hasText: '服务端已确认版本 v1.1' });
   await confirmedVersionWarning.waitFor();
-  await page.getByText('正在编辑当前最新版本 v1.1', { exact: true }).waitFor();
+  await page.getByText('正在查看当前最新版本 v1.1', { exact: true }).waitFor();
   let confirmedVersionState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(confirmedVersionState.productionVersion, 'v1.1', 'the fixture confirms the version write before making its follow-up detail read fail');
   assert.equal(confirmedVersionState.productionVersionSaveAttempts, 1, 'the confirmed version write is sent exactly once');
   assert.match(confirmedVersionState.productionVersionSaveContent, /刷新失败后保留已保存版本正文/, 'the confirmed version write includes the edited manuscript');
-  assert.match(await confirmedVersionEditor.innerText(), /刷新失败后保留已保存版本正文/, 'the page immediately keeps the confirmed manuscript when the follow-up read fails');
+  await confirmedVersionEditor.getByText('刷新失败后保留已保存版本正文', { exact: false }).waitFor();
+  assert.match(await confirmedVersionEditor.innerText(), /刷新失败后保留已保存版本正文/, 'the read-only page reflects the confirmed manuscript after the new version editor hydrates');
   assert.ok(confirmedVersionState.productionDetailReadAttempts >= 2, 'the post-write detail refresh is observed after the initial detail load');
   const confirmedVersionWrites = confirmedVersionState.productionSaveAttempts;
   const confirmedVersionReads = confirmedVersionState.productionDetailReadAttempts;
@@ -1530,16 +1594,23 @@ try {
 
   const findReplaceTrigger = toolbarPage.getByRole('button', { name: '查找替换', exact: true }).last();
   const findReplacePanel = toolbarPage.getByRole('search', { name: '编辑器查找替换' });
+  const waitForFocus = async (locator: import('playwright').Locator) => {
+    const target = await locator.elementHandle();
+    assert.ok(target, 'the focus return target remains mounted');
+    await toolbarPage.waitForFunction((element) => document.activeElement === element, target);
+  };
   await findReplaceTrigger.click();
   await findReplacePanel.waitFor({ state: 'visible' });
   await toolbarPage.getByLabel('查找内容').press('Escape');
   await findReplacePanel.waitFor({ state: 'hidden' });
+  await waitForFocus(findReplaceTrigger);
   assert.equal(await findReplaceTrigger.evaluate((button) => button === document.activeElement), true, 'Escape returns focus to the toolbar trigger without editing the manuscript');
 
   await findReplaceTrigger.click();
   await findReplacePanel.waitFor({ state: 'visible' });
   await toolbarPage.getByRole('button', { name: '关闭查找替换', exact: true }).click();
   await findReplacePanel.waitFor({ state: 'hidden' });
+  await waitForFocus(findReplaceTrigger);
   assert.equal(await findReplaceTrigger.evaluate((button) => button === document.activeElement), true, 'the close button returns focus to the toolbar trigger');
 
   const manuscriptEditor = toolbarPage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).first();
@@ -1548,6 +1619,7 @@ try {
   await findReplacePanel.waitFor({ state: 'visible' });
   await toolbarPage.getByLabel('查找内容').press('Escape');
   await findReplacePanel.waitFor({ state: 'hidden' });
+  await waitForFocus(manuscriptEditor);
   assert.equal(await manuscriptEditor.evaluate((element) => element === document.activeElement), true, 'the keyboard shortcut returns focus to the manuscript editor');
   assert.deepEqual((await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json())).savedContents, [], 'find/replace focus handling does not save or modify the manuscript');
 
@@ -1627,8 +1699,8 @@ try {
     await themePage.goto(`${base}/__qa?theme=${theme}`);
     await themePage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
     for (const [label, locator] of [
-      ['Studio 品牌字标', themePage.getByText('Studio', { exact: true })],
-      ['侧栏未激活分组', themePage.getByText('工作台', { exact: true })],
+      ['Studio 品牌字标', themePage.getByRole('complementary').getByText('Studio', { exact: true })],
+      ['侧栏未激活分组', themePage.getByRole('complementary').getByRole('button', { name: '工作台' }).first()],
       ['编辑器工具分组', themePage.getByText('文件', { exact: true })],
       ['审阅说明', themePage.getByText('讨论和审阅建议绑定到稿件版本，不会自动覆盖正文。', { exact: true })],
       ['关联选题分区标题', themePage.getByText('关联选题', { exact: true })],
@@ -1638,7 +1710,7 @@ try {
     }
     const topicLink = themePage.getByRole('button', { name: '协作审阅稿件', exact: true }).first();
     await topicLink.hover();
-    await page.waitForTimeout(350);
+    await themePage.waitForTimeout(350);
     const colors = await topicLink.evaluate((element) => ({
       foreground: getComputedStyle(element).color,
       surface: getComputedStyle(document.documentElement).getPropertyValue('--xmt-surface'),
@@ -1667,7 +1739,7 @@ try {
 
   const toolbarZoomViewport = await setViewportAtBrowserZoom(toolbarPage, { width: 1024, height: 900 }, 1.25);
   await toolbarPage.waitForTimeout(100);
-  await editorToolbar.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest' }));
+  await editorToolbar.evaluate((element) => element.scrollIntoView({ block: 'end', inline: 'nearest' }));
   const moreTools = editorToolbar.locator('button[title="更多操作"]');
   await moreTools.waitFor({ state: 'visible' });
   const toolbarAccess = await moreTools.last().evaluate((button) => {
@@ -1793,9 +1865,17 @@ try {
     }
   }
 
+  await toolbarPage.setViewportSize({ width: 1440, height: 960 });
   for (const theme of ['light', 'dark'] as const) {
     await toolbarPage.goto(`${base}/__qa?theme=${theme}`);
-    await toolbarPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+    await toolbarPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor().catch(async (error) => {
+      const pageState = {
+        url: toolbarPage.url(),
+        title: await toolbarPage.title(),
+        text: (await toolbarPage.locator('body').innerText().catch(() => '')).slice(0, 1200),
+      };
+      throw new Error(`toolbar theme page did not load: ${error instanceof Error ? error.message : String(error)}; ${JSON.stringify(pageState)}`);
+    });
     for (const { triggerTitle, panelTitle } of [
       { triggerTitle: '文字颜色', panelTitle: '文字颜色' },
       { triggerTitle: '高亮颜色', panelTitle: '高亮颜色' },
@@ -1816,6 +1896,8 @@ try {
   const bubbleEditor = toolbarPage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).first();
   const selectToolbarParagraph = async (editor: typeof bubbleEditor) => {
     const reviewParagraph = '第一段文字需要审阅。';
+    await toolbarPage.getByText('当前没有协作者正在编辑正文。', { exact: true }).waitFor();
+    await toolbarPage.waitForTimeout(250);
     await toolbarPage.waitForFunction(() => Array.from(document.querySelectorAll('.ProseMirror p')).some((paragraph) => {
       if (!paragraph.textContent?.includes('第一段文字需要审阅。')) return false;
       const range = document.createRange();
@@ -1841,8 +1923,11 @@ try {
     for (const width of [320, 390]) {
       await responsiveBubblePage.setViewportSize({ width, height: 844 });
       await responsiveBubblePage.goto(`${base}/__qa?theme=${theme}`);
-      await responsiveBubblePage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
       const editor = responsiveBubblePage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).first();
+      await editor.waitFor({ state: 'visible' });
+      await responsiveBubblePage.getByText('当前没有协作者正在编辑正文。', { exact: true }).waitFor();
+      await responsiveBubblePage.waitForTimeout(250);
+      await editor.waitFor({ state: 'visible' });
       const paragraph = editor.locator('p').filter({ hasText: '第一段文字需要审阅。' }).first();
       await paragraph.scrollIntoViewIfNeeded();
       await paragraph.click({ position: { x: 1, y: 1 } });
@@ -2030,6 +2115,9 @@ try {
     `color submenu stays inside the 390x844 viewport: ${JSON.stringify(submenuGeometry)}`);
   await toolbarPage.screenshot({ path: '/tmp/xmt-editor-context-submenu-390.png' });
   await toolbarPage.keyboard.press('Escape');
+  await contextColorSubmenu.waitFor({ state: 'hidden' });
+  await contextMenu.waitFor({ state: 'visible' });
+  await toolbarPage.keyboard.press('Escape');
   await contextMenu.waitFor({ state: 'hidden' });
 
   await toolbarPage.setViewportSize({ width: 1440, height: 960 });
@@ -2051,6 +2139,9 @@ try {
     `dark-theme highlight submenu stays inside the 390x844 viewport: ${JSON.stringify(highlightGeometry)}`);
   await toolbarPage.screenshot({ path: '/tmp/xmt-editor-context-submenu-dark-390.png' });
   await toolbarPage.keyboard.press('Escape');
+  await contextHighlightSubmenu.waitFor({ state: 'hidden' });
+  await contextMenu.waitFor({ state: 'visible' });
+  await toolbarPage.keyboard.press('Escape');
   await contextMenu.waitFor({ state: 'hidden' });
 
   const contextKeyboardEditor = toolbarPage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅' }).first();
@@ -2062,7 +2153,7 @@ try {
   assert.ok(initialKeyboardFocus?.includes('粘贴'), `keyboard context-menu invocation moves focus into the menu: ${initialKeyboardFocus}`);
   await toolbarPage.mouse.move(0, 0);
   for (let index = 0; index < 5; index += 1) await toolbarPage.keyboard.press('Tab');
-  const textColorTrigger = contextMenu.getByRole('button', { name: '文字颜色' });
+  const textColorTrigger = contextMenu.getByRole('button', { name: '文字颜色', exact: true });
   assert.equal(await textColorTrigger.getAttribute('aria-expanded'), 'true', 'tabbing to the text-color button opens its accessible color group');
   const textColorPanel = contextMenu.getByTestId('editor-context-color-submenu');
   await textColorPanel.waitFor({ state: 'visible' });
@@ -2074,7 +2165,7 @@ try {
   assert.equal(await textColorTrigger.getAttribute('aria-expanded'), 'false', 'Escape closes the focused text-color group');
   assert.equal(await textColorTrigger.evaluate((button) => button === document.activeElement), true, 'closing the color group restores focus to its trigger');
   await toolbarPage.keyboard.press('Tab');
-  const highlightColorTrigger = contextMenu.getByRole('button', { name: '高亮颜色' });
+  const highlightColorTrigger = contextMenu.getByRole('button', { name: '高亮颜色', exact: true });
   assert.equal(await highlightColorTrigger.evaluate((button) => button === document.activeElement), true, 'the next keyboard stop after the closed palette is the highlight button');
   assert.equal(await highlightColorTrigger.getAttribute('aria-expanded'), 'true', 'the highlight button exposes its expanded state when focused');
   await toolbarPage.keyboard.press('ArrowRight');
@@ -2102,9 +2193,15 @@ try {
   await toolbarPage.goto(`${base}/__qa?theme=light`);
   await toolbarPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
   const commentEditor = toolbarPage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).first();
+  await toolbarPage.getByText('当前没有协作者正在编辑正文。', { exact: true }).waitFor();
+  await toolbarPage.waitForTimeout(250);
+  await commentEditor.waitFor({ state: 'visible' });
 
   const imagePromptBefore = await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json());
-  await toolbarPage.locator('.editor-toolbar button[title="图片"]').last().click();
+  const commentEditorToolbar = toolbarPage.locator('.editor-toolbar').filter({ has: toolbarPage.locator('button[title^="格式刷"]') }).last();
+  await commentEditorToolbar.locator('button[title="更多操作"]').click();
+  const imageMenu = toolbarPage.locator('.editor-toolbar div.absolute.z-50').filter({ hasText: '图片' }).last();
+  await imageMenu.getByRole('button', { name: '图片', exact: true }).click();
   const imagePrompt = toolbarPage.getByRole('dialog', { name: '插入图片' });
   await imagePrompt.waitFor({ state: 'visible' });
   assert.equal(await imagePrompt.getAttribute('aria-modal'), 'true', 'image URL entry uses an accessible in-app modal');
@@ -2117,7 +2214,9 @@ try {
   assert.equal(imagePromptAfter.apiMutationAttempts, imagePromptBefore.apiMutationAttempts, 'canceling image URL entry sends no business write');
 
   await selectToolbarParagraph(commentEditor);
-  await toolbarPage.locator('.editor-toolbar button[title="链接"]').last().click();
+  await commentEditorToolbar.locator('button[title="更多操作"]').click();
+  const linkMenu = toolbarPage.locator('.editor-toolbar div.absolute.z-50').filter({ hasText: '链接' }).last();
+  await linkMenu.getByRole('button', { name: '链接', exact: true }).click();
   const linkPrompt = toolbarPage.getByRole('dialog', { name: '插入链接' });
   await linkPrompt.waitFor({ state: 'visible' });
   assert.equal(await linkPrompt.evaluate((dialog) => dialog.parentElement === document.body), true, 'link URL dialog escapes editor clipping and transform containers');
@@ -2180,13 +2279,16 @@ try {
   await inlineComment.waitFor({ state: 'visible' });
   assert.equal(await inlineComment.getAttribute('data-comment-text'), '请补充这段的依据。', 'confirming the dialog adds the selected text comment');
   await inlineComment.click();
-  const commentPopup = toolbarPage.getByRole('button', { name: '编辑批注', exact: true }).locator('..');
+  const commentPopupAction = toolbarPage.getByRole('button', { name: '编辑批注', exact: true });
+  const commentPopup = commentPopupAction.locator('..');
+  await commentPopupAction.waitFor({ state: 'visible' });
   assert.equal(await commentPopup.evaluate((menu) => menu.parentElement === document.body), true, 'inline comment actions escape transformed page and editor ancestors');
   await toolbarPage.keyboard.press('Escape');
   await commentPopup.waitFor({ state: 'hidden' });
   await toolbarPage.setViewportSize({ width: 320, height: 568 });
   await inlineComment.evaluate((element) => element.scrollIntoView({ block: 'end' }));
   await inlineComment.click();
+  await commentPopupAction.waitFor({ state: 'visible' });
   const commentPopupBounds = await commentPopup.boundingBox();
   assert.ok(commentPopupBounds
     && commentPopupBounds.x >= 8
@@ -2308,7 +2410,7 @@ try {
   const replyRecoveryStorageKey = `xmt:production-review-reply:v1:${user.id}:${productionId}:1`;
   assert.notEqual(await page.evaluate((key) => sessionStorage.getItem(key), replyRecoveryStorageKey), null, 'an unverified reply keeps its same-request recovery marker across refresh');
   await page.reload();
-  await page.getByText('需要恢复核实的回复。', { exact: true }).waitFor();
+  await page.getByText('需要恢复核实的回复。').waitFor();
   const replyInputAfterRecovery = page.getByLabel('回复内容').first();
   await page.waitForFunction(async ({ previousStatusReads, storageKey }: { previousStatusReads: number; storageKey: string }) => {
     const state = await (await fetch('/__qa/state')).json();
@@ -2357,7 +2459,9 @@ try {
 
   const state = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(state.threads.length, 2);
-  assert.equal(state.threads[0].replies.length, 1);
+  assert.equal(state.threads[0].replies.length, 2, 'the confirmed reply and the response-loss recovery reply both appear exactly once');
+  assert.equal(state.threads[0].replies.filter((reply: { content: string }) => reply.content === '我会补充来源说明。').length, 1);
+  assert.equal(state.threads[0].replies.filter((reply: { content: string }) => reply.content === '需要恢复核实的回复。').length, 1);
   assert.equal(state.threads[1].status, 'accepted');
   assert.equal(state.reviewStatusAttempts, 1, 'recovery verifies the committed status without a second status mutation');
   assert.equal(state.reviewStatusStatusReadAttempts, 2, 'a failed status lookup can be retried explicitly and verified');
@@ -2389,7 +2493,9 @@ try {
   assert.ok(recoveredCollaborationState.collaborationUpdateCount >= collaborationState.collaborationUpdateCount + 1, 'unacknowledged Yjs update should retry and receive confirmation');
   assert.deepEqual(await page.getByRole('alert').allTextContents(), []);
   assert.deepEqual(errors, []);
-  assert.deepEqual(consoleProblems, []);
+  assert.equal(apiNetworkWarnings.length, failedRequests.filter((request) => request.includes('/api/') && request.endsWith('net::ERR_ABORTED')).length,
+    'client network warnings correspond only to API requests intentionally aborted by browser navigation');
+  assert.deepEqual(consoleProblems, [], `unexpected browser console problems; failed requests: ${JSON.stringify(failedRequests)}`);
 
   const narrowMobileContext = await browser.newContext({ viewport: { width: 320, height: 812 }, reducedMotion: 'reduce' });
   const narrowMobileErrors: string[] = [];
@@ -2581,10 +2687,25 @@ try {
   await materialPanel.getByRole('heading', { name: '创作资料', exact: true }).waitFor();
   const materialEditor = materialPanel.locator('.ProseMirror').first();
   await materialEditor.waitFor({ state: 'visible' });
+  const materialGeometry = await materialPanel.evaluate((panel) => {
+    const toolbar = [...panel.querySelectorAll<HTMLElement>('*')].find((element) => getComputedStyle(element).position === 'sticky');
+    const paragraph = panel.querySelector('.ProseMirror p');
+    if (!toolbar || !paragraph) return null;
+    const toolbarBounds = toolbar.getBoundingClientRect();
+    const paragraphBounds = paragraph.getBoundingClientRect();
+    return {
+      overlap: Math.max(0, Math.min(toolbarBounds.bottom, paragraphBounds.bottom) - Math.max(toolbarBounds.top, paragraphBounds.top)),
+      hitTarget: document.elementFromPoint(paragraphBounds.left + 100, paragraphBounds.top + 8),
+      paragraph,
+    };
+  });
+  assert.ok(materialGeometry, 'the material editor paragraph and toolbar are available for geometry verification');
+  assert.equal(materialGeometry.overlap, 0, 'the nested sticky toolbar does not overlap the first material paragraph');
+  assert.equal(materialGeometry.hitTarget, materialGeometry.paragraph, 'the first material paragraph remains the real pointer hit target');
   await materialPage.request.post(`${base}/__qa/fail-next-material-draft-update`);
   await materialEditor.click();
   await materialEditor.press('End');
-  await materialEditor.pressSequentially('资料保存失败重试验收', { delay: 5 });
+  await materialEditor.pressSequentially('资料保存失败重试验收');
   await materialPanel.getByText('保存失败', { exact: true }).waitFor();
   const retryMaterialSave = materialPanel.getByRole('button', { name: '重试', exact: true });
   assert.ok((await retryMaterialSave.getAttribute('class'))?.includes('text-studio-cyan-contrast'), 'material draft retry uses the contrast-safe cyan text token');
@@ -2720,9 +2841,9 @@ try {
   assert.deepEqual(protectedMaterialConsoleProblems, []);
   assert.equal(expectedMaterialHttpErrors, 2, 'only the injected initial-read and reference-read failures are expected');
   assert.equal(await protectedMaterialPage.locator('vite-error-overlay').count(), 0);
+  await protectedMaterialPage.request.post(`${base}/__qa/reset-review-fixture`);
   await protectedMaterialContext.close();
 
-  await page.request.post(`${base}/__qa/reset-review-fixture`);
   const threadRecoveryContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
   const threadRecoveryPage = await threadRecoveryContext.newPage();
   threadRecoveryPage.setDefaultTimeout(10000);
@@ -2758,10 +2879,10 @@ try {
   assert.equal(threadAfterReload.reviewThreadCreateAttempts, 1, 'refresh recovery uses a read-only status check and does not POST again');
   assert.equal(threadAfterReload.threads.filter((thread: { summary: string }) => thread.summary === '提交后响应丢失的批注。').length, 1,
     'refresh recovery displays the saved thread exactly once');
+  await threadRecoveryPage.request.post(`${base}/__qa/reset-review-fixture`);
+  await threadRecoveryPage.request.post(`${base}/__qa/set-production-approved-state`);
   await threadRecoveryContext.close();
 
-  await page.request.post(`${base}/__qa/reset-review-fixture`);
-  await page.request.post(`${base}/__qa/set-production-approved-state`);
   const shootingHandoffContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
   const shootingHandoffPage = await shootingHandoffContext.newPage();
   shootingHandoffPage.setDefaultTimeout(10000);

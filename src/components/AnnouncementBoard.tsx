@@ -680,13 +680,16 @@ export default function AnnouncementBoard() {
 
       <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
         {loading && !loaded ? (
-          <div className="space-y-2">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="animate-pulse rounded-card border border-studio-border-soft bg-studio-surface-soft p-3">
-                <div className="mb-2 h-3 w-3/4 rounded bg-studio-surface-elevated" />
-                <div className="h-2 w-1/2 rounded bg-studio-surface-elevated" />
-              </div>
-            ))}
+          <div role="status" aria-live="polite" aria-atomic="true">
+            <span className="sr-only">正在加载公告列表…</span>
+            <div aria-hidden="true" className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="animate-pulse rounded-card border border-studio-border-soft bg-studio-surface-soft p-3">
+                  <div className="mb-2 h-3 w-3/4 rounded bg-studio-surface-elevated" />
+                  <div className="h-2 w-1/2 rounded bg-studio-surface-elevated" />
+                </div>
+              ))}
+            </div>
           </div>
         ) : !loaded && loadError ? (
           <div className="rounded-card border border-dashed border-studio-border-soft py-6 text-center text-sm text-studio-text-muted">公告列表不可用，请重新加载后再查看。</div>

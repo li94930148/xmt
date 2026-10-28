@@ -1,5 +1,308 @@
 # Changelog
 
+## v9.6.21 - 2026-10-28
+
+### Accessibility
+
+- 设置分类、成就状态筛选、人员管理视图和归档信息视图现在用读屏可识别的选中状态表达当前内容。
+
+### Validation
+
+- 成就筛选、人员视图切换及完整恢复长套件、系统设置、发布归档浏览器回归通过。权限读取未完成时，人员编辑恢复会保留请求记录并等待权限核实，避免误判为撤权。类型、lint、构建与其它治理证据见 `docs/UPGRADE_PROGRESS.md`。
+
+### Release state
+
+- Android 元数据为 9.6.21 / 90621，未构建 APK。仅本地修改，未提交、推送或部署；无 API、权限或数据库变更。
+
+## v9.6.20 - 2026-10-28
+
+### Mutation result recovery and accessibility
+
+- Approval template deletion now records an actor-scoped recovery marker before sending. If the response is ambiguous, the page reads the template's current state and never repeats the DELETE automatically; unavailable verification keeps writes locked across reload.
+- Report-center tabs expose their selected state to assistive technology, and the topic-template list now offers a real retry action when its first read fails.
+
+### Validation
+
+- Workflow designer and analytics isolated Playwright browser regressions passed, including delete response loss, failed verification, reload recovery, explicit re-confirmation, and report-tab selection. TypeScript, targeted ESLint, version, accessibility, and production-build results are recorded in `docs/UPGRADE_PROGRESS.md`.
+
+### Release state
+
+- Android metadata is 9.6.20 / 90620; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.19 - 2026-10-28
+
+### Loading feedback clarity
+
+- Mobile Home now identifies the in-progress topics list while it is loading. Production history, Creator Works, and mobile message pagination expose contextual loading labels and `aria-busy` on their controls.
+
+### Validation
+
+- TypeScript check, scoped ESLint, production build, version consistency, accessibility loading-state contract, and `git diff --check` passed. The mobile work-center, creator-works, and production-review browser regressions passed through the local isolated Playwright runner after the default environment denied Chromium startup; Playwright MCP was disconnected and Chrome DevTools MCP's browser profile was occupied.
+
+### Release state
+
+- Android metadata is 9.6.19 / 90619; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.18 - 2026-10-28
+
+### Daily report optimistic create guard
+
+- Desktop and mobile daily report draft writes now send version `0` when the initial read found no report. This makes a concurrent first create return a version conflict instead of allowing a retry to overwrite that report.
+- Updated the existing browser recovery assertions for the create version sentinel.
+
+### Validation
+
+- TypeScript check, scoped ESLint, production build, version consistency, and `git diff --check` passed. The browser regression was updated but not run in this turn.
+
+### Release state
+
+- Android metadata is 9.6.18 / 90618; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.17 - 2026-10-28
+
+### Screen-reader loading announcements
+
+- Added polite, atomic loading statuses to the desktop daily report, mobile production detail, Pomodoro ranking, and production review comments.
+- The loading indicator in the desktop daily report header is hidden from assistive technology while the dedicated status region is active to avoid duplicate announcements.
+
+### Validation
+
+- TypeScript check, scoped ESLint, production build, version consistency, and `git diff --check` passed. Browser regression and VoiceOver verification were not run in this turn.
+
+### Release state
+
+- Android metadata is 9.6.17 / 90617; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.16 - 2026-10-28
+
+### Mobile daily report loading announcement
+
+- Mobile daily report loading now exposes a polite, atomic screen-reader status with a clear “Loading today’s report” message during the initial read and retry.
+
+### Validation
+
+- TypeScript check, scoped ESLint, production build, version consistency, and `git diff --check` passed. Browser regression and VoiceOver verification were not run in this turn.
+
+### Release state
+
+- Android metadata is 9.6.16 / 90616; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.15 - 2026-10-28
+
+### Mobile daily report draft recovery
+
+- Mobile daily report saves now preserve a pending recovery snapshot before sending the write. If the response is lost, the client only reads the current report and checks its version and full content before deciding whether the draft saved, remains safe to retry with the exact same payload, or conflicts with newer server state.
+- An ambiguous save never triggers an automatic second write or automatic submission; edits remain locked until the result is confirmed.
+
+### Validation
+
+- TypeScript check, scoped ESLint, production build, version consistency, and `git diff --check` passed. Browser regression and visual QA were not run in this turn; Vite continues to report large bundle chunks.
+
+### Release state
+
+- Android metadata is 9.6.15 / 90615; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.14 - 2026-10-28
+
+### Creator chart theme tokens
+
+- Creator Trends and work review line charts now use the Studio semantic color tokens, so their series colors follow the active light or dark theme.
+- Browser regression checks compare rendered SVG stroke colors with their semantic tokens in both themes.
+
+### Validation
+
+- See `docs/UPGRADE_PROGRESS.md` for automated checks and browser QA boundaries.
+
+### Release state
+
+- Android metadata is 9.6.14 / 90614; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.13 - 2026-10-28
+
+### Creator chart accessibility names
+
+- Creator Trends and work review charts now expose their specific metric and the number of daily samples or historical snapshots to screen readers.
+
+### Validation
+
+- See `docs/UPGRADE_PROGRESS.md` for automated checks and browser QA boundaries.
+
+### Release state
+
+- Android metadata is 9.6.13 / 90613; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.12 - 2026-10-28
+
+### Retrospective and Creator Center loading feedback
+
+- My retrospective actions and daily risk reads now expose polite loading announcements. Snapshot generation announces its pending state as well.
+- Creator Center shared refresh buttons announce a user-requested re-read. Refresh and generation controls expose busy state; decorative loading icons are hidden from assistive technology and respect reduced motion.
+
+### Validation
+
+- Shared loading accessibility contracts, TypeScript, scoped ESLint, Android runtime contract, Studio token usage, and production build passed. Playwright MCP manually verified all four pending states and recovery in isolated local fixtures. The repository Chromium suites could not start because macOS denied Chromium `bootstrap_check_in` (1100), so their assertions did not run. This page set did not receive a separate VoiceOver listening check; see `docs/UPGRADE_PROGRESS.md`.
+
+### Release state
+
+- Android metadata is 9.6.12 / 90612; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.11 - 2026-10-28
+
+### Retrospective list loading accessibility
+
+- The retrospective table's initial loading message is now a polite, atomic live status. Its refresh button exposes a busy state while reads are pending.
+- The refresh icon is decorative and follows reduced-motion preferences.
+
+### Validation
+
+- TypeScript, full ESLint (0 errors, 280 existing warnings), production build, shared-loading accessibility contract, version/changelog governance (543 versions), 293 test-entrypoint checks, Android runtime contract, Studio token checks, and `git diff --check` passed. Playwright MCP manually verified the held list GET at 320px, busy/disabled refresh state, status recovery, no horizontal overflow, and zero browser errors. The repository Chromium suite was not run.
+
+### Release state
+
+- Android metadata is 9.6.11 / 90611; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.10 - 2026-10-28
+
+### Content timeline read feedback
+
+- Initial and refreshed content timeline reads expose a polite loading status; the view button disables itself and announces its busy state until the read completes.
+- Loading icons are hidden from assistive technology and stop animating when reduced motion is preferred.
+
+### Validation
+
+- TypeScript, full ESLint (0 errors, 280 existing warnings), production build, shared-loading accessibility test, version/changelog governance (542 versions), 293 test-entrypoint checks, Android runtime contract, Studio token checks, and `git diff --check` passed. Playwright MCP manually verified held initial and refresh reads, the loading status and busy button, successful recovery, reduced-motion behavior, 320px layout, zero business writes, and no browser errors. The repository Chromium suite was not run.
+
+### Release state
+
+- Android metadata is 9.6.10 / 90610; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.9 - 2026-10-28
+
+### Loading accessibility across pages
+
+- Initial loading on the workspace shell, inspiration and production lists, permissions, kanban, topic/shooting/publishing details, notification preferences, and backup list now announces a clear polite status.
+- Home, topic-list, production-detail, and announcement skeletons announce what is loading while keeping placeholder shapes out of the accessibility tree.
+- Role checks announce while required permissions are still being resolved; the topic spinner announces its inspiration read.
+- Shared Studio skeleton primitives are now marked as decorative.
+
+### Validation
+
+- TypeScript, full ESLint (0 errors, 280 warnings), loading/skeleton accessibility contracts, version governance (541 changelog entries, 293 test entrypoints), Android runtime contract, Studio token usage, and production build passed. This change did not receive route-by-route browser or full-site VoiceOver acceptance; see `docs/UPGRADE_PROGRESS.md`.
+
+### Release state
+
+- Android metadata is 9.6.9 / 90609; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.8 - 2026-10-28
+
+### Weekly report loading accessibility
+
+- The weekly report's first read and retry now announce a polite loading status with an understandable label, using the shared accessible loading component.
+- The isolated browser regression holds the retry GET, verifies the announcement while pending, then releases the response and checks that the report replaces the loading state.
+
+### Validation
+
+- TypeScript, scoped ESLint, the shared loading-state contract test, version and changelog governance (540 entries), test-entrypoint governance (293 files), Android runtime contract, Studio token usage, and production build passed. Playwright MCP verified the held weekly-report GET and successful recovery at 390px with no horizontal overflow; the fixture used one injected 503 and one successful GET, with no business writes. The user confirmed hearing the loading announcements covered in this change; that confirmation does not establish site-wide VoiceOver acceptance. The repository analytics browser suite could not start Chromium because macOS denied `bootstrap_check_in` (1100), so its automated assertions did not run.
+
+### Release state
+
+- Android metadata is 9.6.8 / 90608; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.7 - 2026-10-28
+
+### Shared loading accessibility
+
+- Every common loading-state variant now exposes one polite, atomic status message. Table skeletons and decorative spinners are hidden from assistive technology; table loading provides a screen-reader-only label.
+
+### Validation
+
+- The common loading-state accessibility test passed for table, inline, page, and section variants. Playwright MCP on the isolated anonymous-feedback fixture confirmed a held list read exposes a loading status, then hides it after release and displays the synthetic row. At 320px there was no horizontal overflow; the fixture recorded one GET and zero updates or deletes.
+
+### Release state
+
+- Android metadata is 9.6.7 / 90607; no APK was built. Local changes only; not committed, pushed, or deployed. No API, permission, or database changes.
+
+## v9.6.6 - 2026-10-28
+
+### Accessibility and message status privacy
+
+- Activity log reads now announce their pending state politely to assistive technology while keeping the spinner decorative.
+- Legacy bulk-read and clear-status endpoints now send `Cache-Control: no-store` before authentication, including unauthenticated responses. Their response contracts are documented in OpenAPI and the API contract.
+
+### Validation
+
+- Message pagination and API contract tests passed. TypeScript and scoped ESLint passed. Playwright MCP on an isolated local fixture verified the loading announcement appears during a held read, disappears when the recovered record is rendered, and only the expected failed and successful GET requests occur; the fixture made no business writes. At 320px the page had no horizontal overflow and the filter and pagination controls were 40px high.
+- `npm run version:check`, version/changelog governance (538 versions), entrypoint governance (292 files), Android runtime, Studio token usage (38 color utilities and 28 alpha values), full ESLint, `git diff --check`, and production build passed. Full ESLint reported 280 existing warnings and zero errors. The build retains existing large-chunk warnings: Tiptap 555.12 kB, main app 746.78 kB, Silk 843.50 kB.
+- The repository ActivityLog browser suite could not launch Chromium because macOS denied `bootstrap_check_in` (1100), so its automated assertions did not run. Chrome DevTools MCP could not attach because its browser profile was already in use.
+
+### Release state
+
+- Android metadata is 9.6.6 / 90606; no APK was built. Local changes only; not committed, pushed, or deployed. No database migration or permission change.
+
+## v9.6.5 - 2026-10-28
+
+### Editor reliability
+
+- Temporary save and review locks now keep the live Tiptap/Yjs document mounted. Before status transitions, desktop and mobile editors verify that the current Tiptap content matches the confirmed saved content.
+- The nested material draft editor pins its toolbar to its own scroll panel, so the toolbar no longer covers the first paragraph. The browser regression clicks and types into the real paragraph and checks pointer hit geometry.
+- Escape now closes editor color submenus even while the pointer remains over the context menu.
+
+### Validation
+
+- `npm run test:production-review-browser` passed, including save/review recovery and material-draft retry. The 390px mobile work-center suite, content-document resolution, Yjs persistence/acknowledgement, editor format-painter tests, type check, and scoped ESLint passed. Playwright MCP independently confirmed the first material paragraph is not covered and remains the pointer target. Version governance, Android runtime, Studio token usage, and production build are recorded in `docs/UPGRADE_PROGRESS.md`. Android metadata is 9.6.5 / 90605; no APK was built. This version remains local and has not been committed, pushed, or deployed.
+
+## v9.6.4 - 2026-10-28
+
+### Command palette accessibility
+
+- The global search palette now joins the shared modal lifecycle, opens above existing confirmation dialogs, and remains available to keyboard and assistive-technology users when a confirmation dialog is already open.
+- Browser regressions now verify resource deletion recovery, publishing stale-response handling, and inspiration delete recovery against isolated fixtures.
+
+### Validation
+
+- `npm run test:resource-hover-contrast-browser`, `npm run test:publishing-hover-contrast-browser`, `npm run test:inspiration-theme-contrast-browser`, and `npm run test:global-search-browser` passed with isolated local fixtures. `npm run version:check`, `npm run check -- --pretty false`, scoped ESLint, `npm run test:version-governance`, `npm run test:changelog-governance` (536 versions), `npm run test:android-runtime`, `npm run test:studio-token-usage`, `npm run build`, and `git diff --check` passed. The build retains large-chunk warnings for existing Tiptap, application, and Silk bundles. This version remains local and has not been committed, pushed, or deployed.
+
+## v9.6.3 - 2026-10-28
+
+### Auth rollout screen-reader status
+
+- Loading, recheck progress, and status-read failure now expose polite status or alert semantics on the login security page. The refresh control remains keyboard operable and does not announce its decorative spinner.
+
+### Validation
+
+- `npm run test:auth-rollout-theme-contrast-browser`, `npm run version:check`, `npm run check -- --pretty false`, `npm run build`, `npm run test:version-governance`, `npm run test:changelog-governance`, `npm run test:android-runtime`, `npm run test:studio-token-usage`, scoped ESLint, and `git diff --check` passed. The browser suite uses synthetic read-only fixtures; this version remains local and has not been committed, pushed, or deployed.
+
+## v9.6.2 - 2026-10-28
+
+### Creator work score contrast
+
+- Desktop work scores now use the contrast-safe Studio text token. The browser audit selects the score from the desktop table row or the mobile card according to the rendered layout.
+
+### Validation
+
+- `npm run test:creator-works-browser` passed with isolated fixtures at 320px and 390px mobile plus 1440px desktop, including light/dark contrast, keyboard navigation, reduced motion, and read recovery. No real account or business data was used. Build/type/version results are recorded in `docs/UPGRADE_PROGRESS.md`; this version is local only and was not committed, pushed, or deployed.
+
+## v9.6.1 - 2026-10-28
+
+### Message clear account isolation
+
+- Message-clear recovery, confirmation dialogs, notices, and in-flight locks are account-scoped. After an account switch, late responses cannot change another account's inbox, and the new account can process its own request independently.
+
+### Validation
+
+- `npm run version:check`, `npm run check -- --pretty false`, `npm run build`, `npm run test:message-pagination`, and `git diff --check` passed. The in-memory Playwright browser suite passed at both 320px and 390px, including the new account-switch clear regression and 1440px desktop message recovery. The direct current-worktree login page also had no horizontal overflow at 320px/390px. Its public settings request returned HTTP 500 because Vite's target `127.0.0.1:3001` had no listening API server (`ECONNREFUSED`), so no real-account message-center interaction was performed. The build retains existing large-chunk warnings. This version has not been committed, pushed, or deployed.
+
+
+## v9.6.0 - 2026-10-28
+
+### Message read-state recovery
+
+- Added an authenticated, owner-scoped, no-store read-only endpoint for checking a single message's read state. Missing and foreign-account IDs share the same response.
+- Desktop and mobile inboxes now verify the server after an uncertain read request. They navigate only after confirming the message is read, never retry automatically, and lock unread writes while the status is unavailable.
+
+### Validation
+
+- Local validation is in progress. This version has not been committed, pushed, or deployed.
 
 ## v9.5.0 - 2026-10-28
 

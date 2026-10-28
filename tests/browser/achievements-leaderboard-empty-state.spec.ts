@@ -134,6 +134,18 @@ try {
     assert.equal(await rarityFilter.getAttribute('name'), 'achievementRarity');
     await page.getByRole('heading', { name: '暂无可查看的成就' }).waitFor();
     await page.getByText('当前还没有可查看的成就，请联系管理员启用成就内容。', { exact: true }).waitFor();
+    const achievementFilters = page.getByRole('group', { name: '按成就状态筛选' });
+    const allFilter = achievementFilters.getByRole('button', { name: /^全部/ });
+    const earnedFilter = achievementFilters.getByRole('button', { name: /^已获得/ });
+    const lockedFilter = achievementFilters.getByRole('button', { name: /^未解锁/ });
+    assert.equal(await allFilter.getAttribute('aria-pressed'), 'true', `${theme} all-achievements filter exposes its initial selected state`);
+    assert.equal(await earnedFilter.getAttribute('aria-pressed'), 'false', `${theme} earned filter exposes its initial unselected state`);
+    assert.equal(await lockedFilter.getAttribute('aria-pressed'), 'false', `${theme} locked filter exposes its initial unselected state`);
+    await earnedFilter.click();
+    assert.equal(await earnedFilter.getAttribute('aria-pressed'), 'true', `${theme} earned filter exposes selected state after activation`);
+    await lockedFilter.click();
+    assert.equal(await lockedFilter.getAttribute('aria-pressed'), 'true', `${theme} locked filter exposes selected state after activation`);
+    await allFilter.click();
     await assertAchievementView(page, '卡片视图');
     await assertTextContrast(page.getByText('0 积分 · 距下一级还需 50', { exact: true }), `${theme} level progress summary`);
     await assertTextContrast(page.getByText('/0', { exact: true }), `${theme} earned count denominator`);

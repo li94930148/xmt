@@ -226,3 +226,13 @@ v1 错误响应统一为：
 
 - `POST /api/resource-center/categories`、`PUT /api/resource-center/categories/{id}`、`DELETE /api/resource-center/categories/{id}` 的新客户端可提交 UUID `client_request_id`；更新/删除同时提交原 `library_type`。分类写入、路径更新/删除和请求回执在同一事务提交。请求 UUID 全局唯一；重复编号先比较操作者、操作类型、资料库、目标分类和载荷指纹，不匹配时返回 `409 RESOURCE_CATEGORY_MUTATION_REQUEST_CONFLICT`，不会执行第二次写入。旧客户端省略编号时沿用原合同。
 - `GET /api/resource-center/categories/mutation-requests/{requestId}?fingerprint={sha256}` 要求现有 `resource:category_manage` 权限，匹配指纹后仅返回 `created`、`updated`、`deleted` 与分类 ID，或 `not_found`；当前操作者之外的请求统一返回 `not_found`。成功和错误响应均 `Cache-Control: no-store`。SAFE_EXPAND 迁移 062 仅新增回执表，不修改既有分类数据。
+
+### 消息单条已读状态核实（Legacy）
+
+- `GET /api/messages/{id}/read-status` 只要求登录，按当前账号读取本人消息的已读状态，不修改消息、不授予写权限。本人消息返回 `{ "state": "available", "id": 123, "read": false }`；不存在或属于其他账号时统一返回 `{ "state": "missing" }`，不泄露消息存在性。
+- 成功、参数错误、认证失败和服务端错误响应均带 `Cache-Control: no-store`。客户端在单条 `PUT /api/messages/{id}` 响应不确定时只读核实：确认已读后才更新界面并继续关联导航；确认仍未读后只提示用户可明确重试；读取状态失败时锁定后续未读写操作，直到只读核实完成。此接口不改变原有写权限、数据库结构或消息数据。
+
+### 批量已读与清空结果核实（Legacy）
+
+- `GET /api/messages/read-all-requests/{requestId}` 和 `GET /api/messages/clear-requests/{requestId}` 只要求登录，分别按当前操作者读取批量已读或清空回执；未找到或属于其他操作者时统一返回 `not_found`。仅返回最小状态及计数，不返回消息正文、不授予写权限。
+- 两个状态接口在认证中间件前设置 `Cache-Control: no-store`，因此成功、参数错误、未认证和服务端错误响应都禁止缓存。`GET` 仅仅读取既有回执，不会重新标记或删除消息。

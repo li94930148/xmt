@@ -5,6 +5,7 @@ import { getInspirations } from '../api/inspirations';
 import { promoteInspiration } from '../api/inspirations';
 import type { Inspiration } from '../api/inspirations';
 import { Loader2, RotateCw, Sparkles, ArrowRight } from 'lucide-react';
+import LoadingState from './common/LoadingState';
 
 export default function TopicSpinner() {
   const [inspirations, setInspirations] = useState<Inspiration[]>([]);
@@ -88,9 +89,7 @@ export default function TopicSpinner() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-studio-primary" />
-        </div>
+        <LoadingState type="inline" text="正在加载灵感…" className="w-full justify-center py-12" />
       ) : inspirations.length === 0 ? (
         <div className="text-center py-12">
           <p className={styles.textSecondary}>灵感池为空，请先添加灵感</p>

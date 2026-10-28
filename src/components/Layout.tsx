@@ -22,6 +22,7 @@ import { isAndroid } from '@/platform/runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
+import LoadingState from './common/LoadingState';
 
 declare const __APP_VERSION__: string;
 
@@ -354,13 +355,7 @@ export default function Layout({ mobileLayout = isAndroid() }: { mobileLayout?: 
   if (loading) {
     return (
       <AppShell className="flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div
-            className="h-10 w-10 animate-spin rounded-full border-3 border-studio-primary/20 border-t-studio-cyan"
-            style={{ borderWidth: '3px' }}
-          />
-          <p className="text-sm font-medium text-studio-text-muted">加载中...</p>
-        </div>
+        <LoadingState type="page" text="正在加载协作工作台…" />
       </AppShell>
     );
   }

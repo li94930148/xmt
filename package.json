@@ -1,7 +1,7 @@
 {
   "name": "xmt",
   "private": true,
-  "version": "9.5.0",
+  "version": "9.6.21",
   "type": "module",
   "scripts": {
     "client:dev": "vite",
@@ -88,6 +88,7 @@
     "test:publishing-hover-contrast-browser": "tsx tests/browser/publishing-hover-contrast.spec.ts",
     "test:inspiration-theme-contrast-browser": "tsx tests/browser/inspiration-theme-contrast.spec.ts",
     "test:anonymous-feedback-browser": "tsx tests/browser/anonymous-feedback-theme-contrast.spec.ts",
+    "test:common-loading-state": "tsx tests/accessibility/common-loading-state.test.tsx",
     "test:pomodoro-notification-browser": "tsx tests/browser/pomodoro-notification.spec.ts",
     "test:pomodoro-amber-contrast-browser": "tsx tests/browser/pomodoro-amber-icon-contrast.spec.ts",
     "test:socket": "tsx tests/socket-lifecycle-observability.test.ts",
@@ -172,6 +173,7 @@
     "test:user-list-pagination": "tsx tests/users/user-list-pagination.test.ts",
     "test:user-api-error-copy": "tsx tests/users/user-api-error-copy.test.ts",
     "test:users-refresh-query-race-browser": "tsx tests/browser/users-refresh-query-race.spec.ts",
+    "test:users-tabs-browser": "tsx tests/browser/users-tabs-selected-state.spec.ts",
     "test:backup-inventory-request-race-browser": "tsx tests/browser/backup-inventory-request-race.spec.ts",
     "test:asset-center-partial-read-browser": "tsx tests/browser/asset-center-partial-read.spec.ts",
     "test:user-mutation-audit-atomic": "tsx tests/users/user-mutation-audit-atomic.test.ts",

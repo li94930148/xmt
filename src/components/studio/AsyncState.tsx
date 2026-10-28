@@ -21,7 +21,7 @@ export function LoadingState({
   if (variant === 'inline') {
     return (
       <div className="flex items-center justify-center gap-2 py-8 text-sm text-studio-text-muted" role="status" aria-live="polite">
-        <RefreshCw className="h-4 w-4 animate-spin text-studio-primary" />
+        <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin text-studio-primary" />
         {label}
       </div>
     );

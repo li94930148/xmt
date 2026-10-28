@@ -493,7 +493,7 @@ export default function MobileHome() {
         </div>
         <ActionButton variant="ghost" className="shrink-0 px-2 py-1 text-sm" onClick={() => navigate('/topics', { state: { mobileReturnTo: '/' } })}>查看全部</ActionButton>
       </div>
-      {attentionLoading ? <p className="text-sm text-studio-text-secondary">正在加载…</p>
+      {attentionLoading ? <p className="text-sm text-studio-text-secondary">正在读取进行中的选题…</p>
         : attentionError ? <p className="text-sm text-studio-coral-contrast">进行中选题暂时无法确认，请使用上方重新加载。</p>
           : active.length ? <div className="space-y-2">{active.map((topic) => <ActionButton key={topic.id} variant="ghost" onClick={() => navigate(`/topics/${topic.id}`, { state: { mobileReturnTo: '/' } })} className="h-auto w-full justify-start gap-3 rounded-xl border border-studio-border-soft bg-studio-surface p-4 text-left">
             <FileText aria-hidden="true" className="h-5 w-5 shrink-0 text-studio-cyan" />

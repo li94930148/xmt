@@ -304,8 +304,8 @@ async function run() {
     delayNextDelete = request.body.delayNextDelete === true;
     commitNextDeleteThenFailResponse = request.body.commitNextDeleteThenFailResponse === true;
     failNextDeleteStateRead = request.body.failNextDeleteStateRead === true;
-    if (request.body.seedDeleteRecoveryInspiration === true && !inspirations.some((item) => item.id === 903)) {
-      inspirations = [...inspirations, { ...inspiration, id: 903, title: '删除状态核实：仍保留', votes: 0, comment_count: 0, voted: false }];
+    if (request.body.seedDeleteRecoveryInspiration === true && !inspirations.some((item) => item.id === 904)) {
+      inspirations = [...inspirations, { ...inspiration, id: 904, title: '删除状态核实：仍保留', votes: 0, comment_count: 0, voted: false }];
     }
     failNextPromotion = request.body.failNextPromotion === true;
     delayNextPromotion = request.body.delayNextPromotion === true;
@@ -526,6 +526,8 @@ async function run() {
   }
   let browser: Browser | null = null;
   const errors: string[] = [];
+  const expectedHttpNotFoundResponses: string[] = [];
+  const consoleNotFoundMessages: string[] = [];
 
   try {
     browser = await chromium.launch({ headless: true });
@@ -548,7 +550,15 @@ async function run() {
         page.on('console', (message) => {
           if (message.type() !== 'error') return;
           if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+          else if (message.text().includes('404 (Not Found)')) consoleNotFoundMessages.push(message.text());
           else errors.push(message.text());
+        });
+        page.on('response', (response) => {
+          const path = new URL(response.url()).pathname;
+          const readOnlyRecoveryPath = /^\/api\/inspirations\/\d+$/.test(path)
+            || /^\/api\/inspirations\/(?:vote-requests|create-request)\/[0-9a-f-]+$/i.test(path);
+          if (response.status() === 404 && readOnlyRecoveryPath) expectedHttpNotFoundResponses.push(path);
+          else if (response.status() >= 400 && response.status() !== 503) errors.push(`HTTP ${response.status()} ${response.url()}`);
         });
 
         await page.goto(`${base}/__qa?theme=${theme}`);
@@ -932,17 +942,23 @@ async function run() {
           await page.getByRole('heading', { name: inspiration.title, exact: true }).waitFor({ state: 'detached' });
           assert.equal(deleteWriteRequests, 3, 'a committed delete with a lost response is confirmed with a read-only 404, not a second delete');
 
-          await page.evaluate(async () => {
-            await fetch('/__qa/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seedDeleteRecoveryInspiration: true }) });
+          const deleteRecoverySeeded = await page.evaluate(async () => {
+            const control = await fetch('/__qa/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seedDeleteRecoveryInspiration: true }) });
+            const response = await fetch('/api/inspirations');
+            const payload = await response.json() as { data: Array<{ id: number; title: string }> };
+            return { controlStatus: control.status, dataStatus: response.status, items: payload.data.map((item) => ({ id: item.id, title: item.title })) };
           });
+          assert.equal(deleteRecoverySeeded.controlStatus, 200, 'the isolated fixture control request succeeds');
+          assert.equal(deleteRecoverySeeded.dataStatus, 200, 'the isolated inspiration list can be read before reload');
+          assert.ok(deleteRecoverySeeded.items.some((item) => item.id === 904 && item.title === '删除状态核实：仍保留'), 'the isolated fixture seeds the unique delete-recovery item before reload');
           await page.reload();
-          await page.getByRole('heading', { name: '删除状态核实：仍保留', exact: true }).waitFor();
           const uncertainDeleteCard = getInspirationCard(page, '删除状态核实：仍保留');
+          await uncertainDeleteCard.waitFor();
           await page.evaluate(async () => {
             await fetch('/__qa/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextDelete: true, failNextDeleteStateRead: true }) });
           });
-          const uncertainDeleteResponse = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/903') && response.request().method() === 'DELETE' && response.status() === 503);
-          const uncertainDeleteRead = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/903') && response.request().method() === 'GET' && response.status() === 503);
+          const uncertainDeleteResponse = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/904') && response.request().method() === 'DELETE' && response.status() === 503);
+          const uncertainDeleteRead = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/904') && response.request().method() === 'GET' && response.status() === 503);
           await uncertainDeleteCard.getByRole('button', { name: '删除灵感：删除状态核实：仍保留', exact: true }).click();
           await page.getByRole('dialog', { name: '删除这条灵感？' }).getByRole('button', { name: '删除灵感', exact: true }).click();
           await Promise.all([uncertainDeleteResponse, uncertainDeleteRead]);
@@ -951,12 +967,12 @@ async function run() {
           assert.equal(await pausedDeleteButton.isDisabled(), true, 'an unreadable delete outcome pauses another destructive request');
           assert.equal(deleteWriteRequests, 4, 'an uncertain delete does not issue an automatic retry');
 
-          const verifyDeleteRead = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/903') && response.request().method() === 'GET' && response.status() === 200);
+          const verifyDeleteRead = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/904') && response.request().method() === 'GET' && response.status() === 200);
           await uncertainDeleteCard.getByRole('button', { name: '只读核实删除状态：删除状态核实：仍保留', exact: true }).click();
           await verifyDeleteRead;
           await page.getByText('服务端仍保留这条灵感；当前没有删除，可在确认后重新操作。', { exact: true }).waitFor();
           assert.equal(await pausedDeleteButton.isDisabled(), false, 'read-back confirms the item still exists and re-enables an explicit delete');
-          const finalDeleteResponse = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/903') && response.request().method() === 'DELETE' && response.status() === 200);
+          const finalDeleteResponse = page.waitForResponse((response) => response.url().endsWith('/api/inspirations/904') && response.request().method() === 'DELETE' && response.status() === 200);
           await pausedDeleteButton.click();
           await page.getByRole('dialog', { name: '删除这条灵感？' }).getByRole('button', { name: '删除灵感', exact: true }).click();
           await finalDeleteResponse;
@@ -971,6 +987,8 @@ async function run() {
       }
     }
     assert.deepEqual(errors, [], `unexpected browser errors: ${errors.slice(0, 5).join(' | ')}`);
+    assert.equal(expectedHttpNotFoundResponses.length, 2, `the only 404s are read-only checks confirming deleted inspiration state: ${JSON.stringify(expectedHttpNotFoundResponses)}`);
+    assert.equal(consoleNotFoundMessages.length, expectedHttpNotFoundResponses.length, 'each expected deleted-record 404 has one browser console message');
     assert.equal(expectedHttpErrors.length, 15, 'the isolated fixtures return fifteen intentional 503 responses, including ambiguous create, vote, comment, deletion, and promotion writes plus failed state reads');
     assert.equal(voteWriteRequests, 5, 'vote tests cover failure/retry, in-flight deduplication, committed-but-unconfirmed state recovery, and a deliberate final toggle');
     assert.equal(createWriteRequests, 2, 'the isolated create tests cover a normal create and one committed-but-unconfirmed create without retrying its POST');

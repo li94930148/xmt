@@ -4,7 +4,7 @@ export function StudioSkeletonLine({ className = 'h-4 w-full' }: { className?: s
 
 export function StudioSkeletonCard() {
   return (
-    <div className="rounded-card border border-studio-border-soft bg-studio-surface-glass p-5">
+    <div aria-hidden="true" className="rounded-card border border-studio-border-soft bg-studio-surface-glass p-5">
       <div className="flex items-center gap-3">
         <StudioSkeletonLine className="h-11 w-11 rounded-[14px]" />
         <div className="flex-1 space-y-2">
@@ -22,7 +22,7 @@ export function StudioSkeletonCard() {
 
 export function StudioSkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: number }) {
   return (
-    <div className="overflow-hidden rounded-panel border border-studio-border-soft bg-studio-surface-glass">
+    <div aria-hidden="true" className="overflow-hidden rounded-panel border border-studio-border-soft bg-studio-surface-glass">
       <div className="border-b border-studio-border-soft bg-studio-surface-soft/50 px-4 py-3">
         <div className="flex gap-4">
           {Array.from({ length: cols }).map((_, i) => (
@@ -45,7 +45,7 @@ export function StudioSkeletonTable({ rows = 5, cols = 4 }: { rows?: number; col
 
 export function StudioSkeletonList({ rows = 4 }: { rows?: number }) {
   return (
-    <div className="space-y-3">
+    <div aria-hidden="true" className="space-y-3">
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 rounded-card border border-studio-border-soft bg-studio-surface-glass p-4">
           <StudioSkeletonLine className="h-10 w-10 rounded-xl" />

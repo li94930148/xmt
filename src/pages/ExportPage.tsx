@@ -75,6 +75,7 @@ export default function ExportPage() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
+                aria-pressed={isActive}
                 className={`flex min-h-11 items-center justify-center gap-2 rounded-button px-4 py-3 text-sm font-semibold leading-snug transition-all duration-200 ${
                   isActive
                     ? 'bg-studio-primary-button text-white shadow-glow-primary'

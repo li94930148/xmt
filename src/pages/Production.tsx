@@ -6,6 +6,7 @@ import { Production as ProductionType, Topic } from '../types';
 import { Plus, Search, FileText, Edit3, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ActionButton, ResponsiveTableShell } from '@/components/studio';
 import BaseModal from '../components/common/BaseModal';
+import LoadingState from '../components/common/LoadingState';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { useSocket } from '../hooks/useSocket';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
@@ -1171,7 +1172,7 @@ export default function Production() {
               {loading ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center">
-                    <div className={`w-8 h-8 border-4 ${styles.spinner} border-t-transparent rounded-full animate-spin mx-auto`}></div>
+                    <LoadingState type="inline" text="正在加载创作稿件…" className="min-h-24 justify-center" />
                   </td>
                 </tr>
               ) : filteredProductions.length === 0 && listError ? (

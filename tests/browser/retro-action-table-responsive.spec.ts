@@ -63,6 +63,7 @@ const dailyRisk = {
 
 let detailReadFailures = 0;
 let dailyRiskReadFailures = 0;
+let dailyRiskReadDelayMs = 0;
 let detailReadAttempts = 0;
 let dailyRiskReadAttempts = 0;
 let dailyRisksFixture: typeof dailyRisk[] = [];
@@ -196,6 +197,10 @@ app.post('/__qa/fail-next-reads', (req, res) => {
   if (req.query.scope === 'both' || req.query.scope === 'risks') dailyRiskReadFailures += 1;
   res.json({ ok: true });
 });
+app.post('/__qa/configure-risk-delay', (req, res) => {
+  dailyRiskReadDelayMs = Number(req.body.delayMs) || 0;
+  res.json({ ok: true });
+});
 app.post('/__qa/configure-action-create', (req, res) => {
   actionCreateFailures = Number(req.body.failures) || 0;
   actionCreateDelayMs = Number(req.body.delayMs) || 0;
@@ -236,8 +241,9 @@ app.post('/__qa/external-publish', (_req, res) => {
 app.get('/api/auth/me', (_req, res) => res.json(admin));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
-app.get(`/api/retrospectives/${retrospective.id}/daily-risks`, (_req, res) => {
+app.get(`/api/retrospectives/${retrospective.id}/daily-risks`, async (_req, res) => {
   dailyRiskReadAttempts += 1;
+  if (dailyRiskReadDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, dailyRiskReadDelayMs));
   if (dailyRiskReadFailures > 0) {
     dailyRiskReadFailures -= 1;
     return res.status(503).json({ success: false, message: '模拟日报风险读取失败' });
@@ -789,10 +795,28 @@ try {
   await recoveryPage.getByRole('alert').filter({ hasText: '日报风险暂不可用' }).waitFor();
   assert.equal(await recoveryPage.getByText('当前复盘周期内没有可联动的日报风险分段。', { exact: true }).count(), 0, 'a failed risk read is not reported as no risks');
 
+  await recoveryPage.evaluate(async () => {
+    await fetch('/__qa/configure-risk-delay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delayMs: 500 }),
+    });
+  });
+  const riskPanel = recoveryPage.getByTestId('retro-daily-risk-panel');
   const riskRetry = recoveryPage.waitForResponse((response) => response.url().endsWith(`/api/retrospectives/${retrospective.id}/daily-risks`) && response.request().method() === 'GET' && response.status() === 200);
   await recoveryPage.getByRole('button', { name: '重新加载日报风险' }).click();
+  const riskLoadingStatus = riskPanel.getByRole('status').filter({ hasText: '正在加载日报风险...' });
+  await riskLoadingStatus.waitFor();
+  const riskRefreshButton = riskPanel.getByRole('button', { name: '刷新日报风险', exact: true });
+  assert.equal(await riskRefreshButton.isDisabled(), true, 'daily risk refresh locks during its delayed read');
+  assert.equal(await riskRefreshButton.getAttribute('aria-busy'), 'true', 'daily risk refresh exposes its busy state');
+  const riskSpinner = riskRefreshButton.locator('svg');
+  assert.equal(await riskSpinner.getAttribute('aria-hidden'), 'true', 'the daily risk spinner is decorative');
+  assert.equal(await riskSpinner.evaluate((icon) => getComputedStyle(icon).animationName), 'none', 'the daily risk spinner respects reduced motion');
   await riskRetry;
-  const riskPanel = recoveryPage.getByTestId('retro-daily-risk-panel');
+  dailyRiskReadDelayMs = 0;
+  assert.equal(await riskLoadingStatus.count(), 0, 'the daily risk loading announcement clears when the read succeeds');
+  assert.equal(await riskRefreshButton.getAttribute('aria-busy'), 'false', 'the daily risk refresh button clears its busy state');
   const riskSelect = riskPanel.getByRole('combobox');
   await riskSelect.locator('option[value="993"]').waitFor({ state: 'attached' });
   await riskSelect.selectOption('993');
@@ -1384,9 +1408,17 @@ try {
   const failedSnapshot = workflowPage.waitForResponse((response) => response.url().endsWith(snapshotUrl) && response.request().method() === 'POST' && response.status() === 503);
   await snapshotButton.dblclick({ delay: 10 });
   assert.equal(await snapshotButton.isDisabled(), true, 'snapshot generation locks while pending');
+  const snapshotLoadingStatus = workflowPage.getByRole('status').filter({ hasText: '正在生成指标快照…' });
+  await snapshotLoadingStatus.waitFor();
+  assert.equal(await snapshotButton.getAttribute('aria-busy'), 'true', 'snapshot generation exposes its busy state');
+  const snapshotSpinner = snapshotButton.locator('svg');
+  assert.equal(await snapshotSpinner.getAttribute('aria-hidden'), 'true', 'the snapshot spinner is decorative');
+  assert.equal(await snapshotSpinner.evaluate((icon) => getComputedStyle(icon).animationName), 'none', 'the snapshot spinner respects reduced motion');
   assert.equal(await summarySaveButton.isDisabled(), true, 'a pending snapshot generation blocks a different summary write');
   assert.equal(await publishButton.isDisabled(), true, 'a pending snapshot generation blocks a different publish write');
   await failedSnapshot;
+  assert.equal(await snapshotLoadingStatus.count(), 0, 'snapshot generation status clears after the response');
+  assert.equal(await snapshotButton.getAttribute('aria-busy'), 'false', 'snapshot generation clears its busy state after the response');
   await workflowPage.getByText('生成快照失败', { exact: true }).waitFor();
   assert.equal(retroMutationAttempts.snapshot, 1, 'rapid duplicate snapshot generation sends one POST');
   assert.equal(await workflowPage.getByText('尚未生成指标快照', { exact: true }).count(), 1, 'failed snapshot generation does not fabricate snapshot data');

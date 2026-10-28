@@ -55,7 +55,7 @@ export default function PomodoroPage() {
 
           {rankingError ? (
             <div className="space-y-3 py-6 text-center"><p className="text-sm text-theme-text-muted">排行榜加载失败：{rankingError}</p><button type="button" onClick={() => void loadRanking()} disabled={rankingLoading} className={`rounded-lg px-3 py-2 text-sm ${styles.buttonSecondary}`}>{rankingLoading ? '正在重试…' : '重试'}</button></div>
-          ) : rankingLoading ? <div className="py-8 text-center text-sm text-theme-text-muted">排行榜加载中…</div> : ranking.length > 0 ? (
+          ) : rankingLoading ? <div role="status" aria-live="polite" aria-atomic="true" className="py-8 text-center text-sm text-theme-text-muted">排行榜加载中…</div> : ranking.length > 0 ? (
             <div className="space-y-2">
               {ranking.map((item, index) => (
                 <div

@@ -230,7 +230,7 @@ export default function CreatorWorkDetail() {
           title="播放曲线"
           description={`${data.snapshots.length} 个历史快照`}
         >
-          <LineChart values={data.snapshots.map((row) => row.play_count)} />
+          <LineChart values={data.snapshots.map((row) => row.play_count)} ariaLabel={`播放曲线，${data.snapshots.length} 个历史快照`} />
           {data.snapshots.length < 2 ? (
             <p className="mt-3 text-sm text-studio-text-secondary">
               至少完成两次同步后才能形成增长曲线。
@@ -238,7 +238,7 @@ export default function CreatorWorkDetail() {
           ) : null}
         </Panel>
         <Panel title="互动曲线" description="点赞、评论、分享与收藏之和">
-          <LineChart values={interactions} color="rgb(244 63 94)" />
+          <LineChart values={interactions} color="var(--xmt-coral)" ariaLabel={`互动曲线，${data.snapshots.length} 个历史快照`} />
           {data.snapshots.length < 2 ? (
             <p className="mt-3 text-sm text-studio-text-secondary">
               当前只有一个真实快照，不生成推测趋势。

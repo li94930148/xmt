@@ -147,7 +147,7 @@ export default function CreatorWorks({ reviewMode = false }: { reviewMode?: bool
               </div>
             </div></td>
             <td className="py-3 text-studio-text-secondary">{formatDate(work.publish_time, true)}</td>
-            <td className="py-3 text-right font-semibold text-studio-cyan">{work.performance.score}</td>
+            <td className="py-3 text-right font-semibold text-studio-cyan-contrast">{work.performance.score}</td>
             <td className="py-3 text-right font-medium">{formatNumber(work.play_count)}</td>
             <td className="py-3 text-right">{formatNumber(work.like_count)}</td>
             <td className="py-3 text-right">{formatNumber(work.comment_count)}</td>
@@ -161,10 +161,11 @@ export default function CreatorWorks({ reviewMode = false }: { reviewMode?: bool
       {hasMore && nextCursor ? <div className="mt-5 flex justify-center">
         <button
           type="button"
+          aria-busy={loadingMore}
           disabled={loadingMore}
           onClick={() => void load(failedCursor ?? nextCursor)}
           className="h-10 rounded-lg border border-studio-border bg-studio-surface px-5 text-sm font-medium transition hover:border-studio-cyan/60 disabled:opacity-60"
-        >{loadingMore ? '加载中…' : failedCursor ? '重试加载下一页' : '下一页'}</button>
+        >{loadingMore ? '正在加载下一页作品…' : failedCursor ? '重试加载下一页' : '下一页'}</button>
       </div> : <p className="mt-5 text-center text-xs text-studio-text-secondary">已加载全部作品</p>}
     </Panel> : null}
   </div>;

@@ -34,6 +34,33 @@ const base = `http://127.0.0.1:${address.port}/api/workflow`;
 const workflowTemplatesBase = `http://127.0.0.1:${address.port}/api/workflow-templates`;
 const headers = (id: number) => ({ authorization: `Bearer ${signToken({ userId: id })}`, 'content-type': 'application/json' });
 
+async function publishingBaseline(id: number) {
+  const row = await queryOne<{
+    platform: string | null;
+    url: string | null;
+    status: string;
+    publish_time: string | null;
+    manual_views: number | null;
+    manual_likes: number | null;
+    manual_shares: number | null;
+    manual_comments: number | null;
+  }>(
+    'SELECT platform,url,status,publish_time,manual_views,manual_likes,manual_shares,manual_comments FROM publishing WHERE id=?',
+    [id],
+  );
+  assert(row);
+  return {
+    platform: row.platform ?? '',
+    url: row.url ?? '',
+    status: row.status,
+    publish_time: row.publish_time ?? '',
+    views: row.manual_views ?? null,
+    likes: row.manual_likes ?? null,
+    shares: row.manual_shares ?? null,
+    comments: row.manual_comments ?? null,
+  };
+}
+
 function createProduction(topicId: number, status = 'draft') {
   return fetch(`${base}/production`, {
     method: 'POST',
@@ -446,7 +473,17 @@ try {
     'INSERT INTO publishing(topic_id,platform,status,operator_id) VALUES(?,?,?,?)',
     [topicId, '小红书', 'pending', director.id],
   );
-  assert.equal((await fetch(`${base}/publishing/${autoPublishing.id}`, { method: 'PUT', headers: headers(director.id), body: JSON.stringify({ platform: 'douyin', publish_time: '2026-09-23 12:00:00', status: 'scheduled' }) })).status, 200);
+  const autoPublishingUpdate = await fetch(`${base}/publishing/${autoPublishing.id}`, {
+    method: 'PUT',
+    headers: headers(director.id),
+    body: JSON.stringify({
+      platform: 'douyin',
+      publish_time: '2026-09-23 12:00:00',
+      status: 'scheduled',
+      expected_baseline: await publishingBaseline(autoPublishing.id),
+    }),
+  });
+  assert.equal(autoPublishingUpdate.status, 200, await autoPublishingUpdate.text());
   const scheduledStatusAudit = await queryOne<{ action: string; comment: string; operator_id: number }>(
     `SELECT action,comment,operator_id FROM topic_history WHERE topic_id=? AND action='publishing_status_changed' ORDER BY id DESC LIMIT 1`,
     [topicId],
@@ -532,7 +569,7 @@ try {
   const skippedPublishing = await fetch(`${base}/publishing/${autoPublishing.id}`, {
     method: 'PUT',
     headers: headers(director.id),
-    body: JSON.stringify({ status: 'published' }),
+    body: JSON.stringify({ status: 'published', expected_baseline: await publishingBaseline(autoPublishing.id) }),
   });
   assert.equal(skippedPublishing.status, 409);
   assert.equal((await queryOne<{ status: string }>('SELECT status FROM publishing WHERE id=?', [autoPublishing.id]))?.status, 'scheduled');
@@ -541,7 +578,7 @@ try {
   const published = await fetch(`${base}/publishing/${autoPublishing.id}`, {
     method: 'PUT',
     headers: headers(director.id),
-    body: JSON.stringify({ status: 'published' }),
+    body: JSON.stringify({ status: 'published', expected_baseline: await publishingBaseline(autoPublishing.id) }),
   });
   assert.equal(published.status, 200);
   assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id=?', [topicId]))?.status, 'completed');
@@ -565,7 +602,7 @@ try {
   const correctedAfterPublish = await fetch(`${base}/publishing/${autoPublishing.id}`, {
     method: 'PUT',
     headers: headers(director.id),
-    body: JSON.stringify({ status: 'scheduled' }),
+    body: JSON.stringify({ status: 'scheduled', expected_baseline: await publishingBaseline(autoPublishing.id) }),
   });
   assert.equal(correctedAfterPublish.status, 200);
   assert.equal((await queryOne<{ status: string }>('SELECT status FROM publishing WHERE id=?', [autoPublishing.id]))?.status, 'scheduled');
@@ -597,14 +634,14 @@ try {
   const unresolvedFailure = await fetch(`${base}/publishing/${failedPlatformIds[0]}`, {
     method: 'PUT',
     headers: headers(director.id),
-    body: JSON.stringify({ status: 'failed' }),
+    body: JSON.stringify({ status: 'failed', expected_baseline: await publishingBaseline(failedPlatformIds[0]) }),
   });
   assert.equal(unresolvedFailure.status, 200);
   assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id=?', [failedPlatformsTopicId]))?.status, 'publishing');
   const finishFirstFailure = await fetch(`${base}/publishing/${failedPlatformIds[1]}`, {
     method: 'PUT',
     headers: headers(director.id),
-    body: JSON.stringify({ status: 'failed' }),
+    body: JSON.stringify({ status: 'failed', expected_baseline: await publishingBaseline(failedPlatformIds[1]) }),
   });
   assert.equal(finishFirstFailure.status, 200);
   assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id=?', [failedPlatformsTopicId]))?.status, 'completed');

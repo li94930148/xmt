@@ -13,11 +13,12 @@ export const changelog: ChangelogEntry[] = [
   {
     version: '10.1.46',
     date: '2026-10-30',
-    title: '依赖安全更新与主题状态回归稳定性',
-    impactScope: ['依赖安全', '外观设置', '回归验证'],
+    title: '依赖安全、主题回归与发布状态校验',
+    impactScope: ['依赖安全', '外观设置', '发布管理', '回归验证'],
     changes: [
       { type: 'security', description: '生产依赖 re2js 更新至 2.9.1、qs 更新至 6.17.1，并更新 postcss-selector-parser 至 6.1.5；完整依赖审计通过。' },
       { type: 'improvement', description: '设置中心主题选中态回归移开鼠标后读取样式，避免悬停状态干扰自动断言。' },
+      { type: 'fix', description: '发布接口先校验状态类型；数组等非字符串状态返回明确的 400 错误。' },
     ],
   },
   {

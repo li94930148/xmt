@@ -2603,6 +2603,9 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
     }
     const currentTopic = await getTopicScopeByPublishingId(id);
     if (!canEditProduction(req.user, currentTopic)) return res.status(403).json({ message: '无权限修改该发布记录' });
+    if (status !== undefined && (typeof status !== 'string' || !PUBLISHING_STATUSES.has(status))) {
+      return res.status(400).json({ message: '发布状态无效' });
+    }
     if (hasPublishingEditFields && !hasValidBaseline) {
       return res.status(409).json({
         message: '发布记录缺少可核对的原始数据，本次更新未保存。请重新加载列表并重新打开记录后再编辑。',
@@ -2615,9 +2618,6 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
     );
     if (linkedWork && DOUYIN_AUTHORITATIVE_FIELDS.some((field) => req.body[field] !== undefined)) {
       return res.status(409).json({ message: '已关联抖音作品，平台、状态和发布时间由抖音作品决定' });
-    }
-    if (status !== undefined && (typeof status !== 'string' || !PUBLISHING_STATUSES.has(status))) {
-      return res.status(400).json({ message: '发布状态无效' });
     }
     const suppliedMetrics = Object.fromEntries(
       PUBLISHING_METRIC_FIELDS.filter((field) => req.body[field] !== undefined)

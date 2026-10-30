@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowRight,
@@ -21,17 +22,19 @@ import ContentEditor, { type EditorCommandHandle } from '../components/ContentEd
 import { useWritingFocus } from '../components/layout/WritingFocusContext';
 import { buildMissingOutlineSkeleton, extractOutlineHeadings } from '../components/editor/outlineSkeleton';
 import EditorLeaveFailureDialog from '../components/editor/EditorLeaveFailureDialog';
-import { ConfirmModal } from '../components/common';
+import { BaseModal, ConfirmModal, ErrorState } from '../components/common';
 import { ActionButton, EmptyState, GlassPanel, PageShell, StatusPill, StudioSkeletonCard } from '../components/studio';
 import { getCollaborationRoomId, getProductionVersionRoomId } from '../collaboration/core/events';
 import { createProductionEditorAdapter } from '../editor/adapters/productionEditorAdapter';
 import { getTimelineView } from '../editor/timeline/unifiedContentTimeline';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingTime, formatUtcToBeijingTime } from '../lib/utils';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { parseStoredBjt } from '@shared/time';
 import { productionHistoryTimestamp } from '../lib/productionHistoryTime';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
+import { clearSafeDraft, readSafeDraftValue, userSafeDraftKey, writeSafeDraft } from '../platform/safe-draft';
 import { setCurrentContentDocument } from '../content/orchestrator/currentContentDocument';
 import { editorStateLabel, useEditorEventState } from '../editor/state/editorStateManager';
 import type { ContentEditorRuntimeHandle } from '../editor/contracts/contentEditorAdapter';
@@ -47,6 +50,14 @@ import { buildResourceReferenceHtml } from '../components/production/resourceRef
 import { celebrateMilestone } from '../utils/confetti';
 import { useSocket } from '../hooks/useSocket';
 import { COLLABORATION_EVENTS, type VersionSupersededPayload } from '../collaboration/core/events';
+import {
+  clearProductionAutosaveRecovery,
+  createProductionAutosaveRequestId,
+  persistProductionAutosaveRecovery,
+  readProductionAutosaveRecovery,
+  writeAndVerifyProductionAutosaveDraft,
+  type ProductionAutosaveRecovery,
+} from './production/productionAutosaveRecovery';
 
 const STATUS_TONE: Record<string, 'amber' | 'cyan' | 'success' | 'coral' | 'muted'> = {
   draft: 'amber',
@@ -96,15 +107,22 @@ type ProductionTransitionRecovery = {
   phase: 'uncertain' | 'ready' | 'checking';
 };
 
-function productionTransitionRecoveryKey(id?: string) {
-  return id ? `xmt:production-transition-recovery:${id}` : null;
+function productionTransitionRecoveryKey(id?: string, userId?: number) {
+  return id && Number.isSafeInteger(userId) && Number(userId) > 0
+    ? `xmt:production-transition-recovery:v1:user:${userId}:production:${id}`
+    : null;
 }
 
-function readProductionTransitionRecovery(id?: string): ProductionTransitionRecovery | null {
-  const key = productionTransitionRecoveryKey(id);
+function readProductionTransitionRecovery(id?: string, userId?: number): ProductionTransitionRecovery | null {
+  const key = productionTransitionRecoveryKey(id, userId);
   if (!key || typeof window === 'undefined') return null;
   try {
-    const raw = window.sessionStorage.getItem(key);
+    let raw = window.sessionStorage.getItem(key);
+    let legacyKey: string | null = null;
+    if (!raw && id) {
+      legacyKey = `xmt:production-transition-recovery:${id}`;
+      raw = window.sessionStorage.getItem(legacyKey);
+    }
     if (!raw) return null;
     const value = JSON.parse(raw) as Partial<ProductionTransitionRecovery>;
     const validOperation = value.operation === 'review-submit'
@@ -122,13 +140,13 @@ function readProductionTransitionRecovery(id?: string): ProductionTransitionReco
             && typeof value.previousStatus === 'string'
             && value.targetStatus === 'deleted';
     if (value.version !== 1 || !Number.isSafeInteger(value.userId) || !Number.isSafeInteger(value.productionId)
-      || Number(value.userId) < 1 || Number(value.productionId) < 1 || !validOperation
+      || Number(value.userId) < 1 || Number(value.productionId) < 1 || Number(value.userId) !== userId
+      || Number(value.productionId) !== Number.parseInt(id || '', 10) || !validOperation
       || typeof value.previousStatus !== 'string' || typeof value.targetStatus !== 'string'
       || typeof value.contentFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.contentFingerprint)) {
-      window.sessionStorage.removeItem(key);
       return null;
     }
-    return {
+    const recovery: ProductionTransitionRecovery = {
       version: 1,
       userId: Number(value.userId),
       productionId: Number(value.productionId),
@@ -140,20 +158,42 @@ function readProductionTransitionRecovery(id?: string): ProductionTransitionReco
       versionAction: value.versionAction === 'minor' || value.versionAction === 'major' ? value.versionAction : undefined,
       phase: value.phase === 'ready' ? 'ready' : 'uncertain',
     };
+    if (legacyKey && raw) {
+      try {
+        const serialized = JSON.stringify({ ...recovery, phase: recovery.phase === 'ready' ? 'ready' : 'uncertain' });
+        window.sessionStorage.setItem(key, serialized);
+        if (window.sessionStorage.getItem(key) === serialized) window.sessionStorage.removeItem(legacyKey);
+      } catch {
+        // Keep the legacy marker available for a later read; the in-memory lock remains active.
+      }
+    }
+    return recovery;
   } catch {
     return null;
   }
 }
 
-function writeProductionTransitionRecovery(id: string | undefined, recovery: ProductionTransitionRecovery | null) {
-  const key = productionTransitionRecoveryKey(id);
+function writeProductionTransitionRecovery(id: string | undefined, userId: number | undefined, recovery: ProductionTransitionRecovery | null) {
+  const key = productionTransitionRecoveryKey(id, userId);
   if (!key || typeof window === 'undefined') throw new Error('无法安全保存本次状态核实标记，请刷新后重试。');
   try {
     if (!recovery) {
-      try { window.sessionStorage.removeItem(key); } catch { /* A stale marker is safe: reload will reconcile it read-only. */ }
+      window.sessionStorage.removeItem(key);
+      if (id) {
+        const legacyKey = `xmt:production-transition-recovery:${id}`;
+        const legacy = JSON.parse(window.sessionStorage.getItem(legacyKey) || 'null') as Partial<ProductionTransitionRecovery> | null;
+        if (legacy?.userId === userId && legacy?.productionId === Number.parseInt(id, 10)) window.sessionStorage.removeItem(legacyKey);
+      }
       return;
     }
-    window.sessionStorage.setItem(key, JSON.stringify({ ...recovery, phase: recovery.phase === 'ready' ? 'ready' : 'uncertain' }));
+    if (recovery.userId !== userId || recovery.productionId !== Number.parseInt(id || '', 10)) {
+      throw new Error('恢复标记账号或记录不匹配。');
+    }
+    const serialized = JSON.stringify({ ...recovery, phase: recovery.phase === 'ready' ? 'ready' : 'uncertain' });
+    window.sessionStorage.setItem(key, serialized);
+    if (window.sessionStorage.getItem(key) !== serialized) {
+      throw new Error('恢复标记未能完整保存；本次状态操作未发送。');
+    }
   } catch {
     throw new Error('浏览器暂时无法保存本次状态核实标记，操作未发送；请检查浏览器存储空间后重试。');
   }
@@ -218,10 +258,14 @@ export default function ProductionDetail() {
   const addNotification = useAppStore((state) => state.addNotification);
   const theme = useAppStore((state) => state.theme);
   const authUser = useAuthStore((state) => state.user);
+  const productionDraftKey = id && authUser?.id ? userSafeDraftKey(authUser.id, `production:${id}`) : null;
+  const autosaveRecoveryIdentity = `${authUser?.id ?? 'signed-out'}:${id ?? ''}`;
   const isDark = theme === 'dark';
   const { hasPermission, loading: permissionsLoading } = usePermission();
   const socket = useSocket();
   const { focused: writingFocused, setFocused: setWritingFocused } = useWritingFocus();
+  const authUserIdRef = useRef(authUser?.id);
+  authUserIdRef.current = authUser?.id;
 
   const [production, setProduction] = useState<ProductionType | null>(null);
   const [topic, setTopic] = useState<Topic | null>(null);
@@ -231,13 +275,21 @@ export default function ProductionDetail() {
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [detailLoadError, setDetailLoadError] = useState('');
   const [recoveryReadInFlight, setRecoveryReadInFlight] = useState(false);
   const [confirmedVersionRefreshPending, setConfirmedVersionRefreshPending] = useState(false);
   const [confirmedReviewRefreshPending, setConfirmedReviewRefreshPending] = useState(false);
   const [confirmedStatusRefreshPending, setConfirmedStatusRefreshPending] = useState(false);
   const [confirmedDeleteRefreshPending, setConfirmedDeleteRefreshPending] = useState(false);
-  const [pendingStatusTransition, setPendingStatusTransition] = useState<ProductionTransitionRecovery | null>(() => readProductionTransitionRecovery(id));
+  const [pendingStatusTransition, setPendingStatusTransition] = useState<ProductionTransitionRecovery | null>(() => readProductionTransitionRecovery(id, authUser?.id));
   const [statusTransitionReadError, setStatusTransitionReadError] = useState('');
+  const [productionAutosaveRecovery, setProductionAutosaveRecovery] = useState<ProductionAutosaveRecovery | null>(null);
+  const [productionAutosaveRecoveryReadError, setProductionAutosaveRecoveryReadError] = useState('');
+  const [productionAutosaveRecoveryBlocked, setProductionAutosaveRecoveryBlocked] = useState(false);
+  const [productionAutosaveRecoveryHydratedFor, setProductionAutosaveRecoveryHydratedFor] = useState('');
+  const [productionAutosaveDraftBlocked, setProductionAutosaveDraftBlocked] = useState(false);
+  const [productionAutosaveRetrying, setProductionAutosaveRetrying] = useState(false);
+  const [productionAutosaveConflictDraft, setProductionAutosaveConflictDraft] = useState<{ content: string; serverVersion: string } | null>(null);
   const detailRequestRef = useRef(0);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -249,6 +301,10 @@ export default function ProductionDetail() {
   });
   const latestEditContentRef = useRef('');
   const pendingStatusTransitionRef = useRef(pendingStatusTransition);
+  const productionAutosaveRecoveryRef = useRef<ProductionAutosaveRecovery | null>(productionAutosaveRecovery);
+  const productionAutosaveRecoveryCheckRef = useRef('');
+  const productionAutosaveRecoveryVerifyLockRef = useRef(false);
+  const productionAutosaveExplicitRetryRef = useRef('');
   const statusTransitionVerificationLockRef = useRef(false);
   const productionMutationLockRef = useRef(false);
   const confirmedRefreshLockRef = useRef(false);
@@ -258,7 +314,9 @@ export default function ProductionDetail() {
   const [versionSaving, setVersionSaving] = useState<'minor' | 'major' | null>(null);
   const [deleting, setDeleting] = useState(false);
   const hasConfirmedRefreshPending = confirmedVersionRefreshPending || confirmedReviewRefreshPending || confirmedStatusRefreshPending || confirmedDeleteRefreshPending;
-  const hasProductionMutation = reviewSubmitPhase !== null || reviewSuggestionAccepting || statusUpdating || versionSaving !== null || deleting || hasConfirmedRefreshPending || pendingStatusTransition !== null;
+  const productionAutosaveRecoveryHydrated = productionAutosaveRecoveryHydratedFor === autosaveRecoveryIdentity
+    && production?.id === Number(id);
+  const hasProductionMutation = reviewSubmitPhase !== null || reviewSuggestionAccepting || statusUpdating || versionSaving !== null || deleting || hasConfirmedRefreshPending || pendingStatusTransition !== null || productionAutosaveRecovery !== null || productionAutosaveRecoveryBlocked || productionAutosaveDraftBlocked || Boolean(productionAutosaveConflictDraft) || productionAutosaveRetrying || Boolean(production && !productionAutosaveRecoveryHydrated);
   const [selectedVersionId, setSelectedVersionId] = useState<string>('current');
   const [leaveFailureDialogDismissed, setLeaveFailureDialogDismissed] = useState(false);
   const [superseded, setSuperseded] = useState<VersionSupersededPayload | null>(null);
@@ -327,6 +385,14 @@ export default function ProductionDetail() {
     return content;
   };
   const flushProductionEditorBeforeMutation = useCallback(async () => {
+    if (productionAutosaveRecoveryRef.current || productionAutosaveRecoveryBlocked || productionAutosaveDraftBlocked || productionAutosaveConflictDraft) {
+      addNotification({
+        title: '稿件恢复尚未完成',
+        message: '请先核实服务器正文，并处理保留的本机草稿，再进行状态或版本操作。',
+        type: 'warning',
+      });
+      return false;
+    }
     const result = await flushReviewEditor();
     if (result.status === 'synced') return true;
 
@@ -337,7 +403,7 @@ export default function ProductionDetail() {
         : '正文保存未确认，当前操作未执行；请检查保存提示并重试。';
     addNotification({ title: '正文尚未确认保存', message, type: 'error' });
     return false;
-  }, [addNotification, flushReviewEditor]);
+  }, [addNotification, flushReviewEditor, productionAutosaveConflictDraft, productionAutosaveDraftBlocked, productionAutosaveRecoveryBlocked]);
 
   const beginReviewSuggestionAccept = useCallback(() => {
     if (productionMutationLockRef.current || confirmedRefreshLockRef.current || pendingStatusTransitionRef.current) return false;
@@ -363,6 +429,33 @@ export default function ProductionDetail() {
   }, [authUser, production, socket]);
 
   const pendingRouteStayRef = useRef<(() => void) | null>(null);
+  const materialDraftLeaveStateRef = useRef({ pending: false, canDiscard: false });
+  const materialDraftLeaveActionsRef = useRef<{ discard: () => boolean; copy: () => Promise<boolean> } | null>(null);
+  const pendingMaterialDraftNavigationRef = useRef<RouteNavigationAttempt | null>(null);
+  const [materialDraftLeaveState, setMaterialDraftLeaveState] = useState({ pending: false, canDiscard: false });
+  const [materialDraftLeaveDialogOpen, setMaterialDraftLeaveDialogOpen] = useState(false);
+  const [materialDraftCopyStatus, setMaterialDraftCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [materialDraftLeaveError, setMaterialDraftLeaveError] = useState<string | null>(null);
+  const handleMaterialDraftLeaveStateChange = useCallback((state: { pending: boolean; canDiscard: boolean }) => {
+    const previous = materialDraftLeaveStateRef.current;
+    materialDraftLeaveStateRef.current = state;
+    if (previous.pending === state.pending && previous.canDiscard === state.canDiscard) return;
+    setMaterialDraftLeaveState(state);
+  }, []);
+  const handleRegisterMaterialDraftLeaveActions = useCallback((actions: { discard: () => boolean; copy: () => Promise<boolean> } | null) => {
+    materialDraftLeaveActionsRef.current = actions;
+  }, []);
+  const handleSelectVersion = useCallback((versionId: string) => {
+    if (versionId !== selectedVersionId && materialDraftLeaveStateRef.current.pending) {
+      addNotification({
+        title: '创作资料尚未保存',
+        message: '请先处理本地资料草稿，再切换历史版本。',
+        type: 'warning',
+      });
+      return;
+    }
+    setSelectedVersionId(versionId);
+  }, [addNotification, selectedVersionId]);
   const handleContinueEditing = useCallback(() => {
     pendingRouteStayRef.current?.();
     pendingRouteStayRef.current = null;
@@ -373,7 +466,7 @@ export default function ProductionDetail() {
 
   const handleDiscardAndLeave = useCallback(() => discardAndLeave(), [discardAndLeave]);
 
-  const handleRouteNavigationAttempt = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
+  const continueRouteNavigationAfterMaterialDraft = useCallback(({ proceed, stay }: RouteNavigationAttempt) => {
     let continued = false;
     const continueOnce = () => {
       if (continued) return;
@@ -404,6 +497,77 @@ export default function ProductionDetail() {
       })
       .catch(stay);
   }, [addNotification, requestLeave]);
+
+  const handleRouteNavigationAttempt = useCallback((attempt: RouteNavigationAttempt) => {
+    if (productionAutosaveRecovery || productionAutosaveRecoveryBlocked || productionAutosaveDraftBlocked || productionAutosaveConflictDraft) {
+      attempt.stay();
+      addNotification({
+        title: '稿件恢复尚未完成',
+        message: '本机正文仍有待核实或待处理的草稿，请完成只读核实和恢复后再离开。',
+        type: 'warning',
+      });
+      return;
+    }
+    if (!materialDraftLeaveStateRef.current.pending) {
+      continueRouteNavigationAfterMaterialDraft(attempt);
+      return;
+    }
+    if (!materialDraftLeaveStateRef.current.canDiscard) {
+      attempt.stay();
+      addNotification({
+        title: '创作资料正在保存',
+        message: '已留在当前页面。请等资料状态更新后再离开。',
+        type: 'warning',
+      });
+      return;
+    }
+    pendingMaterialDraftNavigationRef.current = attempt;
+    setMaterialDraftCopyStatus('idle');
+    setMaterialDraftLeaveError(null);
+    setMaterialDraftLeaveDialogOpen(true);
+  }, [addNotification, continueRouteNavigationAfterMaterialDraft, productionAutosaveConflictDraft, productionAutosaveDraftBlocked, productionAutosaveRecovery, productionAutosaveRecoveryBlocked]);
+
+  const handleKeepMaterialDraftEditing = useCallback(() => {
+    pendingMaterialDraftNavigationRef.current?.stay();
+    pendingMaterialDraftNavigationRef.current = null;
+    setMaterialDraftLeaveDialogOpen(false);
+    setMaterialDraftLeaveError(null);
+  }, []);
+
+  const handleCopyMaterialDraft = useCallback(async () => {
+    try {
+      const copied = await materialDraftLeaveActionsRef.current?.copy();
+      if (!copied) throw new Error('当前没有可复制的本地资料文字。');
+      setMaterialDraftCopyStatus('copied');
+      setMaterialDraftLeaveError(null);
+    } catch {
+      setMaterialDraftCopyStatus('failed');
+      setMaterialDraftLeaveError('复制未完成。请留在此页并手动选中资料文字后复制。');
+    }
+  }, []);
+
+  const handleDiscardMaterialDraftAndLeave = useCallback(() => {
+    const attempt = pendingMaterialDraftNavigationRef.current;
+    if (!attempt) {
+      setMaterialDraftLeaveDialogOpen(false);
+      return;
+    }
+    const discarded = materialDraftLeaveActionsRef.current?.discard() ?? false;
+    if (!discarded) {
+      attempt.stay();
+      pendingMaterialDraftNavigationRef.current = null;
+      setMaterialDraftLeaveDialogOpen(false);
+      addNotification({
+        title: '创作资料仍在保存',
+        message: '本次离开已取消。请等保存状态确认后再操作。',
+        type: 'warning',
+      });
+      return;
+    }
+    pendingMaterialDraftNavigationRef.current = null;
+    setMaterialDraftLeaveDialogOpen(false);
+    continueRouteNavigationAfterMaterialDraft(attempt);
+  }, [addNotification, continueRouteNavigationAfterMaterialDraft]);
   useRouteNavigationGuard(Boolean(production), handleRouteNavigationAttempt);
 
   const fetchData = useCallback(async (options?: { notifyOnFailure?: boolean; recovery?: boolean }) => {
@@ -412,6 +576,7 @@ export default function ProductionDetail() {
     const requestId = ++detailRequestRef.current;
     if (options?.recovery) setRecoveryReadInFlight(true);
     setLoading(true);
+    setDetailLoadError('');
     setHistoryLoading(false);
     setLinkedHistoryVersion(null);
 
@@ -432,6 +597,7 @@ export default function ProductionDetail() {
       ]);
       if (requestId !== detailRequestRef.current) return 'stale' as const;
 
+      setDetailLoadError('');
       setProduction(productionData);
       persistedContentRef.current = productionData.content || '';
       setCurrentContentDocument(
@@ -461,10 +627,11 @@ export default function ProductionDetail() {
       return 'success' as const;
     } catch (error) {
       if (requestId !== detailRequestRef.current) return 'stale' as const;
+      setDetailLoadError(getUserFacingErrorMessage(error, '暂时无法读取创作详情，请检查连接后重试。'));
       if (options?.notifyOnFailure !== false) {
         addNotification({
           title: '获取创作详情失败',
-          message: (error as Error).message,
+          message: getUserFacingErrorMessage(error, '暂时无法读取创作详情，请检查连接后重试。'),
           type: 'error',
         });
       }
@@ -476,10 +643,11 @@ export default function ProductionDetail() {
   }, [addNotification, id, requestedVersion]);
 
   const updatePendingStatusTransition = useCallback((recovery: ProductionTransitionRecovery | null) => {
-    writeProductionTransitionRecovery(id, recovery);
+    const ownerUserId = recovery?.userId ?? authUser?.id;
+    writeProductionTransitionRecovery(id, ownerUserId, recovery);
     pendingStatusTransitionRef.current = recovery;
     setPendingStatusTransition(recovery);
-  }, [id]);
+  }, [authUser, id]);
 
   const applyProductionSnapshot = useCallback((record: ProductionType) => {
     const content = String(record.content || '');
@@ -492,6 +660,337 @@ export default function ProductionDetail() {
       record.topic_title || `创作 ${record.id}`,
     );
   }, []);
+
+  const applyProductionAutosaveReadback = useCallback((record: ProductionType, contentToKeep: string) => {
+    const serverContent = String(record.content || '');
+    setProduction(record);
+    persistedContentRef.current = serverContent;
+    latestEditContentRef.current = contentToKeep;
+    setEditData({ content: contentToKeep, status: record.status });
+    setCurrentContentDocument(
+      getCollaborationRoomId('production', record.id),
+      record.topic_title || `创作 ${record.id}`,
+    );
+  }, []);
+
+  const persistProductionAutosaveDraft = useCallback((content: string) => {
+    const persisted = writeAndVerifyProductionAutosaveDraft(
+      productionDraftKey,
+      content,
+      (key, value) => writeSafeDraft(key, value),
+      (key) => readSafeDraftValue<string>(key),
+    );
+    setProductionAutosaveDraftBlocked(!persisted);
+    if (!persisted) {
+      setProductionAutosaveRecoveryReadError('本机稿件草稿未能可靠保存；为保护正文，自动保存已暂停。请检查浏览器存储空间后重试。');
+    } else if (!productionAutosaveRecoveryRef.current) {
+      setProductionAutosaveRecoveryReadError('');
+    }
+    return persisted;
+  }, [productionDraftKey]);
+
+  const updateProductionAutosaveRecovery = useCallback((recovery: ProductionAutosaveRecovery | null) => {
+    if (recovery) {
+      try {
+        persistProductionAutosaveRecovery(recovery);
+        productionAutosaveRecoveryRef.current = recovery;
+        setProductionAutosaveRecovery(recovery);
+        setProductionAutosaveRecoveryBlocked(false);
+        setProductionAutosaveRecoveryReadError('');
+        return true;
+      } catch (error) {
+        productionAutosaveRecoveryRef.current = recovery;
+        setProductionAutosaveRecovery(recovery);
+        setProductionAutosaveRecoveryBlocked(true);
+        setProductionAutosaveRecoveryReadError(getUserFacingErrorMessage(error, '恢复信息无法安全保存；稿件保持锁定。'));
+        throw error;
+      }
+    }
+
+    const existing = productionAutosaveRecoveryRef.current;
+    if (existing && !clearProductionAutosaveRecovery(existing)) {
+      const locked = { ...existing, phase: 'uncertain' as const };
+      productionAutosaveRecoveryRef.current = locked;
+      setProductionAutosaveRecovery(locked);
+      setProductionAutosaveRecoveryBlocked(true);
+      setProductionAutosaveRecoveryReadError('服务端状态已核实，但本机恢复标记未能清理。为避免重复保存，稿件仍保持锁定；请重试只读核实。');
+      return false;
+    }
+    productionAutosaveRecoveryRef.current = null;
+    setProductionAutosaveRecovery(null);
+    setProductionAutosaveRecoveryBlocked(false);
+    setProductionAutosaveRecoveryReadError('');
+    return true;
+  }, []);
+
+  const finishProductionAutosaveRecovery = useCallback((recovery: ProductionAutosaveRecovery) => {
+    if (clearProductionAutosaveRecovery(recovery)) {
+      if (productionAutosaveRecoveryRef.current?.requestId === recovery.requestId) {
+        productionAutosaveRecoveryRef.current = null;
+        setProductionAutosaveRecovery(null);
+        setProductionAutosaveRecoveryBlocked(false);
+        setProductionAutosaveRecoveryReadError('');
+      }
+      return true;
+    }
+    const uncertain = { ...recovery, phase: 'uncertain' as const };
+    productionAutosaveRecoveryRef.current = uncertain;
+    setProductionAutosaveRecovery(uncertain);
+    setProductionAutosaveRecoveryBlocked(true);
+    setProductionAutosaveRecoveryReadError('服务器结果已核实，但本机恢复标记未能清除；稿件保持锁定，请重试只读核实。');
+    return false;
+  }, []);
+
+  const verifyProductionAutosaveRecovery = useCallback(async (
+    recovery: ProductionAutosaveRecovery,
+  ): Promise<'confirmed' | 'ready' | 'conflict' | 'unknown'> => {
+    if (productionAutosaveRecoveryVerifyLockRef.current
+      || recovery.userId !== Number(authUser?.id)
+      || recovery.productionId !== Number(id)) return 'unknown';
+    productionAutosaveRecoveryVerifyLockRef.current = true;
+    const checking = { ...recovery, phase: 'checking' as const };
+    productionAutosaveRecoveryRef.current = checking;
+    setProductionAutosaveRecovery(checking);
+    setProductionAutosaveRecoveryReadError('');
+    try {
+      const record = await getProductionById(recovery.productionId, { cache: 'no-store' });
+      if (record.id !== recovery.productionId) throw new Error('服务器返回的创作记录与当前页面不一致。');
+      const serverContent = String(record.content || '');
+      const serverFingerprint = await fingerprintProductionContent(serverContent);
+      const sameBase = record.topic_id === recovery.topicId
+        && (record.version || 'v1.0') === recovery.productionVersion
+        && record.status === recovery.status
+        && serverFingerprint === recovery.baselineFingerprint;
+      const targetReached = record.topic_id === recovery.topicId
+        && (record.version || 'v1.0') === recovery.productionVersion
+        && record.status === recovery.status
+        && serverFingerprint === recovery.targetFingerprint;
+      const editorContent = outlineEditorHandleRef.current?.getContent();
+      const storedDraft = productionDraftKey ? readSafeDraftValue<string>(productionDraftKey) : null;
+      const localDraft = typeof editorContent === 'string' && editorContent !== persistedContentRef.current
+        ? editorContent
+        : storedDraft ?? editorContent ?? latestEditContentRef.current;
+      const safeLocalDraft = typeof localDraft === 'string' ? localDraft : '';
+
+      if (targetReached) {
+        applyProductionAutosaveReadback(record, safeLocalDraft);
+        if (safeLocalDraft === serverContent) {
+          if (productionDraftKey && !clearSafeDraft(productionDraftKey)) {
+            throw new Error('服务器已保存正文，但本机草稿未能清理；请重试只读核实。');
+          }
+          if (!updateProductionAutosaveRecovery(null)) return 'unknown';
+          runtimeHandleRef.current?.confirmPersistedContent?.(serverContent);
+          addNotification({ title: '自动保存已确认', message: '服务器已保存这次稿件修改，没有重复提交。', type: 'success' });
+          return 'confirmed';
+        }
+
+        if (!persistProductionAutosaveDraft(safeLocalDraft)) {
+          throw new Error('较新的本机正文无法可靠保存；服务器已确认上一条修改，页面保持锁定。');
+        }
+
+        const laterDraftRecovery: ProductionAutosaveRecovery = {
+          ...recovery,
+          baselineFingerprint: serverFingerprint,
+          targetFingerprint: await fingerprintProductionContent(safeLocalDraft),
+          phase: 'ready',
+        };
+        updateProductionAutosaveRecovery(laterDraftRecovery);
+        runtimeHandleRef.current?.discardPendingSaves?.();
+        runtimeHandleRef.current?.confirmPersistedContent?.(serverContent);
+        addNotification({ title: '已确认上一条自动保存', message: '较新的本机正文仍保存在草稿中；确认后可继续保存，不会自动重发。', type: 'warning' });
+        return 'confirmed';
+      }
+
+      if (sameBase) {
+        applyProductionAutosaveReadback(record, safeLocalDraft);
+        if (!persistProductionAutosaveDraft(safeLocalDraft)) {
+          throw new Error('本机正文无法可靠保留；为避免丢稿，自动保存已暂停。');
+        }
+        const readyRecovery: ProductionAutosaveRecovery = {
+          ...recovery,
+          baselineFingerprint: serverFingerprint,
+          targetFingerprint: await fingerprintProductionContent(safeLocalDraft),
+          phase: 'ready',
+        };
+        updateProductionAutosaveRecovery(readyRecovery);
+        runtimeHandleRef.current?.discardPendingSaves?.();
+        addNotification({ title: '自动保存尚未写入', message: '服务器仍是原稿；正文已保留为本机草稿。系统没有自动重试，请确认后再保存。', type: 'warning' });
+        return 'ready';
+      }
+
+      const draftDiffers = safeLocalDraft !== serverContent;
+      if (draftDiffers && !persistProductionAutosaveDraft(safeLocalDraft)) {
+        applyProductionAutosaveReadback(record, safeLocalDraft);
+        setProductionAutosaveConflictDraft({ content: safeLocalDraft, serverVersion: record.version || 'v1.0' });
+        throw new Error('服务器正文已变化；本机稿未能可靠保存，正文保留在当前页面并保持锁定。请先复制或重试本机草稿保存。');
+      }
+      applyProductionAutosaveReadback(record, serverContent);
+      setProductionAutosaveConflictDraft(draftDiffers ? { content: safeLocalDraft, serverVersion: record.version || 'v1.0' } : null);
+      if (!updateProductionAutosaveRecovery(null)) return 'unknown';
+      runtimeHandleRef.current?.discardPendingSaves?.();
+      addNotification({
+        title: '服务器稿件已变化',
+        message: draftDiffers
+          ? '未覆盖其他协作者的正文；你的本机草稿已保留，可先核对再明确恢复。'
+          : '服务器正文与当前恢复记录不一致；已采用服务器正文，没有重复提交。',
+        type: 'warning',
+      });
+      return 'conflict';
+    } catch (error) {
+      const uncertain = { ...recovery, phase: 'uncertain' as const };
+      try { updateProductionAutosaveRecovery(uncertain); } catch { /* Keep the in-memory lock if session storage is unavailable. */ }
+      runtimeHandleRef.current?.discardPendingSaves?.();
+      setProductionAutosaveRecoveryReadError(getUserFacingErrorMessage(error, '稿件保存结果仍无法确认；编辑和后续写入已暂停。'));
+      return 'unknown';
+    } finally {
+      productionAutosaveRecoveryVerifyLockRef.current = false;
+      const current = productionAutosaveRecoveryRef.current;
+      if (current?.phase === 'checking') {
+        const uncertain = { ...current, phase: 'uncertain' as const };
+        productionAutosaveRecoveryRef.current = uncertain;
+        setProductionAutosaveRecovery(uncertain);
+      }
+    }
+  }, [addNotification, applyProductionAutosaveReadback, authUser?.id, id, persistProductionAutosaveDraft, productionDraftKey, updateProductionAutosaveRecovery]);
+
+  const retryProductionAutosave = useCallback(async () => {
+    const recovery = productionAutosaveRecoveryRef.current;
+    const runtime = runtimeHandleRef.current;
+    if (!recovery || recovery.phase !== 'ready' || !runtime || productionAutosaveRetrying) return;
+    setProductionAutosaveRetrying(true);
+    try {
+      const verification = await verifyProductionAutosaveRecovery(recovery);
+      const confirmedRecovery = productionAutosaveRecoveryRef.current;
+      if (verification !== 'ready' || !confirmedRecovery || confirmedRecovery.phase !== 'ready') return;
+      const editorContent = outlineEditorHandleRef.current?.getContent();
+      const content = productionDraftKey
+        ? readSafeDraftValue<string>(productionDraftKey) ?? editorContent ?? latestEditContentRef.current
+        : editorContent ?? latestEditContentRef.current;
+      if (!persistProductionAutosaveDraft(content)) return;
+      const targetFingerprint = await fingerprintProductionContent(content);
+      if (targetFingerprint !== confirmedRecovery.targetFingerprint) {
+        const updatedRecovery = { ...confirmedRecovery, targetFingerprint, phase: 'ready' as const };
+        updateProductionAutosaveRecovery(updatedRecovery);
+        addNotification({ title: '本机草稿已更新', message: '检测到较新的正文；请再次确认后重试保存。', type: 'warning' });
+        return;
+      }
+      const revisions = runtime.getRevisions?.() ?? { latestRevision: 0 };
+      productionAutosaveExplicitRetryRef.current = confirmedRecovery.requestId;
+      runtime.scheduleSave(content, Math.max(Date.now(), revisions.latestRevision + 1));
+      const result = await runtime.flush({ timeoutMs: 30_000 });
+      if (result.status !== 'synced' && productionAutosaveRecoveryRef.current?.phase === 'ready') {
+        addNotification({ title: '稿件仍待保存', message: '本机草稿仍已保留；请先只读核实服务器，再决定是否重试。', type: 'warning' });
+      }
+    } catch (error) {
+      addNotification({ title: '未能重试保存', message: getUserFacingErrorMessage(error, '本机草稿仍已保留；请检查后重试。'), type: 'error' });
+    } finally {
+      productionAutosaveExplicitRetryRef.current = '';
+      setProductionAutosaveRetrying(false);
+    }
+  }, [addNotification, persistProductionAutosaveDraft, productionAutosaveRetrying, productionDraftKey, updateProductionAutosaveRecovery, verifyProductionAutosaveRecovery]);
+
+  const restoreProductionAutosaveConflictDraft = useCallback(async () => {
+    const conflict = productionAutosaveConflictDraft;
+    const userId = Number(authUser?.id);
+    if (!conflict || !production || !productionDraftKey || !Number.isSafeInteger(userId) || userId <= 0
+      || !canEditSelectedVersion || productionAutosaveRetrying) return;
+    setProductionAutosaveRetrying(true);
+    try {
+      if (!persistProductionAutosaveDraft(conflict.content)) return;
+      const record = await getProductionById(production.id, { cache: 'no-store' });
+      const currentContent = String(record.content || '');
+      if (record.id !== production.id || record.topic_id !== production.topic_id
+        || (record.version || 'v1.0') !== (production.version || 'v1.0')
+        || record.status !== production.status || currentContent !== String(production.content || '')) {
+        applyProductionAutosaveReadback(record, currentContent);
+        setProductionAutosaveConflictDraft({ content: conflict.content, serverVersion: record.version || 'v1.0' });
+        addNotification({ title: '服务器稿件又有更新', message: '已重新读取服务器正文并保留本机草稿；请核对后再次明确恢复。', type: 'warning' });
+        return;
+      }
+      const recovery: ProductionAutosaveRecovery = {
+        version: 1,
+        userId,
+        productionId: record.id,
+        topicId: record.topic_id,
+        productionVersion: record.version || 'v1.0',
+        status: record.status,
+        baselineFingerprint: await fingerprintProductionContent(currentContent),
+        targetFingerprint: await fingerprintProductionContent(conflict.content),
+        requestId: createProductionAutosaveRequestId(),
+        phase: 'ready',
+      };
+      if (!updateProductionAutosaveRecovery(recovery)) return;
+      persistedContentRef.current = currentContent;
+      latestEditContentRef.current = conflict.content;
+      setProductionAutosaveConflictDraft(null);
+      setEditData({ content: conflict.content, status: record.status });
+      const runtime = runtimeHandleRef.current;
+      if (!runtime) throw new Error('编辑器尚未准备好；本机草稿已保留，请稍后重试。');
+      const revisions = runtime.getRevisions?.() ?? { latestRevision: 0 };
+      productionAutosaveExplicitRetryRef.current = recovery.requestId;
+      runtime.scheduleSave(conflict.content, Math.max(Date.now(), revisions.latestRevision + 1));
+      const result = await runtime.flush({ timeoutMs: 30_000 });
+      if (result.status !== 'synced' && productionAutosaveRecoveryRef.current?.phase === 'ready') {
+        addNotification({ title: '本机草稿仍待保存', message: '恢复操作没有自动重试；正文仍保存在本机，请核对服务器后再决定。', type: 'warning' });
+      }
+    } catch (error) {
+      addNotification({ title: '未能恢复本机草稿', message: getUserFacingErrorMessage(error, '本机稿仍已保留；请核对服务器后重试。'), type: 'error' });
+    } finally {
+      productionAutosaveExplicitRetryRef.current = '';
+      setProductionAutosaveRetrying(false);
+    }
+  }, [addNotification, applyProductionAutosaveReadback, authUser?.id, canEditSelectedVersion, persistProductionAutosaveDraft, production, productionAutosaveConflictDraft, productionAutosaveRetrying, productionDraftKey, updateProductionAutosaveRecovery]);
+
+  const retryProductionAutosaveDraftStorage = useCallback(() => {
+    const content = outlineEditorHandleRef.current?.getContent();
+    if (content === null || content === undefined || !persistProductionAutosaveDraft(content)) return;
+    setProductionAutosaveDraftBlocked(false);
+    if (!productionAutosaveRecoveryRef.current) setProductionAutosaveRecoveryReadError('');
+    addNotification({ title: '本机草稿已保存', message: '自动保存已恢复；后续服务器写入仍会先核实保存结果。', type: 'success' });
+  }, [addNotification, persistProductionAutosaveDraft]);
+
+  useEffect(() => {
+    if (!production || !authUser?.id || production.id !== Number(id)) return;
+    const checkKey = `${autosaveRecoveryIdentity}:${String(production.content || '')}`;
+    if (productionAutosaveRecoveryCheckRef.current === checkKey) return;
+    productionAutosaveRecoveryCheckRef.current = checkKey;
+    setProductionAutosaveRecoveryHydratedFor('');
+
+    const stored = readProductionAutosaveRecovery(Number(authUser.id), production.id);
+    if (stored.state === 'valid') {
+      productionAutosaveRecoveryRef.current = stored.recovery;
+      setProductionAutosaveRecovery(stored.recovery);
+      setProductionAutosaveRecoveryBlocked(false);
+      void verifyProductionAutosaveRecovery(stored.recovery).finally(() => {
+        setProductionAutosaveRecoveryHydratedFor(autosaveRecoveryIdentity);
+      });
+      return;
+    }
+    if (stored.state === 'invalid' || stored.state === 'unavailable') {
+      productionAutosaveRecoveryRef.current = null;
+      setProductionAutosaveRecovery(null);
+      setProductionAutosaveRecoveryBlocked(true);
+      setProductionAutosaveRecoveryReadError(stored.state === 'invalid'
+        ? '本机保存结果标记无法读取；为避免重复覆盖，稿件保持只读。请重新读取恢复状态。'
+        : '浏览器无法读取本机恢复状态；为避免重复覆盖，稿件保持只读。请检查浏览器存储权限后重试。');
+      setProductionAutosaveRecoveryHydratedFor(autosaveRecoveryIdentity);
+      return;
+    }
+
+    productionAutosaveRecoveryRef.current = null;
+    setProductionAutosaveRecovery(null);
+    setProductionAutosaveRecoveryBlocked(false);
+    const localDraft = productionDraftKey ? readSafeDraftValue<string>(productionDraftKey) : null;
+    const serverContent = String(production.content || '');
+    if (typeof localDraft === 'string' && localDraft !== serverContent) {
+      setProductionAutosaveConflictDraft({ content: localDraft, serverVersion: production.version || 'v1.0' });
+    } else {
+      setProductionAutosaveConflictDraft(null);
+      if (localDraft === serverContent && productionDraftKey) clearSafeDraft(productionDraftKey);
+    }
+    setProductionAutosaveRecoveryReadError('');
+    setProductionAutosaveRecoveryHydratedFor(autosaveRecoveryIdentity);
+  }, [authUser?.id, autosaveRecoveryIdentity, id, production, productionAutosaveRecoveryHydratedFor, productionDraftKey, verifyProductionAutosaveRecovery]);
 
   const prepareStatusTransition = useCallback(async (
     operation: ProductionTransitionOperation,
@@ -541,9 +1040,11 @@ export default function ProductionDetail() {
     const recovery = pendingStatusTransitionRef.current;
     if (!id || !recovery || recovery.phase === 'checking' || statusTransitionVerificationLockRef.current
       || Number(recovery.productionId) !== Number.parseInt(id, 10) || !authUser) return;
+    if (authUserIdRef.current !== authUser.id) return;
     if (recovery.userId !== authUser.id) {
-      updatePendingStatusTransition(null);
-      setStatusTransitionReadError('当前登录账号与发起操作的账号不同；已清除本机核实标记，请重新读取创作详情。');
+      pendingStatusTransitionRef.current = null;
+      setPendingStatusTransition(null);
+      setStatusTransitionReadError('当前登录账号与发起操作的账号不同；原账号的核实标记已保留，请重新读取创作详情。');
       await fetchData({ notifyOnFailure: false, recovery: true });
       return;
     }
@@ -555,6 +1056,7 @@ export default function ProductionDetail() {
     setPendingStatusTransition({ ...recovery, phase: 'checking' });
     try {
       const serverRecord = await getProductionById(Number.parseInt(id, 10));
+      if (authUserIdRef.current !== recovery.userId) return;
       if (serverRecord.id !== recovery.productionId) throw new Error('服务器返回的创作记录与当前页面不一致。');
       const serverContent = String(serverRecord.content || '');
       const serverFingerprint = await fingerprintProductionContent(serverContent);
@@ -675,6 +1177,7 @@ export default function ProductionDetail() {
       });
       await fetchData({ notifyOnFailure: false, recovery: true });
     } catch (error) {
+      if (authUserIdRef.current !== recovery.userId) return;
       if (recovery.operation === 'delete' && (error as Error & { status?: number }).status === 404) {
         updatePendingStatusTransition(null);
         setShowDeleteModal(false);
@@ -684,7 +1187,7 @@ export default function ProductionDetail() {
       }
       const uncertainRecovery = { ...recovery, phase: 'uncertain' as const };
       try { updatePendingStatusTransition(uncertainRecovery); } catch { /* Keep the in-memory write lock even if browser storage is unavailable. */ }
-      setStatusTransitionReadError((error as Error).message || '暂时无法只读核实服务器状态。');
+      setStatusTransitionReadError(getUserFacingErrorMessage(error, '暂时无法只读核实服务器状态，请稍后重试。'));
       addNotification({
         title: recovery.operation === 'delete' ? '删除结果仍待核实' : '状态仍待核实',
         message: recovery.operation === 'delete'
@@ -723,21 +1226,22 @@ export default function ProductionDetail() {
   }, [addNotification, history.length, historyLoading, historyPage, historyTotal, id]);
 
   useEffect(() => {
-    if (!readProductionTransitionRecovery(id)) void fetchData();
+    if (!readProductionTransitionRecovery(id, authUser?.id)) void fetchData({ notifyOnFailure: false });
     return () => {
       detailRequestRef.current += 1;
     };
-  }, [fetchData, id]);
+  }, [authUser?.id, fetchData, id]);
 
   useEffect(() => {
-    const stored = readProductionTransitionRecovery(id);
+    const stored = readProductionTransitionRecovery(id, authUser?.id);
     if (statusTransitionVerificationLockRef.current) return;
     pendingStatusTransitionRef.current = stored;
     setPendingStatusTransition(stored);
     setStatusTransitionReadError('');
     if (!stored) return;
     if (authUser && stored.userId !== authUser.id) {
-      updatePendingStatusTransition(null);
+      pendingStatusTransitionRef.current = null;
+      setPendingStatusTransition(null);
       void fetchData({ notifyOnFailure: false, recovery: true });
       return;
     }
@@ -865,6 +1369,106 @@ export default function ProductionDetail() {
     });
   }, [selectedVersionId, versionEntries]);
 
+  const persistProductionEditorAutosave = useCallback(async (content: string) => {
+    if (!production || !id || !authUser?.id || production.id !== Number(id)) {
+      throw new Error('当前账号或创作记录尚未确认；自动保存未发送。');
+    }
+    if (!productionAutosaveRecoveryHydrated || productionAutosaveRecoveryBlocked || productionAutosaveDraftBlocked) {
+      throw new Error(productionAutosaveRecoveryReadError || '本机稿件恢复状态尚未确认；自动保存未发送。');
+    }
+    if (pendingStatusTransitionRef.current || confirmedRefreshLockRef.current) {
+      throw new Error('创作状态仍待核实；自动保存未发送。');
+    }
+
+    const userId = Number(authUser.id);
+    const existingRecovery = productionAutosaveRecoveryRef.current;
+    const stored = readProductionAutosaveRecovery(userId, production.id);
+    if (stored.state === 'invalid' || stored.state === 'unavailable') {
+      setProductionAutosaveRecoveryBlocked(true);
+      setProductionAutosaveRecoveryReadError('本机保存结果标记无法安全读取；稿件已锁定。请先只读核实恢复状态。');
+      throw new Error('本机保存结果标记无法安全读取；自动保存未发送。');
+    }
+    if (stored.state === 'valid' && stored.recovery.requestId !== existingRecovery?.requestId) {
+      productionAutosaveRecoveryRef.current = stored.recovery;
+      setProductionAutosaveRecovery(stored.recovery);
+      throw new Error('已有一次稿件保存结果待核实；自动保存未发送。');
+    }
+    if (existingRecovery && (existingRecovery.userId !== userId || existingRecovery.productionId !== production.id)) {
+      throw new Error('本机恢复记录与当前账号或稿件不一致；自动保存未发送。');
+    }
+    if (existingRecovery && (existingRecovery.phase !== 'ready'
+      || productionAutosaveExplicitRetryRef.current !== existingRecovery.requestId)) {
+      throw new Error('上次稿件保存仍待只读核实；系统没有自动重试。');
+    }
+    if (!persistProductionAutosaveDraft(content)) {
+      throw new Error('本机草稿未能可靠保存；自动保存未发送。');
+    }
+
+    const baselineContent = persistedContentRef.current;
+    const baselineFingerprint = await fingerprintProductionContent(baselineContent);
+    const targetFingerprint = await fingerprintProductionContent(content);
+    if (existingRecovery && (existingRecovery.baselineFingerprint !== baselineFingerprint
+      || existingRecovery.targetFingerprint !== targetFingerprint)) {
+      const updatedRecovery = { ...existingRecovery, targetFingerprint, phase: 'ready' as const };
+      updateProductionAutosaveRecovery(updatedRecovery);
+      productionAutosaveExplicitRetryRef.current = '';
+      runtimeHandleRef.current?.discardPendingSaves?.();
+      throw new Error('本机正文或服务端基准已变化；请先只读核实，再明确确认重试。');
+    }
+
+    const recovery: ProductionAutosaveRecovery = existingRecovery
+      ? { ...existingRecovery, baselineFingerprint, targetFingerprint, phase: 'uncertain' }
+      : {
+        version: 1,
+        userId,
+        productionId: production.id,
+        topicId: production.topic_id,
+        productionVersion: production.version || 'v1.0',
+        status: editData.status,
+        baselineFingerprint,
+        targetFingerprint,
+        requestId: createProductionAutosaveRequestId(),
+        phase: 'uncertain',
+      };
+    let writeStarted = false;
+    try {
+      persistProductionAutosaveRecovery(recovery);
+      productionAutosaveRecoveryRef.current = recovery;
+      productionAutosaveExplicitRetryRef.current = '';
+      writeStarted = true;
+      await updateProduction(production.id, {
+        topic_id: production.topic_id,
+        version: production.version,
+        content,
+        expected_content: baselineContent,
+        status: editData.status,
+        version_action: 'none',
+      });
+      persistedContentRef.current = content;
+      setProduction((current) => current?.id === production.id ? {
+        ...current,
+        content,
+        content_markdown: content,
+        content_json: content,
+      } : current);
+      if (productionDraftKey && readSafeDraftValue<string>(productionDraftKey) === content) clearSafeDraft(productionDraftKey);
+      if (!finishProductionAutosaveRecovery(recovery)) runtimeHandleRef.current?.discardPendingSaves?.();
+    } catch (error) {
+      if (writeStarted) {
+        const resolution = await verifyProductionAutosaveRecovery(recovery);
+        if (resolution === 'confirmed') return;
+        throw error;
+      }
+
+      addNotification({
+        title: '本次修改尚未保存',
+        message: getUserFacingErrorMessage(error, '创作内容保存失败；本机草稿已保留，请检查后重试。'),
+        type: 'error',
+      });
+      throw error;
+    }
+  }, [addNotification, authUser?.id, editData.status, finishProductionAutosaveRecovery, id, persistProductionAutosaveDraft, production, productionAutosaveDraftBlocked, productionAutosaveRecoveryBlocked, productionAutosaveRecoveryHydrated, productionAutosaveRecoveryReadError, productionDraftKey, updateProductionAutosaveRecovery, verifyProductionAutosaveRecovery]);
+
   const startEditing = () => {
     if (!production || pendingStatusTransitionRef.current) return;
     setSelectedVersionId('current');
@@ -903,30 +1507,9 @@ export default function ProductionDetail() {
         immersive: true,
         pageScroll: true,
       },
-      persist: async (content) => {
-        if (pendingStatusTransitionRef.current) {
-          throw new Error('创作状态仍待核实，请先完成只读核实后再修改正文。');
-        }
-        if (confirmedRefreshLockRef.current) {
-          throw new Error('创作详情正在重新读取，请完成只读恢复后再修改正文。');
-        }
-        try {
-          await updateProduction(production.id, {
-            topic_id: production.topic_id,
-            version: production.version,
-            content,
-            expected_content: persistedContentRef.current,
-            status: editData.status,
-            version_action: 'none',
-          });
-        } catch (error) {
-          addNotification({ title: '本次修改尚未保存', message: (error as Error).message, type: 'error' });
-          throw error;
-        }
-        persistedContentRef.current = content;
-      },
+      persist: async (content) => persistProductionEditorAutosave(content),
     });
-  }, [addNotification, canEditSelectedVersion, editData.content, editData.status, hasProductionMutation, production, selectedVersionId, superseded]);
+  }, [canEditSelectedVersion, editData.content, hasProductionMutation, persistProductionEditorAutosave, production, selectedVersionId, superseded]);
 
   const handleVersionedSave = async (versionAction: 'minor' | 'major', confirmedRetry = false) => {
     const pendingRecovery = pendingStatusTransitionRef.current;
@@ -1013,7 +1596,7 @@ export default function ProductionDetail() {
       if (transitionWriteStarted) updatePendingStatusTransition(null);
       addNotification({
         title: '保存失败',
-        message: (error as Error).message,
+        message: getUserFacingErrorMessage(error, '创作版本保存失败，请检查后重试。'),
         type: 'error',
       });
     } finally {
@@ -1106,7 +1689,7 @@ export default function ProductionDetail() {
       if (transitionWriteStarted) updatePendingStatusTransition(null);
       addNotification({
         title: '提交失败',
-        message: (error as Error).message,
+        message: getUserFacingErrorMessage(error, '创作内容提交失败，请检查后重试。'),
         type: 'error',
       });
     } finally {
@@ -1194,7 +1777,7 @@ export default function ProductionDetail() {
       if (transitionWriteStarted) updatePendingStatusTransition(null);
       addNotification({
         title: '更新失败',
-        message: (error as Error).message,
+        message: getUserFacingErrorMessage(error, '创作状态更新失败，请检查后重试。'),
         type: 'error',
       });
     } finally {
@@ -1216,7 +1799,6 @@ export default function ProductionDetail() {
 
     productionMutationLockRef.current = true;
     setDeleting(true);
-    setShowDeleteModal(false);
     let transitionWriteStarted = false;
     try {
       if (!await flushProductionEditorBeforeMutation()) return;
@@ -1228,6 +1810,7 @@ export default function ProductionDetail() {
         retryingRecovery ? pendingRecovery : undefined,
         { previousVersion: production.version || 'v1.0' },
       );
+      setShowDeleteModal(false);
       transitionWriteStarted = true;
       await deleteProduction(production.id);
       updatePendingStatusTransition(null);
@@ -1239,7 +1822,7 @@ export default function ProductionDetail() {
         return;
       }
       if (transitionWriteStarted) updatePendingStatusTransition(null);
-      addNotification({ title: '删除失败', message: (error as Error).message, type: 'error' });
+      addNotification({ title: '删除失败', message: getUserFacingErrorMessage(error, '创作记录删除失败，请检查后重试。'), type: 'error' });
     } finally {
       productionMutationLockRef.current = false;
       setDeleting(false);
@@ -1272,6 +1855,18 @@ export default function ProductionDetail() {
               {pendingStatusTransition.phase === 'checking' ? '正在只读核实…' : pendingStatusTransition.operation === 'delete' ? '只读核实删除结果' : '只读核实状态'}
             </ActionButton>
           </GlassPanel>
+        </PageShell>
+      );
+    }
+    if (detailLoadError) {
+      return (
+        <PageShell>
+          <ErrorState
+            title="暂时无法读取创作详情"
+            description={detailLoadError}
+            actionText={loading ? '正在重新读取…' : '重新读取创作详情'}
+            onRetry={() => void fetchData({ notifyOnFailure: false })}
+          />
         </PageShell>
       );
     }
@@ -1364,9 +1959,9 @@ export default function ProductionDetail() {
             </ActionButton>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="max-w-[48rem] text-xl font-bold leading-snug text-studio-text-primary">
+                <PageHeading className="max-w-[48rem] text-xl font-bold leading-snug text-studio-text-primary">
                   {production.topic_title || '稿件创作工作台'}
-                </h1>
+                </PageHeading>
                 <StatusPill tone={statusTone}>{statusLabel}</StatusPill>
                 <StatusPill tone={syncTone(syncStatus)}>
                   <Wifi className="h-3.5 w-3.5" />
@@ -1406,7 +2001,7 @@ export default function ProductionDetail() {
                 专注写作
               </ActionButton>
             )}
-            <ActionButton onClick={() => setShowSidebar((prev) => !prev)} className="px-3 py-2" title={showSidebar ? '收起版本历史' : '展开版本历史'}>
+            <ActionButton onClick={() => setShowSidebar((prev) => !prev)} aria-expanded={showSidebar} className="px-3 py-2" title={showSidebar ? '收起版本历史' : '展开版本历史'}>
               {showSidebar ? <PanelRightClose className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
               版本历史
             </ActionButton>
@@ -1477,6 +2072,8 @@ export default function ProductionDetail() {
             manuscriptHtml={editData.content}
             referenceReady={outlineEditorReady}
             onInsertReference={insertResourceReference}
+            onLeaveStateChange={handleMaterialDraftLeaveStateChange}
+            onRegisterLeaveActions={handleRegisterMaterialDraftLeaveActions}
           />
         ) : selectedVersion ? (
           <ProductionMaterialHistorySnapshot
@@ -1551,6 +2148,101 @@ export default function ProductionDetail() {
                   {pendingStatusTransition.phase === 'checking' ? '正在只读核实…' : reviewSubmitPhase === 'submitting' ? '正在提交审核…' : statusUpdating ? '正在更新状态…' : versionSaving ? '正在保存版本…' : deleting ? '正在删除…' : pendingStatusTransition.operation === 'delete' ? '只读核实删除结果' : '只读核实状态'}
                 </ActionButton>
               )}
+            </div>
+          ) : null}
+          {productionAutosaveRecovery ? (
+            <div data-testid="production-autosave-recovery" role="alert" aria-live="polite" className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-amber/30 bg-studio-amber/10 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-studio-amber-contrast">
+                  {productionAutosaveRecovery.phase === 'ready'
+                    ? '本机草稿已保留，等待你确认保存'
+                    : productionAutosaveRecovery.phase === 'checking'
+                      ? '正在只读核实自动保存结果'
+                      : '上次自动保存结果仍待核实'}
+                </p>
+                <p className="mt-1 text-sm text-studio-text-secondary">
+                  {productionAutosaveRecoveryReadError || (productionAutosaveRecovery.phase === 'ready'
+                    ? '已确认服务器正文未被覆盖；系统没有自动重试。确认后才会再次保存本机草稿。'
+                    : '为避免重复覆盖，正文编辑、状态和版本操作已暂停。只读核实不会写入服务器。')}
+                </p>
+              </div>
+              {productionAutosaveRecovery.phase === 'ready' ? (
+                <ActionButton
+                  data-testid="production-autosave-confirm-retry"
+                  onClick={() => void retryProductionAutosave()}
+                  disabled={!canEditSelectedVersion || productionAutosaveRetrying}
+                  aria-busy={productionAutosaveRetrying}
+                  variant="primary"
+                  className="shrink-0"
+                >
+                  {productionAutosaveRetrying ? '正在核实并保存…' : '确认后重试保存本机草稿'}
+                </ActionButton>
+              ) : (
+                <ActionButton
+                  data-testid="production-autosave-verify"
+                  onClick={() => void verifyProductionAutosaveRecovery(productionAutosaveRecovery)}
+                  disabled={productionAutosaveRecovery.phase === 'checking'}
+                  aria-busy={productionAutosaveRecovery.phase === 'checking'}
+                  variant="primary"
+                  className="shrink-0"
+                >
+                  {productionAutosaveRecovery.phase === 'checking' ? '正在只读核实…' : '只读核实服务器正文'}
+                </ActionButton>
+              )}
+            </div>
+          ) : null}
+          {productionAutosaveRecoveryBlocked && !productionAutosaveRecovery ? (
+            <div data-testid="production-autosave-recovery-blocked" role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-coral/30 bg-studio-coral/10 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-studio-coral-contrast">本机保存状态无法读取</p>
+                <p className="mt-1 text-sm text-studio-text-secondary">{productionAutosaveRecoveryReadError || '为避免覆盖正文，当前稿件保持只读。'}</p>
+              </div>
+              <ActionButton
+                data-testid="production-autosave-recovery-reread"
+                onClick={() => {
+                  productionAutosaveRecoveryCheckRef.current = '';
+                  setProductionAutosaveRecoveryHydratedFor('');
+                  setProductionAutosaveRecoveryBlocked(false);
+                }}
+                className="shrink-0 px-3 py-2"
+              >
+                重新读取恢复状态
+              </ActionButton>
+            </div>
+          ) : null}
+          {productionAutosaveDraftBlocked ? (
+            <div data-testid="production-autosave-draft-storage-error" role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-studio-coral/30 bg-studio-coral/10 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-studio-coral-contrast">本机草稿暂未保存</p>
+                <p className="mt-1 text-sm text-studio-text-secondary">{productionAutosaveRecoveryReadError || '请检查浏览器存储空间。保存恢复前，正文和状态操作会暂停。'}</p>
+              </div>
+              <ActionButton data-testid="production-autosave-draft-storage-retry" onClick={retryProductionAutosaveDraftStorage} className="shrink-0 px-3 py-2">
+                重试保存本机草稿
+              </ActionButton>
+            </div>
+          ) : null}
+          {productionAutosaveConflictDraft ? (
+            <div data-testid="production-autosave-conflict" role="alert" aria-live="polite" className="space-y-3 border-b border-studio-coral/30 bg-studio-coral/10 px-4 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-studio-coral-contrast">服务器稿件已由其他操作更新</p>
+                  <p className="mt-1 text-sm text-studio-text-secondary">当前正文显示服务器版本；你的本机草稿已单独保留。请核对草稿后再明确恢复，不会自动覆盖协作者内容。</p>
+                </div>
+                <ActionButton
+                  data-testid="production-autosave-restore-conflict"
+                  onClick={() => void restoreProductionAutosaveConflictDraft()}
+                  disabled={!canEditSelectedVersion || productionAutosaveRetrying}
+                  aria-busy={productionAutosaveRetrying}
+                  variant="primary"
+                  className="shrink-0"
+                >
+                  {productionAutosaveRetrying ? '正在核对服务器…' : '核对后恢复本机草稿并保存'}
+                </ActionButton>
+              </div>
+              <details className="rounded-xl border border-studio-border-soft bg-studio-surface/70 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-studio-text-primary">查看本机保留的草稿（服务器版本 {productionAutosaveConflictDraft.serverVersion}）</summary>
+                <div className="editor-content-preview tiptap prose mt-3 max-w-none break-words text-sm text-studio-text-primary" dangerouslySetInnerHTML={{ __html: sanitizeHtml(productionAutosaveConflictDraft.content) }} />
+              </details>
             </div>
           ) : null}
           {superseded ? (
@@ -1646,12 +2338,14 @@ export default function ProductionDetail() {
                 返回当前版本
               </ActionButton>
             </div>
-          ) : selectedVersion?.isCurrent && canEditSelectedVersion && !editorLocked ? (
+          ) : selectedVersion?.isCurrent && canEditSelectedVersion && !editorLocked && !productionAutosaveConflictDraft ? (
             <div className="min-h-[300px] bg-[var(--editor-bg)]">
               <ContentEditor
+                ariaLabel="成片正文编辑区"
                 value={editData.content}
                 onChange={(content) => {
                   latestEditContentRef.current = content;
+                  persistProductionAutosaveDraft(content);
                   setEditData((prev) => ({ ...prev, content }));
                 }}
                 mode="rich"
@@ -1669,6 +2363,7 @@ export default function ProductionDetail() {
           ) : (
             <div className="min-h-[300px] bg-[var(--editor-bg)] p-6 lg:p-8">
               <ContentEditor
+                ariaLabel="成片正文历史预览"
                 value={sanitizeHtml(normalizeLegacyEditorHtmlTheme(
                   selectedVersion?.contentMarkdown ||
                     normalizeVersionContent(
@@ -1709,13 +2404,14 @@ export default function ProductionDetail() {
           <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4">
             <div>
               <p className="text-xs font-semibold text-studio-text-muted">版本历史</p>
-              <h2 className="mt-1 text-sm font-semibold text-studio-text-primary">版本记录</h2>
+              <h2 id="production-version-history-heading" className="mt-1 text-sm font-semibold text-studio-text-primary">版本记录</h2>
             </div>
             <ActionButton
               type="button"
               variant="icon"
               onClick={() => setShowSidebar((prev) => !prev)}
               className="!h-10 !w-10 !min-h-10 !min-w-10 !p-2"
+              aria-expanded={showSidebar}
               aria-label={showSidebar ? '收起版本历史' : '展开版本历史'}
               title={showSidebar ? '收起版本历史' : '展开版本历史'}
             >
@@ -1725,29 +2421,33 @@ export default function ProductionDetail() {
 
           <div className="space-y-5 p-5">
             <div className={`space-y-2 ${showSidebar ? '' : 'hidden'}`}>
-              {sidebarVersionEntries.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  onClick={() => setSelectedVersionId(entry.id)}
-                  disabled={requestedHistoryUnavailable || hasProductionMutation}
-                  className={`w-full rounded-card border px-4 py-3 text-left transition ${
-                    selectedVersionId === entry.id
-                      ? 'border-studio-border-active bg-studio-primary/12 shadow-glow-primary'
-                      : 'border-studio-border-soft bg-studio-surface-soft/70 hover:border-studio-border-active hover:bg-studio-surface-elevated/70'
-                  } disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-studio-text-primary">{entry.version}</span>
-                    <StatusPill tone={selectedVersionId === entry.id && editorLocked ? 'coral' : entry.isCurrent ? 'success' : entry.versionState === 'superseded' ? 'coral' : 'muted'} className="px-2 py-0.5 text-[10px]">
-                      {versionSyncLabel(entry, selectedVersionId === entry.id && editorLocked)}
-                    </StatusPill>
-                  </div>
-                  <p className="mt-2 text-xs text-studio-text-muted">{entry.isCurrent ? formatBeijingTime(entry.createdAt) : formatUtcToBeijingTime(entry.createdAt)}</p>
-                  <p className="mt-1 text-xs text-studio-text-secondary">{entry.operatorName || '系统记录'}</p>
-                </button>
-              ))}
-              {sidebarVersionEntries.length === 0 ? <EmptyState title="暂无版本历史" description="保存版本后会在这里形成时间线。" /> : null}
+              {sidebarVersionEntries.length > 0 ? (
+                <div role="group" aria-labelledby="production-version-history-heading" className="space-y-2">
+                  {sidebarVersionEntries.map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      aria-pressed={selectedVersionId === entry.id}
+                      onClick={() => handleSelectVersion(entry.id)}
+                      disabled={requestedHistoryUnavailable || hasProductionMutation}
+                      className={`w-full rounded-card border px-4 py-3 text-left transition ${
+                        selectedVersionId === entry.id
+                          ? 'border-studio-border-active bg-studio-primary/12 shadow-glow-primary'
+                          : 'border-studio-border-soft bg-studio-surface-soft/70 hover:border-studio-border-active hover:bg-studio-surface-elevated/70'
+                      } disabled:cursor-not-allowed disabled:opacity-50`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-studio-text-primary">{entry.version}</span>
+                        <StatusPill tone={selectedVersionId === entry.id && editorLocked ? 'coral' : entry.isCurrent ? 'success' : entry.versionState === 'superseded' ? 'coral' : 'muted'} className="px-2 py-0.5 text-[10px]">
+                          {versionSyncLabel(entry, selectedVersionId === entry.id && editorLocked)}
+                        </StatusPill>
+                      </div>
+                      <p className="mt-2 text-xs text-studio-text-muted">{entry.isCurrent ? formatBeijingTime(entry.createdAt) : formatUtcToBeijingTime(entry.createdAt)}</p>
+                      <p className="mt-1 text-xs text-studio-text-secondary">{entry.operatorName || '系统记录'}</p>
+                    </button>
+                  ))}
+                </div>
+              ) : <EmptyState title="暂无版本历史" description="保存版本后会在这里形成时间线。" />}
               {history.length < historyTotal && <ActionButton type="button" variant="secondary" aria-busy={historyLoading} disabled={historyLoading || hasProductionMutation} onClick={() => void loadMoreHistory()} className="min-h-10 w-full px-3 py-2 text-sm">{historyLoading ? '正在加载历史版本…' : '查看更多历史版本'}</ActionButton>}
             </div>
 
@@ -1755,7 +2455,7 @@ export default function ProductionDetail() {
               sourceType={production.origin_source_type}
               sourceSnapshot={production.origin_source_content_snapshot}
               sourceOutlineVersion={production.origin_source_outline_version}
-              sourceTopicId={production.topic_id}
+              sourceTopicId={production.origin_source_topic_id}
             />
 
             <div className="space-y-3 border-t border-studio-border-soft pt-5">
@@ -1810,6 +2510,30 @@ export default function ProductionDetail() {
         onCancel={() => setShowDeleteModal(false)}
         loading={deleting}
       />
+
+      <BaseModal
+        open={materialDraftLeaveDialogOpen}
+        onClose={handleKeepMaterialDraftEditing}
+        title="创作资料尚有本地修改"
+        description="离开会放弃尚未确认的本地资料文字，不会自动覆盖服务器版本。需要保留时，请先复制文字。"
+        size="sm"
+        closeOnOverlayClick={false}
+        closeOnEscape
+        footer={(
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={handleKeepMaterialDraftEditing} className="xmt-btn xmt-btn-ghost min-h-10">继续留在此页</button>
+            <button type="button" onClick={() => void handleCopyMaterialDraft()} className="xmt-btn xmt-btn-secondary min-h-10">复制本地文字</button>
+            <button type="button" onClick={handleDiscardMaterialDraftAndLeave} disabled={!materialDraftLeaveState.canDiscard} className="xmt-btn xmt-btn-danger min-h-10">放弃资料并离开</button>
+          </div>
+        )}
+      >
+        <p className="text-sm leading-6 text-studio-text-secondary">
+          {materialDraftCopyStatus === 'copied'
+            ? '文字已复制到剪贴板。你可以继续留在此页，或确认放弃本地修改后离开。'
+            : '如果服务器保存结果未确认或出现并发修改，离开后本地内容无法自动恢复。先复制可保留一份文字。'}
+        </p>
+        {materialDraftLeaveError ? <p role="alert" className="mt-3 text-sm text-studio-coral-contrast">{materialDraftLeaveError}</p> : null}
+      </BaseModal>
 
       <EditorLeaveFailureDialog
         open={leaveGuardState === 'waiting_confirmation' && !leaveFailureDialogDismissed}

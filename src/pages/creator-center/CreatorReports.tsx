@@ -2,6 +2,7 @@ import { AlertTriangle, BarChart3, CalendarDays, FileText, RefreshCw, Sparkles, 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { deleteCreatorReport, generateCreatorReport, getCreatorCenterData, getCreatorReports, type CreatorReport } from '@/api/creatorCenter';
 import { ConfirmModal } from '@/components/common';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import { ErrorState, LoadingState, PageHeader, Panel, asRecord, formatDate, formatNumber, levelMeta, num } from './shared';
 
 type ReportType='daily'|'weekly'|'monthly';
@@ -26,6 +27,7 @@ export default function CreatorReports() {
   const [operationNotice, setOperationNotice] = useState<{ message: string; refreshFailed: boolean; needsReview?: boolean } | null>(null);
   const [pendingWriteReview, setPendingWriteReview] = useState<ReportWriteReview | null>(null);
   const [writeReviewReady, setWriteReviewReady] = useState(false);
+  const [writeReviewStorageUnavailable, setWriteReviewStorageUnavailable] = useState(false);
   const [reportListInitialized, setReportListInitialized] = useState(false);
   const reportListRequestRef = useRef(0);
   const mutationLock = useRef(false);
@@ -35,6 +37,7 @@ export default function CreatorReports() {
     const reportListRequest = ++reportListRequestRef.current;
     setReportListInitialized(false);
     setWriteReviewReady(false);
+    setWriteReviewStorageUnavailable(false);
     setLoading(true);
     setError('');
     const [dataResult, reportsResult] = await Promise.allSettled([getCreatorCenterData(), getCreatorReports()]);
@@ -51,10 +54,12 @@ export default function CreatorReports() {
         hasStoredWriteReview = Boolean(window.localStorage.getItem(reportWriteReviewStorageKey(loadedAccountId))
           ?? window.localStorage.getItem(legacyGenerationReviewStorageKey(loadedAccountId)));
       } catch {
-        hasStoredWriteReview = false;
+        hasStoredWriteReview = true;
+        setWriteReviewStorageUnavailable(true);
+        errors.push('暂时无法读取浏览器中的报告操作恢复记录，所有报告写入已暂停。');
       }
     } else {
-      errors.push(dataResult.reason instanceof Error ? dataResult.reason.message : '创作者中心数据加载失败');
+      errors.push(getUserFacingErrorMessage(dataResult.reason, '创作者中心数据加载失败，请检查连接后重试。'));
     }
     if (reportsResult.status === 'fulfilled') {
       setReportListUnavailable(false);
@@ -62,7 +67,7 @@ export default function CreatorReports() {
       setActive((current) => reportsResult.value.find((item) => item.id === current?.id) || reportsResult.value[0] || null);
     } else {
       setReportListUnavailable(true);
-      if (!hasStoredWriteReview) errors.push(reportsResult.reason instanceof Error ? reportsResult.reason.message : '报告列表加载失败');
+      if (!hasStoredWriteReview) errors.push(getUserFacingErrorMessage(reportsResult.reason, '报告列表加载失败，请检查连接后重试。'));
     }
     setError(errors.join('；'));
     setReportListInitialized(true);
@@ -79,8 +84,12 @@ export default function CreatorReports() {
     setWriteReviewReady(false);
     const storageKey = reportWriteReviewStorageKey(accountId);
     let restored: ReportWriteReview | null = null;
+    let storageReadSucceeded = false;
     try {
       const raw = window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(legacyGenerationReviewStorageKey(accountId));
+      storageReadSucceeded = true;
+      setWriteReviewStorageUnavailable(false);
+      setError((current) => current.split('；').filter((message) => !message.includes('报告操作恢复记录')).join('；'));
       if (raw) {
         const parsed = JSON.parse(raw) as { operation?: unknown; type?: unknown; baselineIds?: unknown; reportId?: unknown; reportType?: unknown; message?: unknown };
         const isReportType = (value: unknown): value is ReportType => value === 'daily' || value === 'weekly' || value === 'monthly';
@@ -94,10 +103,16 @@ export default function CreatorReports() {
           && parsed.baselineIds.length <= 100
           && parsed.baselineIds.every((id) => typeof id === 'number' && Number.isSafeInteger(id))) {
           restored = { operation: 'generate', type: parsed.type, baselineIds: parsed.baselineIds as number[] };
+        } else {
+          throw new Error('无法识别运营报告恢复记录');
         }
       }
     } catch {
-      restored = null;
+      storageReadSucceeded = false;
+      setWriteReviewStorageUnavailable(true);
+      setError((current) => current.includes('报告操作恢复记录')
+        ? current
+        : [current, '暂时无法读取浏览器中的报告操作恢复记录，所有报告写入已暂停。'].filter(Boolean).join('；'));
     }
     if (!restored && pendingWriteReviewRef.current?.accountId === accountId) {
       restored = pendingWriteReviewRef.current.review;
@@ -139,8 +154,32 @@ export default function CreatorReports() {
     } else {
       setOperationNotice((current) => current?.needsReview ? null : current);
     }
-    setWriteReviewReady(true);
+    setWriteReviewReady(storageReadSucceeded);
   }, [accountId, reportListInitialized, reportListUnavailable, reports]);
+
+  const persistWriteReview = (review: ReportWriteReview) => {
+    if (!accountId) return false;
+    const serialized = JSON.stringify(review);
+    try {
+      const key = reportWriteReviewStorageKey(accountId);
+      window.localStorage.setItem(key, serialized);
+      return window.localStorage.getItem(key) === serialized;
+    } catch {
+      return false;
+    }
+  };
+
+  const clearWriteReview = () => {
+    if (!accountId) return false;
+    try {
+      window.localStorage.removeItem(reportWriteReviewStorageKey(accountId));
+      window.localStorage.removeItem(legacyGenerationReviewStorageKey(accountId));
+      return window.localStorage.getItem(reportWriteReviewStorageKey(accountId)) === null
+        && window.localStorage.getItem(legacyGenerationReviewStorageKey(accountId)) === null;
+    } catch {
+      return false;
+    }
+  };
 
   const reloadReports = async (): Promise<CreatorReport[] | null> => {
     const reportListRequest = ++reportListRequestRef.current;
@@ -158,7 +197,7 @@ export default function CreatorReports() {
       if (reportListRequest === reportListRequestRef.current) {
         setReportListUnavailable(true);
         setReportListInitialized(true);
-        setError(cause instanceof Error ? cause.message : '报告加载失败');
+        setError(getUserFacingErrorMessage(cause, '报告加载失败，请检查连接后重试。'));
       }
       return null;
     } finally {
@@ -174,22 +213,17 @@ export default function CreatorReports() {
   };
 
   const refreshAfterMutation = async (message: string) => {
-    const review: ReportWriteReview = { operation: 'refresh', message };
-    pendingWriteReviewRef.current = { accountId, review };
-    setPendingWriteReview(review);
-    try {
-      window.localStorage.setItem(reportWriteReviewStorageKey(accountId), JSON.stringify(review));
-    } catch {
-      // The in-memory lock still protects this page if browser storage is unavailable.
-    }
     setOperationNotice({ message, refreshFailed: false });
     const refreshed = await reloadReports();
     if (refreshed) {
-      try {
-        window.localStorage.removeItem(reportWriteReviewStorageKey(accountId));
-        window.localStorage.removeItem(legacyGenerationReviewStorageKey(accountId));
-      } catch {
-        // The successful read still confirms the list for this page.
+      if (!clearWriteReview()) {
+        setWriteReviewReady(false);
+        setWriteReviewStorageUnavailable(true);
+        setOperationNotice({
+          message: `${message}报告列表已重新读取，但浏览器安全恢复记录无法清除；所有报告写入已暂停。请恢复浏览器存储后重试。`,
+          refreshFailed: true,
+        });
+        return;
       }
       pendingWriteReviewRef.current = null;
       setPendingWriteReview(null);
@@ -224,11 +258,14 @@ export default function CreatorReports() {
       return;
     }
     if (pendingWriteReview?.operation === 'refresh') {
-      try {
-        window.localStorage.removeItem(reportWriteReviewStorageKey(accountId));
-        window.localStorage.removeItem(legacyGenerationReviewStorageKey(accountId));
-      } catch {
-        // The successful read still confirms the list for this page.
+      if (!clearWriteReview()) {
+        setWriteReviewReady(false);
+        setWriteReviewStorageUnavailable(true);
+        setOperationNotice({
+          message: '报告列表已重新读取，但浏览器安全恢复记录无法清除；所有报告写入已暂停。请恢复浏览器存储后重试。',
+          refreshFailed: true,
+        });
+        return;
       }
       pendingWriteReviewRef.current = null;
       setPendingWriteReview(null);
@@ -239,13 +276,14 @@ export default function CreatorReports() {
   };
 
   const acknowledgeWriteReview = () => {
-    try {
-      if (accountId) {
-        window.localStorage.removeItem(reportWriteReviewStorageKey(accountId));
-        window.localStorage.removeItem(legacyGenerationReviewStorageKey(accountId));
-      }
-    } catch {
-      // Keep the current page usable if browser storage is unavailable.
+    if (!clearWriteReview()) {
+      setWriteReviewReady(false);
+      setWriteReviewStorageUnavailable(true);
+      setOperationNotice({
+        message: '浏览器安全恢复记录无法清除，报告写入仍已暂停。请恢复浏览器存储后重试读取。',
+        refreshFailed: true,
+      });
+      return;
     }
     pendingWriteReviewRef.current = null;
     setPendingWriteReview(null);
@@ -259,19 +297,22 @@ export default function CreatorReports() {
     setError('');
     setOperationNotice(null);
     const baselineIds = reports.map((report) => report.id);
+    const review: ReportWriteReview = { operation: 'generate', type, baselineIds };
+    if (!persistWriteReview(review)) {
+      setWriteReviewReady(false);
+      setWriteReviewStorageUnavailable(true);
+      setError('浏览器无法保存并核验报告安全恢复记录，本次生成请求未发送。请恢复浏览器存储后重试读取。');
+      mutationLock.current = false;
+      setGenerating(null);
+      return;
+    }
+    pendingWriteReviewRef.current = { accountId, review };
+    setPendingWriteReview(review);
     try {
       await generateCreatorReport(type, accountId);
       reportListRequestRef.current += 1;
       await refreshAfterMutation(`运营${typeLabel[type]}已生成。`);
     } catch {
-      const review: ReportWriteReview = { operation: 'generate', type, baselineIds };
-      pendingWriteReviewRef.current = { accountId, review };
-      setPendingWriteReview(review);
-      try {
-        window.localStorage.setItem(reportWriteReviewStorageKey(accountId), JSON.stringify(review));
-      } catch {
-        // The in-memory lock still protects this page if storage is unavailable.
-      }
       const items = await reloadReports();
       setError('');
       if (!items) {
@@ -300,6 +341,20 @@ export default function CreatorReports() {
     setDeleteBusy(true);
     setError('');
     setOperationNotice(null);
+    const review: ReportWriteReview = { operation: 'delete', reportId: removed.id, reportType: removed.type };
+    if (!persistWriteReview(review)) {
+      setWriteReviewReady(false);
+      setWriteReviewStorageUnavailable(true);
+      setOperationNotice({
+        message: '浏览器无法保存并核验报告安全恢复记录，本次删除请求未发送。请恢复浏览器存储后重试读取。',
+        refreshFailed: true,
+      });
+      mutationLock.current = false;
+      setDeleteBusy(false);
+      return;
+    }
+    pendingWriteReviewRef.current = { accountId, review };
+    setPendingWriteReview(review);
     try {
       await deleteCreatorReport(removed.id, accountId);
       reportListRequestRef.current += 1;
@@ -309,16 +364,8 @@ export default function CreatorReports() {
       setDeleting(null);
       await refreshAfterMutation(`运营${typeLabel[removed.type]}已删除。`);
     } catch {
-      const review: ReportWriteReview = { operation: 'delete', reportId: removed.id, reportType: removed.type };
-      pendingWriteReviewRef.current = { accountId, review };
-      setPendingWriteReview(review);
       setDeleting(null);
       setError('');
-      try {
-        window.localStorage.setItem(reportWriteReviewStorageKey(accountId), JSON.stringify(review));
-      } catch {
-        // The in-memory lock still protects this page if browser storage is unavailable.
-      }
       const items = await reloadReports();
       setError('');
       const stillPresent = items?.some((report) => report.id === removed.id) ?? false;
@@ -343,14 +390,15 @@ export default function CreatorReports() {
     <PageHeader
       title="运营复盘报告"
       description="账号、作品、累计播放和趋势统一使用抖音运营中心数据"
-      actions={<div className="flex flex-wrap gap-2">{(['daily', 'weekly', 'monthly'] as ReportType[]).map((type) => <button type="button" key={type} disabled={!canManage || !writeReviewReady || Boolean(generating) || Boolean(deleting) || deleteBusy || loading || Boolean(pendingWriteReview) || Boolean(operationNotice?.refreshFailed)} onClick={() => void generate(type)} className="inline-flex h-10 items-center gap-2 xmt-btn xmt-btn-primary disabled:opacity-45">{generating === type ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}生成{typeLabel[type]}</button>)}</div>}
+      actions={<div className="flex flex-wrap gap-2">{(['daily', 'weekly', 'monthly'] as ReportType[]).map((type) => <button type="button" key={type} aria-busy={generating === type} disabled={!canManage || !writeReviewReady || Boolean(generating) || Boolean(deleting) || deleteBusy || loading || Boolean(pendingWriteReview) || Boolean(operationNotice?.refreshFailed)} onClick={() => void generate(type)} className="inline-flex h-10 items-center gap-2 xmt-btn xmt-btn-primary disabled:opacity-45">{generating === type ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}{generating === type ? `正在生成${typeLabel[type]}…` : `生成${typeLabel[type]}`}</button>)}</div>}
     />
-    {operationNotice ? <div role={operationNotice.refreshFailed || operationNotice.needsReview ? 'alert' : 'status'} className={`space-y-3 rounded-xl border p-4 text-sm ${operationNotice.refreshFailed || operationNotice.needsReview ? 'border-studio-amber/30 bg-studio-amber/10 text-studio-amber-contrast' : 'border-studio-success/30 bg-studio-success/10 text-studio-success-contrast'}`}>
-      <p>{operationNotice.message}{operationNotice.refreshFailed && !operationNotice.needsReview ? ' 列表刷新失败，请重新加载报告；不要重复执行刚才的操作。' : ''}</p>
-      {operationNotice.refreshFailed || pendingWriteReview ? <button type="button" onClick={() => void retryOperationRead()} disabled={!writeReviewReady || loading || Boolean(deleting) || deleteBusy} className="xmt-btn xmt-btn-secondary inline-flex min-h-10 items-center gap-2 px-4 disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />只重新读取报告</button> : null}
+    <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{generating ? `正在生成运营${typeLabel[generating]}，请稍候。` : ''}</div>
+    {operationNotice ? <div role={!writeReviewStorageUnavailable && (operationNotice.refreshFailed || operationNotice.needsReview) ? 'alert' : 'status'} className={`space-y-3 rounded-xl border p-4 text-sm ${operationNotice.refreshFailed || operationNotice.needsReview ? 'border-studio-amber/30 bg-studio-amber/10 text-studio-amber-contrast' : 'border-studio-success/30 bg-studio-success/10 text-studio-success-contrast'}`}>
+      <p>{operationNotice.message}{operationNotice.refreshFailed && !operationNotice.needsReview && !writeReviewStorageUnavailable ? ' 列表刷新失败，请重新加载报告；不要重复执行刚才的操作。' : ''}</p>
+      {operationNotice.refreshFailed || pendingWriteReview ? <button type="button" onClick={() => void (writeReviewStorageUnavailable ? reload() : retryOperationRead())} disabled={loading || Boolean(deleting) || deleteBusy} className="xmt-btn xmt-btn-secondary inline-flex min-h-10 items-center gap-2 px-4 disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />{writeReviewStorageUnavailable ? '重试读取安全恢复记录' : '只重新读取报告'}</button> : null}
       {operationNotice.needsReview && !operationNotice.refreshFailed ? <button type="button" onClick={acknowledgeWriteReview} disabled={loading || deleteBusy} className="xmt-btn xmt-btn-secondary inline-flex min-h-10 items-center gap-2 px-4 disabled:opacity-60">我已核对，允许继续操作</button> : null}
     </div> : null}
-    {error ? <div role="alert" className="space-y-3">
+    {error ? <div className="space-y-3">
       <ErrorState message={error} />
       <button type="button" onClick={() => void reload()} disabled={loading || deleteBusy || Boolean(deleting)} className="xmt-btn xmt-btn-secondary inline-flex min-h-10 items-center gap-2 px-4 disabled:opacity-60">
         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />重新加载报告
@@ -371,7 +419,7 @@ export default function CreatorReports() {
       </Panel>
       {active ? <ReportContent report={active} /> : <Panel title="选择报告"><p className="py-20 text-center text-sm text-studio-text-secondary">生成或选择一份运营分析报告</p></Panel>}
     </div>
-    <ConfirmModal open={Boolean(deleting)} title="删除复盘报告" description="删除后无法恢复，但不会影响账号、作品和历史快照数据。" confirmText="删除报告" variant="danger" loading={deleteBusy} onCancel={() => setDeleting(null)} onConfirm={() => void remove()} />
+    <ConfirmModal open={Boolean(deleting)} title="删除复盘报告" description={writeReviewStorageUnavailable && operationNotice ? operationNotice.message : '删除后无法恢复，但不会影响账号、作品和历史快照数据。'} confirmText="删除报告" variant="danger" loading={deleteBusy} confirmDisabled={!writeReviewReady || Boolean(pendingWriteReview) || Boolean(operationNotice?.refreshFailed)} onCancel={() => setDeleting(null)} onConfirm={() => void remove()} />
   </div>;
 }
 function ReportContent({report}:{report:CreatorReport}){const content=asRecord(report.content),account=asRecord(content.account_performance),health=asRecord(account.health),current=asRecord(account.current),growth=asRecord(content.growth),works=asRecord(content.work_performance),coverage=asRecord(content.data_coverage),levels=asRecord(works.level_distribution),anomalies=Array.isArray(content.anomalies)?content.anomalies:[],top=Array.isArray(content.excellent_works)?content.excellent_works:[],low=Array.isArray(content.low_efficiency_works)?content.low_efficiency_works:[],isUnified=num(content.report_version)>=2;return <div className="space-y-6">{!isUnified?<div className="rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast">这是一份旧口径报告，部分账号指标可能缺失。请重新生成统一口径报告，确认后可删除旧报告。</div>:null}<Panel title={`运营${typeLabel[report.type]}`} description={`生成于 ${formatDate(report.created_at,true)} · ${isUnified?'统一运营数据口径':'旧数据口径'}`}><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Summary label="账号健康度" value={`${num(health.score).toFixed(1)} 分`} icon={BarChart3}/><Summary label={isUnified?'当前累计播放':'周期播放变化'} value={isUnified?formatNumber(current.play_count):signed(growth.plays)} icon={TrendingUp}/><Summary label="当前粉丝" value={current.fans_count==null?'暂无数据':formatNumber(current.fans_count)} icon={Users}/><Summary label="周期发布" value={`${formatNumber(works.published)} 条`} icon={CalendarDays}/></div></Panel>{isUnified?<Panel title="周期变化" description="日快照期末减期初；无可靠快照时明确显示暂无"><div className="grid gap-4 sm:grid-cols-3"><Summary label="播放增长" value={signedNullable(growth.plays)} icon={TrendingUp}/><Summary label="粉丝增长" value={signedNullable(growth.fans)} icon={Users}/><Summary label="互动增长" value={signedNullable(growth.interactions)} icon={BarChart3}/></div></Panel>:null}<Panel title="作品表现" description={`共 ${formatNumber(works.total)} 条去重作品，按透明评分规则汇总`}><div className="grid gap-3 sm:grid-cols-4">{(['viral','excellent','normal','low'] as const).map(level=><div key={level} className="rounded-xl bg-studio-surface p-4"><span className={`rounded-md px-2 py-1 text-xs ${levelMeta[level].className}`}>{levelMeta[level].label}</span><p className="mt-4 text-2xl font-semibold">{formatNumber(levels[level])}</p></div>)}</div></Panel>{isUnified?<Panel title="数据完整度" description={String(coverage.metric_definition||'')}><div className="grid gap-3 text-sm sm:grid-cols-3"><div className="rounded-xl bg-studio-surface p-4"><span className="text-studio-text-secondary">日快照</span><p className="mt-2 font-semibold">{formatNumber(coverage.snapshot_count)} 个</p></div><div className="rounded-xl bg-studio-surface p-4"><span className="text-studio-text-secondary">统计区间</span><p className="mt-2 font-semibold">{String(coverage.period_start||'暂无')} 至 {String(coverage.period_end||'暂无')}</p></div><div className="rounded-xl bg-studio-surface p-4"><span className="text-studio-text-secondary">粉丝数据</span><p className="mt-2 font-semibold">{coverage.fans_available?'可用':'当前采集未提供'}</p></div></div></Panel>:null}<Panel title="异常数据" description="固定规则检测，不生成推测结论">{anomalies.length?<div className="space-y-2">{anomalies.map((item,index)=>{const row=asRecord(item);return <div key={index} className="flex gap-3 rounded-xl bg-studio-amber/8 p-4 text-sm"><AlertTriangle className="h-5 w-5 shrink-0 text-studio-amber"/><span>{String(row.message||'检测到指标异常')}</span></div>})}</div>:<p className="py-8 text-center text-sm text-studio-text-secondary">本周期未检测到显著异常</p>}</Panel><section className="grid gap-6 lg:grid-cols-2"><WorkList title="优秀作品" items={top} icon={TrendingUp}/><WorkList title="低效作品" items={low} icon={TrendingDown}/></section><p className="text-center text-xs text-studio-text-secondary">{String(content.methodology||'全部结论来自 Creator Data Center 已入仓数据。')}</p></div>}

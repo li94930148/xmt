@@ -22,6 +22,7 @@ import {
 import {
   createPublishing,
   deletePublishing,
+  getPublishingById,
   getPublishingDouyinCandidates,
   getPublishingCreateStatus,
   getPublishingDeleteStatus,
@@ -47,6 +48,7 @@ import ResponsiveTableShell from '../components/studio/ResponsiveTableShell';
 import SearchBar from '../components/studio/SearchBar';
 import StatusPill, { type StatusTone } from '../components/studio/StatusPill';
 import StudioEmptyState from '../components/studio/EmptyState';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { formatBeijingDate } from '../lib/utils';
 import { useAppStore, useAuthStore } from '../store';
 import { Publishing as PublishingType, Topic } from '../types';
@@ -54,10 +56,16 @@ import { usePermission } from '../hooks/usePermission';
 
 interface PendingPublishingDeleteVerification {
   id: number;
+  userId: number;
   title: string;
   page: number;
   readError: string | null;
 }
+
+type PublishingDeleteRecoveryRead =
+  | { kind: 'none'; userId: number | undefined }
+  | { kind: 'pending'; userId: number; pending: PendingPublishingDeleteVerification }
+  | { kind: 'blocked'; userId: number | undefined; message: string };
 
 type PublishingCreatePayload = Parameters<typeof createPublishing>[0];
 
@@ -70,7 +78,8 @@ interface PendingPublishingCreateVerification {
   readError: string | null;
 }
 
-type PublishingEditPayload = Pick<PublishingUpdatePayload, 'platform' | 'url' | 'status' | 'publish_time' | 'views' | 'likes' | 'shares' | 'comments'>;
+type PublishingEditValues = Pick<PublishingUpdatePayload, 'platform' | 'url' | 'status' | 'publish_time' | 'views' | 'likes' | 'shares' | 'comments'>;
+type PublishingEditPayload = PublishingEditValues & { expected_baseline?: PublishingEditValues };
 
 interface PendingPublishingUpdateVerification {
   id: number;
@@ -78,7 +87,7 @@ interface PendingPublishingUpdateVerification {
   title: string;
   page: number;
   payload: PublishingEditPayload;
-  original: PublishingEditPayload;
+  original: PublishingEditValues;
   originalRecord: PublishingType;
   status: 'checking' | 'uncertain';
   readError: string | null;
@@ -172,7 +181,7 @@ function removeStoredPublishingDouyinLinkVerification(userId: number, id: number
   }
 }
 
-function isPublishingEditPayload(value: unknown): value is PublishingEditPayload {
+function isPublishingEditValues(value: unknown): value is PublishingEditValues {
   if (!value || typeof value !== 'object') return false;
   const payload = value as Record<string, unknown>;
   return (payload.platform === undefined || typeof payload.platform === 'string')
@@ -185,6 +194,25 @@ function isPublishingEditPayload(value: unknown): value is PublishingEditPayload
     });
 }
 
+function isPublishingEditPayload(value: unknown): value is PublishingEditPayload {
+  if (!isPublishingEditValues(value)) return false;
+  const payload = value as Record<string, unknown>;
+  return payload.expected_baseline === undefined || isPublishingEditValues(payload.expected_baseline);
+}
+
+function publishingEditValues(payload: PublishingEditPayload): PublishingEditValues {
+  return {
+    platform: payload.platform,
+    url: payload.url,
+    status: payload.status,
+    publish_time: payload.publish_time,
+    views: payload.views,
+    likes: payload.likes,
+    shares: payload.shares,
+    comments: payload.comments,
+  };
+}
+
 function loadPendingPublishingUpdateVerification(userId: number | undefined): PendingPublishingUpdateVerification | null {
   const key = publishingUpdateVerificationKey(userId);
   if (!key || userId === undefined || typeof window === 'undefined') return null;
@@ -193,7 +221,7 @@ function loadPendingPublishingUpdateVerification(userId: number | undefined): Pe
     const originalRecord = value?.originalRecord as Partial<PublishingType> | undefined;
     if (!value || value.userId !== userId || !Number.isInteger(value.id) || Number(value.id) <= 0
       || !Number.isInteger(value.page) || Number(value.page) <= 0 || typeof value.title !== 'string'
-      || !isPublishingEditPayload(value.payload) || !isPublishingEditPayload(value.original)
+      || !isPublishingEditPayload(value.payload) || !isPublishingEditValues(value.original)
       || !originalRecord || Number(originalRecord.id) !== Number(value.id)
       || !Number.isInteger(originalRecord.topic_id) || typeof originalRecord.platform !== 'string'
       || typeof originalRecord.status !== 'string' || typeof originalRecord.url !== 'string'
@@ -211,6 +239,26 @@ function loadPendingPublishingUpdateVerification(userId: number | undefined): Pe
     };
   } catch {
     return null;
+  }
+}
+
+function persistPublishingUpdateVerification(pending: PendingPublishingUpdateVerification) {
+  const key = publishingUpdateVerificationKey(pending.userId);
+  if (!key || typeof window === 'undefined') throw new Error('当前账号尚未确认，无法保存发布记录更新恢复信息');
+  const marker = {
+    id: pending.id,
+    userId: pending.userId,
+    title: pending.title,
+    page: pending.page,
+    payload: pending.payload,
+    original: pending.original,
+    originalRecord: pending.originalRecord,
+    status: pending.status,
+  };
+  const serialized = JSON.stringify(marker);
+  sessionStorage.setItem(key, serialized);
+  if (sessionStorage.getItem(key) !== serialized) {
+    throw new Error('发布记录更新恢复信息未能保存');
   }
 }
 
@@ -275,16 +323,79 @@ function removeStoredPublishingCreateVerification(userId: number, clientRequestI
   }
 }
 
-function loadPendingPublishingDeleteVerification(userId: number | undefined): PendingPublishingDeleteVerification | null {
+function persistPublishingCreateVerification(pending: PendingPublishingCreateVerification) {
+  const key = publishingCreateVerificationKey(pending.userId);
+  if (!key || typeof window === 'undefined') throw new Error('当前账号尚未确认，无法保存发布记录创建恢复信息');
+  const serialized = JSON.stringify({
+    clientRequestId: pending.clientRequestId,
+    userId: pending.userId,
+    payload: pending.payload,
+    page: pending.page,
+    status: pending.status,
+  });
+  sessionStorage.setItem(key, serialized);
+  if (sessionStorage.getItem(key) !== serialized) {
+    throw new Error('发布记录创建恢复信息未能保存');
+  }
+}
+
+function loadPendingPublishingDeleteVerification(userId: number | undefined): PublishingDeleteRecoveryRead {
   const key = publishingDeleteVerificationKey(userId);
-  if (!key || typeof window === 'undefined') return null;
+  if (!key || typeof window === 'undefined') {
+    return { kind: 'blocked', userId, message: '当前账号或浏览器会话存储尚不可用，发布页面写入已暂停。请重试读取恢复信息。' };
+  }
   try {
-    const value = JSON.parse(sessionStorage.getItem(key) || 'null') as Partial<PendingPublishingDeleteVerification> | null;
-    if (!value || !Number.isInteger(value.id) || Number(value.id) <= 0
-      || typeof value.title !== 'string' || !Number.isInteger(value.page) || Number(value.page) <= 0) return null;
-    return { id: Number(value.id), title: value.title, page: Number(value.page), readError: null };
+    const raw = window.sessionStorage.getItem(key);
+    if (raw === null) return { kind: 'none', userId };
+    let value: Partial<PendingPublishingDeleteVerification>;
+    try {
+      value = JSON.parse(raw) as Partial<PendingPublishingDeleteVerification>;
+    } catch {
+      return { kind: 'blocked', userId, message: '发布记录删除恢复信息格式异常；为避免重复删除，当前发布页面写入已暂停。请修复或清除会话存储后重试读取。' };
+    }
+    const legacyActorScopedMarker = value.userId === undefined;
+    if (!Number.isSafeInteger(userId) || Number(userId) < 1 || (!legacyActorScopedMarker && value.userId !== userId)
+      || !Number.isInteger(value.id) || Number(value.id) <= 0
+      || typeof value.title !== 'string' || !Number.isInteger(value.page) || Number(value.page) <= 0) {
+      return { kind: 'blocked', userId, message: '发布记录删除恢复信息与当前账号不匹配或内容不完整；为避免跨账号核实或重复删除，当前发布页面写入已暂停。请重试读取恢复信息。' };
+    }
+    const pending = { id: Number(value.id), userId: Number(value.userId), title: value.title, page: Number(value.page), readError: null };
+    if (legacyActorScopedMarker) {
+      pending.userId = Number(userId);
+      const migrated = JSON.stringify({ id: pending.id, userId: pending.userId, title: pending.title, page: pending.page });
+      window.sessionStorage.setItem(key, migrated);
+      if (window.sessionStorage.getItem(key) !== migrated) {
+        return { kind: 'blocked', userId, message: '旧版删除恢复信息无法安全升级；为避免重复删除，当前发布页面写入已暂停。请检查会话存储后重试。' };
+      }
+    }
+    return { kind: 'pending', userId: Number(userId), pending };
   } catch {
-    return null;
+    return { kind: 'blocked', userId, message: '暂时无法读取发布记录删除恢复信息；为避免重复删除，当前发布页面写入已暂停。请重试读取恢复信息。' };
+  }
+}
+
+function persistPublishingDeleteVerification(userId: number | undefined, pending: PendingPublishingDeleteVerification) {
+  const key = publishingDeleteVerificationKey(userId);
+  if (!key || typeof window === 'undefined' || pending.userId !== userId) throw new Error('当前账号尚未确认，无法保存发布记录删除恢复信息');
+  const serialized = JSON.stringify({ id: pending.id, userId: pending.userId, title: pending.title, page: pending.page });
+  window.sessionStorage.setItem(key, serialized);
+  if (window.sessionStorage.getItem(key) !== serialized) {
+    throw new Error('发布记录删除恢复信息未能保存');
+  }
+}
+
+function removeStoredPublishingDeleteVerification(userId: number | undefined, id: number) {
+  const key = publishingDeleteVerificationKey(userId);
+  if (!key || typeof window === 'undefined') return false;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (raw === null) return true;
+    const stored = JSON.parse(raw) as { id?: unknown; userId?: unknown } | null;
+    if (Number(stored?.id) !== id || stored?.userId !== userId) return false;
+    window.sessionStorage.removeItem(key);
+    return window.sessionStorage.getItem(key) === null;
+  } catch {
+    return false;
   }
 }
 
@@ -352,6 +463,20 @@ function publishingDateFromRecord(record: Pick<PublishingType, 'publishing_publi
   return publishingDateInputValue(storedDate);
 }
 
+function publishingFormDataFromRecord(record: PublishingType) {
+  return {
+    topic_id: String(record.topic_id),
+    platform: record.publishing_platform ?? record.platform ?? '',
+    url: record.url || '',
+    status: record.publishing_status ?? record.status,
+    publish_time: publishingDateFromRecord(record),
+    views: record.manual_views?.toString() || '',
+    likes: record.manual_likes?.toString() || '',
+    shares: record.manual_shares?.toString() || '',
+    comments: record.manual_comments?.toString() || '',
+  };
+}
+
 function getNextAction(status: string) {
   if (status === 'published') {
     return '查看数据';
@@ -400,12 +525,17 @@ export default function Publishing() {
   const [pendingUpdateVerification, setPendingUpdateVerification] = useState<PendingPublishingUpdateVerification | null>(
     () => loadPendingPublishingUpdateVerification(authUserId),
   );
+  const [publishingEditConflict, setPublishingEditConflict] = useState(false);
+  const [reloadingConflictedPublishing, setReloadingConflictedPublishing] = useState(false);
   const initialPendingCreateVerificationRef = useRef(pendingCreateVerification);
   const initialPendingUpdateVerificationRef = useRef(pendingUpdateVerification);
   const [createVerificationLoading, setCreateVerificationLoading] = useState(false);
-  const [pendingDeleteVerification, setPendingDeleteVerification] = useState<PendingPublishingDeleteVerification | null>(
+  const [deleteRecoveryReadState, setDeleteRecoveryReadState] = useState<PublishingDeleteRecoveryRead>(
     () => loadPendingPublishingDeleteVerification(authUserId),
   );
+  const pendingDeleteVerification = deleteRecoveryReadState.kind === 'pending' ? deleteRecoveryReadState.pending : null;
+  const deleteRecoveryReadError = deleteRecoveryReadState.kind === 'blocked' ? deleteRecoveryReadState.message : null;
+  const deleteRecoveryActorId = deleteRecoveryReadState.userId;
   const initialRequestedPageRef = useRef(pendingDeleteVerification?.page ?? 1);
   const [deleteVerificationNotice, setDeleteVerificationNotice] = useState<string | null>(null);
   const [updateVerificationNotice, setUpdateVerificationNotice] = useState<string | null>(null);
@@ -414,6 +544,9 @@ export default function Publishing() {
   const deleteLockRef = useRef(false);
   const deleteVerificationLockRef = useRef(false);
   const restoredDeleteVerificationStartedRef = useRef(false);
+  const authUserIdRef = useRef(authUserId);
+  authUserIdRef.current = authUserId;
+  const deleteRecoveryActorRef = useRef(authUserId);
   const douyinLinkVerificationLockRef = useRef(false);
   const restoredDouyinLinkVerificationStartedRef = useRef(false);
   const createVerificationLockRef = useRef(false);
@@ -436,28 +569,27 @@ export default function Publishing() {
   const { hasAllPermissions, loading: permissionsLoading } = usePermission();
   const canManageDouyinLinks = !permissionsLoading
     && hasAllPermissions(['workflow:publishing', 'creator:data:view']);
+  const setPendingDeleteVerification = useCallback((pending: PendingPublishingDeleteVerification | null) => {
+    setDeleteRecoveryReadState(pending
+      ? { kind: 'pending', userId: pending.userId, pending }
+      : { kind: 'none', userId: authUserId });
+  }, [authUserId]);
+  const rereadDeleteRecovery = useCallback(() => {
+    restoredDeleteVerificationStartedRef.current = false;
+    setDeleteRecoveryReadState(loadPendingPublishingDeleteVerification(authUserId));
+  }, [authUserId]);
   const publishingWritesLocked = Boolean(
-    pendingDeleteVerification || pendingCreateVerification || pendingUpdateVerification
+    !Number.isSafeInteger(authUserId) || deleteRecoveryActorId !== authUserId || deleteRecoveryReadError
+    || (pendingDeleteVerification?.userId === authUserId) || pendingCreateVerification || pendingUpdateVerification
     || pendingDouyinLinkVerification?.userId === authUserId || syncingDouyin || savingDouyinLink,
   );
 
   useEffect(() => {
-    const key = publishingDeleteVerificationKey(authUserId);
-    if (!key) return;
-    try {
-      if (pendingDeleteVerification) {
-        sessionStorage.setItem(key, JSON.stringify({
-          id: pendingDeleteVerification.id,
-          title: pendingDeleteVerification.title,
-          page: pendingDeleteVerification.page,
-        }));
-      } else {
-        sessionStorage.removeItem(key);
-      }
-    } catch {
-      // Keep the in-memory write lock if this browser session cannot persist recovery state.
-    }
-  }, [authUserId, pendingDeleteVerification]);
+    if (deleteRecoveryActorRef.current === authUserId) return;
+    deleteRecoveryActorRef.current = authUserId;
+    restoredDeleteVerificationStartedRef.current = false;
+    setDeleteRecoveryReadState(loadPendingPublishingDeleteVerification(authUserId));
+  }, [authUserId]);
 
   useEffect(() => {
     const key = publishingCreateVerificationKey(authUserId);
@@ -546,7 +678,7 @@ export default function Publishing() {
       setTopics(topicList.data.filter((topic) => topic.status === 'publishing' || topic.status === 'shooting'));
       return true;
     } catch (error) {
-      setListError((error as Error).message || '暂时无法读取发布列表');
+      setListError(getUserFacingErrorMessage(error, '暂时无法读取发布列表，请稍后重试。'));
       return false;
     } finally {
       setLoading(false);
@@ -564,6 +696,8 @@ export default function Publishing() {
   const resetForm = useCallback(() => {
     setFormData(initialFormData);
     setEditingPublishing(null);
+    setPublishingEditConflict(false);
+    setUpdateVerificationNotice(null);
   }, []);
 
   const finishPublishingCreate = useCallback(async (
@@ -604,11 +738,11 @@ export default function Publishing() {
         });
       }
     } catch (error) {
-      const readError = error instanceof Error ? error.message : '读取失败';
+      const readError = getUserFacingErrorMessage(error, '');
       setPendingCreateVerification({
         ...pending,
         status: 'uncertain',
-        readError: `发布记录创建结果尚未确认，状态读取失败（${readError}）。请只读核实，不要另建一条。`,
+        readError: `发布记录创建结果尚未确认，状态暂时无法读取${readError ? `（${readError}）` : ''}。请只读核实，不要另建一条。`,
       });
       setShowCreateModal(false);
       addNotification({
@@ -639,17 +773,16 @@ export default function Publishing() {
     const checking = { ...pending, status: 'checking' as const, readError: null };
     setPendingCreateVerification(checking);
     try {
-      const key = publishingCreateVerificationKey(pending.userId);
       try {
-        if (key) sessionStorage.setItem(key, JSON.stringify({
-          clientRequestId: pending.clientRequestId,
-          userId: pending.userId,
-          payload: pending.payload,
-          page: pending.page,
-          status: 'uncertain',
-        }));
+        persistPublishingCreateVerification(checking);
       } catch {
-        // The in-memory key still protects same-tab retries.
+        setPendingCreateVerification(null);
+        addNotification({
+          title: '创建操作未发送',
+          message: '浏览器无法保存本次恢复信息，发布记录没有创建。请检查会话存储后重试。',
+          type: 'error',
+        });
+        return;
       }
       try {
         const result = await createPublishing(pending.payload, pending.clientRequestId);
@@ -670,7 +803,7 @@ export default function Publishing() {
             comments: pending.payload.comments == null ? '' : String(pending.payload.comments),
           });
           setShowCreateModal(true);
-          addNotification({ title: '创建失败', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '创建失败', message: getUserFacingErrorMessage(error, '发布记录创建失败，请检查后重试。'), type: 'error' });
         } else {
           await resolvePendingPublishingCreate(checking);
         }
@@ -689,7 +822,7 @@ export default function Publishing() {
     void verifyPendingPublishingCreate(pending);
   }, [verifyPendingPublishingCreate]);
 
-  const restorePublishingEditForm = useCallback((pending: PendingPublishingUpdateVerification, record: PublishingType, payload: PublishingEditPayload) => {
+  const restorePublishingEditForm = useCallback((pending: PendingPublishingUpdateVerification, record: PublishingType, payload: PublishingEditValues) => {
     setEditingPublishing(record);
     setFormData({
       topic_id: String(record.topic_id),
@@ -710,7 +843,7 @@ export default function Publishing() {
 
   const resolvePendingPublishingUpdate = useCallback(async (pending: PendingPublishingUpdateVerification) => {
     try {
-      const result = await getPublishingUpdateStatus(pending.id, pending.payload, pending.original);
+      const result = await getPublishingUpdateStatus(pending.id, publishingEditValues(pending.payload), pending.original);
       removeStoredPublishingUpdateVerification(pending.userId, pending.id);
       setPendingUpdateVerification(null);
       if (result.status === 'applied') {
@@ -730,43 +863,23 @@ export default function Publishing() {
         return;
       }
       if (result.status === 'unchanged') {
-        restorePublishingEditForm(pending, pending.originalRecord, pending.payload);
+        restorePublishingEditForm(pending, pending.originalRecord, publishingEditValues(pending.payload));
         setUpdateVerificationNotice('服务器仍保留原值；编辑内容已恢复。核对后如需更新，请由你手动再次提交。');
         addNotification({ title: '更新尚未应用', message: '服务器值与保存前一致；表单已保留，可核对后手动重试。', type: 'warning' });
         return;
       }
 
-      const currentRecord: PublishingType = {
-        ...pending.originalRecord,
-        id: result.current.id,
-        topic_id: result.current.topic_id,
-        publishing_platform: result.current.platform,
-        publishing_status: result.current.status,
-        publishing_publish_time: result.current.publish_time || '',
-        platform: pending.originalRecord.data_source === 'douyin' ? pending.originalRecord.platform : (result.current.platform || ''),
-        status: pending.originalRecord.data_source === 'douyin' ? pending.originalRecord.status : (result.current.status || ''),
-        publish_time: result.current.publish_time || '',
-        url: result.current.url || '',
-        manual_views: result.current.views,
-        manual_likes: result.current.likes,
-        manual_shares: result.current.shares,
-        manual_comments: result.current.comments,
-        views: result.current.views ?? undefined,
-        likes: result.current.likes ?? undefined,
-        shares: result.current.shares ?? undefined,
-        comments: result.current.comments ?? undefined,
-      };
-      restorePublishingEditForm(pending, currentRecord, pending.payload);
-      setUpdateVerificationNotice('服务器记录已发生其他变化；当前内容和你的编辑草稿均已保留。请核对后再由你手动提交，不会自动重试。');
-      addNotification({ title: '服务器记录已变化', message: '已读回最新状态并保留编辑草稿；请核对后再明确提交。', type: 'warning' });
-      await fetchData(pending.page);
+      restorePublishingEditForm(pending, pending.originalRecord, publishingEditValues(pending.payload));
+      setPublishingEditConflict(true);
+      setUpdateVerificationNotice('服务器当前值与保存前和提交内容均不一致。你的编辑草稿及原始基线已保留；为避免覆盖其他协作者的改动，当前无法再次保存。请明确选择载入最新记录后再编辑。');
+      addNotification({ title: '发布记录需要核对', message: '当前值与保存前和提交内容均不一致；草稿已保留并暂停保存，请载入最新记录后再编辑。', type: 'warning' });
     } catch (error) {
-      const readError = error instanceof Error ? error.message : '读取失败';
+      const readError = getUserFacingErrorMessage(error, '');
       setShowCreateModal(false);
       setPendingUpdateVerification({
         ...pending,
         status: 'uncertain',
-        readError: `发布记录更新结果尚未确认，当前状态也无法读取（${readError}）。请只读核实，不要重复提交。`,
+        readError: `发布记录更新结果尚未确认，当前状态也无法读取${readError ? `（${readError}）` : ''}。请只读核实，不要重复提交。`,
       });
       addNotification({ title: '更新结果待确认', message: '服务器状态暂时无法读取；发布页面写入已暂停，请先只读核实。', type: 'warning' });
     }
@@ -783,6 +896,28 @@ export default function Publishing() {
     }
   }, [resolvePendingPublishingUpdate]);
 
+  const reloadConflictedPublishing = useCallback(async () => {
+    if (!editingPublishing || !publishingEditConflict || reloadingConflictedPublishing) return;
+    setReloadingConflictedPublishing(true);
+    try {
+      const latest = await getPublishingById(editingPublishing.id) as PublishingType | null;
+      if (!latest || Number(latest.id) !== editingPublishing.id) {
+        throw new Error('服务器返回的发布记录与当前编辑项不一致');
+      }
+      setEditingPublishing(latest);
+      setFormData(publishingFormDataFromRecord(latest));
+      setPublishingEditConflict(false);
+      setUpdateVerificationNotice('已放弃原编辑草稿并载入服务器最新值。请核对后再编辑。');
+      addNotification({ title: '已载入最新记录', message: '原编辑草稿已放弃；表单现在显示服务器最新值。', type: 'warning' });
+    } catch (error) {
+      const message = getUserFacingErrorMessage(error, '暂时无法读取最新记录。');
+      setUpdateVerificationNotice(`最新记录载入失败，原编辑草稿仍保留；保存仍已暂停。${message}`);
+      addNotification({ title: '最新记录暂不可用', message, type: 'error' });
+    } finally {
+      setReloadingConflictedPublishing(false);
+    }
+  }, [addNotification, editingPublishing, publishingEditConflict, reloadingConflictedPublishing]);
+
   const submitPendingPublishingUpdate = useCallback(async (pending: PendingPublishingUpdateVerification) => {
     if (mutationLockRef.current || updateVerificationLockRef.current || createVerificationLockRef.current) return;
     mutationLockRef.current = true;
@@ -790,12 +925,18 @@ export default function Publishing() {
     setUpdateVerificationNotice(null);
     const checking = { ...pending, status: 'checking' as const, readError: null };
     setPendingUpdateVerification(checking);
-    const key = publishingUpdateVerificationKey(pending.userId);
     try {
       try {
-        if (key) sessionStorage.setItem(key, JSON.stringify(checking));
+        persistPublishingUpdateVerification(checking);
       } catch {
-        // In-memory lock still prevents duplicate writes in this tab.
+        setPendingUpdateVerification(null);
+        setUpdateVerificationNotice('浏览器无法保存本次恢复信息；发布记录更新未发送。请检查会话存储后重试。');
+        addNotification({
+          title: '更新操作未发送',
+          message: '浏览器无法保存本次恢复信息，发布记录没有更新。请检查会话存储后重试。',
+          type: 'error',
+        });
+        return;
       }
       try {
         await updatePublishing(pending.id, pending.payload);
@@ -806,10 +947,18 @@ export default function Publishing() {
         addNotification({ title: '更新成功', message: '发布记录已更新。', type: 'success' });
         await refreshAfterConfirmedMutation(pending.page, '服务端已确认发布记录更新');
       } catch (error) {
-        if (isDefinitivePublishingUpdateRejection(error)) {
+        if ((error as { status?: unknown } | null)?.status === 409) {
+          removeStoredPublishingUpdateVerification(pending.userId, pending.id);
+          const serverMessage = getUserFacingErrorMessage(error, '服务器拒绝了本次更新。');
+          restorePublishingEditForm(pending, pending.originalRecord, publishingEditValues(pending.payload));
+          setPublishingEditConflict(true);
+          const followUp = '你的编辑草稿和原始基线均已保留；为避免覆盖其他协作者的改动，保存已暂停。请明确选择“放弃草稿并载入最新记录”后再编辑。';
+          setUpdateVerificationNotice(`${serverMessage} ${followUp}`);
+          addNotification({ title: '请核对发布记录', message: `${serverMessage} ${followUp}`, type: 'warning' });
+        } else if (isDefinitivePublishingUpdateRejection(error)) {
           removeStoredPublishingUpdateVerification(pending.userId, pending.id);
           setPendingUpdateVerification(null);
-          addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '更新失败', message: getUserFacingErrorMessage(error, '发布记录更新失败，请检查后重试。'), type: 'error' });
         } else {
           await resolvePendingPublishingUpdate(checking);
         }
@@ -818,7 +967,7 @@ export default function Publishing() {
       mutationLockRef.current = false;
       setSavingPublishing(false);
     }
-  }, [addNotification, refreshAfterConfirmedMutation, resetForm, resolvePendingPublishingUpdate]);
+  }, [addNotification, refreshAfterConfirmedMutation, resetForm, resolvePendingPublishingUpdate, restorePublishingEditForm]);
 
   useEffect(() => {
     const pending = initialPendingUpdateVerificationRef.current;
@@ -832,6 +981,7 @@ export default function Publishing() {
     pending: PendingPublishingDeleteVerification,
     operationError?: unknown,
   ) => {
+    if (authUserIdRef.current !== pending.userId || authUserId !== pending.userId) return;
     if (deleteVerificationLockRef.current) return;
     deleteVerificationLockRef.current = true;
     setDeleteVerificationLoading(true);
@@ -839,11 +989,13 @@ export default function Publishing() {
     setDeleteVerificationNotice(null);
     try {
       const status = await getPublishingDeleteStatus(pending.id);
-      const key = publishingDeleteVerificationKey(authUserId);
-      try {
-        if (key) sessionStorage.removeItem(key);
-      } catch {
-        // The in-memory result is authoritative even when session storage is unavailable.
+      if (authUserIdRef.current !== pending.userId) return;
+      if (!removeStoredPublishingDeleteVerification(pending.userId, pending.id)) {
+        setPendingDeleteVerification({
+          ...pending,
+          readError: '服务器状态已读取，但恢复标记无法安全清理；为避免重复操作，发布页面继续锁定。请只读重试核实。',
+        });
+        return;
       }
       setPendingDeleteVerification(null);
       setPage(pending.page);
@@ -854,36 +1006,40 @@ export default function Publishing() {
         addNotification({ title: '删除已确认', message: `服务器确认发布记录「${pending.title}」已删除；未重复发送请求。`, type: 'success' });
         await refreshAfterConfirmedMutation(pending.page, `已只读核实发布记录「${pending.title}」已删除`);
       } else {
+        const operationMessage = getUserFacingErrorMessage(operationError, '');
         setDeleteVerificationNotice(
-          `服务器确认发布记录「${pending.title}」仍存在；本次没有重复删除。请核对当前记录后，再由你决定是否重新发起删除。${operationError instanceof Error ? ` ${operationError.message}` : ''}`,
+          `服务器确认发布记录「${pending.title}」仍存在；本次没有重复删除。请核对当前记录后，再由你决定是否重新发起删除。${operationMessage ? ` ${operationMessage}` : ''}`,
         );
         const refreshed = await fetchData(pending.page);
         if (!refreshed) setDeleteVerificationNotice((current) => `${current || ''} 列表刷新失败，可稍后重新加载。`);
       }
     } catch (error) {
-      const readError = error instanceof Error ? error.message : '读取失败';
+      if (authUserIdRef.current !== pending.userId) return;
+      const operationMessage = getUserFacingErrorMessage(operationError, '');
+      const readError = getUserFacingErrorMessage(error, '');
       setPendingDeleteVerification({
         ...pending,
-        readError: `删除请求未获确认${operationError instanceof Error ? `（${operationError.message}）` : ''}，发布记录状态也暂时无法读取${readError ? `（${readError}）` : ''}。请只读重试核实，不要重复删除。`,
+        readError: `删除请求未获确认${operationMessage ? `（${operationMessage}）` : ''}，发布记录状态也暂时无法读取${readError ? `（${readError}）` : ''}。请只读重试核实，不要重复删除。`,
       });
     } finally {
       deleteVerificationLockRef.current = false;
       setDeleteVerificationLoading(false);
     }
-  }, [addNotification, authUserId, fetchData, publishings, refreshAfterConfirmedMutation]);
+  }, [addNotification, authUserId, fetchData, publishings, refreshAfterConfirmedMutation, setPendingDeleteVerification]);
 
   useEffect(() => {
-    if (restoredDeleteVerificationStartedRef.current || !pendingDeleteVerification) return;
+    if (restoredDeleteVerificationStartedRef.current || !pendingDeleteVerification
+      || pendingDeleteVerification.userId !== authUserId || deleteRecoveryActorId !== authUserId) return;
     restoredDeleteVerificationStartedRef.current = true;
     void verifyDeleteStatus(pendingDeleteVerification);
-  }, [pendingDeleteVerification, verifyDeleteStatus]);
+  }, [authUserId, deleteRecoveryActorId, pendingDeleteVerification, verifyDeleteStatus]);
 
   useEffect(() => {
     void fetchData(initialRequestedPageRef.current);
   }, [fetchData]);
 
   const handleCreate = async () => {
-    if (publishingWritesLocked || mutationLockRef.current) return;
+    if (publishingWritesLocked || mutationLockRef.current || publishingEditConflict) return;
     const manualMetricInputs = [formData.views, formData.likes, formData.shares, formData.comments];
     if (manualMetricInputs.some((value) => value.trim() !== '' && formMetricValue(value) === null)) {
       addNotification({ title: '数据无效', message: '手工补充指标必须是非负整数', type: 'error' });
@@ -902,14 +1058,7 @@ export default function Publishing() {
         return;
       }
       const usesDouyinData = editingPublishing.data_source === 'douyin';
-      const payload: PublishingEditPayload = {
-        platform: usesDouyinData ? undefined : formData.platform,
-        url: formData.url,
-        status: usesDouyinData ? undefined : formData.status,
-        publish_time: usesDouyinData ? undefined : formData.publish_time,
-        ...manualMetrics,
-      };
-      const original: PublishingEditPayload = {
+      const original: PublishingEditValues = {
         platform: editingPublishing.publishing_platform ?? editingPublishing.platform,
         url: editingPublishing.url || '',
         status: editingPublishing.publishing_status ?? editingPublishing.status,
@@ -918,6 +1067,14 @@ export default function Publishing() {
         likes: editingPublishing.manual_likes ?? null,
         shares: editingPublishing.manual_shares ?? null,
         comments: editingPublishing.manual_comments ?? null,
+      };
+      const payload: PublishingEditPayload = {
+        platform: usesDouyinData ? undefined : formData.platform,
+        url: formData.url,
+        status: usesDouyinData ? undefined : formData.status,
+        publish_time: usesDouyinData ? undefined : formData.publish_time,
+        ...manualMetrics,
+        expected_baseline: original,
       };
       await submitPendingPublishingUpdate({
         id: editingPublishing.id,
@@ -960,31 +1117,47 @@ export default function Publishing() {
   };
 
   const handleDelete = async (id: number): Promise<boolean> => {
-    if (publishingWritesLocked) return false;
+    if (publishingWritesLocked || !Number.isSafeInteger(authUserId) || Number(authUserId) < 1) return false;
+    const pending = {
+      id,
+      userId: Number(authUserId),
+      title: publishings.find((publishing) => publishing.id === id)?.topic_title || '未命名发布内容',
+      page,
+      readError: null,
+    };
+    try {
+      persistPublishingDeleteVerification(authUserId, pending);
+    } catch {
+      const message = '浏览器无法保存本次恢复信息；发布记录删除未发送。请检查会话存储后重试。';
+      setDeleteVerificationNotice(message);
+      addNotification({ title: '删除操作未发送', message, type: 'error' });
+      return false;
+    }
     try {
       await deletePublishing(id);
     } catch (error) {
       if (isDefinitivePublishingDeleteRejection(error)) {
-        addNotification({ title: '删除失败', message: (error as Error).message, type: 'error' });
+        if (!removeStoredPublishingDeleteVerification(pending.userId, id)) {
+          restoredDeleteVerificationStartedRef.current = true;
+          await verifyDeleteStatus({ ...pending, readError: '删除请求已被服务器拒绝，但恢复标记暂时无法清理。' }, error);
+          return false;
+        }
+        addNotification({ title: '删除失败', message: getUserFacingErrorMessage(error, '发布记录删除失败，请检查后重试。'), type: 'error' });
         return false;
-      }
-      const pending = {
-        id,
-        title: publishings.find((publishing) => publishing.id === id)?.topic_title || '未命名发布内容',
-        page,
-        readError: null,
-      };
-      const key = publishingDeleteVerificationKey(authUserId);
-      try {
-        if (key) sessionStorage.setItem(key, JSON.stringify({ id: pending.id, title: pending.title, page: pending.page }));
-      } catch {
-        // In-memory locking still prevents another delete until read-back succeeds.
       }
       restoredDeleteVerificationStartedRef.current = true;
       setDeleteTarget(null);
       await verifyDeleteStatus(pending, error);
       return false;
     }
+
+    if (!removeStoredPublishingDeleteVerification(pending.userId, id)) {
+      restoredDeleteVerificationStartedRef.current = true;
+      setDeleteTarget(null);
+      await verifyDeleteStatus({ ...pending, readError: '服务器已返回删除成功，但恢复标记尚未安全清理。' });
+      return false;
+    }
+    setPendingDeleteVerification(null);
 
     const deletedRecord = publishings.find((publishing) => publishing.id === id);
     if (deletedRecord) {
@@ -1038,7 +1211,7 @@ export default function Publishing() {
       setLinkCandidates(result.candidates);
     } catch (error) {
       if (!isCurrentLinkCandidateRequest(requestId, target.id, query)) return;
-      addNotification({ title: '获取候选失败', message: (error as Error).message, type: 'error' });
+      addNotification({ title: '获取候选失败', message: getUserFacingErrorMessage(error, '暂时无法读取抖音作品候选，请稍后重试。'), type: 'error' });
     } finally {
       if (isCurrentLinkCandidateRequest(requestId, target.id, query)) setLinkLoading(false);
     }
@@ -1084,11 +1257,11 @@ export default function Publishing() {
     try {
       state = await getPublishingDouyinLinkState(pending.id);
     } catch (error) {
-      const readError = error instanceof Error ? error.message : '读取失败';
+      const readError = getUserFacingErrorMessage(error, '');
       setPendingDouyinLinkVerification({
         ...pending,
         status: 'uncertain',
-        readError: `抖音关联结果尚未确认，当前状态也无法读取（${readError}）。请先只读核实，不要重复操作。`,
+        readError: `抖音关联结果尚未确认，当前状态也无法读取${readError ? `（${readError}）` : ''}。请先只读核实，不要重复操作。`,
       });
       resetDouyinLinkDialog();
       addNotification({ title: '关联结果待确认', message: '服务器状态暂时无法读取；发布页面的写入操作已暂停，请先只读核实。', type: 'warning' });
@@ -1177,7 +1350,7 @@ export default function Publishing() {
       }
       await refreshAfterConfirmedMutation(page, '服务端已确认抖音数据关联刷新');
     } catch (error) {
-      addNotification({ title: '刷新关联失败', message: (error as Error).message, type: 'error' });
+      addNotification({ title: '刷新关联失败', message: getUserFacingErrorMessage(error, '抖音作品关联刷新失败，请稍后重试。'), type: 'error' });
     } finally {
       reconcileLockRef.current = false;
       setSyncingDouyin(false);
@@ -1211,7 +1384,7 @@ export default function Publishing() {
     } catch (error) {
       addNotification({
         title: '关联操作未发送',
-        message: error instanceof Error ? error.message : '无法保存关联恢复状态；本次未发送写入。',
+        message: getUserFacingErrorMessage(error, '无法保存关联恢复状态；本次未发送写入。'),
         type: 'error',
       });
       return;
@@ -1231,7 +1404,7 @@ export default function Publishing() {
       if (isDefinitivePublishingDouyinLinkRejection(error)) {
         removeStoredPublishingDouyinLinkVerification(pending.userId, pending.id);
         setPendingDouyinLinkVerification(null);
-        addNotification({ title: '更新关联失败', message: (error as Error).message, type: 'error' });
+        addNotification({ title: '更新关联失败', message: getUserFacingErrorMessage(error, '抖音作品关联更新失败，请检查后重试。'), type: 'error' });
       } else {
         await resolvePendingDouyinLink(pending);
       }
@@ -1244,18 +1417,10 @@ export default function Publishing() {
 
   const handleEdit = (publishing: PublishingType) => {
     if (publishingWritesLocked) return;
+    setPublishingEditConflict(false);
+    setUpdateVerificationNotice(null);
     setEditingPublishing(publishing);
-    setFormData({
-      topic_id: publishing.topic_id.toString(),
-      platform: publishing.publishing_platform ?? publishing.platform ?? '',
-      url: publishing.url || '',
-      status: publishing.publishing_status ?? publishing.status,
-      publish_time: publishingDateFromRecord(publishing),
-      views: publishing.manual_views?.toString() || '',
-      likes: publishing.manual_likes?.toString() || '',
-      shares: publishing.manual_shares?.toString() || '',
-      comments: publishing.manual_comments?.toString() || '',
-    });
+    setFormData(publishingFormDataFromRecord(publishing));
     setShowCreateModal(true);
   };
 
@@ -1352,6 +1517,16 @@ export default function Publishing() {
           >
             <RefreshCw className={`h-4 w-4 ${pendingUpdateVerification.status === 'checking' ? 'animate-spin' : ''}`} />
             {pendingUpdateVerification.status === 'checking' ? '正在核实…' : '只读核实更新状态'}
+          </ActionButton>
+        </div>
+      ) : null}
+
+      {deleteRecoveryReadError ? (
+        <div role="alert" className="flex flex-col items-stretch gap-3 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-4 py-3 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
+          <p className="w-full min-w-0 sm:flex-1">{deleteRecoveryReadError}</p>
+          <ActionButton type="button" className="self-start sm:self-auto" onClick={rereadDeleteRecovery}>
+            <RefreshCw className="h-4 w-4" />
+            重试读取恢复信息
           </ActionButton>
         </div>
       ) : null}
@@ -1595,13 +1770,39 @@ export default function Publishing() {
           resetForm();
         }}
         onSubmit={handleCreate}
-        loading={savingPublishing || Boolean(pendingUpdateVerification)}
+        loading={savingPublishing || Boolean(pendingUpdateVerification) || reloadingConflictedPublishing}
+        locked={publishingEditConflict}
+        footer={publishingEditConflict ? (
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <ActionButton
+              type="button"
+              variant="ghost"
+              disabled={reloadingConflictedPublishing}
+              onClick={() => {
+                setShowCreateModal(false);
+                resetForm();
+              }}
+            >
+              放弃草稿并关闭
+            </ActionButton>
+            <ActionButton type="button" disabled={reloadingConflictedPublishing} onClick={() => void reloadConflictedPublishing()}>
+              <RefreshCw className={`h-4 w-4 ${reloadingConflictedPublishing ? 'animate-spin' : ''}`} />
+              {reloadingConflictedPublishing ? '正在载入最新记录…' : '放弃草稿并载入最新记录'}
+            </ActionButton>
+          </div>
+        ) : undefined}
         title={editingPublishing ? '编辑发布记录' : '添加发布记录'}
-        submitText={editingPublishing ? '更新' : '保存'}
+        submitText={publishingEditConflict ? '保存已暂停' : editingPublishing ? '更新' : '保存'}
         cancelText="取消"
         size="xl"
       >
         <div className="space-y-4">
+          {editingPublishing && updateVerificationNotice ? (
+            <div role="status" className="rounded-button border border-studio-amber/25 bg-studio-amber/10 px-4 py-3 text-sm text-studio-amber-contrast">
+              {updateVerificationNotice}
+              {publishingEditConflict ? ' 选择下方“放弃草稿并载入最新记录”会清除这些未保存内容，再显示服务器最新值。' : ''}
+            </div>
+          ) : null}
           {editingUsesDouyinData ? (
             <div className="rounded-button border border-studio-cyan/30 bg-studio-cyan/10 px-4 py-3 text-sm text-studio-cyan-contrast">
               已关联抖音作品。平台、发布时间和状态由作品关联记录决定；下方数值填写这条作品截至当前的累计表现，官方导出中已有指标仍优先展示。
@@ -1731,6 +1932,7 @@ export default function Publishing() {
         open={Boolean(linkTarget)}
         onClose={closeDouyinLink}
         closeOnOverlayClick={!savingDouyinLink}
+        closeOnEscape={!savingDouyinLink}
         showCloseButton={!savingDouyinLink}
         size="lg"
         title="关联抖音作品"

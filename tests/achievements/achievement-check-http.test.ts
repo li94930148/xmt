@@ -49,6 +49,32 @@ try {
   assert.equal(repeated.status, 200);
   assert.deepEqual((await repeated.json() as { newAchievements: unknown[] }).newAchievements, []);
   assert.equal((await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM user_achievements WHERE user_id=?', [userId]))?.count, 2, 'rechecking does not duplicate earned rows');
+
+  const concurrentAchievementId = await executeInsert(
+    "INSERT INTO achievements (name,condition_type,condition_value,points,sort_order) VALUES ('并发检查只授予一次','topic_count',1,30,3)",
+  );
+  const messageCountBefore = Number((await queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND title='🏆 获得新成就'",
+    [userId],
+  ))?.count || 0);
+  const concurrentResponses = await Promise.all([1, 2].map(() => fetch(`http://127.0.0.1:${address.port}/api/achievements/check`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${signToken({ userId })}`, 'content-type': 'application/json' },
+    body: '{}',
+    signal: AbortSignal.timeout(2000),
+  })));
+  assert.deepEqual(concurrentResponses.map(response => response.status), [200, 200]);
+  const concurrentBodies = await Promise.all(concurrentResponses.map(response => response.json() as Promise<{ newAchievements: Array<{ id: number }> }>));
+  assert.equal(concurrentBodies.reduce((sum, body) => sum + body.newAchievements.filter(item => item.id === concurrentAchievementId).length, 0), 1,
+    'concurrent checks report the newly earned achievement in exactly one response');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM user_achievements WHERE user_id=? AND achievement_id=?',
+    [userId, concurrentAchievementId],
+  ))?.count || 0), 1, 'the unique earned row is inserted only once');
+  assert.equal(Number((await queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM messages WHERE user_id=? AND title='🏆 获得新成就'",
+    [userId],
+  ))?.count || 0), messageCountBefore + 1, 'concurrent checks persist only one achievement notification');
 } finally {
   server.closeAllConnections();
   await new Promise<void>(resolve => server.close(() => resolve()));
@@ -56,4 +82,4 @@ try {
   fs.rmSync(directory, { recursive: true, force: true });
 }
 
-console.log('成就检查 HTTP 回归通过：已获得项会跳过、后续成就继续检查、请求正常返回且重复检查不重复授予。');
+console.log('成就检查 HTTP 回归通过：已获得项会跳过、后续成就继续检查，顺序与并发重复检查均只授予并通知一次。');

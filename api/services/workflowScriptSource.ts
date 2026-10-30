@@ -38,15 +38,16 @@ export async function isApprovedWorkflowScriptSource(topicId: number, reference:
   const row = await queryOne<{ found: number }>(
     `SELECT 1 AS found
      FROM production p
-     WHERE p.id=? AND p.topic_id=? AND (
-       (p.version=? AND p.status='approved')
+     WHERE p.id=? AND (
+       (p.topic_id=? AND p.version=? AND p.status='approved')
        OR EXISTS (
          SELECT 1 FROM production_history ph
          WHERE ph.production_id=p.id AND ph.version=? AND ph.status='approved'
+           AND (ph.source_topic_id=? OR (ph.source_topic_id IS NULL AND p.topic_id=?))
        )
      )
      LIMIT 1`,
-    [reference.productionId, topicId, reference.version, reference.version],
+    [reference.productionId, topicId, reference.version, reference.version, topicId, topicId],
   );
   return Boolean(row);
 }
@@ -54,34 +55,44 @@ export async function isApprovedWorkflowScriptSource(topicId: number, reference:
 export async function getApprovedWorkflowScriptSource(topicId: number, reference: WorkflowScriptSourceReference) {
   return queryOne<WorkflowScriptSourceProduction>(
     `SELECT p.id,
-            CASE WHEN p.version=? THEN p.version ELSE ph.version END AS version,
-            CASE WHEN p.version=? THEN p.content ELSE ph.content END AS content,
-            CASE WHEN p.version=? THEN p.content_markdown ELSE ph.content_markdown END AS content_markdown,
-            CASE WHEN p.version=? THEN p.status ELSE ph.status END AS status,
-            CASE WHEN p.version=? THEN p.created_at ELSE ph.created_at END AS created_at,
-            CASE WHEN p.version=? THEN COALESCE(p.updated_at,p.created_at) ELSE ph.created_at END AS version_timestamp,
+            CASE WHEN p.version=? AND p.topic_id=? THEN p.version ELSE ph.version END AS version,
+            CASE WHEN p.version=? AND p.topic_id=? THEN p.content ELSE ph.content END AS content,
+            CASE WHEN p.version=? AND p.topic_id=? THEN p.content_markdown ELSE ph.content_markdown END AS content_markdown,
+            CASE WHEN p.version=? AND p.topic_id=? THEN p.status ELSE ph.status END AS status,
+            CASE WHEN p.version=? AND p.topic_id=? THEN p.created_at ELSE ph.created_at END AS created_at,
+            CASE WHEN p.version=? AND p.topic_id=? THEN COALESCE(p.updated_at,p.created_at) ELSE ph.created_at END AS version_timestamp,
             u.name AS operator_name
      FROM production p
      LEFT JOIN production_history ph ON ph.production_id=p.id AND ph.version=?
-     LEFT JOIN users u ON u.id=CASE WHEN p.version=? THEN p.operator_id ELSE ph.operator_id END
-     WHERE p.id=? AND p.topic_id=? AND (
-       (p.version=? AND p.status='approved')
-       OR (ph.version=? AND ph.status='approved')
+     LEFT JOIN users u ON u.id=CASE WHEN p.version=? AND p.topic_id=? THEN p.operator_id ELSE ph.operator_id END
+     WHERE p.id=? AND (
+       (p.version=? AND p.topic_id=? AND p.status='approved')
+       OR (ph.version=? AND ph.status='approved'
+         AND (ph.source_topic_id=? OR (ph.source_topic_id IS NULL AND p.topic_id=?)))
      )
      LIMIT 1`,
     [
       reference.version,
+      topicId,
       reference.version,
+      topicId,
       reference.version,
+      topicId,
       reference.version,
+      topicId,
       reference.version,
+      topicId,
       reference.version,
-      reference.version,
-      reference.version,
-      reference.productionId,
       topicId,
       reference.version,
       reference.version,
+      topicId,
+      reference.productionId,
+      reference.version,
+      topicId,
+      reference.version,
+      topicId,
+      topicId,
     ],
   );
 }

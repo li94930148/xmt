@@ -28,7 +28,9 @@ let reports = [{
   },
 }] as Array<Record<string, unknown>>;
 let failNextReportListGet = false;
+let nextReportListFailureMessage = '报告列表暂时不可用';
 let delayNextReportListGetMs = 0;
+let delayNextReportGenerateMs = 0;
 let reportListGetCount = 0;
 let creatorCenterDataGetCount = 0;
 let reportGenerateCount = 0;
@@ -63,7 +65,9 @@ app.get('/api/creator-agent/reports', (_request, response) => {
   reportListGetCount += 1;
   if (failNextReportListGet) {
     failNextReportListGet = false;
-    return response.status(503).json({ message: '报告列表暂时不可用' });
+    const message = nextReportListFailureMessage;
+    nextReportListFailureMessage = '报告列表暂时不可用';
+    return response.status(503).json({ message });
   }
   const snapshot = [...reports];
   const delayMs = delayNextReportListGetMs;
@@ -77,6 +81,9 @@ app.post('/api/creator-agent/reports/generate', (request, response) => {
   reportGenerateCount += 1;
   const report = { id: nextReportId++, type: request.body.type, created_at: '2026-09-16T09:00:00.000Z', content: { report_version: 1, account_performance: {}, growth: {}, work_performance: {}, anomalies: [] } };
   reports = [report, ...reports];
+  const delayMs = delayNextReportGenerateMs;
+  delayNextReportGenerateMs = 0;
+  if (delayMs > 0) return setTimeout(() => response.status(201).json(report), delayMs);
   if (loseNextReportGenerateResponseAfterCommit) {
     loseNextReportGenerateResponseAfterCommit = false;
     return response.status(503).json({ message: '生成结果暂无法确认' });
@@ -92,8 +99,9 @@ app.delete('/api/creator-agent/reports/:id', (request, response) => {
   }
   response.sendStatus(204);
 });
-app.post('/__test__/fail-next-report-list-get', (_request, response) => {
+app.post('/__test__/fail-next-report-list-get', (request, response) => {
   failNextReportListGet = true;
+  if (typeof request.body?.message === 'string') nextReportListFailureMessage = request.body.message;
   response.sendStatus(204);
 });
 app.post('/__test__/lose-next-report-generate-response', (_request, response) => {
@@ -106,6 +114,10 @@ app.post('/__test__/lose-next-report-delete-response', (_request, response) => {
 });
 app.post('/__test__/delay-next-report-list-get', (request, response) => {
   delayNextReportListGetMs = Math.max(0, Math.min(2_000, Number(request.body.delayMs) || 0));
+  response.sendStatus(204);
+});
+app.post('/__test__/delay-next-report-generate', (request, response) => {
+  delayNextReportGenerateMs = Math.max(0, Math.min(2_000, Number(request.body.delayMs) || 0));
   response.sendStatus(204);
 });
 app.post('/__test__/auth-risk', (_request, response) => {
@@ -167,6 +179,40 @@ async function contextPage(viewport: { width: number; height: number }, theme: '
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('pageerror', (error) => errors.push(error.message));
   return { context, page, errors };
+}
+
+async function dropNextReportReviewWrite(page: Page) {
+  await page.evaluate(() => {
+    const targetKey = 'xmt:creator-report-write-review:douyin-browser-account';
+    const state = window as Window & { __xmtDropReportReviewWrite?: boolean };
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(key: string, value: string) {
+      if (key === targetKey && state.__xmtDropReportReviewWrite) {
+        state.__xmtDropReportReviewWrite = false;
+        return;
+      }
+      original.call(this, key, value);
+    };
+    state.__xmtDropReportReviewWrite = true;
+  });
+}
+
+async function failReportReviewReads(page: Page, enabled: boolean) {
+  await page.evaluate((shouldFail) => {
+    const targetKey = 'xmt:creator-report-write-review:douyin-browser-account';
+    const state = window as Window & { __xmtFailReportReviewRead?: boolean; __xmtOriginalStorageGetItem?: typeof Storage.prototype.getItem };
+    if (shouldFail) {
+      if (!state.__xmtOriginalStorageGetItem) state.__xmtOriginalStorageGetItem = Storage.prototype.getItem;
+      Storage.prototype.getItem = function getItem(key: string) {
+        if (key === targetKey) throw new Error('Injected storage read failure');
+        return state.__xmtOriginalStorageGetItem!.call(this, key);
+      };
+      state.__xmtFailReportReviewRead = true;
+      return;
+    }
+    if (state.__xmtOriginalStorageGetItem) Storage.prototype.getItem = state.__xmtOriginalStorageGetItem;
+    state.__xmtFailReportReviewRead = false;
+  }, enabled);
 }
 
 function parseCssColor(value: string) {
@@ -365,6 +411,48 @@ try {
   assertOnlyInjectedRefreshFailure(initialReadFailure.errors, '初次报告列表读取');
   await initialReadFailure.context.close();
 
+  const technicalReadFailure = await contextPage({ width: 390, height: 844 });
+  const reportGetsBeforeTechnicalFailure = reportListGetCount;
+  const writesBeforeTechnicalFailure = { generate: reportGenerateCount, delete: reportDeleteCount };
+  await technicalReadFailure.page.request.post(`${baseUrl}/__test__/fail-next-report-list-get`, { data: { message: 'Internal Server Error' } });
+  await open(technicalReadFailure.page, '/analytics/creator-center/reports');
+  await technicalReadFailure.page.getByText('报告列表加载失败，请检查连接后重试。', { exact: true }).waitFor();
+  assert.equal(await technicalReadFailure.page.getByText('Internal Server Error', { exact: true }).count(), 0, 'technical report-list responses use Chinese recovery copy');
+  assert.equal(reportListGetCount, reportGetsBeforeTechnicalFailure + 1, 'technical report-list failure performs one read');
+  await technicalReadFailure.page.getByRole('button', { name: '重新加载报告', exact: true }).click();
+  await technicalReadFailure.page.getByText('尚未生成报告', { exact: true }).waitFor();
+  assert.equal(await technicalReadFailure.page.getByText('报告列表加载失败，请检查连接后重试。', { exact: true }).count(), 0, 'successful explicit retry clears the technical read error');
+  assert.equal(reportListGetCount, reportGetsBeforeTechnicalFailure + 2, 'explicit retry performs one additional report-list read');
+  assert.deepEqual({ generate: reportGenerateCount, delete: reportDeleteCount }, writesBeforeTechnicalFailure, 'report read failure and retry do not generate or delete reports');
+  assert.deepEqual(technicalReadFailure.errors, []);
+  await technicalReadFailure.context.close();
+
+  reports = [{ id: 49, type: 'weekly', created_at: '2026-09-16T08:00:00.000Z', content: { report_version: 1, account_performance: {}, growth: {}, work_performance: {}, anomalies: [] } }];
+  const delayedGeneration = await contextPage({ width: 390, height: 844 });
+  await open(delayedGeneration.page, '/analytics/creator-center/reports');
+  await delayedGeneration.page.waitForFunction(() => Array.from(document.querySelectorAll('button')).some((button) => button.textContent?.includes('生成日报') && !(button as HTMLButtonElement).disabled));
+  await delayedGeneration.page.request.post(`${baseUrl}/__test__/delay-next-report-generate`, { data: { delayMs: 800 } });
+  const reportGeneratesBeforeDelay = reportGenerateCount;
+  const reportReadsBeforeDelay = reportListGetCount;
+  await delayedGeneration.page.getByRole('button', { name: '生成日报', exact: true }).click();
+  const generationStatus = delayedGeneration.page.getByRole('status').filter({ hasText: '正在生成运营日报，请稍候。' });
+  await generationStatus.waitFor();
+  const generatingDaily = delayedGeneration.page.getByRole('button', { name: '正在生成日报…', exact: true });
+  assert.equal(await generatingDaily.getAttribute('aria-busy'), 'true', '正在生成的日报按钮明确暴露忙碌状态');
+  assert.equal(await generatingDaily.isDisabled(), true, '正在生成的日报按钮被锁定');
+  assert.equal(await delayedGeneration.page.getByRole('button', { name: '生成周报', exact: true }).isDisabled(), true, '生成日报时其它周期生成按钮保持锁定');
+  assert.equal(await delayedGeneration.page.getByRole('button', { name: '生成月报', exact: true }).isDisabled(), true, '生成日报时其它周期生成按钮保持锁定');
+  assert.equal(await delayedGeneration.page.getByRole('button', { name: '删除运营周报' }).isDisabled(), true, '生成日报时报告删除保持锁定');
+  assert.equal(reportGenerateCount, reportGeneratesBeforeDelay + 1, '延迟期间仅发起一次报告生成');
+  await delayedGeneration.page.getByText('运营日报已生成。', { exact: true }).waitFor();
+  assert.equal(await delayedGeneration.page.getByRole('status').filter({ hasText: '正在生成运营日报，请稍候。' }).count(), 0, '生成结束后忙碌播报已清除');
+  assert.equal(await delayedGeneration.page.getByRole('button', { name: '生成日报', exact: true }).getAttribute('aria-busy'), 'false', '生成结束后按钮忙碌状态清除');
+  assert.equal(await delayedGeneration.page.getByRole('button', { name: '生成日报', exact: true }).isDisabled(), false, '生成结束后日报按钮恢复');
+  assert.equal(reportGenerateCount, reportGeneratesBeforeDelay + 1, '延迟生成完成后没有重复提交');
+  assert.equal(reportListGetCount, reportReadsBeforeDelay + 1, '延迟生成完成后仅刷新一次报告列表');
+  assert.deepEqual(delayedGeneration.errors, []);
+  await delayedGeneration.context.close();
+
   reports = [{ id: 51, type: 'weekly', created_at: '2026-09-16T08:00:00.000Z', content: { report_version: 1, account_performance: {}, growth: {}, work_performance: {}, anomalies: [] } }];
   const generateFeedback = await contextPage({ width: 390, height: 844 });
   await open(generateFeedback.page, '/analytics/creator-center/reports');
@@ -546,6 +634,61 @@ try {
     assert.deepEqual(themed.errors, []);
     await themed.context.close();
   }
+
+  reports = [{ id: 81, type: 'daily', created_at: '2026-09-16T08:00:00.000Z', content: { report_version: 1, account_performance: {}, growth: {}, work_performance: {}, anomalies: [] } }];
+  const generationStorageFailure = await contextPage({ width: 390, height: 844 });
+  await open(generationStorageFailure.page, '/analytics/creator-center/reports');
+  const reportGeneratesBeforeStorageFailure = reportGenerateCount;
+  await dropNextReportReviewWrite(generationStorageFailure.page);
+  await generationStorageFailure.page.getByRole('button', { name: '生成日报', exact: true }).click();
+  await generationStorageFailure.page.getByRole('alert').filter({ hasText: '本次生成请求未发送' }).waitFor();
+  assert.equal(reportGenerateCount, reportGeneratesBeforeStorageFailure, '恢复标记静默丢写时不发送生成请求');
+  assert.equal(await generationStorageFailure.page.evaluate(() => localStorage.getItem('xmt:creator-report-write-review:douyin-browser-account')), null, '静默丢写场景没有伪造成功凭证');
+  assert.equal(await generationStorageFailure.page.getByRole('button', { name: '生成日报', exact: true }).isDisabled(), true, '凭证未验证前暂停报告写入');
+  await generationStorageFailure.page.getByRole('button', { name: '重新加载报告', exact: true }).click();
+  await generationStorageFailure.page.getByRole('button', { name: '生成日报', exact: true }).waitFor({ state: 'visible' });
+  await generationStorageFailure.page.waitForFunction(() => {
+    const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('生成日报')) as HTMLButtonElement | undefined;
+    return Boolean(button && !button.disabled);
+  });
+  assert.equal(reportGenerateCount, reportGeneratesBeforeStorageFailure, '恢复读取仅恢复页面，不生成报告');
+  assert.deepEqual(generationStorageFailure.errors, []);
+  await generationStorageFailure.context.close();
+
+  const deletionStorageFailure = await contextPage({ width: 390, height: 844 });
+  await open(deletionStorageFailure.page, '/analytics/creator-center/reports');
+  const reportDeletesBeforeStorageFailure = reportDeleteCount;
+  await deletionStorageFailure.page.getByRole('button', { name: '删除运营日报' }).click();
+  await dropNextReportReviewWrite(deletionStorageFailure.page);
+  const deleteConfirm = deletionStorageFailure.page.getByRole('button', { name: '删除报告', exact: true });
+  await deleteConfirm.click();
+  await deletionStorageFailure.page.getByText('本次删除请求未发送', { exact: false }).waitFor();
+  assert.equal(reportDeleteCount, reportDeletesBeforeStorageFailure, '恢复标记静默丢写时不发送删除请求');
+  assert.equal(await deletionStorageFailure.page.evaluate(() => localStorage.getItem('xmt:creator-report-write-review:douyin-browser-account')), null, '删除静默丢写场景没有伪造成功凭证');
+  assert.equal(await deleteConfirm.isDisabled(), true, '凭证未验证前禁用删除确认');
+  await deletionStorageFailure.page.getByRole('button', { name: '取消', exact: true }).click();
+  await deletionStorageFailure.page.getByRole('button', { name: '重试读取安全恢复记录', exact: true }).click();
+  await deletionStorageFailure.page.waitForFunction(() => {
+    const button = Array.from(document.querySelectorAll('button')).find((item) => item.getAttribute('aria-label') === '删除运营日报') as HTMLButtonElement | undefined;
+    return Boolean(button && !button.disabled);
+  });
+  assert.equal(reportDeleteCount, reportDeletesBeforeStorageFailure, '存储恢复仅读取报告，不删除报告');
+  assert.deepEqual(deletionStorageFailure.errors, []);
+  await deletionStorageFailure.context.close();
+
+  const storageReadFailure = await contextPage({ width: 390, height: 844 });
+  await failReportReviewReads(storageReadFailure.page, true);
+  await open(storageReadFailure.page, '/analytics/creator-center/reports');
+  await storageReadFailure.page.getByRole('alert').filter({ hasText: '无法读取浏览器中的报告操作恢复记录' }).waitFor();
+  assert.equal(await storageReadFailure.page.getByRole('button', { name: '生成日报', exact: true }).isDisabled(), true, '恢复记录读取失败时禁止生成');
+  assert.equal(reportGenerateCount, reportGeneratesBeforeStorageFailure, '恢复记录读取失败没有额外写请求');
+  await failReportReviewReads(storageReadFailure.page, false);
+  await storageReadFailure.page.getByRole('button', { name: '重新加载报告', exact: true }).click();
+  await storageReadFailure.page.waitForFunction(() => {
+    const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('生成日报')) as HTMLButtonElement | undefined;
+    return Boolean(button && !button.disabled);
+  });
+  await storageReadFailure.context.close();
 
   console.log(`Creator reports/Auth readiness browser tests passed, including legacy warning contrast in light/dark themes; screenshots: ${screenshotDir}`);
   if (process.env.XMT_BROWSER_MCP_HOLD === '1') {

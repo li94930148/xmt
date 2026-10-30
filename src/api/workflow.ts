@@ -22,7 +22,11 @@ export interface WorkflowDocumentVersion {
 
 async function getWorkflowDocumentVersions(path: string): Promise<WorkflowDocumentVersion[]> {
   const response = await fetch(`${BASE_URL}${path}`, { headers: getAuthHeader() });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '获取剧本版本历史失败'));
+  if (!response.ok) {
+    const error = new Error(await getErrorMessage(response, '获取剧本版本历史失败')) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   const payload = await response.json() as { data?: WorkflowDocumentVersion[] };
   return Array.isArray(payload.data) ? payload.data : [];
 }
@@ -90,12 +94,43 @@ export async function createProduction(
   return response.json();
 }
 
-export async function getProductionById(id: number): Promise<Production> {
+export async function getProductionById(id: number, options?: { cache?: RequestCache }): Promise<Production> {
   const response = await fetch(`${BASE_URL}/workflow/production/${id}`, {
-    headers: getAuthHeader()
+    headers: getAuthHeader(),
+    ...(options?.cache ? { cache: options.cache } : {}),
   });
   if (!response.ok) {
     const error = new Error(await getErrorMessage(response, '获取创作详情失败')) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+  return response.json();
+}
+
+export interface ProductionSourceSnapshot {
+  production_id: number;
+  source_topic_id: number;
+  source_topic_title: string;
+  version: string;
+  content: string;
+  content_markdown: string | null;
+  status: string;
+  created_at: string | null;
+  version_timestamp: string | null;
+  operator_name: string | null;
+}
+
+export async function getProductionSourceSnapshot(
+  productionId: number,
+  version: string,
+): Promise<ProductionSourceSnapshot> {
+  const params = new URLSearchParams({ version });
+  const response = await fetch(`${BASE_URL}/workflow/production/${productionId}/source-snapshot?${params}`, {
+    headers: getAuthHeader(),
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    const error = new Error(await getErrorMessage(response, '读取创作来源快照失败')) as Error & { status?: number };
     error.status = response.status;
     throw error;
   }
@@ -323,8 +358,8 @@ export interface ProductionMaterialDraft {
 }
 
 export async function getProductionMaterialDraft(productionId: number): Promise<ProductionMaterialDraft> {
-  const response = await fetch(`${BASE_URL}/productions/${productionId}/material-draft`, { headers: getAuthHeader() });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '获取创作资料草稿失败'));
+  const response = await fetch(`${BASE_URL}/productions/${productionId}/material-draft`, { headers: getAuthHeader(), cache: 'no-store' });
+  if (!response.ok) throw Object.assign(new Error(await getErrorMessage(response, '获取创作资料草稿失败')), { status: response.status });
   return (await response.json()).data;
 }
 
@@ -332,7 +367,7 @@ export async function updateProductionMaterialDraft(productionId: number, input:
   const response = await fetch(`${BASE_URL}/productions/${productionId}/material-draft`, {
     method: 'PUT', headers: { ...getAuthHeader(), 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   });
-  if (!response.ok) throw new Error(await getErrorMessage(response, '保存创作资料草稿失败'));
+  if (!response.ok) throw Object.assign(new Error(await getErrorMessage(response, '保存创作资料草稿失败')), { status: response.status });
   return (await response.json()).data;
 }
 

@@ -266,6 +266,11 @@ async function acceptOfficialExportV2(agent: AgentRow, payload: JsonRecord, snap
         const unit = ratioMetricCodes.has(code) ? 'ratio' : code === 'watch_time_seconds' ? 'seconds' : 'count';
         const valueText = text(value);
         const valueNumber = officialDailyMetricNumber(value)!;
+        await tx.execute(`INSERT INTO creator_official_daily_metric_observations(
+            account_id,batch_id,source_kind,metric_date,source_period,metric_code,value_text,value_number,unit,
+            source_file_sha256,parser_version,collected_at
+          ) VALUES(?,?,'official_batch',?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`,
+        [account.id,batch.id,metricDate,period,code,valueText,valueNumber,unit,sha,parserVersion,new Date(snapshotTime).toISOString()]);
         const previous = await tx.queryOne<{value_text:string;collected_at:string}>('SELECT value_text,collected_at FROM creator_official_daily_metrics WHERE account_id=? AND metric_date=? AND source_period=? AND metric_code=?', [account.id,metricDate,period,code]);
         if (previous && Date.parse(previous.collected_at) > Date.parse(snapshotTime)) { staleIgnored++; continue; }
         if (previous?.value_text === valueText) dailyUnchanged++; else if (previous) dailyUpdated++; else dailyInserted++;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store';
 import { getTopics, updateTopicStatus, getUsers, getShooting, getPublishing } from '../api';
@@ -9,6 +10,7 @@ import { formatBeijingDate } from '../lib/utils';
 import { celebrateMilestone } from '../utils/confetti';
 import { getKanbanTopicDestination } from '../platform/kanban-navigation';
 import { getPlatformLabel } from '../platform/platform-labels';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import LoadingState from '../components/common/LoadingState';
 import {
   Clock, CheckCircle, XCircle, FileText, Camera, Send,
@@ -48,7 +50,7 @@ export default function Kanban() {
         setTopics(topicsRes.data);
         setUsers(usersRes.data || []);
       } catch (error) {
-        appStore.addNotification({ title: '获取数据失败', message: (error as Error).message, type: 'error' });
+        appStore.addNotification({ title: '获取数据失败', message: getUserFacingErrorMessage(error, '看板数据暂时无法读取，请稍后重试。'), type: 'error' });
       } finally {
         setLoading(false);
       }
@@ -80,7 +82,7 @@ export default function Kanban() {
       appStore.addNotification({ title: '状态已更新', message: '选题状态已切换', type: 'success' });
       if (newStatus === 'shooting' || newStatus === 'completed') celebrateMilestone();
     } catch (error) {
-      appStore.addNotification({ title: '更新失败', message: (error as Error).message, type: 'error' });
+      appStore.addNotification({ title: '更新失败', message: getUserFacingErrorMessage(error, '状态更新失败，请检查权限或当前阶段后重试。'), type: 'error' });
     }
   };
 
@@ -110,7 +112,7 @@ export default function Kanban() {
       }
       navigate(path);
     } catch (error) {
-      appStore.addNotification({ title: '流程详情加载失败', message: (error as Error).message, type: 'error' });
+      appStore.addNotification({ title: '流程详情加载失败', message: getUserFacingErrorMessage(error, '暂时无法打开流程详情，请稍后重试。'), type: 'error' });
       navigate(`/topics/${topic.id}`);
     }
   };
@@ -122,7 +124,7 @@ export default function Kanban() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className={styles.pageTitle}>看板视图</h1>
+        <PageHeading className={styles.pageTitle}>看板视图</PageHeading>
         <p className={`${styles.subtitle} mt-1`}>拖拽或点击按钮切换选题</p>
       </div>
 

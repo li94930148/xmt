@@ -32,6 +32,7 @@ import {
 } from '../components/studio';
 import { showRealtimeToast } from '../components/RealtimeToast';
 import { useDebounce } from '../hooks/useDebounce';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { usePermission } from '../hooks/usePermission';
 import { getPlatformLabel } from '../platform/platform-labels';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
@@ -47,15 +48,20 @@ import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/React
 import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
 import { ReactBitsCardSlot } from '../features/reactbits-appearance/ReactBitsCardSlot';
 import { ReactBitsRevealSlot } from '../features/reactbits-appearance/ReactBitsRevealSlot';
-import { parseStoredBjt } from '@shared/time';
 import TopicsBoardView from '../components/topics/TopicsBoardView';
 import { topicStatusLabel } from '../components/topics/topicStatusLabel';
 import { getKanbanTopicDestination } from '../platform/kanban-navigation';
 import { celebrateMilestone } from '../utils/confetti';
 
-type SortField = 'title' | 'created_at' | 'deadline' | 'status' | 'submitted_at';
+type SortField = 'title' | 'deadline' | 'status' | 'submitted_at';
 type SortDir = 'asc' | 'desc';
 type StudioTone = 'primary' | 'cyan' | 'violet' | 'coral' | 'amber' | 'success' | 'muted';
+const sortFieldLabels: Record<SortField, string> = {
+  title: '选题',
+  deadline: '截止时间',
+  status: '状态',
+  submitted_at: '提交时间',
+};
 
 const topicStatusTone: Record<string, StudioTone> = {
   pending: 'amber',
@@ -135,8 +141,9 @@ export default function Topics() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [limit] = useState(15);
-  const [sortField, setSortField] = useState<SortField>('created_at');
+  const [sortField, setSortField] = useState<SortField>('submitted_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [sortAnnouncement, setSortAnnouncement] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [batchActionLoading, setBatchActionLoading] = useState(false);
   const [batchDeleteConfirmationOpen, setBatchDeleteConfirmationOpen] = useState(false);
@@ -216,9 +223,6 @@ export default function Topics() {
         case 'title':
           cmp = (a.title || '').localeCompare(b.title || '');
           break;
-        case 'created_at':
-          cmp = (parseStoredBjt(a.created_at)?.getTime() ?? 0) - (parseStoredBjt(b.created_at)?.getTime() ?? 0);
-          break;
         case 'deadline':
           cmp = new Date(a.deadline || '9999').getTime() - new Date(b.deadline || '9999').getTime();
           break;
@@ -271,7 +275,7 @@ export default function Topics() {
       if (!controller.isCurrent(requestId)) {
         return null;
       }
-      const message = error instanceof Error && error.message ? error.message : '获取选题列表失败';
+      const message = getUserFacingErrorMessage(error, '获取选题列表失败，请稍后重试。');
       setLoadError(message);
       return false;
     } finally {
@@ -411,19 +415,25 @@ export default function Topics() {
   }
 
   const toggleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortField(field);
-      setSortDir('asc');
-    }
+    const nextDir: SortDir = sortField === field && sortDir === 'asc' ? 'desc' : 'asc';
+    setSortField(field);
+    setSortDir(nextDir);
+    setSortAnnouncement(`选题列表已按${sortFieldLabels[field]}${nextDir === 'asc' ? '升序' : '降序'}排列。`);
+  };
+
+  const getSortButtonLabel = (field: SortField) => {
+    const label = sortFieldLabels[field];
+    if (sortField !== field) return `${label}，未排序；选择后按升序排列`;
+    const current = sortDir === 'asc' ? '升序' : '降序';
+    const next = sortDir === 'asc' ? '降序' : '升序';
+    return `${label}，当前按${current}排列；再次选择切换为${next}排列`;
   };
 
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) {
-      return <ArrowUpDown className="h-3 w-3 opacity-40" />;
+      return <ArrowUpDown aria-hidden="true" className="h-3 w-3 opacity-40" />;
     }
-    return sortDir === 'asc' ? <ArrowUp className="h-3 w-3 text-studio-cyan" /> : <ArrowDown className="h-3 w-3 text-studio-cyan" />;
+    return sortDir === 'asc' ? <ArrowUp aria-hidden="true" className="h-3 w-3 text-studio-cyan" /> : <ArrowDown aria-hidden="true" className="h-3 w-3 text-studio-cyan" />;
   };
 
   const toggleSelectAll = () => {
@@ -498,7 +508,7 @@ export default function Topics() {
         addNotification({ title: '删除结果待核实', message: '暂时无法确认选题是否已删除。已暂停再次删除，请先进行只读核实。', type: 'warning' });
       }
     } catch (error) {
-      addNotification({ title: '删除失败', message: error instanceof Error ? error.message : '删除选题失败', type: 'error' });
+      addNotification({ title: '删除失败', message: getUserFacingErrorMessage(error, '删除选题失败，请检查权限或当前状态后重试。'), type: 'error' });
     } finally {
       deleteInFlightRef.current = false;
       setDeleteLoading(false);
@@ -599,7 +609,7 @@ export default function Topics() {
           }
         } catch (error) {
           failedIds.push(id);
-          if (!firstError) firstError = error instanceof Error ? error.message : '删除失败，请重试';
+          if (!firstError) firstError = getUserFacingErrorMessage(error, '删除失败，请检查权限或当前状态后重试。');
         }
       }
       await finishBatchAction('删除', ids, failedIds, firstError);
@@ -646,7 +656,7 @@ export default function Topics() {
           if (definiteRejection) {
             failedIds.push(id);
             selectedAfter.push(id);
-            if (!firstError) firstError = error.message || '审核失败，请检查权限或当前状态';
+            if (!firstError) firstError = getUserFacingErrorMessage(error, '审核失败，请检查权限或当前状态后重试。');
             continue;
           }
 
@@ -697,7 +707,7 @@ export default function Topics() {
       }
       navigate(path);
     } catch (error) {
-      addNotification({ title: '流程详情加载失败', message: error instanceof Error ? error.message : '暂时无法打开流程详情', type: 'error' });
+      addNotification({ title: '流程详情加载失败', message: getUserFacingErrorMessage(error, '暂时无法打开流程详情，请稍后重试。'), type: 'error' });
       navigate(`/topics/${topic.id}`);
     }
   };
@@ -727,7 +737,7 @@ export default function Topics() {
         && error.status < 500
         && ![408, 425, 429].includes(error.status);
       if (definiteRejection) {
-        addNotification({ title: '状态更新失败', message: error.message || '请检查权限或当前阶段后重试', type: 'error' });
+        addNotification({ title: '状态更新失败', message: getUserFacingErrorMessage(error, '请检查权限或当前阶段后重试。'), type: 'error' });
         return;
       }
       const outcome = await resolveAmbiguousTopicStatusWrite(topic.id, topic.status, status);
@@ -780,6 +790,8 @@ export default function Topics() {
           ) : null
         }
       />
+
+      <div id="topics-sort-status" role="status" aria-live="polite" aria-atomic="true" className="sr-only">{sortAnnouncement}</div>
 
       {statusVerificationIds.size > 0 ? (
         <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-amber/30 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
@@ -916,26 +928,26 @@ export default function Topics() {
                     {allSelected ? <CheckSquare className="h-4 w-4 text-studio-cyan" /> : <Square className="h-4 w-4" />}
                   </ActionButton>
                 </th>
-                <th className="px-4 py-3">
-                  <ActionButton type="button" variant="ghost" onClick={() => toggleSort('title')} className="min-h-10 min-w-10 justify-start px-1 py-2 text-xs">
+                <th aria-sort={sortField === 'title' ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-4 py-3">
+                  <ActionButton type="button" variant="ghost" aria-label={getSortButtonLabel('title')} onClick={() => toggleSort('title')} className="min-h-10 min-w-10 justify-start px-1 py-2 text-xs">
                     选题 <SortIcon field="title" />
                   </ActionButton>
                 </th>
                 <th className="px-4 py-3">负责人</th>
                 <th className="px-4 py-3">平台</th>
-                <th className="px-4 py-3">
-                  <ActionButton type="button" variant="ghost" onClick={() => toggleSort('submitted_at')} className="min-h-10 min-w-10 justify-start px-1 py-2 text-xs">
+                <th aria-sort={sortField === 'submitted_at' ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-4 py-3">
+                  <ActionButton type="button" variant="ghost" aria-label={getSortButtonLabel('submitted_at')} onClick={() => toggleSort('submitted_at')} className="min-h-10 min-w-10 justify-start px-1 py-2 text-xs">
                     提交时间 <SortIcon field="submitted_at" />
                   </ActionButton>
                 </th>
-                <th className="px-4 py-3">
-                  <ActionButton type="button" variant="ghost" onClick={() => toggleSort('deadline')} className="min-h-10 min-w-10 justify-start px-1 py-2 text-xs">
+                <th aria-sort={sortField === 'deadline' ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-4 py-3">
+                  <ActionButton type="button" variant="ghost" aria-label={getSortButtonLabel('deadline')} onClick={() => toggleSort('deadline')} className="min-h-10 min-w-10 justify-start px-1 py-2 text-xs">
                     截止 <SortIcon field="deadline" />
                   </ActionButton>
                 </th>
                 <th className="px-4 py-3">流程</th>
-                <th className="px-4 py-3">
-                  <ActionButton type="button" variant="ghost" onClick={() => toggleSort('status')} className="min-h-10 min-w-10 justify-start px-1 py-2 text-xs">
+                <th aria-sort={sortField === 'status' ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-4 py-3">
+                  <ActionButton type="button" variant="ghost" aria-label={getSortButtonLabel('status')} onClick={() => toggleSort('status')} className="min-h-10 min-w-10 justify-start px-1 py-2 text-xs">
                     状态 <SortIcon field="status" />
                   </ActionButton>
                 </th>

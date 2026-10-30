@@ -21,6 +21,7 @@ export interface TopicTransaction {
   updateTopicIfStatus(id: number | string, expectedStatus: TopicStatus, patch: TopicPersistencePatch): Promise<boolean>;
   addHistory(input: TopicHistoryWrite): Promise<void>;
   addActivity(input: TopicActivityWrite): Promise<void>;
+  addMessage(input: TopicMessageWrite): Promise<number>;
   productionExists(topicId: number | string): Promise<boolean>;
   createInitialProduction(input: InitialProductionRecord): Promise<void>;
   shootingExists(topicId: number | string): Promise<boolean>;
@@ -82,6 +83,14 @@ export type TopicActivityWrite = {
   action: string;
   target: string;
   detail: string;
+};
+
+export type TopicMessageWrite = {
+  userId: number;
+  title: string;
+  content: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  link?: string | null;
 };
 
 export type InitialProductionRecord = {

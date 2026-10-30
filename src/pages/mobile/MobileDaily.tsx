@@ -7,6 +7,7 @@ import { useNetworkState } from '@/platform/network';
 import { usePermission } from '@/hooks/usePermission';
 import AccessDeniedState from '@/components/AccessDeniedState';
 import { getMobileDailyReportStatusView } from '@/platform/mobile-daily-report-status';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 const sections = [
   { key: 'today', title: '今日工作', placeholder: '记录今天完成或推进的工作' },
@@ -167,6 +168,10 @@ function isKnownPreWriteRejection(error: unknown) {
   return status === 400 || status === 401 || status === 403 || status === 409;
 }
 
+function errorMessageFragment(message: string) {
+  return message.replace(/[，。；：、,.!?！？;:\s]+$/u, '');
+}
+
 export default function MobileDaily() {
   const userId = useAuthStore((state) => state.user?.id ?? null);
   return <MobileDailySession key={userId ?? 'signed-out'} userId={userId} />;
@@ -181,9 +186,10 @@ function MobileDailySession({ userId }: { userId: number | null }) {
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [items, setItems] = useState<DailyReportItem[]>(() => draftRecovery?.payload.items.map((item) => ({ ...item })) ?? toItems(null));
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingAction, setSavingAction] = useState<'draft' | 'submit' | 'retry-draft' | null>(null);
   const [notice, setNotice] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [draftRecoveryCleanupError, setDraftRecoveryCleanupError] = useState(() => draftRecovery?.phase === 'saved');
   const [submissionNeedsVerification, setSubmissionNeedsVerification] = useState(false);
   const [verifyingSubmission, setVerifyingSubmission] = useState(false);
   const [verifyingDraft, setVerifyingDraft] = useState(false);
@@ -196,12 +202,21 @@ function MobileDailySession({ userId }: { userId: number | null }) {
   const canSubmit = !permissionsLoading && hasPermission('report:daily:submit');
   const dailyStatus = getMobileDailyReportStatusView(report?.status, submissionNeedsVerification || verifyingSubmission);
   const draftWriteLocked = Boolean(draftRecovery && draftRecovery.phase !== 'saved');
-  const readonly = dailyStatus.readOnly || submissionNeedsVerification || verifyingSubmission || verifyingDraft || draftWriteLocked || saving;
+  const saving = savingAction !== null;
+  const readonly = dailyStatus.readOnly || submissionNeedsVerification || verifyingSubmission || verifyingDraft || draftWriteLocked || draftRecoveryCleanupError || saving;
+  const busyStatus = verifyingDraft ? '正在核实草稿状态…'
+    : verifyingSubmission ? '正在核实日报状态…'
+    : savingAction === 'draft' ? '正在保存日报草稿…'
+    : savingAction === 'retry-draft' ? '正在安全重试草稿保存…'
+    : savingAction === 'submit' ? '正在保存并提交日报…'
+    : '';
 
   const persistDraftRecovery = useCallback((value: DraftSaveRecovery) => {
     try {
       if (!recoveryKey) return false;
-      window.sessionStorage.setItem(recoveryKey, JSON.stringify(value));
+      const serialized = JSON.stringify(value);
+      window.sessionStorage.setItem(recoveryKey, serialized);
+      if (window.sessionStorage.getItem(recoveryKey) !== serialized) return false;
     } catch {
       return false;
     }
@@ -211,9 +226,17 @@ function MobileDailySession({ userId }: { userId: number | null }) {
   }, [recoveryKey]);
 
   const clearDraftRecovery = useCallback(() => {
-    try { if (recoveryKey) window.sessionStorage.removeItem(recoveryKey); } catch { /* best-effort cleanup; future writes still require read-only verification */ }
+    try {
+      if (!recoveryKey) return false;
+      window.sessionStorage.removeItem(recoveryKey);
+      if (window.sessionStorage.getItem(recoveryKey) !== null) return false;
+    } catch {
+      return false;
+    }
     draftRecoveryRef.current = null;
     setDraftRecovery(null);
+    setDraftRecoveryCleanupError(false);
+    return true;
   }, [recoveryKey]);
 
   const setDraftRecoveryPhase = useCallback((phase: DraftSaveRecovery['phase'], lastError?: string) => {
@@ -233,6 +256,7 @@ function MobileDailySession({ userId }: { userId: number | null }) {
     else if (recovery.phase !== 'saved' && stableEqual(reportSnapshot(currentReport), recovery.baseline)) phase = 'safe-retry';
     else phase = 'conflict';
     persistDraftRecovery({ ...recovery, phase, lastError: phase === 'saved' ? '' : recovery.lastError });
+    setDraftRecoveryCleanupError(phase === 'saved');
     if (phase === 'saved') setNotice('服务器已确认草稿保存成功，尚未提交。可检查后再提交。');
     else if (phase === 'safe-retry') setNotice('服务器确认日报仍是保存前状态，尚未发现本次草稿写入。原内容已保留；如需继续，可显式使用同一载荷安全重试。');
     else setNotice('服务器日报与保存前状态及本次草稿均不一致。本地输入已保留，写入已锁定；请只读重新核实，不会自动覆盖。');
@@ -256,7 +280,7 @@ function MobileDailySession({ userId }: { userId: number | null }) {
   const handleDraftWriteFailure = useCallback(async (error: unknown) => {
     const recovery = draftRecoveryRef.current;
     if (!recovery) return;
-    const message = error instanceof Error ? error.message : '保存日报草稿失败';
+    const message = getUserFacingErrorMessage(error, '日报草稿保存失败，请检查连接后重试。');
     if (isKnownPreWriteRejection(error)) {
       clearDraftRecovery();
       setItems(recovery.payload.items.map((item) => ({ ...item })));
@@ -270,9 +294,9 @@ function MobileDailySession({ userId }: { userId: number | null }) {
       applyDraftReadResult(result);
     } catch (readError) {
       if (useAuthStore.getState().user?.id !== userId) return;
-      const readMessage = readError instanceof Error ? readError.message : '只读核实失败';
+      const readMessage = getUserFacingErrorMessage(readError, '当前日报状态暂时无法读取，请稍后重新核实。');
       setDraftRecoveryPhase('pending', `${message}；只读核实失败：${readMessage}`);
-      setNotice(`草稿保存结果仍无法确认（${message}；只读核实失败：${readMessage}）。编辑和重复保存已锁定，请重新核实。`);
+      setNotice(`草稿保存结果仍无法确认（${errorMessageFragment(message)}；只读核实失败：${errorMessageFragment(readMessage)}）。编辑和重复保存已锁定，请重新核实。`);
     }
   }, [applyDraftReadResult, clearDraftRecovery, setDraftRecoveryPhase, userId]);
 
@@ -288,10 +312,10 @@ function MobileDailySession({ userId }: { userId: number | null }) {
       applyDraftReadResult(result);
     } catch (error) {
       if (requestSequence !== loadRequestSequence.current || useAuthStore.getState().user?.id !== userId) return;
-      const message = error instanceof Error ? error.message : '加载日报失败';
+      const message = getUserFacingErrorMessage(error, '日报暂时无法读取，请检查连接后重试。');
       if (draftRecoveryRef.current) {
         setDraftRecoveryPhase('pending', message);
-        setNotice(`草稿保存结果仍无法确认（${message}）。编辑和重复保存已锁定，请重新核实。`);
+        setNotice(`草稿保存结果仍无法确认（${errorMessageFragment(message)}）。编辑和重复保存已锁定，请重新核实。`);
       } else {
         setLoadError(message);
         setNotice(message);
@@ -334,9 +358,9 @@ function MobileDailySession({ userId }: { userId: number | null }) {
       }
     } catch (error) {
       if (useAuthStore.getState().user?.id === userId) {
-        const message = error instanceof Error ? error.message : '读取失败';
+        const message = getUserFacingErrorMessage(error, '日报提交结果暂时无法确认，请只读重新核实；确认前不要重复提交。');
         setSubmissionNeedsVerification(true);
-        setNotice(`提交结果仍无法确认：${message}。请稍后重新核实状态；确认前不要重复提交。`);
+        setNotice(`提交结果仍无法确认：${errorMessageFragment(message)}。请稍后重新核实状态；确认前不要重复提交。`);
       }
     } finally {
       verifySubmissionInFlight.current = false;
@@ -354,9 +378,9 @@ function MobileDailySession({ userId }: { userId: number | null }) {
       applyDraftReadResult(result);
     } catch (error) {
       if (useAuthStore.getState().user?.id === userId) {
-        const message = error instanceof Error ? error.message : '只读核实失败';
+        const message = getUserFacingErrorMessage(error, '当前日报状态暂时无法读取，请稍后重新核实。');
         setDraftRecoveryPhase('pending', message);
-        setNotice(`草稿保存结果仍无法确认（${message}）。编辑和重复保存已锁定，请稍后重新核实。`);
+        setNotice(`草稿保存结果仍无法确认（${errorMessageFragment(message)}）。编辑和重复保存已锁定，请稍后重新核实。`);
       }
     } finally {
       verifyDraftInFlight.current = false;
@@ -374,25 +398,38 @@ function MobileDailySession({ userId }: { userId: number | null }) {
       return;
     }
     persistInFlight.current = true;
-    setSaving(true);
+    setSavingAction('retry-draft');
     try {
       const saved = await saveDailyReportDraft(recovery.payload);
       if (useAuthStore.getState().user?.id !== userId) return;
-      clearDraftRecovery();
       setReport(saved);
       setTemplateId(saved.templateId ?? recovery.templateId);
       setItems(toItems(saved));
+      if (!clearDraftRecovery()) {
+        const confirmedRecovery: DraftSaveRecovery = { ...recovery, phase: 'saved', lastError: '' };
+        if (!persistDraftRecovery(confirmedRecovery)) {
+          draftRecoveryRef.current = confirmedRecovery;
+          setDraftRecovery(confirmedRecovery);
+        }
+        setDraftRecoveryCleanupError(true);
+        setNotice('日报草稿已保存，但本机恢复记录未能清除，因此尚未提交。请重试清理后再提交。');
+        return;
+      }
       setNotice('草稿已保存；尚未提交。');
     } catch (error) {
       if (useAuthStore.getState().user?.id === userId) await handleDraftWriteFailure(error);
     } finally {
       persistInFlight.current = false;
-      if (useAuthStore.getState().user?.id === userId) setSaving(false);
+      if (useAuthStore.getState().user?.id === userId) setSavingAction(null);
     }
   };
 
   const updateItems = (nextItems: DailyReportItem[]) => {
-    if (draftRecoveryRef.current?.phase === 'saved') clearDraftRecovery();
+    if (draftRecoveryRef.current?.phase === 'saved' && !clearDraftRecovery()) {
+      setDraftRecoveryCleanupError(true);
+      setNotice('已保存的草稿仍有本机恢复记录，未能安全清理；本次修改未应用。请重试清理后再编辑。');
+      return;
+    }
     setItems(nextItems);
   };
 
@@ -412,7 +449,7 @@ function MobileDailySession({ userId }: { userId: number | null }) {
     }
     if (networkState === 'offline') { setNotice('当前离线，内容已保存在本地草稿，恢复网络后再提交。'); return; }
     persistInFlight.current = true;
-    setSaving(true);
+    setSavingAction(submit ? 'submit' : 'draft');
     setNotice('');
     try {
       let saved: DailyReport;
@@ -428,7 +465,11 @@ function MobileDailySession({ userId }: { userId: number | null }) {
           return;
         }
         saved = report;
-        clearDraftRecovery();
+        if (!clearDraftRecovery()) {
+          setDraftRecoveryCleanupError(true);
+          setNotice('日报草稿已保存，但本机恢复记录未能清除，因此暂未提交。请重试清理后再提交。');
+          return;
+        }
       } else {
         const payload = {
           reportDate,
@@ -454,9 +495,19 @@ function MobileDailySession({ userId }: { userId: number | null }) {
         }
         try {
           saved = await saveDailyReportDraft(payload);
-          clearDraftRecovery();
           setReport(saved);
           setTemplateId(saved.templateId ?? templateId);
+          if (!clearDraftRecovery()) {
+            const confirmedRecovery: DraftSaveRecovery = { ...recovery, phase: 'saved', lastError: '' };
+            if (!persistDraftRecovery(confirmedRecovery)) {
+              draftRecoveryRef.current = confirmedRecovery;
+              setDraftRecovery(confirmedRecovery);
+            }
+            setItems(toItems(saved));
+            setDraftRecoveryCleanupError(true);
+            setNotice('日报草稿已保存，但本机恢复记录未能清除，因此本次尚未提交。请重试清理后再提交。');
+            return;
+          }
         } catch (error) {
           if (useAuthStore.getState().user?.id === userId) await handleDraftWriteFailure(error);
           return;
@@ -478,7 +529,7 @@ function MobileDailySession({ userId }: { userId: number | null }) {
         setNotice('日报已提交');
       } catch (submitError) {
         if (useAuthStore.getState().user?.id !== userId) return;
-        const submitMessage = submitError instanceof Error ? submitError.message : '提交失败';
+        const submitMessage = getUserFacingErrorMessage(submitError, '日报提交失败，请检查后重试。');
         try {
           const current = await getMyDailyReport(reportDate);
           if (useAuthStore.getState().user?.id !== userId) return;
@@ -492,7 +543,7 @@ function MobileDailySession({ userId }: { userId: number | null }) {
             setNotice('日报已成功提交，当前为只读状态。');
           } else if (current.report && (current.report.status === 'draft' || current.report.status === 'rejected')) {
             setSubmissionNeedsVerification(false);
-            setNotice(`草稿已保存，但提交失败：${submitMessage}。服务器当前状态为“${getMobileDailyReportStatusView(current.report.status).label}”，可检查后重新提交。`);
+            setNotice(`草稿已保存，但提交失败：${errorMessageFragment(submitMessage)}。服务器当前状态为“${getMobileDailyReportStatusView(current.report.status).label}”，可检查后重新提交。`);
           } else if (current.report) {
             setSubmissionNeedsVerification(false);
             setNotice(`提交后服务器状态为“${getMobileDailyReportStatusView(current.report.status).label}”，已显示最新日报状态。`);
@@ -502,17 +553,32 @@ function MobileDailySession({ userId }: { userId: number | null }) {
           }
         } catch (readError) {
           if (useAuthStore.getState().user?.id !== userId) return;
-          const readMessage = readError instanceof Error ? readError.message : '读取失败';
+          const readMessage = getUserFacingErrorMessage(readError, '当前日报状态暂时无法读取，请稍后重新核实。');
           setSubmissionNeedsVerification(true);
-          setNotice(`草稿已保存，但提交结果无法确认：${submitMessage}；读取当前状态也失败（${readMessage}）。请重试读取状态，确认前不要重复提交。`);
+          setNotice(`草稿已保存，但提交结果无法确认：${errorMessageFragment(submitMessage)}；读取当前状态也失败（${errorMessageFragment(readMessage)}）。请重试读取状态，确认前不要重复提交。`);
         }
       }
     } catch (error) {
-      if (useAuthStore.getState().user?.id === userId) setNotice(error instanceof Error ? error.message : '保存日报失败');
+      if (useAuthStore.getState().user?.id === userId) setNotice(getUserFacingErrorMessage(error, '日报保存失败，请检查后重试。'));
     } finally {
       persistInFlight.current = false;
-      if (useAuthStore.getState().user?.id === userId) setSaving(false);
+      if (useAuthStore.getState().user?.id === userId) setSavingAction(null);
     }
+  };
+
+  const retryDraftRecoveryCleanup = () => {
+    const confirmedRecovery = draftRecoveryRef.current;
+    if (saving || !confirmedRecovery || confirmedRecovery.phase !== 'saved') return;
+    if (!clearDraftRecovery()) {
+      setDraftRecoveryCleanupError(true);
+      setNotice('本机恢复记录仍未能清除，日报未提交。请检查浏览器存储后重试。');
+      return;
+    }
+    // Keep the confirmed in-memory snapshot so the next explicit submit does not save the same draft again.
+    draftRecoveryRef.current = confirmedRecovery;
+    setDraftRecovery(confirmedRecovery);
+    setDraftRecoveryCleanupError(false);
+    setNotice('本机恢复记录已清除。已保存草稿仍未提交，请检查后再次提交。');
   };
 
   if (!permissionsLoading && !canSubmit) return <AccessDeniedState title="暂时无法填写日报" description="请联系管理员分配日报提交权限。" />;
@@ -540,13 +606,22 @@ function MobileDailySession({ userId }: { userId: number | null }) {
       const item = items.find((candidate) => candidate.sectionKey === section.key);
       return <label key={section.key} className="block rounded-2xl border border-studio-border-soft bg-studio-surface p-4">
         <span className="mb-2 block text-sm font-semibold">{section.title}</span>
-        <textarea value={item?.contentMd ?? ''} disabled={readonly || loading || loadError !== '' || permissionsLoading || !canSubmit} onChange={(event) => updateItems(items.map((candidate) => candidate.sectionKey === section.key ? { ...candidate, contentMd: event.target.value } : candidate))} placeholder={section.placeholder} className="min-h-28 w-full resize-y rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm leading-6 outline-none placeholder:text-studio-text-muted focus:border-studio-cyan disabled:opacity-60" />
+        <textarea id={`mobile-daily-${section.key}`} name={`mobile-daily-${section.key}`} value={item?.contentMd ?? ''} disabled={readonly || loading || loadError !== '' || permissionsLoading || !canSubmit} onChange={(event) => updateItems(items.map((candidate) => candidate.sectionKey === section.key ? { ...candidate, contentMd: event.target.value } : candidate))} placeholder={section.placeholder} className="min-h-28 w-full resize-y rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm leading-6 outline-none placeholder:text-studio-text-muted focus:border-studio-cyan disabled:opacity-60" />
       </label>;
     })}
-    {notice ? <div role={draftRecovery && draftRecovery.phase !== 'saved' ? 'alert' : 'status'} className="space-y-2 px-1 text-sm text-studio-text-secondary"><p>{notice}</p>{draftRecovery && draftRecovery.phase !== 'saved' ? <div className="flex flex-wrap gap-3"><button type="button" disabled={verifyingDraft || saving} onClick={() => void verifyDraftSave()} className="min-h-10 font-semibold text-studio-primary-contrast">{verifyingDraft ? '正在核实…' : '重新核实草稿状态'}</button>{draftRecovery.phase === 'safe-retry' ? <button type="button" disabled={saving || verifyingDraft || !canSubmit} onClick={() => void retryDraftSave()} className="min-h-10 font-semibold text-studio-primary-contrast">{saving ? '正在安全重试…' : '同载荷安全重试'}</button> : null}</div> : null}{submissionNeedsVerification ? <button type="button" disabled={verifyingSubmission} onClick={() => void verifySubmission()} className="min-h-10 font-semibold text-studio-primary-contrast">{verifyingSubmission ? '正在核实…' : '重新核实日报状态'}</button> : null}</div> : null}
+    {busyStatus ? <p role="status" aria-live="polite" aria-atomic="true" className="px-1 text-sm text-studio-text-secondary">{busyStatus}</p> : null}
+    {notice ? <div role={draftRecoveryCleanupError || (draftRecovery && draftRecovery.phase !== 'saved') ? 'alert' : 'status'} className="space-y-2 px-1 text-sm text-studio-text-secondary">
+      <p>{notice}</p>
+      {draftRecoveryCleanupError && draftRecovery?.phase === 'saved' ? <button type="button" aria-busy={saving} disabled={saving} onClick={retryDraftRecoveryCleanup} className="min-h-10 font-semibold text-studio-primary-contrast">{saving ? '正在清理…' : '重试清理恢复记录'}</button> : null}
+      {draftRecovery && draftRecovery.phase !== 'saved' ? <div className="flex flex-wrap gap-3">
+        <button type="button" aria-busy={verifyingDraft} disabled={verifyingDraft || saving} onClick={() => void verifyDraftSave()} className="min-h-10 font-semibold text-studio-primary-contrast">{verifyingDraft ? '正在核实…' : '重新核实草稿状态'}</button>
+        {draftRecovery.phase === 'safe-retry' ? <button type="button" aria-busy={savingAction === 'retry-draft'} disabled={saving || verifyingDraft || !canSubmit} onClick={() => void retryDraftSave()} className="min-h-10 font-semibold text-studio-primary-contrast">{savingAction === 'retry-draft' ? '正在安全重试…' : '同载荷安全重试'}</button> : null}
+      </div> : null}
+      {submissionNeedsVerification ? <button type="button" aria-busy={verifyingSubmission} disabled={verifyingSubmission} onClick={() => void verifySubmission()} className="min-h-10 font-semibold text-studio-primary-contrast">{verifyingSubmission ? '正在核实…' : '重新核实日报状态'}</button> : null}
+    </div> : null}
     <div className="grid grid-cols-2 gap-3">
-      <button type="button" disabled={readonly || saving || loading || Boolean(loadError) || permissionsLoading || !canSubmit} onClick={() => void persist(false)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-studio-border-soft text-sm font-semibold disabled:opacity-50"><Save className="h-4 w-4" />保存草稿</button>
-      <button type="button" disabled={readonly || saving || loading || Boolean(loadError) || permissionsLoading || !canSubmit} onClick={() => void persist(true)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{verifyingDraft || verifyingSubmission ? '核实中…' : saving ? '处理中…' : submissionNeedsVerification ? '状态待核实' : '提交日报'}</button>
+      <button type="button" aria-busy={savingAction === 'draft'} disabled={readonly || saving || loading || Boolean(loadError) || permissionsLoading || !canSubmit} onClick={() => void persist(false)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-studio-border-soft text-sm font-semibold disabled:opacity-50"><Save className="h-4 w-4" />{savingAction === 'draft' ? '正在保存…' : '保存草稿'}</button>
+      <button type="button" aria-busy={savingAction === 'submit' || verifyingDraft || verifyingSubmission} disabled={readonly || saving || loading || Boolean(loadError) || permissionsLoading || !canSubmit} onClick={() => void persist(true)} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-studio-primary-button text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{verifyingDraft || verifyingSubmission ? '核实中…' : savingAction === 'submit' ? '正在保存并提交…' : submissionNeedsVerification ? '状态待核实' : '提交日报'}</button>
     </div>
   </div>;
 }

@@ -8,6 +8,7 @@ type Props = {
   status: RetrospectiveStatus;
   canGenerate: boolean;
   loading: boolean;
+  mutationBlocked?: boolean;
   onGenerate: () => void;
 };
 
@@ -77,7 +78,7 @@ function valueText(snapshot: RetroMetricSnapshot) {
   return '-';
 }
 
-export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerate, loading, onGenerate }: Props) {
+export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerate, loading, mutationBlocked = false, onGenerate }: Props) {
   const grouped = snapshots.reduce<Record<string, RetroMetricSnapshot[]>>((acc, snapshot) => {
     const group = metricCopy[snapshot.metricKey]?.group || '其他';
     acc[group] = [...(acc[group] || []), snapshot];
@@ -98,7 +99,7 @@ export default function RetroMetricSnapshotPanel({ snapshots, status, canGenerat
           </p>
         </div>
         {status === 'draft' && canGenerate ? (
-          <ActionButton onClick={onGenerate} disabled={loading} aria-busy={loading}>
+          <ActionButton onClick={onGenerate} disabled={loading || mutationBlocked} aria-busy={loading}>
             <RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
             {hasSnapshots ? '刷新快照' : '生成快照'}
           </ActionButton>

@@ -1,8 +1,9 @@
 ﻿﻿import express from 'express';
-import { queryOne, queryAll, execute } from '../database/utils';
+import { queryOne, queryAll, runInTransaction } from '../database/utils';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
 import { canManageOwnedResource, isPrivilegedUser } from '../utils/access';
+import { recordResourceAuditInTransaction } from '../services/resourceCenter';
 import { sendSafeServerError } from '../utils/response';
 
 const router = express.Router();
@@ -59,7 +60,7 @@ router.get('/archives', authenticate, async (req, res) => {
     
     let query = `SELECT r.id, r.name, r.file_path, r.content, r.created_at, r.updated_at, u.name as uploader_name 
                  FROM resources r LEFT JOIN users u ON r.uploader_id = u.id 
-                 WHERE r.category = '已完成'`;
+                 WHERE r.category = '已完成' AND COALESCE(r.status, 'published') <> 'deleted' AND r.deleted_at IS NULL`;
     const params: unknown[] = [];
     
     if (search) {
@@ -122,7 +123,7 @@ router.get('/archives/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     
-    const resource = await queryOne(`SELECT r.*, u.name as uploader_name FROM resources r LEFT JOIN users u ON r.uploader_id = u.id WHERE r.id = ? AND r.category = '已完成'`, [id]);
+    const resource = await queryOne(`SELECT r.*, u.name as uploader_name FROM resources r LEFT JOIN users u ON r.uploader_id = u.id WHERE r.id = ? AND r.category = '已完成' AND COALESCE(r.status, 'published') <> 'deleted' AND r.deleted_at IS NULL`, [id]);
     if (!resource) {
       return res.status(404).json({ message: '归档不存在' });
     }
@@ -152,12 +153,30 @@ router.get('/archives/:id', authenticate, async (req, res) => {
 
 router.delete('/archives/:id', authenticate, requirePermission('resource:delete'), async (req, res) => {
   try {
-    const resource = await queryOne('SELECT * FROM resources WHERE id = ? AND category = ?', [req.params.id, '已完成']);
+    const resource = await queryOne<Record<string, unknown>>(
+      `SELECT id,status,uploader_id FROM resources WHERE id = ? AND category = ?
+       AND COALESCE(status, 'published') <> 'deleted' AND deleted_at IS NULL`,
+      [req.params.id, '已完成'],
+    );
     if (!resource) return res.status(404).json({ message: '归档不存在' });
     if (!canManageOwnedResource(req.user, resource as Record<string, unknown>)) {
       return res.status(403).json({ message: '无权限删除该归档' });
     }
-    await execute('DELETE FROM resources WHERE id = ?', [req.params.id]);
+    const deleted = await runInTransaction(async (tx) => {
+      const changed = await tx.execute(
+        `UPDATE resources
+         SET status='deleted', deleted_at=datetime('now','+8 hours'), updated_by=?, updated_at=datetime('now','+8 hours')
+         WHERE id=? AND COALESCE(status,'published') <> 'deleted' AND deleted_at IS NULL`,
+        [req.user!.id, Number(resource.id)],
+      );
+      if (changed !== 1) return false;
+      await recordResourceAuditInTransaction(tx, Number(resource.id), req.user!.id, 'delete', {
+        previous_status: resource.status || 'published',
+        archive_snapshot_only: true,
+      });
+      return true;
+    });
+    if (!deleted) return res.status(404).json({ message: '归档不存在' });
     return res.json({ message: '归档删除成功' });
   } catch (error) {
     return sendSafeServerError(res, '删除归档失败', 'resources:archive-delete', error);

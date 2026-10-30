@@ -473,6 +473,38 @@ try {
   await page.getByRole('heading', { name: '人员管理', exact: true }).waitFor();
   await page.getByText('alpha-user', { exact: true }).waitFor();
 
+  const beforeUnverifiedRecoveryCreate = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
+    createRequests: number;
+    createMutationCount: number;
+  };
+  await page.getByRole('button', { name: '添加用户' }).click();
+  await page.getByLabel('用户名 *').fill('create-with-unverified-storage');
+  await page.getByLabel('密码 *').fill('isolated-unverified-storage-password');
+  await page.evaluate(() => {
+    const storage = window.sessionStorage as Storage & { setItem: Storage['setItem'] };
+    const originalSetItem = Storage.prototype.setItem.bind(storage);
+    Object.defineProperty(storage, 'setItem', {
+      configurable: true,
+      value: (key: string, value: string) => {
+        if (key === 'xmt:user-create-pending:v1:user:151') return;
+        originalSetItem(key, value);
+      },
+    });
+  });
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.getByText('浏览器暂时无法保存本次请求编号，尚未提交创建操作。', { exact: true }).waitFor();
+  const afterUnverifiedRecoveryCreate = await page.request.get(`${base}/__test__/state`).then((response) => response.json()) as {
+    createRequests: number;
+    createMutationCount: number;
+  };
+  assert.equal(afterUnverifiedRecoveryCreate.createRequests, beforeUnverifiedRecoveryCreate.createRequests,
+    'a marker that cannot be read back prevents the create request');
+  assert.equal(afterUnverifiedRecoveryCreate.createMutationCount, beforeUnverifiedRecoveryCreate.createMutationCount,
+    'an unverified recovery marker cannot create a user');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:user-create-pending:v1:user:151')), null);
+  await page.evaluate(() => Reflect.deleteProperty(window.sessionStorage, 'setItem'));
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+
   await page.request.post(`${base}/__test__/fail-after-next-user-create`);
   await page.getByRole('button', { name: '添加用户' }).click();
   await page.getByLabel('用户名 *').fill('created-after-lost-response');

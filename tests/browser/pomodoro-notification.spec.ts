@@ -22,10 +22,12 @@ let cancelAttempts = 0;
 let completeAttempts = 0;
 let activeSessionReadAttempts = 0;
 let activePomodoro: PomodoroActiveFixtureSession | null = null;
+const cancelledSessionIds: number[] = [];
 let failNextStart = false;
 let failNextActiveSessionRead = false;
 let malformNextActiveSessionRead = false;
 let failNextCancel = false;
+let loseNextCancelResponseAfterWrite = false;
 let failNextCompleteBeforeWrite = false;
 let loseNextCompleteResponseAfterWrite = false;
 let startGate: Promise<void> | null = null;
@@ -45,6 +47,7 @@ app.get('/__qa', (_request, response) => response.type('html').send(`<script>
   location.replace('/pomodoro');
 </script>`));
 app.get('/__qa/pomodoro-mutation-state', (_request, response) => response.json({ startAttempts, cancelAttempts }));
+app.get('/__qa/pomodoro-cancel-state', (_request, response) => response.json({ cancelledSessionIds, activeSessionId: activePomodoro?.sessionId ?? null }));
 app.get('/__qa/pomodoro-completion-state', (_request, response) => response.json({ completeAttempts, completedSessionIds }));
 app.get('/__qa/pomodoro-active-state', (_request, response) => response.json({ activeSessionReadAttempts, activePomodoro }));
 app.post('/__qa/reset-pomodoro-mutations', (_request, response) => {
@@ -53,10 +56,12 @@ app.post('/__qa/reset-pomodoro-mutations', (_request, response) => {
   completeAttempts = 0;
   activeSessionReadAttempts = 0;
   activePomodoro = null;
+  cancelledSessionIds.length = 0;
   failNextStart = false;
   failNextActiveSessionRead = false;
   malformNextActiveSessionRead = false;
   failNextCancel = false;
+  loseNextCancelResponseAfterWrite = false;
   failNextCompleteBeforeWrite = false;
   loseNextCompleteResponseAfterWrite = false;
   releaseStartGate?.();
@@ -97,6 +102,10 @@ app.post('/__qa/release-pomodoro-start', (_request, response) => {
 });
 app.post('/__qa/fail-next-pomodoro-cancel', (_request, response) => {
   failNextCancel = true;
+  return response.json({ ok: true });
+});
+app.post('/__qa/lose-next-pomodoro-cancel-response', (_request, response) => {
+  loseNextCancelResponseAfterWrite = true;
   return response.json({ ok: true });
 });
 app.post('/__qa/hold-next-pomodoro-cancel', (_request, response) => {
@@ -177,7 +186,7 @@ app.post('/api/pomodoro/:id/complete', async (request, response) => {
   }
   return response.json({ message: '专注已完成' });
 });
-app.post('/api/pomodoro/:id/cancel', async (_request, response) => {
+app.post('/api/pomodoro/:id/cancel', async (request, response) => {
   cancelAttempts += 1;
   const gate = cancelGate;
   cancelGate = null;
@@ -186,7 +195,15 @@ app.post('/api/pomodoro/:id/cancel', async (_request, response) => {
     failNextCancel = false;
     return response.status(503).json({ message: '隔离验收模拟番茄钟重置失败，请重试' });
   }
-  if (activePomodoro?.sessionId === Number(_request.params.id)) activePomodoro = null;
+  const sessionId = Number(request.params.id);
+  if (activePomodoro?.sessionId === sessionId) {
+    cancelledSessionIds.push(sessionId);
+    activePomodoro = null;
+  }
+  if (loseNextCancelResponseAfterWrite) {
+    loseNextCancelResponseAfterWrite = false;
+    return response.status(503).json({ message: '隔离验收模拟番茄钟已重置但响应丢失，请重试' });
+  }
   return response.json({ message: '专注已取消' });
 });
 app.use('/api', (request, response) => {
@@ -290,8 +307,8 @@ try {
   assert.deepEqual(unexpectedWrites, [], 'the isolated notification test sends no unrelated API writes');
   assert.deepEqual(errors, [], `pomodoro completion has no browser errors: ${errors.join(' | ')}`);
 
-  const openMutationTimer = async (variant: 'full' | 'compact') => {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
+  const openMutationTimer = async (variant: 'full' | 'compact', viewportWidth = 1280) => {
+    const page = await browser.newPage({ viewport: { width: viewportWidth, height: 900 }, reducedMotion: 'reduce' });
     page.setDefaultTimeout(10000);
     await page.clock.install({ time: new Date('2026-10-09T10:00:00.000Z') });
     const pageErrors: string[] = [];
@@ -364,6 +381,38 @@ try {
   const waitForPomodoroResponse = (page: import('playwright').Page, path: string, status: number) => page.waitForResponse((response) => (
     response.url().endsWith(path) && response.request().method() === 'POST' && response.status() === status
   ));
+
+  for (const variant of ['full', 'compact'] as const) {
+    for (const viewportWidth of [320, 390, 1440]) {
+      const geometryPage = await openMutationTimer(variant, viewportWidth);
+      const startButton = geometryPage.page.getByTestId('pomodoro-start-button');
+      const resetButton = geometryPage.page.getByTestId('pomodoro-reset-button');
+      const assertTargetAtLeast40 = async (label: string, locator: import('playwright').Locator) => {
+        const bounds = await locator.boundingBox();
+        assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40,
+          `${variant}/${viewportWidth}px ${label} touch target is at least 40x40px: ${JSON.stringify(bounds)}`);
+      };
+
+      await assertTargetAtLeast40('start', startButton);
+      await assertTargetAtLeast40('reset', resetButton);
+      const startResponse = waitForPomodoroResponse(geometryPage.page, '/api/pomodoro/start', 200);
+      await startButton.click();
+      const { sessionId } = await (await startResponse).json() as { sessionId: number };
+      const pauseButton = geometryPage.page.getByRole('button', { name: '暂停番茄钟', exact: true });
+      await pauseButton.waitFor();
+      await assertTargetAtLeast40('pause', pauseButton);
+      const resetResponse = waitForPomodoroResponse(geometryPage.page, `/api/pomodoro/${sessionId}/cancel`, 200);
+      await resetButton.click();
+      await resetResponse;
+      await geometryPage.page.getByRole('button', { name: '开始番茄钟', exact: true }).waitFor();
+      await assertTargetAtLeast40('reset-to-start', startButton);
+      await assertTargetAtLeast40('reset', resetButton);
+      assert.deepEqual(geometryPage.observedPomodoroPosts, { start: 1, complete: 0, cancel: 1 },
+        `${variant}/${viewportWidth}px geometry interactions only start and reset once`);
+      assert.deepEqual(geometryPage.pageErrors, [], `${variant}/${viewportWidth}px timer controls have no browser errors`);
+      await geometryPage.page.close();
+    }
+  }
 
   for (const variant of ['full', 'compact'] as const) {
     const restored = await openMutationTimer(variant);
@@ -525,6 +574,38 @@ try {
     assert.deepEqual(failedResetPage.pageErrors, [], `${variant} failed reset and retry have no browser errors`);
     assert.equal(failedResetPage.expected503ConsoleErrors.length, 1, `${variant} reset failure is the one expected 503 console message`);
     await failedResetPage.page.close();
+
+    const lostResetPage = await openMutationTimer(variant);
+    const lostResetStart = waitForPomodoroResponse(lostResetPage.page, '/api/pomodoro/start', 200);
+    await lostResetPage.page.getByTestId('pomodoro-start-button').click();
+    const { sessionId: lostResetSessionId } = await (await lostResetStart).json() as { sessionId: number };
+    await lostResetPage.page.getByRole('button', { name: '暂停番茄钟', exact: true }).waitFor();
+    const timeBeforeLostReset = await lostResetPage.page.getByText(/^\d{2}:\d{2}$/).innerText();
+    await lostResetPage.page.request.post(`${base}/__qa/lose-next-pomodoro-cancel-response`);
+    const lostResetResponse = waitForPomodoroResponse(lostResetPage.page, `/api/pomodoro/${lostResetSessionId}/cancel`, 503);
+    await lostResetPage.page.getByTestId('pomodoro-reset-button').click();
+    await lostResetResponse;
+    await lostResetPage.page.getByRole('alert').filter({ hasText: '重置结果尚未确认；点击“重置”可安全重试。' }).waitFor();
+    const committedCancellation = await lostResetPage.page.request.get(`${base}/__qa/pomodoro-cancel-state`).then((response) => response.json() as Promise<{ cancelledSessionIds: number[]; activeSessionId: number | null }>);
+    assert.deepEqual(committedCancellation.cancelledSessionIds, [lostResetSessionId], `${variant} response loss happens after the server cancels the session exactly once`);
+    assert.equal(committedCancellation.activeSessionId, null, `${variant} fixture confirms the active session was removed before dropping the response`);
+    assert.equal(await lostResetPage.page.getByRole('button', { name: '暂停番茄钟', exact: true }).isEnabled(), true, `${variant} response loss keeps the existing session available for explicit retry`);
+    assert.equal(await lostResetPage.page.getByText(/^\d{2}:\d{2}$/).innerText(), timeBeforeLostReset, `${variant} response loss preserves the visible timer state`);
+    assert.deepEqual(await readMutationState(lostResetPage.page), { startAttempts: 1, cancelAttempts: 1 }, `${variant} lost cancellation response is sent once before explicit retry`);
+
+    const retriedLostReset = waitForPomodoroResponse(lostResetPage.page, `/api/pomodoro/${lostResetSessionId}/cancel`, 200);
+    await lostResetPage.page.getByTestId('pomodoro-reset-button').click();
+    await retriedLostReset;
+    await lostResetPage.page.getByRole('button', { name: '开始番茄钟', exact: true }).waitFor();
+    await lostResetPage.page.getByText('25:00', { exact: true }).waitFor();
+    await lostResetPage.page.getByRole('alert').waitFor({ state: 'hidden' });
+    const cancellationAfterRetry = await lostResetPage.page.request.get(`${base}/__qa/pomodoro-cancel-state`).then((response) => response.json() as Promise<{ cancelledSessionIds: number[]; activeSessionId: number | null }>);
+    assert.deepEqual(cancellationAfterRetry.cancelledSessionIds, [lostResetSessionId], `${variant} idempotent explicit retry does not cancel the same session twice`);
+    assert.deepEqual(await readMutationState(lostResetPage.page), { startAttempts: 1, cancelAttempts: 2 }, `${variant} response-loss retry sends one additional cancel POST`);
+    assert.deepEqual(lostResetPage.observedPomodoroPosts, { start: 1, complete: 0, cancel: 2 }, `${variant} no automatic cancel replay occurs after the lost response`);
+    assert.equal(lostResetPage.expected503ConsoleErrors.length, 1, `${variant} response-loss cancellation is the one expected 503 console error`);
+    assert.deepEqual(lostResetPage.pageErrors, [], `${variant} cancellation response-loss recovery has no browser errors`);
+    await lostResetPage.page.close();
 
     const lostCompletionPage = await openMutationTimer(variant);
     const lostStart = waitForPomodoroResponse(lostCompletionPage.page, '/api/pomodoro/start', 200);

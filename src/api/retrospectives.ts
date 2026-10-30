@@ -304,8 +304,8 @@ export function getRetrospectiveCreateRequestStatus(clientRequestId: string) {
   );
 }
 
-export function getRetrospectiveDetail(id: number) {
-  return requestJson<RetrospectiveDetail>(`/${id}`, '加载复盘详情失败');
+export function getRetrospectiveDetail(id: number, init?: RequestInit) {
+  return requestJson<RetrospectiveDetail>(`/${id}`, '加载复盘详情失败', init);
 }
 
 export function getRetroDailyRisks(id: number) {

@@ -3,7 +3,7 @@ import { beijingNow, beijingToday, queryAll, queryOne } from '../database/utils'
 import { authenticate } from '../middleware/auth';
 import { userHasPermission } from '../middleware/permissions';
 import { canManageCreatorData } from '../services/creatorDataVisibility';
-import { getHomeRetrospectiveSummary } from '../services/retrospectives';
+import { getHomeMyRetroActionSummary, getHomeRetrospectiveSummary } from '../services/retrospectives';
 import { canEditAllContent, canViewAllContent } from '../utils/access';
 
 const router = express.Router();
@@ -92,7 +92,12 @@ router.get('/home-attention', authenticate, async (req, res) => {
       total: 0,
       tasks: [],
     }));
-    const [count, activeTopicRows, todayPublishingCount, todayPublishingRows, topics, topicStageRows, myDraftRows, syncAnomalyCount, syncAnomalyRows, productionReviewCount, productionReviewRows, retrospectives] = await Promise.all([
+    const myRetroActionSummary = getHomeMyRetroActionSummary(req.user).catch(() => ({
+      available: false,
+      total: 0,
+      tasks: [],
+    }));
+    const [count, activeTopicRows, todayPublishingCount, todayPublishingRows, topics, topicStageRows, myDraftRows, syncAnomalyCount, syncAnomalyRows, productionReviewCount, productionReviewRows, retrospectives, myRetroActions] = await Promise.all([
       queryOne<{ overdue: number; due_soon: number; stalled: number; stage_time_unknown: number; total: number; active_total: number }>(
       `SELECT
          COUNT(CASE WHEN t.status NOT IN ('completed', 'rejected') THEN t.id END) AS active_total,
@@ -223,6 +228,7 @@ router.get('/home-attention', authenticate, async (req, res) => {
         )
         : Promise.resolve([]),
       retrospectiveSummary,
+      myRetroActionSummary,
     ]);
 
     const topicStages = Object.fromEntries(HOME_TOPIC_STAGE_STATUSES.map((status) => [status, { total: 0, topics: [] as Array<Record<string, unknown>> }])) as Record<typeof HOME_TOPIC_STAGE_STATUSES[number], { total: number; topics: Array<Record<string, unknown>> }>;
@@ -269,6 +275,7 @@ router.get('/home-attention', authenticate, async (req, res) => {
         tasks: productionReviewRows,
       },
       retrospectives,
+      my_retro_actions: myRetroActions,
       topics: topics.map((topic) => ({
         ...topic,
         is_overdue: Number(topic.is_overdue) === 1,

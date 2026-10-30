@@ -1,7 +1,7 @@
 import { ArrowLeft, Clock3, FolderOpen, RefreshCw, Save, Send } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { auditTopic, createProduction, getProduction, getTopic, getTopicOutlineVersions, repairCurrentTopicStageRecord, TopicApiError, updateTopic, updateTopicStatus } from '@/api';
+import { auditTopic, createProduction, getProduction, getProductionById, getProductionCreateStatus, getTopic, getTopicOutlineVersions, repairCurrentTopicStageRecord, TopicApiError, updateTopic, updateTopicStatus } from '@/api';
 import type { WorkflowDocumentVersion } from '@/api';
 import type { Topic, TopicStatus } from '@/types';
 import { getTopicResources, type TopicResource } from '@/api/topics';
@@ -14,8 +14,14 @@ import { useAppStore, useAuthStore } from '@/store';
 import { useRouteNavigationGuard, type RouteNavigationAttempt } from '@/hooks/useRouteNavigationGuard';
 import ConfirmModal from '@/components/common/ConfirmModal';
 import { formatBeijingDate } from '@/lib/utils';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import TopicAssetDimensionsPanel from '@/components/topics/TopicAssetDimensionsPanel';
-import { startOrResumeTopicProduction } from '@/utils/topicProductionHandoff';
+import {
+  readTopicProductionCreateRecovery,
+  startOrResumeTopicProduction,
+  type TopicProductionCreateRecoveryRead,
+  type TopicProductionHandoffAction,
+} from '@/utils/topicProductionHandoff';
 import { ActionButton } from '@/components/studio';
 import { sanitizeHtml } from '@/utils/sanitizeHtml';
 import {
@@ -42,7 +48,8 @@ const historyActionName: Record<string, string> = {
   created: '创建选题', approved: '审核通过', rejected: '审核驳回',
   status_production: '进入创作', status_shooting: '进入拍摄',
   status_publishing: '进入发布', status_completed: '完成归档', stage_record_repaired: '补齐阶段记录',
-  production_status_changed: '创作状态调整', shooting_status_changed: '成片状态调整', publishing_status_changed: '发布状态调整',
+  production_status_changed: '创作状态调整', production_deleted: '创作记录删除',
+  shooting_status_changed: '成片状态调整', publishing_status_changed: '发布状态调整',
   publishing_douyin_link_changed: '抖音作品关联调整',
 };
 type TopicEditDraft = MobileTopicEditValues;
@@ -106,6 +113,14 @@ export default function MobileTopicDetail() {
   const networkState = useNetworkState();
   const appStore = useAppStore();
   const user = useAuthStore((state) => state.user);
+  const handoffTopicId = Number(id);
+  const handoffRecoveryScope = `${Number(user?.id) || 0}:${handoffTopicId || 0}`;
+  const [handoffRecoverySnapshot, setHandoffRecoverySnapshot] = useState<{
+    scope: string;
+    recovery: TopicProductionCreateRecoveryRead;
+  } | null>(null);
+  const handoffRecoveryLoaded = handoffRecoverySnapshot?.scope === handoffRecoveryScope;
+  const handoffRecovery = handoffRecoveryLoaded ? handoffRecoverySnapshot.recovery : null;
   const draftKey = id ? userSafeDraftKey(user?.id, `topic:${id}:edit`) : null;
   const { permissions, loading: permissionsLoading } = usePermission();
   const canUpdateTopics = !permissionsLoading && (user?.role === 'admin' || permissions.includes('topic:update') || permissions.includes('*'));
@@ -161,7 +176,7 @@ export default function MobileTopicDetail() {
       setResources(result);
     } catch (error) {
       if (requestSequence !== resourcesRequestSequenceRef.current) return;
-      setResourcesError(error instanceof Error ? error.message : '关联资料暂不可用，请稍后重试。');
+      setResourcesError(getUserFacingErrorMessage(error, '请检查连接后重试。'));
     } finally {
       if (requestSequence === resourcesRequestSequenceRef.current) setResourcesLoading(false);
     }
@@ -285,7 +300,7 @@ export default function MobileTopicDetail() {
         setTopicLoadFailure(error instanceof TopicApiError && error.status === 404 ? 'not-found' : 'unavailable');
         setNotice('');
       } else {
-        setNotice(error instanceof Error ? error.message : '加载选题失败；请确认权限后重试。');
+        setNotice(getUserFacingErrorMessage(error, '选题详情暂时无法读取，请确认权限后重试。'));
       }
       return false;
     } finally {
@@ -294,6 +309,16 @@ export default function MobileTopicDetail() {
   }, [applyEditWriteReadback, canUpdateTopics, draftKey, id, user?.id, user?.role]);
 
   useEffect(() => { void load('initial'); }, [load]);
+  useEffect(() => {
+    if (!Number.isSafeInteger(handoffTopicId) || handoffTopicId <= 0 || !user?.id) {
+      setHandoffRecoverySnapshot({ scope: handoffRecoveryScope, recovery: null });
+      return;
+    }
+    setHandoffRecoverySnapshot({
+      scope: handoffRecoveryScope,
+      recovery: readTopicProductionCreateRecovery(user.id, handoffTopicId),
+    });
+  }, [handoffRecoveryScope, handoffTopicId, user?.id]);
   useEffect(() => {
     if (!auditRequested || loading || permissionsLoading) return;
 
@@ -373,12 +398,13 @@ export default function MobileTopicDetail() {
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('本次选题修改未发送：')) {
         removeMobileTopicEditRecovery(recovery);
-        setNotice(error.message);
+        const prefix = '本次选题修改未发送：';
+        setNotice(`${prefix}${getUserFacingErrorMessage({ message: error.message.slice(prefix.length) }, '无法安全保存恢复状态。')}`);
       } else if (error instanceof TopicApiError && error.status >= 400 && error.status < 500
         && ![408, 409, 425, 429].includes(error.status)) {
         removeMobileTopicEditRecovery(recovery);
         rememberUncertainEditWrite(null);
-        setNotice(error.message || '保存选题失败；本次修改未被接受。');
+        setNotice(getUserFacingErrorMessage(error, '保存选题失败；本次修改未被接受。'));
       } else {
         const pending = { ...recovery, phase: 'uncertain' as const };
         markMobileTopicEditRecoveryUncertain(recovery);
@@ -472,7 +498,7 @@ export default function MobileTopicDetail() {
       if (next === 'shooting' || next === 'completed') celebrateMilestone();
     } catch (error) {
       if (isDefiniteStatusRejection(error)) {
-        setNotice(error.message || '状态推进失败，请检查权限或当前阶段。');
+        setNotice(getUserFacingErrorMessage(error, '状态推进失败，请检查权限或当前阶段。'));
         return;
       }
       rememberUncertainStatusWrite({ before: topic.status, target: next, kind: 'advance' });
@@ -483,12 +509,13 @@ export default function MobileTopicDetail() {
       setSaving(false);
     }
   };
-  const startProduction = async () => {
+  const startProduction = async (action: TopicProductionHandoffAction = 'start') => {
     if (!topic || !canStartProduction || startProductionInFlight.current) return;
     if (editConflict) { setNotice('请先处理选题内容并发变化，再开始创作。'); return; }
     if (uncertainEditWriteRef.current) { setNotice('请先只读核实上一次选题内容保存结果；核实前不会开始创作。'); return; }
     if (uncertainStatusWriteRef.current) { setNotice('请先只读核实上一次审核或状态操作结果；核实前不会开始创作。'); return; }
     if (networkState !== 'online') { setNotice('目前离线，尚未创建创作草稿。'); return; }
+    if (!handoffRecoveryLoaded || (action === 'start' && handoffRecovery)) return;
     startProductionInFlight.current = true;
     setStartingProduction(true);
     setNotice('');
@@ -497,21 +524,40 @@ export default function MobileTopicDetail() {
         advanceTopic: updateTopicStatus,
         getTopicStatus: async (topicId) => (await getTopic(topicId)).status,
         listProductions: async (topicId) => getProduction({ topic_id: topicId }),
-        createDraft: createProduction,
-      });
+        createDraft: (input, requestId) => createProduction(input, requestId),
+        getCreateStatus: getProductionCreateStatus,
+        getProductionById,
+        userId: user?.id,
+      }, action);
       if (result.advanced) setTopic((currentTopic) => currentTopic ? { ...currentTopic, status: 'production' } : currentTopic);
-      if (result.created || result.advanced) {
-        appStore.addNotification({
-          title: result.created ? (result.advanced ? '创作已建立' : '创作草稿已补齐') : '已进入创作',
-          message: result.created
-            ? '已带入选题大纲，可以直接开始写稿。'
-            : '选题阶段已同步，继续已有稿件。',
-          type: 'success',
-        });
+      if (result.kind === 'opened') {
+        setHandoffRecoverySnapshot({ scope: handoffRecoveryScope, recovery: null });
+        if (result.created || result.advanced) {
+          appStore.addNotification({
+            title: result.verified ? '创作结果已核实' : result.created ? '创作已建立' : '已进入创作',
+            message: result.verified
+              ? '服务端已确认创作稿存在；没有重复创建。'
+              : result.created
+                ? '已带入选题大纲，可以直接开始写稿。'
+                : '选题阶段已同步，继续已有稿件。',
+            type: 'success',
+          });
+        }
+        navigate(`/production/content/${result.productionId}`, { state: { mobileReturnTo: `/topics/${topic.id}` } });
+      } else if (result.kind === 'deleted') {
+        setHandoffRecoverySnapshot({ scope: handoffRecoveryScope, recovery: null });
+        setNotice(result.message);
+      } else {
+        const recovery = result.kind === 'invalid-recovery' ? 'invalid' : result.recovery;
+        setHandoffRecoverySnapshot({ scope: handoffRecoveryScope, recovery });
+        setNotice('');
       }
-      navigate(`/production/content/${result.productionId}`, { state: { mobileReturnTo: `/topics/${topic.id}` } });
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '开始创作失败，请稍后重试。');
+      setHandoffRecoverySnapshot({
+        scope: handoffRecoveryScope,
+        recovery: readTopicProductionCreateRecovery(user?.id, topic.id),
+      });
+      setNotice(getUserFacingErrorMessage(error, '开始创作失败，请检查连接后重试。'));
     } finally {
       startProductionInFlight.current = false;
       setStartingProduction(false);
@@ -530,7 +576,7 @@ export default function MobileTopicDetail() {
       try {
         result = await repairCurrentTopicStageRecord(topic.id);
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : '补齐阶段记录失败，请稍后重试。');
+        setNotice(getUserFacingErrorMessage(error, '补齐阶段记录失败，请检查连接后重试。'));
         return;
       }
 
@@ -572,7 +618,7 @@ export default function MobileTopicDetail() {
       if (!refreshed) setNotice('审核结果已提交；页面刷新失败，请重新加载确认当前状态，不要重复审核。');
     } catch (error) {
       if (isDefiniteStatusRejection(error)) {
-        setNotice(error.message || '审核失败，请检查权限或当前状态。');
+        setNotice(getUserFacingErrorMessage(error, '审核失败，请检查权限或当前状态。'));
         return;
       }
       rememberUncertainStatusWrite({ before: topic.status, target: auditStatus, kind: 'audit' });
@@ -678,13 +724,37 @@ export default function MobileTopicDetail() {
       </section>
       <TopicAssetDimensionsPanel key={topic.id} topicId={topic.id} canManage={canEditTopic} />
       {topic.history?.length ? <section className="rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><h2 className="inline-flex items-center gap-2 text-sm font-semibold"><Clock3 className="h-4 w-4 text-studio-cyan" />协作动态</h2><div className="mt-3 space-y-3">{topic.history.slice(0, 5).map((record) => <div key={record.id} className="border-l border-studio-border-soft pl-3 text-sm"><p>{record.operator_name ?? '成员'} · {historyActionName[record.action] ?? record.action}</p><p className="mt-1 text-xs text-studio-text-secondary">{record.comment || record.created_at}</p></div>)}</div></section> : null}
-      {topic.status === 'pending' && canAudit ? <section className="space-y-3 rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold">选题审核</h2><p className="mt-1 text-xs text-studio-text-secondary">审核操作独立于选题内容编辑权限。</p></div><button type="button" disabled={saving || networkState !== 'online' || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => setShowAudit((current) => !current)} className="xmt-btn xmt-btn-primary min-h-10 px-3 text-sm font-semibold text-white disabled:opacity-50">{showAudit ? '收起审核' : '开始审核'}</button></div>{showAudit ? <><div className="grid grid-cols-2 gap-2"><button type="button" aria-pressed={auditStatus === 'approved'} disabled={submittingAudit || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => setAuditStatus('approved')} className={`min-h-10 rounded-xl border text-sm font-semibold disabled:opacity-60 ${auditStatus === 'approved' ? 'border-studio-success bg-studio-success/15 text-studio-success-contrast' : 'border-studio-border-soft text-studio-text-secondary'}`}>通过</button><button type="button" aria-pressed={auditStatus === 'rejected'} disabled={submittingAudit || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => setAuditStatus('rejected')} className={`min-h-10 rounded-xl border text-sm font-semibold disabled:opacity-60 ${auditStatus === 'rejected' ? 'border-studio-coral bg-studio-coral/10 text-studio-coral-contrast' : 'border-studio-border-soft text-studio-text-secondary'}`}>驳回</button></div><label className="block"><span className="mb-2 block text-sm font-medium">审核意见（选填）</span><textarea value={auditComment} onChange={(event) => setAuditComment(event.target.value)} disabled={submittingAudit || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} className="min-h-24 w-full rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm disabled:opacity-60" placeholder="填写通过说明或需要修改的内容" /></label><button type="button" disabled={saving || networkState !== 'online' || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => void audit()} className="xmt-btn xmt-btn-primary min-h-11 w-full text-sm font-semibold text-white disabled:opacity-50">{submittingAudit ? '正在提交审核…' : auditStatus === 'approved' ? '确认通过选题' : '确认驳回选题'}</button></> : null}</section> : null}
+      {topic.status === 'pending' && canAudit ? <section className="space-y-3 rounded-2xl border border-studio-border-soft bg-studio-surface p-4"><div className="flex items-center justify-between gap-3"><div><h2 id="mobile-topic-audit-title" className="text-sm font-semibold">选题审核</h2><p className="mt-1 text-xs text-studio-text-secondary">审核操作独立于选题内容编辑权限。</p></div><button type="button" aria-expanded={showAudit} aria-controls="mobile-topic-audit-panel" disabled={saving || networkState !== 'online' || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => setShowAudit((current) => !current)} className="xmt-btn xmt-btn-primary min-h-10 px-3 text-sm font-semibold text-white disabled:opacity-50">{showAudit ? '收起审核' : '开始审核'}</button></div><div id="mobile-topic-audit-panel" role="region" aria-labelledby="mobile-topic-audit-title" hidden={!showAudit} className="space-y-3"><div role="group" aria-label="审核结果" className="grid grid-cols-2 gap-2"><button type="button" aria-pressed={auditStatus === 'approved'} disabled={submittingAudit || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => setAuditStatus('approved')} className={`min-h-10 rounded-xl border text-sm font-semibold disabled:opacity-60 ${auditStatus === 'approved' ? 'border-studio-success bg-studio-success/15 text-studio-success-contrast' : 'border-studio-border-soft text-studio-text-secondary'}`}>通过</button><button type="button" aria-pressed={auditStatus === 'rejected'} disabled={submittingAudit || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => setAuditStatus('rejected')} className={`min-h-10 rounded-xl border text-sm font-semibold disabled:opacity-60 ${auditStatus === 'rejected' ? 'border-studio-coral bg-studio-coral/10 text-studio-coral-contrast' : 'border-studio-border-soft text-studio-text-secondary'}`}>驳回</button></div><label className="block"><span className="mb-2 block text-sm font-medium">审核意见（选填）</span><textarea value={auditComment} onChange={(event) => setAuditComment(event.target.value)} disabled={submittingAudit || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} className="min-h-24 w-full rounded-xl border border-studio-border-soft bg-studio-bg p-3 text-sm disabled:opacity-60" placeholder="填写通过说明或需要修改的内容" /></label><button type="button" disabled={saving || networkState !== 'online' || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => void audit()} className="xmt-btn xmt-btn-primary min-h-11 w-full text-sm font-semibold text-white disabled:opacity-50">{submittingAudit ? '正在提交审核…' : auditStatus === 'approved' ? '确认通过选题' : '确认驳回选题'}</button></div></section> : null}
       {notice ? <p role="status" className="px-1 text-sm text-studio-text-secondary">{notice}</p> : null}
+      {canStartProduction && !handoffRecoveryLoaded ? (
+        <p role="status" className="px-1 text-sm text-studio-text-secondary">正在检查本选题的创作恢复状态…</p>
+      ) : null}
+      {handoffRecoveryLoaded && handoffRecovery !== null ? (
+        <section data-testid="topic-production-handoff-recovery" role={handoffRecovery === 'invalid' ? 'alert' : 'status'} className="space-y-3 rounded-2xl border border-studio-border-soft bg-studio-surface p-4 text-sm text-studio-text-secondary">
+          <p>{handoffRecovery === 'invalid'
+            ? '上次创作恢复记录无法读取。为避免重复创建，开始创作已锁定。'
+            : handoffRecovery.phase === 'retryable'
+              ? '服务器暂未找到这条创作稿。原请求编号已保留；只有明确确认后才会用同一编号重试。'
+              : '创作结果仍无法确认。再次创建已锁定；请先只读核实。'}</p>
+          {handoffRecovery !== 'invalid' ? (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <ActionButton type="button" variant="secondary" disabled={startingProduction} onClick={() => void startProduction('verify')} className="min-h-11 w-full justify-center sm:w-auto">
+                {startingProduction ? '正在核实…' : '只读核实创作结果'}
+              </ActionButton>
+              {handoffRecovery.phase === 'retryable' ? (
+                <ActionButton type="button" variant="primary" disabled={startingProduction} onClick={() => void startProduction('retry')} className="min-h-11 w-full justify-center sm:w-auto">
+                  使用同一请求编号明确重试
+                </ActionButton>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {permissionsLoading ? <p role="status" className="text-sm text-studio-text-secondary">正在确认操作权限…</p> : null}
       {!permissionsLoading && !canEditTopic ? <p className="text-sm text-studio-text-secondary">当前为只读查看；如需修改，请联系管理员或选题负责人。</p> : null}
       {!permissionsLoading && (canEditTopic || canStartProduction) ? <div className={`sticky z-sticky -mx-1 grid ${canEditTopic ? 'grid-cols-2' : 'grid-cols-1'} gap-3 bg-studio-bg px-1 py-2`} style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}>
         {canEditTopic ? <button type="button" disabled={saving || startingProduction || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => void save()} className="xmt-btn xmt-btn-secondary min-h-12 w-full text-sm font-semibold disabled:opacity-50"><Save className="h-4 w-4" />{saving ? '保存中…' : '保存修改'}</button> : null}
-        {canStartProduction ? <button type="button" disabled={saving || startingProduction || networkState !== 'online' || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => void startProduction()} className="xmt-btn xmt-btn-primary min-h-12 w-full text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{startingProduction ? '正在准备…' : topic.status === 'approved' ? '开始创作' : '进入创作'}</button> : canAdvanceWorkflow ? <button type="button" disabled={saving || networkState !== 'online' || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => void advance()} className="xmt-btn xmt-btn-primary min-h-12 w-full text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{advancing ? '正在推进阶段…' : statusLabel[topic.status] ?? '推进阶段'}</button> : null}
+        {canStartProduction ? <button type="button" disabled={saving || startingProduction || networkState !== 'online' || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict) || !handoffRecoveryLoaded || handoffRecovery !== null} onClick={() => void startProduction()} className="xmt-btn xmt-btn-primary min-h-12 w-full text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{startingProduction ? '正在准备…' : topic.status === 'approved' ? '开始创作' : '进入创作'}</button> : canAdvanceWorkflow ? <button type="button" disabled={saving || networkState !== 'online' || Boolean(uncertainStatusWrite) || Boolean(uncertainEditWrite) || Boolean(editConflict)} onClick={() => void advance()} className="xmt-btn xmt-btn-primary min-h-12 w-full text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" />{advancing ? '正在推进阶段…' : statusLabel[topic.status] ?? '推进阶段'}</button> : null}
       </div> : null}
     </> : topicLoadFailure === 'not-found' ? <p role="status" className="text-sm text-studio-text-secondary">未找到该选题，或记录当前不可访问。</p>
       : topicLoadFailure === 'unavailable' ? <section role="alert" className="space-y-3 rounded-2xl border border-studio-coral/30 bg-studio-coral/10 p-4 text-sm text-studio-coral-contrast">

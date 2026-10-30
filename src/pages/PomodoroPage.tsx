@@ -1,9 +1,11 @@
 import { useThemeStyles } from '../hooks/useThemeStyles';
+import PageHeading from '@/components/common/PageHeading';
 import { useNavigate } from 'react-router-dom';
 import PomodoroTimer from '../components/PomodoroTimer';
 import { ChevronLeft, Trophy, Timer } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { getPomodoroRanking } from '../api';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import type { PomodoroRanking } from '../types';
 
 export default function PomodoroPage() {
@@ -16,7 +18,7 @@ export default function PomodoroPage() {
   const loadRanking = useCallback(async () => {
     setRankingLoading(true); setRankingError('');
     try { setRanking(await getPomodoroRanking()); }
-    catch (error) { setRankingError(error instanceof Error ? error.message : '获取番茄钟排行榜失败'); }
+    catch (error) { setRankingError(getUserFacingErrorMessage(error, '番茄钟排行榜暂时无法加载，请检查连接后重试。')); }
     finally { setRankingLoading(false); }
   }, []);
   useEffect(() => { void loadRanking(); }, [loadRanking]);
@@ -34,27 +36,27 @@ export default function PomodoroPage() {
       </div>
 
       <div>
-        <h1 className="text-2xl font-bold text-theme-text">番茄钟</h1>
+        <PageHeading className="text-2xl font-bold text-theme-text">番茄钟</PageHeading>
         <p className="text-sm text-theme-text-muted mt-1">25 分钟专注创作，提升工作效率</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 番茄钟主体 */}
-        <div className="lg:col-span-2">
+        <section aria-labelledby="pomodoro-timer-heading" className="lg:col-span-2">
           <PomodoroTimer />
-        </div>
+        </section>
 
         {/* 排行榜 */}
-        <div className="rounded-2xl bg-theme-secondary border border-theme-border p-6">
+        <section aria-labelledby="pomodoro-ranking-heading" className="rounded-2xl bg-theme-secondary border border-theme-border p-6">
           <div className="flex items-center gap-2.5 mb-5">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-studio-amber to-studio-amber flex items-center justify-center shadow-md">
               <Trophy data-testid="pomodoro-ranking-icon" className="w-4 h-4 text-[color:var(--xmt-text-on-color-dark)]" />
             </div>
-            <h3 className="text-base font-semibold text-theme-text">专注排行榜</h3>
+            <h2 id="pomodoro-ranking-heading" className="text-base font-semibold text-theme-text">专注排行榜</h2>
           </div>
 
           {rankingError ? (
-            <div className="space-y-3 py-6 text-center"><p className="text-sm text-theme-text-muted">排行榜加载失败：{rankingError}</p><button type="button" onClick={() => void loadRanking()} disabled={rankingLoading} className={`rounded-lg px-3 py-2 text-sm ${styles.buttonSecondary}`}>{rankingLoading ? '正在重试…' : '重试'}</button></div>
+            <div className="space-y-3 py-6 text-center"><p role="alert" aria-atomic="true" className="text-sm text-theme-text-muted">排行榜加载失败：{rankingError}</p><button type="button" onClick={() => void loadRanking()} disabled={rankingLoading} className={`inline-flex min-h-10 items-center justify-center rounded-lg px-3 py-2 text-sm ${styles.buttonSecondary}`}>{rankingLoading ? '正在重试…' : '重试'}</button></div>
           ) : rankingLoading ? <div role="status" aria-live="polite" aria-atomic="true" className="py-8 text-center text-sm text-theme-text-muted">排行榜加载中…</div> : ranking.length > 0 ? (
             <div className="space-y-2">
               {ranking.map((item, index) => (
@@ -85,7 +87,7 @@ export default function PomodoroPage() {
               <p className="text-xs text-theme-text-muted mt-1">开始你的第一个番茄吧！</p>
             </div>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );

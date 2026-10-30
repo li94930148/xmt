@@ -40,6 +40,7 @@ interface EditorProps {
   onSave?: () => void | boolean | Promise<void | boolean>;
   readOnly?: boolean;
   placeholder?: string;
+  ariaLabel?: string;
   collaboration?: {
     provider: SocketYjsProvider;
     users: CollaborationUserPresence[];
@@ -137,6 +138,7 @@ export default function Editor({
   onSave,
   readOnly = false,
   placeholder = '开始编写...',
+  ariaLabel,
   collaboration,
   immersive = false,
   focusMode = false,
@@ -269,6 +271,10 @@ export default function Editor({
     editorProps: {
       attributes: {
         class: `editor-content prose max-w-none ${immersive ? 'px-4 sm:px-8 lg:px-16 py-8 lg:py-12' : 'px-10 py-8'} min-h-[300px] outline-none ${isDark ? 'prose-invert' : ''}`,
+        role: 'textbox',
+        'aria-label': ariaLabel?.trim() || (readOnly ? '只读正文' : '正文编辑区'),
+        'aria-multiline': 'true',
+        ...(readOnly ? { 'aria-readonly': 'true' } : {}),
       },
       handleKeyDown: (view, event) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
@@ -769,7 +775,6 @@ export default function Editor({
           {editor && !readOnly && !focusMode && (
             <BubbleMenuBar editor={editor} onAddComment={handleAddComment} contextMenuOpen={contextMenuOpen} />
           )}
-
           <div className="relative min-h-full min-w-0 max-w-full">
             <EditorContent editor={editor} className={formatPainterMode === 'idle' ? undefined : 'cursor-copy'} />
           </div>

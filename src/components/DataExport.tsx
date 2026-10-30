@@ -7,6 +7,7 @@ import { getCurrentBeijingDateString } from '../lib/utils';
 import ActionButton from './studio/ActionButton';
 import { PLATFORMS } from '../constants';
 import { topicStatusLabel } from './topics/topicStatusLabel';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 
 type ExportType = 'topics' | 'analytics';
 
@@ -114,7 +115,7 @@ export default function DataExport() {
         type: 'success',
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '导出暂时失败，请检查连接后重试。';
+      const message = getUserFacingErrorMessage(error, '导出暂时失败，请检查连接后重试。');
       setExportFeedback({ kind: 'error', message });
       addNotification({
         title: '导出失败',
@@ -156,8 +157,8 @@ export default function DataExport() {
 
       <div className="space-y-4">
         <div>
-          <label className={`block text-sm font-medium ${styles.textSecondary} mb-2`}>导出类型</label>
-          <div className="grid grid-cols-2 gap-3">
+          <p id="export-type-heading" className={`block text-sm font-medium ${styles.textSecondary} mb-2`}>导出类型</p>
+          <div role="group" aria-labelledby="export-type-heading" className="grid grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() => setExportType('topics')}
@@ -197,7 +198,7 @@ export default function DataExport() {
         </div>
 
         <div>
-          <label className={`block text-sm font-medium ${styles.textSecondary} mb-2`}>导出格式</label>
+          <p className={`block text-sm font-medium ${styles.textSecondary} mb-2`}>导出格式</p>
           <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${styles.bgTertiary} ${styles.border}`}>
             <span className={`text-sm ${styles.textPrimary} font-medium`}>CSV</span>
             <span className="text-xs text-studio-text-secondary">(逗号分隔)</span>

@@ -170,7 +170,7 @@ export function getResourceCenterResources(params: ResourceQuery = {}) {
 }
 
 export function getResourceCenterResource(id: number) {
-  return request<ResourceDetailData>(`/resources/${id}`, { headers: authHeaders() });
+  return request<ResourceDetailData>(`/resources/${id}`, { headers: authHeaders(), cache: 'no-store' });
 }
 
 export function updateResourceCenterResource(id: number, input: UpdateResourceCenterResourceInput, clientRequestId?: string) {

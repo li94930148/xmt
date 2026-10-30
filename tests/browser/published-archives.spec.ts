@@ -83,16 +83,22 @@ let archiveListReads = 0;
 let failNextArchiveListRead = false;
 let failedArchiveListReads = 0;
 let archiveDeleteWrites = 0;
+let archiveDetailReads = 0;
+let failNextArchiveDetailRead701 = false;
+const archiveDeleteAttempts = new Map<number, number>();
 let productionMutationWrites = 0;
 const productionHistoryVersionReads: string[] = [];
+const productionSourceSnapshotReads: string[] = [];
 const app = express();
 app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   const adminCookie = req.query.admin === '1' ? "document.cookie='xmt_archive_qa_admin=1; path=/';" : '';
   const noProductionViewCookie = req.query.source_permission === '0' ? "document.cookie='xmt_archive_qa_no_production=1; path=/';" : '';
   const crossTopicCookie = req.query.source_permission === '0' ? "document.cookie='xmt_archive_qa_cross_topic=1; path=/';" : '';
+  const sourceScopeDeniedCookie = req.query.source_scope === 'denied' ? "document.cookie='xmt_archive_qa_source_scope_denied=1; path=/';" : '';
   const unavailableSourceCookie = req.query.source_unavailable === '1' ? "document.cookie='xmt_archive_qa_source_unavailable=1; path=/';" : '';
-  return res.type('html').send(`<script>${adminCookie}${noProductionViewCookie}${crossTopicCookie}${unavailableSourceCookie}localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(member))});localStorage.setItem('xmt_token','published-archive-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/asset-center');</script>`);
+  const ambiguousSnapshotCookie = req.query.source_snapshot_ambiguous === '1' ? "document.cookie='xmt_archive_qa_source_snapshot_ambiguous=1; path=/';" : '';
+  return res.type('html').send(`<script>${adminCookie}${noProductionViewCookie}${crossTopicCookie}${sourceScopeDeniedCookie}${unavailableSourceCookie}${ambiguousSnapshotCookie}localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(member))});localStorage.setItem('xmt_token','published-archive-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/asset-center');</script>`);
 });
 app.get('/api/auth/me', (_req, res) => res.json(member));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
@@ -119,10 +125,29 @@ app.get('/api/resources/archives', (_req, res) => {
 app.delete('/api/resources/archives/:id', (req, res) => {
   archiveDeleteWrites += 1;
   const id = Number(req.params.id);
+  const attempt = (archiveDeleteAttempts.get(id) || 0) + 1;
+  archiveDeleteAttempts.set(id, attempt);
+  if (id === 702 && attempt === 1) {
+    archiveItems = archiveItems.filter((item) => item.id !== id);
+    return res.status(503).json({ message: '模拟服务端已删除但响应失败' });
+  }
+  if (id === 701 && attempt === 1) {
+    failNextArchiveDetailRead701 = true;
+    return res.status(503).json({ message: '模拟服务端暂未删除归档' });
+  }
   archiveItems = archiveItems.filter((item) => item.id !== id);
   res.json({ message: '归档已删除' });
 });
-app.get('/api/resources/archives/701', (req, res) => res.json({
+app.get('/api/resources/archives/701', (req, res) => {
+  archiveDetailReads += 1;
+  if (failNextArchiveDetailRead701) {
+    failNextArchiveDetailRead701 = false;
+    return res.status(503).json({ message: '模拟归档状态核实暂不可用' });
+  }
+  if (!archiveItems.some((item) => item.id === 701)) return res.status(404).json({ message: '归档不存在' });
+  const crossTopicSource = req.headers.cookie?.includes('xmt_archive_qa_cross_topic=1')
+    || req.headers.cookie?.includes('xmt_archive_qa_source_scope_denied=1');
+  return res.json({
   id: 701,
   name: '多平台早餐主题',
   file_path: 'archive/topic-71',
@@ -137,7 +162,8 @@ app.get('/api/resources/archives/701', (req, res) => res.json({
     script_sources: {
       shooting: { topic_id: 71, production_id: 801, version: 'v2.0', state: 'derived' },
       publishing: {
-        topic_id: req.headers.cookie?.includes('xmt_archive_qa_cross_topic=1') ? 72 : 71,
+        topic_id: 71,
+        ...(crossTopicSource ? { source_topic_id: 72 } : {}),
         production_id: 801,
         version: 'v1.0',
         state: req.headers.cookie?.includes('xmt_archive_qa_source_unavailable=1') ? 'unavailable' : 'derived',
@@ -145,17 +171,36 @@ app.get('/api/resources/archives/701', (req, res) => res.json({
     },
     script_source_snapshots: [
       { topic_id: 71, production_id: 801, version: 'v2.0', content: '<p>成片剧本引用的创作历史正文。</p>', content_markdown: '成片剧本引用的创作历史正文。' },
-      { topic_id: 71, production_id: 801, version: 'v1.0', content: '<p>发布剧本引用的 v1.0 创作历史正文。</p>', content_markdown: '发布剧本引用的 v1.0 创作历史正文。' },
+      ...(!crossTopicSource ? [{ topic_id: 71, production_id: 801, version: 'v1.0', content: '<p>发布剧本引用的 v1.0 创作历史正文。</p>', content_markdown: '发布剧本引用的 v1.0 创作历史正文。' }] : []),
+      ...(req.headers.cookie?.includes('xmt_archive_qa_source_snapshot_ambiguous=1') ? [{ topic_id: 71, production_id: 801, version: 'v1.0', content: '<p>冲突的 v1.0 来源正文副本。</p>', content_markdown: '冲突的 v1.0 来源正文副本。' }] : []),
     ],
     analytics: { data_date: '2026-09-29', views: 1200, likes: 52, shares: 8, comments: 4 },
     published_records: [
-      { publishing_id: 402, platform: 'weixin', url: 'https://example.test/weixin/402', status: 'published', publish_time: '2026-09-29 10:00:00', analytics: { data_date: '2026-09-29', views: 1200, likes: 52, shares: 8, comments: 4 } },
-      { publishing_id: 401, platform: 'douyin', url: 'https://example.test/douyin/401', status: 'published', publish_time: '2026-09-28 10:00:00', analytics: { data_date: '2026-09-28', views: 456789, likes: 231, shares: 15, comments: 28 } },
+      {
+        publishing_id: 402, platform: 'weixin', url: 'https://example.test/weixin/402', status: 'published', publish_time: '2026-09-29 10:00:00',
+        script_source: {
+          topic_id: 71,
+          ...(crossTopicSource ? { source_topic_id: 72 } : {}),
+          production_id: 801,
+          version: 'v1.0',
+          state: req.headers.cookie?.includes('xmt_archive_qa_source_unavailable=1') ? 'unavailable' : 'derived',
+        },
+        analytics: { data_date: '2026-09-29', views: 1200, likes: 52, shares: 8, comments: 4 },
+      },
+      {
+        publishing_id: 401, platform: 'douyin', url: 'https://example.test/douyin/401', status: 'published', publish_time: '2026-09-28 10:00:00',
+        script_source: { topic_id: 71, production_id: 801, version: 'v2.0', state: 'derived' },
+        analytics: { data_date: '2026-09-28', views: 456789, likes: 231, shares: 15, comments: 28 },
+      },
     ],
     archived_at: '2026-09-29 10:30:00',
   },
-}));
-app.get('/api/resources/archives/702', (_req, res) => res.json({
+  });
+});
+app.get('/api/resources/archives/702', (_req, res) => {
+  archiveDetailReads += 1;
+  if (!archiveItems.some((item) => item.id === 702)) return res.status(404).json({ message: '归档不存在' });
+  return res.json({
   id: 702,
   name: '旧版单平台归档',
   file_path: 'archive/topic-72',
@@ -168,7 +213,8 @@ app.get('/api/resources/archives/702', (_req, res) => res.json({
     analytics: { views: 88, likes: 5, shares: 1, comments: 0 },
     archived_at: '2026-09-28 11:30:00',
   },
-}));
+  });
+});
 app.get('/api/workflow/production/801', (_req, res) => res.json({
   id: 801,
   topic_id: 71,
@@ -223,6 +269,35 @@ app.get('/api/workflow/production/801/history', (req, res) => {
   const history = versionFilter ? allHistory.filter((entry) => entry.version === versionFilter) : allHistory;
   res.json({ data: history, total: history.length, page: Number(req.query.page || 1), limit: Number(req.query.limit || 20) });
 });
+app.get('/api/workflow/production/801/source-snapshot', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const versionFilter = String(req.query.version || '');
+  productionSourceSnapshotReads.push(versionFilter);
+  if (req.headers.cookie?.includes('xmt_archive_qa_no_production=1')) {
+    return res.status(403).json({ message: '无权查看创作来源快照' });
+  }
+  if (req.headers.cookie?.includes('xmt_archive_qa_source_scope_denied=1')) {
+    return res.status(403).json({ message: '无权查看该来源选题' });
+  }
+  const content = versionFilter === 'v1.0'
+    ? '<p>准确的 v1.0 创作历史正文。</p>'
+    : versionFilter === 'v2.0'
+      ? '<p>准确的 v2.0 创作历史正文。</p>'
+      : '';
+  if (!content) return res.status(404).json({ message: '来源版本不可用' });
+  return res.json({
+    production_id: 801,
+    source_topic_id: 71,
+    source_topic_title: '多平台早餐主题',
+    version: versionFilter,
+    content,
+    content_markdown: content,
+    status: 'approved',
+    created_at: '2026-09-25 10:00:00',
+    version_timestamp: '2026-09-25 10:00:00',
+    operator_name: member.name,
+  });
+});
 app.all('/api/workflow/production/801', (req, res, next) => {
   if (req.method === 'GET') return next();
   productionMutationWrites += 1;
@@ -252,11 +327,21 @@ try {
   desktop.on('pageerror', (error) => errors.push(error.message));
   desktop.on('console', (message) => {
     if (message.type() !== 'error') return;
-    if (message.text().includes('503 (Service Unavailable)')) expectedHttpErrors.push(message.text());
+    if (message.text().includes('/api/resources/archives') && (message.text().includes('503 (Service Unavailable)') || message.text().includes('404 (Not Found)'))) expectedHttpErrors.push(message.text());
     else errors.push(message.text());
   });
   await desktop.goto(`${base}/__qa`);
   await desktop.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
+  const workbenchGroup = desktop.locator('nav[aria-label="侧边导航"] > div').filter({ has: desktop.getByRole('button', { name: '工作台导航分组', exact: true }) });
+  const workbenchToggle = workbenchGroup.getByRole('button', { name: '工作台导航分组', exact: true });
+  await workbenchToggle.click();
+  const workbenchLink = workbenchGroup.locator('ul').getByRole('button', { name: '工作台', exact: true });
+  assert.equal(await workbenchToggle.getAttribute('aria-expanded'), 'true', 'the workbench group can be expanded');
+  assert.equal(await workbenchLink.count(), 1, 'the workbench page remains available in its group');
+  assert.equal(await desktop.getByRole('button', { name: '工作台导航分组', exact: true }).count(), 1, 'the workbench group control has a distinct accessible name');
+  assert.equal(await desktop.getByRole('button', { name: '工作台', exact: true }).count(), 1, 'the workbench page retains its own accessible name');
+  await workbenchToggle.click();
+
   const contentProductionGroup = desktop.locator('nav.flex-1 > div').filter({ has: desktop.getByRole('button', { name: '内容生产', exact: true }) });
   const contentProductionToggle = contentProductionGroup.getByRole('button', { name: '内容生产', exact: true });
   const collapsedContentLinks = contentProductionGroup.locator('ul');
@@ -276,14 +361,34 @@ try {
   assert.equal(await collapsedContentLinks.evaluate((list) => (list as HTMLElement).inert), false, 'expanded navigation links are no longer inert');
   assert.ok((await collapsedContentLinks.locator('button').evaluateAll((buttons) => buttons.every((button) => (button as HTMLButtonElement).tabIndex === 0))), 'expanded content-production links return to the normal Tab order');
   await contentProductionToggle.click();
-  await desktop.getByRole('button', { name: '收起侧边栏', exact: true }).click();
+  const expandedSidebarToggle = desktop.getByRole('button', { name: '收起侧边栏', exact: true });
+  const expandedSidebarToggleBounds = await expandedSidebarToggle.boundingBox();
+  assert.ok(expandedSidebarToggleBounds && expandedSidebarToggleBounds.width >= 40 && expandedSidebarToggleBounds.height >= 40, 'the expanded sidebar toggle has a 40px minimum hit area');
+  const expandedSidebarOverlapsMainAction = await desktop.locator('main').evaluate((main, bounds) => Array.from(main.querySelectorAll('button, a, input, textarea, select, [tabindex]:not([tabindex="-1"])')).some((control) => {
+    const rect = control.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.left < bounds.x + bounds.width && rect.right > bounds.x && rect.top < bounds.y + bounds.height && rect.bottom > bounds.y;
+  }), expandedSidebarToggleBounds);
+  assert.equal(expandedSidebarOverlapsMainAction, false, 'the expanded sidebar hit area does not cover a main-content control');
+  await expandedSidebarToggle.click();
+  const collapsedSidebarToggle = desktop.getByRole('button', { name: '展开侧边栏', exact: true });
+  const collapsedSidebarToggleBounds = await collapsedSidebarToggle.boundingBox();
+  assert.ok(collapsedSidebarToggleBounds && collapsedSidebarToggleBounds.width >= 40 && collapsedSidebarToggleBounds.height >= 40, 'the collapsed sidebar toggle keeps a 40px minimum hit area');
+  const collapsedSidebarOverlapsMainAction = await desktop.locator('main').evaluate((main, bounds) => Array.from(main.querySelectorAll('button, a, input, textarea, select, [tabindex]:not([tabindex="-1"])')).some((control) => {
+    const rect = control.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.left < bounds.x + bounds.width && rect.right > bounds.x && rect.top < bounds.y + bounds.height && rect.bottom > bounds.y;
+  }), collapsedSidebarToggleBounds);
+  assert.equal(collapsedSidebarOverlapsMainAction, false, 'the collapsed sidebar hit area does not cover a main-content control');
   const compactSectionToggles = desktop.locator('nav.flex-1').first().locator('button[aria-expanded]');
   const compactSectionLabels = await compactSectionToggles.evaluateAll((buttons) => buttons.map((button) => ({
     title: button.getAttribute('title'),
     accessibleName: button.getAttribute('aria-label'),
   })));
   assert.ok(compactSectionLabels.length > 0, 'the compact desktop sidebar keeps its section controls');
-  assert.ok(compactSectionLabels.every(({ title, accessibleName }) => title && accessibleName === title), 'icon-only section controls keep their accessible names');
+  assert.ok(compactSectionLabels.every(({ title, accessibleName }) => title && accessibleName && (
+    accessibleName === title
+    || accessibleName.startsWith(`${title}，当前视图：`)
+    || accessibleName.startsWith(`${title}导航分组`)
+  )), 'icon-only section controls keep distinct names and announce the current view when needed');
   await desktop.getByRole('button', { name: '内容生产', exact: true }).click();
   assert.equal(await desktop.getByRole('button', { name: '收起侧边栏', exact: true }).count(), 1, 'activating an icon-only section expands the desktop sidebar');
   assert.equal(await contentProductionToggle.getAttribute('aria-expanded'), 'true', 'activating an icon-only section opens that group');
@@ -368,26 +473,31 @@ try {
   const sourcePanel = desktop.getByTestId('archive-script-sources');
   await sourcePanel.getByText('成片剧本', { exact: true }).waitFor();
   const sourceVersionLink = sourcePanel.getByRole('link', { name: '查看成片剧本来源创作稿 v2.0', exact: true });
-  assert.equal(await sourceVersionLink.getAttribute('href'), '/production/801?version=v2.0', 'archive source links target the exact recorded production history version');
+  assert.equal(await sourceVersionLink.getAttribute('href'), '/production/801/source-snapshot?version=v2.0', 'archive source links target the exact recorded production history version');
+  const v2SnapshotResponse = desktop.waitForResponse((response) => response.url().includes('/api/workflow/production/801/source-snapshot?version=v2.0'));
   await sourceVersionLink.click();
-  await desktop.getByRole('heading', { name: '多平台早餐主题' }).waitFor();
+  const v2Snapshot = await v2SnapshotResponse;
+  assert.equal(v2Snapshot.status(), 200, 'an authorized archive viewer can read the exact source version');
+  assert.equal(v2Snapshot.headers()['cache-control'], 'no-store', 'source manuscript responses are not cached');
+  await desktop.getByRole('heading', { name: '创作来源快照', exact: true }).waitFor();
   await desktop.getByText('准确的 v2.0 创作历史正文。', { exact: true }).waitFor();
-  await desktop.getByText('历史只读预览', { exact: true }).first().waitFor();
-  await desktop.getByRole('button', { name: '回到当前版本', exact: true }).waitFor();
+  await desktop.getByRole('region', { name: '来源版本信息' }).waitFor();
+  assert.equal(await desktop.getByRole('button', { name: '保存草稿', exact: true }).count(), 0, 'the source snapshot page does not expose manuscript editing');
   assert.equal(await desktop.getByText('这是当前最新的 v3.0 创作稿，不应替代归档来源版本。', { exact: true }).count(), 0, 'following the archive link renders the exact historical body rather than the current manuscript');
-  assert(productionHistoryVersionReads.includes('v2.0'), 'the production detail requests the archive-recorded v2.0 history explicitly');
+  assert(productionSourceSnapshotReads.includes('v2.0'), 'the source snapshot endpoint receives the archive-recorded v2.0 explicitly');
+  assert.equal(productionHistoryVersionReads.length, 0, 'the source snapshot page does not call the broader production history endpoint');
   assert.equal(productionMutationWrites, 0, 'opening an archived source version remains read-only');
   await desktop.goto(`${base}/asset-center/published-archives`);
   await desktop.getByRole('heading', { name: '发布归档' }).waitFor();
   await desktop.getByRole('button', { name: /多平台早餐主题/ }).click();
   await desktop.getByRole('button', { name: '稿件', exact: true }).click();
   const publishingVersionLink = sourcePanel.getByRole('link', { name: '查看发布剧本来源创作稿 v1.0', exact: true });
-  assert.equal(await publishingVersionLink.getAttribute('href'), '/production/801?version=v1.0', 'publishing archives link to the exact recorded history version independently from the shooting source');
+  assert.equal(await publishingVersionLink.getAttribute('href'), '/production/801/source-snapshot?version=v1.0', 'publishing archives link to the exact recorded history version independently from the shooting source');
   await publishingVersionLink.click();
+  await desktop.getByRole('heading', { name: '创作来源快照', exact: true }).waitFor();
   await desktop.getByText('准确的 v1.0 创作历史正文。', { exact: true }).waitFor();
-  await desktop.getByText('历史只读预览', { exact: true }).first().waitFor();
   assert.equal(await desktop.getByText('准确的 v2.0 创作历史正文。', { exact: true }).count(), 0, 'the publishing source opens its own recorded v1.0 rather than the shooting source v2.0');
-  assert(productionHistoryVersionReads.includes('v1.0'), 'the production detail explicitly requests the publishing source version');
+  assert(productionSourceSnapshotReads.includes('v1.0'), 'the source snapshot endpoint explicitly receives the publishing source version');
   assert.equal(productionMutationWrites, 0, 'opening both archived source versions remains read-only');
   await desktop.goto(`${base}/asset-center/published-archives`);
   await desktop.getByRole('heading', { name: '发布归档' }).waitFor();
@@ -402,6 +512,17 @@ try {
   await desktop.screenshot({ path: '/tmp/xmt-published-archives-source-lineage-1440.png', fullPage: true });
   await desktop.getByRole('button', { name: '发布信息', exact: true }).click();
   assert.equal(await desktop.getByRole('button', { name: '发布信息', exact: true }).getAttribute('aria-pressed'), 'true', 'the publishing detail view restores selected state after activation');
+  const weixinRecordCard = desktop.getByTestId('published-record-card-402');
+  const douyinRecordCard = desktop.getByTestId('published-record-card-401');
+  const weixinRecordSourceLink = weixinRecordCard.getByRole('link', { name: '查看发布记录 #402的来源创作稿 v1.0', exact: true });
+  const douyinRecordSourceLink = douyinRecordCard.getByRole('link', { name: '查看发布记录 #401的来源创作稿 v2.0', exact: true });
+  assert.equal(await weixinRecordSourceLink.getAttribute('href'), '/production/801/source-snapshot?version=v1.0', 'each published platform card links to its own exact historical source');
+  assert.equal(await douyinRecordSourceLink.getAttribute('href'), '/production/801/source-snapshot?version=v2.0', 'the second platform card does not reuse the latest publication source');
+  await weixinRecordCard.getByText('查看归档保存的来源正文', { exact: true }).click();
+  await douyinRecordCard.getByText('查看归档保存的来源正文', { exact: true }).click();
+  await weixinRecordCard.getByText('发布剧本引用的 v1.0 创作历史正文。', { exact: true }).waitFor();
+  await douyinRecordCard.getByText('成片剧本引用的创作历史正文。', { exact: true }).waitFor();
+  assert.equal(await weixinRecordCard.getByText('成片剧本引用的创作历史正文。', { exact: true }).count(), 0, 'a publication card never shows a different record’s source snapshot');
   for (const [label, locator] of [
     ['当前“发布信息”页签', desktop.getByRole('button', { name: '发布信息', exact: true })],
     ['发布链接', desktop.getByRole('link', { name: '打开发布链接' }).first()],
@@ -482,7 +603,34 @@ try {
   const unavailableSourcePanel = unavailableSourcePage.getByTestId('archive-script-sources');
   await unavailableSourcePanel.getByText('来源版本当前不可用', { exact: true }).waitFor();
   assert.equal(await unavailableSourcePanel.getByRole('link', { name: '查看发布剧本来源创作稿 v1.0' }).count(), 0, 'an unavailable publishing source is explicit and has no misleading history link');
+  await unavailableSourcePage.getByRole('button', { name: '发布信息', exact: true }).click();
+  const unavailableWeixinCard = unavailableSourcePage.getByTestId('published-record-card-402');
+  await unavailableWeixinCard.getByText('来源版本当前不可用', { exact: true }).waitFor();
+  assert.equal(await unavailableWeixinCard.getByRole('link', { name: '查看发布记录 #402的来源创作稿 v1.0', exact: true }).count(), 0, 'an unavailable per-record source has no misleading link');
+  assert.equal(await unavailableWeixinCard.getByText('查看归档保存的来源正文', { exact: true }).count(), 0, 'an unavailable per-record source does not show a source body');
   await unavailableSourcePage.close();
+
+  const ambiguousSnapshotPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  ambiguousSnapshotPage.on('pageerror', (error) => errors.push(error.message));
+  await ambiguousSnapshotPage.goto(`${base}/__qa?source_snapshot_ambiguous=1`);
+  await ambiguousSnapshotPage.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
+  await ambiguousSnapshotPage.locator('a[href="/asset-center/published-archives"]').last().click();
+  await ambiguousSnapshotPage.getByRole('heading', { name: '发布归档' }).waitFor();
+  await ambiguousSnapshotPage.getByRole('button', { name: /多平台早餐主题/ }).click();
+  await ambiguousSnapshotPage.getByRole('button', { name: '稿件', exact: true }).click();
+  const ambiguousSourcePanel = ambiguousSnapshotPage.getByTestId('archive-script-sources');
+  const ambiguousSnapshotMessage = '归档中没有唯一匹配的来源正文快照；正文已隐藏。';
+  await ambiguousSourcePanel.getByText(ambiguousSnapshotMessage, { exact: true }).waitFor();
+  assert.equal(await ambiguousSourcePanel.getByText('发布剧本引用的 v1.0 创作历史正文。', { exact: true }).count(), 0, 'a duplicate v1.0 snapshot does not make the first body appear authoritative');
+  assert.equal(await ambiguousSourcePanel.getByText('冲突的 v1.0 来源正文副本。', { exact: true }).count(), 0, 'ambiguous source copies remain hidden');
+  assert.equal(await ambiguousSourcePanel.getByRole('link', { name: '查看发布剧本来源创作稿 v1.0', exact: true }).count(), 1, 'the independently validated same-topic source version link remains available');
+  await ambiguousSnapshotPage.getByRole('button', { name: '发布信息', exact: true }).click();
+  const ambiguousWeixinCard = ambiguousSnapshotPage.getByTestId('published-record-card-402');
+  await ambiguousWeixinCard.getByText(ambiguousSnapshotMessage, { exact: true }).waitFor();
+  assert.equal(await ambiguousWeixinCard.getByText('查看归档保存的来源正文', { exact: true }).count(), 0, 'a publication record hides its body when the matching version is ambiguous');
+  assert.equal(await ambiguousWeixinCard.getByText('发布剧本引用的 v1.0 创作历史正文。', { exact: true }).count(), 0, 'a publication record does not silently select the first conflicting snapshot');
+  assert.equal(productionMutationWrites, 0, 'checking ambiguous archived snapshots remains read-only');
+  await ambiguousSnapshotPage.close();
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   mobile.on('pageerror', (error) => errors.push(error.message));
@@ -528,12 +676,42 @@ try {
   await restrictedPage.getByRole('button', { name: '稿件', exact: true }).click();
   const restrictedSourcePanel = restrictedPage.getByTestId('archive-script-sources');
   await restrictedSourcePanel.getByText('可查看归档快照；打开原稿需要创作稿查看权限', { exact: true }).waitFor();
-  await restrictedSourcePanel.getByRole('alert').getByText('来源选题与当前归档不一致，已隐藏来源内容', { exact: true }).waitFor();
+  await restrictedSourcePanel.getByRole('status').getByText('来源选题与当前归档不同，正文未复制进归档；打开原稿仍需来源选题访问权限。', { exact: true }).waitFor();
   assert.equal(await restrictedSourcePanel.getByRole('link', { name: /查看成片剧本来源创作稿/ }).count(), 0, 'archives do not offer a route link when the viewer lacks production:view');
-  assert.equal(await restrictedSourcePanel.getByRole('link', { name: /查看发布剧本来源创作稿/ }).count(), 0, 'a cross-topic lineage entry is hidden fail-closed');
+  assert.equal(await restrictedSourcePanel.getByRole('link', { name: /查看发布剧本来源创作稿/ }).count(), 0, 'a viewer without production:view cannot open the cross-topic source');
   await restrictedSourcePanel.getByText('查看归档保存的来源正文', { exact: true }).click();
   await restrictedSourcePanel.getByText('成片剧本引用的创作历史正文。', { exact: true }).waitFor();
+  await restrictedPage.getByRole('button', { name: '发布信息', exact: true }).click();
+  const restrictedWeixinCard = restrictedPage.getByTestId('published-record-card-402');
+  const restrictedDouyinCard = restrictedPage.getByTestId('published-record-card-401');
+  await restrictedDouyinCard.getByText('可查看归档快照；打开原稿需要创作稿查看权限', { exact: true }).waitFor();
+  await restrictedWeixinCard.getByRole('status').getByText('来源选题与当前归档不同，正文未复制进归档；打开原稿仍需来源选题访问权限。', { exact: true }).waitFor();
+  assert.equal(await restrictedWeixinCard.getByRole('link', { name: /查看发布记录 #402的来源创作稿/ }).count(), 0, 'a cross-topic per-record source is never linkable');
+  assert.equal(await restrictedDouyinCard.getByRole('link', { name: /查看发布记录 #401的来源创作稿/ }).count(), 0, 'a viewer without production:view cannot open per-record source manuscripts');
   await restrictedPage.close();
+
+  const sourceScopeDeniedPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  sourceScopeDeniedPage.on('pageerror', (error) => errors.push(error.message));
+  await sourceScopeDeniedPage.goto(`${base}/__qa?source_scope=denied`);
+  await sourceScopeDeniedPage.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
+  await sourceScopeDeniedPage.locator('a[href="/asset-center/published-archives"]').last().click();
+  await sourceScopeDeniedPage.getByRole('heading', { name: '发布归档' }).waitFor();
+  await sourceScopeDeniedPage.getByRole('button', { name: /多平台早餐主题/ }).click();
+  await sourceScopeDeniedPage.getByRole('button', { name: '稿件', exact: true }).click();
+  const crossTopicSourceStatus = sourceScopeDeniedPage.getByRole('status').getByText('来源选题与当前归档不同，正文未复制进归档；打开原稿仍需来源选题访问权限。', { exact: true });
+  await crossTopicSourceStatus.waitFor();
+  const crossTopicSourceLink = sourceScopeDeniedPage.getByRole('link', { name: '查看发布剧本来源创作稿 v1.0', exact: true });
+  await crossTopicSourceLink.waitFor();
+  assert.equal(await sourceScopeDeniedPage.getByText('发布剧本引用的 v1.0 创作历史正文。', { exact: true }).count(), 0, 'the B archive does not embed the cross-topic A source text');
+  const deniedSourceRead = sourceScopeDeniedPage.waitForResponse((response) => response.url().includes('/api/workflow/production/801/source-snapshot?version=v1.0'));
+  await crossTopicSourceLink.click();
+  const deniedBySourceTopic = await deniedSourceRead;
+  assert.equal(deniedBySourceTopic.status(), 403, 'production:view without access to the stored source topic cannot read a cross-topic historical manuscript');
+  assert.equal(deniedBySourceTopic.headers()['cache-control'], 'no-store', 'permission-denied source responses also disable caching');
+  await sourceScopeDeniedPage.getByRole('heading', { name: '创作来源快照暂不可用', exact: true }).waitFor();
+  await sourceScopeDeniedPage.getByText('无权查看该来源选题', { exact: true }).waitFor();
+  assert.equal(await sourceScopeDeniedPage.getByText('准确的 v1.0 创作历史正文。', { exact: true }).count(), 0, 'the forbidden source page does not render a historical manuscript body');
+  await sourceScopeDeniedPage.close();
 
   for (const theme of ['light', 'dark'] as const) {
     const themedPage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
@@ -541,7 +719,24 @@ try {
     await themedPage.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
     await themedPage.locator('a[href="/asset-center/published-archives"]').last().click();
     await themedPage.getByRole('heading', { name: '发布归档' }).waitFor();
-    await themedPage.getByRole('button', { name: /多平台早餐主题/ }).click();
+    const themedArchiveCard = themedPage.getByRole('button', { name: /多平台早餐主题/ });
+    const themedArchiveTitle = themedArchiveCard.locator('h3');
+    await themedArchiveCard.hover();
+    const archiveTitleHoverContrast = await contrast(themedArchiveTitle);
+    assert.ok(archiveTitleHoverContrast.ratio >= 4.5, `${theme}主题归档卡片悬停标题对比度为 ${archiveTitleHoverContrast.ratio.toFixed(2)}:1 on ${archiveTitleHoverContrast.backgroundColor}，应不低于 4.5:1`);
+    const archiveTitleColors = await themedArchiveTitle.evaluate((element) => ({
+      actual: getComputedStyle(element).color.replace(/\s/g, ''),
+      expected: (() => {
+        const probe = document.createElement('span');
+        probe.style.color = getComputedStyle(document.documentElement).getPropertyValue('--xmt-cyan-contrast').trim();
+        document.body.append(probe);
+        const color = getComputedStyle(probe).color.replace(/\s/g, '');
+        probe.remove();
+        return color;
+      })(),
+    }));
+    assert.equal(archiveTitleColors.actual, archiveTitleColors.expected, `${theme}主题归档标题悬停颜色应匹配当前主题的青色文字令牌`);
+    await themedArchiveCard.click();
     await themedPage.getByRole('button', { name: '稿件', exact: true }).click();
     const sourceLink = themedPage.getByRole('link', { name: '查看成片剧本来源创作稿 v2.0', exact: true });
     const sourceTopicLink = themedPage.getByRole('link', { name: '查看归档来源选题', exact: true });
@@ -561,6 +756,12 @@ try {
   }
 
   const adminPage = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  adminPage.on('pageerror', (error) => errors.push(error.message));
+  adminPage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (message.text().includes('/api/resources/archives') && (message.text().includes('503 (Service Unavailable)') || message.text().includes('404 (Not Found)'))) expectedHttpErrors.push(message.text());
+    else errors.push(message.text());
+  });
   await adminPage.goto(`${base}/__qa?admin=1`);
   await adminPage.getByRole('main').getByRole('heading', { name: '资料中心', exact: true }).waitFor();
   await adminPage.locator('a[href="/asset-center/published-archives"]').last().click();
@@ -594,13 +795,56 @@ try {
   await adminPage.getByRole('button', { name: '删除', exact: true }).click();
   await adminPage.getByRole('heading', { name: '确认删除' }).waitFor();
   const archiveReadsBeforeDelete = archiveListReads;
+  const archiveDetailReadsBeforeDelete = archiveDetailReads;
+  await adminPage.getByRole('button', { name: '取消', exact: true }).click();
+  await adminPage.getByRole('button', { name: '返回发布归档', exact: true }).click();
+  await adminPage.getByRole('button', { name: /旧版单平台归档/ }).click();
+  await adminPage.getByRole('button', { name: '删除', exact: true }).click();
+  await adminPage.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    (window as Window & { __qaOriginalStorageSetItem?: typeof Storage.prototype.setItem }).__qaOriginalStorageSetItem = originalSetItem;
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key.includes('published-archive-delete-pending')) throw new DOMException('quota exceeded', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    };
+  });
+  await adminPage.getByRole('button', { name: '确认删除', exact: true }).click();
+  await adminPage.getByText(/归档删除恢复信息未能可靠保存/).waitFor();
+  assert.equal(archiveDeleteWrites, 0, 'a local recovery-storage failure prevents the DELETE request');
+  await adminPage.evaluate(() => {
+    const windowWithOriginal = window as Window & { __qaOriginalStorageSetItem?: typeof Storage.prototype.setItem };
+    if (windowWithOriginal.__qaOriginalStorageSetItem) Storage.prototype.setItem = windowWithOriginal.__qaOriginalStorageSetItem;
+    delete windowWithOriginal.__qaOriginalStorageSetItem;
+  });
   await adminPage.getByRole('button', { name: '确认删除', exact: true }).click();
   await adminPage.getByRole('heading', { name: '发布归档', exact: true }).waitFor();
-  await adminPage.getByRole('button', { name: /旧版单平台归档/ }).waitFor();
-  assert.equal(await adminPage.getByRole('button', { name: /多平台早餐主题/ }).count(), 0, 'the confirmed archive deletion is removed from the current list');
-  assert.equal(archiveItems.length, 1, 'the isolated server fixture confirms one archive deletion');
-  assert.equal(archiveDeleteWrites, 1, 'confirming archive deletion sends one write');
-  assert.equal(archiveListReads, archiveReadsBeforeDelete, 'the confirmed archive deletion updates local state without a follow-up list read');
+  await adminPage.getByRole('alert').getByText(/服务器确认该归档当前不存在/).waitFor();
+  assert.equal(await adminPage.getByRole('button', { name: /旧版单平台归档/ }).count(), 0, 'a response-lost deletion is reconciled from a read-only 404');
+  assert.equal(archiveDeleteWrites, 1, 'a response-lost delete is sent once and never automatically replayed');
+  assert.equal(archiveItems.length, 1, 'the fixture committed the first archive deletion before returning an error');
+  assert.equal(archiveListReads, archiveReadsBeforeDelete, 'read-only archive reconciliation does not reload the archive list');
+  assert.equal(archiveDetailReads, archiveDetailReadsBeforeDelete + 2, 'the response-lost case performs one opening GET and one read-only reconciliation');
+
+  const remainingArchive = adminPage.getByRole('button', { name: /多平台早餐主题/ });
+  await remainingArchive.click();
+  await adminPage.getByRole('button', { name: '删除', exact: true }).click();
+  await adminPage.getByRole('button', { name: '确认删除', exact: true }).click();
+  await adminPage.getByRole('alert').getByText(/暂时无法确认上次删除结果/).waitFor();
+  assert.equal(archiveDeleteWrites, 2, 'a failed delete with a still-present record performs no automatic second write');
+  assert.equal(await adminPage.getByRole('button', { name: '确认删除', exact: true }).count(), 0, 'the modal closes while the uncertain state awaits an explicit decision');
+  assert.equal(archiveDetailReads, archiveDetailReadsBeforeDelete + 4, 'a failed read-back does not start another write');
+  await adminPage.getByRole('button', { name: '只读核实归档状态', exact: true }).click();
+  await adminPage.getByRole('alert').getByText(/服务器确认这条归档当前仍存在/).waitFor();
+  assert.equal(archiveDeleteWrites, 2, 'manual read-only verification never resends the delete');
+  assert.equal(archiveDetailReads, archiveDetailReadsBeforeDelete + 5, 'the recovery control performs exactly one detail GET');
+  await adminPage.getByRole('button', { name: '删除', exact: true }).click();
+  await adminPage.getByRole('button', { name: '确认删除', exact: true }).click();
+  await adminPage.getByRole('heading', { name: '发布归档', exact: true }).waitFor();
+  assert.equal(await adminPage.getByRole('button', { name: /多平台早餐主题/ }).count(), 0, 'a second deletion only follows a fresh explicit confirmation');
+  assert.equal(archiveItems.length, 0, 'the isolated server fixture confirms both confirmed deletions');
+  assert.equal(archiveDeleteWrites, 3, 'only the two explicit attempts and one response-lost attempt are sent');
+  assert.equal(archiveListReads, archiveReadsBeforeDelete, 'archive deletion and read-back reconcile local state without an extra list read');
+  assert.equal(expectedHttpErrors.length, 6, 'the browser logs only the expected list, deletion and read-back HTTP failures');
   assert.deepEqual(errors, [], 'archive pages render without browser or console errors');
   await adminPage.close();
   console.log('Published archive browser test passed: source-topic and exact script lineage, archived snapshots, permission boundaries, light/dark contrast, 320/390px mobile, desktop zoom, and legacy data.');

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requirePermission } from '../middleware/permissions';
-import { execute, queryOne } from '../database/utils';
+import { execute, queryOne, runInTransaction, type TransactionContext } from '../database/utils';
 import fs from 'fs';
 import path from 'path';
 
@@ -97,11 +97,18 @@ function normalizeSettings(input: unknown): ManagedSystemSettings {
   };
 }
 
-async function loadSettings() {
-  const record = await queryOne<{ value: string }>(
-    `SELECT value FROM app_meta WHERE key = ?`,
-    [SETTINGS_META_KEY],
-  );
+type SettingsTransaction = Pick<TransactionContext, 'queryOne' | 'execute'>;
+
+async function loadSettings(transaction?: SettingsTransaction) {
+  const record = transaction
+    ? await transaction.queryOne<{ value: string }>(
+        `SELECT value FROM app_meta WHERE key = ?`,
+        [SETTINGS_META_KEY],
+      )
+    : await queryOne<{ value: string }>(
+        `SELECT value FROM app_meta WHERE key = ?`,
+        [SETTINGS_META_KEY],
+      );
 
   if (!record?.value) {
     return defaultSettings;
@@ -114,8 +121,9 @@ async function loadSettings() {
   }
 }
 
-async function saveSettings(settings: ManagedSystemSettings) {
-  await execute(
+async function saveSettings(settings: ManagedSystemSettings, transaction?: SettingsTransaction) {
+  const write = transaction ? transaction.execute.bind(transaction) : execute;
+  await write(
     `INSERT INTO app_meta (key, value, created_at)
      VALUES (?, ?, datetime('now', '+8 hours'))
      ON CONFLICT(key) DO UPDATE SET
@@ -143,14 +151,19 @@ router.get('/', authenticate, requirePermission('system:settings'), async (_req,
 
 router.put('/', authenticate, requirePermission('system:settings'), async (req, res) => {
   try {
-    const current = await loadSettings();
-    const next = normalizeSettings({
-      system: { ...current.system, ...(req.body?.system ?? {}) },
-      branding: { ...current.branding, ...(req.body?.branding ?? {}) },
-      login: { ...current.login, ...(req.body?.login ?? {}) },
+    // Acquire the write transaction before reading so concurrent section patches merge on the latest settings.
+    const next = await runInTransaction(async (transaction) => {
+      const current = await loadSettings(transaction);
+      const merged = normalizeSettings({
+        system: { ...current.system, ...(req.body?.system ?? {}) },
+        branding: { ...current.branding, ...(req.body?.branding ?? {}) },
+        login: { ...current.login, ...(req.body?.login ?? {}) },
+      });
+
+      await saveSettings(merged, transaction);
+      return merged;
     });
 
-    await saveSettings(next);
     res.json({ ...next, version: APP_VERSION });
   } catch {
     res.status(500).json({ message: '保存系统设置失败' });

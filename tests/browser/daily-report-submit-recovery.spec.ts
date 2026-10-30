@@ -71,6 +71,8 @@ let summaryWriteRequests = 0;
 let failNextSummaryWrite = true;
 let yearlyWriteRequests = 0;
 let failNextSummaryStatus = 0;
+let failNextSummaryRead = false;
+let failNextSummaryArchive = false;
 let commitThenFailNextSummaryWrite = false;
 let conflictNextSummaryWrite = false;
 let summaryFingerprintSequence = 1;
@@ -130,6 +132,8 @@ function resetFixture() {
   failNextSummaryWrite = true;
   yearlyWriteRequests = 0;
   failNextSummaryStatus = 0;
+  failNextSummaryRead = false;
+  failNextSummaryArchive = false;
   commitThenFailNextSummaryWrite = false;
   conflictNextSummaryWrite = false;
   summaryFingerprintSequence = 1;
@@ -145,6 +149,7 @@ app.use(express.json());
 app.get('/__qa', (req, res) => {
   resetFixture();
   if (req.query.skipInitialSummaryFailure === '1') failNextSummaryWrite = false;
+  if (req.query.skipInitialSubmitFailure === '1') failNextSubmit = false;
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','daily-report-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});if(${req.query.clearSummaryRecovery === '1'}){for(const storage of [localStorage,sessionStorage]){storage.removeItem('xmt:report-summary-update:pending:actor:${user.id}');storage.removeItem('xmt:report-summary-update:pending:actor:${user.id}:rejected')}}location.replace('/daily-report');</script>`);
 });
 app.get('/__qa/daily-detail', (_req, res) => {
@@ -198,6 +203,8 @@ app.get('/__qa/draft-conflict', (_req, res) => {
   res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','daily-report-draft-conflict-fixture');localStorage.setItem('xmt_theme','light');localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/daily-report');</script>`);
 });
 app.post('/__qa/fail-next-summary-status', (_req, res) => { failNextSummaryStatus += 1; res.json({ ok: true }); });
+app.post('/__qa/fail-next-summary-read', (_req, res) => { failNextSummaryRead = true; res.json({ ok: true }); });
+app.post('/__qa/fail-next-summary-archive', (_req, res) => { failNextSummaryArchive = true; res.json({ ok: true }); });
 app.post('/__qa/commit-then-fail-next-summary-write', (_req, res) => { commitThenFailNextSummaryWrite = true; res.json({ ok: true }); });
 app.post('/__qa/conflict-next-summary-write', (_req, res) => { conflictNextSummaryWrite = true; res.json({ ok: true }); });
 app.get('/__qa/state', (_req, res) => res.json({ report, draftVersions, draftPayloads, draftRequests, submitRequests, failNextSubmit, userDirectoryRequests, dailyReportReadRequests, summaryWriteRequests, yearlyWriteRequests, summaryWriteBodies, summaryRecords: Array.from(summaryRecords.values()), summaryReceipts: Array.from(summaryReceipts.entries()).map(([id, receipt]) => ({ id, ...receipt })) }));
@@ -307,6 +314,10 @@ app.get('/api/daily-reports/archive', (_req, res) => res.json({ success: true, d
   })),
 } }));
 app.get('/api/report-summaries/archive', (req, res) => {
+  if (failNextSummaryArchive) {
+    failNextSummaryArchive = false;
+    return res.status(503).json({ success: false, message: 'Internal Server Error' });
+  }
   const year = Number(req.query.year);
   return res.json({ success: true, data: {
     year,
@@ -329,7 +340,7 @@ app.use(['/api/report-summaries/monthly/requests/:requestId', '/api/report-summa
 app.get('/api/report-summaries/monthly/requests/:requestId', (req, res) => {
   if (failNextSummaryStatus > 0) {
     failNextSummaryStatus -= 1;
-    return res.status(503).json({ success: false, message: '模拟月报状态核实失败' });
+    return res.status(503).json({ success: false, message: 'Internal Server Error' });
   }
   const year = Number(req.query.year);
   const month = Number(req.query.month);
@@ -341,7 +352,7 @@ app.get('/api/report-summaries/monthly/requests/:requestId', (req, res) => {
 app.get('/api/report-summaries/yearly/requests/:requestId', (req, res) => {
   if (failNextSummaryStatus > 0) {
     failNextSummaryStatus -= 1;
-    return res.status(503).json({ success: false, message: '模拟年报状态核实失败' });
+    return res.status(503).json({ success: false, message: 'Internal Server Error' });
   }
   const year = Number(req.query.year);
   const receipt = summaryReceipts.get(String(req.params.requestId).toLowerCase());
@@ -351,6 +362,10 @@ app.get('/api/report-summaries/yearly/requests/:requestId', (req, res) => {
 });
 
 app.get('/api/report-summaries/monthly', (req, res) => {
+  if (failNextSummaryRead) {
+    failNextSummaryRead = false;
+    return res.status(503).json({ success: false, message: 'Internal Server Error' });
+  }
   const year = Number(req.query.year);
   const month = Number(req.query.month);
   const data = summaryRecords.get(summaryKey('monthly', year, month)) || emptySummary('monthly', year, month);
@@ -514,11 +529,94 @@ try {
     else unexpectedErrors.push(message.text());
   });
 
+  const storageDropPage = await context.newPage();
+  storageDropPage.setDefaultTimeout(5000);
+  const desktopRecoveryKey = `xmt:daily-report-draft-recovery:v1:${user.id}:${reportDate}`;
+  await storageDropPage.addInitScript((key) => {
+    const nativeSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (name, value) {
+      if (this === window.sessionStorage && name === key) return;
+      nativeSetItem.call(this, name, value);
+    };
+  }, desktopRecoveryKey);
+  await storageDropPage.goto(`${base}/__qa`);
+  await storageDropPage.getByRole('heading', { name: '日报' }).waitFor();
+  const storageDropEditor = storageDropPage.getByPlaceholder('记录今天完成或推进的工作');
+  await storageDropEditor.fill('浏览器静默丢弃恢复凭证时保留输入');
+  await storageDropPage.getByRole('button', { name: '提交日报', exact: true }).click();
+  await storageDropPage.getByRole('alert').filter({ hasText: '日报未保存' }).waitFor();
+  assert.equal(await storageDropEditor.inputValue(), '浏览器静默丢弃恢复凭证时保留输入', 'desktop retains the report text when session storage silently drops the recovery marker');
+  assert.equal(await storageDropPage.evaluate((key) => sessionStorage.getItem(key), desktopRecoveryKey), null, 'the injected desktop session-storage drop leaves no recovery marker');
+  const storageDropState = await storageDropPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(storageDropState.draftRequests, 0, 'desktop does not send a draft write when the recovery marker cannot be read back');
+  assert.equal(storageDropState.submitRequests, 0, 'desktop does not submit when the recovery marker cannot be read back');
+  await storageDropPage.close();
+
+  const cleanupFailurePage = await context.newPage();
+  cleanupFailurePage.setDefaultTimeout(5000);
+  await cleanupFailurePage.addInitScript((key) => {
+    const nativeRemoveItem = Storage.prototype.removeItem;
+    let failFirstRemoval = true;
+    Storage.prototype.removeItem = function (name) {
+      if (this === window.sessionStorage && name === key && failFirstRemoval) {
+        failFirstRemoval = false;
+        throw new DOMException('模拟恢复记录清理失败', 'QuotaExceededError');
+      }
+      nativeRemoveItem.call(this, name);
+    };
+  }, desktopRecoveryKey);
+  await cleanupFailurePage.goto(`${base}/__qa`);
+  await cleanupFailurePage.getByRole('heading', { name: '日报' }).waitFor();
+  await cleanupFailurePage.getByPlaceholder('记录今天完成或推进的工作').fill('草稿确认后恢复记录清理失败');
+  const firstDraftSaved = cleanupFailurePage.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url().endsWith('/api/daily-reports/draft') && response.status() === 200);
+  await cleanupFailurePage.getByRole('button', { name: '提交日报', exact: true }).click();
+  await firstDraftSaved;
+  await cleanupFailurePage.getByRole('alert').filter({ hasText: '日报草稿已保存，但本机恢复记录未能清除' }).waitFor();
+  const stateAfterCleanupFailure = await cleanupFailurePage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(stateAfterCleanupFailure.report?.status, 'draft', 'the confirmed draft remains a draft when its recovery marker cannot be cleared');
+  assert.equal(stateAfterCleanupFailure.draftRequests, 1, 'a confirmed save is not repeated while recovery cleanup is blocked');
+  assert.equal(stateAfterCleanupFailure.submitRequests, 0, 'submission waits until the saved-draft recovery marker is cleared');
+  assert.equal(await cleanupFailurePage.evaluate((key) => JSON.parse(sessionStorage.getItem(key) || 'null')?.phase, desktopRecoveryKey), 'saved',
+    'the retained marker records that the server confirmed the draft save');
+  const submitAfterCleanupRetry = cleanupFailurePage.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url().includes('/api/daily-reports/990/submit') && response.status() === 200);
+  await cleanupFailurePage.getByRole('button', { name: '提交日报', exact: true }).click();
+  await submitAfterCleanupRetry;
+  assert.equal(await cleanupFailurePage.evaluate((key) => sessionStorage.getItem(key), desktopRecoveryKey), null,
+    'the marker is removed before the later successful submit');
+  const stateAfterCleanupRetry = await cleanupFailurePage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(stateAfterCleanupRetry.draftRequests, 1, 'retrying cleanup does not save the same draft twice');
+  assert.equal(stateAfterCleanupRetry.submitRequests, 1, 'submit is sent once after recovery cleanup succeeds');
+  assert.equal(stateAfterCleanupRetry.report?.status, 'submitted', 'the report is submitted after the marker is safely removed');
+  await cleanupFailurePage.close();
+
   const recoveryRequests: string[] = [];
   page.on('request', (request) => {
     if (request.url().includes('/api/daily-reports/')) recoveryRequests.push(request.method());
   });
 
+  await page.goto(`${base}/__qa/draft-commit-then-timeout?reconcile=retry`);
+  await page.getByRole('heading', { name: '日报' }).waitFor();
+  for (const field of [page.getByLabel('记录类型'), page.getByPlaceholder('记录今天完成或推进的工作'), page.getByPlaceholder('记录明天准备开展的工作'), page.getByPlaceholder('记录需要他人或团队协助的事项')]) {
+    const identity = await field.evaluate((element) => ({ id: element.id, name: element.getAttribute('name') }));
+    assert.ok(identity.id && identity.name, 'daily report controls expose stable ids and names for browser autofill');
+  }
+  const reportViewNavigation = page.getByRole('navigation', { name: '日报视图' });
+  assert.equal(await reportViewNavigation.count(), 1, 'daily report views are exposed in a named navigation landmark');
+  const mineTab = reportViewNavigation.getByRole('button', { name: '我的日报', exact: true });
+  const teamTab = reportViewNavigation.getByRole('button', { name: '团队日报', exact: true });
+  const archiveTab = reportViewNavigation.getByRole('button', { name: '总结归档', exact: true });
+  assert.equal(await reportViewNavigation.getByRole('button').count(), 3, 'the named daily report navigation contains the visible view choices');
+  assert.equal(await mineTab.getAttribute('aria-pressed'), 'true', '我的日报 is selected by default');
+  assert.equal(await teamTab.getAttribute('aria-pressed'), 'false', '团队日报 is exposed as unselected by default');
+  assert.equal(await archiveTab.getAttribute('aria-pressed'), 'false', '总结归档 is exposed as unselected by default');
+  await teamTab.click();
+  assert.equal(await teamTab.getAttribute('aria-pressed'), 'true', '团队日报 exposes its selected state after activation');
+  await archiveTab.click();
+  assert.equal(await archiveTab.getAttribute('aria-pressed'), 'true', '总结归档 exposes its selected state after activation');
+  await mineTab.click();
+  assert.equal(await mineTab.getAttribute('aria-pressed'), 'true', '我的日报 exposes its selected state after returning');
   await page.goto(`${base}/__qa/draft-commit-then-timeout?reconcile=retry`);
   await page.getByRole('heading', { name: '日报' }).waitFor();
   const ambiguousDraftEditor = page.getByPlaceholder('记录今天完成或推进的工作');
@@ -663,8 +761,18 @@ try {
   assert.equal(afterRetry.report?.status, 'submitted', 'the report is submitted after a successful retry');
   await page.screenshot({ path: '/tmp/xmt-daily-report-submit-recovered.png', fullPage: false });
   await page.getByRole('button', { name: '我的日报', exact: true }).click();
+  const summaryWritesBeforeReadFailure = await page.request.get(`${base}/__qa/state`).then((response) => response.json()).then((state) => state.summaryWriteRequests);
+  await page.request.post(`${base}/__qa/fail-next-summary-read`);
   await page.getByLabel('记录类型').selectOption('monthly');
   const monthlySummary = page.getByLabel('工作总结');
+  for (const field of [page.getByLabel('记录类型'), page.getByLabel('年份'), page.getByLabel('月份'), monthlySummary, page.getByLabel('重点项目'), page.getByLabel('问题与计划')]) {
+    const identity = await field.evaluate((element) => ({ id: element.id, name: element.getAttribute('name') }));
+    assert.ok(identity.id && identity.name, 'summary controls expose stable ids and names for browser autofill');
+  }
+  await page.getByRole('alert').getByText('加载总结失败，请检查连接后重试。', { exact: true }).waitFor();
+  assert.equal(await page.getByText('Internal Server Error', { exact: true }).count(), 0, 'monthly summary load does not expose a raw technical response');
+  assert.equal(await page.request.get(`${base}/__qa/state`).then((response) => response.json()).then((state) => state.summaryWriteRequests), summaryWritesBeforeReadFailure, 'a failed summary read does not write data');
+  await page.getByRole('button', { name: '重新加载', exact: true }).click();
   await monthlySummary.waitFor();
   await page.waitForFunction(() => {
     const field = Array.from(document.querySelectorAll('textarea')).find((element) => element.getAttribute('aria-label') === '工作总结'
@@ -743,6 +851,8 @@ try {
   await page.getByRole('button', { name: '提交月报', exact: true }).click();
   await Promise.all([committedSummaryError, firstSummaryStatusError]);
   await page.getByTestId('report-summary-recovery').filter({ hasText: '暂时无法核实本次总结更新结果' }).waitFor();
+  await page.getByTestId('report-summary-recovery').getByText('暂时无法核实总结保存结果', { exact: true }).waitFor();
+  assert.equal(await page.getByText('Internal Server Error', { exact: true }).count(), 0, 'uncertain summary writes do not expose a raw status-check response');
   assert.equal(await page.getByRole('status').filter({ hasText: '正在保存月报' }).count(), 0,
     'the stale saving notice is cleared when status verification is unavailable');
   const pendingSummary = await page.evaluate(() => sessionStorage.getItem('xmt:report-summary-update:pending:actor:953'));
@@ -811,6 +921,14 @@ try {
     .some((option) => option.textContent?.includes('日报恢复验收')));
   const directoryRetryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(directoryRetryState.userDirectoryRequests, 2, 'the explicit retry reloads only the member directory');
+  await page.request.post(`${base}/__qa/fail-next-summary-archive`);
+  await page.getByRole('button', { name: '月报', exact: true }).click();
+  await page.getByRole('heading', { name: '日报归档加载失败', exact: true }).waitFor();
+  await page.getByText('日报归档加载失败，请检查连接后重试。', { exact: true }).waitFor();
+  assert.equal(await page.getByText('Internal Server Error', { exact: true }).count(), 0, 'summary archive load does not expose a raw technical response');
+  await page.getByRole('button', { name: '重试', exact: true }).click();
+  await page.getByText('完整工作总结', { exact: false }).waitFor();
+  await page.getByRole('button', { name: '日报', exact: true }).click();
   for (const label of ['草稿', '已提交', '已审核', '已退回', '已归档', '状态待确认']) {
     await page.getByText(label, { exact: true }).waitFor();
   }
@@ -1027,9 +1145,80 @@ try {
     if (message.text().includes('503 (Service Unavailable)') || message.text().includes('409 (Conflict)')) expectedHttpErrors.push(message.text());
     else unexpectedErrors.push(message.text());
   });
+  const mobileRecoveryKey = `xmt:mobile-daily-report-draft-recovery:v1:${user.id}:${reportDate}`;
+  const mobileCleanupFailurePage = await context.newPage();
+  await mobileCleanupFailurePage.setViewportSize({ width: 390, height: 844 });
+  mobileCleanupFailurePage.setDefaultTimeout(5000);
+  mobileCleanupFailurePage.on('pageerror', (error) => unexpectedErrors.push(error.message));
+  mobileCleanupFailurePage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (message.text().includes('503 (Service Unavailable)') || message.text().includes('409 (Conflict)')) expectedHttpErrors.push(message.text());
+    else unexpectedErrors.push(message.text());
+  });
+  await mobileCleanupFailurePage.addInitScript((key) => {
+    const nativeRemoveItem = Storage.prototype.removeItem;
+    let failFirstRemoval = true;
+    Storage.prototype.removeItem = function (name) {
+      if (this === window.sessionStorage && name === key && failFirstRemoval) {
+        failFirstRemoval = false;
+        throw new DOMException('模拟移动端恢复记录清理失败', 'QuotaExceededError');
+      }
+      nativeRemoveItem.call(this, name);
+    };
+  }, mobileRecoveryKey);
+  try {
+    await mobileCleanupFailurePage.goto(`${base}/__qa?skipInitialSubmitFailure=1`, { waitUntil: 'domcontentloaded' });
+    await mobileCleanupFailurePage.getByText(`${reportDate} · 我的日报`, { exact: true }).waitFor();
+    const editor = mobileCleanupFailurePage.getByPlaceholder('记录今天完成或推进的工作');
+    await editor.fill('移动端草稿已确认但恢复记录清理失败');
+    const draftSaved = mobileCleanupFailurePage.waitForResponse((response) => response.request().method() === 'POST'
+      && response.url().endsWith('/api/daily-reports/draft') && response.status() === 200);
+    await mobileCleanupFailurePage.getByRole('button', { name: '提交日报', exact: true }).click();
+    await draftSaved;
+    await mobileCleanupFailurePage.getByRole('alert').filter({ hasText: '日报草稿已保存，但本机恢复记录未能清除' }).waitFor();
+    const stateAfterCleanupFailure = await mobileCleanupFailurePage.request.get(`${base}/__qa/state`).then((response) => response.json());
+    assert.equal(stateAfterCleanupFailure.report?.status, 'draft', 'mobile keeps a confirmed draft unsubmitted when its recovery marker cannot be cleared');
+    assert.equal(stateAfterCleanupFailure.draftRequests, 1, 'mobile does not repeat the confirmed draft write while cleanup is blocked');
+    assert.equal(stateAfterCleanupFailure.submitRequests, 0, 'mobile waits to submit until the recovery marker is cleared');
+    assert.equal(await mobileCleanupFailurePage.evaluate((key) => JSON.parse(sessionStorage.getItem(key) || 'null')?.phase, mobileRecoveryKey), 'saved',
+      'mobile retains a saved-phase recovery marker after cleanup fails');
+    assert.equal(await editor.isDisabled(), true, 'mobile editing remains locked while cleanup is unresolved');
+
+    await mobileCleanupFailurePage.reload({ waitUntil: 'domcontentloaded' });
+    await mobileCleanupFailurePage.getByRole('alert').filter({ hasText: '服务器已确认草稿保存成功' }).waitFor();
+    assert.equal(await mobileCleanupFailurePage.getByPlaceholder('记录今天完成或推进的工作').isDisabled(), true,
+      'mobile remains locked immediately after reopening a saved recovery marker');
+    const cleanupButton = mobileCleanupFailurePage.getByRole('button', { name: '重试清理恢复记录', exact: true });
+    assert.equal(await cleanupButton.isVisible(), true, 'mobile offers recovery-marker cleanup immediately after reopening');
+    await cleanupButton.click();
+    await mobileCleanupFailurePage.getByRole('alert').filter({ hasText: '本机恢复记录仍未能清除' }).waitFor();
+    assert.equal(await mobileCleanupFailurePage.getByPlaceholder('记录今天完成或推进的工作').isDisabled(), true,
+      'mobile keeps editing and submission locked while repeated cleanup still fails');
+
+    await mobileCleanupFailurePage.getByRole('button', { name: '重试清理恢复记录', exact: true }).click();
+    await mobileCleanupFailurePage.getByRole('status').filter({ hasText: '本机恢复记录已清除' }).waitFor();
+    assert.equal(await mobileCleanupFailurePage.evaluate((key) => sessionStorage.getItem(key), mobileRecoveryKey), null,
+      'mobile retry removes the recovery marker before enabling submit');
+    const submitAfterCleanupRetry = mobileCleanupFailurePage.waitForResponse((response) => response.request().method() === 'POST'
+      && response.url().includes('/api/daily-reports/990/submit') && response.status() === 200);
+    await mobileCleanupFailurePage.getByRole('button', { name: '提交日报', exact: true }).click();
+    await submitAfterCleanupRetry;
+    const stateAfterCleanupRetry = await mobileCleanupFailurePage.request.get(`${base}/__qa/state`).then((response) => response.json());
+    assert.equal(stateAfterCleanupRetry.draftRequests, 1, 'mobile cleanup retry does not write the same draft again');
+    assert.equal(stateAfterCleanupRetry.submitRequests, 1, 'mobile submits once after cleanup succeeds');
+    assert.equal(stateAfterCleanupRetry.report?.status, 'submitted', 'mobile submits the confirmed draft after cleanup succeeds');
+    assert.equal(await mobileCleanupFailurePage.evaluate(() => document.documentElement.scrollWidth > innerWidth || document.body.scrollWidth > innerWidth), false,
+      'the 390px mobile cleanup recovery view has no horizontal overflow');
+  } finally {
+    await mobileCleanupFailurePage.close();
+  }
+
   try {
     await mobilePage.goto(`${base}/__qa/submit-committed-error?reconcile=retry`, { waitUntil: 'domcontentloaded' });
     await mobilePage.getByText(`${reportDate} · 我的日报`, { exact: true }).waitFor();
+    const mobileReportViewNavigation = mobilePage.getByRole('navigation', { name: '日报视图' });
+    assert.equal(await mobileReportViewNavigation.getByRole('button').count(), 3, 'the mobile daily report navigation keeps its accessible name and all three visible views');
+    assert.equal(await mobileReportViewNavigation.getByRole('button', { name: '我的日报', exact: true }).getAttribute('aria-pressed'), 'true', 'the mobile daily report navigation exposes the selected view');
     const mobileEditor = mobilePage.getByPlaceholder('记录今天完成或推进的工作');
     await mobileEditor.fill('移动日报已提交但响应异常恢复验收');
     const mobileCommitFailure = mobilePage.waitForResponse((response) => response.request().method() === 'POST'

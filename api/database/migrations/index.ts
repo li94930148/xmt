@@ -65,6 +65,9 @@ import { anonymousFeedbackUpdateIdempotencyMigration } from './063_anonymous_fee
 import { topicTemplateMutationIdempotencyMigration } from './064_topic_template_mutation_idempotency';
 import { reportSummaryUpdateIdempotencyMigration } from './065_report_summary_update_idempotency';
 import { anonymousFeedbackSubmitIdempotencyMigration } from './066_anonymous_feedback_submit_idempotency';
+import { productionOriginSourceTopicMigration } from './067_production_origin_source_topic';
+import { productionHistorySourceTopicMigration } from './068_production_history_source_topic';
+import { creatorOfficialDailyMetricObservationsMigration } from './069_creator_official_daily_metric_observations';
 
 export const databaseMigrations: readonly DatabaseMigration[] = [
   resourceCenterFoundationMigration,
@@ -133,4 +136,7 @@ export const databaseMigrations: readonly DatabaseMigration[] = [
   topicTemplateMutationIdempotencyMigration,
   reportSummaryUpdateIdempotencyMigration,
   anonymousFeedbackSubmitIdempotencyMigration,
+  productionOriginSourceTopicMigration,
+  productionHistorySourceTopicMigration,
+  creatorOfficialDailyMetricObservationsMigration,
 ];

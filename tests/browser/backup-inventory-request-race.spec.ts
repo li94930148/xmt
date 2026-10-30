@@ -151,15 +151,25 @@ assert(address && typeof address !== 'string');
 const base = `http://127.0.0.1:${address.port}`;
 let browser: Browser | undefined;
 
-async function openBackupPage(query = ''): Promise<{ page: Page; errors: string[] }> {
+async function openBackupPage(
+  query = '',
+  beforeNavigate?: (page: Page) => Promise<void>,
+): Promise<{ page: Page; errors: string[] }> {
   assert(browser);
   const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    const expectedNetworkFailure = query.includes('network-error=1') || query.includes('download-error=1');
+    if (expectedNetworkFailure && /Failed to load resource/i.test(message.text())) return;
+    errors.push(message.text());
+  });
+  if (beforeNavigate) await beforeNavigate(page);
   await page.goto(`${base}/__qa${query}`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: '备份管理', exact: true }).waitFor();
   if (query.includes('inventory=sample')) await page.getByTestId('backup-file-list').waitFor();
+  else if (query.includes('network-error=1')) await page.getByRole('alert').waitFor();
   else await page.getByText('没有发现备份文件', { exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname, '/backup', 'the fixture mounts the protected backup route');
   return { page, errors };
@@ -187,6 +197,43 @@ try {
     });
   } else {
   browser = await chromium.launch({ headless: true });
+
+  // A direct network rejection gets a localized message and a manual read-only retry.
+  resetFixture();
+  let rejectInitialInventoryRead = true;
+  const networkRead = await openBackupPage('?network-error=1', async (page) => {
+    await page.route('**/api/backup/inventory', async (route) => {
+      if (rejectInitialInventoryRead) {
+        rejectInitialInventoryRead = false;
+        await route.abort('failed');
+      } else {
+        await route.continue();
+      }
+    });
+  });
+  const networkReadAlert = await networkRead.page.getByRole('alert').first().innerText();
+  assert.match(networkReadAlert, /备份清单暂不可用：服务器备份清单暂时无法读取，请检查连接后重试。/);
+  assert.doesNotMatch(networkReadAlert, /Failed to fetch|ERR_FAILED|TypeError/i, 'inventory network errors stay in Chinese');
+  const retriedInventory = waitForInventoryResponse(networkRead.page, 200);
+  await networkRead.page.getByRole('button', { name: '重新加载清单', exact: true }).click();
+  await retriedInventory;
+  await networkRead.page.getByText('没有发现备份文件', { exact: true }).waitFor();
+  assert.deepEqual(unexpectedApiWrites, [], 'inventory retry performs no business writes');
+  assert.deepEqual(networkRead.errors, [], networkRead.errors.join('\n'));
+  await networkRead.page.close();
+
+  // A failed backup download displays a readable notification and creates no file.
+  resetFixture();
+  const downloadFailure = await openBackupPage('?inventory=sample&download-error=1', async (page) => {
+    await page.route('**/api/backup/download/**', (route) => route.abort('failed'));
+  });
+  const downloadEvent = downloadFailure.page.waitForEvent('download', { timeout: 500 }).catch(() => null);
+  await downloadFailure.page.getByRole('button', { name: '下载备份 xmt-backup-fixture-20261019.db.gz' }).click();
+  await downloadFailure.page.getByText('备份文件下载失败，请检查连接后重试。', { exact: true }).waitFor();
+  assert.equal(await downloadEvent, null, 'a rejected download does not create a file');
+  assert.deepEqual(unexpectedApiWrites, [], 'download failure performs no business writes');
+  assert.deepEqual(downloadFailure.errors, [], downloadFailure.errors.join('\n'));
+  await downloadFailure.page.close();
 
   // An old successful snapshot must not replace the post-create read-back.
   resetFixture();

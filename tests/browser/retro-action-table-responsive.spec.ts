@@ -84,17 +84,27 @@ let actionUpdateStatusAttempts = 0;
 let actionUpdateConflictFailures = 0;
 let actionUpdateConflictResult = '';
 let actionUpdateConflictCommitThenFail = 0;
+let nextSnapshotId = 996;
 const actionUpdateResults = new Map<string, { fingerprint: string }>();
 const actionUpdateConflicts = new Map<string, { fingerprint: string }>();
 const retroMutationAttempts = { summary: 0, snapshot: 0, publish: 0, archive: 0 };
 let summaryUpdateStatusFailures = 0;
 let summaryUpdateStatusAttempts = 0;
 const summaryUpdateResults = new Map<string, { fingerprint: string; outcome: 'processed' | 'conflict' }>();
+type RetroMutationFixtureConfig = {
+  failures: number;
+  delayMs: number;
+  failureStatus: number;
+  commitThenFail: number;
+  statusFailures: number;
+  conflicts: number;
+  externalStatus: 'draft' | 'published' | 'archived' | null;
+};
 const retroMutationConfig = {
-  summary: { failures: 0, delayMs: 0, commitThenFail: 0, statusFailures: 0, conflicts: 0 },
-  snapshot: { failures: 0, delayMs: 0 },
-  publish: { failures: 0, delayMs: 0 },
-  archive: { failures: 0, delayMs: 0 },
+  summary: { failures: 0, delayMs: 0, failureStatus: 503, commitThenFail: 0, statusFailures: 0, conflicts: 0, externalStatus: null } as RetroMutationFixtureConfig,
+  snapshot: { failures: 0, delayMs: 0, failureStatus: 503, commitThenFail: 0, statusFailures: 0, conflicts: 0, externalStatus: null } as RetroMutationFixtureConfig,
+  publish: { failures: 0, delayMs: 0, failureStatus: 503, commitThenFail: 0, statusFailures: 0, conflicts: 0, externalStatus: null } as RetroMutationFixtureConfig,
+  archive: { failures: 0, delayMs: 0, failureStatus: 503, commitThenFail: 0, statusFailures: 0, conflicts: 0, externalStatus: null } as RetroMutationFixtureConfig,
 };
 
 function luminance(rgb: number[]) {
@@ -224,11 +234,11 @@ app.post('/__qa/configure-retro-mutation/:kind', (req, res) => {
   retroMutationConfig[kind] = {
     failures: Number(req.body.failures) || 0,
     delayMs: Number(req.body.delayMs) || 0,
-    ...(kind === 'summary' ? {
-      commitThenFail: Number(req.body.commitThenFail) || 0,
-      statusFailures: Number(req.body.statusFailures) || 0,
-      conflicts: Number(req.body.conflicts) || 0,
-    } : {}),
+    failureStatus: Number(req.body.failureStatus) || 503,
+    commitThenFail: Number(req.body.commitThenFail) || 0,
+    statusFailures: Number(req.body.statusFailures) || 0,
+    conflicts: Number(req.body.conflicts) || 0,
+    externalStatus: ['draft', 'published', 'archived'].includes(req.body.externalStatus) ? req.body.externalStatus : null,
   };
   if (kind === 'summary') summaryUpdateStatusFailures = Number(req.body.statusFailures) || 0;
   return res.json({ ok: true });
@@ -252,6 +262,7 @@ app.get(`/api/retrospectives/${retrospective.id}/daily-risks`, async (_req, res)
 });
 app.get(`/api/retrospectives/${retrospective.id}`, (_req, res) => {
   detailReadAttempts += 1;
+  res.set('Cache-Control', 'no-store');
   if (detailReadFailures > 0) {
     detailReadFailures -= 1;
     return res.status(503).json({ success: false, message: '模拟复盘详情读取失败' });
@@ -428,7 +439,7 @@ app.post(`/api/retrospectives/${retrospective.id}/snapshot`, async (_req, res) =
     return res.status(503).json({ success: false, message: '模拟指标快照生成失败' });
   }
   detail.snapshots = [{
-    id: 996,
+    id: nextSnapshotId++,
     retroId: retrospective.id,
     metricKey: 'topics_total',
     metricName: '选题数量',
@@ -438,19 +449,36 @@ app.post(`/api/retrospectives/${retrospective.id}/snapshot`, async (_req, res) =
     capturedAt: '2026-10-09 09:00:00',
   }];
   retrospective.snapshotCount = detail.snapshots.length;
+  if (config.commitThenFail > 0) {
+    config.commitThenFail -= 1;
+    return res.status(503).json({ success: false, message: '模拟提交后丢失响应' });
+  }
   return res.json({ success: true, data: detail });
 });
+function setFixtureRetrospectiveStatus(status: 'draft' | 'published' | 'archived') {
+  retrospective.status = status;
+  retrospective.publishedAt = status === 'draft' ? null : '2026-10-09 09:00:00';
+  retrospective.archivedAt = status === 'archived' ? '2026-10-09 09:30:00' : null;
+  detail.permissions = status === 'draft'
+    ? { canEdit: true, canPublish: true, canArchive: false, canManageActions: true }
+    : status === 'published'
+      ? { canEdit: false, canPublish: false, canArchive: true, canManageActions: true }
+      : { canEdit: false, canPublish: false, canArchive: false, canManageActions: false };
+}
 app.post(`/api/retrospectives/${retrospective.id}/publish`, async (_req, res) => {
   retroMutationAttempts.publish += 1;
   const config = retroMutationConfig.publish;
   if (config.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, config.delayMs));
   if (config.failures > 0) {
     config.failures -= 1;
-    return res.status(503).json({ success: false, message: '模拟复盘发布失败' });
+    if (config.externalStatus) setFixtureRetrospectiveStatus(config.externalStatus);
+    return res.status(config.failureStatus).json({ success: false, message: '模拟复盘发布失败' });
   }
-  retrospective.status = 'published';
-  retrospective.publishedAt = '2026-10-09 09:00:00';
-  detail.permissions = { canEdit: false, canPublish: false, canArchive: true, canManageActions: true };
+  setFixtureRetrospectiveStatus('published');
+  if (config.commitThenFail > 0) {
+    config.commitThenFail -= 1;
+    return res.status(503).json({ success: false, message: '模拟复盘发布提交后响应丢失' });
+  }
   return res.json({ success: true, data: detail });
 });
 app.post(`/api/retrospectives/${retrospective.id}/archive`, async (_req, res) => {
@@ -459,11 +487,14 @@ app.post(`/api/retrospectives/${retrospective.id}/archive`, async (_req, res) =>
   if (config.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, config.delayMs));
   if (config.failures > 0) {
     config.failures -= 1;
-    return res.status(503).json({ success: false, message: '模拟复盘归档失败' });
+    if (config.externalStatus) setFixtureRetrospectiveStatus(config.externalStatus);
+    return res.status(config.failureStatus).json({ success: false, message: '模拟复盘归档失败' });
   }
-  retrospective.status = 'archived';
-  retrospective.archivedAt = '2026-10-09 09:30:00';
-  detail.permissions = { canEdit: false, canPublish: false, canArchive: false, canManageActions: false };
+  setFixtureRetrospectiveStatus('archived');
+  if (config.commitThenFail > 0) {
+    config.commitThenFail -= 1;
+    return res.status(503).json({ success: false, message: '模拟复盘归档提交后响应丢失' });
+  }
   return res.json({ success: true, data: detail });
 });
 app.get('/api/users', (_req, res) => res.json({ data: [admin], total: 1, page: 1, limit: 200 }));
@@ -889,6 +920,29 @@ try {
   const newActionDescription = '确认失败后仍可按原内容安全重试。';
   await actionTitleInput.fill(newActionTitle);
   await actionDescriptionInput.fill(newActionDescription);
+  await createActionPage.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    (window as Window & { __originalStorageSetItem?: typeof Storage.prototype.setItem }).__originalStorageSetItem = originalSetItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'xmt:retro-action-create:99:991') {
+        const marker = JSON.parse(value) as { payload: { title: string } };
+        marker.payload.title = '同一请求编号但内容被篡改';
+        return originalSetItem.call(this, key, JSON.stringify(marker));
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+  await actionPanel.getByRole('button', { name: '新增', exact: true }).click();
+  await createActionPage.getByText('恢复记录写入后未能通过校验，行动项未提交。', { exact: true }).waitFor();
+  assert.equal(actionCreateAttempts, 0, 'a recovery marker changed under its request ID sends no create POST');
+  assert.equal(await createActionPage.evaluate(() => sessionStorage.getItem('xmt:retro-action-create:99:991')), null, 'the mismatched create marker is removed after exact-content verification fails');
+  assert.equal(await actionTitleInput.inputValue(), newActionTitle, 'preflight rejection preserves the action title');
+  assert.equal(await actionDescriptionInput.inputValue(), newActionDescription, 'preflight rejection preserves the action description');
+  assert.equal(await actionTitleInput.isDisabled(), false, 'a safely cleared preflight marker does not lock the form');
+  await createActionPage.evaluate(() => {
+    const originalSetItem = (window as Window & { __originalStorageSetItem?: typeof Storage.prototype.setItem }).__originalStorageSetItem;
+    if (originalSetItem) Storage.prototype.setItem = originalSetItem;
+  });
   await createActionPage.evaluate(async () => {
     await fetch('/__qa/configure-action-create', {
       method: 'POST',
@@ -1229,12 +1283,42 @@ try {
     const originalSetItem = (window as Window & { __originalStorageSetItem?: typeof Storage.prototype.setItem }).__originalStorageSetItem;
     if (originalSetItem) Storage.prototype.setItem = originalSetItem;
   });
+  const corruptedUpdateResult = '写入后核对发现内容变化，禁止发送更新。';
+  const patchesBeforeCorruptedMarker = actionUpdateAttempts;
+  await actionResult.fill(corruptedUpdateResult);
+  await createActionPage.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    (window as Window & { __originalStorageSetItem?: typeof Storage.prototype.setItem }).__originalStorageSetItem = originalSetItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'xmt:retro-action-update:99:992') {
+        const marker = JSON.parse(value) as { payload: { resultMd: string } };
+        marker.payload.resultMd = '静默改写的处理结果';
+        return originalSetItem.call(this, key, JSON.stringify(marker));
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+  await actionRowActions.getByRole('button', { name: '保存' }).click();
+  await createActionPage.getByText('恢复记录写入后未能通过校验，行动项未提交。', { exact: true }).waitFor();
+  assert.equal(actionUpdateAttempts, patchesBeforeCorruptedMarker, 'a silently altered action update marker sends no PATCH');
+  assert.equal(await actionResult.inputValue(), corruptedUpdateResult, 'preflight rejection preserves the edited action result');
+  assert.equal(await createActionPage.evaluate(() => sessionStorage.getItem('xmt:retro-action-update:99:992')), null, 'the altered action update marker is cleared');
+  await createActionPage.evaluate(() => {
+    const originalSetItem = (window as Window & { __originalStorageSetItem?: typeof Storage.prototype.setItem }).__originalStorageSetItem;
+    if (originalSetItem) Storage.prototype.setItem = originalSetItem;
+  });
+  const confirmedAfterCorruptedMarker = createActionPage.waitForResponse((response) => response.url().endsWith(`/api/retrospectives/actions/${action.id}`) && response.request().method() === 'PATCH' && response.status() === 200);
+  await actionRowActions.getByRole('button', { name: '保存' }).click();
+  await confirmedAfterCorruptedMarker;
+  assert.equal(action.resultMd, corruptedUpdateResult, 'a later explicit save succeeds after storage is restored');
+  assert.equal(actionUpdateAttempts, patchesBeforeCorruptedMarker + 1, 'only the later explicit action update sends a PATCH');
   assert.equal(expectedActionUpdate503, 0, 'the expected action update failure response is accounted for');
   assert.equal(expectedActionUpdate409, 0, 'the expected ACTION_CHANGED responses are accounted for');
   assert.deepEqual(mutations, [
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/actions`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/actions`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/actions`,
+    `PATCH http://127.0.0.1:${address.port}/api/retrospectives/actions/${action.id}`,
     `PATCH http://127.0.0.1:${address.port}/api/retrospectives/actions/${action.id}`,
     `PATCH http://127.0.0.1:${address.port}/api/retrospectives/actions/${action.id}`,
     `PATCH http://127.0.0.1:${address.port}/api/retrospectives/actions/${action.id}`,
@@ -1254,18 +1338,23 @@ try {
   const summaryUpdateRequestIds: string[] = [];
   for (const kind of Object.keys(retroMutationAttempts) as (keyof typeof retroMutationAttempts)[]) {
     retroMutationAttempts[kind] = 0;
-    retroMutationConfig[kind] = { failures: 0, delayMs: 0, commitThenFail: 0, statusFailures: 0, conflicts: 0 };
+    retroMutationConfig[kind] = { failures: 0, delayMs: 0, failureStatus: 503, commitThenFail: 0, statusFailures: 0, conflicts: 0, externalStatus: null };
   }
   summaryUpdateStatusAttempts = 0;
   summaryUpdateStatusFailures = 0;
   const workflowPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   let expectedWorkflow503 = 0;
+  let expectedWorkflow429 = 0;
   let expectedWorkflow409 = 0;
   workflowPage.on('pageerror', (error) => errors.push(error.message));
   workflowPage.on('console', (message) => {
     if (message.type() !== 'error') return;
     if (expectedWorkflow503 > 0 && message.text().includes('503')) {
       expectedWorkflow503 -= 1;
+      return;
+    }
+    if (expectedWorkflow429 > 0 && message.text().includes('429')) {
+      expectedWorkflow429 -= 1;
       return;
     }
     if (expectedWorkflow409 > 0 && message.text().includes('409')) {
@@ -1287,7 +1376,7 @@ try {
   const configureWorkflowMutation = async (
     kind: keyof typeof retroMutationConfig,
     failures = 1,
-    recovery: { commitThenFail?: number; statusFailures?: number; conflicts?: number } = {},
+    recovery: { commitThenFail?: number; statusFailures?: number; conflicts?: number; failureStatus?: number; externalStatus?: 'draft' | 'published' | 'archived' } = {},
   ) => {
     await workflowPage.evaluate(async ({ name, count, recoveryConfig }) => {
       await fetch(`/__qa/configure-retro-mutation/${name}`, {
@@ -1305,7 +1394,7 @@ try {
   expectedWorkflow503 += 1;
   const failedSummarySave = workflowPage.waitForResponse((response) => response.url().endsWith(`/api/retrospectives/${retrospective.id}`) && response.request().method() === 'PUT' && response.status() === 503);
   const summarySaveButton = workflowPage.getByRole('button', { name: '保存结论' });
-  const snapshotButton = workflowPage.getByRole('button', { name: '生成快照' });
+  const snapshotButton = workflowPage.getByRole('button', { name: /生成快照|刷新快照/ });
   const publishButton = workflowPage.getByRole('button', { name: '发布复盘' });
   const summarySaveAttempt = summarySaveButton.dblclick({ delay: 10 });
   await summarySaveAttempt;
@@ -1419,7 +1508,7 @@ try {
   await failedSnapshot;
   assert.equal(await snapshotLoadingStatus.count(), 0, 'snapshot generation status clears after the response');
   assert.equal(await snapshotButton.getAttribute('aria-busy'), 'false', 'snapshot generation clears its busy state after the response');
-  await workflowPage.getByText('生成快照失败', { exact: true }).waitFor();
+  await workflowPage.getByText('快照结果已核实未更新', { exact: true }).waitFor();
   assert.equal(retroMutationAttempts.snapshot, 1, 'rapid duplicate snapshot generation sends one POST');
   assert.equal(await workflowPage.getByText('尚未生成指标快照', { exact: true }).count(), 1, 'failed snapshot generation does not fabricate snapshot data');
   assert.equal(await snapshotButton.isDisabled(), false, 'snapshot generation unlocks after failure for retry');
@@ -1440,6 +1529,32 @@ try {
   await confirmedReplaceSnapshotDialog.getByRole('button', { name: '替换快照', exact: true }).click();
   await workflowPage.waitForResponse((response) => response.url().endsWith(snapshotUrl) && response.request().method() === 'POST' && response.status() === 200);
   assert.equal(retroMutationAttempts.snapshot, 3, 'replacing an existing snapshot requires explicit confirmation');
+
+  await workflowPage.evaluate(async () => {
+    await fetch('/__qa/fail-next-reads?scope=detail', { method: 'POST' });
+  });
+  await configureWorkflowMutation('snapshot', 0, { commitThenFail: 1 });
+  expectedWorkflow503 += 2;
+  const committedButUnacknowledgedSnapshot = workflowPage.waitForResponse((response) => response.url().endsWith(snapshotUrl) && response.request().method() === 'POST' && response.status() === 503);
+  const failedSnapshotReadback = workflowPage.waitForResponse((response) => response.url() === `http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}` && response.request().method() === 'GET' && response.status() === 503);
+  await snapshotButton.click();
+  await Promise.all([committedButUnacknowledgedSnapshot, failedSnapshotReadback]);
+  await workflowPage.getByRole('alert').filter({ hasText: '快照生成结果尚未确认' }).waitFor();
+  assert.equal(retroMutationAttempts.snapshot, 4, 'a committed snapshot with a lost response is sent once before readback fails');
+  assert.equal(await snapshotButton.isDisabled(), true, 'an unresolved snapshot result locks repeat generation');
+  const unresolvedSnapshotMarker = await workflowPage.evaluate(() => {
+    const raw = sessionStorage.getItem('xmt:retro-snapshot:99:991');
+    return raw ? JSON.parse(raw) as Record<string, unknown> : null;
+  });
+  assert.equal(unresolvedSnapshotMarker?.actorId, 99, 'the snapshot recovery marker is account scoped');
+  assert.equal(unresolvedSnapshotMarker?.retroId, 991, 'the snapshot recovery marker is retrospective scoped');
+  assert.equal(Array.isArray(unresolvedSnapshotMarker?.beforeSnapshotIds), true, 'the snapshot recovery marker retains the pre-request snapshot identity set');
+
+  await workflowPage.reload({ waitUntil: 'domcontentloaded' });
+  await workflowPage.getByText('指标快照已核实', { exact: true }).waitFor();
+  assert.equal(retroMutationAttempts.snapshot, 4, 'refresh recovery verifies the committed snapshot with GET and never repeats POST');
+  assert.equal(await workflowPage.evaluate(() => sessionStorage.getItem('xmt:retro-snapshot:99:991')), null, 'a successful read-only comparison clears the exact recovery marker');
+  assert.equal(await snapshotButton.isDisabled(), false, 'verified snapshot state unlocks later user-directed replacement');
 
   const workflowActions = workflowPage.getByTestId('retro-action-table-panel');
   await workflowActions.getByLabel('行动项标题', { exact: true }).fill('保留结论时新增的行动项');
@@ -1468,10 +1583,40 @@ try {
   await workflowPage.getByRole('alert').filter({ hasText: '请先点击“保存结论”' }).waitFor({ state: 'hidden' });
   assert.equal(retrospective.summaryMd, lateSummaryInput, 'the preserved conclusion is saved by the explicit save action');
 
-  await configureWorkflowMutation('publish');
-  expectedWorkflow503 += 1;
+  const corruptedSummaryDraft = '恢复标记被静默改写时不得提交结论。';
+  const summaryWritesBeforeCorruptedMarker = retroMutationAttempts.summary;
+  await summaryInput.fill(corruptedSummaryDraft);
+  await workflowPage.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    (window as Window & { __qaOriginalStorageSetItem?: typeof Storage.prototype.setItem }).__qaOriginalStorageSetItem = originalSetItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'xmt:retro-summary-update:99:991') {
+        const marker = JSON.parse(value) as { payload: { summaryMd: string } };
+        marker.payload.summaryMd = '静默改写的复盘结论';
+        return originalSetItem.call(this, key, JSON.stringify(marker));
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+  await summarySaveButton.click();
+  await workflowPage.getByText('恢复记录写入后未能通过校验，本次复盘结论未提交。', { exact: true }).waitFor();
+  assert.equal(retroMutationAttempts.summary, summaryWritesBeforeCorruptedMarker, 'a silently altered summary marker sends no PUT');
+  assert.equal(await summaryInput.inputValue(), corruptedSummaryDraft, 'preflight rejection preserves the edited conclusion');
+  assert.equal(await workflowPage.evaluate(() => sessionStorage.getItem('xmt:retro-summary-update:99:991')), null, 'the altered summary marker is removed after verification fails');
+  await workflowPage.evaluate(() => {
+    const original = (window as Window & { __qaOriginalStorageSetItem?: typeof Storage.prototype.setItem }).__qaOriginalStorageSetItem;
+    if (original) Storage.prototype.setItem = original;
+  });
+  const confirmedAfterCorruptedSummaryMarker = workflowPage.waitForResponse((response) => response.url().endsWith(`/api/retrospectives/${retrospective.id}`) && response.request().method() === 'PUT' && response.status() === 200);
+  await summarySaveButton.click();
+  await confirmedAfterCorruptedSummaryMarker;
+  assert.equal(retrospective.summaryMd, corruptedSummaryDraft, 'a later explicit save succeeds once recovery storage is restored');
+
+  await configureWorkflowMutation('publish', 1, { failureStatus: 429 });
+  expectedWorkflow429 += 1;
   const publishUrl = `/api/retrospectives/${retrospective.id}/publish`;
-  const failedPublish = workflowPage.waitForResponse((response) => response.url().endsWith(publishUrl) && response.request().method() === 'POST' && response.status() === 503);
+  const failedPublish = workflowPage.waitForResponse((response) => response.url().endsWith(publishUrl) && response.request().method() === 'POST' && response.status() === 429);
+  const publishReadback = workflowPage.waitForResponse((response) => response.url() === `http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}` && response.request().method() === 'GET' && response.status() === 200);
   await publishButton.click();
   const publishCancelDialog = workflowPage.getByRole('dialog', { name: '发布复盘？' });
   await publishCancelDialog.getByRole('button', { name: '取消', exact: true }).click();
@@ -1481,13 +1626,19 @@ try {
   await publishConfirmDialog.getByRole('button', { name: '发布复盘', exact: true }).dblclick({ delay: 10 });
   assert.equal(await publishButton.isDisabled(), true, 'publishing locks the workflow while pending');
   assert.equal(await summaryInput.isDisabled(), true, 'a pending publish also locks the retrospective summary');
-  await failedPublish;
-  await workflowPage.getByText('发布复盘失败', { exact: true }).waitFor();
+  await Promise.all([failedPublish, publishReadback]);
+  await workflowPage.getByText('发布结果已确认未完成', { exact: true }).waitFor();
+  assert.equal(expectedWorkflow429, 0, 'the expected 429 publish rejection is accounted for');
   assert.equal(retroMutationAttempts.publish, 1, 'rapid duplicate publish actions send one POST');
   assert.equal(await workflowPage.getByRole('button', { name: '发布复盘' }).count(), 1, 'failed publish leaves the retrospective in draft for retry');
   await configureWorkflowMutation('publish', 0);
   const successfulPublish = workflowPage.waitForResponse((response) => response.url().endsWith(publishUrl) && response.request().method() === 'POST' && response.status() === 200);
-  await workflowPage.getByRole('button', { name: '发布复盘' }).click();
+  await workflowPage.getByRole('button', { name: '重新确认发布', exact: true }).click();
+  const publishRetryConfirm = workflowPage.getByRole('dialog', { name: '发布复盘？' });
+  await publishRetryConfirm.waitFor();
+  assert.equal(retroMutationAttempts.publish, 1, 'opening the explicit retry confirmation sends no second POST');
+  await publishRetryConfirm.getByRole('button', { name: '取消', exact: true }).click();
+  await workflowPage.getByRole('button', { name: '重新确认发布', exact: true }).click();
   await workflowPage.getByRole('dialog', { name: '发布复盘？' }).getByRole('button', { name: '发布复盘', exact: true }).click();
   await successfulPublish;
   await workflowPage.getByText('复盘已发布', { exact: true }).waitFor();
@@ -1498,18 +1649,19 @@ try {
   expectedWorkflow503 += 1;
   const archiveUrl = `/api/retrospectives/${retrospective.id}/archive`;
   const failedArchive = workflowPage.waitForResponse((response) => response.url().endsWith(archiveUrl) && response.request().method() === 'POST' && response.status() === 503);
+  const archiveReadback = workflowPage.waitForResponse((response) => response.url() === `http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}` && response.request().method() === 'GET' && response.status() === 200);
   const archiveButton = workflowPage.getByRole('button', { name: '归档复盘' });
   await archiveButton.click();
   const archiveConfirmDialog = workflowPage.getByRole('dialog', { name: '归档复盘？' });
   await archiveConfirmDialog.getByRole('button', { name: '归档复盘', exact: true }).dblclick({ delay: 10 });
   assert.equal(await archiveButton.isDisabled(), true, 'archive action locks while pending');
-  await failedArchive;
-  await workflowPage.getByText('归档复盘失败', { exact: true }).waitFor();
+  await Promise.all([failedArchive, archiveReadback]);
+  await workflowPage.getByText('归档结果已确认未完成', { exact: true }).waitFor();
   assert.equal(retroMutationAttempts.archive, 1, 'rapid duplicate archive actions send one POST');
   assert.equal(await workflowPage.getByRole('button', { name: '归档复盘' }).count(), 1, 'failed archive leaves the published retrospective available for retry');
   await configureWorkflowMutation('archive', 0);
   const successfulArchive = workflowPage.waitForResponse((response) => response.url().endsWith(archiveUrl) && response.request().method() === 'POST' && response.status() === 200);
-  await workflowPage.getByRole('button', { name: '归档复盘' }).click();
+  await workflowPage.getByRole('button', { name: '重新确认归档', exact: true }).click();
   await workflowPage.getByRole('dialog', { name: '归档复盘？' }).getByRole('button', { name: '归档复盘', exact: true }).click();
   await successfulArchive;
   await workflowPage.getByText('复盘已归档', { exact: true }).waitFor();
@@ -1525,8 +1677,10 @@ try {
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/snapshot`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/snapshot`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/snapshot`,
+    `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/snapshot`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/actions`,
     `PATCH http://127.0.0.1:${address.port}/api/retrospectives/actions/${action.id}`,
+    `PUT http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}`,
     `PUT http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/publish`,
     `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/publish`,
@@ -1535,6 +1689,144 @@ try {
   ], 'each retrospective write retries only after a confirmed 503 and an explicit user action');
   assert.deepEqual(errors, [], 'retrospective workflow failure and retry have no unexpected browser errors');
   await workflowPage.close();
+
+  retroMutationAttempts.publish = 0;
+  retroMutationAttempts.archive = 0;
+  detailReadFailures = 0;
+  const transitionRecoveryPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  let expectedTransition503 = 0;
+  const transitionWrites: string[] = [];
+  transitionRecoveryPage.on('pageerror', (error) => errors.push(error.message));
+  transitionRecoveryPage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (expectedTransition503 > 0 && message.text().includes('503')) {
+      expectedTransition503 -= 1;
+      return;
+    }
+    errors.push(message.text());
+  });
+  transitionRecoveryPage.on('request', (request) => {
+    if (request.url().includes('/api/retrospectives') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) {
+      transitionWrites.push(`${request.method()} ${request.url()}`);
+    }
+  });
+  await transitionRecoveryPage.goto(`${base}/__qa?theme=light&workflow=draft`);
+  await transitionRecoveryPage.getByRole('heading', { name: retrospective.title }).waitFor();
+  await transitionRecoveryPage.evaluate(async () => {
+    await fetch('/__qa/configure-retro-mutation/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ failures: 0, delayMs: 180, commitThenFail: 1 }),
+    });
+  });
+  await transitionRecoveryPage.evaluate(async () => {
+    await fetch('/__qa/fail-next-reads?scope=detail', { method: 'POST' });
+  });
+  expectedTransition503 += 2;
+  const committedPublishLostResponse = transitionRecoveryPage.waitForResponse((response) => response.url().endsWith(`/api/retrospectives/${retrospective.id}/publish`) && response.request().method() === 'POST' && response.status() === 503);
+  const failedPublishReadback = transitionRecoveryPage.waitForResponse((response) => response.url() === `http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}` && response.request().method() === 'GET' && response.status() === 503);
+  await transitionRecoveryPage.getByRole('button', { name: '发布复盘', exact: true }).click();
+  await transitionRecoveryPage.getByRole('dialog', { name: '发布复盘？' }).getByRole('button', { name: '发布复盘', exact: true }).click();
+  await Promise.all([committedPublishLostResponse, failedPublishReadback]);
+  await transitionRecoveryPage.getByText('复盘操作结果暂未确认', { exact: true }).waitFor();
+  assert.equal(await transitionRecoveryPage.getByRole('button', { name: '归档复盘', exact: true }).isDisabled(), true,
+    'a committed publish with an unreadable status keeps transition actions locked');
+  const pendingPublishMarker = await transitionRecoveryPage.evaluate(() => {
+    const value = sessionStorage.getItem('xmt:retro-transition:v1:99:991');
+    return value ? JSON.parse(value) as Record<string, unknown> : null;
+  });
+  assert.equal(pendingPublishMarker?.actorId, 99, 'the publish recovery marker is scoped to the current account');
+  assert.equal(pendingPublishMarker?.retroId, 991, 'the publish recovery marker is scoped to the current retrospective');
+  await transitionRecoveryPage.reload({ waitUntil: 'domcontentloaded' });
+  await transitionRecoveryPage.getByRole('button', { name: '归档复盘', exact: true }).waitFor();
+  await transitionRecoveryPage.getByText('复盘已发布', { exact: true }).waitFor();
+  assert.equal(await transitionRecoveryPage.evaluate(() => sessionStorage.getItem('xmt:retro-transition:v1:99:991')), null,
+    'refresh readback of the committed publish clears its exact recovery marker');
+  assert.equal(retroMutationAttempts.publish, 1, 'commit followed by a lost publish response is confirmed by GET without a second POST');
+  assert.equal(await transitionRecoveryPage.getByRole('button', { name: '归档复盘', exact: true }).count(), 1, 'confirmed publish uses the readback state and enables archive');
+
+  await transitionRecoveryPage.evaluate(async () => {
+    await fetch('/__qa/configure-retro-mutation/archive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ failures: 1, delayMs: 180 }),
+    });
+    await fetch('/__qa/fail-next-reads?scope=detail', { method: 'POST' });
+  });
+  expectedTransition503 += 2;
+  const archiveLostResponse = transitionRecoveryPage.waitForResponse((response) => response.url().endsWith(`/api/retrospectives/${retrospective.id}/archive`) && response.request().method() === 'POST' && response.status() === 503);
+  const failedArchiveReadback = transitionRecoveryPage.waitForResponse((response) => response.url() === `http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}` && response.request().method() === 'GET' && response.status() === 503);
+  await transitionRecoveryPage.getByRole('button', { name: '归档复盘', exact: true }).click();
+  await transitionRecoveryPage.getByRole('dialog', { name: '归档复盘？' }).getByRole('button', { name: '归档复盘', exact: true }).click();
+  await Promise.all([archiveLostResponse, failedArchiveReadback]);
+  await transitionRecoveryPage.getByText('复盘操作结果暂未确认', { exact: true }).waitFor();
+  assert.equal(await transitionRecoveryPage.getByRole('button', { name: '归档复盘', exact: true }).isDisabled(), true, 'a failed readback locks archive to prevent an uncertain duplicate write');
+  assert.equal(retroMutationAttempts.archive, 1, 'a failed readback does not replay the archive POST');
+  const pendingArchiveMarker = await transitionRecoveryPage.evaluate(() => {
+    const value = sessionStorage.getItem('xmt:retro-transition:v1:99:991');
+    return value ? JSON.parse(value) as Record<string, unknown> : null;
+  });
+  assert.equal(pendingArchiveMarker?.operation, 'archive', 'the archive request remains identified after the readback fails');
+  await transitionRecoveryPage.reload({ waitUntil: 'domcontentloaded' });
+  await transitionRecoveryPage.getByText('归档结果已确认未完成', { exact: true }).waitFor();
+  assert.equal(await transitionRecoveryPage.evaluate(() => sessionStorage.getItem('xmt:retro-transition:v1:99:991')), null,
+    'refresh readback of the unchanged status clears the exact archive marker');
+  assert.equal(retroMutationAttempts.archive, 1, 'manual readback is GET-only and does not resend archive');
+  await transitionRecoveryPage.getByRole('button', { name: '重新确认归档', exact: true }).click();
+  const explicitArchiveRetry = transitionRecoveryPage.waitForResponse((response) => response.url().endsWith(`/api/retrospectives/${retrospective.id}/archive`) && response.request().method() === 'POST' && response.status() === 200);
+  await transitionRecoveryPage.getByRole('dialog', { name: '归档复盘？' }).getByRole('button', { name: '归档复盘', exact: true }).click();
+  await explicitArchiveRetry;
+  await transitionRecoveryPage.getByText('复盘已归档', { exact: true }).waitFor();
+  assert.equal(retroMutationAttempts.archive, 2, 'archive can be retried only after GET confirmed the original state and the user confirmed again');
+  assert.equal(expectedTransition503, 0, 'the expected lost-response and readback failures are accounted for');
+  assert.deepEqual(transitionWrites, [
+    `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/publish`,
+    `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/archive`,
+    `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/archive`,
+  ], 'lost responses and readback retry do not cause duplicate writes');
+  await transitionRecoveryPage.close();
+
+  const changedStatusPage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  let expectedChangedStatus503 = 1;
+  const changedStatusWrites: string[] = [];
+  changedStatusPage.on('pageerror', (error) => errors.push(error.message));
+  changedStatusPage.on('console', (message) => {
+    if (message.type() !== 'error') return;
+    if (expectedChangedStatus503 > 0 && message.text().includes('503')) {
+      expectedChangedStatus503 -= 1;
+      return;
+    }
+    errors.push(message.text());
+  });
+  changedStatusPage.on('request', (request) => {
+    if (request.url().includes('/api/retrospectives') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())) {
+      changedStatusWrites.push(`${request.method()} ${request.url()}`);
+    }
+  });
+  await changedStatusPage.goto(`${base}/__qa?theme=light&workflow=draft`);
+  await changedStatusPage.getByRole('heading', { name: retrospective.title }).waitFor();
+  await changedStatusPage.evaluate(async () => {
+    await fetch('/__qa/configure-retro-mutation/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ failures: 1, delayMs: 180, externalStatus: 'archived' }),
+    });
+  });
+  const thirdPartyPublishFailure = changedStatusPage.waitForResponse((response) => response.url().endsWith(`/api/retrospectives/${retrospective.id}/publish`) && response.request().method() === 'POST' && response.status() === 503);
+  const thirdPartyStatusReadback = changedStatusPage.waitForResponse((response) => response.url() === `http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}` && response.request().method() === 'GET' && response.status() === 200);
+  await changedStatusPage.getByRole('button', { name: '发布复盘', exact: true }).click();
+  await changedStatusPage.getByRole('dialog', { name: '发布复盘？' }).getByRole('button', { name: '发布复盘', exact: true }).click();
+  await Promise.all([thirdPartyPublishFailure, thirdPartyStatusReadback]);
+  await changedStatusPage.getByText('复盘状态已被其他操作改变', { exact: true }).waitFor();
+  await changedStatusPage.getByText(/当前为已归档/).waitFor();
+  assert.equal(await changedStatusPage.getByRole('button', { name: '发布复盘', exact: true }).count(), 0, 'a third-party archived state replaces the stale draft controls');
+  assert.equal(retroMutationAttempts.publish, 2, 'third-party state recovery does not resend the failed publish request');
+  assert.deepEqual(changedStatusWrites, [
+    `POST http://127.0.0.1:${address.port}/api/retrospectives/${retrospective.id}/publish`,
+  ], 'a third-party state readback is followed by no publish retry');
+  assert.equal(expectedChangedStatus503, 0, 'the third-party mutation failure response is accounted for');
+  assert.deepEqual(errors, [], 'transition outcome recovery has no unexpected browser errors');
+  await changedStatusPage.close();
 
   const leavePage = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   leavePage.on('pageerror', (error) => errors.push(error.message));

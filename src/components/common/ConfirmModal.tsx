@@ -65,6 +65,7 @@ export default function ConfirmModal({
       size="sm"
       className={className}
       closeOnOverlayClick={!loading}
+      closeOnEscape={!loading}
       showCloseButton={!loading}
       footer={
         <div className="flex gap-3">

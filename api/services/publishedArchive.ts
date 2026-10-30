@@ -1,6 +1,5 @@
 import { beijingNow, execute, executeInsert, queryAll, queryOne } from '../database/utils';
 import { getPublishingMetricFacts } from './publishingMetrics';
-import { getApprovedWorkflowScriptSource } from './workflowScriptSource';
 
 type ArchiveSyncResult = {
   action: 'created' | 'updated' | 'skipped';
@@ -16,6 +15,57 @@ type ArchiveScriptSourceSnapshot = {
   content_markdown: string | null;
 };
 
+type ResolvedArchiveScriptSource = {
+  source_topic_id: number;
+  content: string;
+  content_markdown: string | null;
+  status: string;
+};
+
+type ArchiveScriptSourceRow = {
+  source_topic_id: number | null;
+  content: string | null;
+  content_markdown: string | null;
+  status: string;
+};
+
+async function getApprovedArchiveScriptSource(productionId: number, version: string): Promise<ResolvedArchiveScriptSource | null> {
+  const candidates = await queryAll<{ source_kind: string; source_topic_id: number | null }>(
+    `SELECT 'current' AS source_kind,p.topic_id AS source_topic_id
+     FROM production p WHERE p.id=? AND p.version=?
+     UNION ALL
+     SELECT 'history' AS source_kind,ph.source_topic_id
+     FROM production_history ph
+     WHERE ph.production_id=? AND ph.version=?`,
+    [productionId, version, productionId, version],
+  );
+  if (candidates.length !== 1) return null;
+  const sourceTopicId = Number(candidates[0].source_topic_id);
+  if (!Number.isSafeInteger(sourceTopicId) || sourceTopicId <= 0) return null;
+
+  const sourceRows = candidates[0].source_kind === 'current'
+    ? await queryAll<ArchiveScriptSourceRow>(
+      `SELECT p.topic_id AS source_topic_id,p.content,p.content_markdown,p.status
+       FROM production p
+       WHERE p.id=? AND p.topic_id=? AND p.version=?`,
+      [productionId, sourceTopicId, version],
+    )
+    : await queryAll<ArchiveScriptSourceRow>(
+      `SELECT ph.source_topic_id,ph.content,ph.content_markdown,ph.status
+       FROM production_history ph
+       WHERE ph.production_id=? AND ph.source_topic_id=? AND ph.version=?`,
+      [productionId, sourceTopicId, version],
+    );
+  if (sourceRows.length !== 1 || sourceRows[0].status !== 'approved') return null;
+  const row = sourceRows[0];
+  return {
+    ...row,
+    source_topic_id: sourceTopicId,
+    content: String(row.content_markdown ?? row.content ?? ''),
+    content_markdown: row.content_markdown ?? null,
+  };
+}
+
 async function archiveScriptSource(
   topicId: number,
   stage: Record<string, unknown> | null,
@@ -25,17 +75,34 @@ async function archiveScriptSource(
   if (!stage) return { topic_id: topicId, production_id: null, version: null, state: 'none' };
   const sourceProductionId = Number(stage.script_source_production_id) || null;
   const sourceVersion = typeof stage.script_source_version === 'string' ? stage.script_source_version : null;
-  if (sourceProductionId && sourceVersion) {
-    const source = await getApprovedWorkflowScriptSource(topicId, { productionId: sourceProductionId, version: sourceVersion });
+  const hasRecordedSourceMetadata = stage.script_source_production_id !== null && stage.script_source_production_id !== undefined
+    || stage.script_source_version !== null && stage.script_source_version !== undefined;
+  if (hasRecordedSourceMetadata) {
+    if (!sourceProductionId || !sourceVersion) {
+      return { topic_id: topicId, production_id: sourceProductionId, version: sourceVersion, state: 'unavailable' };
+    }
+    const sourceKey = `${sourceProductionId}@${sourceVersion}`;
+    if (sourceSnapshots.has(sourceKey)) {
+      return { topic_id: topicId, production_id: sourceProductionId, version: sourceVersion, state: 'derived' };
+    }
+    const source = await getApprovedArchiveScriptSource(sourceProductionId, sourceVersion);
     if (!source) return { topic_id: topicId, production_id: sourceProductionId, version: sourceVersion, state: 'unavailable' };
-    sourceSnapshots.set(`${sourceProductionId}@${sourceVersion}`, {
+    if (source.source_topic_id === topicId) {
+      sourceSnapshots.set(sourceKey, {
+        topic_id: topicId,
+        production_id: sourceProductionId,
+        version: sourceVersion,
+        content: source.content,
+        content_markdown: source.content_markdown ?? null,
+      });
+    }
+    return {
       topic_id: topicId,
       production_id: sourceProductionId,
       version: sourceVersion,
-      content: source.content,
-      content_markdown: source.content_markdown ?? null,
-    });
-    return { topic_id: topicId, production_id: sourceProductionId, version: sourceVersion, state: 'derived' };
+      state: 'derived',
+      ...(source.source_topic_id !== topicId ? { source_topic_id: source.source_topic_id } : {}),
+    };
   }
   if (stage.script_content !== null && stage.script_content !== undefined) {
     return { topic_id: topicId, production_id: null, version: null, state: 'unrecorded' };
@@ -126,8 +193,6 @@ async function buildArchivePayload(topicId: number, operatorId?: number) {
       analytics,
     };
   });
-  const publishing = publishedRecords[0];
-  const analytics = publishing.analytics;
   const topicHistory = await queryAll<Record<string, unknown>>(
     `SELECT th.*, u.name as operator_name
      FROM topic_history th
@@ -137,10 +202,17 @@ async function buildArchivePayload(topicId: number, operatorId?: number) {
     [topicId],
   );
   const sourceSnapshots = new Map<string, ArchiveScriptSourceSnapshot>();
-  const [shootingSource, publishingSource] = await Promise.all([
+  const [shootingSource, publishedRecordSources] = await Promise.all([
     archiveScriptSource(topicId, shooting, production, sourceSnapshots),
-    archiveScriptSource(topicId, publishing, production, sourceSnapshots),
+    Promise.all(publishedRecords.map((record) => archiveScriptSource(topicId, record, production, sourceSnapshots))),
   ]);
+  const archivedPublishedRecords = publishedRecords.map((record, index) => ({
+    ...record,
+    script_source: publishedRecordSources[index],
+  }));
+  const publishing = archivedPublishedRecords[0];
+  const analytics = publishing.analytics;
+  const publishingSource = publishedRecordSources[0];
 
   return {
     topic,
@@ -155,7 +227,7 @@ async function buildArchivePayload(topicId: number, operatorId?: number) {
       },
       script_source_snapshots: Array.from(sourceSnapshots.values()),
       analytics: analytics || null,
-      published_records: publishedRecords,
+      published_records: archivedPublishedRecords,
       topicHistory: topicHistory || [],
       archived_at: beijingNow(),
     }),
@@ -198,6 +270,61 @@ export async function syncPublishedArchive(topicId: number, operatorId?: number)
 function sameArchiveScript(left: Record<string, unknown> | null | undefined, right: Record<string, unknown> | null | undefined) {
   const fields = ['script_content', 'script_source_production_id', 'script_source_version'] as const;
   return fields.every((field) => (left?.[field] ?? null) === (right?.[field] ?? null));
+}
+
+function hasRecognizedPublishedRecordSource(
+  value: unknown,
+  archivedRow: Record<string, unknown>,
+  archiveScript: Record<string, unknown> | null,
+  topicId: number,
+) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const source = value as Record<string, unknown>;
+  if (source.topic_id !== topicId) return false;
+  if (!['none', 'unavailable', 'unrecorded', 'derived', 'inherited'].includes(String(source.state))) return false;
+
+  const rowSourceProductionId = Number(archivedRow.script_source_production_id) || null;
+  const rowSourceVersion = typeof archivedRow.script_source_version === 'string' ? archivedRow.script_source_version : null;
+  const rowHasExplicitSource = archivedRow.script_source_production_id !== null && archivedRow.script_source_production_id !== undefined
+    || archivedRow.script_source_version !== null && archivedRow.script_source_version !== undefined;
+  const hasLocalScript = archivedRow.script_content !== null && archivedRow.script_content !== undefined;
+  const hasValidProductionId = source.production_id === null || Number.isSafeInteger(source.production_id);
+  const hasValidVersion = source.version === null || typeof source.version === 'string';
+  if (!hasValidProductionId || !hasValidVersion) return false;
+
+  if (source.state === 'derived' || source.state === 'inherited') {
+    const hasCompleteProductionReference = Number.isSafeInteger(source.production_id)
+      && Number(source.production_id) > 0
+      && typeof source.version === 'string'
+      && Boolean(source.version.trim());
+    if (!hasCompleteProductionReference) return false;
+    if (source.state === 'derived') {
+      return rowHasExplicitSource
+        && Number(source.production_id) === rowSourceProductionId
+        && source.version === rowSourceVersion;
+    }
+
+    const inheritedProductionId = Number(archiveScript?.id) || null;
+    const inheritedVersion = typeof archiveScript?.version === 'string' ? archiveScript.version : null;
+    return !rowHasExplicitSource
+      && !hasLocalScript
+      && Boolean(inheritedProductionId && inheritedVersion?.trim())
+      && Number(source.production_id) === inheritedProductionId
+      && source.version === inheritedVersion;
+  }
+
+  if (source.state === 'unavailable') {
+    return rowHasExplicitSource
+      && source.production_id === rowSourceProductionId
+      && source.version === rowSourceVersion;
+  }
+  if (source.state === 'none' || source.state === 'unrecorded') {
+    if (source.production_id !== null || source.version !== null || rowHasExplicitSource) return false;
+    return source.state === 'unrecorded'
+      ? hasLocalScript
+      : !hasLocalScript && !(Number(archiveScript?.id) > 0 && typeof archiveScript?.version === 'string' && Boolean(archiveScript.version.trim()));
+  }
+  return false;
 }
 
 /**
@@ -247,12 +374,16 @@ export async function hasPublishedArchiveScriptDrift(topicId: number): Promise<b
       ? [snapshot.publishing as Record<string, unknown>]
       : [];
   if (archivedRows.length !== currentPublishedById.size) return true;
+  const archiveScript = snapshot.script && typeof snapshot.script === 'object' && !Array.isArray(snapshot.script)
+    ? snapshot.script as Record<string, unknown>
+    : null;
 
   const matchedIds = new Set<number>();
   for (const archivedRow of archivedRows) {
     const publishingId = Number(archivedRow.publishing_id ?? archivedRow.id);
     const currentRow = currentPublishedById.get(publishingId);
     if (!currentRow || !sameArchiveScript(archivedRow, currentRow)) return true;
+    if (!hasRecognizedPublishedRecordSource(archivedRow.script_source, archivedRow, archiveScript, topicId)) return true;
     matchedIds.add(publishingId);
   }
   return matchedIds.size !== currentPublishedById.size;

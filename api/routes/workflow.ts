@@ -87,6 +87,7 @@ const PUBLISHING_STATUS_TEXT: Record<string, string> = {
 };
 const PUBLISHING_STATUSES = new Set(Object.keys(PUBLISHING_STATUS_TEXT));
 const PUBLISHING_METRIC_FIELDS = ['views', 'likes', 'shares', 'comments'] as const;
+const PUBLISHING_EDIT_BASELINE_FIELDS = ['platform', 'url', 'status', 'publish_time', ...PUBLISHING_METRIC_FIELDS] as const;
 const DOUYIN_AUTHORITATIVE_FIELDS = ['platform', 'status', 'publish_time'] as const;
 const TOPIC_STAGE_TEXT: Record<string, string> = {
   pending: '待审核',
@@ -896,7 +897,7 @@ router.post('/production', authenticate, requirePermission('production:update'),
 
 router.get('/production/:id', authenticate, async (req, res) => {
   try {
-    const production = await queryOne(`SELECT p.*, COALESCE(p.content_markdown, p.content) as contentMarkdown, COALESCE(p.content_json, p.content) as contentJson, origin.source_type as origin_source_type, origin.source_content_snapshot as origin_source_content_snapshot, origin.source_outline_version as origin_source_outline_version, origin.captured_at as origin_captured_at, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id LEFT JOIN production_origin_snapshots origin ON origin.production_id = p.id WHERE p.id = ?`, [req.params.id]);
+    const production = await queryOne(`SELECT p.*, COALESCE(p.content_markdown, p.content) as contentMarkdown, COALESCE(p.content_json, p.content) as contentJson, origin.source_type as origin_source_type, origin.source_content_snapshot as origin_source_content_snapshot, origin.source_outline_version as origin_source_outline_version, origin.source_topic_id as origin_source_topic_id, origin.captured_at as origin_captured_at, u.name as operator_name, t.title as topic_title, t.status as topic_status FROM production p LEFT JOIN users u ON p.operator_id = u.id LEFT JOIN topics t ON p.topic_id = t.id LEFT JOIN production_origin_snapshots origin ON origin.production_id = p.id WHERE p.id = ?`, [req.params.id]);
     if (!production) return res.status(404).json({ message: '创作记录不存在' });
     const topic = await getTopicScopeByProductionId(req.params.id);
     if (!canAccessTopic(req.user, topic)) return res.status(403).json({ message: '无权限查看该创作记录' });
@@ -980,7 +981,7 @@ router.put('/production/:id', authenticate, requirePermission('production:update
     const updateProductionParams = guarded
       ? [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, id, expected_content, currentVersion]
       : [topic_id, newVersion, content, contentMarkdown, contentJson, status, req.user?.id, id];
-    const historySql = `INSERT INTO production_history (production_id, version, content, content_markdown, content_json, status, change_type, operator_id, version_state, superseded_by_version, superseded_at, material_draft_snapshot_html) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const historySql = `INSERT INTO production_history (production_id, version, content, content_markdown, content_json, status, change_type, operator_id, version_state, superseded_by_version, superseded_at, material_draft_snapshot_html, source_topic_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     const historyParams = [
       id,
       currentVersion,
@@ -1000,7 +1001,11 @@ router.put('/production/:id', authenticate, requirePermission('production:update
         'SELECT content_html FROM production_material_drafts WHERE production_id=?',
         [id],
       );
-      await tx.execute(historySql, [...historyParams, materialDraft?.content_html ?? '']);
+      await tx.execute(historySql, [
+        ...historyParams,
+        materialDraft?.content_html ?? '',
+        Number(existingProduction.topic_id),
+      ]);
     };
 
     if (approvalTransition) {
@@ -1203,6 +1208,21 @@ router.put('/production/:id', authenticate, requirePermission('production:update
 router.delete('/production/:id', authenticate, requirePermission('production:delete'), async (req, res) => {
   try {
     const deletion = await runInTransaction(async (tx) => {
+      const production = await tx.queryOne<{
+        id: number;
+        topic_id: number | null;
+        version: string | null;
+        creator_id: number | null;
+        assignee_id: number | null;
+        participant_id: number | null;
+        topic_title: string | null;
+      }>(
+        `SELECT p.id,p.topic_id,p.version,t.creator_id,t.assignee_id,p.operator_id AS participant_id,t.title AS topic_title
+         FROM production p LEFT JOIN topics t ON t.id=p.topic_id WHERE p.id=?`,
+        [req.params.id],
+      );
+      if (!production) return { ok: false as const, reason: 'missing' as const };
+      if (!canEditProduction(req.user, production)) return { ok: false as const, reason: 'forbidden' as const };
       const referencedSource = await tx.queryOne<{ found: number }>(
         `SELECT 1 AS found FROM shooting WHERE script_source_production_id=?
          UNION ALL
@@ -1216,9 +1236,24 @@ router.delete('/production/:id', authenticate, requirePermission('production:del
         [req.params.id, req.params.id, req.params.id],
       );
       if (referencedSource) return { ok: false as const, reason: 'source-in-use' as const };
-      const deleted = await tx.execute(`DELETE FROM production WHERE id = ?`, [req.params.id]);
+      const historyCount = Number((await tx.queryOne<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM production_history WHERE production_id=?`,
+        [production.id],
+      ))?.count || 0);
+      const deleted = await tx.execute(`DELETE FROM production WHERE id = ?`, [production.id]);
       if (deleted === 0) return { ok: false as const, reason: 'missing' as const };
-      await tx.execute(`DELETE FROM production_history WHERE production_id = ?`, [req.params.id]);
+      await tx.execute(`DELETE FROM production_history WHERE production_id = ?`, [production.id]);
+      const recordedAt = beijingNow();
+      const topicTitle = production.topic_title || '未关联选题';
+      const auditDetail = `删除创作记录 #${production.id}（${production.version || '未标注版本'}），选题「${topicTitle}」；同时清除 ${historyCount} 条创作历史版本。`;
+      await tx.execute(
+        `INSERT INTO topic_history(topic_id,action,comment,operator_id,created_at) VALUES(?,?,?,?,?)`,
+        [production.topic_id ?? null, 'production_deleted', auditDetail, req.user?.id ?? null, recordedAt],
+      );
+      await tx.execute(
+        `INSERT INTO activity_log(user_id,action,target,detail,created_at) VALUES(?,?,?,?,?)`,
+        [req.user?.id ?? null, 'delete', 'production', auditDetail, recordedAt],
+      );
       return { ok: true as const };
     });
     if (!deletion.ok && deletion.reason === 'source-in-use') {
@@ -1226,6 +1261,9 @@ router.delete('/production/:id', authenticate, requirePermission('production:del
         message: '该创作记录仍被成片或发布剧本引用，暂不能删除；请先处理这些来源关联。',
         code: 'PRODUCTION_SCRIPT_SOURCE_IN_USE',
       });
+    }
+    if (!deletion.ok && deletion.reason === 'forbidden') {
+      return res.status(403).json({ message: '无权限删除该创作记录' });
     }
     if (!deletion.ok) return res.status(404).json({ message: '创作记录不存在' });
     broadcastToRoom('production', 'production:deleted', { id: Number(req.params.id) });
@@ -1283,6 +1321,93 @@ router.get('/production/:id/history', authenticate, async (req, res) => {
     res.json({ data: ids.map((id) => byId.get(id)).filter(Boolean), total: selected.length, page, limit });
   } catch {
     res.status(500).json({ message: '获取版本历史失败' });
+  }
+});
+
+router.get('/production/:id/source-snapshot', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+}, authenticate, requirePermission('production:view'), async (req, res) => {
+  try {
+    const productionId = parsePositiveId(req.params.id);
+    const version = typeof req.query.version === 'string' ? req.query.version.trim() : '';
+    const requestedSourceTopicId = req.query.source_topic_id === undefined
+      ? undefined
+      : typeof req.query.source_topic_id === 'string' ? parsePositiveId(req.query.source_topic_id) : null;
+    if (!productionId || !version || version.length > 64
+      || (req.query.source_topic_id !== undefined && requestedSourceTopicId === null)) {
+      return res.status(400).json({ message: '创作来源版本信息不完整' });
+    }
+
+    // Resolve provenance from stored history. The stage/archive topic may differ after
+    // reassignment, so client-supplied topic ids can only constrain the result, never select it.
+    const sourceCandidates = await queryAll<{
+      source_kind: string;
+      source_topic_id: number | null;
+      participant_id: number | null;
+    }>(
+      `SELECT 'current' AS source_kind,p.topic_id AS source_topic_id,p.operator_id AS participant_id
+       FROM production p
+       WHERE p.id=? AND p.version=?
+       UNION ALL
+       SELECT 'history' AS source_kind,ph.source_topic_id,NULL AS participant_id
+       FROM production_history ph
+       WHERE ph.production_id=? AND ph.source_topic_id IS NOT NULL AND ph.version=?`,
+      [productionId, version, productionId, version],
+    );
+    const sourceTopicId = sourceCandidates.length === 1 ? parsePositiveId(sourceCandidates[0].source_topic_id) : null;
+    if (!sourceTopicId || (requestedSourceTopicId !== undefined && requestedSourceTopicId !== sourceTopicId)) {
+      return res.status(404).json({ message: '创作来源版本不可用' });
+    }
+    const sourceTopic = await queryOne<{
+      id: number;
+      title: string;
+      creator_id: number | null;
+      assignee_id: number | null;
+      participant_id: number | null;
+    }>(
+      'SELECT id,title,creator_id,assignee_id FROM topics WHERE id=?',
+      [sourceTopicId],
+    );
+    if (!sourceTopic) return res.status(404).json({ message: '创作来源版本不可用' });
+    if (!canAccessTopic(req.user, {
+      ...sourceTopic,
+      participant_id: sourceCandidates[0].source_kind === 'current'
+        ? parsePositiveId(sourceCandidates[0].participant_id)
+        : null,
+    })) {
+      return res.status(403).json({ message: '无权限查看该创作来源选题' });
+    }
+
+    // Return only the exact row selected above; never fall through to the current row.
+    const snapshots = sourceCandidates[0].source_kind === 'current'
+      ? await queryAll<Record<string, unknown>>(
+        `SELECT p.id AS production_id,p.topic_id AS source_topic_id,p.version,
+                COALESCE(p.content_markdown,p.content,'') AS content,
+                p.content_markdown,p.status,p.created_at,
+                COALESCE(p.updated_at,p.created_at) AS version_timestamp,u.name AS operator_name
+         FROM production p LEFT JOIN users u ON u.id=p.operator_id
+         WHERE p.id=? AND p.topic_id=? AND p.version=?`,
+        [productionId, sourceTopicId, version],
+      )
+      : await queryAll<Record<string, unknown>>(
+        `SELECT ph.production_id,ph.source_topic_id,ph.version,
+                COALESCE(ph.content_markdown,ph.content,'') AS content,
+                ph.content_markdown,ph.status,ph.created_at,
+                ph.created_at AS version_timestamp,u.name AS operator_name
+         FROM production_history ph LEFT JOIN users u ON u.id=ph.operator_id
+         WHERE ph.production_id=? AND ph.source_topic_id=? AND ph.version=?`,
+        [productionId, sourceTopicId, version],
+      );
+    if (snapshots.length !== 1) return res.status(404).json({ message: '创作来源版本不可用' });
+
+    return res.json({
+      ...snapshots[0],
+      source_topic_id: sourceTopic.id,
+      source_topic_title: sourceTopic.title,
+    });
+  } catch {
+    return res.status(500).json({ message: '读取创作来源快照失败' });
   }
 });
 
@@ -2446,6 +2571,18 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
   try {
     const { id } = req.params;
     const { platform, url, status, publish_time, script_content } = req.body;
+    const expectedBaseline = req.body.expected_baseline as Record<string, unknown> | null | undefined;
+    const hasPublishingEditFields = PUBLISHING_EDIT_BASELINE_FIELDS.some((field) => req.body[field] !== undefined);
+    const baselineFields = PUBLISHING_EDIT_BASELINE_FIELDS.filter((field) => req.body[field] !== undefined);
+    const hasValidBaseline = expectedBaseline !== null && typeof expectedBaseline === 'object' && !Array.isArray(expectedBaseline)
+      && baselineFields.every((field) => {
+        if (!Object.prototype.hasOwnProperty.call(expectedBaseline, field)) return false;
+        const value = expectedBaseline[field];
+        if (PUBLISHING_METRIC_FIELDS.includes(field as (typeof PUBLISHING_METRIC_FIELDS)[number])) {
+          return value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
+        }
+        return typeof value === 'string';
+      });
     const versionAction = req.body.version_action;
     const expectedContent = req.body.expected_content;
     if (versionAction !== undefined && versionAction !== 'none' && versionAction !== 'minor' && versionAction !== 'major') {
@@ -2466,6 +2603,12 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
     }
     const currentTopic = await getTopicScopeByPublishingId(id);
     if (!canEditProduction(req.user, currentTopic)) return res.status(403).json({ message: '无权限修改该发布记录' });
+    if (hasPublishingEditFields && !hasValidBaseline) {
+      return res.status(409).json({
+        message: '发布记录缺少可核对的原始数据，本次更新未保存。请重新加载列表并重新打开记录后再编辑。',
+        code: 'PUBLISHING_UPDATE_BASELINE_REQUIRED',
+      });
+    }
     const linkedWork = await queryOne<{ douyin_work_id: number }>(
       `SELECT douyin_work_id FROM publishing_douyin_links WHERE publishing_id=?`,
       [id],
@@ -2540,15 +2683,43 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
     const result = await runInTransaction(async (tx) => {
       const currentPublishing = await tx.queryOne<{
         topic_id: number;
+        platform: string | null;
+        url: string | null;
         status: string;
+        publish_time: string | null;
+        manual_views: number | null;
+        manual_likes: number | null;
+        manual_shares: number | null;
+        manual_comments: number | null;
         script_content: string | null;
         script_source_production_id?: number | null;
         script_source_version?: string | null;
       }>(
-        'SELECT topic_id,status,script_content,script_source_production_id,script_source_version FROM publishing WHERE id=?',
+        'SELECT topic_id,platform,url,status,publish_time,manual_views,manual_likes,manual_shares,manual_comments,script_content,script_source_production_id,script_source_version FROM publishing WHERE id=?',
         [id],
       );
       if (!currentPublishing) return { ok: false as const, reason: 'missing' as const };
+      if (hasPublishingEditFields) {
+        const currentBaseline: Record<(typeof PUBLISHING_EDIT_BASELINE_FIELDS)[number], string | number | null> = {
+          platform: currentPublishing.platform,
+          url: currentPublishing.url,
+          status: currentPublishing.status,
+          publish_time: currentPublishing.publish_time,
+          views: currentPublishing.manual_views,
+          likes: currentPublishing.manual_likes,
+          shares: currentPublishing.manual_shares,
+          comments: currentPublishing.manual_comments,
+        };
+        const baselineChanged = baselineFields.some((field) => {
+          const currentValue = currentBaseline[field];
+          const expectedValue = expectedBaseline?.[field];
+          if (PUBLISHING_METRIC_FIELDS.includes(field as (typeof PUBLISHING_METRIC_FIELDS)[number])) {
+            return (currentValue == null ? null : Number(currentValue)) !== (expectedValue == null ? null : Number(expectedValue));
+          }
+          return String(currentValue ?? '') !== String(expectedValue ?? '');
+        });
+        if (baselineChanged) return { ok: false as const, reason: 'baseline_conflict' as const };
+      }
       if (versionAction === 'minor' || versionAction === 'major') {
         const version = await recordWorkflowDocumentVersion(tx, {
           documentType: 'publishing_script',
@@ -2592,6 +2763,12 @@ router.put('/publishing/:id', authenticate, requirePermission('workflow:publishi
     });
     if (!result.ok) {
       if ('reason' in result && result.reason === 'missing') return res.status(404).json({ message: '发布记录不存在' });
+      if ('reason' in result && result.reason === 'baseline_conflict') {
+        return res.status(409).json({
+          message: '发布记录已被其他协作者修改，本次更新未保存。你的编辑草稿仍保留，请核对最新记录后再手动提交。',
+          code: 'PUBLISHING_UPDATE_BASELINE_CONFLICT',
+        });
+      }
       if ('reason' in result && result.reason === 'stale') {
         return res.status(409).json({
           message: '剧本已被其他协作者修改，请刷新后核对再创建版本',

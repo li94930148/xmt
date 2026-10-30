@@ -19,6 +19,7 @@ import {
   type RetroActionUpdateRecoveryState,
   type RetroDailyRiskItem,
   type RetrospectiveDetail,
+  type RetrospectiveStatus,
   type UpdateRetroActionPayload,
   type UpdateRetrospectivePayload,
   type RetrospectiveUpdateRecoveryState,
@@ -35,6 +36,13 @@ import RetroSummaryUpdateRecoveryNotice from '../components/retrospectives/Retro
 import RetroPublishPanel from '../components/retrospectives/RetroPublishPanel';
 import RetroActionTable from '../components/retrospectives/RetroActionTable';
 import RetroActionDetailDrawer from '../components/retrospectives/RetroActionDetailDrawer';
+import {
+  clearRetroTransitionRecovery,
+  persistRetroTransitionRecovery,
+  readRetroTransitionRecovery,
+  type PendingRetroTransitionRecovery,
+  type RetroTransitionOperation,
+} from '../components/retrospectives/retroTransitionRecovery';
 
 type RetroConfirmation =
   | { kind: 'replace-snapshot' }
@@ -50,8 +58,33 @@ import {
   formatDateTime,
   retroCategoryLabels,
   retroScopeLabels,
+  retroStatusLabels,
   toFriendlyRetroError,
 } from '../components/retrospectives/retroLabels';
+
+type RetroTransitionRecovery = {
+  marker: PendingRetroTransitionRecovery | null;
+  operation: RetroTransitionOperation | null;
+  retroId: number;
+  originalStatus?: RetrospectiveStatus;
+  targetStatus?: RetrospectiveStatus;
+  state: 'needs_check' | 'posting' | 'checking' | 'unchanged' | 'unknown' | 'changed' | 'storage_error';
+  observedStatus?: RetrospectiveStatus;
+  error?: string;
+};
+
+type PendingRetroSnapshotRecovery = {
+  actorId: number;
+  retroId: number;
+  requestId: string;
+  beforeSnapshotIds: number[];
+};
+
+type RetroSnapshotRecoveryEntry = {
+  marker: PendingRetroSnapshotRecovery | null;
+  state: 'posting' | 'needs_check' | 'checking' | 'unknown' | 'storage_error';
+  message?: string;
+};
 
 type PendingRetroActionCreate = {
   actorId: number;
@@ -94,13 +127,126 @@ const retroActionCreateRequestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f
 const retroActionUpdateRequestIdPattern = retroActionCreateRequestIdPattern;
 const retroSummaryUpdateRequestIdPattern = retroActionCreateRequestIdPattern;
 
+function retroSnapshotStorageKey(actorId: number, retroId: number) {
+  return `xmt:retro-snapshot:${actorId}:${retroId}`;
+}
+
+function parsePendingRetroSnapshot(value: string, actorId: number, retroId: number): PendingRetroSnapshotRecovery | null {
+  try {
+    const marker = JSON.parse(value) as Partial<PendingRetroSnapshotRecovery> & { contentFingerprint?: unknown };
+    const ids = marker.beforeSnapshotIds;
+    if (!hasValidRecoveryMarkerFingerprint(marker as Record<string, unknown>)
+      || Number(marker.actorId) !== actorId || Number(marker.retroId) !== retroId
+      || typeof marker.requestId !== 'string' || !retroActionCreateRequestIdPattern.test(marker.requestId)
+      || !Array.isArray(ids) || ids.length > 200
+      || ids.some((id) => !Number.isSafeInteger(id) || Number(id) <= 0)
+      || new Set(ids).size !== ids.length) return null;
+    return { actorId, retroId, requestId: marker.requestId, beforeSnapshotIds: ids as number[] };
+  } catch {
+    return null;
+  }
+}
+
+function readPendingRetroSnapshot(actorId: number, retroId: number) {
+  if (!Number.isSafeInteger(actorId) || actorId <= 0 || !Number.isSafeInteger(retroId) || retroId <= 0) {
+    return { marker: null, error: '' };
+  }
+  try {
+    const raw = window.sessionStorage.getItem(retroSnapshotStorageKey(actorId, retroId));
+    if (raw === null) return { marker: null, error: '' };
+    const marker = parsePendingRetroSnapshot(raw, actorId, retroId);
+    return marker
+      ? { marker, error: '' }
+      : { marker: null, error: '本机快照核验记录无法读取。为避免重复生成，快照操作已锁定。' };
+  } catch {
+    return { marker: null, error: '本机快照核验记录暂不可用。为避免重复生成，快照操作已锁定。' };
+  }
+}
+
+function persistRetroSnapshotMarker(marker: PendingRetroSnapshotRecovery): boolean {
+  const key = retroSnapshotStorageKey(marker.actorId, marker.retroId);
+  try {
+    if (window.sessionStorage.getItem(key) !== null) return false;
+    const serialized = serializeRecoveryMarker(marker);
+    window.sessionStorage.setItem(key, serialized);
+    return window.sessionStorage.getItem(key) === serialized;
+  } catch {
+    return false;
+  }
+}
+
+function clearRetroSnapshotMarker(marker: PendingRetroSnapshotRecovery): boolean {
+  const key = retroSnapshotStorageKey(marker.actorId, marker.retroId);
+  try {
+    const current = window.sessionStorage.getItem(key);
+    if (current === null) return true;
+    const parsed = parsePendingRetroSnapshot(current, marker.actorId, marker.retroId);
+    if (!parsed || parsed.requestId !== marker.requestId) return false;
+    window.sessionStorage.removeItem(key);
+    return window.sessionStorage.getItem(key) === null;
+  } catch {
+    return false;
+  }
+}
+
+function recoveryMarkerContentFingerprint(marker: Record<string, unknown>) {
+  const content = { ...marker };
+  delete content.contentFingerprint;
+  const serialized = JSON.stringify(content);
+  let hash = 2166136261;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash = Math.imul(hash ^ serialized.charCodeAt(index), 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function serializeRecoveryMarker(marker: object) {
+  const content = { ...(marker as Record<string, unknown>) };
+  delete content.contentFingerprint;
+  return JSON.stringify({ ...content, contentFingerprint: recoveryMarkerContentFingerprint(content) });
+}
+
+function hasValidRecoveryMarkerFingerprint(marker: Record<string, unknown>) {
+  if (marker.contentFingerprint === undefined) return true;
+  return typeof marker.contentFingerprint === 'string'
+    && marker.contentFingerprint === recoveryMarkerContentFingerprint(marker);
+}
+
+function writeRecoveryMarkerAndReadBack(key: string, marker: { requestId: string }): 'written' | 'cleared' | 'other' | 'unavailable' {
+  const serialized = serializeRecoveryMarker(marker);
+  let writeFailed = false;
+  try {
+    window.sessionStorage.setItem(key, serialized);
+  } catch {
+    writeFailed = true;
+    // Read-back below determines whether storage nevertheless retained the complete marker.
+  }
+  let stored: string | null;
+  try {
+    stored = window.sessionStorage.getItem(key);
+  } catch {
+    return 'unavailable';
+  }
+  if (stored === serialized) return 'written';
+  if (stored === null) return writeFailed ? 'unavailable' : 'cleared';
+  try {
+    const current = JSON.parse(stored) as { requestId?: unknown } | null;
+    if (!current || current.requestId !== marker.requestId) return 'other';
+    window.sessionStorage.removeItem(key);
+    return window.sessionStorage.getItem(key) === null ? 'cleared' : 'unavailable';
+  } catch {
+    return 'unavailable';
+  }
+}
+
 function retroSummaryUpdateStorageKey(actorId: number, retroId: number) {
   return `xmt:retro-summary-update:${actorId}:${retroId}`;
 }
 
 function parsePendingRetroSummaryUpdate(value: string, actorId: number, retroId: number): PendingRetroSummaryUpdate | null {
   try {
-    const marker = JSON.parse(value) as Partial<PendingRetroSummaryUpdate>;
+    const marker = JSON.parse(value) as Partial<PendingRetroSummaryUpdate> & { contentFingerprint?: unknown };
+    if (!hasValidRecoveryMarkerFingerprint(marker as Record<string, unknown>)) return null;
     const payload = marker.payload as UpdateRetrospectivePayload | undefined;
     if (Number(marker.actorId) !== actorId || Number(marker.retroId) !== retroId
       || typeof marker.requestId !== 'string' || !retroSummaryUpdateRequestIdPattern.test(marker.requestId)
@@ -128,7 +274,8 @@ function retroActionCreateStorageKey(actorId: number, retroId: number) {
 
 function parsePendingRetroActionCreate(value: string, actorId: number, retroId: number): PendingRetroActionCreate | null {
   try {
-    const marker = JSON.parse(value) as Partial<PendingRetroActionCreate>;
+    const marker = JSON.parse(value) as Partial<PendingRetroActionCreate> & { contentFingerprint?: unknown };
+    if (!hasValidRecoveryMarkerFingerprint(marker as Record<string, unknown>)) return null;
     const payload = marker.payload as CreateRetroActionPayload | undefined;
     if (Number(marker.actorId) !== actorId || Number(marker.retroId) !== retroId
       || typeof marker.requestId !== 'string' || !retroActionCreateRequestIdPattern.test(marker.requestId)
@@ -164,7 +311,8 @@ function actionUpdateRecoveryToken(marker: PendingRetroActionUpdate) {
 
 function parsePendingRetroActionUpdate(value: string, actorId: number, actionId: number, retroId: number): PendingRetroActionUpdate | null {
   try {
-    const marker = JSON.parse(value) as Partial<PendingRetroActionUpdate>;
+    const marker = JSON.parse(value) as Partial<PendingRetroActionUpdate> & { contentFingerprint?: unknown };
+    if (!hasValidRecoveryMarkerFingerprint(marker as Record<string, unknown>)) return null;
     const payload = marker.payload as UpdateRetroActionPayload | undefined;
     const validStatuses = ['todo', 'doing', 'done', 'cancelled'];
     if (Number(marker.actorId) !== actorId || Number(marker.actionId) !== actionId || Number(marker.retroId) !== retroId
@@ -223,8 +371,20 @@ export default function RetrospectiveDetailPage() {
     refreshPermissions: permissionState.refreshPermissions,
   });
   const retroId = Number(params.id);
+  const currentActorId = Number(currentUser?.id || 0);
   const currentRetroIdRef = useRef(retroId);
   currentRetroIdRef.current = retroId;
+
+  const [initialSnapshotRecovery] = useState(() => readPendingRetroSnapshot(currentActorId, retroId));
+  const [snapshotRecovery, setSnapshotRecovery] = useState<RetroSnapshotRecoveryEntry | null>(() => (
+    initialSnapshotRecovery.marker
+      ? { marker: initialSnapshotRecovery.marker, state: 'needs_check' }
+      : initialSnapshotRecovery.error
+        ? { marker: null, state: 'storage_error', message: initialSnapshotRecovery.error }
+        : null
+  ));
+  const snapshotRecoveryScopeRef = useRef(`${currentActorId}:${retroId}`);
+  const snapshotRecoveryCheckRef = useRef<string | null>(null);
 
   const [detail, setDetail] = useState<RetrospectiveDetail | null>(null);
   const [summary, setSummary] = useState('');
@@ -236,6 +396,11 @@ export default function RetrospectiveDetailPage() {
   const [summaryActionError, setSummaryActionError] = useState<string | null>(null);
   const [dailyRisks, setDailyRisks] = useState<RetroDailyRiskItem[]>([]);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [transitionRecovery, setTransitionRecovery] = useState<RetroTransitionRecovery | null>(null);
+  const [transitionRecoveryReady, setTransitionRecoveryReady] = useState(false);
+  const transitionRecoveryScopeRef = useRef('');
+  const transitionRecoveryCheckRef = useRef<string | null>(null);
+  const transitionRecoveryRequestRef = useRef<string | null>(null);
   const [dailyRisksError, setDailyRisksError] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] = useState<RetroAction | null>(null);
   const [loading, setLoading] = useState(true);
@@ -366,6 +531,51 @@ export default function RetrospectiveDetailPage() {
     };
   }, [loadDetail, loadDailyRisks]);
 
+  useEffect(() => {
+    const scope = `${currentActorId}:${retroId}`;
+    if (transitionRecoveryScopeRef.current === scope) return;
+    transitionRecoveryScopeRef.current = scope;
+    transitionRecoveryCheckRef.current = null;
+    transitionRecoveryRequestRef.current = null;
+    setTransitionRecoveryReady(false);
+    setTransitionRecovery(null);
+    if (!Number.isSafeInteger(currentActorId) || currentActorId <= 0
+      || !Number.isSafeInteger(retroId) || retroId <= 0) {
+      setTransitionRecoveryReady(true);
+      return;
+    }
+    const stored = readRetroTransitionRecovery(currentActorId, retroId);
+    if (stored.state === 'valid') {
+      const { marker } = stored;
+      transitionRecoveryRequestRef.current = marker.requestId;
+      setTransitionRecovery({
+        marker,
+        operation: marker.operation,
+        retroId: marker.retroId,
+        originalStatus: marker.originalStatus,
+        targetStatus: marker.targetStatus,
+        state: 'needs_check',
+      });
+    } else if (stored.state === 'invalid' || stored.state === 'unavailable') {
+      transitionRecoveryRequestRef.current = null;
+      setTransitionRecovery({ marker: null, operation: null, retroId, state: 'storage_error', error: stored.message });
+    }
+    setTransitionRecoveryReady(true);
+  }, [currentActorId, retroId]);
+
+  useEffect(() => {
+    const scope = `${currentActorId}:${retroId}`;
+    if (snapshotRecoveryScopeRef.current === scope) return;
+    snapshotRecoveryScopeRef.current = scope;
+    const result = readPendingRetroSnapshot(currentActorId, retroId);
+    setSnapshotRecovery(result.marker
+      ? { marker: result.marker, state: 'needs_check' }
+      : result.error
+        ? { marker: null, state: 'storage_error', message: result.error }
+        : null);
+    snapshotRecoveryCheckRef.current = null;
+  }, [currentActorId, retroId]);
+
   const applyDetail = useCallback((next: RetrospectiveDetail, submittedSummary?: string) => {
     if (next.retrospective.id !== currentRetroIdRef.current) return;
     setDetail(next);
@@ -376,7 +586,175 @@ export default function RetrospectiveDetailPage() {
     });
   }, [applySummary]);
 
-  const currentActorId = Number(currentUser?.id || 0);
+  const verifySnapshotRecovery = useCallback(async (marker: PendingRetroSnapshotRecovery) => {
+    const token = `${marker.actorId}:${marker.retroId}:${marker.requestId}`;
+    if (currentRetroIdRef.current !== marker.retroId
+      || Number(useAuthStore.getState().user?.id || 0) !== marker.actorId
+      || snapshotRecoveryCheckRef.current === token) return;
+    snapshotRecoveryCheckRef.current = token;
+    setSnapshotRecovery({ marker, state: 'checking' });
+    try {
+      const refreshed = await getRetrospectiveDetail(marker.retroId, { cache: 'no-store' });
+      if (currentRetroIdRef.current !== marker.retroId
+        || Number(useAuthStore.getState().user?.id || 0) !== marker.actorId) return;
+      if (refreshed.retrospective?.id !== marker.retroId || !Array.isArray(refreshed.snapshots)
+        || refreshed.snapshots.some((snapshot) => !Number.isSafeInteger(snapshot.id) || snapshot.id <= 0)) {
+        setSnapshotRecovery({ marker, state: 'unknown', message: '服务器返回的快照状态无法核对；本次不会自动重新生成。' });
+        return;
+      }
+      applyDetail(refreshed);
+      const currentIds = refreshed.snapshots.map((snapshot) => snapshot.id).sort((left, right) => left - right);
+      const beforeIds = [...marker.beforeSnapshotIds].sort((left, right) => left - right);
+      const changed = JSON.stringify(currentIds) !== JSON.stringify(beforeIds);
+      if (!clearRetroSnapshotMarker(marker)) {
+        setSnapshotRecovery({ marker, state: 'unknown', message: '服务器快照已读取，但本机核验记录尚未确认清除。为避免重复替换，操作继续锁定。' });
+        return;
+      }
+      setSnapshotRecovery(null);
+      addNotification(changed
+        ? { title: '指标快照已核实', message: '服务器快照已变化；本次不会自动重复生成。', type: 'success' }
+        : { title: '快照结果已核实未更新', message: '服务器快照与操作前一致；未自动重发，可确认后再生成。', type: 'warning' });
+    } catch (error) {
+      if (currentRetroIdRef.current !== marker.retroId
+        || Number(useAuthStore.getState().user?.id || 0) !== marker.actorId) return;
+      setSnapshotRecovery({ marker, state: 'unknown', message: `快照生成结果尚未确认：${toFriendlyRetroError(error)}。核实成功前不会再次生成。` });
+    } finally {
+      if (snapshotRecoveryCheckRef.current === token) snapshotRecoveryCheckRef.current = null;
+    }
+  }, [addNotification, applyDetail]);
+
+  useEffect(() => {
+    const entry = snapshotRecovery;
+    if (entry?.marker && entry.state === 'needs_check') void verifySnapshotRecovery(entry.marker);
+  }, [snapshotRecovery, verifySnapshotRecovery]);
+
+  const reconcileTransition = useCallback(async (recovery: RetroTransitionRecovery) => {
+    if (currentRetroIdRef.current !== recovery.retroId || !recovery.operation) return;
+    const actorId = recovery.marker?.actorId ?? currentActorId;
+    if (!Number.isSafeInteger(actorId) || actorId <= 0
+      || Number(useAuthStore.getState().user?.id || 0) !== actorId) return;
+    if (recovery.marker) {
+      const stored = readRetroTransitionRecovery(actorId, recovery.retroId);
+      if (stored.state !== 'valid' || stored.marker.requestId !== recovery.marker.requestId) {
+        if (currentRetroIdRef.current === recovery.retroId
+          && Number(useAuthStore.getState().user?.id || 0) === actorId) {
+          setTransitionRecovery({
+            ...recovery,
+            state: 'storage_error',
+            error: stored.state === 'valid'
+              ? '本机核验记录已被另一操作替换；请重新读取当前记录。'
+              : stored.state === 'none'
+                ? '本机核验记录已不存在；请重新读取当前记录。'
+                : stored.message,
+          });
+        }
+        return;
+      }
+      transitionRecoveryRequestRef.current = recovery.marker.requestId;
+    }
+    const token = `${actorId}:${recovery.retroId}:${recovery.marker?.requestId || `${recovery.operation}:readback`}`;
+    if (transitionRecoveryCheckRef.current === token) return;
+    transitionRecoveryCheckRef.current = token;
+    setTransitionRecovery({ ...recovery, state: 'checking', error: undefined });
+    const isCurrent = () => currentRetroIdRef.current === recovery.retroId
+      && Number(useAuthStore.getState().user?.id || 0) === actorId
+      && transitionRecoveryCheckRef.current === token
+      && (recovery.marker ? transitionRecoveryRequestRef.current === recovery.marker.requestId : transitionRecoveryRequestRef.current === null);
+    try {
+      const refreshed = await getRetrospectiveDetail(recovery.retroId, { cache: 'no-store' });
+      if (!isCurrent()) return;
+      if (refreshed.retrospective?.id !== recovery.retroId) {
+        setTransitionRecovery({ ...recovery, state: 'unknown', error: '回读结果与当前复盘不匹配' });
+        return;
+      }
+      applyDetail(refreshed);
+      const observedStatus = refreshed.retrospective.status;
+      if (recovery.marker && !clearRetroTransitionRecovery(recovery.marker)) {
+        setTransitionRecovery({
+          ...recovery,
+          state: 'unknown',
+          error: '服务器状态已读取，但本机核验记录尚未确认清除。为避免重复发布或归档，操作继续锁定。',
+        });
+        return;
+      }
+      if (recovery.marker && transitionRecoveryRequestRef.current === recovery.marker.requestId) {
+        transitionRecoveryRequestRef.current = null;
+      }
+      if (observedStatus === recovery.targetStatus) {
+        setTransitionRecovery(null);
+        addNotification({
+          title: recovery.operation === 'publish' ? '复盘已发布' : '复盘已归档',
+          message: '只读核实确认服务器已完成本次操作。',
+          type: 'success',
+        });
+        return;
+      }
+      if (observedStatus === recovery.originalStatus) {
+        setTransitionRecovery({ ...recovery, marker: null, state: 'unchanged', observedStatus, error: undefined });
+        addNotification({
+          title: recovery.operation === 'publish' ? '发布结果已核实' : '归档结果已核实',
+          message: `当前仍为${retroStatusLabels[recovery.originalStatus || 'draft']}，未自动重发。`,
+          type: 'warning',
+        });
+        return;
+      }
+      setTransitionRecovery({ ...recovery, marker: null, state: 'changed', observedStatus, error: undefined });
+      addNotification({
+        title: '复盘状态已变化',
+        message: `回读显示当前为${retroStatusLabels[observedStatus]}，本次操作不会自动重发。`,
+        type: 'warning',
+      });
+    } catch (error) {
+      if (!isCurrent()) return;
+      setTransitionRecovery({ ...recovery, state: 'unknown', error: toFriendlyRetroError(error) });
+    } finally {
+      if (transitionRecoveryCheckRef.current === token) transitionRecoveryCheckRef.current = null;
+    }
+  }, [addNotification, applyDetail, currentActorId]);
+
+  useEffect(() => {
+    const recovery = transitionRecovery;
+    if (transitionRecoveryReady && recovery?.marker && recovery.state === 'needs_check') {
+      void reconcileTransition(recovery);
+    }
+  }, [reconcileTransition, transitionRecovery, transitionRecoveryReady]);
+
+  const rereadTransitionRecoveryStorage = () => {
+    const result = readRetroTransitionRecovery(currentActorId, retroId);
+    if (result.state === 'valid') {
+      transitionRecoveryRequestRef.current = result.marker.requestId;
+      setTransitionRecovery({
+        marker: result.marker,
+        operation: result.marker.operation,
+        retroId: result.marker.retroId,
+        originalStatus: result.marker.originalStatus,
+        targetStatus: result.marker.targetStatus,
+        state: 'needs_check',
+      });
+    } else if (result.state === 'none') {
+      transitionRecoveryRequestRef.current = null;
+      setTransitionRecovery(null);
+    } else {
+      transitionRecoveryRequestRef.current = null;
+      setTransitionRecovery({ marker: null, operation: null, retroId, state: 'storage_error', error: result.message });
+    }
+  };
+
+  const verifyTransitionRecovery = async () => {
+    const recovery = transitionRecovery;
+    if (!recovery || recovery.state === 'checking') return;
+    if (recovery.state === 'storage_error') {
+      rereadTransitionRecoveryStorage();
+      return;
+    }
+    if (!beginMutation()) return;
+    try {
+      await reconcileTransition(recovery);
+    } finally {
+      endMutation();
+    }
+  };
+
   summaryUpdateRecoveryRef.current = summaryUpdateRecovery;
   const setSummaryUpdateRecovery = useCallback((entry: RetroSummaryUpdateRecoveryEntry | null) => {
     summaryUpdateRecoveryRef.current = entry;
@@ -421,7 +799,7 @@ export default function RetrospectiveDetailPage() {
           : 'rejected_refresh';
     summaryUpdateAutoRecoveryTokensRef.current.add(`${next.actorId}:${next.retroId}:${next.requestId}:${next.phase}`);
     try {
-      window.sessionStorage.setItem(retroSummaryUpdateStorageKey(marker.actorId, marker.retroId), JSON.stringify(next));
+      window.sessionStorage.setItem(retroSummaryUpdateStorageKey(marker.actorId, marker.retroId), serializeRecoveryMarker(next));
     } catch {
       // Keep the original request marker; a later mount will still perform only a read-only status check.
     }
@@ -548,10 +926,10 @@ export default function RetrospectiveDetailPage() {
     const entry = summaryUpdateRecoveryRef.current;
     if (!entry?.marker || (entry.state !== 'conflict_reedit' && entry.state !== 'superseded_reedit')) return;
     const nextMarker = { ...entry.marker, payload: { ...entry.marker.payload, summaryMd: value } };
-    try {
-      window.sessionStorage.setItem(retroSummaryUpdateStorageKey(nextMarker.actorId, nextMarker.retroId), JSON.stringify(nextMarker));
+    const result = writeRecoveryMarkerAndReadBack(retroSummaryUpdateStorageKey(nextMarker.actorId, nextMarker.retroId), nextMarker);
+    if (result === 'written') {
       setSummaryUpdateRecovery({ marker: nextMarker, state: entry.state });
-    } catch {
+    } else {
       setSummaryUpdateRecovery({ marker: nextMarker, state: 'storage_error' });
     }
   }, [setSummaryUpdateRecovery]);
@@ -560,15 +938,15 @@ export default function RetrospectiveDetailPage() {
     const entry = summaryUpdateRecoveryRef.current;
     const marker = entry?.marker;
     if (entry?.state !== 'storage_error' || !marker) return;
-    try {
-      window.sessionStorage.setItem(retroSummaryUpdateStorageKey(marker.actorId, marker.retroId), JSON.stringify(marker));
+    const result = writeRecoveryMarkerAndReadBack(retroSummaryUpdateStorageKey(marker.actorId, marker.retroId), marker);
+    if (result === 'written') {
       const state: RetrospectiveUpdateRecoveryState = marker.phase === 'conflict_detail'
         ? 'conflict_reedit'
         : marker.phase === 'processed_detail'
           ? 'superseded_reedit'
           : 'storage_error';
       setSummaryUpdateRecovery({ marker, state });
-    } catch {
+    } else {
       setSummaryUpdateRecovery({ marker, state: 'storage_error' });
     }
   }, [setSummaryUpdateRecovery]);
@@ -661,7 +1039,7 @@ export default function RetrospectiveDetailPage() {
           : 'conflict_refresh';
     actionUpdateAutoRecoveryTokensRef.current.add(actionUpdateRecoveryToken(next));
     try {
-      window.sessionStorage.setItem(retroActionUpdateStorageKey(marker.actorId, marker.actionId), JSON.stringify(next));
+      window.sessionStorage.setItem(retroActionUpdateStorageKey(marker.actorId, marker.actionId), serializeRecoveryMarker(next));
     } catch {
       // The original status marker is safe to retain: the server receipt is terminal and a reload will only read it again.
     }
@@ -922,13 +1300,52 @@ export default function RetrospectiveDetailPage() {
   }, [actionCreateRecoveryState, detail?.retrospective.id, pendingActionCreate, verifyPendingActionCreate]);
 
   const generateSnapshot = async () => {
-    if (!detail) return;
+    if (!detail || detail.retrospective.id !== retroId || snapshotRecovery) return;
     if (!beginMutation()) return;
+    let requestId = '';
     try {
-      applyDetail(await generateRetroSnapshot(detail.retrospective.id, { mode: 'replace' }));
-      addNotification({ title: '指标快照已更新', message: '已读取 XMT 系统内部数据', type: 'success' });
+      requestId = window.crypto.randomUUID();
+    } catch {
+      endMutation();
+      addNotification({ title: '无法安全生成快照', message: '当前浏览器无法生成核验编号，指标快照未提交。', type: 'error' });
+      return;
+    }
+    const marker: PendingRetroSnapshotRecovery = {
+      actorId: currentActorId,
+      retroId,
+      requestId,
+      beforeSnapshotIds: detail.snapshots.map((snapshot) => snapshot.id).sort((left, right) => left - right),
+    };
+    if (!Number.isSafeInteger(currentActorId) || currentActorId <= 0
+      || marker.beforeSnapshotIds.length > 200
+      || marker.beforeSnapshotIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+      || new Set(marker.beforeSnapshotIds).size !== marker.beforeSnapshotIds.length
+      || !persistRetroSnapshotMarker(marker)) {
+      setSnapshotRecovery({
+        marker: null,
+        state: 'storage_error',
+        message: '本机快照核验记录未能写入并回读确认。本次未发送生成请求，请检查浏览器存储后重试。',
+      });
+      endMutation();
+      return;
+    }
+    setSnapshotRecovery({ marker, state: 'posting' });
+    try {
+      const updated = await generateRetroSnapshot(marker.retroId, { mode: 'replace' });
+      if (currentRetroIdRef.current !== marker.retroId
+        || Number(useAuthStore.getState().user?.id || 0) !== marker.actorId) return;
+      applyDetail(updated);
+      if (clearRetroSnapshotMarker(marker)) {
+        setSnapshotRecovery(null);
+        addNotification({ title: '指标快照已更新', message: '已读取 XMT 系统内部数据', type: 'success' });
+      } else {
+        setSnapshotRecovery({ marker, state: 'needs_check' });
+        await verifySnapshotRecovery(marker);
+      }
     } catch (error) {
-      addNotification({ title: '生成快照失败', message: toFriendlyRetroError(error), type: 'error' });
+      setSnapshotRecovery({ marker, state: 'unknown', message: `快照生成结果尚未确认：${toFriendlyRetroError(error)}。核实成功前不会再次生成。` });
+      addNotification({ title: '生成快照结果待核实', message: `${toFriendlyRetroError(error)} 已锁定重复生成；正在只读核实服务器状态。`, type: 'warning' });
+      await verifySnapshotRecovery(marker);
     } finally {
       endMutation();
     }
@@ -936,6 +1353,7 @@ export default function RetrospectiveDetailPage() {
 
   const handleGenerateSnapshot = () => {
     if (!detail) return;
+    if (snapshotRecovery) return;
     if (detail.snapshots.length > 0) {
       setConfirmation({ kind: 'replace-snapshot' });
       return;
@@ -975,9 +1393,15 @@ export default function RetrospectiveDetailPage() {
       payload,
       phase: 'status',
     };
-    try {
-      window.sessionStorage.setItem(retroSummaryUpdateStorageKey(currentActorId, marker.retroId), JSON.stringify(marker));
-    } catch {
+    const markerWrite = writeRecoveryMarkerAndReadBack(retroSummaryUpdateStorageKey(currentActorId, marker.retroId), marker);
+    if (markerWrite !== 'written') {
+      const recoverableEntry = existingRecovery?.marker
+        ? { marker: existingRecovery.marker, state: 'storage_error' as const }
+        : markerWrite === 'other'
+          ? { marker, state: 'storage_error' as const }
+          : null;
+      if (recoverableEntry) setSummaryUpdateRecovery(recoverableEntry);
+      setSummaryActionError('恢复记录写入后未能通过校验，本次复盘结论未提交。');
       endMutation();
       addNotification({ title: '无法安全保存', message: '浏览器无法保存本次恢复记录，复盘结论未提交。', type: 'error' });
       return;
@@ -1025,18 +1449,106 @@ export default function RetrospectiveDetailPage() {
     setConfirmation({ kind: 'publish' });
   };
 
-  const publish = async () => {
-    if (!detail) return;
-    if (!beginMutation()) return;
+  const executeTransition = async (operation: RetroTransitionOperation) => {
+    if (!detail || !transitionRecoveryReady) return;
+    const retro = detail.retrospective;
+    const unresolved = transitionRecovery?.retroId === retro.id
+      && ['needs_check', 'posting', 'checking', 'unknown', 'storage_error'].includes(transitionRecovery.state);
+    if (unresolved || !beginMutation()) return;
+    const actorId = Number(useAuthStore.getState().user?.id || 0);
+    const originalStatus: RetrospectiveStatus = operation === 'publish' ? 'draft' : 'published';
+    const targetStatus: RetrospectiveStatus = operation === 'publish' ? 'published' : 'archived';
+    let requestId = '';
     try {
-      applyDetail(await publishRetrospective(detail.retrospective.id));
-      addNotification({ title: '复盘已发布', message: '可进入归档前观察和行动项跟进', type: 'success' });
+      requestId = window.crypto.randomUUID();
+    } catch {
+      setTransitionRecovery({
+        marker: null,
+        operation,
+        retroId: retro.id,
+        originalStatus,
+        targetStatus,
+        state: 'storage_error',
+        error: '当前浏览器无法生成核验编号，本次未提交发布或归档。',
+      });
+      endMutation();
+      return;
+    }
+    const marker: PendingRetroTransitionRecovery = {
+      version: 1,
+      actorId,
+      retroId: retro.id,
+      operation,
+      originalStatus,
+      targetStatus,
+      requestId,
+    };
+    if (!Number.isSafeInteger(actorId) || actorId <= 0 || !persistRetroTransitionRecovery(marker)) {
+      setTransitionRecovery({
+        marker: null,
+        operation,
+        retroId: retro.id,
+        originalStatus,
+        targetStatus,
+        state: 'storage_error',
+        error: '本机发布/归档核验记录未能写入并回读确认，本次没有发送请求。请恢复浏览器存储后重新读取。',
+      });
+      endMutation();
+      return;
+    }
+    transitionRecoveryRequestRef.current = marker.requestId;
+    const recovery: RetroTransitionRecovery = {
+      marker,
+      operation,
+      retroId: retro.id,
+      originalStatus,
+      targetStatus,
+      state: 'posting',
+    };
+    setTransitionRecovery(recovery);
+    try {
+      const updated = operation === 'publish'
+        ? await publishRetrospective(retro.id)
+        : await archiveRetrospective(retro.id);
+      if (currentRetroIdRef.current !== marker.retroId
+        || Number(useAuthStore.getState().user?.id || 0) !== marker.actorId
+        || transitionRecoveryRequestRef.current !== marker.requestId) return;
+      applyDetail(updated);
+      if (clearRetroTransitionRecovery(marker)) {
+        transitionRecoveryRequestRef.current = null;
+        setTransitionRecovery(null);
+        addNotification({
+          title: operation === 'publish' ? '复盘已发布' : '复盘已归档',
+          message: operation === 'publish' ? '可进入归档前观察和行动项跟进' : '详情已刷新为只读状态',
+          type: 'success',
+        });
+      } else {
+        await reconcileTransition({ ...recovery, state: 'unknown', error: '本机核验记录尚未确认清除。' });
+      }
     } catch (error) {
-      addNotification({ title: '发布复盘失败', message: toFriendlyRetroError(error), type: 'error' });
+      if (currentRetroIdRef.current !== marker.retroId
+        || Number(useAuthStore.getState().user?.id || 0) !== marker.actorId
+        || transitionRecoveryRequestRef.current !== marker.requestId) return;
+      const status = Number((error as { status?: number } | null)?.status || 0);
+      if (status === 0 || status === 408 || status === 409 || status === 429 || status >= 500) {
+        await reconcileTransition({ ...recovery, state: 'unknown', error: toFriendlyRetroError(error) });
+      } else if (clearRetroTransitionRecovery(marker)) {
+        transitionRecoveryRequestRef.current = null;
+        setTransitionRecovery(null);
+        addNotification({
+          title: operation === 'publish' ? '发布复盘失败' : '归档复盘失败',
+          message: toFriendlyRetroError(error),
+          type: 'error',
+        });
+      } else {
+        await reconcileTransition({ ...recovery, state: 'unknown', error: toFriendlyRetroError(error) });
+      }
     } finally {
       endMutation();
     }
   };
+
+  const publish = () => executeTransition('publish');
 
   const handleArchive = () => {
     if (!detail) return;
@@ -1049,18 +1561,7 @@ export default function RetrospectiveDetailPage() {
     setConfirmation({ kind: 'archive' });
   };
 
-  const archive = async () => {
-    if (!detail) return;
-    if (!beginMutation()) return;
-    try {
-      applyDetail(await archiveRetrospective(detail.retrospective.id));
-      addNotification({ title: '复盘已归档', message: '详情已刷新为只读状态', type: 'success' });
-    } catch (error) {
-      addNotification({ title: '归档复盘失败', message: toFriendlyRetroError(error), type: 'error' });
-    } finally {
-      endMutation();
-    }
-  };
+  const archive = () => executeTransition('archive');
 
   const handleCreateAction = async (payload: CreateRetroActionPayload) => {
     if (!detail || pendingActionCreate || actionCreateRecoveryState === 'storage_error' || !beginMutation()) return false;
@@ -1089,12 +1590,22 @@ export default function RetrospectiveDetailPage() {
         dueDate: payload.dueDate ?? null,
       },
     };
-    try {
-      window.sessionStorage.setItem(retroActionCreateStorageKey(actorId, marker.retroId), JSON.stringify(marker));
-    } catch {
+    const markerWrite = writeRecoveryMarkerAndReadBack(retroActionCreateStorageKey(actorId, marker.retroId), marker);
+    if (markerWrite !== 'written') {
       endMutation();
-      setActionCreateRecoveryState('storage_error');
-      addNotification({ title: '无法安全提交', message: '浏览器无法保存本次恢复标记，行动项未提交。', type: 'error' });
+      if (markerWrite === 'other') {
+        setPendingActionCreate(marker);
+        setActionCreateRecoveryState('storage_error');
+      } else {
+        setActionCreateRecoveryState(null);
+      }
+      addNotification({
+        title: '无法安全提交',
+        message: markerWrite === 'unavailable'
+          ? '浏览器无法保存本次恢复标记，行动项未提交。'
+          : '恢复记录写入后未能通过校验，行动项未提交。',
+        type: 'error',
+      });
       return false;
     }
     setPendingActionCreate(marker);
@@ -1186,11 +1697,17 @@ export default function RetrospectiveDetailPage() {
       phase: 'status',
       resetTableDraftOnSuccess: source === 'table' || existingRecovery?.state === 'conflict_reedit',
     };
-    try {
-      window.sessionStorage.setItem(retroActionUpdateStorageKey(actorId, actionId), JSON.stringify(marker));
-    } catch {
+    const markerWrite = writeRecoveryMarkerAndReadBack(retroActionUpdateStorageKey(actorId, actionId), marker);
+    if (markerWrite !== 'written') {
       endMutation();
-      addNotification({ title: '无法安全提交', message: '浏览器无法保存本次恢复记录，行动项未提交。', type: 'error' });
+      if (markerWrite === 'other') setActionUpdateRecovery(marker, 'storage_error');
+      addNotification({
+        title: '无法安全提交',
+        message: markerWrite === 'unavailable'
+          ? '浏览器无法保存本次恢复记录，行动项未提交。'
+          : '恢复记录写入后未能通过校验，行动项未提交。',
+        type: 'error',
+      });
       return false;
     }
     setActionUpdateRecovery(marker, 'posting');
@@ -1335,6 +1852,64 @@ export default function RetrospectiveDetailPage() {
         </div>
       ) : null}
 
+      {transitionRecovery?.retroId === retroId ? (
+        <div
+          role={transitionRecovery.state === 'checking' ? 'status' : 'alert'}
+          className="flex flex-col gap-3 rounded-panel border border-studio-border-soft bg-studio-surface-soft p-4 text-sm text-studio-text-primary sm:flex-row sm:items-center sm:justify-between"
+          data-testid="retro-transition-recovery"
+        >
+          <div>
+            <p className="font-semibold">{transitionRecovery.state === 'checking'
+              ? '正在只读核实复盘状态'
+              : transitionRecovery.state === 'posting'
+                ? '正在提交复盘操作'
+                : transitionRecovery.state === 'needs_check'
+                  ? '正在恢复上次复盘操作'
+                  : transitionRecovery.state === 'storage_error'
+                    ? '本机复盘核验记录无法读取'
+              : transitionRecovery.state === 'unchanged'
+                ? `${transitionRecovery.operation === 'publish' ? '发布' : '归档'}结果已确认未完成`
+                : transitionRecovery.state === 'changed'
+                  ? '复盘状态已被其他操作改变'
+                  : '复盘操作结果暂未确认'}</p>
+            <p className="mt-1 text-studio-text-secondary">{transitionRecovery.state === 'checking'
+              ? '不会再次提交发布或归档请求。'
+              : transitionRecovery.state === 'posting'
+                ? '若提交结果不明，将先只读核实，不会自动重复提交。'
+                : transitionRecovery.state === 'needs_check'
+                  ? '正在只读读取服务器状态，不会自动重复提交。'
+                  : transitionRecovery.state === 'storage_error'
+                    ? transitionRecovery.error || '本机核验记录不可用，发布和归档暂时锁定。'
+              : transitionRecovery.state === 'unchanged'
+                ? `只读回读确认仍为${retroStatusLabels[transitionRecovery.originalStatus || 'draft']}。如需重试，请重新确认。`
+                : transitionRecovery.state === 'changed'
+                  ? `只读回读确认当前为${transitionRecovery.observedStatus ? retroStatusLabels[transitionRecovery.observedStatus] : '其他状态'}。请核对当前状态后再操作。`
+                  : `尚未读取到可信的当前状态${transitionRecovery.error ? `：${transitionRecovery.error}` : ''}。为避免重复操作，发布和归档暂时锁定。`}</p>
+          </div>
+          {transitionRecovery.state === 'storage_error' ? (
+            <ActionButton onClick={rereadTransitionRecoveryStorage} disabled={working}>
+              重新读取本机记录
+            </ActionButton>
+          ) : null}
+          {transitionRecovery.state === 'unchanged' && transitionRecovery.operation ? (
+            <ActionButton
+              variant="primary"
+              onClick={() => {
+                if (transitionRecovery.operation === 'publish') handlePublish();
+                else handleArchive();
+              }}
+            >
+              重新确认{transitionRecovery.operation === 'publish' ? '发布' : '归档'}
+            </ActionButton>
+          ) : null}
+          {(transitionRecovery.state === 'unknown' || transitionRecovery.state === 'changed') && transitionRecovery.operation ? (
+            <ActionButton onClick={() => void verifyTransitionRecovery()} disabled={working}>
+              只读重新核实状态
+            </ActionButton>
+          ) : null}
+        </div>
+      ) : null}
+
       <RetroAssigneeDirectoryNotice
         status={assigneeDirectory.status}
         error={assigneeDirectory.error}
@@ -1433,11 +2008,29 @@ export default function RetrospectiveDetailPage() {
 
       <div data-testid="retrospective-detail-columns" className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-5">
+          {snapshotRecovery ? (
+            <div
+              role={snapshotRecovery.state === 'unknown' || snapshotRecovery.state === 'storage_error' ? 'alert' : 'status'}
+              aria-live="polite"
+              aria-atomic="true"
+              className="flex flex-col gap-3 rounded-panel border border-studio-amber/25 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between"
+            >
+              <p>{snapshotRecovery.message || (snapshotRecovery.state === 'posting'
+                ? '正在生成指标快照；若结果不明，将先只读核实，不会自动重复生成。'
+                : '正在只读核实上次指标快照生成结果；不会自动重复生成。')}</p>
+              {snapshotRecovery.marker && snapshotRecovery.state !== 'posting' && snapshotRecovery.state !== 'checking' ? (
+                <ActionButton onClick={() => { void verifySnapshotRecovery(snapshotRecovery.marker!); }}>
+                  只读核实快照状态
+                </ActionButton>
+              ) : null}
+            </div>
+          ) : null}
           <RetroMetricSnapshotPanel
             snapshots={snapshots}
             status={retrospective.status}
             canGenerate={permissions.canEdit}
             loading={working}
+            mutationBlocked={snapshotRecovery !== null}
             onGenerate={handleGenerateSnapshot}
           />
           {summaryActionError && summaryIsDirty ? (
@@ -1515,7 +2108,8 @@ export default function RetrospectiveDetailPage() {
           <RetroPublishPanel
             retrospective={retrospective}
             permissions={permissions}
-            loading={working}
+            loading={working || !transitionRecoveryReady || transitionRecovery?.retroId === retrospective.id
+              && ['needs_check', 'posting', 'checking', 'unknown', 'storage_error'].includes(transitionRecovery.state)}
             onPublish={handlePublish}
             onArchive={handleArchive}
           />

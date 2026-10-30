@@ -42,6 +42,35 @@ const originalProduction: FixtureProduction = {
   created_at: '2026-10-09 09:00:00',
   updated_at: '2026-10-09 09:00:00',
 };
+
+async function visibleTextContrastRatio(locator: import('playwright').Locator) {
+  return locator.evaluate((element) => {
+    const parseColor = (raw: string) => {
+      const srgb = raw.match(/^color\(\s*srgb\s+([^\s/]+)\s+([^\s/]+)\s+([^\s/]+)(?:\s*\/\s*([^\s)]+))?\s*\)/i);
+      if (srgb) return [...srgb.slice(1, 4).map((value) => Number(value) * 255), srgb[4] === undefined ? 1 : Number(srgb[4])];
+      const rgb = raw.match(/^rgba?\((.*)\)$/i)?.[1].match(/[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:e[-+]?\d+)?/gi)?.map(Number) || [];
+      return rgb.length >= 3 ? [...rgb.slice(0, 3), rgb[3] ?? 1] : null;
+    };
+    const luminance = (channels: number[]) => {
+      const linear = channels.map((channel) => channel / 255 <= 0.03928 ? channel / 255 / 12.92 : ((channel / 255 + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const backgrounds: string[] = [];
+    for (let current: Element | null = element; current; current = current.parentElement) backgrounds.push(getComputedStyle(current).backgroundColor);
+    const foreground = parseColor(getComputedStyle(element).color);
+    if (!foreground) return 0;
+    const background = [255, 255, 255];
+    for (const raw of backgrounds.reverse()) {
+      const layer = parseColor(raw);
+      if (!layer) continue;
+      for (let index = 0; index < 3; index += 1) background[index] = layer[index] * layer[3] + background[index] * (1 - layer[3]);
+    }
+    const text = luminance(foreground);
+    const surface = luminance(background);
+    return (Math.max(text, surface) + 0.05) / (Math.min(text, surface) + 0.05);
+  });
+}
+
 let productions: FixtureProduction[] = [{ ...originalProduction }];
 let createWrites = 0;
 const productionCreateRequests = new Map<string, { fingerprint: string; productionId: number }>();
@@ -309,6 +338,38 @@ try {
   assert.ok(Math.max(...desktopProductionActions.map((action) => action.top)) - Math.min(...desktopProductionActions.map((action) => action.top)) <= 1,
     `desktop production actions remain on one line: ${JSON.stringify(desktopProductionActions)}`);
 
+  const lightTitleButton = page.getByRole('button', { name: originalProduction.topic_title, exact: true });
+  const lightTitle = lightTitleButton.locator('span');
+  const lightTitleBeforeHover = await lightTitle.evaluate((element) => getComputedStyle(element).color);
+  await lightTitleButton.hover();
+  const lightTitleAfterHover = await lightTitle.evaluate((element) => getComputedStyle(element).color);
+  assert.notEqual(lightTitleAfterHover, lightTitleBeforeHover, 'the production title changes color on hover in the light theme');
+  assert(await visibleTextContrastRatio(lightTitle) >= 4.5, 'the production title remains readable on hover in the light theme');
+  await page.mouse.move(0, 0);
+
+  const darkContext = await browser.newContext({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' });
+  const darkPage = await darkContext.newPage();
+  await darkPage.goto(`${base}/__qa-production?theme=dark`);
+  await darkPage.getByRole('heading', { name: '创作管理' }).waitFor();
+  const darkTitleButton = darkPage.getByRole('button', { name: originalProduction.topic_title, exact: true });
+  const darkTitle = darkTitleButton.locator('span');
+  const darkTitleBeforeHover = await darkTitle.evaluate((element) => getComputedStyle(element).color);
+  await darkTitleButton.hover();
+  const darkTitleAfterHover = await darkTitle.evaluate((element) => getComputedStyle(element).color);
+  assert.notEqual(darkTitleAfterHover, darkTitleBeforeHover, 'the production title changes color on hover in the dark theme');
+  assert(await visibleTextContrastRatio(darkTitle) >= 4.5, 'the production title remains readable on hover in the dark theme');
+  const titleClickRequests: string[] = [];
+  darkPage.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith('/api/')) titleClickRequests.push(`${request.method()} ${url.pathname}`);
+  });
+  const mutationsBeforeTitleClick = createWrites + updateWrites;
+  await darkTitleButton.click();
+  await darkPage.waitForURL((url) => url.pathname === `/production/${originalProduction.id}`);
+  assert(titleClickRequests.length > 0 && titleClickRequests.every((request) => request.startsWith('GET ')), 'opening the title only reads the selected production');
+  assert.equal(createWrites + updateWrites, mutationsBeforeTitleClick, 'opening the production title does not create or update a record');
+  await darkContext.close();
+
   type HeldProductionRead = { page: number; respond: (status: number, data?: FixtureProduction[], total?: number) => Promise<void> };
   const heldProductionReads: HeldProductionRead[] = [];
   const heldReadWaiters: Array<{ count: number; resolve: () => void }> = [];
@@ -568,9 +629,20 @@ try {
   await page.setViewportSize({ width: 1440, height: 960 });
 
   await page.getByRole('button', { name: '添加创作' }).click();
-  await page.locator('select').first().selectOption(String(topics[0].id));
-  await page.getByPlaceholder('如：v1.0').fill('v1.1');
-  await page.getByPlaceholder('请输入创作内容描述').fill('通过隔离浏览器验证的新增稿件。');
+  const createProductionDialog = page.getByRole('dialog', { name: '添加创作记录' });
+  const createTopicSelect = createProductionDialog.getByLabel('关联选题', { exact: true });
+  assert.equal(await createTopicSelect.getAttribute('id'), 'production-create-topic', 'create topic selector has a stable id');
+  assert.equal(await createTopicSelect.getAttribute('name'), 'topic_id', 'create topic selector has a stable form name');
+  assert.equal(await createTopicSelect.getAttribute('required'), '', 'create topic selector exposes its required state');
+  await createTopicSelect.selectOption(String(topics[0].id));
+  const createVersion = createProductionDialog.getByLabel('版本', { exact: true });
+  assert.equal(await createVersion.getAttribute('name'), 'version', 'create version field has a stable form name');
+  await createVersion.fill('v1.1');
+  const createContent = createProductionDialog.getByLabel('内容描述', { exact: true });
+  assert.equal(await createContent.getAttribute('name'), 'content', 'create content field has a stable form name');
+  await createContent.fill('通过隔离浏览器验证的新增稿件。');
+  const createStatus = createProductionDialog.getByLabel('状态', { exact: true });
+  assert.equal(await createStatus.getAttribute('name'), 'status', 'create status selector has a stable form name');
   await page.route('**/api/workflow/production**', holdProductionListRoute);
   nextCreatePostGate = new Promise<void>((resolve) => { releaseCreatePost = resolve; });
   const createReadStart = heldProductionReads.length;
@@ -622,6 +694,10 @@ try {
   const darkEditDialog = page.getByRole('dialog', { name: '编辑创作记录' });
   await darkEditDialog.waitFor();
   assert.equal(await darkEditDialog.getAttribute('aria-modal'), 'true', 'edit modal exposes dialog semantics');
+  const editTopicSelect = darkEditDialog.getByLabel('关联选题', { exact: true });
+  assert.equal(await editTopicSelect.getAttribute('id'), 'production-edit-topic', 'edit topic selector has a stable id');
+  assert.equal(await editTopicSelect.getAttribute('name'), 'topic_id', 'edit topic selector has a stable form name');
+  assert.equal(await editTopicSelect.getAttribute('required'), '', 'edit topic selector exposes its required state');
   const darkEditLayout = await page.locator('.xmt-overlay > div').first().evaluate((element) => {
     const rect = element.getBoundingClientRect();
     const probe = document.createElement('span');
@@ -634,8 +710,12 @@ try {
   assert.ok(darkEditLayout.left >= 0 && darkEditLayout.right <= 390 && darkEditLayout.top >= 0 && darkEditLayout.bottom <= 844, `dark edit modal stays within the 390x844 viewport: ${JSON.stringify(darkEditLayout)}`);
   assert.equal(darkEditLayout.surface, darkEditLayout.tokenSurface, 'edit modal surface follows the dark Studio token');
   await page.screenshot({ path: '/tmp/xmt-production-edit-modal-dark-390.png' });
-  await page.getByPlaceholder('如：v1.0').fill('v2.0');
-  await page.getByPlaceholder('请输入创作内容描述').fill('通过隔离浏览器验证的已保存修订。');
+  const editVersion = darkEditDialog.getByLabel('版本', { exact: true });
+  assert.equal(await editVersion.getAttribute('name'), 'version', 'edit version field has a stable form name');
+  await editVersion.fill('v2.0');
+  const editContent = darkEditDialog.getByLabel('内容描述', { exact: true });
+  assert.equal(await editContent.getAttribute('name'), 'content', 'edit content field has a stable form name');
+  await editContent.fill('通过隔离浏览器验证的已保存修订。');
   const updateRequest = page.waitForResponse((response) => response.url().endsWith(`/api/workflow/production/${originalProduction.id}`) && response.request().method() === 'PUT' && response.status() === 200);
   const updateRefreshFailures = Promise.all([
     page.waitForResponse((response) => response.url().includes('/api/workflow/production?') && response.request().method() === 'GET' && response.status() === 503),
@@ -681,9 +761,11 @@ try {
   await ambiguousEditRow.getByTitle('编辑记录').click();
   const ambiguousEditDialog = page.getByRole('dialog', { name: '编辑创作记录' });
   await ambiguousEditDialog.waitFor();
-  await page.getByPlaceholder('如：v1.0').fill('v3.0');
-  await page.getByPlaceholder('请输入创作内容描述').fill('已提交但响应丢失的列表编辑');
-  await ambiguousEditDialog.locator('select').last().selectOption('review');
+  await ambiguousEditDialog.getByLabel('版本', { exact: true }).fill('v3.0');
+  await ambiguousEditDialog.getByLabel('内容描述', { exact: true }).fill('已提交但响应丢失的列表编辑');
+  const ambiguousEditStatus = ambiguousEditDialog.getByLabel('状态', { exact: true });
+  assert.equal(await ambiguousEditStatus.getAttribute('name'), 'status', 'edit status selector has a stable form name');
+  await ambiguousEditStatus.selectOption('review');
   await page.request.post(`${base}/__qa-production/commit-next-production-update-and-fail`);
   await page.request.post(`${base}/__qa-production/fail-next-production-list-read`);
   const writesBeforeCommittedUpdate = updateWrites;
@@ -732,8 +814,8 @@ try {
   await uncertainEditRow.getByTitle('编辑记录').click();
   const uncertainEditDialog = page.getByRole('dialog', { name: '编辑创作记录' });
   await uncertainEditDialog.waitFor();
-  await page.getByPlaceholder('如：v1.0').fill('v4.0');
-  await page.getByPlaceholder('请输入创作内容描述').fill('未确认后等待明确重试的列表编辑');
+  await uncertainEditDialog.getByLabel('版本', { exact: true }).fill('v4.0');
+  await uncertainEditDialog.getByLabel('内容描述', { exact: true }).fill('未确认后等待明确重试的列表编辑');
   await page.request.post(`${base}/__qa-production/fail-next-production-update-without-commit`);
   await page.request.post(`${base}/__qa-production/fail-next-production-detail-read`);
   const writesBeforeFailedReadback = updateWrites;
@@ -796,8 +878,8 @@ try {
   assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-update-pending:v1:user:96')), null,
     'a read-back confirming the original legacy row clears the recovery marker');
   await page.getByRole('dialog', { name: '编辑创作记录' }).waitFor();
-  assert.equal(await page.getByPlaceholder('如：v1.0').inputValue(), 'v4.0', 'an unchanged readback restores the requested version');
-  assert.equal(await page.getByPlaceholder('请输入创作内容描述').inputValue(), '未确认后等待明确重试的列表编辑', 'an unchanged readback restores the edit body');
+  assert.equal(await uncertainEditDialog.getByLabel('版本', { exact: true }).inputValue(), 'v4.0', 'an unchanged readback restores the requested version');
+  assert.equal(await uncertainEditDialog.getByLabel('内容描述', { exact: true }).inputValue(), '未确认后等待明确重试的列表编辑', 'an unchanged readback restores the edit body');
   assert.equal(updateWrites, writesBeforeFailedReadback + 1, 'read-only verification does not resubmit the update');
   assert.equal(await page.getByRole('button', { name: '添加创作', exact: true, includeHidden: true }).isDisabled(), false,
     'writes unlock after read-back confirms the original record is unchanged');
@@ -814,8 +896,8 @@ try {
   await changedEditRow.getByTitle('编辑记录').click();
   const changedEditDialog = page.getByRole('dialog', { name: '编辑创作记录' });
   await changedEditDialog.waitFor();
-  await page.getByPlaceholder('如：v1.0').fill('v5.0');
-  await page.getByPlaceholder('请输入创作内容描述').fill('保留待核对的第三方变化前草稿');
+  await changedEditDialog.getByLabel('版本', { exact: true }).fill('v5.0');
+  await changedEditDialog.getByLabel('内容描述', { exact: true }).fill('保留待核对的第三方变化前草稿');
   await page.request.post(`${base}/__qa-production/commit-next-production-update-and-fail`);
   await page.request.post(`${base}/__qa-production/change-next-production-detail-read`, {
     data: { operator_id: 97, status: 'rejected', content: '第三方最新正文', updated_at: '2026-10-09 11:00:00' },
@@ -832,9 +914,10 @@ try {
   assert.equal(updateWrites, writesBeforeThirdPartyChange + 1, 'a changed server record does not trigger a second PUT');
   assert.equal(await page.getByRole('button', { name: '添加创作' }).isDisabled(), true, 'third-party changes keep create writes locked');
   await page.getByRole('button', { name: '保留草稿并基于最新记录继续' }).click();
-  await page.getByRole('dialog', { name: '编辑创作记录' }).waitFor();
-  assert.equal(await page.getByPlaceholder('请输入创作内容描述').inputValue(), '保留待核对的第三方变化前草稿', 'explicit conflict resolution preserves the local draft');
-  assert.equal(await page.getByPlaceholder('如：v1.0').inputValue(), 'v5.0', 'explicit conflict resolution preserves the requested version');
+  const resolvedEditDialog = page.getByRole('dialog', { name: '编辑创作记录' });
+  await resolvedEditDialog.waitFor();
+  assert.equal(await resolvedEditDialog.getByLabel('内容描述', { exact: true }).inputValue(), '保留待核对的第三方变化前草稿', 'explicit conflict resolution preserves the local draft');
+  assert.equal(await resolvedEditDialog.getByLabel('版本', { exact: true }).inputValue(), 'v5.0', 'explicit conflict resolution preserves the requested version');
   assert.equal(updateWrites, writesBeforeThirdPartyChange + 1, 'choosing to preserve the draft does not itself write');
   assert.equal(await page.getByRole('button', { name: '添加创作', exact: true, includeHidden: true }).isDisabled(), false,
     'explicit resolution releases the write lock');
@@ -842,9 +925,10 @@ try {
 
   const fillCreateForm = async (version: string, content: string) => {
     await page.getByRole('button', { name: '添加创作', exact: false }).click();
-    await page.locator('select').first().selectOption(String(topics[0].id));
-    await page.getByPlaceholder('如：v1.0').fill(version);
-    await page.getByPlaceholder('请输入创作内容描述').fill(content);
+    const createDialog = page.getByRole('dialog', { name: '添加创作记录' });
+    await createDialog.getByLabel('关联选题', { exact: true }).selectOption(String(topics[0].id));
+    await createDialog.getByLabel('版本', { exact: true }).fill(version);
+    await createDialog.getByLabel('内容描述', { exact: true }).fill(content);
   };
 
   const committedCreateCount = createWrites;

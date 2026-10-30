@@ -110,7 +110,8 @@ export default function RetroActionDetailDrawer({
   return (
     <BaseModal
       open={Boolean(action)}
-          onClose={() => { if (!loading) onClose(); }}
+      onClose={() => { if (!loading) onClose(); }}
+      closeOnEscape={!loading}
       size="xl"
       title="行动项详情"
       description={action.retroTitle || `复盘 #${action.retroId}`}

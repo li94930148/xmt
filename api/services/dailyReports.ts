@@ -13,8 +13,9 @@ import { createMessage } from '../utils/messageHelper.js';
 import { apiLogger } from '../observability/logger.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-// 已提交日报允许本人重新编辑并再次提交，保留审核/归档记录不被覆盖。
+// 已提交日报允许本人先保存为草稿；直接提交仅接受草稿或驳回状态。
 const EDITABLE_STATUSES: DailyReportStatus[] = ['draft', 'rejected', 'submitted'];
+const SUBMITTABLE_STATUSES: DailyReportStatus[] = ['draft', 'rejected'];
 const VALID_STATUSES: DailyReportStatus[] = ['draft', 'submitted', 'approved', 'rejected', 'archived'];
 const VALID_RISK_LEVELS: DailyReportRiskLevel[] = ['normal', 'warning', 'blocked'];
 const MAX_ARCHIVE_DAYS = 31;
@@ -486,24 +487,26 @@ export async function saveDailyReportDraft(user: User | undefined, input: SaveDa
 export async function autosaveDailyReport(user: User | undefined, input: SaveDailyReportDraftInput) {
   assertAuthenticated(user);
   const reportDate = parseDate(input.reportDate);
-  const existing = await queryOne<DailyReportRow>(
-    `SELECT * FROM daily_reports WHERE user_id = ? AND report_date = ?`, [user.id, reportDate]
-  );
-  if (!existing) {
-    return { saved: false, report: null, message: '请先创建日报草稿' };
-  }
-  if (!EDITABLE_STATUSES.includes(String(existing.status) as DailyReportStatus)) {
-    throw new DailyReportServiceError(409, 'REPORT_LOCKED', '当前日报状态不可自动保存');
-  }
-
   const manualSummary = String(input.manualSummaryMd || '').trim();
   const riskLevel = parseRiskLevel(input.riskLevel);
   const items = (input.items || []).map(normalizeItemInput);
-  await runInTransaction(async (tx) => {
-    await tx.execute(
-      `UPDATE daily_reports SET manual_summary_md = ?, risk_level = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?`,
-      [manualSummary, riskLevel, Number(existing.id)]
+  const reportId = await runInTransaction(async (tx) => {
+    const existing = await tx.queryOne<{ id: number; status: string }>(
+      `SELECT id, status FROM daily_reports WHERE user_id = ? AND report_date = ?`, [user.id, reportDate]
     );
+    if (!existing) return null;
+    if (existing.status !== 'draft') {
+      throw new DailyReportServiceError(409, 'REPORT_LOCKED', '当前日报状态不可自动保存');
+    }
+
+    const changed = await tx.execute(
+      `UPDATE daily_reports SET manual_summary_md = ?, risk_level = ?, updated_at = datetime('now', '+8 hours')
+       WHERE id = ? AND user_id = ? AND status = 'draft'`,
+      [manualSummary, riskLevel, Number(existing.id), user.id],
+    );
+    if (changed !== 1) {
+      throw new DailyReportServiceError(409, 'REPORT_LOCKED', '当前日报状态不可自动保存');
+    }
     await tx.execute(`DELETE FROM daily_report_items WHERE report_id = ?`, [Number(existing.id)]);
     for (const item of items) {
       await tx.execute(
@@ -512,10 +515,15 @@ export async function autosaveDailyReport(user: User | undefined, input: SaveDai
         [Number(existing.id), item.sectionKey, item.title || null, item.contentMd || null, item.sortOrder || 0, stringifyJson(item.meta)]
       );
     }
+    return Number(existing.id);
   });
+
+  if (reportId === null) {
+    return { saved: false, report: null, message: '请先创建日报草稿' };
+  }
   const row = await queryOne<DailyReportRow>(
     `SELECT r.*, u.name AS user_name, u.username FROM daily_reports r LEFT JOIN users u ON u.id = r.user_id WHERE r.id = ?`,
-    [Number(existing.id)]
+    [reportId]
   );
   return { saved: true, report: await formatReport(row), message: '已保存' };
 }
@@ -529,7 +537,7 @@ export async function submitDailyReport(user: User | undefined, reportId: number
   if (Number(row.user_id) !== user.id) {
     throw new DailyReportServiceError(403, 'FORBIDDEN', '只能提交自己的日报');
   }
-  if (!EDITABLE_STATUSES.includes(String(row.status) as DailyReportStatus)) {
+  if (!SUBMITTABLE_STATUSES.includes(String(row.status) as DailyReportStatus)) {
     throw new DailyReportServiceError(409, 'REPORT_LOCKED', '只有草稿或驳回状态可以提交');
   }
 

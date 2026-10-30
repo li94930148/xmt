@@ -71,6 +71,7 @@ html.dark,
 
   --xmt-glow-primary: 0 0 0 1px rgba(107, 140, 255, 0.18), 0 12px 40px rgba(107, 140, 255, 0.16);
   --xmt-glow-cyan: 0 0 0 1px rgba(92, 225, 230, 0.14), 0 12px 36px rgba(92, 225, 230, 0.12);
+  --xmt-glow-coral: 0 0 18px rgb(var(--xmt-coral-rgb) / 0.28);
   --xmt-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 18px 48px rgba(0, 0, 0, 0.36);
   --xmt-floating-shadow: 0 24px 64px rgba(0, 0, 0, 0.44);
   --xmt-modal-shadow: 0 32px 96px rgba(0, 0, 0, 0.52);
@@ -221,6 +222,7 @@ html.light,
 
   --xmt-glow-primary: 0 0 0 1px rgba(61, 90, 254, 0.10), 0 14px 36px rgba(15, 23, 42, 0.08);
   --xmt-glow-cyan: 0 0 0 1px rgba(8, 145, 178, 0.10), 0 14px 32px rgba(15, 23, 42, 0.06);
+  --xmt-glow-coral: 0 0 18px rgb(var(--xmt-coral-rgb) / 0.14);
   --xmt-card-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 10px 30px rgba(15, 23, 42, 0.06);
   --xmt-floating-shadow: 0 22px 60px rgba(15, 23, 42, 0.14);
   --xmt-modal-shadow: 0 28px 90px rgba(15, 23, 42, 0.20);

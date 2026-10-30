@@ -2,6 +2,7 @@ import { ArrowLeft, Home, LockKeyhole, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
+import PageHeading from './common/PageHeading';
 
 interface AccessDeniedStateProps {
   title?: string;
@@ -26,7 +27,7 @@ export default function AccessDeniedState({
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.28em] text-studio-amber-contrast">403</p>
-              <h1 className={`mt-1 text-2xl font-semibold ${styles.textPrimary}`}>{title}</h1>
+              <PageHeading className={`mt-1 text-2xl font-semibold ${styles.textPrimary}`}>{title}</PageHeading>
             </div>
           </div>
         </div>

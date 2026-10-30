@@ -5,7 +5,20 @@ import { useAuthStore } from '../../src/store';
 import { RouteNavigationGuardProvider } from '../../src/hooks/useRouteNavigationGuard';
 import '../../src/index.css';
 
-useAuthStore.setState({ token: 'mobile-notification-fixture' });
+useAuthStore.setState({
+  token: 'mobile-notification-fixture',
+  user: {
+    id: 73,
+    username: 'mobile-notification-fixture',
+    email: 'mobile-notification@example.test',
+    role: 'editor',
+    name: '通知设置验收',
+    enabled: true,
+    created_at: '2026-10-30T00:00:00.000Z',
+    updated_at: '2026-10-30T00:00:00.000Z',
+  },
+  isLoggedIn: true,
+});
 
 function FixtureLayout() {
   return <RouteNavigationGuardProvider><Outlet /></RouteNavigationGuardProvider>;

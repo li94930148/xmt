@@ -14,6 +14,7 @@ import {
 } from '../../api/workflow';
 import type { EditorCommandHandle } from '../ContentEditor';
 import { ActionButton, GlassPanel } from '../studio';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 type NoticeType = 'success' | 'warning' | 'error';
 
@@ -54,6 +55,17 @@ function formatReviewTime(value: string) {
   return value.replace('T', ' ').slice(0, 16);
 }
 
+function replyFieldAccessibleName(thread: ProductionReviewThread) {
+  const kind = thread.kind === 'comment' ? '批注' : '修改建议';
+  const summary = thread.summary.trim().replace(/\s+/gu, ' ');
+  const summaryCharacters = Array.from(summary);
+  const summaryExcerpt = summaryCharacters.slice(0, 80).join('');
+  const summaryLabel = summaryExcerpt
+    ? `${summaryExcerpt}${summaryCharacters.length > 80 ? '…' : ''}`
+    : '当前讨论';
+  return `回复${kind}：${summaryLabel}`;
+}
+
 type ReplyRecoveryState = 'checking' | 'not_found' | 'unknown' | 'conflict' | 'applied' | 'corrupt';
 type ReplyRecovery = { requestId: string | null; content: string | null; state: ReplyRecoveryState };
 const replyRecoveryKey = (actorId: number, productionId: number, threadId: number) =>
@@ -79,8 +91,10 @@ function readReplyRecovery(actorId: number, productionId: number, threadId: numb
 function writeReplyRecovery(actorId: number, productionId: number, threadId: number, recovery: Pick<ReplyRecovery, 'requestId' | 'content'>) {
   try {
     if (!recovery.requestId || recovery.content === null) return false;
-    window.sessionStorage.setItem(replyRecoveryKey(actorId, productionId, threadId), JSON.stringify(recovery));
-    return true;
+    const key = replyRecoveryKey(actorId, productionId, threadId);
+    const serialized = JSON.stringify(recovery);
+    window.sessionStorage.setItem(key, serialized);
+    return window.sessionStorage.getItem(key) === serialized;
   } catch {
     return false;
   }
@@ -125,12 +139,14 @@ function readStatusRecovery(actorId: number, productionId: number, threadId: num
 function writeStatusRecovery(actorId: number, productionId: number, threadId: number, recovery: Pick<StatusRecovery, 'requestId' | 'status' | 'contentApplied'>) {
   try {
     if (!recovery.requestId || !recovery.status) return false;
-    window.sessionStorage.setItem(statusRecoveryKey(actorId, productionId, threadId), JSON.stringify({
+    const key = statusRecoveryKey(actorId, productionId, threadId);
+    const serialized = JSON.stringify({
       requestId: recovery.requestId,
       status: recovery.status,
       contentApplied: recovery.contentApplied,
-    }));
-    return true;
+    });
+    window.sessionStorage.setItem(key, serialized);
+    return window.sessionStorage.getItem(key) === serialized;
   } catch {
     return false;
   }
@@ -195,8 +211,10 @@ function readThreadRecovery(actorId: number, productionId: number): ThreadRecove
 function writeThreadRecovery(actorId: number, productionId: number, recovery: Pick<ThreadRecovery, 'requestId' | 'input'>) {
   try {
     if (!recovery.requestId || !recovery.input) return false;
-    window.sessionStorage.setItem(threadRecoveryKey(actorId, productionId), JSON.stringify(recovery));
-    return true;
+    const key = threadRecoveryKey(actorId, productionId);
+    const serialized = JSON.stringify(recovery);
+    window.sessionStorage.setItem(key, serialized);
+    return window.sessionStorage.getItem(key) === serialized;
   } catch {
     return false;
   }
@@ -240,11 +258,17 @@ export default function ProductionReviewPanel({
   const [threadRecovery, setThreadRecovery] = useState<ThreadRecovery | null>(null);
   const [busyKey, setBusyKey] = useState('');
   const mutationLockRef = useRef(false);
+  const componentActiveRef = useRef(true);
   const viewScopeRef = useRef({ currentUserId, productionId });
   viewScopeRef.current = { currentUserId, productionId };
   const terminalStatusRequestsRef = useRef(new Set<string>());
   const mutationBusy = Boolean(busyKey) || mutationsLocked;
   const threadFormLocked = mutationBusy || Boolean(threadRecovery);
+
+  useEffect(() => {
+    componentActiveRef.current = true;
+    return () => { componentActiveRef.current = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -253,7 +277,7 @@ export default function ProductionReviewPanel({
     void getProductionReviewThreads(productionId, version)
       .then((items) => { if (active) setThreads(items); })
       .catch((loadError: unknown) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : '获取批注与建议失败');
+        if (active) setError(getUserFacingErrorMessage(loadError, '批注与建议暂时无法加载，请检查连接后重试。'));
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -443,19 +467,30 @@ export default function ProductionReviewPanel({
     return () => { active = false; };
   }, [currentUserId, productionId, verifyThreadRequest]);
 
-  const verifyReplyRequest = useCallback(async (threadId: number, recovery: ReplyRecovery) => {
+  const verifyReplyRequest = useCallback(async (
+    threadId: number,
+    recovery: ReplyRecovery,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    if (!isCurrent()) return 'unknown' as const;
     if (!currentUserId || !recovery.requestId || recovery.content === null) {
-      setReplyRecoveries((current) => ({
-        ...current,
-        [replyStateKey(productionId, threadId)]: { requestId: null, content: null, state: 'corrupt' },
-      }));
-      setError('回复恢复记录无法读取。为避免重复创建，回复输入已锁定。');
+      if (isCurrent()) {
+        setReplyRecoveries((current) => ({
+          ...current,
+          [replyStateKey(productionId, threadId)]: { requestId: null, content: null, state: 'corrupt' },
+        }));
+        setError('回复恢复记录无法读取。为避免重复创建，回复输入已锁定。');
+      }
       return 'unknown' as const;
     }
     const checking = { ...recovery, state: 'checking' as const };
-    setReplyRecoveries((current) => ({ ...current, [replyStateKey(productionId, threadId)]: checking }));
+    if (isCurrent()) setReplyRecoveries((current) => ({ ...current, [replyStateKey(productionId, threadId)]: checking }));
     try {
       const status = await getProductionReviewReplyRequestStatus(productionId, threadId, recovery.requestId, recovery.content);
+      if (!isCurrent()) {
+        if (status.status === 'applied' && currentUserId) clearReplyRecovery(currentUserId, productionId, threadId);
+        return 'unknown' as const;
+      }
       if (status.status === 'applied') {
         const cleared = clearReplyRecovery(currentUserId, productionId, threadId);
         setReplyRecoveries((current) => {
@@ -486,11 +521,13 @@ export default function ProductionReviewPanel({
       setError('服务端尚未找到这条回复请求。原内容已锁定，可使用同一请求编号安全重试。');
       return 'not_found' as const;
     } catch {
-      setReplyRecoveries((current) => ({
-        ...current,
-        [replyStateKey(productionId, threadId)]: { ...recovery, state: 'unknown' },
-      }));
-      setError('回复结果暂时无法核实。原内容已锁定，请重新核实后再操作。');
+      if (isCurrent()) {
+        setReplyRecoveries((current) => ({
+          ...current,
+          [replyStateKey(productionId, threadId)]: { ...recovery, state: 'unknown' },
+        }));
+        setError('回复结果暂时无法核实。原内容已锁定，请重新核实后再操作。');
+      }
       return 'unknown' as const;
     }
   }, [currentUserId, productionId, refresh]);
@@ -503,8 +540,12 @@ export default function ProductionReviewPanel({
       return;
     }
     if (!beginMutation(`verify-reply-${threadId}`)) return;
+    const actorId = currentUserId;
+    const requestProductionId = productionId;
     try {
-      await verifyReplyRequest(threadId, recovery);
+      await verifyReplyRequest(threadId, recovery, () => componentActiveRef.current
+        && viewScopeRef.current.currentUserId === actorId
+        && viewScopeRef.current.productionId === requestProductionId);
     } finally {
       finishMutation();
     }
@@ -748,6 +789,11 @@ export default function ProductionReviewPanel({
       setError('当前登录身份尚未确认，暂不能安全提交回复。');
       return;
     }
+    const actorId = currentUserId;
+    const requestProductionId = productionId;
+    const isCurrent = () => componentActiveRef.current
+      && viewScopeRef.current.currentUserId === actorId
+      && viewScopeRef.current.productionId === requestProductionId;
     const key = replyStateKey(productionId, threadId);
     const recovery = replyRecoveries[key] ?? readReplyRecovery(currentUserId, productionId, threadId);
     if (recovery && recovery.state !== 'not_found') {
@@ -766,7 +812,8 @@ export default function ProductionReviewPanel({
     setReplyRecoveries((current) => ({ ...current, [key]: activeRecovery }));
     try {
       await replyToProductionReviewThread(productionId, threadId, content, requestId);
-      const cleared = clearReplyRecovery(currentUserId, productionId, threadId);
+      const cleared = clearReplyRecovery(actorId, requestProductionId, threadId);
+      if (!isCurrent()) return;
       setReplyRecoveries((current) => {
         const next = { ...current };
         if (cleared) delete next[key];
@@ -779,7 +826,7 @@ export default function ProductionReviewPanel({
       setError(cleared ? '' : '服务端已确认回复，但本机恢复标记暂时无法清除；请勿重复操作，刷新后会再次核实。');
       refresh();
     } catch {
-      await verifyReplyRequest(threadId, activeRecovery);
+      await verifyReplyRequest(threadId, activeRecovery, isCurrent);
     } finally {
       finishMutation();
     }
@@ -869,7 +916,7 @@ export default function ProductionReviewPanel({
             return next;
           });
         }
-        setError(statusError instanceof Error ? statusError.message : '更新批注或建议状态失败');
+        setError(getUserFacingErrorMessage(statusError, '操作尚未提交；请检查浏览器后重试。'));
       } else {
         setError('处理结果暂时未收到确认，正在核实服务端状态…');
         await verifyStatusRequest(thread.id, recovery, () => viewScopeRef.current.currentUserId === actorId
@@ -1054,7 +1101,7 @@ export default function ProductionReviewPanel({
                       disabled={mutationBusy || Boolean(replyRecovery)}
                       onChange={(event) => setReplyDrafts((current) => ({ ...current, [thread.id]: event.target.value }))}
                       maxLength={4000}
-                      aria-label="回复内容"
+                      aria-label={replyFieldAccessibleName(thread)}
                       placeholder="回复这条讨论…"
                     />
                     {replyRecovery ? (

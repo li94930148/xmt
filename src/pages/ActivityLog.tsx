@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { getActivityLogs, getUsers } from '../api';
 import type { ActivityLog as ActivityLogType, User } from '../types';
 import { Clock, Filter, ChevronLeft, ChevronRight, Loader2, FileText, Settings, Trash2, Edit, Plus, LogIn, Send } from 'lucide-react';
 import { formatBeijingTime } from '../lib/utils';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import ActionButton from '../components/studio/ActionButton';
 
 const actionIcons: Record<string, typeof FileText> = {
@@ -52,23 +54,31 @@ export default function ActivityLog() {
   const [limit] = useState(20);
   const [loading, setLoading] = useState(true);
   const [logsError, setLogsError] = useState<string | null>(null);
+  const [paginationAnnouncement, setPaginationAnnouncement] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<number | undefined>(undefined);
+  const logsRequestIdRef = useRef(0);
   const styles = useThemeStyles();
 
   const fetchLogs = useCallback(async () => {
+    const requestId = ++logsRequestIdRef.current;
     setLoading(true);
     setLogsError(null);
+    setPaginationAnnouncement('');
     try {
       const result = await getActivityLogs({ page, limit, user_id: selectedUser });
+      if (requestId !== logsRequestIdRef.current) return;
       setLogs(result.data);
       setTotal(result.total);
+      const totalPages = Math.max(1, Math.ceil(result.total / limit));
+      setPaginationAnnouncement(`已加载第 ${page}/${totalPages} 页，共 ${result.total} 条记录。`);
     } catch (error) {
-      setLogsError(error instanceof Error ? error.message : '获取活动日志失败');
+      if (requestId !== logsRequestIdRef.current) return;
+      setLogsError(getUserFacingErrorMessage(error, '活动日志暂时无法读取，请稍后重试。'));
     } finally {
-      setLoading(false);
+      if (requestId === logsRequestIdRef.current) setLoading(false);
     }
   }, [page, limit, selectedUser]);
 
@@ -79,7 +89,7 @@ export default function ActivityLog() {
       const result = await getUsers({ limit: 100 });
       setUsers(result.data);
     } catch (error) {
-      setUsersError(error instanceof Error ? error.message : '获取成员筛选列表失败');
+      setUsersError(getUserFacingErrorMessage(error, '成员筛选列表暂时无法读取，请稍后重试。'));
     } finally {
       setUsersLoading(false);
     }
@@ -91,6 +101,9 @@ export default function ActivityLog() {
 
   useEffect(() => {
     void fetchLogs();
+    return () => {
+      logsRequestIdRef.current += 1;
+    };
   }, [fetchLogs]);
 
   const totalPages = Math.ceil(total / limit);
@@ -135,7 +148,7 @@ export default function ActivityLog() {
       {/* 页面标题 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h1 className={styles.pageTitle}>活动日志</h1>
+          <PageHeading className={styles.pageTitle}>活动日志</PageHeading>
           <p className={`${styles.subtitle} mt-1`}>查看团队成员的操作记录</p>
         </div>
         <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center">
@@ -177,7 +190,7 @@ export default function ActivityLog() {
             <span className={styles.textSecondary}>正在加载活动日志…</span>
           </div>
         ) : logsError && logs.length === 0 ? null : logs.length === 0 ? (
-          <div className="text-center py-16">
+          <div role="status" aria-live="polite" aria-atomic="true" className="text-center py-16">
             <Clock className={`w-12 h-12 mx-auto ${styles.textMuted} mb-3`} />
             <p className={styles.textSecondary}>暂无活动记录</p>
           </div>
@@ -246,6 +259,12 @@ export default function ActivityLog() {
         )}
       </div>
 
+      {paginationAnnouncement ? (
+        <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+          {paginationAnnouncement}
+        </div>
+      ) : null}
+
       {/* 分页 */}
       {totalPages > 1 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -275,6 +294,7 @@ export default function ActivityLog() {
               return (
                 <button
                   key={pageNum}
+                  aria-label={`第 ${pageNum} 页`}
                   aria-current={page === pageNum ? 'page' : undefined}
                   onClick={() => setPage(pageNum)}
                   className={`xmt-btn h-10 w-10 min-h-10 min-w-10 rounded-button p-0 text-sm font-medium transition-all duration-200 ${

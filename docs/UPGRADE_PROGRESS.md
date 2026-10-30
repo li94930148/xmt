@@ -1,12 +1,1573 @@
 # XMT 升级阶段记录
 
-## 2026-10-28 清单 B4/B5：管理与归档视图选中状态（v9.6.21，本地未部署）
+## 2026-10-30 发布准备：依赖安全更新与主题回归稳定性（v10.1.46）
+
+- **依赖风险**：完整依赖审计发现 re2js 2.8.6、qs 6.16.0 与 postcss-selector-parser 的易受影响版本；更新至 re2js 2.9.1、qs 6.17.1、postcss-selector-parser 6.1.5。npm ci 后 npm audit --audit-level=moderate 报告 0 项漏洞；覆盖 GHSA-gg6h-894w-4m9c 与 GHSA-6pq8-jhm2-2vcw。
+- **回归稳定性**：主题快捷按钮选中态断言在读计算样式前先把鼠标移到页面空白处，避免把悬停样式误判为选中态样式。
+- **范围**：不改业务行为、API、权限或数据库；Android 元数据为 10.1.46 / 100146，未构建 APK。版本与构建门禁、CI 和发布证据见本次 PR 与发布记录。
+
+## 2026-10-30 清单 B4/B5：日历键盘导航、拍摄计划焦点与主题快捷状态（v10.1.45，本地未部署）
+
+- **发现与改造**：日历日期原先是逐个 Tab 的独立按钮，没有日期网格语义及方向键移动。现在以有名称的网格、星期列标题、六周行和 42 个日期单元格表达月视图；仅当前活动日期在 Tab 顺序中。左右键移动一天、上下键移动一周、Home/End 移到星期一/星期日。跨月时仅读取新月份，加载完成后焦点回到目标日期。拍摄计划创建弹窗的关联选题、日期、地点、设备清单和状态控件原用 `outline-none` 压制全局 `:focus-visible` 轮廓；移除此覆盖，保留原边框与主题样式。设置中心的浅/深主题快捷按钮原先只更新草稿，没有报告当前选中项；现用 `aria-pressed` 和 Studio primary border/background/ring 显示唯一当前选择，与主题下拉框共用 `appearanceTheme`，不改保存流程。
+- **Chrome DevTools MCP 隔离验收**：合成日历页确认网格名称为“2026年10月日历”，包含 7 行（星期头及六周）、7 个星期列标题、42 个日期格，只有一个日期 Tab 停靠点。实际键盘从 10 月 31 日按右键进入 11 月 1 日，读取完成后焦点仍在目标日期；并核对右/下/Home/End/上/左移动到 11 月 2、9、9、15、8、7 日且每步恰有一个 Tab 停靠点。网络仅有日历/选题 GET 与 Socket.IO 握手，没有业务写入。合成拍摄页在浅色和深色主题逐一读取五字段的 computed `:focus-visible`：均为 2px 实线、2px offset、颜色与各主题 `--xmt-primary` 一致；Escape 关闭后状态为零创建尝试、零计划。
+- **自动回归与工程检查**：浏览器规格补充网格语义、单停靠点、日期/周移动、Home/End、跨月焦点和零写入断言；拍摄规格覆盖两主题焦点框和取消后无创建。设置中心回归核对初始/切换后的唯一 `aria-pressed`、Studio 选中外观和主题下拉同步。`npm run check -- --pretty false`、改动文件定向 ESLint 和 `git diff --check` 通过。`npm run test:calendar-month-race-browser` 在 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 启动失败，未进入断言；拍摄和设置中心的最终自动浏览器断言未运行。Chrome DevTools MCP 手工验收不记作自动套件通过。版本/更新说明治理、Android runtime 和生产构建将在同步后执行。
+- **范围与版本**：只调整日历交互语义/焦点恢复、拍摄计划创建表单焦点样式、设置中心主题选择状态、对应隔离回归和版本说明。无 API、权限、数据库或 Android 原生变化。Android 元数据为 10.1.45 / 100145，未构建 APK。本地不提交、推送或部署。
+
+## 2026-10-30 清单 B8：选题审核通知原子持久化（v10.1.44，本地未部署）
+
+- **发现与改造**：选题审核事务提交后才调用 `createMessage`，而该 helper 在消息数据库插入失败时仅记日志并返回 `null`；结果会出现审核成功但创建者/负责人收件箱没有通知。现将审核通知消息行加入审核事务；任一通知持久化失败都会回滚状态、历史、活动记录和通过时初始创作。事务提交后再发送 Socket 实时提示；推送失败记录警告但不逆转已经提交的审核和收件箱消息。其它选题创建/阶段变更通知沿用原路径。
+- **隔离回归**：`tests/topics/topics.test.ts` 用临时 SQLite 触发器令第二条“新任务指派”消息插入失败，确认第一条创建者消息及审核状态、历史、活动、初始创作均回滚，且没有广播或推送。恢复后审核成功，创建者/负责人各有一条预期消息，Socket 推送发生时两条收件箱记录已可读取；重复审核被拒绝且不增加消息。另模拟实时推送抛错，审核仍成功且收件箱消息保留。
+- **工程检查**：`npm run test:topics`（包括 topic-status recovery 2/2）、`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`（v10.1.44）、`npm run test:version-governance`、`npm run test:changelog-governance`（722 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 均通过。生产构建保留已有 >500 kB 分包提示。
+- **范围与版本**：仅选题审核消息持久化事务、提交后实时推送、关联回归及版本说明；复用现有 `messages` 表，无数据库迁移或权限规则变化。Android 元数据为 10.1.44 / 100144，未构建 APK。本地不提交、推送或部署。
+
+## 2026-10-30 清单 B4：编辑器气泡菜单平板触屏色板尺寸（v10.1.43，本地未部署）
+
+- **发现与改造**：编辑器气泡菜单在 `sm` 断点以上将文字色和高亮色板缩至 32×32px，包含有触屏能力的平板。现以 `any-pointer: coarse` 在粗指针设备上保持 40×40px，同时细指针桌面保留原紧凑布局；768px 触屏浏览器回归覆盖两类色板、可见边界、无水平溢出和稿件内容未写入。
+- **Chrome DevTools MCP 隔离验收**：在本机合成稿件页用 768×844 触屏模拟，确认 `(any-pointer: coarse)` 为真。文字色和高亮面板各 8 个色块均为 40×40px；两个浮层完整在视口内，页面宽度等于视口宽度。服务端状态仍为原正文，`savedContents` 为空、`productionSaveAttempts` 与 `apiMutationAttempts` 均为 0。未点击任何色块或保存稿件。
+- **自动回归与工程检查**：新增 `tests/browser/production-review.spec.ts` 768px 触屏色板回归，并保持现有 320/390px 双主题检查；`npm run check -- --pretty false`、目标 ESLint、`npm run test:editor-selection-style`、`npm run version:check`（v10.1.43）、`npm run test:version-governance`、`npm run test:changelog-governance`（721 个版本）、`npm run test:android-runtime` 与 `git diff --check` 通过。随后 v10.1.44 工作树构建成功，包含本版代码。`npm run test:production-review-browser` 在 macOS Chromium 启动阶段遇到 `bootstrap_check_in ... Permission denied (1100)` 退出，未进入断言；DevTools MCP 手工验收不计作自动浏览器通过。
+- **范围与版本**：只改气泡菜单触屏色块尺寸、浏览器回归、版本及说明文档；无 API、权限、数据库或 Android 原生代码变化。Android 元数据为 10.1.43 / 100143，未构建 APK。本地不提交、推送或部署。
+
+## 2026-10-30 清单 B4/B8：番茄钟触控尺寸与重置恢复（v10.1.42，本地未部署）
+
+- **发现与改造**：完整和紧凑番茄钟的开始/暂停控件原始尺寸不足 40px；现增加至少 40px 最小高度。补充浏览器回归覆盖完整/紧凑布局在 320、390、1440px 下的开始、暂停、重置控件几何尺寸。重置 API 已有取消账本幂等保护，现扩展隔离 fixture 模拟服务端先取消、再丢失响应，并验证界面保留现有会话，只有用户明确再次点击重置才重试。
+- **Chrome DevTools MCP 隔离验收**：完整界面开始/暂停按钮为 130×42px / 104×42px，重置为 40×40px；紧凑界面在 320/390/1440px 下开始与暂停按钮分别为 150/220/1270×40px，重置均为 40×40px，视口无横向溢出。模拟取消已在服务端生效但首个响应返回 503：界面显示“重置结果尚未确认”，计时会话仍可见；用户再次点击后恢复 25:00，页面无错误，单个会话只记录一次取消。所有操作仅访问本机隔离夹具。
+- **自动回归与工程检查**：`npm run test:pomodoro-notification-browser` 在 macOS Chromium 启动阶段遇到 `bootstrap_check_in ... Permission denied (1100)` 退出，未进入断言；Chrome DevTools MCP 手工验收不记作自动浏览器通过。`npm run test:integrity:resources-pomodoro`、`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（720 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 均通过。构建仍有现存的 >500 kB 分包提示。
+- **范围与版本**：仅番茄钟控件样式、对应浏览器回归、版本与说明文档；未改 API、权限、数据库或 Android 原生代码。Android 元数据为 10.1.42 / 100142，未构建 APK。本地不提交、推送或部署。
+
+## 2026-10-30 清单 B8：编辑器剪贴板操作结果反馈（v10.1.41，本地未部署）
+
+- **发现与改造**：编辑器右键菜单调用浏览器 `execCommand` 后没有结果提示，用户无法判断剪贴板操作是否成功。复制、剪切、粘贴现在捕获浏览器返回值与异常并显示对应成功/失败通知；操作后关闭菜单并恢复编辑器焦点。失败分支不会自行修改正文。浏览器回归定位同步使用菜单项的可访问角色。
+- **Chrome DevTools MCP 隔离验收**：在 1440×960 本地拍摄稿件夹具中拦截 `execCommand`，依次模拟复制失败、复制成功、剪切失败和粘贴失败。四类结果均显示对应通知；两次失败场景下编辑器正文保持“拍摄用隔离稿件。”，焦点回到正文。隔离接口记录 `shootingScriptWriteCount: 0`、`publishingScriptWriteCount: 0`、`archiveSyncRetryCount: 0`；控制台无错误。仅模拟浏览器返回结果，未访问系统剪贴板或生产服务。
+- **自动回归与工程检查**：更新 `tests/browser/workflow-details-responsive.spec.ts`，让已有剪贴板回归按 `menuitem` 角色查找复制/剪切/粘贴入口，并断言成功/失败文案和无正文/协作写入。`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`（v10.1.41）、`npm run test:version-governance`、`npm run test:changelog-governance`（719 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过；生产构建保留现有超过 500 kB 的分包警告。`npm run test:workflow-details-responsive-browser` 在 macOS Chromium 启动阶段遇到 `bootstrap_check_in ... Permission denied (1100)`，未进入自动断言；DevTools MCP 手工验收不计作自动测试通过。
+- **范围与版本**：仅编辑器右键菜单剪贴板反馈、现有浏览器回归语义定位、版本与说明文档；无 API、授权规则、数据库、真实业务数据或 Android 原生代码变化。首页“待我审核”范围保持现有权限、创作者/负责人/操作人规则，不新增审稿人或转派字段。Android 元数据为 10.1.41 / 100141，未构建 APK。只改工作树，不提交、推送或部署。
+
+## 2026-10-30 清单 B4：首页内容流读取失败状态（v10.1.40，本地未部署）
+
+- **发现与改造**：桌面内容阶段卡片整张点击会进入对应列表，卡片中“暂时无法读取，请重试”容易被理解为卡片内提供重试操作；实际重试由顶部“重新加载工作台”按钮执行。现在卡片只陈述“暂时无法读取”，原有全局重试与卡片导航保持。
+- **Chrome DevTools MCP 隔离验收**：1440×960 本地夹具注入复盘摘要读取失败，确认首页内容流显示“— 复盘 / 暂时无法读取”，顶部告警提供“重新加载工作台”，其他首页内容继续呈现；点击复盘卡片后地址进入 `/retrospectives`。无控制台错误；夹具为本地隔离数据，无生产请求。
+- **自动回归与工程检查**：`tests/browser/topic-stage-record-repair.spec.ts` 更新阶段失败文案断言，并覆盖没有卡片内重试按钮、顶部重试入口仍存在及复盘卡片仍导航到列表。`npm run test:home-dashboard`、`npm run test:home-cross-module-overview`、`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`（v10.1.40）、`npm run test:version-governance`、`npm run test:changelog-governance`（718 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过；构建保留现存 >500 kB 分包提示。`npm run test:topic-stage-record-repair-browser` 在 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 启动阶段退出，未进入自动断言；Chrome 手工验收不替代自动套件。
+- **范围与版本**：仅首页错误文案、既有浏览器回归、版本和说明文档；无 API、权限、数据库或 Android 原生代码变化。Android 元数据为 10.1.40 / 100140，未构建 APK。本地不提交、推送或部署。
+
+## 2026-10-30 清单 B4：首页公告板触控尺寸（v10.1.39，本地未部署）
+
+- **发现与改造**：公告板添加/关闭图标入口只有 36×36px，创建状态核实、原编号显式重试、删除状态核实和列表重试按钮均只有 36px 高。现在图标入口固定为 40×40px，其余恢复操作至少 40px 高；公告权限、二次确认、幂等编号和 GET-only 核实行为不变。
+- **Chrome DevTools MCP 隔离验收**：320px 下列表首次读取 503 后，“重新加载列表”为 98×40px，点击后列表恢复；新增/关闭入口与行删除按钮为 40×40px，文档宽度保持 320px。390px 下新增/关闭入口和行删除按钮均为 40×40px；创建状态核实、原请求显式重试、删除状态核实分别为 122×40、182×40、146×40px，文档宽度保持 390px。控制台只有夹具预期注入的 503；全程为隔离内存数据，没有生产请求。
+- **自动回归与工程检查**：`tests/browser/announcement-board-feedback.spec.ts` 增加 320px/390px 触控几何断言，覆盖列表读取失败/恢复、表单开关、创建核实与显式重试、删除核实。`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`（v10.1.39）、`npm run test:changelog-governance`（717 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过；生产构建保留现存 >500 kB 分包提示。直接运行 `npx tsx tests/browser/announcement-board-feedback.spec.ts` 时，macOS Chromium 在 `bootstrap_check_in ... Permission denied (1100)` 启动阶段退出，未进入自动断言；Chrome 手工验收不替代自动套件。
+- **范围与版本**：仅公告板控件尺寸、对应浏览器断言、版本和说明文档；无 API、权限、数据库或 Android 原生代码变化。Android 元数据为 10.1.39 / 100139，未构建 APK。本地不提交、推送或部署。
+
+## 2026-10-30 清单 B4：选题维度读取失败重试触控尺寸（v10.1.38，本地未部署）
+
+- **发现与改造**：桌面、移动选题详情共用的内容维度面板中，读取失败后的“重试”按钮原为 36px 高，低于同面板其它操作采用的 40px 触控尺寸。现在提升至至少 40px；重试继续只发起只读 GET。
+- **回归与工程检查**：`tests/browser/mobile-work-center-responsive.spec.ts` 的 320px 详情场景注入首次 503，测量重试按钮并点击确认恢复读取；`npm run test:topic-asset-dimensions-recovery` 2/2 通过。`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`（v10.1.38）、`npm run test:changelog-governance`（716 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过；生产构建提示现存 >500 kB 分包。`npm run test:mobile-work-center-browser` 在 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 启动阶段退出，未进入浏览器断言。
+- **范围与版本**：仅按钮样式、对应浏览器断言、版本和文档；无 API、权限、数据库或 Android 原生代码变化。Android 元数据为 10.1.38 / 100138，未构建 APK。本地不提交、推送或部署。
+
+## 2026-10-30 清单 B4：编辑器颜色子菜单方向键跟随展开方向（v10.1.37，本地未部署）
+
+- **发现与改造**：颜色面板靠近右侧时会向左展开，但键盘仍要求用右方向键进入，并用左键退出；视觉方向和键盘方向不一致。现按面板展开侧选择进入键及相反的返回键；Enter、空格和 Escape 行为保留。
+- **Google Chrome 隔离核验**：连接的 Chrome 打开本地合成稿件审阅夹具，在 500×824 CSS 视口将菜单放到右侧边缘，确认颜色面板 `data-side=left`。从菜单首项用 7 次向下移动到“文字颜色”后，焦点位于触发项；按左方向键进入并聚焦“文字颜色：默认”，按右方向键关闭面板并将焦点恢复到触发项，Escape 关闭主菜单。只打开菜单，没有应用颜色、保存或提交稿件；夹具无生产连接。
+- **回归与工程检查**：`src/components/editor/menuBehavior.test.ts` 10/10 通过，增加左右两侧进入/退出键合同；`tests/browser/production-review.spec.ts` 增加右边缘左展开的实际键盘顺序回归。`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`（v10.1.37）、`npm run test:changelog-governance`（715 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过；构建保留已有 >500 kB 分包提示。`npm run test:production-review-browser` 在 macOS Chromium 启动阶段因 `bootstrap_check_in ... Permission denied (1100)` 退出，未进入自动断言；Chrome 手工核验不记作自动浏览器测试通过。
+- **范围与下一步**：仅编辑器菜单键盘方向、辅助函数/回归测试、版本和文档；无 API、权限、数据库或 Android 原生代码变化。Android 元数据为 10.1.37 / 100137，未构建 APK。本地不提交、推送或部署。继续 B4/B5 其余已挂载页面与 B8 未闭合恢复路径；Android 原生专项按用户要求后置。
+
+## 2026-10-30 清单 B4：编辑器上下文菜单高缩放子菜单可见性（v10.1.36，本地未部署）
+
+- **发现与改造**：真实 Chrome 原生缩放 125% 下，编辑器主菜单虽然留在视口内，文字颜色/高亮颜色子菜单却被主菜单内部的纵向滚动区域裁切，选项虽在辅助树中但画面不可见。现在将主菜单选项放进独立滚动区域，颜色面板作为外层菜单的同级浮层；面板随触发项、菜单滚动和视口变化重新定位，并限制在可见视口内。
+- **Google Chrome 手工验收**：使用本地合成稿件夹具，实际浏览器缩放 80%、90%、100%、110%、125% 逐项核对。各缩放下主菜单均留在视口内；125% 下主菜单可滚动，颜色子菜单完整可见，键盘 End 可将最后一项滚入视野。Chrome 原生缩放已恢复并确认是 100%。验收没有提交或保存稿件。
+- **回归与工程检查**：`src/components/editor/menuBehavior.test.ts` 9/9 通过；`tests/browser/production-review.spec.ts` 加入 125% 等效窄高视口的内部滚动、子菜单边界与键盘末项断言。`npm run check -- --pretty false`、`npm run build`、定向 ESLint、`npm run version:check`（v10.1.36）、`npm run test:changelog-governance`（714 个版本）、`npm run test:android-runtime` 与 `git diff --check` 通过；构建仍提示已有超过 500 kB 的分包。`npm run test:production-review-browser` 在 Chromium 启动阶段遭 macOS `bootstrap_check_in ... Permission denied (1100)` 阻断，未进入自动断言；因此手工 Chrome 验收不记作自动浏览器通过。
+- **G 首页责任范围确认**：用户确认无需增加指定审稿人字段或转派规则。“待我审核”继续使用当前权限、创作者/负责人/操作人范围，不扩大责任模型；本版本没有改首页审核权限或统计逻辑。`npm run test:home-dashboard` 与 `npm run test:home-cross-module-overview` 均通过，覆盖现有审核范围、精确计数与范围外队列隐藏。
+- **范围与下一步**：只改编辑器菜单呈现、相应回归、版本和文档；无 API、权限、数据库或 Android 原生代码变化。Android 元数据为 10.1.36 / 100136，未构建 APK。本地不提交、推送或部署。继续 B4/B5 其余已挂载页面与 B8 未闭合恢复路径的审计；G 的其他指标口径和 Android 原生专项仍按清单开放。
+
+## 2026-10-30 清单 B4：编辑器上下文菜单缩放与窗口调整（v10.1.35，本地未部署）
+
+- **发现与改造**：编辑器菜单只在打开时按窗口测量；菜单保持打开时缩小视口，顶部位置仍使用旧值，短屏下菜单会超出可见区域。颜色子菜单方向也不会随视口变更更新；390px 宽的窄桌面布局中，部分中间锚点会使左右空间都不够，子菜单左侧越过屏幕。现为打开中的菜单监听 `window` 和 `visualViewport` 的 resize，重新读取菜单尺寸、计算位置和子菜单方向。桌面宽度允许并排布局时，如主菜单位于左右两个安全展开区域之间，会移至距离锚点较近且可完整容纳子菜单的一侧；320px 手机内联子菜单布局不移动主菜单。
+- **Chrome DevTools MCP 隔离核验**：本地合成稿件页、无业务写入。500×824 菜单缩至 500×500 时，修复前顶部仍为 y=157、底部到 y=641；修复后菜单移至 y=8，边界为 8–492px。500px 宽时菜单 x=130、子菜单向右（x=331–491）；缩至 390px 后主菜单调整到 x=168，子菜单改向左并完整落在 x=7–167；重新加宽和缩窄后菜单仍可见且方向同步恢复。此处使用 Chrome DevTools CSS 视口模拟和视口 resize；未通过浏览器工具栏直接改变 Chrome 原生缩放百分比。
+- **回归与工程检查**：`src/components/editor/menuBehavior.test.ts` 9 项通过，新增桌面窄屏子菜单安全位置与手机内联布局边界；`tests/browser/production-review.spec.ts` 增加打开状态下的高度/宽度变化和子菜单边界回归。`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`（v10.1.35）、`npm run test:changelog-governance`（713 个版本）、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 通过；构建仍有原有 >500 kB 分包警告。`npm run test:production-review-browser` 在 macOS Chromium 启动阶段因 `bootstrap_check_in ... Permission denied (1100)` 退出，未进入断言，不能记作自动浏览器通过。
+- **范围与下一步**：仅编辑器菜单定位逻辑、对应单测/浏览器回归、版本与说明文档；无 API、权限或数据库变化。Android 元数据为 10.1.35 / 100135，未构建 APK。本地不提交、推送或部署。继续 B4/B5 其他已挂载页面验收和 B8 未闭合的写入恢复路径；Android 原生专项仍后置。
+
+## 2026-10-30 清单 B8：稿件回复异步结果按视图隔离（v10.1.34，本地未部署）
+
+- **发现与改造**：稿件批注回复提交或结果核实期间切换稿件/账号，旧异步请求可能继续刷新当前面板或覆盖当前错误反馈。现在回复请求同时校验账号、稿件和组件实例是否仍有效；面板卸载后不再更新新视图。已确认的旧请求只在原范围清理恢复记录，结果不明时保留该记录。
+- **Chrome DevTools MCP 隔离核验**：使用重启后的当前工作树夹具，分别覆盖回复成功、服务端已提交但返回 503 两种切换竞态。两种场景切换到另一合成稿件后，当前错误提示均保持，线程只读取一次且没有被旧请求刷新；旧回复只写入一次。成功场景只清理旧稿恢复标记；503 场景不发起状态查询，保留旧稿标记供后续核实。隔离服务记录只有一条合成回复 POST，没有连接生产服务或写入真实稿件。
+- **自动回归边界**：`tests/browser/production-review.spec.ts` 已新增这两个隔离场景。`npm run test:production-review-browser` 本轮在 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 启动阶段退出，未进入断言，不能记作自动浏览器回归通过。
+- **工程检查与范围**：`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`（v10.1.34）、`npm run test:changelog-governance`（712 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过。生产构建保留已有 >500 kB 分包提示。`npm run test:production-review-browser` 因 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 在启动阶段退出，未进入断言。无 API、权限或数据库变化。Android 元数据为 10.1.34 / 100134，未构建 APK；本地不提交、推送或部署。
+
+## 2026-10-30 清单 B4：日报总结归档周期状态与触控尺寸（v10.1.33，本地未部署）
+
+- **发现与改造**：日报总结归档的日报/月报/年报周期按钮原先没有向辅助技术报告选中状态，实际高度也未统一到 40px。现放入具名“归档周期”按钮组，以 `aria-pressed` 暴露当前项，并使按钮至少 40px 高；无归档权限时月报/年报仍保持禁用。
+- **Chrome DevTools MCP 隔离核验**：1440×960 浅色/深色下组名可读、三项均为 40px，点击及空格键切换后始终只有一个选中项；对比度分别为 5.1319:1 与 5.4427:1。无归档权限时在 320×844 深色、390×844 浅色核对禁用和未选中状态、40px 高度与无横向溢出。请求只有业务 GET 和 Socket.IO 轮询握手 POST，没有业务写入。自动浏览器在 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 启动阶段退出，未进入断言。
+- **工程检查与范围**：`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`、`npm run test:changelog-governance`（712 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过。生产构建保留已有 >500 kB 分包提示。`npm run test:mobile-work-center-browser` 因 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 在启动阶段退出，未进入断言。无 API、权限规则或数据库变化。Android 元数据为 10.1.33 / 100133，未构建 APK；本地不提交、推送或部署。
+
+## 2026-10-30 清单 B4：编辑器目录当前标题读屏状态（v10.1.32，本地未部署）
+
+- **发现与改造**：目录原先只用 `activeId` 和样式高亮当前阅读标题，没有向辅助技术标记当前项；标题判断和跳转定位还参照编辑器外框，外层页面滚动后会造成活动标题错误或跳转落点偏移。现在活动标题设置 `aria-current="location"`，跳转状态随之更新；位置计算改为相对实际滚动容器，并将编辑器选择落在标题文本中，避免 ProseMirror 文本选择端点警告。目录折叠和正文写入路径不变。
+- **隔离浏览器核验**：Chrome DevTools MCP 在 1440×960 合成稿件上点击一级、二级标题，分别只出现一个 `aria-current="location"`；跳到二级标题后外层滚动位置从 991 增至约 1082，一级标题移至视口上方、二级标题落在视口约 80px 处。焦点进入编辑区，文本选择端点位于标题文本内；控制台无应用错误或文本选择警告，仅有启用减少动效时 Motion 的预期提示。用户此前确认 VoiceOver 能明确读出人员管理“操作日志”和“用户列表”的已选视图；这不是编辑器目录的实际语音验收。本次仅覆盖桌面编辑器，移动编辑器不显示该目录。
+- **回归与工程检查**：`tests/browser/production-review.spec.ts` 增加一级/二级当前项唯一性与切换、TOC 折叠状态断言。Chrome DevTools 隔离核验后 fixture 记录 `apiMutationAttempts=0`、`productionSaveAttempts=0`。`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`（v10.1.32）、`npm run test:changelog-governance`（710 个版本）、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 均通过。构建仅提示现有大分包。`npm run test:production-review-browser` 因 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 在启动阶段退出，未进入断言；DevTools MCP 手工验收不记作自动回归通过。
+- **范围与下一步**：仅编辑器目录、对应浏览器回归及版本说明；无 API、权限规则或数据库变化，隔离 fixture 未发出业务写入。Android 元数据为 10.1.32 / 100132，未构建 APK。只改工作树，不提交、推送或部署。继续 B4/B5 页面状态和对比度检查及 B8 未闭合写入恢复；Android 原生专项仍后置。
+
+## 2026-10-30 清单 G/B4：桌面首页最近变化折叠语义（v10.1.31，本地未部署）
+
+- **发现与改造**：首页“最近变化”折叠标题原本嵌套在按钮内，造成标题语义和交互控件混合；折叠内容也没有稳定可关联的区域。现将二级标题独立呈现，使用名称随状态更新的按钮，并通过 `aria-expanded` / `aria-controls` 指向持续存在、由 `hidden` 管理的具名区域。按钮维持至少 40px 高。
+- **Chrome DevTools MCP 隔离核验**：1440×960 桌面首页显示独立 H2“最近变化”、按钮“收起最近变化”及具名区域。展开状态、关联 ID、区域可见性均正确；点击后状态改为收起、区域隐藏且内容不进入可访问树；再次用 Enter 展开成功，焦点留在按钮上，页面宽度等于视口。此验收使用本地合成夹具，没有业务写入。用户确认 VoiceOver 对“操作日志”“用户列表”选中视图的播报明确；该实际听音证据只涉及人员管理两个视图，不扩展为首页的真实语音验收。
+- **回归与工程检查**：`tests/browser/topic-stage-record-repair.spec.ts` 增加按钮名称、`aria-controls`、具名区域、折叠隐藏与重新展开断言。`npm run check -- --pretty false`、对应 ESLint、`npm run test:home-dashboard`、`npm run test:home-cross-module-overview`（2 项）、`npm run version:check`（v10.1.31）、更新说明治理（709 个版本）、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 均通过。构建仍提示现有超过 500 kB 的分包，本次未做无关拆分。`npm run test:topic-stage-record-repair-browser` 在 Chromium 启动时因 macOS `bootstrap_check_in ... Permission denied (1100)` 退出，未进入断言；DevTools 手工交互不记作自动化通过。
+- **范围与下一步**：仅首页折叠控件、对应浏览器回归和版本/说明文档；无 API、授权规则、数据库或业务数据变化。Android 元数据为 10.1.31 / 100131，未构建 APK。只改工作树，不提交、推送或部署。继续清单 B4/B5 已挂载页面检查和 B8 未完成恢复闭环；Android 原生专项仍后置。
+
+# XMT 升级阶段记录
+
+## 2026-10-30 清单 B4：登录及更新提示触控优化（v10.1.30，本地未部署）
+
+- **发现**：Chrome DevTools MCP 中当前工作树登录页在 320×568 浅色视口，品牌标题“岚曜”（y=32–68）与“欢迎回来”（y=15–47）相交 15px；“记住密码”标签点击区只有 72×16px。版本更新提示关闭按钮也只有 36×36px。窄屏品牌容器使用绝对定位，表单区仍垂直居中，造成标题重叠和较小的触控目标。
+- **改造**：style1 登录页将手机品牌从绝对定位改为顺序文档流，品牌区置于登录内容之前；style1 及共用 `LoginForm` 中的记住密码标签扩大到至少 40px 高。版本更新提示关闭按钮改用 Studio ghost 按钮样式，目标为 40×40px 并补键盘焦点框。桌面仍隐藏移动品牌区并保留原双栏布局。无新增色值，继续使用 Studio 令牌。
+- **Chrome DevTools MCP 隔离核验**：登录夹具使用合成设置和内存 API，不连接业务 API；style1/2/3 的 320×568 浅色、style1 的 320px 深色与 390×844 浅色、1440×960 桌面核对。style1 在 320px 品牌区底部 y=88、“欢迎回来”顶部 y=120，间隔 32px；390px 也间隔 32px。记住密码点击区从 72×16px 增至 88×40px；style2/3 320px 下分别为 98×40px。更新提示独立隔离夹具在 320px、390px、1440px 实测关闭按钮 40×40px，点击后提示关闭；各视口无横向溢出，主区域唯一；密码显隐和复选框操作正常，控制台无错误/警告。未登录、未提交业务写入；夹具只挂载合成组件。
+- **回归与工程检查**：登录回归新增 320px、390px 品牌区与欢迎标题几何不重叠断言、宽屏隐藏移动品牌区检查，以及各布局复选框触控尺寸和视口边界断言；新增 `tests/browser/update-notification-touch-target.spec.ts` 覆盖关闭按钮 320px/390px/1440px 尺寸、视口边界和关闭动作。登录与更新提示 Playwright 自动套件均在 Chromium 启动阶段遇 macOS `bootstrap_check_in ... Permission denied (1100)` 退出，未进入断言；不能记作自动套件通过。`npm run check -- --pretty false`、定向 ESLint（0 errors / 0 warnings）、`npm run version:check`（v10.1.30）、更新说明治理（708 个版本）、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 通过。构建保留既有大分包提示：Tiptap 555.12 kB、应用入口 821.48 kB、Silk 背景适配器 843.50 kB。Chrome DevTools MCP 手动核验补充了更新提示在 320px/390px/1440px 下关闭按钮 40×40px、点击关闭与键盘焦点框行为；自动套件未进入断言，手动核验不计作自动化通过。
+- **范围与下一步**：仅登录页局部布局、回归规格、版本和说明文档变化；无 API、权限、数据库或真实登录变化。Android 元数据为 10.1.30 / 100130，未构建 APK。仅改工作树，不提交、推送或部署。继续清单 B4/B5 全站验收和 B8 写入反馈盘点；Android 原生专项仍后置。
+
+## 2026-10-30 清单 B4：内容资产核实入口触控尺寸（v10.1.29，本地未部署）
+
+- **发现与改造**：隔离内容资产页上的“只读核实当前状态”按钮实测为 96×36px，未达到清单 40px 最低触控高度。将其最小高度增至 40px；写入结果不明时仍锁定表单，只有用户点击后才发起只读核实。
+- **Chrome DevTools MCP 隔离核验**：使用合成选题数据和浏览器内存接口拦截，不连接业务数据库。390×844 与 320×568 下按钮均为 96×40px，文档宽度分别为 390px 与 320px。模拟写入响应丢失与首次状态读取失败后，入口可见且表单保持锁定；用户点击后仅执行 GET，读到“未发现城市‘杭州’”后解锁，没有自动重发写入。页面渲染正常。
+- **自动回归与工程检查**：`tests/browser/mobile-work-center-responsive.spec.ts` 增加首次只读核实失败场景、锁定状态和按钮最小高度断言；`npm run test:topic-asset-dimensions-recovery` 2 项通过。`npm run test:mobile-work-center-browser` 在 macOS Chromium `bootstrap_check_in ... Permission denied (1100)` 启动错误处退出，未进入测试断言；DevTools MCP 手工验收不计作自动浏览器通过。`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、更新说明治理（707 个版本）、测试入口检查（317 个文件）、Studio token 检查（39 类颜色令牌/28 个透明度值）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过。构建保留大分包提示：Tiptap 555.12 kB、应用入口 821.21 kB、Silk 背景适配器 843.50 kB。
+- **范围与下一步**：仅内容资产列表按钮、对应浏览器回归、版本和说明文档变化；无 API、权限规则、数据库或真实选题数据变化。Android 元数据为 10.1.29 / 100129，未构建 APK。只改工作树，不提交、推送或部署。继续清单 B4/B5 其他已挂载页面与 B8 未完成恢复闭环；Android 原生专项仍后置。
+
+## 2026-10-30 清单 B4：资料详情导航触控尺寸（v10.1.28，本地未部署）
+
+- **发现**：Chrome DevTools MCP 隔离夹具在 1440px、390px、320px 下测得“返回所属资料库”链接只有 38×38px；桌面面包屑“首页”为 34×24.8px，“内容档案库”为 73×24.8px，均未达到 40px 触控尺寸。
+- **改造**：资料详情返回链接固定为 40×40px；共享面包屑可点击链接至少 40×40px，并增加清晰的键盘焦点轮廓，颜色继续使用 Studio 令牌。
+- **Chrome DevTools MCP 隔离核验**：使用工作树合成归档数据。1440×960 下返回链接 40×40px、面包屑为 42×40px 和 81×40px；390px 与 320px 下返回链接和面包屑均至少 40×40px，页面文档宽度不超过视口。归档详情内容正常显示，控制台无应用错误；测试启用减少动效时出现 Motion 的预期提示。点击返回链接后进入正确的内容档案库 URL；夹具没有实现列表读取接口，因此目标页进入可重试的加载失败状态，此状态不作为生产列表行为判断。
+- **回归与工程检查**：`tests/browser/resource-archive-detail.spec.ts` 增加 320px、390px、1440px 触控目标与视口边界断言。归档快照合同单元测试 11 项通过。`npm run test:legacy-resource-archive-detail` 随后在 Playwright Chromium 启动时遇到 macOS `bootstrap_check_in ... Permission denied (1100)`，未进入浏览器断言；Chrome DevTools MCP 手工验收不计作自动套件通过。`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`、版本治理、更新说明治理（706 个版本）、测试入口检查（317 个文件）、Studio token 检查（39 类颜色令牌/28 个透明度值）、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 均通过。构建仍提示现有大分包：Tiptap 555.12 kB、应用主包 820.87 kB、Silk 背景适配器 843.50 kB；本次未做无关拆分。
+- **范围与下一步**：仅资料详情、共享面包屑、对应浏览器回归、版本和说明文档变化；无 API、权限规则、数据库或真实资料变化。Android 元数据为 10.1.28 / 100128，未构建 APK。只改工作树，不提交、推送或部署。继续清单 B4/B5 其他已挂载页面以及 B8 未完成恢复闭环；Android 原生专项仍后置。
+
+## 2026-10-30 清单 B4：角色权限管理触控尺寸（v10.1.27，本地未部署）
+
+- **发现**：Chrome DevTools MCP 隔离页面确认角色权限管理的“新建角色”按钮为 114×38px，编辑和删除图标操作均为 32×32px，未达到 `DESIGN.md` 的 40px 最小高度。新建/编辑弹窗在窄屏仍使用双列字段，权限选择行和弹窗关闭按钮也没有统一的 40px 命中区。
+- **改造**：新建、重新加载、角色写入结果核实、编辑、删除、弹窗关闭和表单操作统一使用 Studio `ActionButton`。角色卡片编辑/删除与弹窗关闭固定为 40×40px；模块展开、全选沿用至少 40px 控件，权限勾选行最小高度 40px。角色信息和权限列表在手机视口改为单列，宽屏仍使用双列。
+- **Chrome DevTools MCP 隔离核验**：只使用工作树内存夹具的合成管理员与角色。桌面 1440×960、移动 390×844 和 320×568 页面宽度均与视口一致；“新建角色”分别为 114×40px，编辑/删除分别为 40×40px，全部留在视口内。320px 弹窗内编码、名称、描述字段各为 262×43.6px，390px 下各为 340×43.6px；关闭、模块展开、全选、取消、创建及权限标签命中区均至少 40px。实际打开并取消弹窗，焦点返回“新建角色”，没有角色创建、修改或删除请求。深色主题删除图标悬停对比度实测约 13.8:1；浏览器控制台无应用错误，只有测试环境主动开启减少动效后的提示。
+- **回归与工程检查**：浏览器回归 `tests/browser/workflow-designer-language.spec.ts` 增加 320px/390px 角色卡片触控尺寸、窄屏字段宽度、弹窗和权限选项命中区以及取消无写入断言。`npm run test:workflow-designer-language-browser` 因 macOS Chromium 在 `bootstrap_check_in` 阶段报权限错误 1100 退出，未进入断言；DevTools 手工验收不记作自动化套件通过。`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`、更新说明治理（705 个版本）、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 均通过。生产构建仍提示既有大于 500 kB 的分包，本次没有做无关调整。
+- **范围与下一步**：仅角色管理界面、该页面浏览器回归、版本和说明文档变化；无 API、授权规则、数据库或真实角色数据变化。Android 元数据为 10.1.27 / 100127，未构建 APK。只改工作树，不提交、推送或部署。继续清单 B4/B5 其他已挂载页面以及 B8 未完成恢复闭环；Android 原生专项仍后置。
+
+## 2026-10-30 清单 B4：人员管理视图触控尺寸（v10.1.26，本地未部署）
+
+- **发现**：Chrome DevTools MCP 在隔离的人员夹具中检查 320px、390px 与 1440px 视口，用户列表/操作日志切换按钮及搜索框均为 38px 高，低于设计系统 40px 触控最小值；源码复核还发现添加用户、行内操作、恢复按钮及新建/编辑字段未统一使用标准尺寸。打开编辑表单时，Chrome 提示密码字段未处于表单元素内，且没有明确的自动填充用途。
+- **改造**：人员管理视图、添加用户、行内操作与恢复按钮接入现有统一按钮样式，均至少 40px；搜索、新建和编辑字段接入统一字段样式。启用状态文字与复选框合并为至少 40px 高的可点击标签。新建和编辑的字段归入原生表单，并标明用户名、姓名、邮箱及新密码的自动填充用途，同时保留现有保存回调和恢复保护。视图名称、`aria-pressed` 当前选中状态、上下文搜索名称、搜索行为和颜色不变。
+- **交互与读屏**：用户本轮确认 VoiceOver 明确播报“操作日志”和“用户列表”的已选状态；该实际听音证据仅覆盖这两个视图。隔离辅助树也显示对应的选中状态和上下文搜索名称。
+- **隔离浏览器核验**：在桌面 1440px、1024px，以及 500px、390px、320px 视口实测视图切换、添加用户与两项行内操作均至少 40px，搜索框也至少 40px；列表/日志选中状态及搜索名称随切换正确，文档宽度与视口一致，无横向溢出。在 1440px、390px、320px 打开合成用户的新建和编辑表单，文本字段约 44px、角色选择与弹窗操作至少 40px，启用状态标签点击区 40px，取消后焦点返回触发按钮。密码字段位于原生表单中，用户名/姓名/邮箱/新密码属性分别正确；控制台没有密码表单归属或自动填充警告，仅有测试时启用减少动效产生的提示。网络只有登录态、权限、人员与角色读取及 Socket.IO 心跳；没有业务写入。
+- **回归与工程检查**：`tests/browser/users-tabs-selected-state.spec.ts` 增加 1440px、390px、320px 下视图标签、搜索框、添加入口、行操作、启用状态标签和新建/编辑字段尺寸、溢出、密码表单归属及 `new-password` 断言，并保留只读、视图状态、读取次数和表单不写入断言。最终重跑 `npm run test:users-tabs-browser` 时，Playwright Chromium 在 macOS 启动阶段遇到 `bootstrap_check_in ... Permission denied (1100)`，未进入任何测试断言；Chrome DevTools MCP 手工验收不记作自动套件通过。`npm run check -- --pretty false`、改动文件定向 ESLint、`npm run version:check`、版本与更新说明治理（704 个版本）、Android runtime contract、`npm run build` 和 `git diff --check` 均通过。构建仍提示主包、Tiptap 与 Silk 背景适配器超过 500 kB，属于现有分包提示，本次未做无关拆分。
+- **范围与下一步**：无 API、权限规则、数据库或真实人员数据变化。Android 元数据为 10.1.26 / 100126，仅同步版本，未构建 APK。只改工作树，不提交、推送或部署。继续清单 B4/B5 的其他已挂载页面以及 B8 未完成恢复闭环；Android 原生专项仍后置。
+
+## 2026-10-30 清单 B4：桌面侧栏折叠控件触控优化（v10.1.25，本地未部署）
+
+- **发现**：Chrome DevTools MCP 在实际桌面首页读到侧栏展开/收起按钮仅 28×28px，低于 `DESIGN.md` 规定的 40px 最小按钮高度。
+- **改造**：侧栏控件复用 `ActionButton` 图标样式，命中区改为 40×40px，Chevron 保持 14×14px；`tests/browser/published-archives.spec.ts` 增加展开/折叠两状态尺寸断言及与主内容可操作控件不相交的检查。
+- **验收夹具**：移动首页合成夹具漏了当前首页摘要合同中的 `my_retro_actions` 字段，导致正常首页显示格式错误提示。已补齐空行动项响应；没有变更产品 API 或真实数据。
+- **Chrome DevTools MCP 核验**：隔离账号与内存 API，无生产账号或业务写入。1440×960 展开与折叠状态各实测 40×40px，图标均为 14×14px，与主内容中的可操作控件不相交；1024×768 展开状态实测 40×40px，页面宽度未溢出。320×568 与 390×844 移动首页在夹具修复后均正常显示，只有一个 main 地标、没有错误提示、无横向溢出或低于 40px 的可见操作控件。阶段预览点击后正确展开各阶段内容。
+- **Lighthouse 与读屏边界**：桌面 Lighthouse Accessibility、Best Practices、SEO 均为 100；Agentic Browsing 33 分仅源自全站 `llms.txt`/`ai-catalog.json` 检查，与页面无关。用户确认 VoiceOver 明确读出“操作日志”“用户列表”的已选视图；该实际听音证据只覆盖这两个视图，不代表全站 VoiceOver 验收。
+- **工程检查**：`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、更新说明治理（703 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过。生产构建仍有既有超过 500 kB 的分包提示。新增 Playwright 侧栏回归本轮未执行；本轮采用 DevTools MCP 手工交互核验，不将其记作自动化套件通过。
+- **范围与下一步**：仅侧栏控件、首页验收夹具、浏览器回归和版本文档变化；无 API、权限、数据库或真实业务数据变化。Android 元数据 10.1.25 / 100125，仅同步版本，未构建 APK。仅本地修改，不提交、推送或部署。继续 B4/B5 其他已挂载页面验收和 B8 未完成恢复闭环；Android 原生专项仍后置。
+
+## 2026-10-30 清单 B4：可安全取消的弹窗支持 Escape（v10.1.24，本地未部署）
+
+- **发现**：Chrome DevTools MCP 隔离页检查移动“成片制作”的“添加制作计划”弹窗时，Tab 能访问表单，但 Escape 无法关闭。源码显示 `BaseModal` 有 Escape 支持，`FormModal` 未启用；多个可安全取消的确认、只读详情及资料选择弹窗也没有启用。
+- **改造**：表单和确认弹窗现可用 Escape 取消；提交中、忙碌或恢复锁定时仍保持打开。选题相似提示、资料选择、分类管理、意见/月报详情、复盘弹窗、抖音作品关联及安全离开提示等按各自已有关闭保护启用 Escape。`BaseModal` 默认值不变，遇到需要明确处理的修改状态时仍保留原路径。关闭后由模态生命周期将焦点恢复至打开弹窗的按钮。组件回归覆盖普通关闭、焦点恢复和写入锁定阻止关闭。
+- **核验与边界**：Chrome DevTools MCP 隔离内存夹具在 320×568 与 390×844 下打开制作计划表单，均以 Escape 关闭并将焦点还给“添加制作计划”，文档宽度与视口一致。320px 下弹窗内容可滚动，状态字段滚到可视范围时与固定底部操作区分离。组件模态回归 4/4 通过；fixture 使用内存数据，未提交表单或触发业务写入。
+- **移动成片详情补验**：Chrome DevTools MCP 隔离内存夹具在 320×568、390×844 核对移动拍摄详情：仅一个 main 地标，栏目为 H1、任务为 H2，所见按钮/编辑器控件至少 40px 高，文档无横向溢出；320px 长页可滚动，目标字数控件可滚到固定导航上方。删除确认框按 Escape 关闭并把焦点还给删除按钮；选题记录仍在，网络未出现删除写请求，控制台无错误或警告。未编辑或提交正文。
+- **B5 深色主题补验**：Chrome DevTools MCP 在 320×568 深色移动拍摄详情核对标题与操作渲染，所有操作按钮均至少 40px 高、文档无横向溢出、控制台无错误/警告。Lighthouse Accessibility、Best Practices、SEO 均为 100；Agentic Browsing 33 分仅来自全站 llms.txt / ai-catalog.json 建议，与页面主题无关。
+- **范围**：仅调整通用弹窗键盘交互及回归，不涉及 API、权限、数据库或真实业务数据。版本 10.1.24；Android 元数据 10.1.24 / 100124，仅同步版本号，未构建 APK。仅本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 其他已挂载页面验收与 B8 未完成恢复闭环；Android 原生专项仍后置。
+
+## 2026-10-30 清单 B4：移动首页阶段预览触控尺寸（v10.1.23，本地未部署）
+
+- **发现**：Chrome DevTools MCP 隔离首页在 320px 视口发现“各阶段最新内容”折叠入口仅 38px 高，低于清单的 40px 触控目标；实现也未复用 Studio 按钮控件。
+- **改造**：入口改用 `ActionButton` 的 ghost 样式和 40px 最小高度；保留现有可访问名称、`aria-controls`、`aria-expanded` 与折叠行为。阶段预览浏览器回归增加 320px、390px 最小高度及 Space 展开/收起断言。
+- **核验与边界**：Chrome DevTools MCP 隔离内存首页在 320px、390px 实测按钮分别为 76px、60px，辅助树名称完整，Space 可展开/收起；两种宽度文档宽度均与视口相同，无未命名或小于 40px 的可见控件。Chrome Lighthouse Accessibility、Best Practices、SEO 均为 100；Agentic Browsing 的 `llms.txt` 与 `ai-catalog.json` 两项是全站建议，与本改动无关。页面控制台无错误或警告。隔离 fixture 的首页摘要接口数据不匹配，页面显示对应的模拟读取错误态；这不代表真实数据路径已验收。类型检查、版本一致性、更新说明治理（701 个版本）、Android runtime 合同、生产构建和 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。`npm run test:topic-stage-record-repair-browser` 在 Chromium 启动时遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言；MCP 手工核验不记作自动套件通过。
+- **移动主导航补验**：320×568 隔离页继续检查选题、消息和“我的”路由：三页均只有一个 `main`，选中导航项通过 `aria-current="page"` 标记，页面标题在切换后获得焦点，无横向溢出、无未命名操作或小于 40px 的可见触控目标，控制台无错误/警告。选题搜索文字框本身为 20px 高，但其关联标签提供 44px 高的完整点击区域，辅助名称为“搜索选题”，符合本项目触控尺寸要求，因此不调整该字段。均为只读隔离页面，没有业务数据写入。
+- **范围**：无 API、权限、数据库或业务数据变化。版本 10.1.23；Android 元数据 10.1.23 / 100123，仅同步版本号，未构建 APK。仅本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 页面验收及 B8 未完成恢复闭环；Android 原生专项按用户要求后置。
+
+## 2026-10-30 清单 B4：移动端页面标题层级统一（v10.1.22，本地未部署）
+
+- **发现**：Chrome DevTools MCP 在 390×844 的知识库隔离页面读屏树中，同时看到移动壳一级标题“资料中心”和页面一级标题“知识库”；另一个成片详情隔离页面出现移动壳 `main` 内再嵌套 `main`。源码复核确认共享页头及多处手写页头都有同类标题结构；桌面侧栏品牌名也使用了标题标签。
+- **改造**：移动壳内统一把具体页面标题作为二级标题，桌面页仍使用一级标题；共享页头、手写页头和无权限状态共用同一语义组件。页面标题带稳定标记，移动路由切换焦点仍可落到具体页面标题。桌面侧栏品牌名改为普通文本。拍摄详情正文容器改为普通内容区，保留全局唯一 `main` 地标。同步更新成片制作移动验收中标题层级的既有期望。
+- **核验与边界**：变更前浏览器快照确认重复一级标题。修改后在 Chrome DevTools MCP 隔离 fixture 的 390×844 拍摄详情页确认栏目“工作”为唯一 H1、具体页标题为 H2、全页只有一个 `main`，文档宽度为 390px；Lighthouse Accessibility、Best Practices、SEO 均为 100。Agentic Browsing 33 分的两项失败是全站 `llms.txt` 与 `ai-catalog.json` 建议，与本次页面语义无关。控制台仅有 fixture WebSocket 关闭提示。`npm run check -- --pretty false`、`npm run version:check`、`npm run build` 和 `git diff --check` 通过。`npm run test:mobile-work-center-browser` 在 macOS Chromium 启动时遇 `bootstrap_check_in … Permission denied (1100)`，未进入测试断言；MCP 手工核验不记作自动套件通过。本轮未做 VoiceOver 复测。
+- **范围**：无 API、权限规则、数据库或业务数据变化。版本 10.1.22；Android 元数据 10.1.22 / 100122，仅同步版本号，未构建 APK。仅本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 剩余页面的键盘、读屏、主题与窄屏检查；待本地浏览器 fixture 可用时补做修改后页面实测。B8 未完写入恢复继续按实际调用路径逐项收口，Android 原生专项仍后置。
+
+## 2026-10-30 清单 B4/B5/B6/B8：来源隔离、恢复保护与触控/读屏细节（v10.1.21，本地未部署）
+
+- **本轮 B4/B8 补充**：移动端 `/topics/add` 的公共顶栏以“选题”作为 H1，提报页原本又输出 H1“提报选题”，形成两个一级标题；现将页面具体标题改为 H2，保留原视觉样式和 MobileShell 的页面焦点落点。用户确认匿名意见回执不自动过期、意见删除时清除；复核现有随机回执不保存提交人身份、没有自动过期字段，刷新后仅只读核实，删除事务会清除对应回执，现有实现符合口径，本轮不改回执行为。
+- **B4 浏览器补验与回归**：Chrome DevTools MCP 连接本地合成 fixture，从移动选题列表点“新建选题”进入 `/topics/add`；390×844 和 320×844 辅助树均仅有分区 H1“选题”，页面标题“提报选题”为 H2，路由后焦点落在该 H2，文档宽度分别与视口一致。业务接口仅 GET；另见 Socket.IO 轮询 POST，未触发业务写入。新增的 `test:creator-topic-suggestions-browser` 断言未能由仓库 Chromium 执行：本轮尝试在启动阶段遇 `bootstrap_check_in … Permission denied (1100)`，未进入断言；Chrome DevTools MCP 手工验收不记作自动套件通过。SearchBar 标识回归 2/2、类型检查、目标 ESLint 和 `git diff --check` 通过。
+
+- **B8 审批流模板恢复复核**：Chrome DevTools MCP 与 Playwright MCP 在独立隔离上下文使用内存 fixture。创建时让服务端确认写入后丢弃浏览器响应，再注入首次只读核实 503；页面保留请求与表单锁，刷新后通过 GET 确认新模板存在，没有第二次 POST。更新时 PUT 已提交但返回 503，首次状态核实也为 503；刷新后状态 GET 与模板详情 GET 均确认成功，页面反馈“不会重复更新”，没有第二次 PUT。删除时 DELETE 已提交但返回 503，首次只读详情 GET 为 503；刷新后 GET 404 确认已删除，随后列表 GET 503 显示“删除已确认、仅重载列表”，点击后仅发 GET 并恢复列表，没有第二次 DELETE。每条业务写入各一次；Socket.IO 轮询 POST 不计业务写入。`npm run test:workflow-template-update-recovery` 6/6 通过。`test:workflow-designer-language-browser` 完整自动套件仍未执行；MCP 人工结果不替代自动断言。fixture 无业务数据库或真实模板数据变化。
+
+- **B8 公告创建/删除恢复抽查**：复核 `AnnouncementBoard` 的账号范围恢复标记、同步写入锁、成功回执与列表刷新分离。Playwright MCP 在隔离 fixture 注入“创建已落库但回执失败 + 首次状态 GET 503”；刷新后仅状态/列表 GET，公告只创建一条且提示成功。再注入“删除已生效但 DELETE 回执和首次列表 GET 均为 503”；页面保留写入锁与恢复标记，刷新后 GET 确认目标不存在并清除标记，没有第二次 DELETE。`announcement-create-idempotency-http` 与 `announcement-client-contract` 共 2 个专项测试通过。公告自动浏览器套件本轮未运行；MCP 人工结果不替代自动断言。均为隔离合成数据，没有修改真实公告。
+
+- **本轮补验**：Chrome DevTools MCP 在隔离内存夹具手动测量主题内容资产卡片中的“移除人物：李师傅”按钮：1440px、390px、320px 均为 40×40px；390px/320px 文档宽度分别为 382px/312px，无横向溢出。辅助树含明确移除名称。初检发现该页搜索框及两项筛选缺少稳定 `id/name`：筛选已补明确标识，共用 `SearchBar` 为所有未自定义调用生成唯一标识；主题资产页重载后 320px/1440px 均无对应 Issue，另在知识库页验证默认调用生成值。知识库隔离夹具缺少分类/资料接口并显示预期读取错误，该页只用于字段属性核对。主题资产页仅显示合成选题/人物数据，未触发删除或其他业务写入；该页控制台无错误，捕获 320×844 全页截图。SearchBar 回归 2/2、类型检查、目标 ESLint、`git diff --check` 通过；`test:creator-topic-suggestions-browser` 本轮尝试启动但受 Chromium 权限错误 1100 阻断，未进入断言；MCP 手工核验不代表自动套件通过。
+
+- **本轮补充**：编辑器目录栏标题、分组折叠和标题跳转的触控区域提升到至少 40×40px，并补齐 `aria-expanded`。折叠一级标题时仍保留展开按钮，修复此前子标题消失后无法展开的缺陷。Chrome DevTools MCP 在 1440px 隔离页核对 40px 触控区域及折叠/展开状态；320/390px 使用移动编辑器，该流程不显示桌面目录，因此本轮不声称窄屏目录尺寸已验收。创作记录删除前正文保存失败时保留确认框；仅在正文保存成功且恢复凭证准备完成后关闭。Chrome DevTools MCP 隔离夹具注入待处理保存 503，确认对话框保留、DELETE 为 0；明确重试使正文同步后重新确认，只发送一次 DELETE。正文最终保存两次（首次失败、明确重试成功），服务端内容正确；唯一控制台错误是预期注入的 503。`tests/browser/production-review.spec.ts` 已补回归覆盖，本轮未运行自动浏览器套件；既有 Chromium 启动权限错误 1100 仍是未解决限制。无 API、权限规则、数据库、版本号变更；仅本地修改，不提交、推送或部署。
+
+- **改造内容**：新增只读创作来源快照页。服务端仅按精确创作记录/版本解析来源选题，访问范围需覆盖来源选题；客户端提供的选题 ID 不能扩大读取范围。来源缺失、版本重复或归属不明时不返回正文，不回退到当前稿；快照响应禁用缓存。生产归档保留跨选题来源标识，不把原选题正文复制到另一选题归档。归档页分开展示归档选题与实际来源选题，并提供受服务端权限校验的来源入口。成就排行和创作者驾驶舱失败重试入口提升到至少 40px；公告表单的类型、置顶、发布和公告删除入口扩大触控区域，番茄钟排行榜与选题内容维度重试操作至少 40px。编辑器基础富文本工具栏增加具名控件组语义；编辑器右键菜单行和颜色选项触控目标提升到至少 40px。知识库“全部分类”、类别选择和展开/收起触控目标提升到至少 40px。Lighthouse 发现来源快照错误提示标题从 H1 跳到 H3；错误状态增加可配置标题层级，该页使用 H2。移动通知偏好发送前持久化账号范围的恢复标记；结果不明时刷新仍可只读核实，不会自动重复提交。移动日报恢复信息无法清除时锁定编辑和提交，提供重试清理操作；趋势周期按钮提升到 40px，图表日期与数值明细继续支持屏幕阅读器。成片来源大纲链接、选题历史展开入口及历史重试按钮均提升到至少 40px；选题小版本/大版本保存成功后若历史读取失败，清空旧列表并提示只读重试，不将旧历史伪装为最新结果，也不重复提交版本写入，且读取失败时不显示“暂无已保存版本”。成片来源创作稿链接及成片/发布版本历史正文展开入口也统一提升至至少 40px。
+- **浏览器核验**：Chrome DevTools MCP 本地隔离页确认同选题归档可打开对应的历史正文，页面为只读且未展示当前稿；跨选题归档提示正文未复制，入口请求在只有 `production:view`、无来源选题访问范围时返回 403，响应 `Cache-Control: no-store`，正文为空。另在 390px Chrome 隔离夹具中模拟通知偏好写入提交后响应丢失、首次核实 GET 失败；刷新后自动只读核实成功，辅助树显示已保存且选中值与服务器一致，恢复标记清除，刷新网络仅含 GET、没有第二次 PUT，文档宽度为 390px。日报移动页 Playwright MCP 隔离夹具注入恢复记录清理异常后，草稿保持已保存、提交次数为 0、恢复标记阶段为 saved；刷新重开时立刻锁定编辑并显示清理入口，持续清理异常期间仍锁定，恢复后清理标记，最终只有一次草稿保存和一次提交，390px 无横向溢出。趋势页 Playwright MCP 在 390px、320px 核对三个按钮均为 40px，切换 7 天后选中状态正确，图表日期/数值表仍可访问，页面无横向溢出且运行时错误为 0。创作资料区 Playwright MCP 手动操作验证桌面拖拽将高度从 360px 调至 642px 并保存，Home/方向键复位和步进正常；390×844 下高度 min/max 为 240/633px，无资料或业务写入、无水平溢出，运行时错误为 0。用户确认 VoiceOver 能读出“操作日志”“用户列表”的已选视图；该听音证据仅覆盖这两处，不扩展到本版本新增控件。
+- **本轮 MCP 补充核验**：Chrome DevTools MCP 在 320×844 公告夹具中确认类型、置顶、发布按钮各 40px 高，删除入口为 40×40px，文档宽度为 320px。320×720 番茄钟隔离页注入排行榜 503 后，错误位于 `role=alert` 且 `aria-atomic=true`，重试按钮为 54×40px；点击后错误消失并显示空排行榜。Playwright MCP 编辑器隔离页辅助树列出“基础富文本工具栏”控件组及 8 个格式按钮。知识库类别树在 Chrome DevTools MCP 隔离页以 320×844、390×844 核验：“全部分类”、分类选择和展开/收起按钮均至少 40×40px，折叠/展开时 `aria-expanded` 与子类显示一致，页面无横向溢出。编辑器右键菜单在 Chrome DevTools MCP 隔离页以 390×844、320×844、320×568 核验：菜单操作项和文字/高亮色板选项均至少 40×40px；320px 下色板在视口内展开、无横向溢出，320×568 下菜单可滚动且键盘 End 将末项滚入视口。只操作内存夹具中的菜单/焦点，业务写入计数为 0。Chrome DevTools MCP 还在隔离内存夹具中复核角色创建、更新、删除三条 B8 恢复链路：各提交一次后模拟响应丢失和首次只读核实失败，刷新后锁仍在且没有自动重发；再次只读核实分别确认角色已创建、更新或删除（删除由 404 确认），随后清除账号范围恢复标记。网络中每条写入只有一次 POST、PUT 或 DELETE；唯一控制台错误是已删除角色的预期 404。`test:workflow-designer-language-browser` 本轮未运行；此前启动 Chromium 时遇到 macOS 权限错误 1100，MCP 手工核验不代替自动测试。对应自动浏览器断言已补充，本轮未运行。选题内容维度移除按钮已补足至少 40×40px，现有浏览器规格要求桌面和 320px 均满足此尺寸；Chrome DevTools MCP 隔离内存夹具实测桌面 1440px 和 320px 窄屏均为 40×40px，窄屏无横向溢出，未触发移除或其他业务写入；自动套件本轮未运行。新增来源大纲链接、成片来源创作稿链接及成片/发布版本历史正文入口桌面、390px、320px 触控尺寸与窄屏溢出断言；版本历史回归注入保存成功后的历史 GET 503，断言旧列表清空、错误提示和只读重试可见，重试恢复历史且不产生第二次 PUT。来源详情/成片与发布版本历史两个自动浏览器套件均在 Chromium 启动阶段被 macOS 权限错误 1100 阻断，未进入断言。Playwright MCP 随后在本地隔离 fixture 中手动复核成片与发布详情：桌面 1200px、390px、320px 下来源链接和正文展开入口均为 40px，320px 页面宽 312px 且正文可展开；仅有预期注入的首次历史 GET 503，没有额外控制台错误。Playwright MCP 在选题 940 隔离 fixture 中先保存 v1.0，再保存 v1.1 并注入版本历史 GET 503；失败态不显示 v1.1、旧 v1.0、历史原稿或“暂无已保存版本”。只读重试恢复 v1.1、v1.0 与历史原稿，清除错误提示；两次有意保存共两次 PUT，重试未增加写入。对应自动回归另加入预加载 baseline 并断言失败时旧列表和空态均隐藏；自动 suite 仍在 Chromium 启动阶段被 macOS 权限错误 1100 阻断，断言尚未执行。
+- **Chrome 原生缩放补验**：在用户 Google Chrome 的隔离夹具中使用浏览器原生缩放（DPR 随之改变），覆盖成片 110%/125% 与发布 80%/90%/125%。来源链接和历史正文展开控件在所测级别均为 40px，展开后正文可见，页面无水平溢出；点击指向缺失 v2 的历史来源会进入不可用提示，不显示当前稿，也不提供保存操作。仅在内存夹具中各显式保存一次测试版本。此实测暴露浏览器规格仍期待旧的 `/production/303?version=v2` 路径，已改为断言当前 `/production/303/source-snapshot?version=v2` 及失败关闭状态；自动套件仍因 Chromium 启动错误 1100 未执行。
+- **自动验证**：归档快照 UI 测试 11/11、归档来源快照辅助测试 1/1、错误状态标题层级无障碍回归、通知恢复辅助测试 4/4、跨选题归档/HTTP 权限隔离测试通过；source-snapshot HTTP 回归和 `test:workflow-script-source` 通过。最新 `npm run check -- --pretty false`、目标 ESLint（0 errors；共享创作者组件 8 条既有 react-refresh 警告）、`npm run build`、`npm run version:check`、版本治理、更新说明治理（699 个版本）与 `git diff --check` 通过；构建保留现有超过 500 kB 的分包提示。日报恢复、趋势、公告、番茄钟、移动工作中心（含选题维度）、资料分类/编辑器，以及新增来源详情、成片/发布版本历史入口和选题历史恢复浏览器套件均在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言，不计作自动测试通过。Playwright MCP / Chrome DevTools MCP 隔离页手动核验单独记录，不替代自动测试。本轮重新启动只读归档 fixture 后复验创作来源快照错误态：Chrome DevTools MCP Lighthouse 快照在桌面 1440×960、移动 390×844 的 Accessibility、Best Practices、SEO 均为 100；320×844 文档宽度与视口相同，辅助树为页面 H1 后接错误 H2。Agentic Browsing 33 的两项失败是全站 llms.txt 标题和 ai-catalog schema 建议，不属于页面标题修复范围。fixture 仅合成数据、未触发业务写入；仅有模拟 reduced-motion 的预期控制台提示。`test:error-state-accessibility` 通过。
+- **接口与数据**：新增只读来源快照 API 并登记 OpenAPI；复用现有 `production:view` 和来源选题范围检查。此版本没有新增数据库迁移或权限代码。Android 元数据为 10.1.21 / 100121，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续按清单推进尚未完成的 B4/B5 页面验收与 B8 恢复/权限边界，Android 原生专项仍后置。
+
+## 2026-10-30 清单 B4/B5/B8：编辑器、活动日志、日报、登录灰度与恢复隔离（v10.1.20，本地未部署）
+
+- **改造内容**：编辑器为现代版和旧版正文、只读正文补充明确名称与只读语义；格式工具、颜色选项播报当前状态。活动日志分页按钮播报“第 N 页”并保留当前页状态。日报草稿保存后若本机恢复信息无法清除，会保留已保存状态、暂停提交，清理成功后才可继续，避免提交后刷新误判冲突。登录灰度页按实际运行方式显示模式和就绪条件；品牌 Logo 图片选择增加键盘入口与可见焦点框；资料筛选无匹配时显示空结果说明和清除操作。发布和成片恢复标记按账号隔离，损坏或不可读的发布标记保持写入锁，资料状态核实请求禁用缓存。
+- **浏览器核验**：Chrome DevTools MCP 辅助技术树确认 4 个编辑区名称、多行/只读属性，以及现代和旧版编辑器格式与颜色选择状态；只读核实失败期间资料删除/编辑仍锁定，显式只读核实成功后才清除恢复标记；切换账号后不读取或清除其他账号的发布标记，损坏标记保持恢复锁；登录灰度比例模式显示未就绪；Logo 图片选择可用 Tab 聚焦且显示焦点框；筛选无结果时清除操作可用。Playwright MCP 活动日志隔离页面确认“第 1/2/3 页”名称和当前状态；Tab+Enter 切至第 3 页后焦点、当前页同步，页面无控制台错误/警告。日报新增的本机标记清理失败浏览器用例尚未运行。VoiceOver 实际听音由用户确认仅覆盖“操作日志”和“用户列表”已选视图，不扩展到编辑器或其他控件。
+- **自动验证与边界**：灰度、Logo、筛选空状态、恢复逻辑及资源缓存控制定向测试 10/10 通过；编辑器选择样式契约通过；`npm run test:activity-log`、`npm run test:daily-report-audit-atomic`、`npm run test:daily-report-permissions`、`npm run check -- --pretty false`、`npm run version:check`、版本与更新说明治理、Android runtime contract 和 `git diff --check` 通过。生产构建通过并保留超过 500 kB 的分包提示。目标 ESLint 0 errors，5 条警告集中于编辑器 `any` 类型及设置页 hook 依赖提示；日报、活动日志目标 ESLint 无错误/警告。自动 Playwright 浏览器套件受 Chrome 会话占用及本机 Chromium `bootstrap_check_in … Permission denied (1100)` 限制，未进入断言；隔离页面手工核验不记为自动套件通过。Android 元数据为 10.1.20 / 100120，未构建 APK；无 API、权限或数据库变化。本地不提交、推送或部署。
+- **下一步**：继续 B4/B5 其余已挂载页面的全站核验与 B8 操作反馈盘点；Android 原生专项继续后置。
+
+## 2026-10-30 清单 B4/B5：消息未读光效主题适配与番茄钟读屏结构（v10.1.19，本地未部署）
+
+- **发现与改造**：顶栏和侧栏消息未读徽标的外侧光效原为固定粉色，浅色主题下不随当前强调色变化；番茄钟页在主标题后跳到三级分区标题，排行榜和今日统计读取失败也缺少错误播报。现新增随主题切换的珊瑚色光效令牌，并由两个消息入口共用；番茄钟主体和排行榜均改为紧接页面主标题的二级标题，排行榜和统计错误加入完整播报，重试按钮保持独立可操作。
+- **浏览器核验**：Chrome DevTools MCP 隔离页面实测浅色光效为 `rgba(225, 29, 72, 0.14)`、深色为 `rgba(255, 122, 147, 0.28)`，顶栏与侧栏结果一致。番茄钟无障碍树显示页面 H1 后依次为主体 H2 和排行榜 H2；分别注入排行榜和今日统计读取失败后，完整 alert 错误文本与独立重试按钮均可见于辅助技术树，桌面完整组件和精简卡片均已核对。1440px 视口文档宽度与视口相同。此处核对的是浏览器辅助技术树，未声称完成本页 VoiceOver 语音验收。
+- **并行源码抽查**：B4 检查工作台、选题、发布、日志、人员、报告和移动导航等页面，B5 检查本轮未覆盖的主题页面，B8 检查用户、日历、成片、公告、日报与消息操作；未确认其他新缺陷。这些是局部源码审查，不代表 B4/B5 全站验收或 B8 全量盘点已完成。
+- **验证与边界**：`npm run version:check`、`npm run check -- --pretty false`、目标 ESLint、`npm run build`、`git diff --check` 通过；构建保留既有超过 500 kB 的分包提示；B5 的 Studio token 用量检查已在本轮改造中通过。自动消息浏览器在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言；番茄钟浏览器规格中的标题检查已同步到 H2，本轮未运行自动浏览器套件。隔离页的当前番茄钟接口未配置，产生一条 404 和独立的状态读取提示，不影响本次标题与统计/排行榜错误语义核对。Android 元数据为 10.1.19 / 100119，未构建 APK；无 API、权限或数据库变化。本地不提交、推送或部署。
+- **下一步**：继续 B4/B5 其余已挂载页面的全站核验与 B8 操作反馈盘点；Android 原生专项继续后置。
+
+## 2026-10-30 清单 P0：历史更新说明文案清理（v10.1.18，本地未部署）
+
+- **发现与改造**：设置页会逐条原样展示完整更新说明。历史记录中存在内部源文件路径、字段名、依赖和开发工具名称，普通用户难以理解。现将可见说明改写为用户可感知的功能结果，并清理历史安全、协作、移动端、主题、数据导入与内容编辑条目中的实现细节。
+- **回归保护**：扩展 `tests/ops/changelog-governance.test.ts`，除版本唯一与当前版本置顶外，检查所有标题、影响范围和更新内容，拦截常见开发工具、实现术语、代码字段及源码路径。
+- **验证与边界**：`npm run test:changelog-governance` 通过（696 个版本）；`npm run version:check`、`npm run check -- --pretty false`、目标 ESLint、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 均通过。构建保留既有超过 500 kB 的分包提示。Android 元数据为 10.1.18 / 100118，未构建 APK；无接口、权限或数据库变化。本地不提交、推送或部署。
+- **下一步**：继续清单 P0 的 B4/B5 全站验收与 B8 全量操作反馈盘点；Android 原生专项继续后置。
+
+## 2026-10-30 清单 B4/B8：登录触控目标与找回密码反馈（v10.1.17，本地未部署）
+
+- **发现与改造**：登录页“忘记密码？”在 320px 下仅 70×20px，手机难以准确点按；其回调还只写入全局通知状态，而 `/login` 路由不挂载 `Layout` 通知容器，点击没有可见结果。现将入口命中区域加至 86×44px，并在登录表单显示 `role="status"` 管理员重置说明；输入账号/密码或提交后清除过期提示。
+- **回归保护**：`tests/browser/login-theme-contrast.spec.ts` 在 style3 的 320/390px 视口断言触控区域高度至少 44px、左右边界在视口内；点击“忘记密码？”后检查说明可见，并确认点击没有新增 API 写请求。
+- **Chrome DevTools MCP 验收**：本地合成登录页 `/login` 320×812 与 390×844 下按钮均为 86×44px，页面宽度分别等于视口宽度。320px 视口点击后读屏快照出现礼貌播报状态“当前系统未接入找回密码流程，请联系管理员重置密码。”；提示在页面内可见，390px 下提示宽 342px 且在视口内。请求列表仅有系统设置 GET；控制台无错误或警告。截图在本轮工具输出中展示；无账号提交。
+- **验证与边界**：`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、`npm run test:changelog-governance`（695 个版本）、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 均通过；构建保留既有 >500 kB 分包提示。自动 `npm run test:login-theme-contrast-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言；Chrome DevTools MCP 手工隔离核验不记为自动测试通过。Android 元数据为 10.1.17 / 100117，未构建 APK；无 API、权限或数据库变化。本地不提交、推送或部署。
+- **下一步**：继续清单 P0 的 B4/B5 全站验收与 B8 全量操作反馈盘点；Android 原生专项继续后置。
+
+## 2026-10-30 清单 B4：消息标题层级与未读数读屏名称（v10.1.16，本地未部署）
+
+- **发现与改造**：消息中心原有 `h1` 后直接使用 `h3`，顶栏消息入口的读屏名称也没有包含可见未读数。现将消息标题调整为 `h2`；入口名称包含未读数，超过 9 条时同时播报可见的“9+”和实际总数。
+- **回归保护**：`tests/browser/messages-clear-hover.spec.ts` 现在核对消息标题为 `h2`、入口名称包含可见未读数，并加入 12 条未读时徽标显示“9+”且读屏名称仍播报准确总数的断言；原有主题令牌、窄屏、清空确认和无业务写入检查继续保留。
+- **Chrome DevTools MCP / Lighthouse 验收**：本地合成消息隔离页显示页面 `h1`“消息中心”及 `h2`“未读状态主题验收”；顶栏入口名称为“打开消息中心，未读 1 条”，与徽标一致。Lighthouse 无障碍、最佳实践、SEO 均为 100；剩余两项失败是 `llms-txt`、`ard-schema` Agentic Browsing 建议，与本项无关。320×844 深色、减弱动态效果模拟下页面与文档宽度均为 320px，未读卡片位于 x=16..304，无横向溢出。只读合成数据，未触发消息读写。
+- **验证与边界**：`npm run check -- --pretty false`、`npm run build`、`npm run version:check`、`npm run test:changelog-governance`（694 个版本）、`npm run test:android-runtime`、目标 ESLint 和 `git diff --check` 均通过；构建保留既有 >500 kB 分包提示。自动 `npm run test:messages-clear-hover-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言，因而“9+ / 12 条”规格尚未由自动浏览器执行；Chrome DevTools MCP 手动核验不记为自动测试通过。验收页控制台无错误或警告。Android 元数据为 10.1.16 / 100116，未构建 APK；无 API、权限或数据库变化。本地不提交、推送或部署。
+- **下一步**：继续清单 P0 的 B4/B5 全站验收与 B8 未闭合操作；Android 原生专项继续后置。
+
+## 2026-10-30 清单 B5：消息未读状态主题令牌（v10.1.15，本地未部署）
+
+- **发现与改造**：桌面消息中心未读项的左侧强调线写死为亮青色，在浅色主题下不随 Studio 语义色变化。现改用 `--xmt-cyan-rgb`，透明度与强调线宽度保持原值。
+- **回归保护**：扩展 `tests/browser/messages-clear-hover.spec.ts`，提供一条合成未读消息，检查亮/暗主题下桌面强调线的最终渲染 RGB 与当前令牌一致；同时保留手机消息视图加载和 320px 无溢出断言。
+- **Chrome DevTools MCP 验收**：本地隔离夹具 1920×960 桌面页实测浅色强调线 `8 145 178` 与令牌 `8 145 178` 相同，切换深色后强调线 `92 225 230` 与令牌 `92 225 230` 相同。320×844 手机页面显示未读项，卡片位于 x=16..304，页面宽度为 320px；控制台无错误。只读合成数据，未触发消息已读、清空或其他业务写入。
+- **验证与边界**：`npm run check -- --pretty false`、`npm run build`、`npm run version:check`、目标 ESLint、`npm run test:changelog-governance`（693 个版本）和 `npm run test:android-runtime` 通过；构建保留既有 >500 kB 分包提示。自动 `npm run test:messages-clear-hover-browser` 在 Chromium 启动时受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言；本地 Chrome DevTools MCP 手工复核用于补充渲染证据，不记为自动套件通过。Android 元数据为 10.1.15 / 100115，未构建 APK；无 API、权限或数据库变化。本地不提交、推送或部署。
+- **下一步**：继续清单 P0 的 B4/B5 全站验收与 B8 未闭合操作；Android 原生专项继续后置。
+
+## 2026-10-30 清单 B4：选题详情标题层级与截止日期读屏名称（v10.1.14，本地未部署）
+
+- **发现与改造**：Chrome DevTools MCP Lighthouse 首次检查选题详情无障碍为 99，定位到 `h1` 后跳过 `h2` 的分区标题，以及日期按钮用“编辑截止时间”覆盖可见日期。现将背景、目标受众、大纲、关联资料、流程进度、操作和历史记录统一为 `h2`；版本历史为大纲下的 `h3`；按钮名称为“可见日期，编辑截止时间”。
+- **回归保护**：`tests/browser/topics-list-responsive.spec.ts` 检查上述页面分区均为 `h2`、版本历史为 `h3`，并核对截止日期可见文字包含在读屏名称中。自动规格未能启动 Chromium，见下方边界。
+- **Playwright MCP / Chrome DevTools MCP / Lighthouse 验收**：1366×960 合成选题详情 `/topics/931` 的辅助树显示分区级别连续，版本历史嵌套在大纲下；截止日期显示 `2026/10/10`，读屏名称为“2026/10/10，编辑截止时间”。Playwright MCP 的 320px、390px 和桌面视口检查均无水平溢出；标题级别和名称保持正确。Lighthouse 无障碍、最佳实践、SEO 均为 100（36 项通过）；两项 Agentic Browsing 建议不属于本项。控制台无错误；开启减少动态效果模拟时有 Motion 的预期提示。只读合成夹具，没有业务数据写入。
+- **B4/B5 扩展抽查**：成片详情与创作详情在 320 CSS px 均无水平溢出，所见操作按钮高度至少 40px，固定保存/提交按钮为 48px；创作详情 1366px 浅色和深色 Lighthouse 无障碍均为 100。登录页 style1 浅色 320px、style3 深色 320/390px 页面均无水平溢出，主登录按钮高度 48–54px；1366px 两套样式 Lighthouse 无障碍均为 100。均使用本地合成账号/API，没有提交登录或触发业务写入；这些样本不代表全站 B4/B5 完成。
+- **验证与边界**：`npm run check -- --pretty false`、`npm run version:check`、`npm run test:changelog-governance`（692 个版本）、`npm run test:android-runtime`、`npm run build`、目标 ESLint 和 `git diff --check` 均通过；构建保留既有 >500 kB 分包提示，目标 ESLint 有 6 条未改动行的既有警告、无错误。`npm run test:topics-responsive-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言；不记为自动浏览器通过。Android 元数据为 10.1.14 / 100114，未构建 APK；无 API、权限或数据库变化。本地不提交、推送或部署。
+- **下一步**：继续清单 P0 的全站 B4/B5 范围与 B8 未闭合操作；Android 原生专项继续后置。
+
+## 2026-10-30 清单 B4：侧边导航分组与用户菜单读屏名称（v10.1.13，本地未部署）
+
+- **发现与改造**：当前工作台路由的侧边栏同时有“工作台”可展开分组按钮和“工作台”页面按钮，两者读屏名称相同。分组控制现在命名为“工作台导航分组”，同名页面保留“工作台”，`aria-expanded` 继续播报展开状态。桌面用户菜单移除与可见账号/角色文字不一致的 `aria-label`，改为使用可见账号名、角色及隐藏的“打开用户菜单”用途文字生成名称。
+- **回归保护**：`tests/browser/published-archives.spec.ts` 验证展开后分组控件和“工作台”页面可分别按名称定位；`tests/browser/topic-stage-record-repair.spec.ts` 验证用户菜单名称包含可见账号/角色及用途。
+- **Playwright MCP / Chrome DevTools MCP / Lighthouse 验收**：Playwright MCP 展开“工作台导航分组”后，读屏树分别列出“工作台导航分组”控件与“工作台”页面；桌面菜单名称为“发布归档验收 通用编辑 打开用户菜单”。Chrome DevTools MCP 1440×960 隔离页复核名称和展开状态。Lighthouse 无障碍分类 100，34 项通过，标签/名称不匹配不再被报告；两项 Agentic Browsing 建议（`llms.txt` 和 `ai-catalog.json`）与本项无关。控制台无错误/警告；页面只读，没有业务写入。
+- **验证与边界**：`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、`npm run test:changelog-governance`（691 个版本）、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。`npm run test:published-archives-browser` 与 `npm run test:topic-stage-record-repair-browser` 均在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言；不记为自动浏览器测试通过。无 API、权限或数据库变化；Android 元数据为 10.1.13 / 100113，未构建 APK。本地不提交、推送或部署。
+- **VoiceOver 补充验收**：用户确认在“操作日志”和“用户列表”间聚焦时，VoiceOver 明确读出已选视图；此项人工听音仅覆盖这两个侧栏视图。
+- **下一步**：继续清单 P0 的全站 B4/B5 范围与 B8 未闭合操作；Android 原生专项继续后置。
+
+## 2026-10-30 清单 B5：创作者账号卡片光晕主题令牌（v10.1.12，本地未部署）
+
+- **发现与改造**：创作者中心真实使用的账号卡片将光晕固定为旧青色 RGB，浅、深主题都偏离 Studio 令牌。现保留 0.38 透明度并引用 `rgb(var(--xmt-cyan-rgb) / 0.38)`。
+- **回归保护**：`tests/browser/topic-stage-record-repair.spec.ts` 增加隔离驾驶舱规格，分别切换浅/深主题，确认光晕配置引用令牌且实际渲染 RGB 与当前令牌一致；检查后恢复浅色，避免影响后续视口场景。
+- **Playwright MCP / Chrome DevTools MCP 验收**：1440×960 本地隔离驾驶舱页面点击“切换主题”后，浅色令牌与实际渲染均为 `8 145 178`，深色均为 `92 225 230`；账号数据和页面内容正常，当前验收页控制台无错误/警告。未触发任何业务写入。
+- **验证与边界**：`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、`npm run test:changelog-governance`（690 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。更新后的 `npm run test:topic-stage-record-repair-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言；不记为自动测试通过。无 API、权限或数据库变化；Android 元数据为 10.1.12 / 100112，未构建 APK。本地不提交、推送或部署。
+- **下一步**：继续清单 P0 的全站 B4/B5 范围与 B8 未闭合操作；Android 原生专项继续后置。
+
+## 2026-10-30 清单 B5：选题卡片悬停主题令牌（v10.1.11，本地未部署）
+
+- **问题与改造**：选题管理页的三张指标卡和重点选题卡在悬停时使用固定 RGB，亮色主题仍显示旧青蓝色。两套 SpotlightCard 组件及其选题/ReactBits 调用现改用 `rgb(var(--xmt-cyan-rgb) / alpha)`；保留原 0.18/0.16 透明度，颜色随 Studio 浅/深主题令牌变化。
+- **回归保护**：`tests/browser/topics-list-responsive.spec.ts` 的隔离夹具新增仅供该规格使用的 ReactBits 卡片预览设置，在主题测试中同时渲染三张指标卡和重点选题卡；浅色、深色分别悬停两条组件路径，断言背景引用当前令牌、光斑显示且两主题令牌值不同。
+- **Chrome DevTools MCP 验收**：1366×960 隔离页面启用预览后显示 4 张卡片，浅色令牌为 `8 145 178`、深色为 `92 225 230`；指标卡与重点选题卡悬停均显示且计算样式分别解析为相应主题 RGB。文档宽度与视口同为 1366px，控制台无错误或警告。未执行业务写入；网络另有 Socket.IO 轮询传输 POST。
+- **验证与边界**：`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、`npm run test:changelog-governance`（689 个版本）、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。`npm run test:topics-responsive-browser` 在 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 阶段退出，未进入浏览器断言；以 Chrome DevTools MCP 手动隔离页核验补充交互证据，不记为自动测试通过。无 API、权限或数据库变化；Android 元数据为 10.1.11 / 100111，未构建 APK。本地不提交、推送或部署。
+- **下一步**：继续清单 P0 的全站 B4/B5 范围与 B8 未闭合操作；Android 原生专项继续后置。
+
+## 2026-10-29 清单 B4/B8：首行缩进读屏语义与采集端账号隔离（v10.1.10，本地未部署）
+
+- **问题与改造**：编辑器主工具栏和“更多”菜单的首行缩进按钮可改变状态，但此前未暴露为可切换控件；现均以 `aria-pressed` 报告当前状态。创作者中心此前在当前账号没有采集设备匹配项时退回使用全局首条设备，可能把其他账号的设备、浏览器、兼容和登录状态带入当前页；现只按当前成功加载 dashboard 的 `account.douyin_uid` 精确匹配，移除首项回退。未匹配时明确显示“尚未绑定采集端”；匹配但离线仍显示离线，失败时不沿用其他账号信息。
+- **回归保护**：编辑器合同规格覆盖主工具栏和“更多”首行缩进 `aria-pressed`；Creator Dashboard 浏览器规格覆盖 A→B 切换、B 的状态 GET 失败、成功无 B Agent、B Agent 离线/在线，并检查 A 的设备、浏览器、兼容与登录信息不泄漏。接口权限、服务端筛选范围和业务数据未改。
+- **Chrome DevTools MCP 验收**：1440×960 隔离页面先确认 A 显示自身设备和浏览器；切换到 B 并注入一次状态 503 后，页面明确显示状态暂不可用，设备、浏览器、版本、兼容和登录字段不含 A 信息。成功读取但无 B Agent 时显示“尚未绑定采集端”而非离线；注入 B Agent 后仅显示 B 设备/浏览器/兼容/登录，且离线与在线状态各自准确。验收只执行页面读取和刷新 GET。
+- **验证与边界**：`npm run test:editor-selection-style`、`npm run check -- --pretty false`、目标文件 ESLint、`npm run version:check`、`npm run test:changelog-governance`、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。`npm run test:topic-stage-record-repair-browser` 的 Chromium 在应用断言前因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，不能记为自动浏览器测试通过；Chrome DevTools MCP 隔离实测作为交互证据。用户确认 VoiceOver 明确读出了“操作日志”和“用户列表”的已选视图；未据此声称编辑器首行缩进经过实际听音。本版本不涉及 API 权限或数据库；Android 元数据为 10.1.10 / 100110，未构建 APK。本地修改，不提交、推送或部署。
+- **B4 窄屏/主题补充验收**：Chrome DevTools MCP 本地隔离夹具复核 ProductionDetail 在 320/390px 手机布局与 1366/1920px 桌面布局的浅色、深色视图；重新加载后的 320px 手机页均无横向溢出，保存/提交固定操作区与底部导航处于可视范围，控制台无错误或警告。桌面编辑器文字颜色弹层在 320/1366/1920px 及 1366px 根元素 CSS 缩放 0.8/1.25 时均在视口内；320px 窄宽下“更多操作”菜单保持可滚动，Escape 收起后焦点回到触发按钮。根元素 CSS 缩放仅模拟页面缩放，未代表 Chrome 原生缩放验收。隔离夹具的保存、审核、批注、状态更新、版本保存、删除和通用业务写入计数均为 0；存在协作同步更新计数。此项为手动隔离页视觉/交互复核，不替代全站 B4/B5 验收。
+- **B4 键盘焦点补充**：在 320px 深色手机隔离页仅通过 Tab 导航，依次到达固定“保存草稿”和“提交审核”；焦点框为 2px 实线，两按钮完整位于视口内。未激活按钮；再次读取夹具计数后，保存、审核、批注、状态、版本、删除和通用业务写入均为 0。该检查只覆盖稿件页对应操作，不替代全站键盘验收。
+- **下一步**：继续 B4/B5 全站读屏、键盘、主题与窄屏验收及 B8 其他本地闭环；Android 原生专项仍按用户要求后置。
+
+## 2026-10-29 清单 B4/B8：资料库筛选结果归属与编辑器切换语义（v10.1.9，本地未部署）
+
+- **问题与改造**：资料库旧结果在新筛选条件等待防抖/读取、失败及账号变化期间仍可能让旧总数和分页看起来属于新查询。现在总数与页码仅在身份、资料类型、分类、已防抖关键词和页码均匹配成功结果时展示；查询切换与失败时统计暂隐，翻页停用。成功删除后刷新失败的现有保留提示与行状态逻辑继续有效。编辑器基础和完整工具栏的格式、列表、对齐与块级切换按钮均以 `aria-pressed` 暴露当前状态，链接仍作为打开设置对话框的命令。
+- **回归保护**：浏览器夹具先返回 45 条/3 页，再为新筛选注入一次 503；断言错误期间旧资料行和数字不出现、页码显示未知且两侧翻页禁用，明确重试后新结果恢复为 1 条/1 页。编辑器合同回归覆盖基础/完整工具栏状态绑定及链接命令不声明切换状态。
+- **Chrome DevTools MCP 验收**：1440×960 隔离页面确认初始 45 条/3 页；筛选后注入 503，页面显示“加载失败”，旧资料行隐藏，统计显示“共 — 条 / — / —”，上一页和下一页均禁用；点击显式重试后显示当前筛选结果 1 条/1 页，页面宽度保持 1440px。只在本地隔离夹具执行 GET 与测试控制 POST，无业务数据写入。用户已确认 VoiceOver 清楚播报“操作日志”和“用户列表”的已选视图；本项未声称完成编辑器 VoiceOver 实际听音。
+- **验证与边界**：`npm run test:editor-selection-style`、`npm run check -- --pretty false`、资料库与编辑器目标 ESLint、`npm run version:check`、`npm run test:changelog-governance`（687 个版本）、`npm run test:android-runtime`、`npm run build` 通过；构建保留既有 >500 kB 分包提示。`npm run test:resource-hover-contrast-browser` 因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 在浏览器启动阶段退出，未进入断言；由 Chrome DevTools MCP 的隔离页面手动验证补充交互证据，不记为自动测试通过。无 API、权限或数据库变化；Android 元数据为 10.1.9 / 100109，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站读屏、键盘、主题与窄屏验收及 B8 本地闭环；Android 原生专项仍按用户要求后置。
+
+## 2026-10-29 清单 B8：首页摘要身份隔离与迟到重试保护（v10.1.8，本地未部署）
+
+- **问题与改造**：此前首页“最近变化”按账号隔离，但关注事项、灵感预览与总数仍是未绑定身份的独立状态。现工作台主摘要身份带用户 ID、角色和登录令牌；身份不匹配时在 React 首次重绘即显示整页加载态，主加载先清空旧摘要，结果成功/失败后才标记当前身份。关注事项的独立手动重试也捕获这三项身份，成功、异常和 `finally` 更新均检查当前认证状态，旧账号迟到结果不会覆盖新账号数据、错误或加载状态。
+- **回归保护**：浏览器规格用不同账号的合成摘要，挂起新账号关注事项请求，断言旧灵感和活动被隐藏；释放后只显示新账号灵感、选题和活动。另使旧账号关注事项重试挂起，待新账号首页加载完成后再释放，断言新账号摘要保持、旧摘要和旧错误不恢复。夹具只进行 GET。
+- **Chrome DevTools MCP 验收**：1440×960 桌面隔离夹具完成两条交错路径。第一条在切换后读屏快照仅含“正在加载工作台…”，旧活动和内容区不在树中；释放请求后仅有“当前账号灵感预览”“当前账号进行中选题”和“当前账号最近变化”。第二条先注入一次摘要 503，再挂起旧账号的手动重试；切至新账号并显示其专属摘要后释放旧请求，旧选题、旧灵感、旧错误均未恢复。视口与文档宽度均为 1440px；没有意外控制台错误，第二条路径只出现夹具主动注入的 503 网络错误；没有业务写入。
+- **验证与边界**：`npm run check -- --pretty false`、`npx eslint src/pages/Home.tsx tests/browser/topic-stage-record-repair.spec.ts src/data/changelog.ts`、`npm run test:home-dashboard`、`npm run version:check`、`npm run test:changelog-governance`（686 个版本）、`npm run test:android-runtime`、`npm run build` 和 `git diff --check` 通过。生产构建保留既有 >500 kB chunk 警告。`npm run test:topic-stage-record-repair-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入自动断言；因此只记 Chrome DevTools MCP 的手动隔离验收，不记为自动 Playwright 通过。无 API、权限或数据库变化；Android 元数据为 10.1.8 / 100108，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站辅助技术、主题、窄屏与键盘验收，以及其他 B8 本地闭环；Android 原生专项仍按用户要求后置。
+
+## 2026-10-29 清单 B8：首页最近变化账号隔离（v10.1.7，本地未部署）
+
+- **发现与改造**：首页“最近变化”沿用同账号重试时显示上次成功数据的策略，但数据没有记录所属用户。切换账号后，新请求尚未返回时可能短暂看到旧账号活动。现在活动状态同时保存用户 ID；仅同账号请求保留旧数据，切换账号立即清空并以当前账号 ID 控制可见状态，成功/失败/结束回调只能更新所属账号仍匹配的状态。
+- **回归保护**：浏览器规格模拟编辑账号已有活动、切换至只读账号并挂起新账号请求；断言旧活动在加载期间隐藏，新活动未返回前不显示，响应释放后仅显示当前账号活动，并确保活动接口均为 GET。自动 Playwright 在 macOS Chromium 启动时受 `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言。
+- **页面验收**：Chrome DevTools MCP 在 1440×960 桌面（`Home.tsx`）与 320×812 移动（`MobileHome.tsx`）隔离夹具分别完成同一交错流程；两页均确认挂起期间有“正在读取最近变化…”且旧事件不可见，释放后只显示“当前账号最近变化”。文档宽度分别保持 1440px 和 320px；没有控制台错误，桌面减少动态效果模拟仅出现 Motion 的预期提示。隔离夹具没有业务数据写入，控制请求仅释放测试响应。
+- **验证与边界**：`npm run check -- --pretty false`、`npx eslint src/pages/Home.tsx tests/browser/topic-stage-record-repair.spec.ts src/data/changelog.ts`、`npm run build`、`npm run version:check`、`npm run test:changelog-governance`、`npm run test:android-runtime`、`npm run test:home-dashboard` 与 `git diff --check` 通过。自动 Playwright 在 macOS Chromium 启动阶段因 `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言；因此依赖隔离 Chrome DevTools MCP 实测补足页面交互证据，不能记为自动浏览器回归通过。构建保留既有 >500 kB 分包提示。无 API、权限或数据库变化；Android 元数据为 10.1.7 / 100107，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续清单 B4/B5 全站验收、其他 B8 可本地闭环路径；部署后旧客户端检查、业务定义项与 Android 原生专项继续按既有边界推进。
+
+## 2026-10-29 清单 B4/B8：活动日志分页并发读取恢复（v10.1.6，本地未部署）
+
+- **问题与改造**：活动日志快速翻页或切换成员筛选时，旧请求可以晚于新请求返回，覆盖新页记录、总数和读屏页码播报；旧请求的 `finally` 还可能过早关闭当前加载态。现在每次读取持有递增请求序号，只有最新序号能提交成功/错误/加载状态；依赖变化和卸载会作废旧请求。
+- **回归保护**：现有活动日志浏览器夹具增加按页暂挂/释放响应；自动场景断言第 2 页旧请求晚于第 3 页请求先返回时，页面仍保持加载、旧页不显示，随后只显示第 3 页且每次查询恰有一个 GET。
+- **页面验收**：Browser 插件不可用，项目 Playwright 自动脚本启动 Chromium 时被 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入测试体。Chrome DevTools MCP 在 1440×900 隔离夹具实际交错释放第 2/3 页响应：旧响应返回后仍显示 polite 加载态、没有第 2 页文本/播报；新响应后呈现第 3 页记录和“已加载第 3/3 页”，没有水平溢出。页面身份、标题和应用内容正确，Vite 无错误覆盖层；控制台没有错误，仅有启用 `prefers-reduced-motion` 时动画库提示减少动态效果的预期 warning。夹具没有业务写入。另据用户确认，VoiceOver 聚焦“操作日志”和“用户列表”时明确读出已选视图；该听音证据仅覆盖这两个视图。
+- **验证与边界**：`npm run check -- --pretty false`、目标 ESLint、`npm run build`、`npm run version:check`、`npm run test:changelog-governance`、`npm run test:android-runtime` 与 `git diff --check` 均通过。生产构建保留既有 >500 kB 分包提示。自动浏览器回归受环境启动限制，故不记为通过。无 API、权限、数据库或 Android 行为变化；Android 元数据为 10.1.6 / 100106，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站辅助技术、主题、窄屏与键盘路径，以及 B8 其他可本地闭环的写入恢复；消息清空旧客户端兼容收紧等依赖部署的项目暂缓，业务定义阈值/责任口径与 Android 原生专项继续开放。
+
+## 2026-10-29 清单 B8/B4：发布记录编辑并发保护与移动切页焦点（v10.1.5，本地未部署）
+
+- **B8 发布记录基线**：列表编辑此前将平台、链接、状态、发布时间、播放/点赞/分享/评论整份旧表单都发给服务端；两人基于相同旧值编辑不相关字段时，后提交者会覆盖先提交者的字段。现在新客户端将所发字段的打开记录值放入 `expected_baseline`；服务端在一个 write transaction 中读取当前行并比较后才写入。基线缺失或当前值已变化时返回 409，明确不更新记录。仅比较本次实际提交的字段：抖音关联记录仍只提交可编辑的链接和手工指标；平台/状态/发布时间继续由关联抖音作品决定。
+- **冲突恢复**：遇到 409 时移除这次已确定拒绝请求的恢复标记，保留屏幕内编辑表单与原基线，禁用保存且不自动替换基线。用户需明确选“放弃草稿并载入最新记录”后，页面只读获取详情；读取成功才重置表单/基线，失败时原草稿仍在。另可明确放弃草稿并关闭。旧列表编辑客户端缺少 `expected_baseline` 时 fail closed 返回 409，不会走旧式全字段覆盖；剧本版本 `expected_content` CAS 路径不变。API 合同已同步。无迁移。
+- **B4 移动 SPA 导航**：移动底部导航改变 `pathname` 后，在下一帧聚焦新主内容中的首个可见 h1；没有时聚焦顶栏跟随路由改变的 sectionLabel h1；均不存在时回退到带名称和 `tabIndex=-1` 的 main。首次默认挂载不抢焦点，客户端导航导致懒加载壳层重挂载时仍在变更的 location key 后应用焦点。保留既有 `aria-current` 和导航行为。
+- **页面验收**：Chrome DevTools MCP 的 390×844 隔离组件夹具确认初次挂载保留既有焦点；点击底部“选题”后焦点进入可见页面 h1、`aria-current=page` 跟随且文档宽度仍为 390px；切至没有页内 h1 的“工作”视图后焦点落到顶栏 sectionLabel h1。v10.1.4 编辑器上下文菜单另在真实 ContextMenu + 编辑器扩展隔离夹具核对菜单名称、键盘/禁用项、子菜单、Tab 双向退出和 Escape 焦点恢复。夹具运行于本地 Vite 页面，本地 API 未启动，登录页的代理请求因 `127.0.0.1:3001` 不可用而返回 HTTP 500；组件夹具不经过登录，无业务写入。
+- **验证与边界**：全局类型检查、目标 ESLint、版本检查、`git diff --check` 和生产构建通过；构建保留既有 >500 kB 分包警告。目标 ESLint 0 错误，`api/routes/workflow.ts` 有 12 条既有告警。发布并发未做真实数据库竞态或自动回归；本轮未新增/运行测试。无数据迁移；Android 元数据为 10.1.5 / 100105，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续改造清单中其他未完成 B4/B5 和 B8 写入路径；消息清空空请求体兼容分支等待新版部署并确认旧客户端退出后再收紧；G 中需业务定义的阈值/团队口径与 Android 原生专项仍未完成。
+
+## 2026-10-29 清单 B4：编辑器上下文菜单读屏与键盘导航（v10.1.4，本地未部署）
+
+- **改造内容**：编辑器鼠标右键、Shift+F10 和 Context Menu 键现在打开有名称“编辑器上下文菜单”的 `role=menu`；主操作和颜色选项成为具名 `menuitem`，分隔线与包装容器采用合适的 ARIA 语义。无选区的复制、剪切、批注、插入链接和删除选中使用 `aria-disabled`，仍可被方向键定位但不会执行。
+- **键盘操作**：ArrowUp/Down 在当前菜单内循环，Home/End 跳到首/末项；ArrowRight、Enter 或 Space 从颜色触发项打开子菜单并聚焦首项，ArrowLeft/Escape 关闭子菜单并还到触发项；Escape 关闭主菜单并还到编辑器。Tab/Shift+Tab 关闭菜单并按浏览器正常顺序离开，已在 Chrome 两个方向实际核验。
+- **页面验收**：本地 Vite 页面加载真实 `EditorContextMenu` 与编辑器扩展的隔离组件夹具。Chrome DevTools MCP 辅助树读出主菜单、菜单项、禁用状态、具名文字颜色子菜单；手动核验 Shift+F10/Context Menu 键打开、方向键聚焦禁用项、Home/End、ArrowRight 进入调色板、ArrowLeft/Escape 返回，以及 Tab/Shift+Tab 离开和焦点落点。补充确认 Enter 在“高亮颜色”打开色板、Space 在“文字颜色”打开色板，均聚焦首个颜色项。仅组件夹具，无业务写入。用户 VoiceOver 确认仅覆盖“操作日志”和“用户列表”选中播报，本次菜单尚未实际听音。
+- **回归与边界**：同步修订既有 `tests/browser/production-review.spec.ts` 键盘菜单断言，但本轮未运行自动测试。类型检查、目标 ESLint、生产构建、版本检查及 `git diff --check` 通过；构建保留原有大分包提示。无 API、权限、数据库或 Android 原生代码行为改动；Android 元数据 10.1.4 / 100104，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续 B8 发布记录编辑并发基线保护与 B4/B5 全站读屏/键盘验收；消息空请求体兼容分支需等待新版部署并确认旧客户端退出后才收紧；G 中待业务定义的阈值/团队口径及 Android 原生专项继续保留为未完成事项。
+
+## 2026-10-29 清单 B4/B8：系统设置事务合并与桌面用户菜单焦点恢复（v10.1.3，本地未部署）
+
+- **B8 系统设置并发保护**：系统设置 PUT 原先在事务外读整份 `app_meta` JSON，合并一个分区再写回；多标签页/管理员并发保存不同分区会造成最后写入覆盖另一方。现在把读取、分区合并、规范化与 UPSERT 放入 `runInTransaction` 写事务中；当前 libSQL 客户端将 `write` 模式映射为 `BEGIN IMMEDIATE`，先取得写事务再读，后续写入基于最新已提交配置。请求权限、分区字段和响应合同不变；无迁移。
+- **B4 桌面用户菜单**：触发器增加包含账号/角色的可访问名称、展开状态与菜单关联 ID；两项操作包入“用户菜单”具名 group。全局 Escape 关闭菜单时将焦点还给触发按钮，原有点击与 Tab 顺序保留。
+- **页面验收**：Chrome DevTools MCP 1440×900 隔离页确认用户菜单辅助树名称“用户菜单：首页复盘验收，普通人员”，按钮展开时 `aria-expanded=true` 并关联具名 group；Tab 可进入“个人设置”，Escape 后菜单移除、`aria-expanded=false`，焦点回到原触发按钮。未触发设置保存或登出业务操作。
+- **验证与边界**：类型检查、目标 ESLint、生产构建、`npm run version:check` 与 `git diff --check` 通过；本轮未新增或运行自动测试，事务并发行为未做运行时压力回归。构建保留既有 >500 kB 分包提示。无数据库迁移；Android 元数据为 10.1.3 / 100103，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续清单 B4/B5 和可本地闭环的 B8 项；消息清空空请求体兼容分支需等待新版部署并确认旧客户端退出后再收紧。G 中需业务定义的阈值/团队口径继续待定，Android 原生专项后置。
+
+## 2026-10-29 清单 B4：键盘快捷键帮助对话框焦点管理（v10.1.2，本地未部署）
+
+- **核实与改造**：桌面全局快捷键帮助原先只有视觉浮层，缺少 dialog 名称、模态语义、具名关闭按钮、Tab 限制与焦点恢复。改用共享 `BaseModal`，命名“键盘快捷键”，沿用其 `useModalLifecycle` 的初始焦点、背景 inert、Tab 圈定、具名“关闭弹窗”按钮和关闭后焦点恢复，并启用 Escape 关闭；快捷键内容不变。
+- **页面验收**：Chrome DevTools MCP 隔离桌面页面按 `?` 打开后，无障碍树读出 `dialog “键盘快捷键”` 及 `关闭弹窗`，初始焦点在关闭按钮；Tab 与 Shift+Tab 均留在对话框，背景应用根节点保持 inert/aria-hidden。Escape 关闭后焦点返回此前聚焦的工作台按钮。打开和关闭期间无真实业务写入；用户此前 VoiceOver 确认仅涵盖“操作日志”和“用户列表”选中视图，没有作为本弹窗实际听音验收。
+- **验证与边界**：类型检查、目标 ESLint、生产构建、`npm run version:check` 和 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。本轮未新增或运行自动化测试。无数据库迁移；Android 元数据为 10.1.2 / 100102，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续清单 B4/B5 全站验收和可本地闭环的 B8 项；消息清空的空请求体兼容分支需待新版部署并确认旧客户端退出后才安全收紧，G 中需业务定义的指标阈值/团队口径继续待定，Android 原生专项后置。
+
+## 2026-10-29 清单 B4：桌面侧边导航地标命名（v10.1.1，本地未部署）
+
+- **核实与改造**：桌面布局同时提供侧边导航和面包屑两个导航地标；侧边 `<nav>` 原先没有可访问名称。现为其增加稳定名称“侧边导航”，可与“面包屑”区分，现有 `aria-current="page"`、选中外观和跳转行为不变。移动网页继续使用已命名的底部“移动主导航”。
+- **页面验收**：Chrome DevTools MCP 隔离页面的无障碍树读出具名侧边导航和面包屑；移动首页行动项的 390×844 跳转检查也确认导航到所属复盘，无横向溢出。用户此前的 VoiceOver 确认只覆盖“操作日志”和“用户列表”选中播报，未扩展为本次新地标的实际语音验收。
+- **验证与边界**：类型检查、目标 ESLint、生产构建、`npm run version:check` 和 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。无数据库迁移；Android 元数据为 10.1.1 / 100101，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续清单 B4/B5 全站验收和其他 B8 闭环；旧客户端兼容分支需待新版部署并确认旧客户端退出后再收紧，G 中需业务定义的指标阈值/团队口径继续待定，Android 原生专项后置。
+
+## 2026-10-29 清单 F/G：复盘行动项回到个人任务（v10.1.0，本地未部署）
+
+- **完成内容**：工作台摘要新增“我的复盘行动项”，桌面和移动首页任务区均展示本人负责且状态为待处理/进行中的任务，并显示行动项、所属复盘、状态和截止日期；点击返回对应复盘继续处理。首页说明展示完整待办总数，接口最多返回 3 条预览。
+- **权限与数据边界**：计数与列表都按当前登录用户的 `owner_id` 过滤；已完成、已取消及其他成员的行动项不进入个人任务。响应不含行动项说明、结果或复盘正文。复盘详情继续沿用现有访问/编辑规则；无数据库迁移。
+- **路由权限与页面验收**：隔离页面实测发现详情路由原先也受 `analytics:retro:view` 列表权限拦截，导致本人行动项无法从首页打开。现在列表仍要求该权限，详情路由交由服务端按单条复盘权限校验；无列表查看权的合成账号可打开本人行动项所属复盘，行动项显示在详情表格中。Chrome DevTools MCP 在 390×844 页面确认文档宽度 390px、无横向溢出；点击任务跳转 `/retrospectives/440` 成功，console 无 error/warning。截图在当前会话内核验，未写入仓库。
+- **回归与验证**：`npm run test:home-dashboard`、`npm run test:api-contract`、`npm run test:home-cross-module-overview` 通过；首页最终改动后重跑 `npm run check -- --pretty false`、9 个相关文件定向 ESLint、`npm run build`、`npm run version:check` 和 `git diff --check` 均通过。版本治理和更新说明唯一性（678 个版本）在本项完成时通过；构建保留既有大分包提示。
+- **验收补充**：用户确认 VoiceOver 在 Chrome 中聚焦“操作日志”和“用户列表”时明确读出已选视图；此反馈仅覆盖这两个视图。本轮复盘结论离开确认的隔离页面手工核对已看到未保存提示，选择“继续编辑”仍留在当前页面；仓库自动 Chromium 规格仍受 macOS `bootstrap_check_in` 权限错误 1100 阻断，未进入自动断言。
+- **版本与边界**：工程与 Android 元数据同步至 10.1.0 / 100100；未构建 APK、无数据库迁移。本地修改，不提交、推送或部署。
+- **下一步**：继续清单 F/G 的未完成项；B4/B5 全站验收、其他 B8 闭环、G 中待业务定义的阈值/团队口径仍开放，Android 原生专项按用户要求后置。
+
+## 2026-10-29 清单 B8/G：创作删除范围校验与官方日报批次重建（v10.0.0，本地未部署）
+
+- **B8 权限修复**：`DELETE /api/workflow/production/:id` 原先只检查 `production:delete`，没有检查选题逐条编辑范围。现在在删除事务中读取稿件所属选题的创建人、负责人及参与者，调用 `canEditProduction`；范围外在任何引用检查、删除或审计写入前返回 403。普通自定义角色即使获授删除权限，也不能绕过本人创建/负责/参与范围；管理员和范围内编辑维持原路径。隔离 HTTP 回归覆盖越界拒绝且稿件、版本历史、审计不变，以及范围内删除及操作者审计。
+- **G 批次事实**：新增 SAFE_EXPAND 迁移 069 `creator_official_daily_metric_observations`，按账号、批次、日期、周期、指标保存数值、来源文件哈希、解析器版本和签名采集时刻；每份完整周期、必填指标、日期窗口校验通过后，在同一导入事务追加。相同外部批次重放不重复写入；晚到旧批次仍保存原观测，但既有 upsert 投影仍依据 `Date.parse(collected_at)` 防止回退。
+- **历史/趋势口径**：迁移把旧表当前仍可见的每个指标值复制为 `projection_backfill` baseline，`batch_id` 保持 NULL，绝不伪造源批次。90 天查询按 `metric_date + metric_code` 选采集绝对时刻最新的一行（偏移时区通过 SQLite `julianday` 比较，同一时刻以行 ID 稳定排序），再检查截至北京时间当天的 90 个连续自然日及投稿、播放、点赞、评论、分享。缺日期、非法日期或缺核心指标继续返回 `partial`，不会补零；7/30 天现有物化读取语义不变。已在迁移前被 upsert 覆盖的批次旧值无法恢复；批次观测证明的是服务端接受并保存的签名上报数据，不代表服务端持有/重新核对了抖音原始文件。
+- **迁移与留存**：迁移只新增表、索引及一次性 baseline 复制，旧二进制忽略新表；迁移的隔离就绪判定为 GO，未应用任何真实数据库。无自动过期策略；来源批次/账号删除会按外键级联删除观测，持续同步的行数与存储占用需监测。
+- **B8 发布复盘竞态**：复盘快照计算期间若报告被另一请求发布，事务内会重新核对状态和版本并以 409 拒绝快照替换；既有快照和审计保持原样。确定性并发回归覆盖发布获胜和正常草稿快照路径。
+- **B4 命令面板语义**：无结果时不暴露空 listbox；加载/无结果状态放在 listbox 外，搜索进行中以 `aria-busy` 表达，部分搜索失败不会伪报“无结果”。浏览器规格覆盖空结果、忙碌、结果列表和键盘选择。
+- **验证**：`test:workflow-script-source`、`test:creator-daily-observations-migration`、`test:official-export-v2`、`test:creator-dashboard-freshness`、`test:retrospective-audit-atomic`、`test:global-search`、`version:check`、版本治理、更新说明唯一性（677 个版本）、测试入口（317 个文件）、迁移就绪、Android runtime 合同、全量类型检查、`git diff --check` 均通过。12 个相关 TypeScript/TSX 文件定向 ESLint 为 0 errors、12 warnings（均在既有 workflow 路由代码）；生产构建成功，保留既有大分包提示（主包 807.47 kB，Tiptap 555.12 kB，Silk 843.50 kB）。Playwright MCP 本地合成页面在 390×844 检查空结果、6 项结果、唯一选中项与方向键选择；console 无 error/warning。自动 Chromium 规格启动前因 macOS `bootstrap_check_in` 权限错误 1100 被阻断，未进入断言。
+- **版本与边界**：数据库 schema 变化按项目规则提升主版本为 10.0.0；Android 元数据为 10.0.0 / 100000，未构建 APK。VoiceOver 用户确认只覆盖 Chrome 中“操作日志”“用户列表”已选视图播报，不扩展为新命令面板或全站听音验收。本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B8：创作删除审计与删除原子性（v9.6.144，本地未部署）
+
+- **核实发现**：DELETE /api/workflow/production/:id 会删除创作稿及全部 production_history，但不会写 topic_history 或 activity_log；删除后无法追溯操作者、稿件版本或被清除的历史数量。
+- **改造**：先在删除事务中读取创作稿及选题标题、当前版本和历史数量；确认未被成片、发布稿或版本文档引用后执行删除，并同事务写入选题删除历史和全局操作日志。移动端协作动态为新事件增加中文名称。任何审计写入失败都使事务回滚，稿件及版本历史保持原样。
+- **回归与验证**：扩展 tests/production/workflow-script-source.test.ts，覆盖引用中的创作拒绝删除、审计失败时稿件/历史/选题审计一并回滚，以及审计成功后操作者、当前版本、历史清理数量均可追溯。npm run test:workflow-script-source 通过。
+- **版本与边界**：工程版本同步为 9.6.144，Android 元数据 90744，未构建 APK；无数据库迁移。本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B4：侧栏当前页面读屏语义（v9.6.143，本地未部署）
+
+- **核实发现**：侧栏通过颜色和边框表达选中页面，但当前项未提供 aria-current，辅助技术无法从导航语义识别当前视图。
+- **改造**：当前直达页面和匹配的子导航按钮设置 aria-current="page"，非当前项省略该属性；桌面侧栏折叠时，活动分组按钮名称会附带当前子视图，避免折叠后当前子项完全不可感知。视觉、点击和键盘行为保持原样。
+- **回归与验证**：资料中心浏览器规格新增断言，要求恰好一个当前导航项且与视觉选中项一致；另覆盖折叠侧栏分组读名及展开恢复。npm run test:navigation-routes 通过。Playwright MCP 隔离内存页面在 1200×900 桌面视口检查概览到项目资料库切换，唯一 aria-current 与视觉选中项一致；390×844 移动视口抽屉只有一个当前项且 scrollWidth 为 390。桌面收起后 DOM 确认分组读名为“资料与资产，当前视图：项目资料库”、aria-expanded=false；展开后只有一个 aria-current，名称仍为项目资料库且 aria-expanded=true。模拟写入计数为 0。唯一 console error 是 fixture 故意注入的素材读取 503。自动 Chromium 规格在断言前因 macOS bootstrap_check_in 权限错误 1100 阻断。
+- **边界**：用户确认 VoiceOver 在 Chrome 中会明确读出“操作日志”和“用户列表”的已选视图；该确认只覆盖这两个视图，不作为本次侧栏或全站 VoiceOver 验收。Android 元数据 90743，未构建 APK；本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B8：成就并发检查副作用幂等（v9.6.142，本地未部署）
+
+- **核实发现**：`POST /api/achievements/check` 先独立查询已获成就，再执行唯一键保护的 `INSERT OR IGNORE`；原实现不检查实际插入行数，因此并发请求可能都报告新成就并各创建消息/实时通知，尽管唯一键只保留一条授予记录。
+- **改造**：以 `INSERT OR IGNORE` 的受影响行数作为唯一成功条件；只有插入 1 行的请求将成就放入响应并发送通知。等待 `createMessage` 完成后返回，消息服务自身继续隔离通知写入失败，不影响授予。
+- **回归与验证**：扩展 `tests/achievements/achievement-check-http.test.ts`，覆盖旧成就跳过、后续满足项继续授予、顺序重查不重复及并发双请求仅一条授予、一条持久通知、一个响应含新成就。`npm run test:achievements-check` 通过。
+- **版本与边界**：工程版本同步为 9.6.142，Android 元数据 90742，未构建 APK；无数据库迁移。本地修改，不提交、推送或部署。
+- **下一步**：继续审查其他当前挂载写入口的审计与并发副作用，并推进 B4/B5 全站辅助技术、主题和响应式验收。
+
+## 2026-10-29 清单 B8：资料中心删除/恢复并发审计幂等（v9.6.141，本地未部署）
+
+- **核实发现**：资料中心删除与恢复路由先读取资源，再在事务内无条件更新并写审计。两个页面/标签同时对同一资料执行操作时，或调用方在结果不明后重试，数据库状态虽相同，仍可能重复记录删除/恢复审计。
+- **额外权限复核**：回看旧发布归档删除时发现查询投影遗漏 `uploader_id`，会使有 `resource:delete` 权限的普通上传者误收 403。已补回该字段；隔离 HTTP 回归确认上传者可以删除自己的归档，但不能删除他人归档。
+- **改造**：删除仅在资料仍未删除时条件更新，恢复仅在资料已删除时条件更新；状态变化和审计同事务提交。若事务读到同一资料已处于目标状态则不再写审计并返回成功；资源不存在时返回 404。保留权限及所属范围校验，无 API 数据结构或数据库迁移变化。
+- **回归与验证**：扩展 `tests/production/resource-center-mutation-atomic.test.ts`，覆盖并发重复删除和恢复均返回成功且每种状态转换只写一条审计；扩展 `tests/resource-center/published-archive-soft-delete-http.test.ts` 覆盖上传者本人删除成功和跨所有者拒绝，并保留审计失败回滚/归档恢复断言。两项测试、类型检查、改动文件 ESLint、生产构建、版本同步/版本治理/更新说明治理及 `git diff --check` 均通过。生产构建保留既有大分包提示。
+- **版本与边界**：工程版本同步为 9.6.141，Android 元数据 90741，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续核对其它活跃业务写入口的并发审计与结果恢复，再推进 B4/B5 全站验收；不据此标记完整改造清单完成。
+
+## 2026-10-29 清单 B8：发布归档软删除与审计（v9.6.140，本地未部署）
+
+- **核实发现**：`/asset-center/published-archives` 仍调用已弃用的 `/api/resources/archives/:id`。该删除路由直接 `DELETE FROM resources`，会物理移除归档行且不写资料审计；资料迁移已将这些行纳入 `content_archive`，新资料中心已有事务软删除、审计和恢复接口。
+- **改造**：保留现有页面请求和响应合同，归档删除改为带条件的事务软删除，并在同一事务写入资源审计；并发删除只允许一个状态变更。旧归档列表和详情查询排除 `status='deleted'`/已设置 `deleted_at` 的快照。原选题、稿件、批注及发布记录不变，无数据库迁移。
+- **恢复与回归**：新增 `tests/resource-center/published-archive-soft-delete-http.test.ts` 覆盖归档内容保留、旧列表/详情隐藏、资料中心既有恢复接口还原和审计、并发删除只写一条审计、审计失败回滚。修复前隔离回归观察到 DELETE 后归档行不存在；修复后全项通过。
+- **版本与边界**：工程版本同步为 9.6.140，Android 元数据 90740，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查其它活跃 B8 写入口及 B4/B5 全站辅助技术、主题、响应式与状态验收；不据此标记完整改造清单完成。
+
+## 2026-10-29 清单 B8：停用旧日报写入路由（v9.6.139，本地未部署）
+
+- **核实发现**：弃用的 `/api/reports` 仍挂载 POST/PUT/DELETE，且直接写 `daily_reports`。隔离测试修复前复现：具备既有 `report:create` 权限的成员能以 POST 创建 `status='approved'` 日报并收到 201；PUT 可任意改状态/正文而不递增版本或写日报审计，DELETE 物理移除记录。当前仓库没有 `/api/reports` 前端调用者。
+- **改造**：保留 `/api/reports` 认证读取、原权限检查、`Deprecation` 与 successor-version 链接；POST/PUT/DELETE 均返回 410 和新版 `/api/daily-reports` 路径，不再进入旧 SQL 写入。无数据库结构或数据迁移。
+- **回归**：新增 `tests/daily/legacy-reports-read-only.test.ts`，使用隔离 SQLite 验证旧接口创建/更新/删除均返回 410、数据完全不变、弃用迁移头保留且按权限读取仍返回原报告；修复前明确观察到创建返回 201。
+- **版本与边界**：版本来源同步为 9.6.139，Android 元数据 90739，未构建 APK。本变更会拒绝仍在使用旧写路由的仓库外客户端；仓库内未发现调用者，部署前需核对外部集成已转到 `/api/daily-reports`。本地修改，不提交、推送或部署。
+- **兼容资料路由复核**：旧 `/api/resources` 的通用创建/更新/删除已停用，但 `/archives/:id` 删除仍由当前 `/asset-center/published-archives` 页面调用；该页有账号隔离的本机结果恢复，并明确只删除归档快照。未在没有替代页面路径的情况下停用此入口；新资料中心删除为软删除并留审计，可作为后续迁移目标。
+- **下一步**：继续清查其它活跃 B8 写入口及 B4/B5 全站验收；不把这一条接口收敛标作改造清单完成。
+
+## 2026-10-29 清单 B8：日报自动保存状态保护（v9.6.138，本地未部署）
+
+- **核实发现**：仍挂载的日报 `/autosave` API 在事务外读取状态，并复用包含 `submitted` 的手工可编辑状态集合；已提交日报可在不递增版本、不留审计的情况下被自动保存改写。驳回状态也缺少显式转草稿的边界。
+- **改造**：自动保存改为在写事务内读取同一用户/日期报告，仅接受 `draft`；`UPDATE` 同时约束报告 ID、用户和 `status='draft'` 并检查受影响行数。报告不存在时继续返回原有“请先创建日报草稿”结果；正式手工保存、提交和驳回后保存回草稿流程不变。无 schema/migration 变化。当前桌面和移动页面未调用此兼容自动保存 API。
+- **回归**：`tests/daily/daily-report-audit-atomic.test.ts` 覆盖草稿自动保存成功且不改版本、已提交/驳回自动保存返回 409 且不改正文/条目/版本、并发首次建档、同版本更新、并发提交、并发通过/驳回及审计触发器失败回滚。修复前隔离回归确认已提交日报自动保存实际返回 200；修复后全项通过。
+- **修改文件**：`api/services/dailyReports.ts`、日报原子性隔离测试、版本/更新说明与改造清单进度文档。
+- **验证与发布边界**：`npm run test:daily-report-audit-atomic`、`npm run check -- --pretty false`、改动文件 ESLint、`npm run build`、`npm run version:check`、版本治理、更新说明唯一性（670 个版本）及 `git diff --check` 均通过。生产构建保留既有超过 500 kB 的分包提示。版本来源同步为 9.6.138，Android 元数据 90738，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查清单 B8 其余活跃写入口及 B4/B5 全站验收；不将此窄修复或局部验证视为清单完成。
+
+## 2026-10-29 清单 B4/B5/B8：Creator Center 无障碍、协作主题令牌、发布/日历/移动选题恢复（v9.6.137，本地未部署）
+
+- **H 编辑器清单复核**：当前 `AddTopic` 以 `ContentEditor mode="rich"` 使用共享主编辑器，`legacy` 分支只在显式传入 `mode="legacy"` 时渲染；提报页另由本机多草稿列表支持续写。原清单和第二阶段路线图中的“AddTopic 去 legacy”已过时，现标为完成；没有改运行时代码。
+- **B4 趋势图表**：共享曲线保留原 SVG 外观和指标名称，新增屏幕阅读器可读的日期/数值表。趋势页使用采集自然日，作品复盘时间按北京时间显示；粉丝空值明确播报“暂无数据”，空序列提供稳定空行，百分比沿用界面格式。
+- **B4 作品库**：封面在卡片和表格已有标题的上下文中作为装饰内容；其它 CreatorCoverImage 调用默认仍保留作品标题替代文本。浏览器规格检查卡片名称只包含一次标题、封面不进入辅助树且桌面标题链接名称清晰。
+- **B4 报告生成**：生成日报、周报或月报时提供 polite/atomic 状态区；对应按钮显示当前报告类型、aria-busy 并禁用，其它报告写入/删除沿用现有锁定。规格加入延迟生成，检查忙碌状态、结束清理、单次生成请求和一次列表刷新。
+- **B5 主题令牌**：内容实验室“协作动态”中的“人类可读模式”复选框强调色改用 `--xmt-primary`，随浅/深主题令牌变化。浏览器规格核对计算后的强调色与当前令牌一致，并验证启用/关闭仍切换叙事视图和时间轴。
+- **B4 分析页说明**：通用 PageHeader 现在会显示传入的说明文字；数据分析页在 1440px、390px、320px 的 Playwright MCP 页面检查中均完整显示，无横向溢出。分析页浏览器规格增加说明文字存在断言。
+- **B8 日报并发状态变更**：直接提交仅接受草稿或驳回状态；顺序重放返回 409。隔离 SQLite API 回归覆盖两次并发提交及并发“通过/驳回”：每组只有一个请求成功，报告版本只增一次，仅产生一条对应审计和一条通知；驳回后保存回草稿仍可合法再次提交。审核或提交审计写入失败时状态与版本在事务中回滚。
+- **B8 日报草稿并发保存**：隔离 API 回归覆盖同一用户/日期的并发首次创建及携带相同预期版本的并行更新。每组均只有一个请求成功；首次创建只留一份日报，更新仅增加一个版本及一条审计，输家不能替换胜者的摘要、风险等级或条目列表。
+- **B8 发布编辑回归**：新增长期隔离规格，覆盖状态更新已提交但响应丢失、首次 GET 失败、刷新只读确认已发布状态、清除恢复标记且不重复 PUT。实际业务合同和权限未改；确认提交后无需开放重试。
+- **B8 日历与移动选题恢复**：日历创建已确认成功、已删除或明确拒绝后，只有精确恢复标记删除并回读确认，才解除创建锁；清理失败时保留原请求并提供只读核实。移动选题看板的审核/阶段变更在 POST 前按账号、选题、操作类型、原/目标状态与请求内容保存 sessionStorage 恢复记录；刷新仅 GET 核实，并同时要求详情读取、列表刷新、精确清理全部成功才解锁。审核和阶段更新仍调用各自端点，不自动重发。写请求进行中会禁用并标注只读核实按钮；请求结束后忙碌状态会同步清除，即使详情 GET 失败也恢复可用的只读核实入口。新增恢复存储单测 5/5 与浏览器回归规格；Playwright MCP 合成 fixture 注入阶段/审核提交后响应丢失及首次详情 GET 失败，刷新后只发送 GET、确认目标状态并清除标记，不重复写入。
+- **MCP 手工验收**：Playwright MCP 本地趋势 fixture 验证日期和值、7 天切换、粉丝空值及空序列；运营报告 fixture 检查延迟生成期间播报、当前按钮忙碌/禁用、其它周期操作禁用以及结束后恢复；作品库 fixture 在 390px 卡片及桌面表格辅助树确认标题/封面无重复播报。发布 fixture 确认响应丢失、首个只读读取失败后刷新能确认已发布状态，恢复标记清除且仅一次 PUT。主题复选框浅/深计算强调色匹配令牌且切换视图同步。移动选题 fixture 挂起阶段 POST，确认只读核实按钮禁用且没有提前发 GET；释放 POST 后注入响应丢失和详情 GET 失败，按钮恢复为可用的“只读核实并刷新列表”。刷新后只发送 GET、确认目标状态并清除标记，阶段 POST 仍只有一次。审核路径同样注入 POST 响应丢失与详情 GET 失败；恢复标记精确记录 `audit` 操作，刷新只读确认审核结果，审核 POST 仍只有一次。日历 fixture 持续模拟 sessionStorage 标记删除失败，确认服务器已创建后页面仍锁定并保留 `cleanup-created` 标记；恢复本机存储后点击“重新核实”，只发 GET、清除标记且关闭表单。首次 POST 失败后只用同一编号明确重试一次，最终只创建一个事件。fixture 的 503/404 均为预置响应。关闭 fixture 后页面记录的 Vite/Socket.IO 断连发生在验收结束后。均使用本地合成数据；没有生产账号或业务写入。
+- **自动化边界**：Creator Center 与发布恢复自动 Chromium 规格曾在启动阶段遇 macOS `bootstrap_check_in` 权限错误 1100，未进入断言。本轮新加的移动工作中心与日历恢复断言未运行自动套件；移动状态路径由 Playwright MCP 手工复核。VoiceOver 本次新增控件未听音核验；用户确认已选状态读出只覆盖“操作日志”和“用户列表”。
+- **验证结果**：最新 `npm run check -- --pretty false`、新增恢复单测（5/5）、改动文件 ESLint、生产构建、`npm run version:check`、版本/更新说明治理（669 个版本）、Android runtime 合同、测试入口检查（314 个文件）及 `git diff --check` 通过。生产构建保留既有超过 500 kB 的分包提示。
+- **本批追加复核**：`npm run test:daily-report-audit-atomic` 覆盖重复提交无额外状态/版本/审计/通知，以及驳回后保存草稿再提交；改动文件 ESLint、类型检查和生产构建再次通过。分析页在 Playwright MCP 视口检查中验证说明可见；新增的 Analytics 浏览器规格断言尚未自动执行。
+- **并发回归补充**：日报原子性测试覆盖并行首次建档、同版本并行保存、同一草稿并行双提交，以及并行通过/驳回；各场景均断言单一胜者和无重复版本/审计/通知。`npm run test:daily-report-audit-atomic` 通过。
+- **G 首页续验**：`npm run test:home-dashboard` 与 `npm run test:home-cross-module-overview` 均通过，覆盖角色数据边界、待审稿件权限范围、今日多平台任务的完成/异常规则、精确计数与有界预览；这次只复验已有实现，没有改首页运行代码。播放骤降告警仍缺可靠指标口径，专属审稿责任仍缺产品规则；不能据此标记 G 全部完成。
+- **VoiceOver 确认范围**：用户确认 Chrome 中“操作日志”和“用户列表”聚焦时会明确读出已选视图。此结论只适用于这两个视图控件，不扩展为全站语音验收。
+- **版本状态**：Android 元数据 9.6.137 / 90737，未构建 APK；仅本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B4/B8：移动日报忙碌播报与灵感转选题刷新恢复（v9.6.136，本地未部署）
+
+- **B4 改造**：移动日报区分保存草稿、提交、恢复重试和状态核实中的操作；通过 polite、atomic 状态区播报当前步骤，相关按钮使用 `aria-busy` 并在处理中禁用，结束后清除忙碌提示。浏览器回归加入延迟请求期间状态、按钮忙碌/禁用及结束清理断言，并保留双击只发起一次写入检查。
+- **B8 改造**：灵感转选题 POST 前按账号与灵感 ID 写入并精确回读本机 sessionStorage 恢复标记。结果不明且首个状态 GET 失败时，刷新恢复暂停状态，不自动重发；仅提供只读核实，确认服务器已关联或尚未关联后才精确核验清除标记。标记异常时关闭重复转换和删除操作。服务端事务、权限、API 和业务数据不变。
+- **自动回归**：日报状态测试通过；灵感恢复存储单测 5/5，`test:inspiration-topic-link` 通过。`npm run check -- --pretty false`、目标 ESLint、生产构建、Android runtime、测试入口（313 个文件）及 `git diff --check` 通过。构建保留既有 >500 kB 分包提示。
+- **Playwright MCP 手工验收**：390×844 本地隔离日报 fixture 确认保存/提交中各自播报状态、正确按钮 `aria-busy=true` 且禁用；操作结束后忙碌按钮消失。唯一 503 为 fixture 预设的提交失败场景。灵感池 fixture 注入转换已提交但响应丢失和首次只读读取失败，确认恢复标记按账号/灵感保存；刷新后转换与删除均锁定，仅保留只读核实；确认选题关联后跳转到选题详情并清除标记。只使用合成内存数据，无生产请求。
+- **自动浏览器边界**：`test:mobile-work-center-browser` 与 `test:inspiration-theme-contrast-browser` 均在 macOS Chromium 启动阶段因 `bootstrap_check_in … Permission denied (1100)` 失败，未进入断言；不计为浏览器自动化通过。
+- **VoiceOver 边界**：用户确认 VoiceOver 明确读出“操作日志”和“用户列表”的已选视图；该确认仅覆盖这两个视图，本次新增日报/灵感操作状态未作实际听音核验。
+- **其它复核**：按清单 P0 技术语言范围对当前挂载页面只读检查，未确认新的可见技术错误；此项不代表全站文案验收完成。B2 状态机只读审查未发现可证明的当前缺陷；历史错位状态仍需人工确认，不自动回填。
+- **版本状态**：Android 元数据 9.6.136 / 90736，未构建 APK；仅本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B4：移动消息筛选窄屏完整显示（v9.6.135，本地未部署）
+
+- **改造内容**：移动消息页筛选组由横向滚动改为自动换行，320px 下“全部/未读/工作流/协作/系统”五个按钮都在可视分组内完整显示；保留“消息筛选”组名与每项 `aria-pressed`。
+- **回归覆盖**：浏览器规格扩展至 320px、390px 明暗主题，逐项检查按钮边界、40px 触控高度、无组内横向滚动、默认/切换选中状态与筛选可操作性。
+- **浏览器验收**：Playwright MCP 与 Chrome DevTools MCP 隔离页均在 320×812 暗色验证移动布局、具名筛选组和五个按钮；各按钮落在组边界内，组宽/滚动宽均为 288px，页面宽/滚动宽均为 320px，每项高度 40px。点“系统”后辅助树显示 pressed，结果切换为“暂无消息”。Playwright MCP 在 390×844 复核五项同一行、全部位于 358px 分组内，组滚动宽与可视宽相同。两种浏览器页面标题正确、应用内容正常；交互验收期间控制台 0 错误/警告。业务 API 均为 GET，观察到的 POST 仅 Socket.IO 轮询握手和本地 fixture 释放控制，无业务写入。主动停止 fixture 后，仍打开的开发页出现 Vite HMR/Socket.IO `ERR_CONNECTION_REFUSED` 重连日志，属于本地验收服务关闭后的清理状态，不在交互检查期间。截图见本轮 QA 记录。
+- **验证结果**：`npm run check -- --pretty false`、改动文件 ESLint、`npm run build`、`npm run version:check`、版本治理、更新说明唯一性治理（667 个版本）、Android runtime 合同（90735）、测试入口检查（313 个文件）及 `git diff --check` 通过；构建仍有既有 >500KB 分包提示。
+- **验证边界**：自动 `test:mobile-work-center-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer … Permission denied (1100)`，Playwright 报浏览器/页面已关闭，未进入断言，不计通过。VoiceOver 未覆盖本次筛选组。
+- **版本状态**：Android 元数据为 9.6.135 / 90735，未构建 APK；仅本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B4/B5：主题开关播报当前颜色（v9.6.134，本地未部署）
+
+- **改造内容**：移动端“我的”页主题开关的可访问名称增加当前浅色/深色值，并保留 `aria-pressed`；Space 或点击切换后名称、按下状态和主题偏好同步更新。
+- **回归覆盖**：扩展 `mobile-work-center-responsive.spec.ts`，覆盖 320×812 浅色和 390×844 深色下的初始主题名称、状态、Space 切换后名称与状态、点击恢复及偏好持久化。
+- **验证结果**：`npm run check -- --pretty false`、目标 ESLint、`npm run build`、版本检查/治理、更新说明治理（666 个唯一版本）、Android runtime 合同（90734）和 313 个测试入口检查通过；构建保留现有 500KB+ chunk 提示。Chrome DevTools MCP 隔离夹具在 390×844 和 320×812 确认辅助树名称分别为“主题 当前浅色/深色”；Space 切换与点击恢复后，名称、`aria-pressed` 和 `xmt_theme` 一致。320px 页面宽度与滚动宽度均为 320px，主题按钮边界在视口内；390px 下控件也在视口内。控制台无错误/警告，观察到的 XHR/fetch 业务请求为 GET；Socket.IO 有握手 POST，没有业务写入。移动 Lighthouse Accessibility、Best Practices 和 SEO 均为 100；原主题按钮名称不匹配问题已消除。
+- **B8 回执口径确认**：用户确认匿名意见提交回执不自动过期、关联意见删除时清除。复核迁移 066 的请求 ID 为随机值、回执不含提交人身份且无过期字段；外键与删除事务清除关联回执。提交 HTTP、migration 与 sessionStorage 测试重新通过（3 项）。规则与当前实现一致，无需改变后端行为。
+- **验证边界**：自动 `test:mobile-work-center-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，Playwright 报 `Target page, context or browser has been closed`，未进入断言。Lighthouse 另报 `llms-txt` 和 `ard-schema` 两项 agentic-browsing 建议未通过，不属于本次 B4/B5 改动范围。VoiceOver 没有实际听音核验本次主题按钮；此前用户确认的语音结果仅覆盖“操作日志”和“用户列表”的已选视图。
+- **版本状态**：Android 元数据为 9.6.134 / 90734，未构建 APK；仅本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B4/B5：移动端主题切换状态播报（v9.6.133，本地未部署）
+
+- **改造内容**：移动端“我的”页主题按钮增加稳定可访问名称“主题”，并通过 `aria-pressed` 暴露深色主题是否启用；点击与 Space 键切换共用原主题逻辑并保存本机偏好。
+- **回归覆盖**：扩展 `mobile-work-center-responsive.spec.ts`，在 320×812 浅色和 390×844 深色下检查初始/切换/恢复状态，验证 Space 和点击操作、偏好持久化、14/16/18 字号具名组与至少 40×40 控件边界。
+- **验证结果**：类型检查、目标 ESLint、生产构建、版本/更新说明治理、Android runtime 合同、313 个测试入口及差异检查通过。Chrome DevTools MCP 隔离页面在 390×844 与 320×812 验证辅助树中的“主题”按钮按下状态、Space/点击切换、当前主题持久化和字体具名组；320px 文档宽度和滚动宽度均为 320px，主题按钮边界在视口内，控制台无错误。观察到的业务 API 请求均为读取；无业务写入。
+- **验证边界**：自动 `test:mobile-work-center-browser` 在 Chromium 启动阶段受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言。VoiceOver 未实际听音核验本次主题按钮。
+- **版本状态**：Android 元数据为 9.6.133 / 90733，未构建 APK；仅本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B8：复盘发布/归档结果不明后的刷新恢复（v9.6.132，本地未部署）
+
+- **改造内容**：发布与归档操作前按账号和复盘 ID 写入并精确回读 `sessionStorage` 标记，记录操作类型、原/目标状态与请求编号。请求结果不明后只 GET 复盘详情；刷新时恢复标记并保持操作锁。读到目标状态后核验清除，读到原状态后才显示需用户明确确认的重试，读取失败时继续锁定。服务端 ACL、路由和数据合同不变。
+- **回归覆盖**：新增恢复存储单测 5 项；浏览器规格覆盖发布已提交但响应丢失、首次详情 GET 失败、刷新后确认，以及归档未提交、首次 GET 失败、刷新读到原状态后用户明确重试。
+- **验证结果**：`npm run check -- --pretty false`、恢复单测、目标 ESLint、`npm run build`、版本/更新说明治理及 `git diff --check` 通过；Playwright MCP 本地隔离 fixture 手动验证两条刷新恢复路径。构建保留既有大分包提示。
+- **验证边界**：自动 `test:retro-action-table-responsive-browser` 在 Chromium 启动阶段受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言。VoiceOver 未覆盖本次新控件。
+- **版本状态**：Android 元数据为 9.6.132 / 90732，未构建 APK；仅本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B8/B4：复盘快照结果不明恢复与创作恢复提示窄屏验收（v9.6.131，本地未部署）
+
+- **改造内容**：复盘指标快照生成前按账号与复盘 ID 写入并回读 `sessionStorage` 标记（只含随机请求编号和生成前快照 ID 集合）。提交结果不明时只读获取复盘详情；回读失败或本机标记异常时锁住重复生成。刷新后继续 GET 核验，确认服务器快照状态后才清除标记并解锁；服务器 ACL、路由和数据合同不变。创作自动保存恢复提示补齐窄屏布局及主题验收。
+- **回归覆盖**：复盘浏览器规格覆盖服务端已替换快照但返回 503、首个详情 GET 503、刷新后 GET 确认、标记清除和零重复 POST。创作正文恢复规格增加 320×812 浅色与 390×844 深色场景，检查提示文字、按钮边界/高度、无横向溢出、键盘聚焦，以及布局检查期间没有重试写入。
+- **验证结果**：`npm run check -- --pretty false`、改动文件定向 ESLint、`npm run build`、`git diff --check` 通过；构建保留既有超过 500 kB 的分包提示。Playwright MCP 本地复盘 fixture 手动验证提交后丢失响应、GET 失败、刷新后确认并清除标记；本地创作 fixture 在 320×812 浅色与 390×844 深色下确认恢复提示和重试按钮落在水平视口内，无横向溢出，按钮可聚焦；检查期间服务器保存计数维持 1。
+- **验证边界**：`npm run test:retro-action-table-responsive-browser` 与 `npm run test:production-review-browser` 均在 Chromium 启动阶段受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言。隔离 fixture 人为注入的一次快照 POST 503 和一次详情 GET 503 在浏览器控制台表现为预期资源失败；不包含生产账号或真实数据。VoiceOver 本次未检查新控件。
+- **版本状态**：Android 元数据为 9.6.131 / 90731，未构建 APK；仅本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B4：移动端“我的”字号选项具名分组（v9.6.130，本地未部署）
+
+- **改造内容**：为“字体大小”及 14/16/18 三个字号按钮增加具名 `group`，保留按钮名称、`aria-pressed` 状态和既有字号行为。
+- **回归覆盖**：扩展 `mobile-work-center-responsive.spec.ts`，通过具名组定位选项，并覆盖三个字号的唯一选中状态与移动端布局。
+- **验证结果**：`npm run check -- --pretty false`、目标 ESLint、`npm run build`、`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（662 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（312 个文件）及 `git diff --check` 通过。构建保留既有超过 500 kB 的分包提示。Playwright MCP 本地隔离页在 320×844 确认辅助树包含“字体大小”组，切换到 18 后仅该项选中；文档宽度 312px、无横向溢出，组框位于视口内；仅观察到 GET、没有业务写入，交互检查期间控制台错误和警告均为 0。
+- **验证边界**：自动 `test:mobile-work-center-browser` 在 Chromium 启动阶段受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言。Playwright MCP 辅助树核验不等同于本轮 VoiceOver 实际语音验收。用户先前确认 VoiceOver 明确读出“操作日志”和“用户列表”的已选视图，仅覆盖这两处。
+- **版本状态**：Android 元数据 9.6.130 / 90730，未构建 APK；本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B8/B4：选题资料跨刷新恢复与版本记录具名组（v9.6.129，本地未部署）
+
+- **改造内容**：选题资料关联和解除关联写入前按账号、选题及资料 ID 保存并精确回读 `sessionStorage` 恢复标记；标记无法验证时不发请求。未知结果后执行只读关系核实；服务端读取失败时刷新仍恢复标记并锁住该资料重复操作，不自动重发。核实成功后精确核验清除记录。服务端 ACL 与 API 路由未变。创作详情版本列表增加关联标题的具名 `group`，保留 `aria-pressed` 并支持键盘切换。
+- **回归覆盖**：新增恢复单测 7 项，覆盖账号/选题隔离、字段异常、静默丢写与篡改、并存标记、请求归属清理和存储异常。扩展资料关联浏览器规格，覆盖响应丢失、首次 GET 失败、刷新后 GET 再失败、原请求编号保留、零重复 POST/DELETE 和只读重试。生产详情浏览器规格覆盖具名组、历史/当前唯一选中状态、Enter 键切换和无业务写请求。
+- **验证结果**：`npm run test:topic-resource-recovery`（7/7）、`npm run check -- --pretty false`、定向 ESLint、`npm run build`、`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（661 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（312 个文件）及 `git diff --check` 通过。Playwright MCP 本地隔离页预置解除关联待核实标记并刷新，确认只执行 GET；GET 确认关系未变后清除标记，未发生 POST/DELETE。关闭 fixture 前交互检查的控制台错误为 0；停止本地 Vite/Socket.IO fixture 后，页面因开发服务已停止开始记录连接拒绝重试。
+- **验证边界**：`npm run test:topic-stage-record-repair-browser` 与 `npm run test:production-review-browser` 均在启动 Chromium 时被 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入自动断言。Playwright MCP 手动检查验证的是已存标记在成功 GET 下的刷新恢复，不等同于自动规格中“写入响应丢失且刷新 GET 失败”的完整故障注入链路。VoiceOver 本次未核验新加入的版本记录组；用户确认的语音证据仍仅覆盖“操作日志”和“用户列表”已选视图。
+- **发布边界**：Android 元数据为 9.6.129 / 90729，未构建 APK。仅本地修改，不提交、推送或部署。隔离页面使用 localhost 与合成账号，不连接生产服务。
+- **下一步**：继续 B8 剩余写入恢复路径及 B4/B5 全站辅助技术与主题验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：个人资料提交结果恢复（v9.6.128，本地未部署）
+
+- **改造内容**：桌面设置与移动“我的”页在个人资料写入前，保存并逐项核对账号、认证模式、请求编号、更新前资料及提交草稿；不保存密码或令牌。恢复标记预写未确认时阻止请求。服务端结果未知后，刷新恢复原草稿并只读核实；核实期间锁住资料字段且不自动重发。服务器仍为旧值时只允许用户明确确认再次提交；服务端成功后核实清除恢复记录，清理结果未明时继续锁定并只读重试。
+- **回归覆盖**：移动恢复单测 6/6，桌面恢复单测 4/4。Playwright MCP 本地隔离 fixture 对桌面个人资料模拟 PUT 与后续 GET 均失败：首次提交只发一次请求，恢复标记仅含预期的版本、账号、认证模式、请求编号、before 和 draft 字段且无凭据；刷新后保留草稿、字段保持禁用，网络记录仅见只读 GET。用户明确确认后只发送一次 PUT（200），表单解锁且恢复标记清除。移动端同类手动核验确认预写静默丢写时零 PUT、PUT/核验 GET 故障后刷新保持锁定且零自动重发、明确确认后发一次 PUT 并清标记；Chrome DevTools MCP 辅助树检查确认表单和控件可读。
+- **自动验证**：`npm run check -- --pretty false`、`npm run build`、`npm run version:check`、版本治理、更新说明版本唯一性（660 个版本）、Android runtime 合同、311 个测试入口检查与 `git diff --check` 均通过。目标 ESLint 0 errors，保留 `NotificationSettings.tsx:434` 一条既有 `fetchSystemSettings` Hook dependency warning；生产构建保留既有超过 500 kB 的分包提示。
+- **验证边界**：自动 `test:system-settings-browser` / `test:mobile-work-center-browser` 在本机 Chromium 启动阶段受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入自动断言；Playwright MCP 对桌面、移动页面及本地隔离 fixture 的交互核验已完成。用户确认 VoiceOver 明确播报“操作日志”和“用户列表”的已选视图，仅覆盖这两个视图。
+- **发布边界**：Android 元数据为 9.6.128 / 90728，未构建 APK。仅本地修改，不提交、推送或部署。浏览器核验使用合成账号、localhost 与隔离存储，不连接生产服务。
+- **下一步**：继续 B8 剩余写入恢复路径与 B4/B5 全站辅助技术验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8/B4：密码修改刷新恢复与粉丝趋势空状态播报（v9.6.127，本地未部署）
+
+- **改造内容**：桌面设置和首次登录密码修改请求前保存并核对账号范围恢复标记，标记只含版本、账号 ID、随机请求编号，不保存密码或令牌。存储预写未能核实则不发送；结果未知时清空密码输入并锁定，刷新后恢复同一标记且不自动重发。成功重新登录时按账号核实清除有效或损坏的记录；首次登录弹窗清理失败时向用户保留告警并锁定控件。Creator Trends 缺少粉丝快照时以 polite、atomic `role=status` 播报“暂无数据”，不展示伪造粉丝图表。
+- **回归覆盖**：新增桌面密码恢复模块测试，覆盖账号隔离、畸形标记、静默丢写、所属请求核实清理、重新登录清理与清理失败（6/6）。系统设置浏览器规格覆盖密码标记静默丢写零 POST、确定拒绝/成功后清理，以及提交响应丢失后的刷新锁定和零自动重发。首次登录浏览器规格覆盖恢复清理失败时锁定、重新登录可用和成功后清理。Creator Trends 浏览器规格覆盖礼貌空状态属性、无粉丝图表及其它趋势图表继续显示。
+- **验证结果**：Playwright MCP 本地隔离 fixture 手动验证系统设置页：静默丢写显示“未发送”且没有 `/api/auth/change-password` 请求；模拟本地服务已返回 200 但拦截响应后，页面将密码输入清空并锁定，sessionStorage 记录仅有 `version`、`actorId`、`requestId`。刷新后账号安全面板自动选中、三个输入仍空且禁用、相同请求编号保留、没有新增密码 POST。首次登录 fixture 注入恢复记录清理失败，弹窗显示 alert、三个字段与提交均锁定；恢复存储后重新登录可继续改密，200 后恢复记录清空。Creator Trends 7 天 fixture 显示“暂无数据” polite/atomic 状态、无粉丝图表，其它四类图表仍在；周期选择状态正确，网络仅有趋势 GET，控制台无错误。截图：`/private/tmp/xmt-v9.6.127-password-recovery.png`、`/private/tmp/xmt-v9.6.127-empty-fans.png`。
+- **自动验证**：`npm run check -- --pretty false`、目标 ESLint（0 errors，保留 `NotificationSettings.tsx` 的一条既有 `fetchSystemSettings` Hook dependency warning）、密码恢复单测 6/6、通知偏好恢复 4/4、系统设置恢复 4/4、活动日志时间/保留测试、`npm run build`、`npm run version:check`、版本治理、更新说明唯一性（659 个版本）、Android runtime 合同、测试入口检查（309 个文件）及 `git diff --check` 通过。构建保留现有 >500 kB 分包提示。`test:system-settings-browser`、`test:creator-trends-browser` 和 `test:login-theme-contrast-browser` 均在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入自动断言；浏览器交互改由 Playwright MCP 对本地合成 fixture 验证。
+- **发布边界**：Android 元数据为 9.6.127 / 90727，未构建 APK；仅本地修改，不提交、推送或部署。浏览器 fixture 使用合成账号和 localhost，不连接生产服务。
+- **下一步**：继续 B8 未覆盖的写入恢复路径和 B4/B5 全站辅助技术、主题、错误/加载/空状态验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8/B4：通知偏好恢复与活动日志空状态播报（v9.6.126，本地未部署）
+
+- **改造内容**：通知偏好 PUT 前保存并逐字段校验账号隔离的 sessionStorage 恢复记录；静默丢写时不发送 PUT。提交结果未知时刷新后只读加载与比对，冲突期间锁定编辑；用户明确覆盖沿用原请求记录，确认写入或载入服务器值后核验清理，清理异常继续锁定。活动日志成功读取空结果时将“暂无活动记录”放入 polite、atomic `role=status` 区域。
+- **回归覆盖**：通知偏好单测覆盖账号隔离、无效记录、静默丢写和所属请求清理；浏览器规格新增丢失恢复标记零 PUT、PUT/核验 GET 均异常后的刷新恢复、冲突锁定、原请求编号保留及明确覆盖一次 PUT。活动日志浏览器规格新增成功空结果的状态语义断言，并保留“首次读取失败不呈现为空列表”断言。
+- **验证结果**：通知偏好 Chrome DevTools MCP 隔离 fixture 注入 PUT 与 no-store GET 503，确认待核实标记包含 actorId / requestId / draft 且不含 token；刷新后恢复冲突与同一 requestId，系统偏好 API 仅 GET、未自动 PUT；明确覆盖恰好 PUT 一次并清除 marker。另静默丢弃 marker 的预写夹具只显示未发送提示，服务端偏好保持不变且无通知 API PUT。活动日志 MCP 空数据 fixture 辅助树读出 polite、atomic 状态“暂无活动记录”，另有礼貌状态报告 0 条记录。通知与系统设置恢复单测各 4 项通过；活动日志时间/保留测试通过。`npm run check -- --pretty false`、版本检查/治理、更新说明治理（658 个版本）、Android runtime 合同、测试入口检查（308 个文件）、生产构建和 `git diff --check` 均通过；目标 ESLint 为 0 errors，保留 `NotificationSettings.tsx` 一条既有 Hook dependency warning，构建保留既有 >500 kB 分包提示。自动 `test:system-settings-browser` 与 `test:activity-log-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言。
+- **发布边界**：Android 元数据为 9.6.126 / 90726，未构建 APK；仅本地修改，不提交、推送或部署。浏览器操作使用本地隔离 fixture。
+- **下一步**：继续 B8 剩余写入恢复路径，以及 B4/B5 全站读屏、主题、错误/加载/空状态验收；Android 原生专项后置。
+
+## 2026-10-29 清单 B8/B5：系统设置保存恢复与成片标题反馈（v9.6.125，本地未部署）
+
+- **改造内容**：系统设置 PUT 前保存并逐项校验账号隔离的 sessionStorage 恢复标记；标记异常、静默丢写或读回不一致时不发送 PUT。服务端结果未知时刷新后恢复待核实状态，仅执行 GET；匹配、冲突、拒绝后的标记清理均验证归属及移除结果，清理不确定时继续锁定。普通保存不得绕过待核实状态，只有明确冲突覆盖才会重发。成片列表标题悬停和键盘聚焦改用独立 Studio 对比色。
+- **回归覆盖**：新增恢复模块单测覆盖账号隔离、无效记录、写入静默丢失和所属请求清理；浏览器规格覆盖标记预写失败零 PUT、结果未知后的刷新恢复和零自动重发；成片列表规格覆盖浅/深主题悬停对比和标题只触发详情读取。
+- **验证结果**：Chrome DevTools MCP 隔离 fixture 注入 PUT 与核实 GET 故障后，确认恢复标记包含账号与请求编号、不含令牌；刷新后页面只读核实并显示服务端冲突，恢复标记仍在且保存/输入保持禁用。刷新网络还包含 Socket.IO 传输轮询 POST；系统设置 API 仅有 GET、没有 PUT。生产列表 1440×960 浅/深主题标题悬停色由 `rgb(61, 90, 254)` / `rgb(107, 140, 255)` 变为 `rgb(30, 58, 138)` / `rgb(201, 214, 255)`；点击后仅导航到详情。恢复标记单测 4 项通过。`npm run check -- --pretty false`、目标 ESLint（0 errors；`NotificationSettings.tsx` 保留 2 条既有 Hook dependency warnings）、版本检查/治理、更新说明治理（657 个版本）、Android runtime 合同、测试入口检查（307 个文件）、生产构建及 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。自动 `test:system-settings-browser` 与 `test:production-list-feedback-browser` 在 Chromium 启动前受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入自动断言。
+- **发布边界**：Android 元数据为 9.6.125 / 90725，未构建 APK；仅本地修改，不提交、推送或部署。Chrome DevTools MCP 操作使用本地隔离 fixture。
+- **下一步**：继续改造清单中的 B4/B5 辅助技术、主题、加载/错误/空状态及 B8 剩余写入恢复项；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B4：报告中心视图具名分组（v9.6.124，本地未部署）
+
+- **改造内容**：为“日报 / 周报 / 导出”共享切换容器增加“报告中心视图”具名组；保留现有权限过滤、视图内容和 `aria-pressed` 状态。
+- **回归覆盖**：`tests/browser/analytics-read-recovery.spec.ts` 断言权限下可见选项数量、日报隐藏、默认周报选中及切换导出后的唯一选中状态。
+- **验证结果**：Chrome DevTools MCP 隔离 fixture 的辅助树读出“报告中心视图”分组及“周报 / 导出”按钮，默认周报选中；切换导出后只有导出处于选中状态，页面无横向溢出。fixture 按设计注入的周报读取 503 是唯一控制台错误。自动 `npm run test:analytics-browser` 在 Chromium 启动前遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言。`npm run check -- --pretty false`、目标 ESLint、`npm run build`、版本检查/治理、更新说明治理（656 个版本）、Android runtime 合同、测试入口检查（306 个文件）及 `git diff --check` 通过；构建保留既有 >500 kB 分包警告。
+- **发布边界**：Android 元数据为 9.6.124 / 90724，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：补足系统设置保存结果不明后的刷新恢复凭证；继续 B8 其它写入路径与 B4/B5 全站辅助技术和主题验收，Android 原生专项后置。
+
+## 2026-10-29 清单 B4：移动选题审核结果具名组（v9.6.123，本地未部署）
+
+- **改造内容**：移动选题审核的“通过 / 驳回”按钮新增“审核结果”具名组，保留原 `aria-pressed` 选择状态；桌面审核弹窗原本已提供同名分组。
+- **回归覆盖**：扩展 `tests/browser/topic-stage-record-repair.spec.ts`，断言移动分组名称、两个选项、默认选择、切换状态，以及收起/重新展开后决定与意见仍保留。
+- **验证结果**：Playwright MCP 本地隔离夹具在 390×844 下无障碍树读出“审核结果”组，初始“通过”按下，点击“驳回”后其状态唯一切换；页面文档宽 382px、无横向溢出，交互时控制台无错误。自动 `test:topic-stage-record-repair-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言。`npm run check -- --pretty false`、目标 ESLint、`npm run build`、`npm run version:check`、`npm run test:version-governance`、更新说明治理（655 个版本）、Android runtime 合同、测试入口检查（306 个文件）及 `git diff --check` 通过；构建保留既有 >500 kB 分包警告。
+- **发布边界**：Android 元数据为 9.6.123 / 90723，未构建 APK；仅本地修改，不提交、推送或部署。
+- **下一步**：继续 B8 未闭合写入恢复路径和 B4/B5 全站辅助技术、主题、错误与空状态验收；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：桌面选题视图组状态验证（v9.6.122，本地未部署）
+
+- **改造内容**：复核确认桌面选题列表的列表/看板已有“选题视图切换”具名组，手机端也有同名组；补齐浏览器规格对桌面组名称、两项按钮、默认列表选中以及切到看板后 `aria-pressed` 状态变化的断言，并补手机端默认选中状态断言。
+- **验证结果**：Playwright MCP 本地隔离 Topics fixture 的无障碍树读出具名组和两个按钮；默认“列表”按下，切换看板后只有“看板”按下，控制台 0 错误。`test:topics-responsive-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言。`npm run check -- --pretty false`、目标 ESLint、`npm run build`、`npm run version:check`、`npm run test:version-governance`、更新说明治理（654 个版本）、Android runtime 合同、测试入口检查（306 个文件）及 `git diff --check` 通过；构建保留既有 >500 kB 分包警告。
+- **发布边界**：Android 元数据为 9.6.122 / 90722，未构建 APK；仅本地修改，不提交、推送或部署。
+- **下一步**：继续 B8 未闭合写入恢复路径和 B4/B5 全站辅助技术、主题、错误与空状态验收；Android 原生专项后置。
+
+## 2026-10-29 清单 B8：选题详情聚合保存恢复标记核验（v9.6.121，本地未部署）
+
+- **改造内容**：选题详情写入前升级到 v2 恢复标记，并对用户、选题、保存前/目标内容、版本动作做内容指纹和逐字段回读核验。静默篡改或丢弃时保留当前编辑内容且阻止业务写请求；服务端确认后必须确认恢复标记已移除。若移除失败，继续锁定写入，仅提供只读核实入口；损坏标记也必须在清理确认后才能采用服务端内容。
+- **回归覆盖**：`tests/browser/topic-stage-record-repair.spec.ts` 新增指纹篡改、静默丢写、静默保留、清理失败后 GET-only 核验，以及恢复后的用户显式重试断言。
+- **验证结果**：Playwright MCP 本地隔离 fixture 实测：篡改标记未发 PUT且保留原输入；损坏标记清理失败时保留输入并锁定；保存成功但清理失败仅允许 GET，清理恢复后再次只读核实解锁且不重发；静默丢弃预写标记未发请求，存储恢复后用户再次明确保存只发一个 PUT并清理标记。浏览器控制台 0 错误。`npm run check -- --pretty false`、目标 ESLint（0 errors，TopicDetail 有 6 条既有 warning）、`npm run build`、`npm run version:check`、`npm run test:version-governance`、更新说明治理（653 个版本）、Android runtime 合同、测试入口检查（306 个文件）及 `git diff --check` 通过；构建保留既有 >500 kB 分包警告。自动 `test:topic-stage-record-repair-browser` 在 Chromium 启动时遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言。
+- **发布边界**：Android 元数据为 9.6.121 / 90721，未构建 APK；仅本地修改，不提交、推送或部署。
+- **下一步**：继续 B8 其它写入恢复路径及 B4/B5 辅助技术、主题、加载/错误/空状态验收；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：消息筛选具名分组（v9.6.120，本地未部署）
+
+- **改造内容**：桌面消息中心与移动消息页筛选按钮组均提供“消息筛选”可访问名称，保留现有过滤及各按钮 `aria-pressed` 交互。
+- **回归覆盖**：`tests/browser/messages-clear-hover.spec.ts` 检查桌面/手机端具名组、五个筛选按钮与默认选择；`tests/browser/mobile-work-center-responsive.spec.ts` 的亮/暗主题用例从具名组内操作筛选按钮并断言切换状态。
+- **验证结果**：Playwright MCP 本地隔离消息 fixture 在桌面无障碍树读出“消息筛选”分组和 4 个现有筛选项，默认“全部”为 pressed；在移动端 320×844 刷新应用以加载真实移动布局，无障碍树读出同名分组和 5 个筛选项，点击“未读”后 pressed 状态唯一切换，页面宽 320px、无横向溢出，控制台 0 错误/警告。`npm run check -- --pretty false`、目标 ESLint、`npm run build`、`npm run version:check`、版本治理、更新说明治理（652 个版本）、Android runtime 合同、测试入口检查（306 个文件）及 `git diff --check` 通过；构建保留既有 >500 kB 分包警告。`test:messages-clear-hover-browser` 与 `test:mobile-work-center-browser` 均在自动浏览器断言前因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 无法启动。
+- **发布边界**：Android 元数据为 9.6.120 / 90720，未构建 APK；仅本地修改，不提交、推送或部署。
+- **下一步**：继续 B8 写入恢复路径与 B4/B5 其他页面辅助技术、主题及错误/空状态审查；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：日报视图导航具名（v9.6.119，本地未部署）
+
+- **改造内容**：为“我的日报 / 团队日报 / 总结归档”共同导航添加“日报视图”可访问名称；保留三个按钮原有 `aria-pressed` 选中状态及切换行为。
+- **回归覆盖**：`tests/browser/daily-report-submit-recovery.spec.ts` 断言具名导航包含三个视图按钮、桌面端初始与切换状态，以及 390px 移动视口下导航名称和当前选择。
+- **验证结果**：Playwright MCP 本地隔离日报 fixture 的无障碍树显示 `navigation "日报视图"` 和三个视图选项；桌面依次切换团队日报、总结归档、我的日报后，具名导航保持不变且 `aria-pressed` 正确更新。390×844 移动视口下三个按钮完整，默认选择正确，文档宽 382px、视口宽 390px。切换总结归档时 fixture 按预置返回一次用户目录 GET 503，属于读取失败夹具。`npm run check -- --pretty false`、目标 ESLint、`npm run build`、`npm run version:check`、版本治理、更新说明治理（651 个版本）、Android runtime 合同、测试入口检查（306 个文件）及 `git diff --check` 通过；构建保留既有 >500 kB 分包警告。仓库自动 `test:daily-report-submit-recovery-browser` 在断言前因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 无法启动。
+- **发布边界**：Android 元数据为 9.6.119 / 90719，未构建 APK；仅本地修改，不提交、推送或部署。浏览器操作只访问隔离 fixture，无生产数据写入。
+- **下一步**：继续 B4/B5 全站辅助技术、主题、错误与空状态审查及 B8 写入恢复路径盘点；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：创作者趋势周期切换具名组（v9.6.118，本地未部署）
+
+- **改造内容**：创作者趋势 7/30/90 天周期按钮的共同容器添加 `role="group"` 与“数据统计周期”可访问名称；各按钮原有 `aria-pressed` 保持，切换和数据请求逻辑不变。
+- **回归覆盖**：扩展 `tests/browser/creator-trends-official-daily.spec.ts`，在桌面/手机/窄屏用例中断言具名组、三个周期按钮、默认 30 天选中及切换至 7/90 天时的选中状态。
+- **验证结果**：Chrome Playwright MCP 本地隔离 fixture 页面确认具名组及 3 个周期按钮可从无障碍树读取；默认 30 天按下，切换后 7 天/90 天按下且其余按钮取消选中，90 天不完整数据仍播报缺失说明并隐藏周期合计。390×844 视口正常，浏览器控制台无错误或警告。`npm run check -- --pretty false`、目标 ESLint、`npm run build`、`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（650 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（306 个文件）及 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。自动仓库浏览器套件未运行；同机 Chromium 在此前套件启动时触发 macOS `bootstrap_check_in … Permission denied (1100)`，会在自动断言前阻断。
+- **发布边界**：Android 元数据为 9.6.118 / 90718，未构建 APK；仅本地修改，不提交、推送或部署。浏览器验证使用本地隔离 fixture，无生产 API、数据库或真实业务数据写入。
+- **下一步**：继续 B4/B5 其他已挂载视图的辅助技术、主题、错误与空状态检查；B8 写入恢复路径清单继续推进；Android 原生专项后置。
+
+## 2026-10-29 清单 B8：复盘结论与行动项恢复标记精确核验（v9.6.117，本地未部署）
+
+- **改造内容**：复盘结论更新、行动项创建和行动项更新在发 PUT/POST/PATCH 前写入并精确回读带内容指纹的恢复标记；同请求编号下正文被静默改写时只清理由本次请求持有的标记，核实清理后阻止业务请求并保留表单。无法确认写入/清理时保留恢复锁。恢复流程继续兼容无指纹的旧格式记录。
+- **回归覆盖**：扩展 `tests/browser/retro-action-table-responsive.spec.ts`，覆盖三类写入的同请求编号内容篡改、零业务请求、异常标记清理和用户输入保留；验证恢复存储后只能由用户再次明确提交。
+- **验证结果**：`npm run check -- --pretty false`、目标 ESLint、`npm run build`、`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（649 个版本）、`npm run test:android-runtime`、`npm run test:entrypoints`（306 个文件）和目标文件 `git diff --check` 通过；构建保留现有 >500 kB 分包提示。Chrome Playwright MCP 本地隔离 fixture 分别篡改复盘结论、行动项创建和行动项更新标记，均展示未提交提示、保留原表单输入、清除异常标记且未发出对应 PUT/POST/PATCH。自动 `npm run test:retro-action-table-responsive-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，未进入自动断言。
+- **发布边界**：Android 元数据为 9.6.117 / 90717，未构建 APK；仅本地修改，不提交、推送或部署。浏览器验证使用本地隔离 fixture，无生产 API、数据库或真实业务数据写入。
+- **下一步**：继续 B8 未覆盖的写入路径清点，同时推进 B4/B5 全站辅助技术、主题与错误/空状态验收；Android 原生专项后置。
+
+## 2026-10-29 清单 B8：成片创建/详情恢复标记精确核验（v9.6.116，本地未部署）
+
+- **改造内容**：制作计划创建恢复凭证携带一致性指纹并逐字回读；内容不符时只清理由本次请求编号持有的标记并核实清理，清理失败则跨刷新保持写入锁，防止用篡改过的 payload/page 重试。兼容旧格式有效恢复记录。安全清理后从可信恢复凭证中还原原选题、日期、地点和设备内容，要求用户核对后另行提交。成片详情的状态与剧本版本恢复记录采用“无记录/有效记录/读取受阻”三态判断；读取异常或指纹/结构校验失败时暂停编辑器、版本保存、状态更新和归档同步，并提供重新读取入口。状态与版本写操作同样在请求前逐字核对新凭证；未能确认清理时保留跨刷新恢复锁。
+- **回归覆盖**：制作计划创建规格改为按可见标签定位必填选题和表单字段，并加入同用户、同请求身份但 `payload` 与 `page` 被静默改写时零 POST、清理失败后刷新仍锁定、点击清理后原选题/日期/地点/设备内容恢复且不自动提交、旧格式凭证只读恢复等场景。成片详情规格加入状态/剧本标记读取异常、重新读取恢复、同一请求编号下标记内容被改写且清理失败时零 PUT及刷新持续锁定。
+- **验证结果**：类型检查、定向 ESLint、版本检查、版本治理、更新说明治理（648 个版本）、测试入口检查（306 个文件）、Android runtime 合同、生产构建和 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。Chrome DevTools MCP 隔离夹具实测状态与剧本标记读取异常时展示恢复提示、编辑器只读、保存/状态按钮禁用，服务端状态/版本写入计数为 0；移除故障后重新读取解锁且没有重放写入。再注入同请求编号、有效 JSON 但错误目标状态/正文，状态和版本请求均为 0。制作计划创建 `payload`/`page` 被改写时创建次数和记录数为 0；刷新后安全清理恢复原表单内容，不自动提交。自动 `npm run test:workflow-details-responsive-browser` 与 `npm run test:shooting-create-recovery-browser` 均在 Chromium 启动阶段遇 macOS `bootstrap_check_in … Permission denied (1100)`，没有进入自动断言。
+- **发布边界**：Android 元数据为 9.6.116 / 90716，未构建 APK；仅本地修改，不提交、推送或部署。所有浏览器操作仅使用本地隔离 fixture，无生产 API、数据库或真实业务数据写入。
+- **下一步**：继续 B8 剩余写入恢复路径，并继续 B4/B5 全站辅助技术、主题和错误/空状态验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8/B5：报告与匿名意见删除恢复核验、创作详情错误态重试（v9.6.115，本地未部署）
+
+- **改造内容**：创作者报告生成/删除请求前精确读回恢复标记；存储读取失败、静默丢写或成功后的清理无法验证时锁定写入。匿名意见删除采用相同的失败关闭规则，恢复凭证清理需验证后才解除写锁。创作详情首次读取失败显示“暂时无法读取创作详情”及手动重试，不再误显示“创作记录不存在”；首次失败由页面错误态单独播报，避免重复 toast。生产详情的文字对比回归改为按当前实际合成背景计算悬停态。
+- **回归覆盖**：新增创作者报告生成/删除静默丢写和存储读取异常断言、匿名意见删除凭证静默丢写断言；生产审阅规格新增浅/深主题、390px 错误提示可读性与无溢出、无业务写入和明确重试恢复详情检查。
+- **验证结果**：类型检查、目标 ESLint、版本检查/治理、Android runtime 合同、更新说明治理（647 个版本）、测试入口检查（306 个文件）、生产构建和 `git diff --check` 通过；构建仍有既有 >500 kB 分包提示。Chrome DevTools MCP 隔离夹具确认桌面/手机及浅/深主题下创作详情暂时失败只显示一条错误提示，手机无横向溢出；手机浅/深主题的错误标题、说明、按钮最低对比度为 4.8:1/5.01:1。创作选题链接实际悬停对比度为浅色 8.29:1、深色 9.86:1。点击错误页重试只新增详情 GET，页面恢复且无业务写入。创作者报告与匿名意见管理在存储静默丢写/读取异常时保留错误/确认状态、阻止写请求。三项自动浏览器套件在 macOS Chromium 启动阶段因 `bootstrap_check_in … Permission denied (1100)` 失败，未进入断言。
+- **发布边界**：Android 元数据为 9.6.115 / 90715，未构建 APK；仅本地修改，不提交、推送或部署。验证使用隔离 fixture，无生产 API、数据库或真实业务数据写入。
+- **下一步**：继续 B8 写入恢复路径清点与 B4/B5 全站辅助技术、主题、错误/空状态逐页验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：创作者中心绑定码请求前恢复标记校验（v9.6.114，本地未部署）
+
+- **改造内容**：创作者中心签发一次性绑定码前写入并精确回读当前操作者、抖音账号和请求编号；存储抛错、静默丢写或读回内容不符时显示明确“未发送”反馈，阻止绑定码 POST。保留原有响应不明后的只读核实和同编号重试流程。
+- **回归覆盖**：扩展 `tests/browser/creator-topic-suggestions.spec.ts`，在原有签发、失败恢复和响应丢失场景前注入绑定凭证静默丢写，断言零签发 POST 与凭证缺失。
+- **验证结果**：`npm run check -- --pretty false`、目标 ESLint、版本检查、版本治理、Android runtime 合同、更新说明治理（646 个版本）、测试入口检查（306 个文件）、生产构建和 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。自动 `npm run test:creator-topic-suggestions-browser` 在 Chromium 启动前因 macOS `bootstrap_check_in … Permission denied (1100)` 失败，未进入断言。Chrome DevTools MCP 1440×960 隔离夹具注入 sessionStorage 静默丢写，确认 alert 明确“未发送”、标记为空、无绑定码请求，控制台无错误（仅 reduced-motion 提示）。
+- **发布边界**：Android 元数据为 9.6.114 / 90714，未构建 APK；本地修改，不提交、推送或部署。仅隔离页面，无生产绑定码签发或真实数据写入。
+- **下一步**：继续 B8 未闭合写入路径与 B4/B5 全站辅助技术、主题及状态验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：发布管理 CRUD 恢复凭证请求前核验（v9.6.113，本地未部署）
+
+- **改造内容**：发布记录创建、编辑和删除在 POST/PUT/DELETE 前同步保存并精确回读账号范围恢复凭证；静默丢写、存储异常或回读不一致时明确提示操作未发送。创建/编辑保留表单，删除保留确认对话框。结果不明的请求仍使用原有只读核实路径，不自动重发。
+- **回归覆盖**：新增 `tests/browser/publishing-mutation-recovery.spec.ts`，分别静默丢弃三种恢复凭证并断言凭证缺失、零业务写请求、创建/编辑输入保留及删除确认仍打开。
+- **验证结果**：`npm run check -- --pretty false`、目标 ESLint、`npm run test:entrypoints`（306 个文件）、版本检查、版本治理、Android runtime 合同、发布创建幂等 HTTP 合同、更新说明治理（645 个版本）、生产构建和 `git diff --check` 通过；构建保留既有 >500 kB 分包提示。新增浏览器规格在本机 Chromium 启动前因 macOS `bootstrap_check_in … Permission denied (1100)` 失败，未进入自动断言。Chrome DevTools MCP 1440×960 隔离夹具逐条注入静默丢写，确认创建、编辑、删除均有未发送提示、凭证为空、零对应 API 写请求；创建和编辑表单值保留，删除确认保持打开，控制台无错误或警告。
+- **发布边界**：Android 元数据为 9.6.113 / 90713，未构建 APK；本地修改，不提交、推送或部署。仅使用隔离内存夹具，无生产 API、数据库或真实业务数据变化。选题多平台完成口径未改动：任一平台发布即完成，“发布异常”计为已处理。
+- **下一步**：继续 B8 剩余写入恢复路径与 B4/B5 全站辅助技术/主题验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：创作详情状态恢复凭证静默丢写拦截（v9.6.112，本地未部署）
+
+- **改造内容**：审核提交、阶段状态更新、版本保存、删除等状态转换请求前精确回读 sessionStorage 恢复凭证；静默丢写时提示操作未发送并保持原状态。
+- **回归覆盖**：生产审阅浏览器规格新增凭证静默丢写注入，检查可见错误提示、恢复标记缺失，以及创作保存、审核、状态更新、版本保存和删除 API 计数均不变。
+- **验证结果**：Chrome DevTools MCP 在桌面创作详情隔离内存夹具注入恢复凭证静默丢写；审核显示“操作未发送”，标记为空，API `apiMutationAttempts` 为 0。`npm run check -- --pretty false`、目标 ESLint、版本检查、版本治理、更新说明治理（644 个版本）、`npm run build` 和 `git diff --check` 通过；生产构建仍显示既有 >500 kB 分包提示。`npm run test:production-review-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 失败，未进入断言。
+- **发布边界**：Android 元数据为 9.6.112 / 90712，未构建 APK；本地修改，不提交、推送或部署。仅隔离内存夹具产生临时写入，无生产 API、数据库或真实业务数据变化。
+- **下一步**：继续清单 B8 剩余写入恢复路径及 B4/B5 全站辅助技术验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：制作计划删除与完成恢复凭证预写校验（v9.6.111，本地未部署）
+
+- **改造内容**：制作计划删除、标记完成前先保存并精确回读操作者和目标记录范围的只读核实凭证；凭证静默丢写时保留制作状态并阻止 DELETE/PUT。确认成功、明确失败或只读核实后只清理由当前记录持有的凭证。
+- **回归覆盖**：浏览器规格新增删除、完成两种恢复凭证静默丢写注入，检查未发送提示、标记缺失、零业务写请求和原状态不变。
+- **验证结果**：Chrome DevTools MCP 隔离内存夹具以 390×844 移动视口验证两条路径：删除与完成均显示“未发送”，标记为空，API 计数为零、制作状态保持 `in_progress`。`npm run check -- --pretty false`、目标 ESLint、版本检查、版本治理、更新说明治理（643 个版本）、`npm run build` 和 `git diff --check` 通过；生产构建仍显示既有 >500 kB 分包提示。`npm run test:shooting-delete-recovery-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 失败，未进入断言。
+- **发布边界**：Android 元数据为 9.6.111 / 90711，未构建 APK；本地修改，不提交、推送或部署。仅隔离内存夹具产生临时写入，无生产 API、数据库或真实业务数据变化。
+- **下一步**：继续清单 B8 剩余写入恢复路径及 B4/B5 全站辅助技术验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：消息中心恢复凭证静默丢写拦截（v9.6.110，本地未部署）
+
+- **改造内容**：桌面和移动消息中心的批量已读、桌面清空消息均在业务请求前精确回读 sessionStorage 恢复凭证；静默丢写时保留消息状态并阻止 POST/DELETE。
+- **回归覆盖**：浏览器规格为移动批量已读、桌面批量已读和桌面清空增加静默丢写故障注入，检查提示、凭证缺失、零写请求和消息状态不变。
+- **验证结果**：Chrome DevTools MCP 在隔离内存夹具中验证桌面/移动批量已读和桌面清空三条路径均显示明确未保存反馈、恢复标记为空、未发出对应业务写请求且消息状态不变；清空错误提示通过同步 DOM 观察确认。`npm run check -- --pretty false`、目标 ESLint、`npm run version:check`、版本治理、更新说明治理（642 个版本）、`npm run build` 和 `git diff --check` 通过；构建仍显示既有 >500 kB 分包提示。`npm run test:mobile-work-center-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 失败，未进入断言。
+- **发布边界**：Android 元数据为 9.6.110 / 90710，未构建 APK；本地修改，不提交、推送或部署。仅隔离内存夹具产生临时写入，无生产 API、数据库或真实业务数据变化。
+- **下一步**：继续清单 B8 剩余写入恢复路径与 B4/B5 全站辅助技术验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8/B4：生产审阅恢复凭证校验与有限 VoiceOver 确认（v9.6.109，本地未部署）
+
+- **改造内容**：生产审阅中的批注创建、讨论回复、状态处理均在业务请求前精确回读 sessionStorage 恢复凭证；遇到存储静默丢写时保留输入/原状态并停止请求。保留原请求编号和既有结果核实流程。
+- **回归覆盖**：生产审阅浏览器规格新增三类静默丢写注入，检查凭证缺失、零业务请求及内容保留。
+- **验证结果**：Chrome DevTools MCP 在隔离生产审阅夹具中依次验证批注、回复和结束讨论：三种恢复标记均未保存，批注/回复输入保留、讨论维持打开且业务写请求为零；恢复存储后操作成功。`npm run check -- --pretty false` 与目标 ESLint 通过。`npm run test:production-review-browser` 因 macOS Chromium 启动失败（`bootstrap_check_in … Permission denied (1100)`）未进入断言；其隔离夹具改由 Chrome DevTools MCP 手工验收。用户确认 VoiceOver 在 Chrome 中聚焦“操作日志”和“用户列表”时明确播报已选视图；语音确认仅覆盖这两处。
+- **发布边界**：Android 元数据为 9.6.109 / 90709，未构建 APK；本地修改，不提交、推送或部署。仅隔离内存夹具产生临时写入，无生产 API、数据库或真实业务数据变化。
+- **下一步**：继续清单 B8 其余写入恢复路径和 B4/B5 全站辅助技术验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：日报、灵感投票与发布剧本恢复凭证精确回读（v9.6.108，本地未部署）
+
+- **改造内容**：桌面和移动日报、灵感投票、发布剧本保存均在发送业务请求前写入并精确回读 sessionStorage 恢复凭证；写入异常或静默丢写时保留当前内容，不发送业务请求。
+- **回归覆盖**：新增灵感投票和发布剧本恢复凭证静默丢写浏览器断言；v9.6.107 已为桌面/移动日报增加对应断言。
+- **验证结果**：Chrome DevTools MCP 隔离页分别验证桌面日报（1440×960）、移动日报（390×844）、灵感投票（320×900）和发布剧本（1440×900），均确认未保存提示、输入保留、恢复凭证为空且业务写请求为零。类型检查、目标 ESLint、版本检查、版本治理、更新说明治理（640 个版本）、生产构建和差异检查通过；构建保留既有 >500 kB 分包提示。自动日报 Playwright 在 Chromium 启动前因 macOS `bootstrap_check_in` 权限错误 1100 失败，未进入断言；其它全量浏览器套件未运行。
+- **发布边界**：Android 元数据为 9.6.108 / 90708，未构建 APK；本地修改，不提交、推送或部署。无数据库、API 或真实业务数据变化。
+- **下一步**：继续清单 B8 其它写入恢复路径核验及 B4/B5 辅助技术检查；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：桌面与移动日报恢复凭证精确回读（v9.6.107，本地未部署）
+
+- **改造内容**：桌面和移动日报草稿恢复记录写入 sessionStorage 后精确回读比对；抛错或静默丢写均阻止后续日报写请求，保留用户输入。
+- **回归覆盖**：新增桌面、移动隔离浏览器故障注入，验证恢复凭证不存在时保留表单且无草稿/提交请求。
+- **验证结果**：Chrome DevTools MCP 在 1440×960 桌面与 390×844 移动隔离页模拟 sessionStorage 静默丢写，均确认未保存提示、原输入保留、恢复凭证为空且草稿/提交请求为零。类型检查、目标 ESLint、版本检查、版本治理、更新说明治理（639 个版本）、生产构建和差异检查通过；构建保留既有 >500 kB 分包提示。自动 `test:daily-report-submit-recovery-browser` 在 Chromium 启动前因 macOS `bootstrap_check_in` 权限错误 1100 失败，未进入断言；移动全量浏览器套件未运行。
+- **发布边界**：Android 元数据为 9.6.107 / 90707，未构建 APK；本地修改，不提交、推送或部署。无数据库、API 或真实日报数据变化。
+- **下一步**：继续清单 B8 其他写入恢复路径核验及 B4/B5 辅助技术检查；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：日历创建恢复编号精确回读（v9.6.106，本地未部署）
+
+- **改造内容**：日历事件创建前将待处理标记序列化后写入 sessionStorage，并精确回读比对。浏览器存储抛错或静默丢写时显示原有明确提示，保留表单且不发送创建请求。
+- **回归覆盖**：扩展日历月份隔离浏览器规格，模拟只丢弃日历恢复标记的 setItem；断言标记不存在、表单提示出现、创建 POST 为零。
+- **验证结果**：Chrome DevTools MCP 在 390×844 隔离日历页面确认静默丢写后显示“浏览器无法保存本次恢复信息，请检查会话存储后重试。”，标记为空且创建动作未提交。自动 `test:calendar-month-race-browser` 因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 在页面断言前失败。类型检查、定向 ESLint、生产构建、版本检查、版本治理、更新说明治理（638 个版本）与差异检查通过；构建仍有既有 >500 kB 分包提示。
+- **发布边界**：Android 元数据为 9.6.106 / 90706，未构建 APK；本地修改，不提交、推送或部署。无 API、权限、数据库或真实日历数据变化。
+- **下一步**：继续清单 B8 其他恢复凭证写入回读，以及 B4/B5 辅助技术验收；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8：公告创建恢复编号确认（v9.6.105，本地未部署）
+
+- **改造内容**：公告创建请求前保存恢复编号并精确回读，静默丢写时停止发布且零 POST。发布成功后若恢复编号删除失败，则保留该编号并锁定后续写入，明确告诉用户公告已发布；刷新后通过只读请求核实并清理，避免重复发布。公告状态核实失败仍保持锁定。
+- **回归覆盖**：公告板浏览器规格新增 sessionStorage 写入静默丢失零 POST，以及恢复编号删除静默失败、刷新后只读恢复且不重复 POST 的断言。
+- **验证结果**：Chrome DevTools MCP 在 390×844 本地隔离夹具确认预写丢失时只出现列表 GET、没有发布 POST；删除静默丢失后恢复编号保留、页面说明公告已确认发布且操作锁定；刷新后状态核实完成、编号清理、公告可见。自动 `test:announcement-board-browser` 在 Chromium 启动前因 macOS `bootstrap_check_in … Permission denied (1100)` 失败，未进入断言。类型检查、目标 ESLint、生产构建、版本检查、版本治理、更新说明治理（637 个版本）与差异检查通过。
+- **发布边界**：Android 元数据为 9.6.105 / 90705，未构建 APK；本地修改，不提交、推送或部署。生产数据库无变更。
+- **下一步**：继续清单 B4/B5 真实辅助技术验收与 B8 写入恢复路径盘点；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B4/B5：全站共用错误状态播报（v9.6.104，本地未部署）
+
+- **改造内容**：共用 ErrorState 默认将错误/警告标题和说明包在 alert live region 内；notFound 改用较低打断性的 status。重试按钮保留在播报区域外，调用处仍可选择语义。
+- **影响范围**：覆盖现有约 19 处共享错误面板，包括移动消息、通知设置、日报、资源、成就、日历、备份和创作者页面等；移动消息/通知偏好之前的显式 alert 与默认保持一致。
+- **回归覆盖**：新增 common-error-state 合同测试，断言默认 alert 原子播报、notFound status、显式 status 覆盖，以及重试动作独立于 alert。
+- **验证结果**：error-state-accessibility 合同测试、类型检查、公共组件定向 ESLint、版本/更新说明治理、测试入口、生产构建与 git diff --check 通过。生产构建沿用既有大分包提示（主入口 788.97 kB、Tiptap 555.12 kB、Silk 背景适配器 843.50 kB）。
+- **发布边界**：Android 元数据为 9.6.104 / 90704，未构建 APK；本地修改，不提交、推送或部署。迁移 067/068 仍未应用到生产。
+- **下一步**：继续复核全站错误提示的真实语音体验和剩余 B8 写入路径；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B4/B5：移动消息加载错误播报（v9.6.103，本地未部署）
+
+- **改造内容**：移动消息列表首屏读取失败时，ErrorState 的标题与说明使用 alert live region 播报；“重试加载”按钮保持在告警区域外，避免与错误文案合并播报。
+- **回归覆盖**：扩展移动工作台浏览器规格，断言告警名称/说明及重试动作独立可达；保留原消息失败、错误不泄露和重试恢复验证。
+- **验证结果**：npm run check -- --pretty false、MobileMessages 与浏览器规格定向 ESLint、git diff --check 通过。自动 test:mobile-work-center-browser 在断言前因 macOS Chromium bootstrap_check_in Permission denied (1100) 失败。
+- **发布边界**：Android 元数据为 9.6.103 / 90703，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 剩余视图辅助技术检查和 B8 全量写入路径盘点；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B6/B8/B4/B5：历史来源归属、角色删除恢复与通知错误播报（v9.6.102，本地未部署）
+
+- **B6 来源版本归属**：迁移 068 给 production_history 增加 nullable source_topic_id。保存新版本时记录重关联前的选题 ID；当前版本按 production.topic_id 校验，历史版本按 source_topic_id 校验。旧 null 历史只在稿件仍属于请求选题时保留旧兼容语义，重关联后 fail-closed，不猜来源。A→B 回归验证 A 仍能读取其 v1.0 历史，B 仅读取新 v1.1 当前稿；两边发布归档各自保留正确来源，旧 null 历史重关联后不可恢复正文。与迁移 067 初稿来源追踪配合，067/068 均为 SAFE_EXPAND 且不回填。
+- **B8 角色写入恢复**：角色创建、更新、删除在 POST/PUT/DELETE 前按当前账号保存并精确回读恢复快照。存储异常或静默丢写时不发业务请求；响应不明保留快照并只读核实，不自动重发。新增角色删除浏览器断言，覆盖存储静默丢写时零 DELETE。
+- **B4/B5 错误播报**：移动通知偏好首次读取失败时将标题和说明置于 alert live region，重试按钮位于告警区域外；显式重试成功后通知选项恢复。Playwright MCP 在 390×844 本地合成页面核验告警树和重试，无真实业务写入。用户另确认 VoiceOver 在 Chrome 中明确读出“操作日志”和“用户列表”的已选视图；本次确认只覆盖这两个视图。
+- **验证**：workflow script source 集成、068 迁移幂等/schema/readiness、全 migration readiness、角色恢复单测 4/4、角色管理安全、用户角色分配安全、通知首读合同、类型检查、version:check、版本治理、更新说明治理（634 条）、测试入口检查（304 个文件）、Android runtime 合同、生产构建及差异检查通过。目标 ESLint 0 errors；workflow.ts 保留 12 条既有 warning。生产构建有既有大分包提示（Tiptap 555.12 kB、主入口 788.70 kB、Silk 背景适配器 843.50 kB）。
+- **浏览器限制**：test:workflow-designer-language-browser 与 test:mobile-notification-settings-browser 在断言开始前均因 macOS Chromium bootstrap_check_in Permission denied (1100) 退出。新增角色删除浏览器断言未自动执行；移动通知情景改由 Playwright MCP 对本地隔离页面手工核验。
+- **发布边界**：迁移 067/068 未应用到生产；Android 元数据为 9.6.102 / 90702，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 剩余视图验收和 B8 全量写入路径盘点；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B6/B8/B4：来源选题追溯、角色创建恢复与键盘日期入口（v9.6.101，本地未部署）
+
+- **B6 来源选题保留**：原快照只保存正文和来源大纲版本；稿件可以合法更换 `production.topic_id`，导致来源入口按新选题和相同版本号错链。新增 nullable `production_origin_snapshots.source_topic_id`，SAFE_EXPAND 迁移 067；创建时写原选题 ID，详情 API 返回 `origin_source_topic_id`，桌面/移动来源面板只用该字段回链。历史快照保持 null，不回填推断；原稿重关联行为和权限不变。
+- **B6 隔离回归**：来源 HTTP 测试创建选题 A 来源 v1.2 的稿件，重关联到也有 v1.2 的 B 后确认当前稿件选题为 B、来源选题仍为 A。迁移测试覆盖既有行 null、不回填、重复执行和 schema 校验；migration readiness 为 GO。浏览器规格补桌面/移动回链断言，但自动 `test:workflow-details-responsive-browser` 因 Chromium `bootstrap_check_in … Permission denied (1100)` 未进入新增断言。
+- **B8 角色创建恢复**：创建 POST 前按账号写入并精确回读表单快照；写入静默丢失、读回不匹配或 storage 异常时提示未发送并零 POST。成功或明确失败清理标记，响应不明保留原有只读恢复流程；角色更新、删除本轮不变。恢复单测 4/4，角色权限合同测试通过；浏览器规格加入存储静默丢写零 POST，但自动 suite 受 Chromium 1100 阻断。
+- **B4 截止日期键盘访问**：选题详情中仅鼠标可点击的日期文本替换为具名原生按钮，支持 Tab/Enter 并保留 Studio 焦点环。Chrome DevTools MCP 本地合成详情页确认无障碍树名称、焦点和 Enter 打开编辑器；浅/深主题对比度分别为 7.13:1 / 12.10:1。自动浏览器规格新增断言但未启动。
+- **验证**：`npm run test:production-outline-origin`、`npm run test:production-outline-origin-migration`、`npm run test:migration-readiness`、`npm run test:role-recovery-storage`、`npm run test:topics`、`npm run check`、测试入口检查（304 文件）、目标 ESLint（0 错误，18 条 warning）、`npm run version:check`、版本治理、更新说明治理（633 个版本）、`npm run build` 和 `git diff --check` 通过。生产构建保留已有 >500 kB 分包警告（Tiptap 555.12 kB、主入口 788.08 kB、Silk 背景适配器 843.50 kB）。无真实业务写入；迁移未应用到生产。
+- **发布边界**：Android 元数据为 9.6.101 / 90701，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站辅助技术验收和剩余 B8 写入闭环；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8/B6/B5：用户写入恢复、来源快照唯一性与悬停对比度（v9.6.100，本地未部署）
+
+- **B8 用户管理恢复标记**：用户新增、编辑、删除、启停四类操作共用“写入 sessionStorage 后精确回读”工具。JSON 无法序列化、存储写入被静默丢弃、内容不匹配或读取异常都会在业务 POST/PUT/DELETE 之前退出。原有 requestId、actor 范围恢复 API、权限检查和审计事务保持不变。新增单测 4/4；浏览器规格加入存储静默丢写时创建 POST 计数为零，自动浏览器受 Chromium `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言。
+- **B6 发布归档来源正文**：读端原先对来源快照用 `find`，重复快照会误展示首条。现在只在选题、创作稿、版本三个字段恰有一条匹配时展示正文；缺失或重复时隐藏正文并提示待核实，已验证的来源原稿链接仍保留。新增纯逻辑单测 1/1 和浏览器回归规格；自动发布归档套件因 Chromium 启动错误 1100 未进入断言。
+- **B5 登录 style2 悬停**：修复“忘记密码？”浅色 hover 透明度使文字对比度只有 3.57:1 的问题，改用 Studio 语义令牌。Playwright MCP 本地隔离页实测浅色从 3.57:1 提升至 10.18:1，深色为 5.96:1；新增双主题 hover 对比度规格。自动浏览器规格仍因 Chromium 1100 未进入断言。
+- **验证**：用户恢复单测 4/4、归档来源快照单测 1/1、用户角色分配安全、用户变更审计事务、用户 API 错误文案、类型检查、目标 ESLint、测试入口检查（303 项）、版本检查/治理、更新说明治理（632 个版本）、生产构建和 `git diff --check` 通过。生产构建保留已有 >500 kB 分包警告（Tiptap 555.12 kB、主入口 787.48 kB、Silk 背景适配器 843.50 kB）。
+- **发布边界**：无接口或数据库变化、无真实业务写入；Android 元数据为 9.6.100 / 90700，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站辅助技术和视觉验收，逐条审查剩余 B8 写入路径；Android 原生专项仍后置。
+
+## 2026-10-29 清单 B8/B4/B5：选题审核恢复、弹窗焦点与登录对比度（v9.6.99，本地未部署）
+
+- **B8 选题审核恢复**：审核 POST 前先 GET 选题历史并保存、回读账号与选题范围的本机恢复标记，标记不能安全保存时不发 POST。结果不明时保留原决定、意见、负责人并锁定控件，保护 SPA 离页与浏览器刷新；重新进入只读 GET，按历史高水位和审核人/决定/意见识别已提交、未变化或并发变化。已提交时清理匹配标记；未变化时只允许用户二次确认原操作后再次写入；出现其他变化时不重发。服务器权限仍由原有 `topic:audit` 校验。
+- **B8 手工浏览器验证**：Chrome DevTools MCP 本地隔离夹具模拟审核 POST 503、只读 GET 503，确认只产生一次 POST、一次 GET；恢复标记完整保存在 sessionStorage；触发离页先出现“审核结果尚未核实”，刷新事件被拦截；确认离开后再次进入，系统只读 GET 并恢复原意见和负责人，没有自动 POST；点击二次确认前仍无重试，确认后第二个 POST 成功并将审核历史读回。所有写入仅针对合成夹具数据。自动 Playwright 在启动 Chromium 时受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言。
+- **B4 角色弹窗焦点**：角色新建/编辑弹窗 portal 到 body 并复用模态生命周期管理，焦点进入、Tab/Shift+Tab 循环、Escape 关闭、恢复到触发按钮；有未完成写入时 Escape 不关闭。Chrome DevTools MCP 手工检查新建和编辑焦点、背景 inert、关闭后焦点返回及零角色写入。自动 Playwright 未能启动。
+- **B5 登录文字对比度**：登录页 `STR.2025` 品牌小字改用主题语义令牌；Chrome DevTools MCP 实测浅色 9.57:1、深色 13.63:1，并增加自动对比度规格。VoiceOver 现场确认由用户提供，仅明确覆盖“操作日志”和“用户列表”的已选视图。
+- **验证**：`npm run check`、`npm run test:topics`、审核恢复单测 4/4、`npm run version:check`、版本治理、更新说明治理（631 个版本）、测试入口检查（301 个文件）、目标 ESLint（0 error，TopicDetail 6 warnings）、`npm run build` 与 `git diff --check` 通过。生产构建保留已有 >500 kB 分包警告（Tiptap 555.12 kB、主入口 786.87 kB、Silk 背景适配器 843.50 kB）。Android 构建端点合同测试未能启动：缺少 `dist/xmt-mobile-build.json`；本轮仅同步版本元数据，没有构建移动端包，Android 原生专项继续后置。
+- **发布边界**：无数据库迁移、无真实业务写入；Android 元数据为 9.6.99 / 90699，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站辅助技术与视觉验收，逐条审查剩余 B8 写入链路；Android 原生专项仍后置。
+
+## 2026-10-29 补充验收：发布剧本权限撤销恢复与自动保存提示可读性（v9.6.98，本地未部署）
+
+- **B8 发布详情权限撤销恢复**：修正 `tests/browser/workflow-details-responsive.spec.ts` 中隔离夹具等待响应时缺少 `async` 的处理器后，通过 Chrome DevTools MCP 在 390×844 本地夹具实测：小版本保存返回未提交的 503，随后版本和详情读取均返回 403；界面隐藏先前剧本正文和编辑器，保留同账号会话恢复标记并阻止关闭标签页，写入计数保持 1。只读重试仍被 403 拒绝时未发写请求；离开详情后标记仍在。切换至账号 92 只看到服务端原稿，无法看到账号 91 的本机稿；恢复账号 91 及读取权限后，页面恢复原草稿并清除已核实的标记，全程没有第二次 PUT。390px 页面无横向溢出。该场景只改动隔离夹具数据。
+- **B4/B5 自动保存恢复提示**：在 Chrome DevTools MCP 的桌面隔离夹具 1440×960 页面检查浅/深主题。浅色标题与说明文字对比度为 7.79:1、6.51:1，按钮白字在渐变端点及中点至少 4.79:1；深色标题与说明为 13.16:1、6.80:1，按钮白字渐变端点至少 5.01:1。键盘 Tab 可到达“确认后重试保存本机草稿”，浅色焦点环 2px，深色焦点环 2px 并外偏 2px。两种主题下提示均清楚可见。桌面提示本轮未完成窄屏复核。
+- **日志与边界**：浏览器日志中的 503 是本轮主动注入的未提交保存故障；另有系统启用减少动态效果时的提示，没有其他浏览器错误。用户另行确认 VoiceOver 在 Chrome 中能明确读出“操作日志”和“用户列表”的已选视图，仅覆盖这两处。无真实业务写入；版本仍为 9.6.98，Android 元数据 9.6.98 / 90698；本地修改，不提交、推送或部署。
+
+## 2026-10-29 清单 B8：桌面创作正文自动保存结果恢复（v9.6.98，本地未部署）
+
+- **恢复保护**：桌面创作详情每次正文自动保存前，先按账号与创作记录保存并回读本机草稿及请求恢复标记。请求结果不明时发起禁用缓存的只读 GET，并按正文指纹区分服务器已提交、仍为原稿、协作者已更新三种情况；不自动重复 PUT。服务器仍为原稿时可在核对后明确重试；协作者已更新时默认切到服务器正文的只读预览，将本机正文单独留作可展开核对的草稿。明确恢复前再读服务器并比较版本/状态/正文，基准有变化则继续保留冲突并要求重新核对。编辑器待写队列和稿件状态、版本操作、离开页面均受恢复状态保护。
+- **编辑器协调**：协调器支持用只读回读确认服务端已保存内容，并清除已被核实内容覆盖的待写/失败队列，避免旧请求在恢复后隐式重发。
+- **回归覆盖**：新增恢复标记读写、账号/稿件隔离、请求编号保护、损坏或禁用存储失败关闭及草稿回读保护单测 4/4；编辑器协调器恢复测试 1/1。扩展创作详情浏览器规格覆盖响应丢失、未写入后的刷新恢复及显式重试、协作者并发更新和显式恢复。
+- **验证结果**：恢复单测 4/4、编辑器协调器测试 1/1、`npm run check -- --pretty false`、目标 ESLint、301 个测试入口检查、`npm run version:check`、版本治理、更新说明治理（630 个版本）、Android runtime/生产端点合同测试及 `git diff --check` 通过，`npm run build` 通过。构建保留既有 >500 kB 分包提示（Tiptap 555.12 kB、主入口 786.15 kB、Silk 背景适配器 843.50 kB）。Chrome DevTools MCP 本地隔离夹具手动验证：服务器已提交但响应丢失时只发送 1 次保存并清理匹配草稿；服务器未提交时刷新后保留恢复提示、无自动重试，明确确认后才发送第 2 次保存；协作者变化时服务器正文只读展示、本机正文单独展开查看，确认恢复后才发送第 2 次保存并保存本机稿。页面控制台无错误。自动 `test:production-review-browser` 受 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 阻断，未进入自动断言；无真实业务数据写入。
+- **发布边界**：Android 元数据为 9.6.98 / 90698，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清单中尚未完成的桌面写入结果恢复、全站辅助技术与视觉验收；Android 原生专项后置。
+
+## 2026-10-29 清单 B8：发布归档删除结果恢复（v9.6.97，本地未部署）
+
+- **恢复保护**：发布归档删除前先按账号和归档编号保存并回读随机恢复标记。标记无法可靠保存时不发 DELETE；删除响应异常后只读 GET，不自动重复删除。GET 404 时将当前归档从列表移除并清理匹配标记；GET 200 时保留标记和详情，只有用户重新打开确认框并确认后，才允许对同一归档再次发送 DELETE。401/403 明确拒绝时保留归档并清理匹配标记；本机标记无法清理或只读核实失败时保持写入锁，只开放恢复/只读核实。标记按用户隔离，详情 GET 禁用缓存，页面关闭前在请求/核实期间提示。
+- **回归覆盖**：新增 `tests/resource-center/published-archive-delete-recovery.test.ts`，恢复状态/API 测试 4/4 通过，覆盖账号隔离、错误/不可用存储、恢复标记冲突与 HTTP 状态保留。扩展 `tests/browser/published-archives.spec.ts`，覆盖本机存储失败零 DELETE、服务端已删除但响应失败并 GET 404、删除与 GET 均失败后只读重试、GET 200 后人工再次确认。Playwright MCP 在本地隔离页面逐条执行以上交互；网络记录证明存储失败阶段零 DELETE，未知状态只产生 GET，显式再次确认后才产生下一次 DELETE。仅隔离内存夹具数据变化，无真实业务写入。
+- **验证边界**：`npm run check -- --pretty false`、新增恢复/API 测试 4/4、`npm run version:check`、更新说明治理（629 个版本）、测试入口检查（300 个文件）、`git diff --check` 与 `npm run build` 通过。目标 ESLint 无错误，`src/api/resources.ts` 保留 2 条 `any` 警告。构建保留仓库既有 >500 kB 分包警告（Tiptap 555.12 kB、主入口 785.64 kB、Silk 背景适配器 843.50 kB）。自动 `test:published-archives-browser` 的本机 Chromium 启动受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入自动断言；Playwright MCP 隔离页面已完成本次关键交互核验。
+- **发布边界**：版本保持 v9.6.97，Android 元数据仍为 9.6.97 / 90697，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续按清单推进 B4/B5 全站验收、B8 写入路径清查及 B6 跨模块历史语义；G 项可信阈值和审稿责任规则仍需正式业务依据，Android 原生专项后置。
+
+## 2026-10-29 清单 G/B4/J4：跨模块首页概览、角色字段标签与编辑器菜单层级（v9.6.97，本地未部署）
+
+- **G 首页**：管理者桌面和移动首页将现有摘要中的选题卡点、待审选题、待审稿件、今日待发布、同步异常和待办消息汇成可点击计数入口，沿用各自权限与统计范围。无权限的队列隐藏，加载失败/消息未知不会显示成零；选题个人范围与模块范围说明保留。没有新接口、数据库改动、审批写入或播放骤降告警。
+- **B4 表单**：角色管理弹窗的角色编码、角色名称、描述均关联可见标签并补稳定 `id/name`；浏览器规格使用标签定位并覆盖填写后取消、零角色写入。
+- **J4 编辑器**：BubbleMenu、FloatingMenu 子菜单与 Toolbar 下拉使用 `z-editor-menu`；下拉定位考虑祖先滚动裁剪区域。颜色选择按钮和 FloatingMenu 触发按钮提供名称/展开状态，回归检查菜单层级顺序及开关过程零业务写入。
+- **B5 令牌复核与逐页抽查**：修复资料关联待核实提示使用未注册 `bg-studio-surface-muted` 的问题，改用现有 `bg-studio-surface-soft`；Studio 色彩令牌检查从失败恢复为通过。另核对登录页 1200px 桌面、390×844 与 320×640 的浅/深主题页面宽度及主文字/按钮；Production 详情检查了桌面浅色主题的稿件、版本区和空批注状态；创作者中心检查了桌面浅/深主题的离线提示、作品空态、同步记录空态与缺失指标，测得次级/弱化/离线文字对比度分别为浅色 7.00:1/5.35:1/8.39:1、深色 8.89:1/6.41:1/17.21:1。抽查未见明确对比缺陷，但 Production 暗色、hover、错误态及全站主题切换仍未覆盖，不代表全站 B5 完成。
+- **B4 数据导出与专注写作**：导出类型按钮组通过可见标题提供组名，“选题数据/数据分析”通过 `aria-pressed` 告知选中项；既有分析导出浏览器规格补充零请求切换断言。Chrome DevTools MCP 隔离夹具的实际页面树确认按钮组名称和状态，切换前后网络记录无导出请求。现有稿件详情浏览器规格补充专注模式的导航/工具栏/版本区隐藏与恢复、正文保留和无业务写入断言；Chrome DevTools MCP 隔离夹具确认这些运行时状态及服务端写入数为零。
+- **B4 选题审核**：桌面审核弹窗将批准/驳回按钮关联到可见“审核结果”组名，并用 `aria-pressed` 标示默认批准与切换后的选项；浏览器规格覆盖状态及零审核请求。Chrome DevTools MCP 隔离页面实际看到“审核结果”具名组，选中状态切换无审核 POST。
+- **B4 日报归档筛选**：归档列表的成员、开始日期、结束日期筛选补齐关联标签及稳定 `id/name`；只影响控件识别，不改变筛选请求。静态组件回归核对三项标签关系和标识。
+- **B6 多平台发布来源**：每条已发布记录按自身 `script_source_production_id + script_source_version` 保存对应来源状态；有效且同选题的正文快照去重后归档。发布卡片分别显示来源版本、快照和受 `production:view` 限制的原稿入口；缺失/不完整、过期、跨选题来源不展示推断正文。旧归档缺少逐条来源、记录数不符或来源结构无效时只标记待同步；即使来源结构看似有效但 ID/版本错配，也只标记待同步；只有既有显式同步操作才重建，不自动写库、无数据库迁移。隔离 SQLite/API 回归覆盖不同平台版本、错配/异常来源、旧归档恢复与零自动写入；Chrome DevTools MCP 隔离页面确认 v1.0/v2.0 来源和正文逐条匹配、跨选题正文隐藏。
+- **B6 资源中心归档详情**：历史归档详情现在按发布记录逐条读取、校验来源剧本和版本快照，并可在有 `production:view` 时打开对应原稿版本；旧快照仍兼容。跨选题、来源字段不完整或多个快照无法唯一匹配时隐藏正文和回链，不从相邻平台记录推断。单测 11/11、目标 ESLint、类型检查通过；Playwright MCP 隔离页面检查了逐条来源展示，自动 Chromium 套件未执行。
+- **B8 剧本保存结果与权限撤销**：发布剧本写入后若只读核实 GET 返回 403，清除页面上此前读取的正文和编辑器，保留同账号当前标签页会话里的请求编号/草稿，并提供只读重试及离开详情入口；核实进行中仍拦截 SPA 离开，401/5xx 不当作权限撤销。因恢复数据使用 `sessionStorage`，页面保留关闭警告并明确提示不要关闭标签页。浏览器回归规格覆盖 403、401、账号隔离、无重复 PUT 和权限恢复后的同账号重入；版本历史 API 状态码定向测试通过。Playwright MCP 与 Chrome DevTools MCP 的浏览器配置均报告被占用，未执行该浏览器场景。
+- **验证**：`npm run check -- --pretty false`、`npm run build`、目标 ESLint、日报归档字段静态回归、Studio token 使用（39 类、28 个 alpha）、`npm run test:home-dashboard`、首页概览单测（2/2）、发布来源隔离 SQLite/API 集成、资源归档详情单测（11/11）、`npm run test:publishing-save-read-errors`、版本检查/治理、更新说明治理（629 个唯一版本）、测试入口检查（299 个文件）、Android runtime 合同与 `git diff --check` 通过。构建保留既有 >500 kB 分包提示（Tiptap 555.12 kB、主入口 785.43 kB、Silk 背景适配器 843.50 kB）。
+- **未完成验证**：`test:analytics-browser`、`test:resource-categories-browser`、`test:production-review-browser`、`test:workflow-designer-language-browser`、`test:published-archives-browser` 与 `test:topic-stage-record-repair-browser` 中本次新增断言尚未由 Playwright 自动套件执行；浏览器启动曾受 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 阻断，本轮 Playwright MCP 和 Chrome DevTools MCP 的 Chrome 配置也被占用。Chrome DevTools MCP 已在隔离本地夹具完成数据导出、审核选项、专注写作和发布归档页面状态核验，但这不等同于 Playwright 自动套件或全站 VoiceOver 语音验收。用户确认 VoiceOver 在 Chrome 聚焦“操作日志”和“用户列表”时明确读出已选视图；该现场确认仅覆盖这两个视图，不代表新改首页、表单、编辑器或导出组通过语音验收。
+- **发布边界**：未写入真实业务数据；Android 仅同步版本元数据至 9.6.97 / 90697，未构建 APK。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站验收、B8 完整写入反馈盘点、B6 跨模块历史语义，以及 G 中尚缺可信播放骤降阈值和专属审核责任规则的部分；不凭空补定业务口径。Android 原生专项后置。
+
+## 2026-10-29 清单 B4：日历今天日期读屏状态（v9.6.96，本地未部署）
+
+- **改造内容**：只有代表今天的日历日期按钮增加 `aria-current="date"`；点击日期、排期查询与创建行为不变。
+- **回归覆盖**：扩展 `tests/browser/calendar-month-request-race.spec.ts`，将隔离时钟固定在北京时间 2026-10-15，断言当月只有一个日期按钮标记为当前日期、切换到不含今天的月份后标记消失、返回后恢复；保留全程零业务写入断言。
+- **验证结果**：类型检查、生产构建、日历目标 ESLint 和 `git diff --check` 通过。日历浏览器规格只尝试一次，macOS Chromium 在 `bootstrap_check_in … Permission denied (1100)` 阶段无法启动，断言未运行；未重试。构建保留既有超过 500 kB 的分包提示。
+- **发布边界**：Android 元数据仍为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查当前挂载页面的 B4/B5 与 P0/B8 边界；Android 原生专项后置。
+
+## 2026-10-29 清单 B4 / P0-B8：灵感创建弹层与预提交恢复保护（v9.6.96，本地未部署）
+
+- **改造内容**：灵感池“提交灵感”弹层通过 `role="dialog"`、`aria-modal` 和关联标题提供模态语义；键盘焦点进入标题字段、在弹层内循环并在关闭后返回触发按钮。恢复核实期间禁用关闭按钮、取消和 Escape。创建 POST 前必须保存并回读匹配的账号、请求编号、标题、描述、分类和核实状态；存储写入失败或回读不匹配时，尽力清除当前标记、保留草稿，在弹层内提示“本次未发送”并停止 POST。
+- **回归覆盖**：扩展 `tests/browser/inspiration-theme-contrast.spec.ts`，覆盖弹层名称、焦点进入/Tab/Shift+Tab 循环、显式关闭和 Escape 的焦点返回、关闭不产生业务写入；覆盖恢复凭据写入异常和载荷回读不一致时保留标题/描述、清除标记、POST 数为 0，以及服务端创建结果未知时 Escape 不关闭也不重发。
+- **验证结果**：`npm run check -- --pretty false`、`npm run build`、本批目标 ESLint、`git diff --check`、`npm run version:check`、版本治理、更新说明版本唯一性（628 个版本）、Android runtime 合同和 297 个测试入口检查均通过；成就初始化原子性及成就检查 API 门禁也通过。浏览器规格只尝试一次，macOS Chromium 在 `bootstrap_check_in … Permission denied (1100)` 阶段无法启动，新增断言未执行，未重试；不将规格代码视为浏览器验收。构建保留既有超过 500 kB 的分包提示。
+- **其他已确认验收**：用户确认 macOS VoiceOver 在 Chrome 中聚焦“操作日志”和“用户列表”时能明确读出已选视图；此结果只覆盖这两个视图，不代表灵感弹层或全站语音验收。
+- **发布边界**：Android 元数据仍为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查清单中当前挂载页面的 B4/B5 与 P0/B8 边界；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：活动日志翻页完成播报（v9.6.96，本地未部署）
+
+- **改造内容**：活动日志请求开始时清除上次成功播报；只有 GET 成功才通过礼貌状态播报当前页和总记录数，读取失败保留错误提示且不宣布成功。既有加载播报继续保留。
+- **回归覆盖**：扩展 `tests/browser/activity-log-read-recovery.spec.ts`，覆盖请求等待、成功翻页、失败后不播报成功、只读重试；断言每次翻页/重试仅产生一条 GET。
+- **验证结果**：Chrome DevTools MCP 1440×700 隔离夹具确认翻页后辅助功能树播报“已加载第 2/3 页，共 41 条记录。”；注入一次 503 后只显示刷新失败提示、不出现成功播报；点击重试仅新增一条 GET，恢复播报第 3/3 页。390×844 下同样显示成功状态且无横向溢出；无意外浏览器错误，503 控制台错误为隔离夹具预期注入。自动 Playwright 只尝试一次，macOS Chromium `bootstrap_check_in … Permission denied (1100)` 阻止其启动、未进入断言；类型检查和目标 ESLint 通过。
+- **发布边界**：Android 元数据仍为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续扫描并处理其他已挂载页面的清单 B4/B5/P0 缺口；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：生产审阅回复框讨论上下文名称（v9.6.96，本地未部署）
+
+- **改造内容**：生产详情的批注和修改建议回复框名称带上讨论类型与摘要，摘要超过 80 个字符时按字符截断；不改变回复权限、接口或提交行为。
+- **回归覆盖**：扩展 `tests/browser/production-review.spec.ts`，在桌面双线程与移动端两批注场景分别按可访问名称唯一定位，并检查名称核对时回复请求数不增加。
+- **验证结果**：Chrome DevTools MCP 1440×700 隔离夹具创建一条批注和一条建议，辅助功能树分别显示“回复批注：请补充这段的依据。”与“回复修改建议：让表达更直接。”；DOM 核对两个字段唯一，回复 POST 数为 0，页面无横向溢出和 console error。自动 Playwright 在 macOS Chromium 启动阶段因 `bootstrap_check_in … Permission denied (1100)` 失败，未进入断言；`npm run check` 通过。390px 自动场景尚未执行。
+- **发布边界**：Android 元数据仍为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续按清单复核其他已挂载页面；Android 原生专项后置。
+
+## 2026-10-29 清单 B5：桌面消息关联图标对比度（v9.6.96，本地未部署）
+
+- **改造内容**：消息页关联页面图标从低对比度、半透明的弱化文字令牌改为主题语义文字颜色，悬停时提升到主要文字颜色；沿用 Studio 令牌，不引入硬编码颜色。
+- **回归覆盖**：扩展 `tests/browser/mobile-work-center-responsive.spec.ts` 的 1440px 浅/深色桌面关联消息场景，验证提示文字至少 4.5:1、外链图标至少 3:1，且只读取隔离夹具、不点击导航卡片。
+- **验证结果**：Chrome DevTools MCP 在 1440×900 隔离页面读取实际样式与合成背景，浅色对比度 6.91:1、深色 7.75:1；两主题均渲染关联消息与提示文字，图标不透明，浏览器无 console error。页面使用仅拦截 GET 的临时内存响应，无业务写入；截图已目视检查。最终构建与版本门禁需在本批所有改动完成后重跑。
+- **发布边界**：Android 元数据仍为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查 B4/B5 当前挂载页面和 B8 写入反馈；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：移动首页公告板新建字段可访问名称（v9.6.96，本地未部署）
+
+- **改造内容**：新建公告 textarea 增加可见“公告内容”标签及稳定 `id="announcement-content"`、`name="content"`；不改公告权限、接口和发布流程。
+- **回归覆盖**：扩展 `tests/browser/announcement-board-feedback.spec.ts`，按可访问名称定位字段并检查 id/name；填入隔离草稿后关闭表单，断言无创建请求，再继续原有创建与回执场景。
+- **验证结果**：Chrome DevTools MCP 320×844 隔离夹具显示标签和字段名均为“公告内容”，DOM 标签关联、id/name 正确；取消已填草稿后表单关闭且请求仅有公告列表 GET，无创建 POST，页面无横向溢出、无浏览器 console error。自动 Playwright 在 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 启动阶段失败，未进入断言；目标 ESLint 与差异检查通过。
+- **发布边界**：Android 元数据仍为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续处理生产详情中多个批注/建议回复框缺少上下文名称的问题；Android 原生专项后置。
+
+## 2026-10-29 清单 P0/B8：成就初始化结果不明恢复（v9.6.96，本地未部署）
+
+- **改造内容**：预设成就初始化遇到网络、超时或暂时性服务端错误时，按发起账号用 `no-store` 读取成就列表核实。读到内容后同步页面并说明服务器已有成就，不宣称本次创建数量；读到空列表后只提供明确重试；只读核实失败时锁定初始化，仅开放重新核实。确定的 4xx 仍按明确拒绝提示。写权限继续受 `system:achievement` 保护。
+- **回归覆盖**：扩展 `tests/browser/achievements-leaderboard-empty-state.spec.ts`，覆盖提交后响应丢失、未提交后的明确重试、只读读回失败锁定以及明确拒绝；检查 POST/GET 次数。
+- **验证结果**：Chrome DevTools MCP 隔离夹具确认提交后响应丢失通过单次只读 GET 恢复、空列表只在用户明确点击后再 POST、只读核实失败锁定写入且手动重核只发 GET、确定 403 不发核实 GET。类型检查、目标 ESLint、成就初始化原子性测试及成就检查 HTTP 测试通过。自动浏览器因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 启动失败，未进入断言；最终生产构建和版本门禁覆盖本版全部改动。
+- **发布边界**：Android 元数据为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查 B4/B5 当前挂载页面与 B8 写入反馈；Android 原生专项后置。
+
+## 2026-10-29 清单 P0/B8：灵感评论恢复凭据写入前置保护（v9.6.96，本地未部署）
+
+- **改造内容**：灵感讨论区发送评论前必须成功写入并回读匹配账号、灵感、请求编号、正文及核实状态的恢复标记；无法保存时保留输入并说明“本次未发送”，不发 POST。写入结果不明后仍沿用同一请求编号；如果无法确认编号仍保存在浏览器，继续锁定发送并提醒不要刷新/关闭当前页，提供只读核实。
+- **回归覆盖**：扩展 `tests/browser/inspiration-theme-contrast.spec.ts`，注入 `sessionStorage.setItem` 配额异常，检查提示、草稿保留、零评论 POST、无误导性标记，并保留既有同编号刷新恢复覆盖。
+- **验证结果**：Chrome DevTools MCP 隔离夹具模拟恢复标记写入异常，确认草稿仍在、提示“本次未发送”、sessionStorage 没有该标记且没有评论创建请求；自动浏览器因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 在断言前退出。类型检查、目标 ESLint 与差异检查通过；最终生产构建及版本门禁覆盖本版全部改动。
+- **发布边界**：Android 元数据为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查 B4/B5 当前挂载页面和 B8 写入反馈；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：移动“我的”页字号选择读屏状态（v9.6.96，本地未部署）
+
+- **改造内容**：14/16/18 字号按钮通过 `aria-pressed` 报告当前字号，选择与本机字体设置行为不变。
+- **回归覆盖**：扩展 `tests/browser/mobile-work-center-responsive.spec.ts`，断言窄屏初始仅 14px 被选中，选择 18px 后唯一选中状态同步。
+- **验证结果**：Chrome DevTools MCP 390 CSS px 隔离页确认初始 14px 为唯一 pressed，切到 18px 后只有 18px pressed 且本地设置为 18；定向 ESLint 与差异检查通过。自动浏览器因 Chromium 启动权限错误未进入断言。
+- **发布边界**：Android 元数据为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查 B4/B5 当前挂载页面和 B8 写入反馈；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：日历事件标题必填读屏语义（v9.6.96，本地未部署）
+
+- **改造内容**：日历新建事件标题输入框补充原生 `required`，读屏可直接识别必填状态。空标题业务拦截和提示保持不变，创建请求不会发送。
+- **回归覆盖**：扩展 `tests/browser/calendar-month-request-race.spec.ts`，通过可访问名称找到标题字段，断言 required，并点击空表单“创建”后等待既有提示、确认隔离页面未产生任何业务写入。
+- **验证结果**：Chrome DevTools MCP 隔离夹具无障碍树将字段显示为“标题 *，required”；空提交显示“请输入事件标题”，网络无日历创建请求。定向 ESLint、`npm run check -- --pretty false`、`npm run build`、`npm run version:check`、版本治理、更新说明唯一性（628 个版本）、Android runtime 合同及差异检查通过；构建仍有既有超过 500 kB 分包警告。自动浏览器规格在 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 启动阶段退出，未进入断言。
+- **发布边界**：Android 元数据为 9.6.96 / 90696，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查 B4/B5 当前挂载页面与 B8 写入反馈；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：匿名意见必填字段读屏语义（v9.6.95，本地未部署）
+
+- **改造内容**：匿名意见的类型和内容控件补稳定 `id/name` 并关联可见标签；原生 `required` 暴露必填状态，装饰星号标记为隐藏内容，不进入控件名称。匿名提交、保存和恢复逻辑未改。
+- **回归覆盖**：扩展 `tests/browser/anonymous-feedback-theme-contrast.spec.ts`，按字段标签断言名称、id/name/required，并验证空表单提交提示且隔离服务请求计数不变。
+- **验证结果**：Chrome DevTools MCP 隔离夹具无障碍树读作“意见类型”“意见内容”，两者 required；390/1440 页面业务行为未写入；空提交显示“意见类型和意见内容均为必填项”，匿名反馈创建请求数为 0。类型检查、定向 ESLint、生产构建、版本治理与差异检查通过。专属 Playwright 测试因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 在断言前退出。
+- **发布边界**：Android 元数据为 9.6.95 / 90695，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查 B4/B5 当前挂载页面和 B8 写入反馈；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：系统设置“登录页布局”读屏名称（v9.6.94，本地未部署）
+
+- **改造内容**：为“登录页设置”中的布局下拉框补充稳定 `id="settings-login-layout"`、`name="login.layout"`，并将可见“登录页布局”标签与控件关联；未改变默认值、保存、权限或配置请求。
+- **回归覆盖**：`tests/browser/system-settings-default-theme.spec.ts` 在进入“登录页设置”后通过可访问名称定位，并断言字段 `id/name`。
+- **验证结果**：Chrome DevTools MCP 隔离夹具无障碍树显示“登录页布局”具名下拉框；DOM 标签关联与 `id/name` 正确；页面无横向溢出、无控制台错误；网络只读取公开设置和当前设置，没有提交保存。定向 ESLint 通过（0 错误，NotificationSettings 保留 2 条既有 hook 警告），`npm run test:system-settings-browser` 因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 在断言前退出。
+- **发布边界**：Android 元数据为 9.6.94 / 90694，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查 B4/B5 当前挂载页面和 B8 写入反馈；Android 原生专项后置。
+
+## 2026-10-29 清单 B4/B8：表单字段读屏语义、全局搜索键盘状态与选题建稿回执恢复（v9.6.93，本地未部署）
+
+- **改造内容**：创作管理新增/编辑和拍摄计划创建表单为可见标签补稳定 `id/name` 关联，选题字段暴露原生必填状态；全局搜索输入框声明 combobox，结果区使用 listbox/option，方向键改变选中项时同步 `aria-activedescendant` 与唯一 `aria-selected`，焦点留在搜索框；桌面、移动选题详情在开始建稿前持久化账号/选题范围的请求编号及原正文，未知结果只读查询回执，命中后再读作品详情，确认关联当前选题才导航，读回失败或记录不可读时锁定重建，只有服务器确认请求缺失时提供同编号明确重试。
+- **回归覆盖**：扩展 `tests/topics/topic-production-handoff.test.ts` 到 8 项，覆盖响应丢失、回执读取失败、同编号明确重试、账号/选题隔离与恢复标记写入失败；`tests/browser/mobile-work-center-responsive.spec.ts` 增加移动与桌面选题建稿结果不明/重试场景；表单及全局搜索浏览器规格按可访问名称和 ARIA 状态断言。
+- **验证结果**：`npm run test:topic-production-handoff` 8 项、`npm run test:production-create-idempotency`、`npm run check -- --pretty false`、定向 ESLint（0 错误；TopicDetail 有 5 条既有警告）、`npm run build`、`npm run version:check`、`npm run test:version-governance`、`npm run test:changelog-governance`（625 个版本）、`npm run test:entrypoints`（297 个文件）、`npm run test:android-runtime` 和 `git diff --check` 均通过；构建仍有既有超过 500 kB 分包警告。Chrome DevTools MCP 隔离夹具确认创作新增/编辑四个字段名称和选题必填；命令面板候选列表暴露为 listbox，方向键移动唯一选中项且焦点保留在 combobox；拍摄计划五个字段可访问名称与标签对应，1440×960/390×844 文档均无横向溢出，控制台无错误，表单均未提交。相关仓库 Playwright 浏览器测试因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 在断言前退出；选题建稿结果不明场景已写入浏览器回归但本轮未能执行。
+- **发布边界**：Android 元数据为 9.6.93 / 90693，未构建 APK；仅本地修改，不提交、推送或部署。VoiceOver 用户确认的实际语音范围仍仅限“操作日志”和“用户列表”两个已选视图。
+- **下一步**：继续 B4/B5 当前挂载页面与 B8 写入反馈审查；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：移动端选题提报字段读屏语义（v9.6.92，本地未部署）
+
+- **改造内容**：移动端提报表单的标题、平台、截止日期、项目背景、目标受众和大纲补齐稳定 `id/name`，继续使用可见标签命名输入框；标题必填状态通过原生 `required` 暴露，装饰星号排除在读屏名称之外。没有改动提报数据、权限、草稿和提交行为。
+- **回归覆盖**：扩展 `tests/browser/creator-topic-suggestions.spec.ts`，增加 390×844 移动视口检查，断言字段名称、标题 `id/name/required`、空标题提交的提示/零创建请求与页面无横向溢出。
+- **验证结果**：`npm run check -- --pretty false`、定向 ESLint、`npm run build`、版本检查、版本治理、更新说明唯一性（624 个版本）、测试入口检查（297 个文件）、Android runtime 契约检查和 `git diff --check` 通过；构建保留既有超过 500 kB 分包警告。Chrome DevTools MCP 隔离夹具在 390px 确认标题名称为“选题标题”且必填、其它字段名称完整、文档宽度等于视口且控制台无错误；点击空表单“提交选题”显示“请输入选题标题”，没有 `POST /api/topics`，仅有读取和 Socket.IO 传输请求。仓库 Playwright suite 在 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 启动阶段退出，未进入断言。用户另确认 VoiceOver 在 Chrome 中明确读出“操作日志”和“用户列表”的已选视图；语音验收范围仅限这两个视图。
+- **发布边界**：Android 元数据为 9.6.92 / 90692，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续核对 B4/B5 当前挂载页面和操作反馈，收口 B8 未完成项；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：桌面选题提报字段读屏名称（v9.6.91，本地未部署）
+
+- **改造内容**：为桌面提报页标题、发布平台、截止日期、负责人、项目背景和目标受众增加稳定 `id/name`，并将各自可见标签关联到控件；必填星号不进入字段名称。富文本大纲编辑区提供“选题大纲”多行文本框名称。提报数据、权限和提交/草稿流程不变。
+- **回归覆盖**：扩展 `tests/browser/creator-topic-suggestions.spec.ts`，断言六个可见标签都能定位到表单控件，且富文本大纲暴露准确文本框名称。
+- **验证结果**：`npm run check -- --pretty false`、目标 ESLint（0 错误，RichTextEditor 保留 4 条既有警告）、`npm run build` 与 `git diff --check` 通过，构建仍有既有超过 500 kB 分包警告。仓库浏览器测试尝试在启动阶段被 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言。Chrome DevTools MCP 在本地隔离夹具确认无障碍树列出六个字段名称与“大纲结构”下的“选题大纲”多行文本框；1440px 文档宽度与视口相同，控制台无错误。页面仅读取隔离夹具用户/权限/系统设置，无业务写入。本轮未进行选题页 VoiceOver 语音验收。
+- **发布边界**：Android 元数据为 9.6.91 / 90691，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续核对 B4/B5 当前挂载的其他表单与操作反馈，收口 B8 未完成项；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：人员管理搜索框名称随视图变化（v9.6.90，本地未部署）
+
+- **改造内容**：人员管理搜索框增加稳定 `id`、`name` 和动态 `aria-label`：用户列表视图读作“搜索用户名、姓名或邮箱”，操作日志视图读作“搜索操作、用户或目标”。共享 `SearchBar` 优先保留调用方显式名称，否则使用 placeholder 作为名称；两者皆无则使用通用名称“搜索”。视图切换、筛选逻辑和请求行为保持不变。
+- **回归覆盖**：扩展 `tests/browser/users-tabs-selected-state.spec.ts`，在两种视图断言对应名称，并保留选中态、单次读取和零业务写入断言；新增 `tests/components/search-bar-accessibility.test.tsx` 覆盖自定义、placeholder 和通用名称。
+- **验证结果**：SearchBar 组件回归、`npm run check -- --pretty false`、定向 ESLint、`npm run build`、`npm run version:check`、版本治理、更新说明唯一性与 `git diff --check` 通过。Playwright MCP 返回 `Transport closed`；仓库 Playwright suite 随后因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 在断言前退出。Chrome DevTools MCP 在本地隔离夹具确认人员管理初始搜索名称，并切换至操作日志后确认名称更新；另在知识库路由确认共享搜索框名称为“搜索知识库”。人员视图选中态正确，1440×700 视口无横向溢出，控制台无错误。请求仅为本地夹具 GET 与 Socket.IO 传输轮询，没有业务写入。
+- **发布边界**：Android 元数据为 9.6.90 / 90690，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续清查 B4/B5 挂载界面和 B8 剩余写入反馈；Android 原生专项后置。
+
+## 2026-10-29 清单 B4：桌面选题列表排序状态可感知（v9.6.89，本地未部署）
+
+- **问题与改造**：桌面列表默认使用不可见的 `created_at desc` 排序，所有可见排序列看起来都未激活，排序箭头也可能被辅助技术读作内容。现默认按可见的提交时间降序；当前排序列使用 `aria-sort`，排序按钮说明当前方向和再次激活后的方向，图标标为装饰内容；字段切换/方向改变后通过 `role=status`、polite live region 播报结果。
+- **回归覆盖**：`tests/browser/topics-list-responsive.spec.ts` 增加默认排序列/方向、点击后 `aria-sort` 更新、切换到选题标题排序、只保留一个活动列、播报文本的断言；既有触控尺寸与深浅主题 hover 对比验收保留。
+- **验证结果**：`npm run check -- --pretty false`、定向 ESLint（0 错误、0 警告）、`npm run build`、`npm run version:check` 与 `git diff --check` 通过。Chrome DevTools MCP 在隔离夹具 1440×960 页面确认列表初始按提交时间新→旧；点击后读屏名称更新为当前升序、下次降序；切换“选题”后仅该列带 `aria-sort=ascending`，礼貌播报“选题列表已按选题升序排列”，夹具排序结果符合方向且页面宽度 1440/1440px。Playwright 套件已尝试启动，但 Chromium 在 macOS `bootstrap_check_in … Permission denied (1100)` 处退出，未进入新增断言。
+- **保护边界**：仅改本地排序默认值与语义反馈；不改查询参数、服务端排序、筛选、权限或业务数据。Android 元数据为 9.6.89 / 90689，未构建 APK；未提交、推送或部署。
+- **下一步**：继续剩余 B4/B5 页面和 B8 写入反馈边界；Android 原生专项后置。
+
+## 2026-10-29 清单 P0/B8：选题资料关联未知结果只读恢复（v9.6.88，本地未部署）
+
+- **问题与改造**：选题详情关联或解除资料时，写入响应丢失、超时、网络错误、冲突或服务器异常可能使页面把成功写入误报失败，且允许重复写入。现在遇到不确定或冲突结果时读取当前选题关联资料；读回确认目标状态后更新本地列表；读回失败则按选题/资料关系保留写入锁，只显示 GET 核实操作。再次核实仍失败时锁继续保留；仅在读回确认关系未变后清除锁，用户可显式重试。明确权限/输入拒绝继续显示原业务原因。服务端事务、权限和审计逻辑未改。
+- **回归覆盖**：扩展 `tests/browser/topic-stage-record-repair.spec.ts`，增加关联与解除关联两种“事务已提交、写入响应 503、首次只读读回 503”的隔离流程；断言写请求只发生一次、目标关系按钮持续禁用、核实 GET 成功后界面与服务端一致，核实过程不发第二次写请求。
+- **验证结果**：`npm run check -- --pretty false`、选题资料/API/浏览器夹具定向 ESLint（0 错误、0 警告）、`npm run build` 和 `git diff --check` 通过。Chrome DevTools MCP 在隔离账号与内存夹具中实际走过关联/解除两类响应丢失与首次读回失败流程，均显示持久的待核实提示；目标操作锁定；手动核实只发 GET 后列表匹配。视口 1440px，页面无横向溢出。仓库 Playwright 套件在浏览器启动前退出，错误为 macOS Chromium `bootstrap_check_in … Permission denied (1100)`，未进入自动断言。
+- **数据与发布边界**：不改数据库、迁移、权限或 API；隔离夹具外未访问或写入真实业务数据。Android 元数据为 9.6.88 / 90688，未构建 APK；仅本地修改，未提交、推送或部署。
+- **其他已确认验收**：用户确认 Mac VoiceOver 在 Chrome 中聚焦“操作日志”和“用户列表”时，能明确读出当前已选视图。该确认只覆盖这两个视图，不代表全站 VoiceOver 验收完成。
+- **下一步**：继续 B8 未闭合的写入反馈，以及桌面选题列表排序状态等 B4/B5 项；Android 原生专项后置。
+
+## 2026-10-29 清单 P0/B8：移动选题看板状态确认与列表刷新一致性（v9.6.87，本地未部署）
+
+- **问题与改造**：选题状态写入成功但列表刷新失败，或写入响应丢失后状态 GET 已确认、列表刷新失败时，原实现会因为 TanStack Query 吞掉刷新异常而错误提示成功并解除卡片锁，旧阶段按钮随之恢复。现在列表失效刷新启用错误传递；只有状态核实和列表刷新成功才解除锁。状态已确认但列表仍旧时，持续显示服务端当前阶段并锁住旧卡片；“只读核实并刷新列表”只发读取请求。服务端确认选题不存在时也保持卡片锁，直到列表刷新完成。
+- **保护边界**：不自动重发状态写请求、不改服务端 API、状态机、权限或业务数据；明确写入拒绝仍按原逻辑反馈。实际路由 `/topics` 与看板操作链已在当前代码核实。
+- **验证结果**：`npm run check -- --pretty false`、定向 ESLint（0 错误）、`npm run build`、`npm run version:check` 与 `git diff --check` 通过；TopicDetail 定向 ESLint 保留 5 条既有警告，生产构建保留既有超过 500 kB 的分包提示。Playwright 仓库套件尝试启动时，Chromium 在 `bootstrap_check_in … Permission denied (1100)` 处退出，未进入断言。Chrome DevTools MCP 在隔离浏览器上下文、390×844 视口中完成流程核对：夹具审核 POST 只写入一次并返回 503；选题详情 GET 确认已通过；紧接的选题列表 GET 返回 503。页面保留待审核旧卡片、状态确认通知如实说明“状态已确认，列表待刷新”，并禁用“通过/驳回”。点击“只读核实并刷新列表”后，只再发详情 GET 和列表 GET，卡片移动到“已通过”，旧“通过”操作消失；夹具记录确认审核请求数和写入数均为 1。`documentElement.scrollWidth` 与视口同为 390px。页面另有隔离 Vite 未启动 Socket.IO 服务产生的连接失败/500 控制台记录，与本次夹具请求及状态流程无关。未使用真实账号或业务数据。
+- **发布状态**：Android 元数据 9.6.87 / 90687，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续清查 B8 状态写入反馈与 B4/B5 真实挂载界面；安卓原生专项后置。
+
+## 2026-10-29 清单 B4：选题编辑核心字段读屏名称（v9.6.86，本地未部署）
+
+- **问题与改造**：桌面选题详情点击“编辑选题”后，标题、负责人、截止时间、发布平台、项目背景和目标受众控件均有可访问名称，分别由关联标签或 `aria-labelledby` 提供；项目背景和目标受众的同名“编辑”按钮也改为可区分的辅助名称。审核表单中的指派负责人和审核意见控件补齐关联标签。移动端标题、说明和审核意见已由标签命名，且没有同类的负责人/日期编辑控件。
+- **保护边界**：只补充字段名称与稳定 `id/name`，不改变自动聚焦、字段值、权限、提交或保存行为；未访问真实选题、账号或 API。
+- **验证结果**：`npm run check -- --pretty false`、`npm run version:check`、`npm run build` 与 `git diff --check` 通过；定向 ESLint 0 错误，TopicDetail 保留 5 条未处理的已有警告；生产构建保留既有超过 500 kB 的大分包提示。未运行自动化测试、浏览器或本轮 VoiceOver 验收。
+- **发布状态**：Android 元数据 9.6.86 / 90686，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续检查当前挂载的 B4/B5 控件和 B8 写入结果反馈；安卓原生专项后置。
+
+## 2026-10-29 清单 P0/B8+B4：资料分类提示去技术化与选题标题读屏名称（v9.6.85，本地未部署）
+
+- **问题与改造**：资料分类新增、编辑、删除在列表刷新、请求回执核实、明确拒绝和本机恢复准备等错误路径中，可能直接显示浏览器或 HTTP 技术文本。现在统一经 `getUserFacingErrorMessage` 转换，并为读取、回执、拒绝及本地准备场景提供中文兜底；短且可读的业务原因仍保留。桌面选题详情编辑标题时为自动聚焦输入框补齐“选题标题”关联标签及稳定 `id/name`。
+- **保护边界**：没有改请求编号、载荷指纹、分类写入请求、权限、回执核实、恢复记录清理与安全重试策略；标题自动聚焦、编辑和保存流程保持。没有访问真实资料、真实账号、API 或业务写入。
+- **验证结果**：`npm run check -- --pretty false`、`npm run version:check`、`npm run build` 与 `git diff --check` 通过；定向 ESLint 0 错误，TopicDetail 保留 5 条未处理的已有警告；构建保留既有超过 500 kB 的大分包提示。未运行自动化测试、浏览器或本轮 VoiceOver 验收。
+- **发布状态**：Android 元数据 9.6.85 / 90685，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续 B8 其它真实挂载的写入反馈/结果恢复路径，继续 B4/B5 的桌面与移动辅助技术、主题和视口审查；安卓原生专项后置。
+
+## 2026-10-29 清单 P0/B8：选题提报恢复提示去技术化（v9.6.84，本地未部署）
+
+- **问题与改造**：桌面和移动端 `useTopicCreateRecovery` 在浏览器恢复信息保存失败或请求状态 GET 失败时，原先直接展示异常文本。现在对这些提示调用 `getUserFacingErrorMessage`，过滤网络/浏览器技术错误并使用当前操作对应的中文兜底；服务器提供可读业务原因时仍保留。
+- **保护边界**：没有更改创建请求编号、表单/草稿恢复信息、读回核实、确定拒绝分类、同编号明确重试或防重复提交锁定；无 API、权限、数据库或真实业务数据修改。
+- **验证结果**：`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`、`npm run build` 与 `git diff --check` 通过。未运行自动化测试套件。
+- **发布状态**：Android 元数据 9.6.84 / 90684，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续 B8 剩余写入结果恢复与错误反馈路径，并继续 B4/B5 全站键盘、读屏、对比度和跨视口审查；Android 原生专项后置。
+
+## 2026-10-29 清单 P0/B8：资料中心创建/编辑恢复提示去技术化（v9.6.83，本地未部署）
+
+- **问题与改造**：资料中心创建与编辑恢复 hook 在结果状态 GET 失败、或浏览器无法保存恢复信息时，将异常 `message` 直接送入页面提示，可能暴露 `Failed to fetch`、存储异常等浏览器技术文本。现统一调用 `getUserFacingErrorMessage` 并提供创建/保存结果核实对应的中文兜底；可读业务原因仍保留。
+- **保护边界**：只改错误文案转换，不改变请求编号、恢复快照、服务端结果核实、明确拒绝分类、重试入口或重复提交锁定；无 API、权限、数据库或数据修改。
+- **验证结果**：`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`、`npm run build` 与 `git diff --check` 通过。未运行自动化测试套件，未操作真实资料。
+- **发布状态**：Android 元数据 9.6.83 / 90683，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续检查清单 B8 仍未收口的写入结果反馈与恢复路径，并继续 B4/B5 全站读屏、键盘、对比度及窄屏审查；Android 原生专项后置。
+
+## 2026-10-29 清单 B5：映射登录改密提示的 Studio 对比文字令牌（v9.6.82，本地未部署）
+
+- **问题与改造**：前一轮门禁输出指出登录页使用的 `text-studio-danger-contrast` 未在 `tailwind.config.js` 映射。核对发现 Studio 主题已有 `coral-contrast` 浅/深主题令牌；现给 `studio.danger-contrast` 添加指向同一令牌的别名，让错误提示使用有效的主题类。
+- **设计系统边界**：没有新增颜色值、硬编码色板或修改 `tokens.css`；继续复用唯一 Studio Atelier 令牌源。
+- **验证结果**：`npm run check -- --pretty false`、`npx eslint tailwind.config.js` 与 `npm run build` 通过。生产构建保留既有大分包警告（Tiptap 555.12 kB、主包 776.71 kB、Silk 843.50 kB）。Studio token 自动化门禁本轮未运行，结果尚未核实。
+- **发布状态**：Android 元数据 9.6.82 / 90682，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 全站键盘、读屏、对比度及窄屏状态审查；B8 未关闭的写入核实与反馈路径继续逐项审阅，Android 原生专项后置。
+
+## 2026-10-29 清单 P0/B8：移动端改密未知结果跨页面恢复（v9.6.81，本地未部署）
+
+- **问题与改造**：移动端“我的”页密码变更返回网络/服务器异常时，原有锁定只存 React 状态；用户确认离开、刷新或重新进入后会丢失核验提示并可再次提交。现在在发起改密请求前，按正整数账号编号将版本号和时间写入 `sessionStorage`，并读回确认写入成功；写入不成功就不发送改密 POST。响应不确定时清空密码字段并持续锁定，返回页面时按当前账号恢复提示和锁定；同一账号登录成功后才清除该账号标记，其他账号登录不影响它。明确拒绝和服务器确认成功后会清除标记；若浏览器无法清除，则继续保守锁定并说明重新登录可解除。
+- **安全与产品边界**：恢复标记不含密码、用户名、认证令牌或服务器错误文本；不改变改密 API、认证权限、数据库和服务器密码处理。会话存储支持同一标签页中的刷新/路由离开恢复，关闭整个标签页后由浏览器会话结束清除。
+- **验证结果**：`npm run check -- --pretty false`、`npx eslint src/lib/mobilePasswordChangeRecovery.ts src/pages/mobile/MobileMe.tsx src/pages/Login.tsx` 与 `npm run build` 通过。生产构建保留既有大分包提示（Tiptap 555.12 kB、主包 776.32 kB、Silk 843.50 kB）。本轮未运行自动化测试套件，也未进行真实账号或真实 API 操作。
+- **发布状态**：Android 元数据 9.6.81 / 90681，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续 B8 剩余写入结果与反馈路径，继续 B4/B5 全站辅助技术和跨视口审查；清单中依赖官方规则/可信数据源的 G 项继续保持待核实，Android 原生专项后置。
+
+## 2026-10-29 清单 B4：选题详情关联资料触控与读屏名称（v9.6.80，本地未部署）
+
+- **问题与改造**：资料列表中的“查看资料”和“解除关联”图标按钮原为约 32×32px，搜索结果“关联”按钮约 28px 高；查看/解除按钮的名称对所有条目都相同，搜索框也只有占位提示、没有辅助技术名称。现统一按 Studio 按钮规范达到至少 40px 高；图标操作宽高为 40px，搜索输入有“搜索资料”名称，读屏操作名称包括对应资料标题，关联结果按钮在关联中播报资料标题并提供忙碌状态。
+- **隔离浏览器验收**：Chrome DevTools MCP 在独立 `TopicResourcesPanel` 组件上下文使用临时资料夹具，未登录真实账号。1440px 下查看/解除为 40×40px、关联为 50×40px；390px 与 320px 下同样达到 40×40px/50×40px，目标均在视口内且 `documentElement.scrollWidth` 等于视口宽度。辅助技术快照区分“查看资料：隔离验收关联资料”“解除与「隔离验收关联资料」的关联”“关联资料：隔离待关联资料”；解除确认可打开并取消；只模拟一条搜索结果关联写入至内存夹具。Vite 登录宿主页启动时的公开设置 GET 因本地 API `:3001` 未运行返回 500；组件自身列表、搜索和关联请求均被隔离夹具接管，没有真实 API 写入或业务关系变化。
+- **回归代码**：扩展 `tests/browser/topic-stage-record-repair.spec.ts`，断言桌面/390/320px 的查看、解除、关联命中尺寸和边界，以资料标题定位操作，并按“搜索资料”辅助名称定位输入框。仓库 Playwright 脚本启动 Chromium 时 macOS 返回 `bootstrap_check_in … Permission denied (1100)`，未进入测试体，因此这些新增脚本断言尚未由仓库套件执行；以 Chrome DevTools MCP 的真实组件隔离验收作为本轮浏览器证据。
+- **验证结果**：`npm run check -- --pretty false`、涉及组件及浏览器回归文件的定向 ESLint、生产构建、`npm run version:check`、`npm run test:changelog-governance`（612 个唯一版本）、`npm run test:android-runtime` 与 `git diff --check` 通过。构建保留既有超过 500kB 的分包告警。`npm run test:studio-token-usage` 仍报告未映射的 `text-studio-danger-contrast`（`src/pages/Login.tsx:214`）；该既有位置不在本次改动中，作为后续 B5 修复记录。仓库 Playwright 浏览器套件启动 Chromium 时 macOS 返回权限错误，未进入断言。
+- **发布状态**：Android 元数据 9.6.80 / 90680，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 全站辅助技术、跨视口和主题状态审计；B8 尚有逐项写入反馈核对，G 中依赖业务规则/可信数据源的未完成项保持开放；Android 原生专项后置。
+
+## 2026-10-29 清单 B4/B5：编辑器弹层边界与键盘焦点（v9.6.79，本地未部署）
+
+- **问题与改造**：编辑器标题、文字颜色、高亮、导出和“更多操作”菜单原先按整个浏览器视口计算可用高度；在创作资料等内层滚动面板中，菜单仍可能被面板边界截断。现在计算视口与所有裁切祖先的交集，按实际可见区域确定菜单展开方向、最大高度和横向位置；滚动、窗口或裁切容器尺寸变化时重新定位，锚点滚出可见区域时关闭菜单。颜色面板的最小宽度也会服从容器可用宽度。键盘 Escape 会关闭所有编辑器下拉；焦点在菜单项时先返回对应触发按钮，再移除菜单。
+- **Chrome DevTools MCP 隔离组件验收**：在本地登录页隔离上下文直接挂载真实 `ContentEditor`，使用临时文字和固定尺寸、`overflow-y:auto; overflow-x:hidden` 的测试容器，不使用账号或稿件数据。桌面视口 1440×960、容器 520×220 时，标题菜单最大高度为 162px，菜单边界落在容器内；390×844 移动视口、容器 358×260 时，标题菜单由 202px 自动缩至 92px，并保持在缩小后的容器内；“更多操作”菜单为 224×88px，可在菜单内部滚动；文字颜色面板保持 176px 宽，未超出容器，页面无横向溢出。键盘验收按 Enter 打开标题菜单，Tab 聚焦首项，再按 Escape 关闭菜单并将焦点还给“标题层级”触发按钮。浅色主题、减少动态效果已启用。
+- **浏览器限制**：隔离页面只有全局公开设置读取 `/api/system-settings/public` 因本地 API 未启动返回 500；没有触发编辑器 API 或业务写入。Chrome DevTools MCP 截图保存于临时目录 [`xmt-v9-6-79-toolbar-keyboard.png`](/private/var/folders/2g/kj5j1wkj2nv1b4gb9gq4_58c0000gn/T/xmt-v9-6-79-toolbar-keyboard.png)。
+- **验证结果**：`npm run check -- --pretty false`、`npx eslint src/components/editor/Toolbar.tsx`、Chrome DevTools MCP 隔离组件验收、`npm run version:check`、`npm run build` 和最终 `git diff --check` 通过；未运行自动化测试套件。生产构建的大分包提示保持为既有告警。
+- **发布状态**：Android 元数据 9.6.79 / 90679，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 的其余全站页面、浏览器缩放与辅助技术路径；Android 原生专项后置。
+
+## 2026-10-29 清单 P0/B8+B4：首次登录改密结果保护与成功反馈（v9.6.78，本地未部署）
+
+- **问题与改造**：首次登录强制改密原先把服务器请求与本机“记住密码”写入放在同一个失败分支中；服务器已成功但本机存储失败时会误报改密失败。现在先清除初始密码的本机记忆；服务器明确拒绝时可修正重试，网络中断、5xx 或无法确认的响应会清空密码输入、锁定再次提交并要求退出后手动核对。未知结果可退出后重新登录，不会把上一轮锁定状态带到新一轮。服务器确认改密成功后，即使本机记住密码写入失败也完成登出、清理旧记忆，并在登录页以礼貌状态提示说明结果；本次新密码只暂留在当前页面内存。
+- **表单可访问性**：强制改密表单的三个密码字段补齐关联标签、稳定 `id/name` 和 `autocomplete`，支持 Enter 提交；失败和未知结果通过 `role=alert` 播报。
+- **保护边界**：保持 API、服务端密码事务、权限和数据不变。只对已核实为写入前拒绝的 400/404/429 和“旧密码错误”401开放修正重试；其它结果一律不自动重发。
+- **验证结果**：`npm run check -- --pretty false`、`npx eslint src/pages/Login.tsx`、`npm run version:check`、生产构建和 `git diff --check` 通过；定向 ESLint 0 errors、0 warnings。未运行自动化测试套件。构建通过，保留既有大分包警告（Tiptap 555.12 kB、主包 775.45 kB、Silk 843.50 kB）。
+- **Chrome DevTools MCP 隔离验收**：390×844 浅色移动视口，所有登录/密码接口使用内存夹具。确认强制改密时本机记住密码标记已清除，三个字段均有标签和密码管理器语义，无横向溢出（390/390px）。模拟 401“旧密码错误”后输入可修正；随后模拟 503 `Internal Server Error`，界面显示中文结果待核实提示、清空并锁定三个字段和提交按钮，程序化点击禁用按钮后请求数仍为 2。退出回到密码为空的登录页，再次登录会重新开放改密流程。最后模拟改密成功 200、同时令本机密码密文写入抛出存储配额异常；页面以 `role=status` 告知密码已更新和本机记忆未同步，返回登录页、清除本机记忆标记并在当前页面暂存新密码。真实账号/API和真实密码数据未使用。
+- **VoiceOver 补充验收**：用户确认 VoiceOver 明确读出 Chrome“操作日志”“用户列表”当前已选视图；此证据仅覆盖这两个视图，不代表全站语音审计完成。
+- **发布状态**：Android 元数据为 9.6.78 / 90678，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清查清单 P0/B8 写入反馈和 B4/B5 辅助技术、对比度及跨视口路径；Android 原生专项后置。
+
+## 2026-10-29 清单 P0/B8：当前挂载模块技术错误提示收口（v9.6.77，本地未部署）
+
+- **改造内容**：资料中心的详情/分类读取、删除结果核实、资源创建/编辑分类、Creator 看板/趋势/作品/建议依据、灵感转选题、复盘本机恢复、创作审核和创作恢复信息，以及桌面通知设置的备份/配置读取，统一用共享错误转换器处理网络、HTTP 和浏览器存储技术错误。可读业务拒绝原因仍保留。番茄钟统计错误状态也不再保存原始技术文本。创作恢复信息保存失败时明确告知创建请求尚未发送。
+- **保护边界**：保留原有只读核实、显式重试、权限检查、写入锁定及操作顺序；没有改 API、权限、数据库、真实业务数据或自动重试规则。
+- **验证结果**：`npm run check -- --pretty false`、涉及文件的定向 ESLint（0 errors，11 条 Hook/Fast Refresh warnings）、`npm run version:check`、`npm run build` 与最终 `git diff --check` 通过。生产构建保留既有大分包提示。未运行自动化测试套件。
+- **Chrome DevTools MCP 验收**：在隔离浏览器上下文打开 `http://127.0.0.1:5190/asset-center/projects`，390×844 浅色视口。拦截 `/api/auth/me` 和资料列表为隔离夹具，令分类 GET 抛出 `Failed to fetch`；界面显示中文分类错误与重试按钮，不显示原始技术文本，页面宽度 390/390px。将后续分类 GET 改为成功后点击“重新加载分类”，只发起一次夹具 GET、错误区域消失、分类管理恢复可用。未触达真实 API 或写入业务数据。页面其余未模拟的本地代理 API 和 Socket.IO 仍在控制台产生 500/连接失败记录，来自后端未启动，不是本次夹具请求。
+- **发布状态**：Android 元数据为 9.6.77 / 90677，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清查剩余 P0/B8 写入反馈和 B4/B5 可访问性/跨视口路径；尤其逐条复核特殊认证和编辑器恢复边界。Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8+B4：个人设置错误提示与表单语义（v9.6.76，本地未部署）
+
+- **改造内容**：桌面个人设置页个人资料被明确拒绝时，使用共享用户提示转换器处理服务端消息。HTTP 状态/网络/浏览器技术错误显示“个人资料保存失败，请检查后重试。”；可读的业务校验原因继续原样显示。个人资料及系统设置输入补齐 `label` 关联、稳定 `id/name`，个人资料字段声明姓名/邮箱自动填充用途。
+- **保护边界**：只调整明确拒绝后的通知文案和表单语义；未知写入结果仍执行个人资料只读核实并保留锁定，不自动重发。不改变 API、权限、数据库或资料数据。
+- **验证结果**：`npm run check -- --pretty false`、定向 ESLint、`npm run version:check`、`npm run build` 与 `git diff --check` 通过；定向 ESLint 保留该文件原有两条 Hook 依赖警告，生产构建保留既有大分包警告。未运行自动化测试套件；Playwright MCP 本轮连接返回 `Transport closed`，由 Chrome DevTools MCP 完成手工验收。
+- **浏览器验收**：Chrome DevTools MCP 隔离页面在 1440px 桌面和 390px 网页视口验证。模拟一次 400 `Internal Server Error`，只显示中文回退提示、保留输入且仅触发一次隔离 PUT；另一模拟 400 中文业务原因“该邮箱已被其他账号使用”原样展示。个人资料姓名/邮箱字段均有 label 关联、稳定 `id/name` 与自动填充用途；系统设置四项输入均有 label 关联和稳定 `id/name`。Chrome Issues 未再报告表单标签/字段标识问题。移动视口文档宽 382/382px，无横向溢出；滚动至底部后保存按钮命中自身，错误提示仍为中文。真实 API 未启动，Socket 500 来自 Vite 代理连接本机后端失败；个人资料请求由页面内隔离 fetch 替身处理，没有真实业务写入。桌面与移动截图分别保存于 `/private/tmp/xmt-v9-6-76-profile-error.jpg` 和 `/private/tmp/xmt-v9-6-76-profile-error-390.jpg`。
+- **发布状态**：Android 元数据为 9.6.76 / 90676，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清点当前挂载 P0/B8 用户提示与 B4/B5 辅助技术、跨视口余项；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：匿名意见弹窗技术错误反馈（v9.6.75，本地未部署）
+
+- **改造内容**：匿名意见弹窗列表读取失败时在弹窗内给出中文错误和明确重试，不再把加载失败显示成“还没有意见”；技术异常转为中文提示，可读业务拒绝原因继续保留。提交后刷新回调和提交结果只读核实的技术异常也改用中文提示。
+- **保护边界**：保留上次成功读取的意见；只有成功读取到空列表才显示空状态。不改变提交请求编号/指纹、sessionStorage 回执、匿名身份、回执保留期限、未知结果锁定、只读核实或明确的新请求流程；不改 API、权限、数据库或真实意见。
+- **验证结果**：`npm run check -- --pretty false`、`npx eslint src/components/AnonymousFeedbackModal.tsx`（0 errors/warnings）、`npm run version:check`、`npm run build` 与 `git diff --check` 通过。构建保留既有 500KB+ 分包提示；本轮未运行自动化测试套件。
+- **Chrome DevTools MCP 验收**：重启本地夹具并确认浏览器载入当前源码后，在 390×844 隔离页注入离线：匿名意见列表显示内联错误和“重新加载意见”，不显示空状态；恢复后点重试成功，夹具确认为空时才显示“还没有意见”。随后离线提交仅发起一次 POST 和一次只读状态 GET；sessionStorage 恢复标记仍在，界面显示“暂时无法核实意见提交结果”，锁定表单并提示不会自动重发。页面无横向溢出，网络/Socket 控制台记录均对应预期离线注入，没有真实意见写入。
+- **发布状态**：Android 元数据为 9.6.75 / 90675，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续当前挂载页面的 P0/B8 反馈闭环及 B4/B5 辅助技术、跨视口余项；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：报告中心 CSV 导出错误反馈（v9.6.74，本地未部署）
+
+- **改造内容**：报告中心 CSV 导出遇到浏览器网络、不可读服务器或浏览器技术异常时，显示“导出暂时失败，请检查连接后重试。”；可读的中文业务拒绝原因继续显示。
+- **修改范围**：`DataExport.tsx` 复用用户可读错误转换器。保留 CSV 生成、下载命名、重复点击锁定、结果提示和通知；不改 API、权限、写入或业务数据。
+- **验证结果**：`npm run check -- --pretty false`、`npx eslint src/components/DataExport.tsx`、`npm run version:check`、`npm run build` 与 `git diff --check` 通过。构建保留现有 500KB+ 分包提示；本轮未运行自动化测试套件。
+- **Chrome DevTools MCP 验收**：使用本机隔离内存夹具，在 320×720、390×844 和 1440×900 下查看 CSV 导出区，页面无横向溢出，导出按钮完整可见且高 42px。网络离线时显示“导出暂时失败，请检查连接后重试。”；恢复连接后注入隔离夹具 503，中文业务原因“导出选题数据失败”仍原样显示。仅触发只读 GET 和夹具控制请求，没有真实数据或文件写入；控制台的 503/离线连接记录均为本轮预期注入。
+- **VoiceOver 补充验收**：用户确认在 Chrome 中聚焦“操作日志”和“用户列表”时，VoiceOver 明确读出当前已选视图；这仅记录两个视图的实测，不代表全站辅助技术审计关闭。
+- **发布状态**：Android 元数据为 9.6.74 / 90674，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清点当前挂载页面的 P0/B8 错误反馈和 B4/B5 辅助技术、多视口余项；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8+B4：日报总结错误反馈、表单语义与 Creator 头像稳定性（v9.6.73，本地未部署）
+
+- **改造内容**：日报/月报/年报表单读取、保存状态核实、总结归档读取遇到浏览器或不可读服务器异常时显示中文提示；保留业务原因、请求编号、只读核实、未知结果锁定与明确重试。日报桌面端、移动网页端及月报/年报字段补齐稳定 `id/name`。Creator profile 首屏头像移除懒加载，声明固有宽高及比例，避免首屏图像尺寸问题。
+- **修改范围**：日报总结表单、桌面日报编辑器、移动日报编辑器、Creator Dashboard 实际使用的 `ProfileCard`；只新增隔离浏览器失败注入与字段/头像尺寸断言。不改 API、数据库、权限、生产数据或 Android 原生代码。
+- **验证结果**：`npm run check -- --pretty false`、定向 ESLint、`test:user-facing-error`、日报总结接口合同、`test:version-governance`、更新说明版本唯一性（605 个）、296 个测试入口、Android runtime 合同、Studio token（38 类）、`version:check`、`npm run build` 与 `git diff --check` 通过。构建保留既有 500KB+ 分包提示。
+- **Chrome DevTools MCP 验收**：在本机隔离内存夹具中，月报读取 503 显示“加载总结失败，请检查连接后重试。”，点击重新加载后恢复，读取失败前后总结写入计数不变；月报归档读取 503 显示“日报归档加载失败，请检查连接后重试。”，点击重试后返回夹具月报。对模拟月报保存与状态核实分别注入 503 后，界面显示“暂时无法核实总结保存结果”，保留原文本与请求编号、锁定表单并仅提供只读核实；只读核实确认未找到记录后提供同请求明确重试，写入请求仍为 1 次。页面未展示 `Internal Server Error`。
+- **Chrome 版式与表单核验**：Creator profile 在 320/390/1440px 下宽度分别与视口一致；两个头像都有宽高和比例、改为首屏优先加载，Chrome Issues 不再提示懒加载尺寸问题。日报桌面/移动及月报字段均带稳定 `id/name`；移动日报在 390px 下无横向溢出，日报和总结表单 Chrome Issues 无表单标识问题。Chrome 处于减少动态效果模拟状态，控制台仅有对应提示。
+- **自动浏览器范围**：本轮没有启动仓库 Playwright 自动浏览器套件；相关隔离断言已补充，但本轮验收证据来自 Chrome DevTools MCP 手动操作。先前自动 Chromium 的 macOS `bootstrap_check_in … Permission denied (1100)` 记录不作为本轮通过证据。
+- **发布状态**：Android 元数据为 9.6.73 / 90673，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清点清单 P0/B8 其他当前挂载页面的错误反馈边界，并推进 B4/B5 其余表单可访问性与多视口检查；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：运营概览与复盘报告读取错误提示（v9.6.72，本地未部署）
+
+- **改造内容**：抖音运营概览与 Creator Center 复盘报告列表的首次读取和显式重载统一过滤网络、浏览器与不可读服务器技术错误，提供对应中文重试提示；可读的中文业务原因继续显示。创作数据、权限、报告生成/删除、只读核实与结果不明保护不变。
+- **修改范围**：`CreatorDashboard.tsx`、`CreatorReports.tsx` 复用用户可读错误转换器；Creator Dashboard/Reports 的隔离浏览器规格注入 `Internal Server Error` 并检查原始错误不展示，报告列表重试不得生成或删除报告。
+- **验证结果**：`npm run check -- --pretty false`、相关源文件和浏览器规格定向 ESLint、`test:user-facing-error`、版本治理、更新说明治理（604 个唯一版本）、测试入口（296 个）、Android runtime 合同、Studio token（38 类）、`version:check`、生产构建、`git diff --check` 均通过。构建保留既有 500KB+ 分包提示。
+- **浏览器验收**：Chrome DevTools MCP 在 390×844 浅色隔离夹具注入运营概览 dashboard GET 与复盘报告 list GET 的 503 `Internal Server Error`；页面显示“抖音数据驾驶舱暂不可用，请重试。”与“报告列表加载失败，请检查连接后重试。”，没有展示原始英文。分别点击“重新加载数据/重新加载报告”后页面恢复；报告夹具计数为 GET 2、生成 0、删除 0。两页宽度均为 390/390px；控制台无 error/warn。请求仅到本机内存夹具，没有真实业务写入。Chrome Issues 面板另提示 Creator profile 两张懒加载图片未声明尺寸，列为后续 B4 稳定性排查，不影响本项错误路径。
+- **自动浏览器限制**：`test:creator-reports-browser` 和 `test:topic-stage-record-repair-browser` 均在 Playwright Chromium 启动阶段因 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)` 退出，测试断言未执行；报告套件同时出现一次共享 DevTools WebSocket 端口 24678 占用提示。Chrome DevTools MCP 手工验收已覆盖本次失败提示与显式恢复，自动化结果不记为通过。
+- **发布状态**：Android 元数据为 9.6.72 / 90672，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续检查日报总结读取/核实中的原始技术错误，并推进 B4/B5 多视口和表单可访问性验收；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：移动创作列表和稿件编辑错误反馈（v9.6.71，本地未部署）
+
+- **改造内容**：移动创作列表、稿件详情和编辑/核实流程遇到网络、浏览器存储或不可读服务器技术异常时显示中文操作提示；创建请求编号、只读核实、写入锁定及明确重试边界保持。
+- **修改范围**：`MobileProduction.tsx`、`MobileProductionEditor.tsx` 与 `mobile-work-center-responsive.spec.ts` 的隔离错误/恢复路径；不改 API、请求编号、写入范围或持久化数据。
+- **验证结果**：类型检查、目标 ESLint、错误文案合同、版本治理、更新说明治理（603 个唯一版本）、测试入口（296 个）、Android runtime 合同、`version:check`、Studio token（38 类）、生产构建与 `git diff --check` 均通过。构建保留既有大分包提示。
+- **浏览器验收**：Chrome DevTools MCP 在 390×844 浅色隔离内存夹具注入创作列表网络失败与稿件详情 503 `Internal Server Error`；显示对应中文提示，不泄露 `Failed to fetch`/原始英文。明确重试后列表和编辑器恢复；未自动重发或写入业务数据。视口宽度 390/390px，错误状态控制台无 error/warn/issue 消息，截图已捕获。
+- **自动浏览器限制**：`npm run test:mobile-work-center-browser` 在 Chromium 启动阶段遇 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)`，未进入测试断言，不计为自动测试通过。
+- **发布状态**：Android 元数据为 9.6.71 / 90671，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续按 P0/B8 清点其他当前挂载页面的技术错误反馈，推进 B4/B5 跨视口与辅助技术验收；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：移动通知与账号设置反馈及键盘表单（v9.6.70，本地未部署）
+
+- **改造内容**：移动通知偏好加载失败、个人资料保存拒绝、密码修改拒绝遇到网络或不可读技术错误时显示中文操作提示；个人资料和改密改为语义表单，字段补齐 `id`/`name`/自动填充用途，支持 Enter 提交。密码表单补充屏幕外的用户名自动填充上下文。
+- **保护边界**：保留可读业务校验原因；资料确定性拒绝不触发多余核实，资料未知结果继续只读核实；密码未知结果仍锁定输入、防止重复提交。不会自动重发；无 API、数据库、权限或真实账号数据变化。
+- **浏览器验收**：Chrome DevTools MCP 在当前工作树 Vite + 内存 API 隔离夹具、390×844 浅色视口中，对资料 PUT 与改密 POST 分别注入一次 400 `Internal Server Error`。按 Enter 后各只发一次请求；显示“个人资料保存失败，请检查后重试。”与“修改密码失败，请检查当前密码和网络后重试。”，不泄露原始英文错误，字段保持可编辑；用户名隐藏字段提供 `autocomplete=username` 且不进入键盘焦点。视口宽度 390/390px，错误/警告/问题控制台无消息；截图已捕获并显示。所有请求留在隔离内存夹具。
+- **验证结果**：`npm run check -- --pretty false`、定向 ESLint、`test:notification-settings-load`、`test:user-facing-error`、版本治理、更新记录治理（602 个唯一版本）、测试入口（296 个）、Android runtime 合同、Studio token（38 类）、`version:check`、生产构建和 `git diff --check` 通过。生产构建保留既有 500KB+ 分包提示。
+- **自动浏览器限制**：`npm run test:mobile-work-center-browser` 在 Playwright Chromium 启动时因 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)` 退出，未进入测试断言，不计为自动测试通过。Chrome DevTools MCP 已完成上述隔离手动验收。
+- **发布状态**：Android 元数据为 9.6.70 / 90670，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续按 P0/B8 清点当前挂载移动生产流程中的技术错误反馈和结果核实边界，并继续 B4/B5 跨视口与辅助技术验收；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：移动选题看板错误反馈（v9.6.69，本地未部署）
+
+- **改造内容**：移动选题看板读取流程详情失败或审核/状态操作收到确定性拒绝时，将浏览器技术异常转换为中文操作提示；保留服务端可读业务原因及已有结果核实、防重语义。
+- **修改范围**：`MobileTopics.tsx` 的流程跳转和看板状态错误提示；`topics-list-responsive.spec.ts` 增加隔离断网与 403 拒绝场景，不改 API、权限、状态流程或真实数据。
+- **验证结果**：类型检查、目标 ESLint、`test:user-facing-error`、版本治理、更新记录治理（601 个版本）、测试入口（296 个）、Android runtime 合同、`version:check`、生产构建与 `git diff --check` 均通过。构建保留既有 500KB+ 分包警告。
+- **浏览器验收**：Chrome DevTools MCP 在 390×844 隔离内存夹具分别注入一次流程详情 GET 网络异常和审核 POST 403；显示“暂时无法打开流程详情，请检查连接后重试”与“请检查权限或当前阶段后重试”，不暴露 `Failed to fetch`/`Forbidden`。流程异常回到选题详情；审核被拒绝仅一次 POST，夹具状态保持待审核，服务端审核尝试/写入均为 0。看板首屏按钮“通过”完整位于导航上方（按钮 y=716–756，导航起点 y=779），点击命中正确操作；页面宽度 390/390px，控制台无 error/warn。发现并修正浏览器夹具的总数失真（返回 3 条却报告 31 条）；准确数据下不再渲染误导性的 200 条上限提示，也不再把按钮挤入导航覆盖区。未改产品布局。
+- **自动浏览器限制**：`npm run test:topics-responsive-browser` 在 Playwright Chromium 启动阶段因 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)` 退出，未进入断言；不计作自动测试通过。隔离 Chrome DevTools MCP 手动验收已覆盖本次流程。
+- **边界与风险**：只调整客户端错误文案并补充隔离回归；无业务/API/数据库写入。Android 元数据为 9.6.69 / 90669，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清点改造清单 P0/B8 当前挂载页面反馈缺口，并推进 B4/B5 跨视口与辅助技术验收；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：移动选题详情错误提示与关联资料重试（v9.6.68，本地未部署）
+
+- **改造内容**：移动选题详情的关联资料读取、选题保存、审核、阶段推进、创作启动和阶段记录补齐遇到浏览器/网络技术异常时改用中文操作提示；可读业务原因继续保留。
+- **修改范围**：`MobileTopicDetail.tsx` 使用共享用户文案转换器；`topics-list-responsive.spec.ts` 增加移动端关联资料断网与显式只读重试回归。不改变 API、权限、请求方式、写入锁、幂等和结果核实流程。
+- **验证结果**：类型检查、目标 ESLint、`test:user-facing-error`、版本治理、更新记录治理（600 个版本）、测试入口（296 个）、Android runtime 合同、`version:check` 与生产构建均通过；构建保留既有 500KB+ 分包警告。
+- **浏览器验收**：Chrome DevTools MCP 在 320×812 暗色隔离内存夹具中对关联资料 GET 注入一次 `Failed to fetch`，页面显示“请检查连接后重试”且不泄露原始技术错误；点击“重新加载资料”后第二次 GET 成功，错误提示清除并显示“暂无关联资料”。页面宽度为 320/320px，无横向溢出或控制台错误；夹具不写入业务数据。
+- **自动浏览器限制**：`npm run test:topics-responsive-browser` 在 Chromium 启动阶段再次遇到本机 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)`，未进入断言，不计作自动测试通过。
+- **边界与风险**：只收敛移动端错误文案并增加隔离回归；没有真实选题、关联资料、数据库或生产数据变更。Android 元数据为 9.6.68 / 90668，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清点改造清单 P0/B8 的当前挂载页面反馈缺口，并推进 B4/B5 跨视口与辅助技术验收；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：移动选题列表网络错误提示（v9.6.67，本地未部署）
+
+- **改造内容**：移动选题列表读取遇到浏览器网络或其他技术异常时显示中文连接提示；保留服务端可读业务原因、已缓存列表、筛选状态和显式重试。
+- **修改范围**：`MobileTopics.tsx` 的列表失败提示，以及 `topics-list-responsive.spec.ts` 中的隔离网络失败/重试回归；不改服务端/API、权限、筛选、缓存或请求语义。
+- **验证结果**：类型检查、目标 ESLint、`test:user-facing-error`、版本治理、更新记录治理（599 个版本）、测试入口（296 个）、Android runtime 合同、`version:check`、生产构建与 `git diff --check` 均通过。构建保留既有 500KB+ 分包警告。
+- **浏览器验收**：Chrome DevTools MCP 在 390×844 隔离内存夹具对选题 GET 注入一次 `Failed to fetch`，显示中文连接提示并保留上次成功的选题；明确重试后列表恢复，只有一次失败 GET 和一次重试 GET，无横向溢出（390/390px），无应用控制台错误。失败态截图已捕获并显示；夹具不写入业务数据。
+- **自动浏览器限制**：`npm run test:topics-responsive-browser` 在 Chromium 启动阶段遇本机 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)`，未进入断言，不计作自动测试通过。
+- **边界与风险**：仅改客户端错误文案并补充隔离回归，没有真实选题、数据库或生产数据变更。Android 元数据为 9.6.67 / 90667，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续按改造清单排查当前挂载主流程的错误反馈与辅助技术/跨视口缺口；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：移动消息错误提示与只读恢复（v9.6.66，本地未部署）
+
+- **改造内容**：移动消息首次加载、继续分页、单条已读状态核实与批量已读恢复编号安全准备的底层技术异常，统一通过共享用户文案转换器处理；可读的中文业务原因继续保留。
+- **修改范围**：`MobileMessages.tsx` 及现有 `mobile-work-center-responsive.spec.ts` 隔离场景；不改消息权限、账号范围、请求顺序、服务端/API、写入锁和恢复记录。
+- **恢复边界**：未知单条已读结果继续锁定写入；只读状态查询失败不自动重发，确认仍未读后由用户再次点击才发送新请求。批量请求编号无法安全保存时不提交写请求。
+- **验证结果**：类型检查、定向 ESLint、`test:user-facing-error`、版本治理、更新记录治理（598 个版本）、测试入口（296 个）、Android runtime 合同、`version:check`、生产构建与 `git diff --check` 均通过；构建保留既有 500KB+ 分包体积警告。
+- **浏览器验收**：Chrome DevTools MCP 在 390×844 隔离内存夹具注入一次消息列表网络失败，页面显示中文重试提示，点“重试加载”后列表恢复；另注入单条 PUT 失败和状态 GET 网络失败，页面只显示中文核实提示且消息保持锁定，点击“只读核实”确认仍未读后，用户明确再次点击才发第二次 PUT。未显示 `Failed to fetch`，无横向溢出，无应用控制台错误；截图已在验收中捕获并显示。所有 API 数据均为内存夹具。
+- **自动浏览器限制**：本轮自动套件仍在 Chromium 启动阶段遇本机 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)`，未进入断言，不作为通过。
+- **边界与风险**：只收敛客户端错误提示并增加隔离回归；没有真实消息、数据库或生产数据变更。Android 元数据为 9.6.66 / 90666，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清点清单 P0/B8 尚未覆盖的当前挂载错误/反馈闭环，并推进 B4/B5 辅助技术与跨视口剩余项；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：移动工作台错误提示与读取恢复（v9.6.65，本地未部署）
+
+- **改造内容**：移动工作台“关注事项”和“最近变化”读取/刷新错误通过共享用户文案转换器；网络、HTTP 或浏览器技术异常改为中文操作提示，可读业务原因保留。
+- **修改范围**：`MobileHome.tsx` 与现有 `topic-stage-record-repair.spec.ts` 的隔离工作台失败/重试路径；不改权限、GET 请求、任务判定、旧数据保留或重试行为。
+- **验证结果**：`npm run check -- --pretty false`、目标 ESLint、`version:check`、`test:version-governance`、`test:changelog-governance`（597 条）、`test:entrypoints`（296 个入口）、`test:android-runtime`、生产构建和 `git diff --check` 均通过。构建保留既有 500KB+ 分包警告。
+- **浏览器验收**：Chrome DevTools MCP 在 390×844 隔离工作台夹具中注入 `/api/dashboard/home-attention` 与 `/api/dashboard/home-activity` 的 `Failed to fetch` 503。关注事项显示中文提示，点击“重新加载”后 GET 成功、任务数据恢复、告警清除；展开“最近变化”后显示中文提示，点击“重新加载最近变化”后 GET 成功、事件恢复、告警清除。全过程只读，无横向溢出（390/390px）、无框架错误层、无业务写入；错误态截图已捕获并显示。控制台没有应用运行时异常，仅有夹具生成的预期 503 资源错误。
+- **自动浏览器限制**：`npm run test:topic-stage-record-repair-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)` 退出，未进入自动断言；不计作自动测试通过。
+- **边界与风险**：只调整客户端错误呈现与隔离回归，不改变服务器/API、权限、数据库或数据内容。Android 元数据 9.6.65 / 90665，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0/B8 剩余当前挂载主流程，并行推进 B4/B5 多视口与辅助技术检查；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：移动日报错误提示与写入保护（v9.6.64，本地未部署）
+
+- **改造内容**：移动日报保存、提交、加载和只读核实错误统一通过用户可读错误转换器；网络和浏览器技术异常显示中文操作提示，可读业务原因保持。
+- **修改范围**：`MobileDaily.tsx` 和现有 `mobile-work-center-responsive.spec.ts` 日报隔离场景；不改变权限、写入顺序、请求次数、未知结果锁定或显式只读核实流程。
+- **验证结果**：`test:user-facing-error`、`npm run check -- --pretty false`、目标 ESLint、`version:check`、`test:version-governance`、`test:changelog-governance`（596 条）、`test:entrypoints`（296 个入口）、`test:android-runtime`、生产构建和 `git diff --check` 均通过。构建保留既有 500KB+ 分包警告。
+- **浏览器验收**：Chrome DevTools MCP 在 390×844 触屏隔离内存夹具中打开 `/daily-report`，初始只读 GET 成功后注入一次草稿 POST 503 和一次核实 GET 503。界面显示中文保存/核实提示，不显示 `Failed to fetch`；三项编辑框及“保存草稿”均锁定，“重新核实草稿状态”仍可用；网络记录确认恰有一次 POST 和一次只读 GET，页面无横向溢出（390/390px），无框架错误层。控制台仅有夹具注入 503 对应的两条资源失败记录，无额外警告或运行时错误。截图已在验收中捕获并显示；使用内存数据，未改真实日报。
+- **自动浏览器限制**：`npm run test:mobile-work-center-browser` 在 Chromium 启动时因 macOS `bootstrap_check_in org.chromium.Chromium.MachPortRendezvousServer: Permission denied (1100)` 退出，未进入自动断言；不计作自动测试通过。
+- **边界与风险**：只调整错误展示与隔离回归，不改变服务器/API、权限、数据库、北京时间日期或写入保护策略。Android 元数据 9.6.64 / 90664，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0/B8 当前挂载主流程的剩余错误边界，并行推进 B4/B5 跨视口检查；Android 原生专项后置。
+
+## 2026-10-28 清单 B4：创作资料本机草稿恢复操作尺寸（v9.6.63，本地未部署）
+
+- **改造内容**：移除创作资料恢复/只读核实按钮显式设置的 28px 高度，沿用共享 `.xmt-btn` 40px 最小高度。
+- **修改范围**：`ProductionResourcesPanel.tsx` 与已有 `production-review.spec.ts` 隔离本机草稿恢复覆盖；不触发客户端自动保存或更改恢复逻辑。
+- **验证结果**：类型检查、目标 ESLint、版本治理、生产构建和差异检查随 v9.6.64 一并运行，结果见本记录当前版本项。
+- **浏览器验收**：Chrome DevTools MCP 在隔离稿件夹具验证 1440×900 和 1024×900 下恢复区“只读重新核实”按钮高 40px、可见且位于面板内；页面无横向溢出，控制台无错误/警告。未点击恢复/核实或触发写入。`npm run test:production-review-browser` 在 Chromium 启动阶段受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言。
+- **边界与风险**：仅调整按钮命中高度及回归断言，无 API、权限、数据库或真实稿件变化。Android 元数据为 9.6.63 / 90663，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0/B8 移动日报和其他当前挂载主流程的反馈闭环，Android 原生专项后置。
+
+## 2026-10-28 清单 B4：首页公告板触屏删除操作可见性与命中尺寸（v9.6.62，本地未部署）
+
+- **改造内容**：公告板删除按钮移动端默认可见，尺寸提高到 40×40px；桌面端保留悬停显示，并增加键盘焦点及组内焦点显示。
+- **修改范围**：`AnnouncementBoard.tsx` 和 `announcement-board-feedback.spec.ts`；不改变权限、删除确认、恢复标记或请求行为。
+- **验证结果**：`npm run check -- --pretty false`、两批定向 ESLint、296 个测试入口、594 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建和 `git diff --check` 均通过。构建保留既有 500KB+ 分包提示。
+- **浏览器验收**：Chrome DevTools MCP 使用隔离公告夹具验证 320×844、390×844 删除按钮均为 40×40px、默认可见且页面无横向溢出；1440×900 桌面静止时隐藏，通过键盘 Tab 聚焦后可见并显示焦点轮廓。浏览器控制台无错误/警告；截图已在验收中捕获。未点击删除或写入公告。仓库 Playwright 套件在 fixture 服务关闭后重试，仍于 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言。
+- **边界与风险**：仅调整操作可见性/尺寸与回归断言，无 API、权限、数据库或真实公告写入变化。Android 元数据为 9.6.62 / 90662，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 全站触屏与跨分辨率检查，Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：资料详情删除核实错误提示去技术化（v9.6.61，本地未部署）
+
+- **改造内容**：资料详情 DELETE 请求与随后只读 GET 连续断网时，操作提示不再显示 `Failed to fetch` 等浏览器技术文本；可读中文业务原因仍会保留。
+- **修改范围**：`ResourceDetail.tsx` 只调整删除结果及只读核实失败的文案；资料删除权限、请求、锁定、状态读取、显式重试和无自动重发规则保持。`resource-category-management.spec.ts` 增加隔离网络拒绝场景。
+- **验证结果**：`npm run test:user-facing-error`、`npm run test:resource-categories`、`npm run check -- --pretty false`、目标 ESLint、296 个测试入口、593 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建和 `git diff --check` 均通过。构建保留既有 500KB+ 分包提示。
+- **浏览器验收**：Chrome DevTools MCP 在隔离内存资料夹具中加载资料详情，断网后确认删除，页面显示中文结果未知和只读核实指引，删除/编辑保持锁定；恢复网络后只读核实确认资料仍有效并恢复操作，期间没有向夹具 API 发出 DELETE。Playwright 套件尝试启动 Chromium 时因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言。
+- **边界与风险**：只改客户端错误展示及隔离回归；无 API、权限、数据库或真实业务数据变化。Android 元数据为 9.6.61 / 90661，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：按清单继续检查首页公告板触屏删除操作等 B4/B5 当前挂载主流程；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：知识库、公告与成就错误提示去技术化（v9.6.60，本地未部署）
+
+- **改造内容**：知识库分类读取、公告列表读取，以及成就检查/启用预设遇到浏览器网络等不可读技术异常时显示对应中文提示；可读业务原因继续保留。
+- **修改范围**：`KnowledgeLibrary.tsx`、`AnnouncementBoard.tsx`、`Achievements.tsx` 仅在错误呈现处使用共享转换器；不改 API、权限、重试、公告恢复或成就写入规则。
+- **验证结果**：`test:user-facing-error`、`test:resource-categories`、`test:achievements-check`、`test:achievement-seed-atomic`、通知设置合同回归、类型检查、四个页面及备份浏览器规格定向 ESLint、296 个测试入口、592 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建及 `git diff --check` 均通过。构建保留既有大分包提示。
+- **浏览器验收**：Chrome DevTools MCP 使用内存夹具分别注入公告列表 GET、知识库分类 GET 和成就初始化 POST 的网络拒绝。公告提示中文，点击只读重载后恢复既有公告；知识库分类区显示中文提示、保留右侧资料区可用，重载后分类树恢复；成就初始化显示中文提示。未对生产服务或业务数据发起写入。仓库 Playwright 本批未运行；v9.6.59 自动套件已复现 macOS Chromium 启动权限错误 1100，未进入断言。
+- **边界与风险**：只调整浏览器技术异常的可见文案，保留服务端可读业务提示；没有 API、权限或数据库变化。Android 元数据为 9.6.60 / 90660，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清点其他当前挂载主流程的 P0/B8 用户提示与写入恢复路径，并推进 B4/B5 未闭合项；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：备份管理错误提示去技术化（v9.6.59，本地未部署）
+
+- **改造内容**：备份清单读取与备份文件下载遇到浏览器网络异常时显示对应中文提示；保留可读业务原因、显式只读重载和创建备份结果核实流程。
+- **修改范围**：`BackupPage.tsx` 与现有备份竞态浏览器规格；不改备份 API、权限、创建请求编号、核实、下载生成或恢复流程。
+- **验证结果**：`test:user-facing-error`、`test:backup-inventory`、类型检查、目标 ESLint、296 个测试入口、591 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建和 `git diff --check` 通过。构建保留既有大分包提示。
+- **浏览器验收**：Chrome DevTools MCP 在隔离内存夹具中注入清单 GET 和下载请求网络拒绝；清单显示中文提示，点击“重新加载清单”后恢复两条合成记录；下载错误显示中文通知且没有生成文件。没有触发备份创建、生产下载或业务写入。仓库 Playwright 在启动 Chromium 时因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言。
+- **边界与风险**：只调整浏览器网络异常的可见文案；无 API、权限或数据库变化。Android 元数据为 9.6.59 / 90659，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清点当前挂载的数据维护和其它主流程错误提示，以及 B4/B5 未闭合项；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：公开意见、番茄钟与导出错误提示去技术化（v9.6.58，本地未部署）
+
+- **改造内容**：公开意见列表读取、番茄钟排行榜读取与选题/分析数据导出遇到不可读网络、HTTP 或浏览器技术异常时，显示对应中文处理提示；可读业务原因继续保留。
+- **修改范围**：`AnonymousFeedback.tsx`、`PomodoroPage.tsx`、`ExportPage.tsx` 与共享错误文案合同测试；不改 API、权限、数据、排行榜重试、下载生成或匿名意见提交流程。
+- **验证结果**：`test:anonymous-feedback`（意见箱迁移与 API 权限）、`test:integrity:resources-pomodoro`、`test:user-facing-error`、类型检查、三个页面与共享错误转换器定向 ESLint、296 个测试入口、590 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建和 `git diff --check` 均通过。生产构建保留现有大分包提示。
+- **浏览器验收**：Chrome DevTools MCP 在 500×824 隔离页，以合成账号注入公开意见、番茄钟排行和选题 JSON 导出网络异常；页面分别显示中文处理提示，导出失败没有生成下载。未触发意见提交、真实数据导出或业务写入。临时环境未启动 API 服务，Vite 的其它 API 代理请求和 Socket.IO 轮询出现 `ECONNREFUSED`/500；这些环境错误不计页面/API/Socket 正常验收。仓库 Playwright 规格未运行。
+- **边界与风险**：不触发真实意见提交或数据导出。Android 元数据为 9.6.58 / 90658，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0/B8 其他当前挂载页面及 B4/B5 未闭合项；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：模板、匿名意见与日历错误提示去技术化（v9.6.57，本地未部署）
+
+- **改造内容**：模板管理的操作结果核实/请求冲突/安全请求准备，匿名意见管理的列表、更新/删除结果核实及恢复信息准备，以及日历的列表读取、创建拒绝和创建结果核实遇到不可读网络、HTTP 或浏览器技术异常时，统一显示操作对应的中文提示；可读业务原因继续保留。
+- **修改范围**：`TemplateManagement.tsx`、`AnonymousFeedbackAdmin.tsx`、`Calendar.tsx` 与共享错误提示转换器/合同测试；不改 API、权限、数据模型、请求编号、删除/更新/创建核实、显式重试和写入锁规则。
+- **验证结果**：`test:user-facing-error`、模板创建幂等/更新恢复/模板完整性、日历权限、匿名意见更新与删除 HTTP 恢复和更新恢复存储测试、`npm run check -- --pretty false`、三个页面与共享错误转换器定向 ESLint、296 个测试入口、589 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建及 `git diff --check` 均通过。模板更新恢复存储 6/6、匿名意见更新存储 4/4；生产构建保留既有 Tiptap、主包与 Silk 大分包提示。
+- **浏览器验收**：Chrome DevTools MCP 在 1440×900 的隔离账号中，将模板、匿名意见列表与日历读取响应注入 503。匿名意见只显示中文重试提示；模板失败没有显示成空模板列表；日历显示可读中文失败说明。未触发业务写入。控制台只有 fixture 触发的 503、未实现 Socket.IO 轮询 404/连接警告；没有页面运行时异常。仓库 Playwright 自动套件未运行，本机 Chromium 启动权限错误 1100 仍阻断自动化。
+- **边界与风险**：只调整用户看到的技术错误文案并补齐常见连接错误识别；没有发起真实业务写入。Android 元数据为 9.6.57 / 90657，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0/B8 当前挂载页面与 B4/B5 未闭合项；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：资料归档与灵感流程错误提示去技术化（v9.6.56，本地未部署）
+
+- **改造内容**：资料归档列表/详情/删除、灵感列表/详情/删除权限反馈及转选题结果只读核实遇到不可读网络、HTTP 或浏览器技术异常时使用操作对应的中文提示；保留可读业务原因。
+- **修改范围**：`Resources.tsx`、`Inspirations.tsx` 和共享错误文案转换器；不改 API、权限、数据模型、请求编号、删除核实或转选题写锁/禁止重复操作流程。
+- **匿名意见回执复核**：提交回执永久保留，不自动过期；仅在关联意见删除时清除。HTTP 回归覆盖原子提交、同编号重放、响应核实、提交记录写入失败回滚和删除后清理。
+- **验证结果**：`test:resource-api-error`、`test:resource-create-recovery`、`test:resource-update-recovery`、`test:resource-reference`、`test:resource-center-mutations`、`test:inspiration-mutations-atomic`、`test:inspiration-create-response`、`test:inspiration-topic-link`、匿名意见回执 HTTP/存储/migration 回归、`test:user-facing-error`、类型检查、目标 ESLint、296 个测试入口、588 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建和 `git diff --check` 均通过。生产构建保留已有 Tiptap、主包与 Silk 大分包提示。
+- **浏览器边界**：Chrome DevTools MCP 在本地隔离页面验证灵感列表从成功读取、筛选失败保留已有卡片并提供重试，到重试成功返回空列表后才显示空状态；资料归档失败显示中文提示。新增仓库浏览器断言；Playwright 自动套件在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入测试断言。控制台中的 503 与 Socket.IO 轮询 404 是临时 fixture 的预期响应。
+- **边界与风险**：仅修改用户可见错误提示；没有触发真实业务写入。Android 元数据为 9.6.56 / 90656，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0 的数据维护页面与其它当前挂载用户提示；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：用户与权限管理错误提示去技术化（v9.6.55，本地未部署）
+
+- **改造内容**：用户列表、操作日志、可分配角色读取及用户/角色创建、更新、结果核实的技术网络、HTTP、浏览器与解析错误改为操作对应的中文提示；保留可读业务原因。
+- **修改范围**：`Users.tsx` 与 `PermissionManagement.tsx` 的错误呈现；不改权限、账号/角色写入、请求编号、审计或只读核实逻辑。
+- **验证结果**：`test:user-list-pagination`、`test:user-api-error-copy`、`test:user-mutation-audit-atomic`、`test:user-role-assignment-security`、`test:role-management-security`、`test:user-facing-error`、`npm run check -- --pretty false`、Users/PermissionManagement 定向 ESLint、296 个测试入口、587 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建及 `git diff --check` 均通过。生产构建保留既有 Tiptap、主包和 Silk 大分包提示。VoiceOver 已选视图读出由用户确认，历史验收见 v9.6.21。
+- **浏览器边界**：本轮 Chrome 当前页不在本地 worktree 服务环境中，不计本版本 UI 浏览器断言。
+- **边界与风险**：未发起真实账号或角色写入。Android 元数据为 9.6.55 / 90655，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0/B8，审查其他当前挂载的权限管理和数据维护页面；Android 原生专项后置。
+
+## 2026-10-28 清单 P0：工作台与活动日志错误提示去技术化（v9.6.54，本地未部署）
+
+- **改造内容**：工作台摘要/最近变化和活动日志/成员筛选列表的读取失败使用操作相关的中文提示；过滤网络、HTTP 和内部异常文本，同时保留可读业务原因。成功返回空数据的既有状态判别不变。
+- **修改范围**：`Home.tsx`、`ActivityLog.tsx` 与共享错误转换器调用；不改 API、权限、数据模型或读取时序。
+- **验证结果**：`test:home-dashboard`、`test:activity-log`、`test:user-facing-error`、`check -- --pretty false`、目标 ESLint、296 个测试入口、586 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建与 `git diff --check` 通过。生产构建保留既有 Tiptap、主包与 Silk 大分包提示。
+- **边界与风险**：仅改错误呈现，不触发真实业务写入；Android 元数据为 9.6.54 / 90654，未构建 APK。本地修改，未提交、推送或部署。
+- **下一步**：继续审查其他当前挂载页面的用户可见技术文案与 P0/B8/B4/B5 闭环；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：消息中心错误反馈去技术化（v9.6.53，本地未部署）
+
+- **改造内容**：消息列表读取、单条已读状态核实、批量已读与清空结果核实、恢复请求编号存储失败，统一过滤网络、浏览器存储和 HTTP 技术文本；不可读时给出针对操作的中文提示。
+- **修改范围**：仅 `Messages.tsx` 的错误提示调用共享转换器；保留当前账号隔离、请求编号、防重复、只读核实与清空后的增量消息保护，不改 API、权限、数据模型或写入规则。
+- **验证结果**：`test:message-localization`、`test:message-pagination`、`test:mobile-message-read`、`test:user-facing-error`、`check -- --pretty false`、目标 ESLint、296 个测试入口、585 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建与 `git diff --check` 通过。构建保留既有 Tiptap、主包与 Silk 大分包提示。
+- **浏览器边界**：Chrome DevTools 可读的消息标签页来自较早的消息加载验收环境，未加载本轮 worktree；本地应用服务未启动，故不计本轮浏览器验收。
+- **边界与风险**：未发起消息写入或清空。Android 元数据为 9.6.53 / 90653，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0/B8 与其他已挂载页面的错误恢复反馈；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：创作列表结果提示去技术化（v9.6.52，本地未部署）
+
+- **改造内容**：创作列表创建/更新明确失败、恢复标记保存失败、服务端只读核实失败及创建/更新对账提示统一过滤浏览器、存储和 HTTP 技术异常，显示针对当前操作的中文提示；可读业务原因保留。
+- **修改范围**：仅 `Production.tsx` 的错误呈现与共享错误转换器调用；现有请求编号、对账逻辑、结果不明写入锁定及不自动重放规则不变，无 API、权限、数据模型或服务端修改。
+- **验证结果**：`test:production-list-update`、`test:production-create-idempotency`、`test:user-facing-error`、`check -- --pretty false`、目标 ESLint、296 个测试入口检查、584 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建与 `git diff --check` 通过。生产构建保留既有 Tiptap、主包与 Silk 大分包提示。
+- **边界与风险**：未发起真实业务写入。Android 元数据为 9.6.52 / 90652，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0/B8 的其他当前挂载主流程及错误/恢复反馈；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：看板与资料操作错误提示去技术化（v9.6.51，本地未部署）
+
+- **改造内容**：看板加载、阶段更新与流程打开，选题详情关联资料搜索/关联/解除、城市人物项目维度读取/新增/移除/核实，以及创作资料自动保存、搜索与插入，统一过滤技术异常并给出操作相关的中文提示；可读业务原因保留。
+- **修改范围**：`Kanban`、`TopicResourcesPanel`、`TopicAssetDimensionsPanel`、`ProductionResourcesPanel` 与共享错误转换器调用；不调整 API、权限、数据模型或服务端规则。已有维度恢复标记、只读核实和禁止自动重放行为不变。
+- **验证结果**：`test:user-facing-error`、`test:topic-asset-dimensions-recovery`、`test:content-topic-assets`、`test:resource-reference`、`test:resource-center-mutations`、`test:kanban-navigation`、`check -- --pretty false`、目标 ESLint、296 个测试入口检查、583 条更新记录唯一性、`version:check`、`test:android-runtime`、生产构建与 `git diff --check` 通过。Kanban 保留 6 条既有警告；生产构建保留既有 Tiptap、主包与 Silk 大分包提示。
+- **边界与风险**：仅更改面向用户的错误提示；未发起真实业务写入。Android 元数据为 9.6.51 / 90651，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0/B8，核对创作主流程、资源中心与其他当前挂载页面的反馈和恢复路径；Android 原生专项后置。
+
+## 2026-10-28 清单 P0/B8：选题与资料操作错误提示去技术化（v9.6.50，本地未部署）
+
+- **改造内容**：选题列表读取、单条/批量删除与审核、看板跳转与阶段操作、详情审核/阶段推进/创作交接/阶段记录补齐/保存与版本保存，以及选题资料维度新增/移除/读取/结果核实，统一过滤网络、浏览器存储、内部异常和 HTTP 技术文本。保留可读中文业务原因；失败恢复仍按原逻辑执行只读核实、防重复和写入锁定。
+- **修改范围**：共享用户错误转换器、错误合同、`Topics`、`TopicDetail`、`ContentTopicAssets` 及版本/更新文档；没有修改 API、权限、数据库、写入规则或已核实的数据。
+- **验证结果**：`test:user-facing-error`、`test:topics`、`test:topic-create-recovery`、`test:topic-asset-dimensions-recovery`、`test:content-topic-assets`、`check -- --pretty false`、目标 ESLint、296 个测试入口检查、582 条更新记录版本唯一检查、`version:check`、`test:android-runtime`、生产构建与 `git diff --check` 均通过。ESLint 保留 TopicDetail 原有 5 条警告；生产构建保留既有 Tiptap、主包与 Silk 大分包提示。
+- **浏览器边界**：Chrome DevTools 可读取现有页面，但当前标签页为此前的消息加载验收环境；本地 Vite/预览端口均未监听，无法对本轮选题页面进行浏览器断言，不计为浏览器验收通过。
+- **边界与风险**：仅改错误呈现与共享技术错误过滤，不改写入/核实/重试边界；未发起真实业务写入。Android 元数据为 9.6.50 / 90650，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续按清单检查其他当前挂载页面的用户可见技术错误和 P0/B8/B4/B5 未闭合路径；Android 原生专项后置。
+
+# 2026-10-28 清单 P0/B8：拍摄与发布错误提示去技术化（v9.6.49，本地未部署）
+
+- **改造内容**：拍摄/发布列表与详情、创作详情及日报中的读取、创建、更新、删除、完成、状态/剧本保存、提交和抖音关联失败提示，统一过滤网络错误、内部异常、HTTP 状态及无效异常值。可读的中文业务原因继续显示，无法直接理解的错误按操作给出中文处理提示；只读核实失败时保留“结果未确认、不要重复操作”等恢复语义。
+- **修改范围**：共享用户错误转换器、拍摄/发布/创作详情与日报错误及恢复提示、错误文案合同和版本/更新文档。
+- **验证结果**：新增合同覆盖 `Failed to fetch`、Safari `Load failed`、`NetworkError`、`TimeoutError`、Chrome 网络错误码、HTTP 503、内部错误、中文业务原因及未知/空异常；错误转换与复盘文案、拍摄/发布创建幂等、抖音关联、日报权限回归、`npm run check -- --pretty false`、目标 ESLint、`npm run test:entrypoints`（296 个文件）、`npm run test:changelog-governance`（581 个版本唯一）、`npm run version:check`、`npm run test:android-runtime`、`npm run build` 与 `git diff --check` 通过。生产构建保留既有 Tiptap、主包和 Silk 大分包提示。
+- **浏览器边界**：已检查 Chrome DevTools MCP 页面列表并尝试从隔离新页打开本机应用，但 `127.0.0.1:57001` 拒绝连接，未进入浏览器断言；不计浏览器验收通过。
+- **边界与风险**：仅改客户端错误信息呈现；拍摄/发布 API、权限、数据库、幂等请求和状态核实流程不变。未发起真实业务写入。Android 元数据为 9.6.49 / 90649，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清理其他当前挂载模块中残留的用户可见技术错误，并收口 B8/B4/B5 未完成路径；Android 原生专项仍按用户要求后置。
+
+## 2026-10-28 清单 P0：复盘错误提示去技术化（v9.6.48，本地未部署）
+
+- **改造内容**：复盘中心列表、详情、日报风险读取和行动项指派共用错误转换。未知网络异常、内部错误、HTTP 状态码不再直接显示，改为提示用户稍后重试；400 业务校验信息仅在可读时保留。原有登录失效、无权访问、内容不可访问和版本冲突提示不变；异常值（包括 null）不会再导致错误转换本身崩溃。通知/系统设置使用的错误文案过滤器已移至共享工具层。
+- **修改文件**：`src/lib/userFacingError.ts`、`src/components/retrospectives/retroLabels.ts`、`src/api/notificationSettings.ts`、`src/api/systemSettings.ts`、`tests/retrospectives/retro-labels.test.ts`、`tests/notifications/notification-settings-load.test.ts`、`tests/system/system-settings.test.ts`、`package.json` 及版本/更新文档。
+- **验证结果**：新增复盘错误文案测试覆盖网络错误、内部错误、中文 400、HTTP 400 和未知异常；通知设置加载/保存技术错误兜底及中文原因保持、系统设置文案合同继续通过。类型检查、目标 ESLint、相关测试、测试入口（295 个）、版本检查、更新说明治理（580 个版本唯一）、Android runtime 合同、生产构建和差异检查通过；构建保留既有大分包提示。另补跑 B10 日报、拍摄/发布状态及内置角色映射合同测试，静态盘点未发现移动页面直接显示原始角色/状态码；这不构成全站浏览器或 Android 验收，也不代表 B10 完成。
+- **边界与风险**：只改客户端错误信息呈现，不改复盘请求、API 路由、权限或数据库；不自动重试，不更改请求结果核实流程。Android 元数据为 9.6.48 / 90648，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0 用户文案与 B8 操作反馈余项；B10 移动端仍需其余页面的实际浏览器核对，Android/真机专项按用户要求后置。
+
+## 2026-10-28 清单 P0：设置错误文案去技术化（v9.6.47，本地未部署）
+
+- **改造内容**：通知偏好与系统设置接口遇到缺少可用业务原因的失败时，显示对应操作的中文重试提示；不向用户展示“HTTP 503”“Internal Server Error”等技术信息。服务端返回可读的中文业务错误时继续显示原原因，保存结果不明时原有只读核实与安全恢复逻辑不变。
+- **修改文件**：`src/api/userFacingError.ts`、`src/api/notificationSettings.ts`、`src/api/systemSettings.ts`、`tests/notifications/notification-settings-load.test.ts`、`tests/system/system-settings.test.ts` 及版本/更新文档。
+- **验证结果**：通知偏好测试覆盖读取/保存技术错误兜底以及中文业务错误保持；系统设置文案合同覆盖内部错误、HTTP 状态和中文校验提示。类型检查、目标 ESLint、通知设置测试、系统设置测试、版本一致性、更新说明治理（579 个版本唯一）和差异检查通过；生产构建通过，保留既有 500KB+ 分包提示。
+- **边界与风险**：仅改变面向用户的错误兜底文案，不改 API 路由、权限、服务端处理、数据库或写入/核实流程。Android 元数据为 9.6.47 / 90647，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 P0 程序员语言清理，按当前挂载路由与真实用户提示逐项复核；Android 原生专项后置。
+
+## 2026-10-28 清单 B4/B5：桌面消息统计首读与失败状态（v9.6.46，本地未部署）
+
+- **改造内容**：桌面消息统计按当前账号隔离。首轮读取期间显示“正在读取…”，读取失败且无已核实统计时显示“暂不可用”；失败请求不再把统计或全局未读数伪装成 0。已读单条确认只更新当前账号的已核实摘要。消息摘要卡片支持状态文案，不影响数字动画。
+- **修改文件**：`src/pages/Messages.tsx`、`src/components/studio/MetricCard.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 1440×900 深色隔离页确认延迟首读显示“正在读取…”，首读 503 后未读、待处理和总量均显示“暂不可用”，手动重试后均恢复为 1；页面/文档宽度均为 1440px。控制台记录夹具注入的预期 503 与减少动态效果提示，无页面脚本异常。消息分页、统计作用域、批量已读及清空幂等测试通过；类型检查、目标 ESLint、版本检查、更新说明治理、Android runtime 合同、生产构建及差异检查通过，构建保留既有大分包提示。自动 `npm run test:mobile-work-center-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言，不计自动化通过。
+- **边界与风险**：不改消息 API、权限、数据库或写入规则；浏览器只用隔离内存夹具，唯一失败响应是测试注入的 503。Android 元数据为 9.6.46 / 90646，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单中服务端错误提示及其他未闭合的状态/反馈项；Android 原生专项后置。
+
+## 2026-10-28 清单 B8：选题维度待确认写入跨刷新恢复（v9.6.45，本地未部署）
+
+- **改造内容**：选题详情中的城市、人物与项目维度在 POST/DELETE 前，先将待确认操作保存到当前账号和选题专属的 sessionStorage。页面刷新后只读对账，不自动重放；读取失败时保留恢复标记并锁定新增/移除，用户可继续只读核实。确认成功或明确拒绝后清除标记；恢复标记无法写入时不发送业务请求。
+- **修改文件**：`src/components/topics/TopicAssetDimensionsPanel.tsx`、`src/components/topics/topicAssetDimensionRecovery.ts`、`src/pages/ContentTopicAssets.tsx`、`tests/components/topic-asset-dimensions-recovery.test.tsx` 及版本/更新文档。
+- **验证结果**：`npm run test:topic-asset-dimensions-recovery` 2/2 通过，覆盖新增与移除跨刷新、刷新后的核实失败仍保留标记和写锁、成功只读核实清除标记、存储不可用时不发 POST。Chrome DevTools MCP 390×844 深色隔离夹具先模拟新增已提交但响应丢失、首次只读 GET 503；刷新后只发 1 次 GET、展示已登记“绍兴”、清除待确认标记且没有重发 POST，页面和文档宽度均为 390px，目标页控制台无错误/警告。`npm run check -- --pretty false`、目标 ESLint、`npm run test:android-runtime`、`npm run build`、`npm run version:check`、`npm run test:changelog-governance`（577 个版本唯一）和 `git diff --check` 通过；构建保留既有 Tiptap、主包和 Silk 大分包提示。
+- **边界与风险**：仅在浏览器 sessionStorage 保存随机性无关的操作意图（账号 ID、选题 ID、维度类型/值/维度 ID），不保存认证凭据；只调用现有 GET/POST/DELETE，不改变 API、权限、数据库或维度业务规则。浏览器用合成数据，无真实业务写入。Android 元数据同步为 9.6.45 / 90645，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 B4/B5 的桌面消息首读状态与 B8 其余待闭合项；Android 原生专项后置。
+
+## 2026-10-28 清单 B4/B5：移动消息首读状态文案（v9.6.44，本地未部署）
+
+- **改造内容**：消息列表首次读取尚未结束且未读摘要还没有数据时，摘要显示“正在读取未读数…”，不再先显示“未读数暂不可用”；读取失败后仍显示现有不可用提示，已有未读数在刷新期间仍保持展示。新增浏览器回归断言覆盖延迟首读和失败文案。
+- **修改文件**：`src/pages/mobile/MobileMessages.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 320×844 深色隔离夹具挂起首个消息 GET，确认摘要显示读取中、刷新按钮 busy 且禁用、页面/正文宽度均为 320px；释放后显示“未读 1 条”。再对独立页面的首轮未读数和消息列表读取注入一次性 503，确认显示“未读数暂不可用”、保留最近缓存消息；明确点击刷新后恢复“未读 1 条”。首读、失败和重试三个状态均无横向溢出，控制台无错误或警告；网络只有读取、Socket.IO 轮询和测试夹具释放控制请求，无消息业务写入。`npm run check`、目标 ESLint、`npm run version:check`、`npm run build` 与 `git diff --check` 通过；生产构建保留既有 500KB+ 分包提示。自动 `npm run test:mobile-work-center-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言，不计自动化通过。
+- **边界与风险**：仅修正文案与回归覆盖，不改消息 API、权限、数据库或读写规则；使用内存隔离夹具，不写真实消息。Android 元数据 9.6.44 / 90644，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 首读、失败、刷新与无数据状态的辅助技术和响应式核对，并按清单推进 B8 余项；Android 原生专项仍后置。
+
+## 2026-10-28 清单 B8：创作资料本机草稿恢复（v9.6.43，本地未部署）
+
+- **改造内容**：创作资料编辑时，将未完成内容、服务器基线正文和版本保存到账号/生产记录隔离的本机恢复副本中。服务端确认保存或用户明确放弃后清理副本。重新打开时先读取服务器：若正文和版本仍等于编辑基线，恢复的内容只读展示，用户明确选择“恢复并保存本机草稿”后才发起保存；若服务端已变化，则保留本机草稿并锁定编辑，可只读重新核实或明确采用服务器版本，不会自动覆盖。存储失败时展示刷新/关闭可能丢失的提示。
+- **修改文件**：`src/components/production/ProductionResourcesPanel.tsx`、`src/components/production/materialWorkspace.ts` 及版本/更新文档。
+- **验证结果**：`npm run check`、定向 ESLint（0 errors）、`npm run version:check`、`npm run build` 与 `git diff --check` 通过；生产构建保留既有 500KB+ 分包提示。Chrome DevTools MCP 1440×900 隔离夹具核验：刷新不自动写入；明确恢复只发 1 次 PUT、服务端确认后清除副本；并发版本仍保留本机内容，明确采用服务端版本不发 PUT；其他账号的恢复副本不读取、不清除；控制台无错误。手测先发现“采用服务器版本”会对相同内容多写一次，已加入服务端正文相同的无操作保护并复测为 0 次 PUT。自动 Playwright 规格已补充上述断言，但本机 Chromium 在启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言；不计自动化通过。
+- **边界与风险**：仅在有资料编辑权限的当前账号浏览器存储副本；不会跨设备同步。服务端并发变化时不会自动写入。本地存储不可用时仍保留页面内存内容并提示风险；应用 API、权限、数据库、正式稿件协作和审核链路未修改。Android 元数据 9.6.43 / 90643，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续清单 B8 结果恢复与 B4/B5 辅助技术/响应式检查；Android 原生专项仍按用户要求后置。
+
+## 2026-10-28 清单 B4/B5：移动消息列表刷新忙碌状态（v9.6.42，本地未部署）
+
+- **改造内容**：手动刷新移动消息列表期间，按钮显示“刷新中…”，以 `aria-busy` 报告读取状态并禁用重复刷新；与批量结果核实的“核实中…”状态区分。
+- **修改文件**：`src/pages/mobile/MobileMessages.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 在 390×844 浅色隔离页挂起已加载消息列表的第一页 GET；快照确认“刷新中…”、`aria-busy=true` 和按钮禁用，视口与文档/正文宽度均为 390px。隔离夹具网络仅含初始化读取与 Socket.IO 轮询，没有业务写入，控制台无 error/warning。浏览器回归新增延迟第一页 GET 断言；仓库自动浏览器规格未在本版本运行，同环境上一轮在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出、未进入断言。`npm run check`、目标 ESLint、`npm run version:check`、测试入口（294 个）、更新说明唯一性（574 个版本）、版本治理、Android runtime、Studio token、`npm run build` 和 `git diff --check` 均通过；构建保留既有大分包警告。
+- **边界与风险**：不改变列表数据、写入规则/API/权限/数据库；仅用隔离夹具，无真实消息写入。Android 元数据同步为 9.6.42 / 90642，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 关键状态与响应式审查，按清单推进 B8 未闭合项；Android 原生专项后置。
+
+## 2026-10-28 清单 B4/B5：移动单条消息操作忙碌状态（v9.6.41，本地未部署）
+
+- **改造内容**：单条消息标记已读期间，正在处理的消息卡片通过 `aria-busy` 暴露忙碌状态；请求结束后自动清除。既有防重复操作保持。
+- **修改文件**：`src/pages/mobile/MobileMessages.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 在 390×844 浅色隔离页挂起本地模拟的单条已读写入；快照确认目标消息卡片为 busy 且禁用，视口与文档/正文宽度均为 390px，写入在页面内截断、未到达夹具 API，控制台无 error/warning。浏览器回归对指定卡片断言忙碌属性，并检查失败后清除。自动浏览器套件本轮未能进入断言；同环境 Chromium 启动曾因 macOS `bootstrap_check_in … Permission denied (1100)` 退出。`npm run check`、目标 ESLint、`npm run version:check`、测试入口（294 个）、更新说明唯一性、版本治理、Android runtime、Studio token、生产构建和 `git diff --check` 通过；构建保留既有大分包警告。
+- **边界与风险**：不改变消息写入规则/API/权限/数据库；仅使用隔离夹具，无真实消息写入。Android 元数据同步为 9.6.41 / 90641，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 关键状态与响应式审查，按清单推进 B8 未闭合项；Android 原生专项后置。
+
+## 2026-10-28 清单 B4/B5：移动单条消息只读核实忙碌状态（v9.6.40，本地未部署）
+
+- **改造内容**：单条消息已读结果不明时，手动只读核实进行中显示“核实中…”，通过 `aria-busy` 暴露忙碌状态并禁用重复查询；状态读取结束后沿用原恢复结果。
+- **修改文件**：`src/pages/mobile/MobileMessages.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 在 390×844 浅色隔离页模拟单条 PUT 与首次状态 GET 响应失败，再挂起用户发起的状态重查；确认按钮读作“核实中…”，`aria-busy=true` 且禁用，页面/正文宽度均为 390px，状态文案保留。隔离脚本记录一次合成 PUT 尝试和两次状态查询；业务请求均由页面脚本本地截断，网络只含初始化 GET 与 Socket.IO 轮询，控制台无 error/warning。新增自动回归覆盖延迟 GET；本机同环境的 Chromium 启动会因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，无法进入断言。`npm run check`、目标 ESLint、`npm run version:check`、测试入口（294 个）、更新说明唯一性（572 个版本）、版本治理、Android runtime、Studio token、`npm run build` 与 `git diff --check` 均通过；构建保留既有大分包警告。
+- **边界与风险**：不改变 API、权限、数据库或消息状态规则；仅使用隔离夹具，不触碰真实消息。Android 元数据同步为 9.6.40 / 90640，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 关键状态与响应式审查，按清单推进 B8 未闭合项；Android 原生专项后置。
+
+## 2026-10-28 清单 B4/B5：移动消息只读核实忙碌状态（v9.6.39，本地未部署）
+
+- **改造内容**：移动消息批量已读状态的手动只读核实进行中时，按钮显示“核实中…”，通过 `aria-busy` 暴露忙碌状态并保持禁用；查询失败后恢复只读重试。不会自动重复业务写入。
+- **修改文件**：`src/pages/mobile/MobileMessages.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 在 390×844 浅色隔离页确认“核实中…”、`aria-busy=true`、按钮禁用和待核实凭据保留；状态读取由隔离脚本挂起，页面/正文宽度均为 390px，未发出消息写入。夹具启动时注入的一次 503 用于确认失败后恢复为“只读核实”，浏览器控制台仅有该预期 503，无页面脚本错误。`npm run test:mobile-work-center-browser` 已尝试，但 Chromium 在启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言。`npm run check`、目标 ESLint、`npm run version:check`、`npm run test:entrypoints`（294 个文件）、更新说明唯一性（571 个版本）、版本治理、Android runtime、Studio token、`npm run build` 与 `git diff --check` 均通过；构建保留既有大分包警告。
+- **边界与风险**：不改变 API、权限、数据库或请求规则；仅使用隔离浏览器夹具，不触碰真实消息。Android 元数据同步为 9.6.39 / 90639，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 状态与辅助技术审查及 B8 写入结果恢复清点；Android 原生专项按用户要求后置。
+
+## 2026-10-28 清单 B4/B5：移动消息批量已读忙碌状态（v9.6.38，本地未部署）
+
+- **改造内容**：移动消息中心的“全部已读”按钮在请求进行中通过 `aria-busy` 报告忙碌状态；按钮保持禁用，并继续使用已有礼貌提示播报进度。仅补足状态语义，不改变请求范围、幂等恢复或失败处理。
+- **修改文件**：`src/pages/mobile/MobileMessages.tsx`、`tests/browser/mobile-work-center-responsive.spec.ts` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 在 390×844 移动隔离页拦截合成写入请求，确认按钮从 `aria-busy=false` 变为 `true`、保持禁用，同时播报“正在提交批量已读请求…”。被拦截的业务写入未到达夹具 API，网络记录仅有读取和 Socket.IO 轮询，页面无横向溢出且控制台无错误/警告。`tests/browser/mobile-work-center-responsive.spec.ts` 已加入延迟写入断言；自动浏览器套件未运行，本机上一项同环境 Chromium 启动报 `bootstrap_check_in … Permission denied (1100)`，因此本条不宣称该套件通过。`npm run check`、目标 ESLint、`npm run version:check`、`npm run test:entrypoints`（294 个文件）、Android runtime 合同、Studio token 使用检查、`npm run build` 与 `git diff --check` 通过；构建仍显示既有大分包警告。
+- **边界与风险**：不修改服务端权限、API、数据库或数据规则；浏览器验证使用内存夹具。Android 元数据为 9.6.38 / 90638，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 语义与 B8 写入结果恢复的全站清点；Android 原生专项按用户要求后置。
+
+## 2026-10-28 清单 B4/B5：移动端选题审核区域关联（v9.6.37，本地未部署）
+
+- **改造内容**：移动端审核按钮通过 `aria-controls` 指向持续存在的审核区域，区域以标题提供可访问名称；按钮 `aria-expanded` 与 `hidden` 状态一致。折叠仅隐藏区域，不卸载审核表单，保留本地审核结论和意见。
+- **修改文件**：`src/pages/mobile/MobileTopicDetail.tsx`、`tests/browser/topic-stage-record-repair.spec.ts` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 在 390×844 浅色与深色合成数据隔离页面确认审核区域名称、关联 ID、Space 折叠、Enter 展开及驳回选择/意见折叠后保留；两主题页面均无横向溢出，控制台无 error/warning。网络请求为权限、选题和资料 GET 与 Socket.IO 轮询 POST，没有审核写入。仓库 `npm run test:topic-stage-record-repair-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言；不能记为自动化套件通过。`npm run check`、定向 ESLint、`npm run version:check`、`npm run test:entrypoints`（294 个文件）、Android runtime 合同、Studio token 使用检查、`npm run build` 与 `git diff --check` 通过；构建仍显示既有大分包警告。
+- **边界与风险**：不改变审核权限、服务端流程、API 或数据库；仅在合成审核数据中操作，没有提交审核。真实 VoiceOver 听音未覆盖此移动审核区；用户确认的“操作日志 / 用户列表”已选视图播报只适用于此前人员管理页面。Android 元数据为 9.6.37 / 90637，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 全站状态与辅助技术审查，并逐项收口 B8 未完成的写入结果恢复；依赖业务规则确认的 G 项不自行推断，Android 原生专项按用户要求后置。
+
+## 2026-10-28 清单 B4/B5：权限模块状态关系与触控尺寸（v9.6.36，本地未部署）
+
+- **改造内容**：角色权限模块折叠按钮使用 `aria-controls` 指向持续存在的权限区，`aria-expanded` 与区块可见性保持一致；折叠只隐藏控件，不卸载或重置勾选值。“全选/取消全选”改为独立的 Studio 次要按钮，不再依靠父容器事件冒泡；折叠与全选按钮操作高度均至少 40px。
+- **修改文件**：`src/pages/PermissionManagement.tsx`、`tests/browser/workflow-designer-language.spec.ts` 及版本/更新文档。
+- **验证结果**：Google Chrome 扩展隔离夹具手工核对页面身份、模态内容和截图；Chrome DevTools MCP 在 390×844 移动触控和 500×824 隔离视口验证区域关联、Space 折叠/展开、Enter 展开、选择值保留、全选后恢复及 40×40px 命中区。390px 浅/深主题均无横向溢出；“全选”文字静态对比度分别为 5.79:1 / 5.77:1，悬停时分别为 13.92:1 / 15.53:1。角色接口只有 GET，未保存真实角色更改；控制台无 error/warning。`npm run check -- --pretty false`、目标 ESLint、`npm run build` 通过，构建保留既有大分包警告。仓库 `npm run test:workflow-designer-language-browser` 尝试一次，在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言；Playwright MCP 连接返回 `Transport closed`，故使用已授权的 Chrome DevTools MCP 隔离页面人工补验。
+- **边界与风险**：未改变角色权限值、权限规则、API 或数据库；手工的取消全选/全选只改隔离页面内存状态并已恢复，未提交角色更新。本次未对该新权限区做独立 VoiceOver 听音；用户确认的“操作日志 / 用户列表”已选视图播报仍仅适用于已部署 v9.6.21。Android 元数据为 9.6.36 / 90636，未构建 APK；本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 全站响应式、主题与辅助技术审查，并逐项收口 B8 结果不明的写入；G 中依赖业务确认的口径不自行推断，Android 原生专项后置。
+
+## 2026-10-28 清单 B4/B5：通知偏好开关名称与状态（v9.6.35，本地未部署）
+
+- **改造内容**：通知偏好矩阵开关使用“事件，渠道”作为可访问名称，通过 `aria-pressed` 表示当前启用状态；加入语义按钮类型和 Studio 按钮样式，保留“已启用/已关闭”可见文字及原保存/恢复行为。现有浏览器规格选择器已同步到稳定的事件/渠道名称和按下状态。
+- **修改文件**：`src/pages/NotificationSettings.tsx`、`tests/browser/system-settings-default-theme.spec.ts` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 在隔离夹具核验事件/渠道名称、aria-pressed 初始与切换状态；Enter/Space 均可切换，390px 下无横向溢出、无通知写入请求、控制台无错误。仓库浏览器规格已更新但未运行；本轮类型检查、构建、版本治理、Android runtime 合同及差异检查通过。定向 ESLint 有 2 条既有 Hook 依赖警告；构建保留既有大包提示。
+- **边界与风险**：仅修改辅助名称与控件语义，不改变通知偏好数据、API 或保存规则。Android 元数据为 9.6.35 / 90635，未构建 APK；仅本地修改，未提交、推送或部署。
+- **下一步**：继续 B4/B5 全站主题、响应式、键盘和辅助技术审查，并逐项核对 B8 其他尚未闭合的本地写入结果；G 中需要明确业务口径的事项不推断，Android 原生专项仍按用户要求后置。
+
+## 2026-10-28 清单 B8：创作资料草稿离页保护（v9.6.34，本地未部署）
+
+- **改造内容**：制作详情页把资料面板的未保存状态接入现有站内路由保护。写入仍进行时，导航会停留在当前页并提示等待；其他未决本地内容会先展示确认窗口，用户可复制纯文本、继续编辑，或明确放弃资料草稿后继续导航。切换到历史版本也会被阻止，直到先处理未保存资料。
+- **修改文件**：`src/components/production/ProductionResourcesPanel.tsx`、`src/pages/ProductionDetail.tsx` 及版本/更新文档。
+- **验证结果**：Chrome DevTools MCP 在 1440×960 桌面隔离夹具验证并发版本后本地文字保留、离页弹窗、取消后继续编辑、明确放弃后返回创作管理；复制操作显示成功提示。隔离请求为一次预期 503 草稿 PUT 和一次只读 GET，离页操作没有额外 PUT；控制台仅有该合成 503，没有应用脚本错误。Playwright MCP 此前已授予剪贴板读取并核对复制文字。production-review.spec.ts 新增复制/取消/放弃回归断言，但仓库浏览器套件未运行，Chromium 启动曾被 macOS bootstrap_check_in Permission denied (1100) 阻断，未进入断言；类型检查、构建、定向 ESLint、版本治理、Android runtime 合同及差异检查通过。定向 ESLint 有 2 条既有 Hook 依赖警告；构建保留既有大包提示。
+- **边界与风险**：复制使用系统剪贴板，若浏览器拒绝访问会提示用户手动复制并保持页面；明确放弃只清除当前页面的本地待保存内容，不发送写入请求，也不覆盖服务器并发版本。刷新/关闭仍依赖浏览器 `beforeunload` 提示；本项尚未实现本机草稿持久化。Android 元数据为 9.6.34 / 90634，未构建 APK；仅本地修改，未提交、推送或部署。
+
+## 2026-10-28 清单 B8：创作资料草稿写入结果核实（v9.6.33，本地未部署）
+
+- **改造内容**：`GET /api/productions/:id/material-draft` 使用 `no-store` 并保留 HTTP 状态。写入遇到网络/响应不明后，只读回读草稿及 revision：读到已提交的目标内容时确认成功且不重发；仍为原 revision 与内容时显示明确“确认未记录，重试保存”按钮；回读失败时锁住编辑和相关写入，仅提供只读重核；发现另一版本时保留本地编辑、更新服务端基线并持续锁定，不自动覆盖。保存成功响应后产生的后续编辑仍需用户显式保存。
+- **修改文件**：`src/api/workflow.ts`、`src/components/production/ProductionResourcesPanel.tsx`、`tests/browser/production-review.spec.ts` 及版本/更新文档。
+- **验证结果**：`npm run check -- --pretty false`、受影响源码和浏览器规格定向 ESLint、`npm run build`、`npm run version:check`（v9.6.33）、`npm run test:version-governance`、`npm run test:changelog-governance`、`npm run test:android-runtime` 与 `git diff --check` 汇总执行通过，构建保留既有大包提示。`npm run test:production-review-browser` 仅尝试一次，在 Chromium 启动时因 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言且未重试。Playwright MCP 隔离夹具验证写入 503 后先 GET 原 revision、编辑器锁定，只有用户点击才发第二次 PUT 并保存；Chrome DevTools MCP 验证提交后 503 经 GET 确认目标 revision、无重复 PUT；另验证 PUT/GET 均 503 后只读核实与显式重试，以及并发 revision 保留本地文字、再次核实时仅 GET 且不覆盖服务端内容。预期的合成 HTTP 503 在控制台出现，不计为应用脚本错误；本地隔离页其余功能正常。
+- **边界与风险**：在 v9.6.33 中，并发冲突内容仍仅保存在打开的组件内，离开页面前没有路由拦截或复制入口；v9.6.34 补上站内离页保护与复制选项，但尚未实现刷新/关闭后的本地草稿持久化。回读内容要求与目标 HTML 完全一致；服务端净化造成差异时按冲突保守处理。手工验证只修改隔离内存夹具，无真实数据库/业务内容写入。Android 元数据为 9.6.33 / 90633，未构建 APK；本地修改，不提交、推送或部署。
+
+## 2026-10-28 清单 B4/B5：角色权限模块键盘与展开语义（v9.6.32，本地未部署）
+
+- **改造内容**：角色权限模块标题由可点击容器改为普通按钮，增加 `aria-expanded`、Studio 可见焦点环和至少 40px 操作高度；Space/Enter 可以折叠或展开。全选/取消全选为同级独立按钮，折叠不会更改原权限复选值。
+- **修改文件**：`src/pages/PermissionManagement.tsx`、`tests/browser/workflow-designer-language.spec.ts` 及版本/更新文档。
+- **验证结果**：`npm run check -- --pretty false`、改动源文件和浏览器规格定向 ESLint、版本/更新说明治理、Android runtime 合同和 `git diff --check` 汇总通过。`npm run test:workflow-designer-language-browser` 仅尝试一次，因 macOS Chromium `bootstrap_check_in … Permission denied (1100)` 在启动阶段失败，未进入断言且未重试。Playwright MCP 与 Chrome DevTools MCP 在隔离角色编辑页核验初始展开、Space 收起、Enter 展开、权限复选值保持、“全选”独立工作及模块操作不发 PUT；实际按钮高度 40px，视口无横向溢出，控制台无错误/警告。VoiceOver 实际听音未覆盖此控件；用户对 v9.6.21“操作日志 / 用户列表”的确认仅适用于该已部署视图。
+- **数据与发布边界**：未改变角色权限值、角色 API 或数据库；操作只在内存测试角色上进行。Android 元数据为 9.6.32 / 90632，未构建 APK；本地修改，不提交、推送或部署。
+
+## 2026-10-28 清单 B4/B5：公告表单展开状态（v9.6.31，本地未部署）
+
+- **改造内容**：公告板添加/关闭公告表单的按钮同步报告 `aria-expanded`；回归规格覆盖初始关闭、打开、关闭及再次打开。表单仍按现有方式条件渲染，不添加在关闭状态下不存在的控制目标。
+- **修改文件**：`src/components/AnnouncementBoard.tsx`、`tests/browser/announcement-board-feedback.spec.ts` 及版本/更新文档。
+- **验证结果**：汇总类型检查、涉及源文件和浏览器规格定向 ESLint、版本一致性、版本治理、更新说明治理（563 个版本）、Android runtime 合同、生产构建和 `git diff --check` 均通过；构建保留既有大包警告。`npm run test:announcement-board-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言，按要求未重试。Playwright MCP 与 Chrome DevTools MCP 在本地隔离夹具交互核验 `false → true → false → true`，公告表单正常显隐、只有公告列表 GET、无发布/删除请求；控制台错误/警告为 0，首屏可见。
+- **VoiceOver 范围**：用户确认 VoiceOver 明确读出 v9.6.21 的“操作日志 / 用户列表”已选视图；该确认不等于本公告表单已进行实际语音验收。
+- **数据与发布边界**：仅增加现有按钮的辅助状态；无 API、权限、数据库或真实业务数据变化。Android 元数据为 9.6.31 / 90631，未构建 APK；本地修改，不提交、推送或部署。
+
+## 2026-10-28 清单 B8：复盘发布与归档结果核实（v9.6.30，本地未部署）
+
+- **改造内容**：发布/归档遇到网络中断、408、409、429 或服务端 5xx 时，以 `cache: no-store` 只读读取服务器状态。读取为目标状态时按已完成处理；仍为原状态时不自动重试，只在用户再次确认后重发；读取失败或复盘不匹配时锁定发布/归档并只提供只读核验。读回为其他状态时同步真实状态与权限并提示人工核对。
+- **修改文件**：`src/api/retrospectives.ts`、`src/pages/RetrospectiveDetailPage.tsx`、`tests/browser/retro-action-table-responsive.spec.ts` 及版本/更新文档。
+- **验证结果**：汇总类型检查、定向 ESLint、版本/更新说明治理、Android runtime 合同、生产构建和 `git diff --check` 通过。`npm run test:retro-action-table-responsive-browser` 的一次运行在 Chromium 启动阶段遇到 macOS `bootstrap_check_in … Permission denied (1100)`，未进入断言，未重试。Playwright MCP 与 Chrome DevTools MCP 在隔离内存夹具手动验证了发布返回 429 后 `POST → GET`、草稿状态提示与显式二次确认；弹出确认框期间没有第二个 POST，确认后才出现第二个 POST 并按夹具已发布状态更新。网络中唯一错误是夹具刻意返回的 HTTP 429，应用异常/警告为 0。自动化规格内其余分支并未在本轮运行中执行。
+- **数据与发布边界**：手动业务交互只改动隔离内存夹具，不触及真实复盘数据；无数据库迁移或权限规则变化。Android 元数据为 9.6.30 / 90630，未构建 APK；本地修改，不提交、推送或部署。
+
+## 2026-10-28 清单 B4/B5：知识库分类展开状态（v9.6.29，本地未部署）
+
+- **改造内容**：知识库树分类的展开/收起按钮报告 `aria-expanded` 当前值；展开与折叠仍使用原有子分类显隐行为。回归规格断言初始展开、折叠与重新展开的语义值，并保留子分类显隐断言。
+- **修改文件**：`src/pages/KnowledgeLibrary.tsx`、`tests/browser/resource-table-hover-contrast.spec.ts` 及版本/更新文档。
+- **验证结果**：汇总类型检查、定向 ESLint、版本/更新说明治理、Android runtime 合同、生产构建和 `git diff --check` 通过。`npm run test:resource-hover-contrast-browser` 一次运行在 Chromium 启动阶段受 macOS `bootstrap_check_in … Permission denied (1100)` 阻断，未进入断言，未重试。Playwright MCP 隔离夹具手动核对根分类展开、收起和再展开的 `aria-expanded` 以及子分类显隐，控制台无错误/警告。
+- **数据与发布边界**：仅增加展开状态语义；无 API、权限、数据库或业务数据变化。Android 元数据为 9.6.29 / 90629，未构建 APK；本地修改，不提交、推送或部署。
+
+## 2026-10-28 清单 B4/B5：手机首页优先任务展开状态（v9.6.28，本地未部署）
+
+- **改造内容**：手机首页“查看剩余 N 项”和“收起任务”用 `aria-expanded` 分别报告收起/展开，并通过稳定列表 ID 与 `aria-controls` 关联实际任务列表；显示范围和任务顺序不变。
+- **修改文件**：`src/pages/mobile/MobileHome.tsx`、`tests/browser/topic-stage-record-repair.spec.ts` 及版本/更新文档。
+- **验证结果**：本轮汇总类型检查、定向 ESLint、版本/更新说明治理（563 个版本）、Android runtime 合同、生产构建和 `git diff --check` 通过。Playwright MCP 与 Chrome DevTools MCP 先前在 390px 隔离夹具验证默认三项/false、展开六项/true、再次收起三项/false，`aria-controls` 指向任务列表，无横向溢出且没有业务 API 写入。仓库自动规格一次运行在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言。
+- **VoiceOver 范围**：用户确认 v9.6.21“操作日志 / 用户列表”的已选视图由 VoiceOver 明确读出；此证据不覆盖手机首页本次控件。
+- **发布边界**：Android 元数据为 9.6.28 / 90628，未构建 APK；无 API、权限、数据库或真实业务数据变化。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站语义与辅助技术审查、B8 尚未闭合的写入结果恢复；G 中需产品规则或可信数据支持的事项不推断，Android 原生专项后置。
+
+## 2026-10-28 手工验收补记 B5：六项主操作双主题悬停复核（v9.6.27，不新增版本）
+
+- **验收范围**：在 Chrome DevTools MCP 的本地隔离页面中，逐项悬停 404“回到工作台”、无权限“回到首页”、公告“发布”、选题详情“保存”和“大版本保存”、新建选题“提报选题”；六项在浅色与深色主题下的主按钮渐变均由默认态切换到悬停态。选题详情仅进入编辑模式以显示保存按钮，未改字段或保存；公告表单只填入合成验收文字，未发布；新建选题未填写或提交。
+- **运行证据**：页面内容与预期路由一致；三页控制台无错误/警告。网络记录仅有 GET 与 Socket.IO 传输轮询 POST，没有业务 API 写入。自动 Chromium 套件本补记未运行；此条是 Chrome DevTools MCP 手工验收，不计作自动化套件通过。
+- **VoiceOver 用户确认**：用户确认 VoiceOver 明确读出了“操作日志”和“用户列表”的已选视图。该听音证据只适用于 v9.6.21 人员管理视图，不扩展到本次按钮或其他页面。
+- **变更边界**：本次只补验，不改产品代码、不递增版本、不触碰真实业务数据；本地不提交、推送或部署。
+
+## 2026-10-28 清单 B4/B5：手机首页优先任务展开状态（v9.6.28，本地未部署）
+
+- **改造内容**：手机首页“查看剩余 N 项”和“收起任务”用 `aria-expanded` 分别报告收起/展开，用稳定 `mobile-home-priority-tasks` ID 与 `aria-controls` 指向实际任务列表；显示范围和任务顺序不变。
+- **修改文件**：`src/pages/mobile/MobileHome.tsx`、`tests/browser/topic-stage-record-repair.spec.ts`、版本及更新文档。
+- **验证结果**：`npm run check -- --pretty false` 与定向 ESLint 通过。Playwright MCP 和 Chrome DevTools MCP 的隔离夹具在 390px 实测默认三项/false、展开六项/true、再收起三项/false，`aria-controls` 始终指向该列表，`clientWidth` 与 `scrollWidth` 均为 382px。浏览器控制台在夹具运行时无错误/警告；请求只有 GET 与 Socket.IO 轮询 POST，无业务 API 写入。`npm run test:topic-stage-record-repair-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 退出，未进入断言。
+- **VoiceOver 范围**：用户确认 v9.6.21“操作日志 / 用户列表”的已选视图由 VoiceOver 明确读出；此确认不覆盖本次手机首页或其它控件。
+- **发布边界**：Android 元数据为 9.6.28 / 90628，未构建 APK；无 API、权限、数据库或真实业务数据变化。本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站语义与辅助技术审查、B8 其它写入结果恢复；G 中依赖产品规则或可信数据的事项不推断，Android 原生专项后置。
+
+## 2026-10-28 清单 B4/B5：稿件编辑器目录与菜单展开状态（v9.6.27，本地未部署）
+
+- **改造内容**：编辑器目录侧栏、目录内部折叠标题、标题层级、文字颜色、高亮颜色、导出、“更多操作”、BubbleMenu 和段落浮动插入/块操作菜单统一报告 aria-expanded；这些控件明确指定普通按钮类型，图标菜单补充可读名称。
+- **修改文件**：`src/components/editor/TableOfContents.tsx`、`src/components/editor/Toolbar.tsx`、`src/components/editor/BubbleMenu.tsx`、`src/components/editor/FloatingMenu.tsx`、`tests/browser/production-review.spec.ts` 及版本/改造文档。
+- **验证结果**：`npm run check -- --pretty false`、编辑器源码与 `tests/browser/production-review.spec.ts` 定向 ESLint、`npm run version:check`（v9.6.27）、`npm run test:android-runtime`、`npm run test:changelog-governance`（559 个版本）、`npm run test:version-governance`、`git diff --check` 和 `npm run build` 通过；构建保留现有大包提示。`npm run test:production-review-browser` 在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 失败，未进入规格断言。Playwright MCP 使用隔离的生产审阅夹具，在桌面 1440×960 实际点击目录、标题层级、文字颜色、高亮颜色、更多操作、导出及选中文字浮动工具栏的颜色/高亮按钮，`aria-expanded` 均正确往返；Chrome DevTools MCP 的辅助树交叉确认目录和导出菜单打开后为 expanded。页面标题及主要内容正常，无框架错误覆盖；隔离夹具运行期间两种 MCP 控制台均无错误/警告。主动停止 Vite 隔离夹具后，尚未关闭的 Playwright 页签出现连接拒绝日志，随后已关闭页签。390px CSS 视口的 `clientWidth` / `scrollWidth` 均为 382px，无水平溢出。手工检查未触发资料修改或业务写入。FloatingMenu 当前未被页面引用，本轮未能在渲染界面验证其新语义；本批编辑器菜单未做 VoiceOver 实际听音核验。截图保存在 `/private/tmp/xmt-v9-6-27-editor-toolbar.png` 和 `/private/tmp/xmt-v9-6-27-editor-toolbar-mobile.png`。
+- **数据与发布边界**：仅增加现有控件语义；无 API、权限、数据库或业务数据变化。Android 元数据为 9.6.27 / 90627，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站状态、键盘与辅助技术审查，以及 B8 尚未闭合的写入反馈；G 中需明确规则或可信数据的事项不推断；Android 原生专项按用户要求后置。
+
+## 2026-10-28 清单 B4/B5：密码可见状态与移动更新说明展开状态（v9.6.26，本地未部署）
+
+- **改造内容**：系统设置的当前密码、新密码、确认新密码控件均关联可读标签；显示/隐藏按钮有字段专属名称、aria-controls 和 aria-pressed。登录页密码切换使用“显示密码 / 隐藏密码”动作名称并报告 pressed 状态。手机“更新说明”按钮报告展开状态。
+- **修改文件**：`src/pages/NotificationSettings.tsx`、`src/pages/Login.tsx`、`src/pages/mobile/MobileMe.tsx`、三份浏览器回归规格及版本/改造文档。
+- **验证结果**：`npm run check -- --pretty false`、改动文件定向 ESLint、`npm run build`、`npm run version:check`（v9.6.26）、`npm run test:android-runtime`、`npm run test:changelog-governance`（558 个版本）和 `git diff --check` 通过。定向 ESLint 为 0 错误、保留 NotificationSettings 中两条原有 effect 依赖警告。`test:system-settings-browser`、`test:login-theme-contrast-browser`、`test:mobile-work-center-browser` 均在 Chromium 启动阶段因 macOS `bootstrap_check_in … Permission denied (1100)` 失败，未进入断言。Playwright MCP 在本地 Vite 页面进行合成账号隔离验收：登录页显示/隐藏密码后，输入类型、动作名称和 pressed 状态同步往返；设置页三个密码字段均有可读关联标签，逐项显示/隐藏时类型、名称、aria-controls 与 pressed 状态正确；手机“更新说明”展开显示 3 条更新，收起后恢复 0 条。手机视口 390px 下文档 clientWidth/scrollWidth 均为 382px，无水平溢出；页面标题与内容正常，无框架错误覆盖。浏览器控制台中的 HTTP 500 来自未启动后端的公共系统设置和 Socket.IO 连接；另有一条路由警告由隔离验收脚本直接 pushState 造成。截图保存于 `/private/tmp/xmt-v9-6-26-validation/`。
+- **数据与发布边界**：仅改善控件名称、关联与状态播报；无 API、权限、数据库或业务数据变化。本批新控件未另做 VoiceOver 实际听音；用户已确认 v9.6.21“操作日志 / 用户列表”的已选视图由 VoiceOver 明确读出，该证据仅适用于此前控件。Android 元数据为 9.6.26 / 90626，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站控件状态、键盘和辅助技术验收，以及 B8 其他写入结果恢复；G 中需明确定义的业务规则不推断；Android 原生专项按用户要求后置。
+
+## 2026-10-28 清单 B4/B5：新建选题预览模式选中状态（v9.6.25，本地未部署）
+
+- **改造内容**：新建选题页“预览 / 编辑模式”切换通过 aria-pressed 暴露当前模式，并指定 type=button，避免处于表单上下文时触发表单提交。
+- **修改文件**：src/pages/AddTopic.tsx、tests/browser/mobile-work-center-responsive.spec.ts 及版本/改造文档。
+- **验证结果**：npm run check -- --pretty false、两个改动文件定向 ESLint、npm run build、npm run version:check（v9.6.25）、git diff --check 通过。npm run test:mobile-work-center-browser 在 Chromium 启动时因 macOS bootstrap_check_in 权限错误（1100）失败，未进入断言。Playwright MCP 与 Chrome DevTools MCP 隔离夹具在 1440px 桌面实际点击核对辅助树 `pressed: false → true → false`；Playwright MCP 在 390px 下同样验证切换，文档宽 382px、没有横向溢出，两种模式均保持可见。两工具的控制台错误/警告为 0。未进行本页 VoiceOver 实际听音核验。
+- **数据与发布边界**：仅增加现有页面按钮语义；无 API、权限、数据库或业务数据变化。Android 元数据为 9.6.25 / 90625，未构建 APK；本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 全站控件状态、键盘和 VoiceOver 验收，以及 B8 其他写入结果恢复；G 中需明确定义的业务规则不推断；Android 原生专项按用户要求后置。
+
+## 2026-10-28 清单 B4/B5/B8：折叠状态与创作建议反馈恢复（v9.6.24，本地未部署）
+
+- **改造内容**：手机选题详情的审核记录、手机账号页的账号安全折叠区通过 aria-expanded 暴露展开状态。创作者建议“暂不采用”和加入选题草稿后的“采纳”反馈遇到响应不明时，按账号、建议编号和样本编号使用现有驾驶舱接口 no-store 只读核实；确认已记录则展示服务器状态，确认未记录才提供用户主动重试，样本或反馈已变化时停止重发。读取失败期间不重复提交，并提供只读复核入口；已追加到草稿的依据不会回滚。
+- **修改文件**：src/api/creatorCenter.ts、src/components/topics/CreatorTopicSuggestionReference.tsx、src/components/topics/CreatorTopicSuggestionsPanel.tsx、src/pages/mobile/MobileMe.tsx、src/pages/mobile/MobileTopicDetail.tsx、tests/browser/creator-topic-suggestions.spec.ts、tests/browser/mobile-work-center-responsive.spec.ts、tests/browser/topic-stage-record-repair.spec.ts 及版本/改造文档。
+- **验证结果**：npm run check -- --pretty false、改动源文件及浏览器规格定向 ESLint、npm run build、npm run version:check（v9.6.24）、git diff --check 通过。生产构建保留现有大包提示：主入口约 756 kB、Tiptap 555 kB、Silk 背景适配器 844 kB。创作者建议反馈、移动账号安全、移动选题详情、首页及创作详情相关自动浏览器套件均因本机 Chromium bootstrap_check_in 权限错误（1100）在启动阶段失败，未进入测试断言。Playwright MCP 本地隔离夹具验证了暂不采用请求已写入但响应丢失后仅一次 POST 加一次只读 GET 确认；加入草稿后反馈响应丢失并遇只读 GET 失败时保留草稿，随后通过只读复核确认状态；未写入分支只有用户明确重试后才再次 POST。v9.6.23 的桌面折叠状态与创作详情共用按钮状态已由 Playwright MCP / Chrome DevTools MCP 实测；本批移动折叠控件尚无 VoiceOver 实际语音读出核验。
+- **数据与发布边界**：复用现有抖音驾驶舱读取和反馈写入，不新增 API 路由、权限规则、数据库结构或业务数据；Android 元数据为 9.6.24 / 90624，未构建 APK。当前工作区累积 v9.6.22–v9.6.24 的本地改造，未提交、推送或部署。
+- **下一步**：继续 B4/B5 全站控件状态与 VoiceOver 验收、B8 其他写入结果恢复；G 中需产品阈值、审核责任或明确统计范围的项目不推断；Android 原生专项按用户要求后置。
+
+## 2026-10-28 清单 B4/B5：折叠区域状态可访问性（v9.6.23，本地未部署）
+
+- **改造内容**：桌面首页“最近变化”和创作详情顶部工具栏、侧栏的版本历史折叠按钮都用 `aria-expanded` 暴露共享折叠状态；两处版本历史按钮始终同步。
+- **修改文件**：`src/pages/Home.tsx`、`src/pages/ProductionDetail.tsx`、`tests/browser/topic-stage-record-repair.spec.ts`、`tests/browser/production-review.spec.ts`，版本与更新文档。
+- **验证结果**：`npm run check -- --pretty false`、改动文件定向 ESLint、`npm run build`、`npm run version:check`（v9.6.23）、更新说明治理（555 个版本）和 `git diff --check` 通过；构建保留既有大分包提示，主包约 756 kB、Tiptap 555 kB、Silk 背景适配器 844 kB。自动 `npm run test:topic-stage-record-repair-browser` 和 `npm run test:production-review-browser` 均在 Chromium 启动时被 macOS `bootstrap_check_in … Permission denied (1100)` 阻止，未进入断言。Playwright MCP 本地隔离夹具确认首页最近变化的辅助树由 expanded → 收起 → expanded；创作详情顶部与侧栏版本历史按钮共享状态，任一按钮收起后两个都不再报告 expanded，重新展开后两处均恢复。Chrome DevTools MCP 对创作详情的同一共享状态作独立无障碍树核验；控制台没有错误，只有减少动态效果环境提示。两处新增页面控件的 VoiceOver 实际语音读出尚未确认。
+- **数据与发布边界**：无 API、权限定义、数据库或业务数据变化。工程版本 9.6.23，Android 元数据 9.6.23 / 90623，未构建 APK；仅本地修改，不提交、推送或部署。
+- **下一步**：继续 B4/B5 其他页面与 VoiceOver 验收、B8 其它写入结果路径；G 中需明确指标阈值、审核责任与团队统计范围的部分暂不推断；Android 原生专项按用户要求后置。
+
+## 2026-10-28 清单 B4/B5：日报、消息与创作版本历史选中状态（v9.6.22，本地未部署）
+
+- **改造内容**：日报页“我的日报 / 团队日报 / 总结归档”、移动消息“全部 / 未读 / 工作流 / 协作 / 系统”筛选，以及创作详情侧栏当前/历史版本按钮，均通过 `aria-pressed` 暴露当前选择；回归覆盖默认值、筛选切换和历史版本链接状态。
+- **修改文件**：`src/pages/DailyReportPage.tsx`、`src/pages/ProductionDetail.tsx`、`src/pages/mobile/MobileMessages.tsx`、对应隔离浏览器回归与版本/改造记录。
+- **用户验收口径**：用户确认听到了此前新增的加载提示；这不代表已确认本批日报视图选中状态的实际语音读出。匿名意见提交回执继续不自动过期，并在对应意见删除时清除；已有随机回执实现符合此规则。
+- **验证结果**：`npm run check -- --pretty false`、改动文件定向 ESLint、`npm run version:check`、版本治理、更新说明治理（554 个版本）、Android runtime 合同（未构建 APK）、测试入口检查（294 个文件）、共用加载状态语义测试、生产构建与 `git diff --check` 均通过。构建保留既有大分包提示（主包约 755 kB、Tiptap 555 kB、Silk 背景适配器 844 kB）。自动 `npm run test:daily-report-submit-recovery-browser`、`npm run test:production-review-browser` 与 `npm run test:mobile-work-center-browser` 均在 Chromium 启动阶段被 macOS `bootstrap_check_in … Permission denied (1100)` 阻止，未进入测试断言。Playwright MCP 与 Chrome DevTools MCP 在本地隔离夹具切换实测通过：默认“我的日报”、移动消息“全部”以及创作详情 v1.0 历史预览均正确暴露选中状态；归档/未读与版本切换后状态正确。控制台无错误。日报在 1440×960 与 390×844 完成视口检查，390px 下文档宽 382px、无水平溢出；创作详情在 1440×960 和 390×844 检查，移动消息 390px 页面宽度 390px、无水平溢出。截图保存在本地 `.playwright-mcp/`。
+- **发布状态与下一步**：工程版本 9.6.22，Android 元数据 9.6.22 / 90622，未构建 APK；当前仅本地修改，不提交、推送或部署。无 API、权限定义或数据库变化。继续 B4/B5 全站状态语义与实际辅助技术验收、B8 其它写入结果路径及 G 未闭合项；Android 原生专项按用户要求后置。
+
+## 2026-10-28 清单 B4/B5：管理与归档视图选中状态（v9.6.21，已部署）
 
 - **改造内容**：设置中心分类、成就“全部/已获得/未解锁”筛选、人员管理“用户列表/操作日志”切换、归档详情“稿件/制作批注/发布信息/流程记录”切换统一暴露 `aria-pressed`；新增切换控件指定明确的 `type="button"`。另外修复人员编辑响应不明后刷新时的权限加载竞态：权限核实未完成前不会把 `hasPermission=false` 当成已撤权，不提前清除恢复记录或关闭编辑窗；启停恢复也会等待权限完成再判断。
 - **修改文件**：`src/pages/NotificationSettings.tsx`、`src/pages/Achievements.tsx`、`src/pages/Users.tsx`、`src/pages/Resources.tsx`、对应浏览器回归与版本/改造记录。
 - **验证结果**：隔离浏览器 `test:achievements-leaderboard-browser`、`test:users-tabs-browser`、`test:users-refresh-query-race-browser`、`test:system-settings-browser`、`test:published-archives-browser` 均通过；人员管理长套件覆盖延迟权限读取、权限撤销、同请求安全重试及删除 404 只读核实。`npm run check -- --pretty false`、全仓 `npm run lint`（0 错误、280 条警告；改动文件定向 ESLint 通过）、`npm run build`、`npm run version:check`、294 个测试入口、Android runtime、common loading-state、版本与更新说明治理（553 个版本）、`git diff --check` 均通过。构建保留大分包提示：主包约 755 kB、Tiptap 555 kB、Silk 背景适配器 844 kB。
-- **VoiceOver**：按授权临时开启，在本机 Chrome 隔离夹具将焦点依次移到“操作日志”和“用户列表”；辅助技术状态分别显示所选视图为 1、未选视图为 0。macOS VoiceOver 已恢复关闭。用户已确认听到此前新增的加载提示；本批选中状态的实际听音反馈待用户回复。
-- **发布状态与下一步**：工程版本 9.6.21，Android 元数据 9.6.21 / 90621，未构建 APK；当前仍为本地改动。无 API、权限定义或数据库变化。继续清点剩余页面的状态按钮和全站 B4/B5 辅助技术验收；B8 其它写入结果路径及 G 未闭合项仍待处理，Android 原生专项按用户要求后置。
+- **VoiceOver**：按授权临时开启，在本机 Chrome 隔离夹具将焦点依次移到“操作日志”和“用户列表”；辅助技术状态分别显示所选视图为 1、未选视图为 0。用户确认 VoiceOver 明确读出已选视图，也确认听到此前新增的加载提示；macOS VoiceOver 已恢复关闭。
+- **发布状态与验证**：PR #95 六项 CI 全部通过并合并至 `main`，合并提交及 `v9.6.21` 标签均为 `89c1a5a74dbad7352c0554394455dcdbc7ff7307`。服务器以该完整 SHA 部署；部署前备份 `/www/wwwroot/xmt/emergency-backup/xmt-20261028-131120-3722941.db`，Restore Drill 通过，66 项迁移检查 GO。PM2 v9.6.21 在线、Caddy 正常；内外健康检查与主页返回成功，SQLite `quick_check=ok` 且外键检查无记录，4 条内部路由隐藏检查通过。Android 元数据 9.6.21 / 90621，未构建 APK；无 API、权限定义或数据库变化。
+- **下一步**：继续清点剩余页面的状态按钮和全站 B4/B5 辅助技术验收；B8 其它写入结果路径及 G 未闭合项仍待处理，Android 原生专项按用户要求后置。
 
 ## 2026-10-28 清单 B8/B4/B5：审批流删除结果恢复与状态可访问性（v9.6.20，本地未部署）
 

@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 type Layout = 'style1' | 'style2' | 'style3';
 let selectedLayout: Layout = 'style1';
+let passwordChangeDelayMs = 0;
 
 const app = express();
 app.use(express.json());
@@ -32,6 +33,10 @@ app.post('/api/auth/login', (req, res) => {
     return;
   }
   res.status(401).json({ message: '账号或密码错误' });
+});
+app.post('/api/auth/change-password', async (_req, res) => {
+  if (passwordChangeDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, passwordChangeDelayMs));
+  res.json({ message: '密码已更新' });
 });
 app.get('/api/auth/me', (_req, res) => res.json({ id: 92, username: 'theme-qa-forced', name: '主题验收账号', email: 'qa@example.test', role: 'admin', enabled: true, force_change_password: false }));
 app.get('/api/permissions/my', (_req, res) => res.json(['*']));
@@ -115,10 +120,17 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
     for (const theme of ['light', 'dark'] as const) {
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
       const errors: string[] = [];
+      const apiMutationRequests: string[] = [];
       const page = await context.newPage();
       page.setDefaultTimeout(5000);
       page.on('pageerror', (error) => errors.push(error.message));
       page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+      page.on('request', (request) => {
+        const { pathname } = new URL(request.url());
+        if (pathname.startsWith('/api/') && request.method() !== 'GET' && request.method() !== 'HEAD') {
+          apiMutationRequests.push(`${request.method()} ${pathname}`);
+        }
+      });
       await page.goto(`${base}/__qa/${layout}/${theme}`);
       await page.getByRole('heading', { name: '欢迎回来', exact: true }).waitFor();
       assert.equal(await page.getByRole('main').count(), 1, `${layout}/${theme} login exposes its content through one main landmark`);
@@ -133,6 +145,17 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
         const brandMark = page.getByTestId('login-brand-mark');
         const brandContrast = await contrast(brandMark);
         assert.ok(brandContrast.ratio >= 4.5, `${layout}/${theme} brand mark contrast=${brandContrast.ratio.toFixed(2)} expected>=4.5 ${JSON.stringify(brandContrast)}`);
+        const forgotPassword = page.getByRole('button', { name: '忘记密码？', exact: true });
+        const forgotPasswordColorBeforeHover = await forgotPassword.evaluate((element) => getComputedStyle(element).color);
+        await forgotPassword.hover();
+        const forgotPasswordHoverContrast = await contrast(forgotPassword);
+        const forgotPasswordHoverStyles = await forgotPassword.evaluate((element) => ({
+          color: getComputedStyle(element).color,
+          opacity: getComputedStyle(element).opacity,
+        }));
+        assert.notEqual(forgotPasswordHoverStyles.color, forgotPasswordColorBeforeHover, `${layout}/${theme} forgot-password hover visibly changes its text color`);
+        assert.equal(forgotPasswordHoverStyles.opacity, '1', `${layout}/${theme} forgot-password hover does not dim small text`);
+        assert.ok(forgotPasswordHoverContrast.ratio >= 4.5, `${layout}/${theme} forgot-password hover contrast=${forgotPasswordHoverContrast.ratio.toFixed(2)} expected>=4.5 ${JSON.stringify(forgotPasswordHoverContrast)}`);
       }
       const welcomeLabels = page.getByText('欢迎回来', { exact: true });
       const visibleWelcomeIndexes = await welcomeLabels.evaluateAll((nodes) => nodes.flatMap((node, index) => {
@@ -148,9 +171,20 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
       await accountLabel.waitFor();
       assert.ok((await contrast(accountLabel)).ratio >= 4.5, `${layout}/${theme} account label must remain readable`);
       if (layout === 'style1') {
+        const brandEyebrow = page.getByText('STR.2025', { exact: true });
+        const brandEyebrowContrast = await contrast(brandEyebrow);
+        assert.ok(brandEyebrowContrast.ratio >= 4.5, `${layout}/${theme} brand eyebrow contrast=${brandEyebrowContrast.ratio.toFixed(2)} expected>=4.5 ${JSON.stringify(brandEyebrowContrast)}`);
         assert.equal(await page.getByText('其他方式', { exact: true }).count(), 0, 'unavailable auxiliary login methods are not presented as working actions');
         assert.equal(await page.getByRole('button').filter({ hasText: /微信|企微|邮箱/ }).count(), 0, 'login has no placeholder social or email buttons without a configured login flow');
-        const passwordToggle = page.getByRole('button', { name: '切换密码可见状态' });
+        const passwordToggle = page.locator('button[aria-controls="login-password"]');
+        assert.equal(await passwordToggle.getAttribute('aria-label'), '显示密码', 'masked login password exposes an action-specific name');
+        assert.equal(await passwordToggle.getAttribute('aria-pressed'), 'false', 'masked login password visibility reports its current state');
+        await passwordToggle.click();
+        assert.equal(await page.locator('#login-password').getAttribute('type'), 'text', 'login password becomes visible on request');
+        assert.equal(await passwordToggle.getAttribute('aria-label'), '隐藏密码', 'revealed login password exposes the inverse action name');
+        assert.equal(await passwordToggle.getAttribute('aria-pressed'), 'true', 'revealed login password reports its current state');
+        await passwordToggle.click();
+        assert.equal(await page.locator('#login-password').getAttribute('type'), 'password', 'login password is masked again on request');
         await passwordToggle.hover();
         assert.ok((await contrast(passwordToggle)).ratio >= 4.5, `${layout}/${theme} password toggle remains readable on hover`);
         const rememberLabel = page.locator('label').filter({ hasText: '记住密码' });
@@ -170,6 +204,19 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
           if (expectedAuthFailure >= 0) errors.splice(expectedAuthFailure, 1);
         }
 
+        if (theme === 'light') {
+          await page.evaluate(() => {
+            const storage = window.sessionStorage as Storage & { __qaRestoreRemoveItem?: Storage['removeItem'] };
+            const key = 'xmt:desktop-password-change-recovery:v1:actor:92';
+            storage.setItem(key, JSON.stringify({ version: 1, actorId: 92, requestId: '123e4567-e89b-42d3-a456-426614174000' }));
+            const originalRemoveItem = storage.removeItem.bind(storage);
+            storage.__qaRestoreRemoveItem = originalRemoveItem;
+            storage.removeItem = (name: string) => {
+              if (name === key) return;
+              originalRemoveItem(name);
+            };
+          });
+        }
         await page.locator('input[autocomplete="username"]').fill('theme-qa-forced');
         await page.locator('input[autocomplete="current-password"]').fill('initial-password');
         const forcedLoginResponse = page.waitForResponse((response) => response.url().endsWith('/api/auth/login') && response.status() === 200);
@@ -178,6 +225,30 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
         await forcedLoginResponse;
         const passwordDialog = page.getByRole('dialog', { name: '请先修改初始密码' });
         await passwordDialog.waitFor();
+        if (theme === 'light') {
+          assert.equal(await passwordDialog.getByRole('textbox').evaluateAll((fields) => fields.every((field) => (field as HTMLInputElement).disabled)), true, 'failed recovery-marker cleanup locks the first-login password fields');
+          await passwordDialog.getByRole('button', { name: '结果待核实', exact: true }).waitFor();
+          await passwordDialog.getByRole('alert').getByText('本机密码修改恢复记录无法核实清除。为避免重复修改，密码表单已锁定；请退出并重新登录后再次核实。', { exact: true }).waitFor();
+          assert.deepEqual(await page.evaluate(() => {
+            const raw = sessionStorage.getItem('xmt:desktop-password-change-recovery:v1:actor:92');
+            return raw ? Object.keys(JSON.parse(raw)).sort() : null;
+          }), ['actorId', 'requestId', 'version'], 'the locked first-login recovery record contains no password or token');
+          await page.evaluate(() => {
+            const storage = window.sessionStorage as Storage & { __qaRestoreRemoveItem?: Storage['removeItem'] };
+            if (storage.__qaRestoreRemoveItem) storage.removeItem = storage.__qaRestoreRemoveItem;
+            storage.removeItem('xmt:desktop-password-change-recovery:v1:actor:92');
+            delete storage.__qaRestoreRemoveItem;
+          });
+          await passwordDialog.getByRole('button', { name: '退出登录' }).click();
+          await loginButton.waitFor();
+          await page.locator('input[autocomplete="username"]').fill('theme-qa-forced');
+          await page.locator('input[autocomplete="current-password"]').fill('initial-password');
+          const recoveredLoginResponse = page.waitForResponse((response) => response.url().endsWith('/api/auth/login') && response.status() === 200);
+          await loginButton.click();
+          await recoveredLoginResponse;
+          await passwordDialog.waitFor();
+          assert.equal(await passwordDialog.getByRole('button', { name: '更新密码', exact: true }).isDisabled(), false, 'a fresh successful login after marker cleanup unlocks the first-login change form');
+        }
         const loginBackground = page.getByTestId('login-background');
         assert.equal(await loginBackground.getAttribute('aria-hidden'), 'true', `${theme} login content is hidden from assistive technology while the modal is open`);
         assert.equal(await loginBackground.evaluate((element) => (element as HTMLElement).inert), true, `${theme} login content is inert while the modal is open`);
@@ -250,9 +321,23 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
         await passwordDialog.getByPlaceholder('新密码（至少 6 位）').fill('updated-password');
         await passwordDialog.getByPlaceholder('确认新密码').fill('updated-password');
         const passwordUpdateResponse = page.waitForResponse((response) => response.url().endsWith('/api/auth/change-password') && response.status() === 200);
+        const passwordUpdateRequest = page.waitForRequest((request) => request.url().endsWith('/api/auth/change-password'));
+        if (theme === 'light') passwordChangeDelayMs = 180;
         await passwordDialog.getByRole('button', { name: '更新密码' }).click();
+        await passwordUpdateRequest;
+        if (theme === 'light') {
+          const pendingRecovery = await page.evaluate(() => {
+            const raw = sessionStorage.getItem('xmt:desktop-password-change-recovery:v1:actor:92');
+            return raw ? JSON.parse(raw) as { actorId: number; requestId: string; version: number; password?: string; token?: string } : null;
+          });
+          assert.equal(pendingRecovery?.actorId, 92, 'first-login password update stores an account-scoped recovery record before sending');
+          assert.equal(pendingRecovery?.version, 1, 'first-login password update stores the current recovery schema');
+          assert.deepEqual(Object.keys(pendingRecovery || {}).sort(), ['actorId', 'requestId', 'version'], 'first-login recovery stores no password or authentication token');
+        }
         await passwordUpdateResponse;
+        if (theme === 'light') passwordChangeDelayMs = 0;
         await passwordDialog.waitFor({ state: 'detached' });
+        if (theme === 'light') assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:desktop-password-change-recovery:v1:actor:92')), null, 'confirmed first-login password update clears its verified recovery record');
         assert.equal(await loginButton.evaluate((button) => button === document.activeElement), true, `${theme} successful update restores focus to the login control that opened the dialog`);
         assert.equal(await loginBackground.evaluate((element) => (element as HTMLElement).inert), false, `${theme} successful update restores login interactivity`);
       }
@@ -275,8 +360,39 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
         assert.equal(await submit.isVisible(), true, `${layout}/${theme} primary login action remains visible at ${width}px`);
         assert.equal(await page.locator('input[autocomplete="username"]').isVisible(), true, `${layout}/${theme} account field remains visible at ${width}px`);
         assert.equal(await page.locator('input[autocomplete="current-password"]').isVisible(), true, `${layout}/${theme} password field remains visible at ${width}px`);
+        const rememberLabel = page.locator('label').filter({ hasText: '记住密码' });
+        const rememberBounds = await rememberLabel.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+        });
+        assert.ok(rememberBounds.width >= 40 && rememberBounds.height >= 40, `${layout}/${theme} remember-password checkbox label provides a 40px touch target at ${width}px: ${JSON.stringify(rememberBounds)}`);
+        assert.ok(rememberBounds.left >= 0 && rememberBounds.right <= width, `${layout}/${theme} remember-password touch target stays inside ${width}px: ${JSON.stringify(rememberBounds)}`);
+        if (layout === 'style1') {
+          const mobileBrand = page.getByTestId('login-mobile-brand');
+          assert.equal(await mobileBrand.isVisible(), width < 1024, `${layout}/${theme} mobile brand follows the responsive layout at ${width}px`);
+          if (width < 1024) {
+            const brandBounds = await mobileBrand.evaluate((element) => {
+              const rect = element.getBoundingClientRect();
+              return { top: rect.top, bottom: rect.bottom };
+            });
+            const welcomeBounds = await page.getByRole('heading', { name: '欢迎回来', exact: true }).evaluate((element) => {
+              const rect = element.getBoundingClientRect();
+              return { top: rect.top, bottom: rect.bottom };
+            });
+            assert.ok(brandBounds.bottom <= welcomeBounds.top, `${layout}/${theme} mobile brand ends before the login heading at ${width}px: brand=${JSON.stringify(brandBounds)} welcome=${JSON.stringify(welcomeBounds)}`);
+          }
+        }
+        if (layout === 'style3') {
+          const forgotPassword = page.getByRole('button', { name: '忘记密码？', exact: true });
+          const forgotPasswordBounds = await forgotPassword.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+          });
+          assert.ok(forgotPasswordBounds.height >= 44, `${layout}/${theme} forgot-password action provides a 44px touch target at ${width}px: ${JSON.stringify(forgotPasswordBounds)}`);
+          assert.ok(forgotPasswordBounds.left >= 0 && forgotPasswordBounds.right <= width, `${layout}/${theme} forgot-password touch target stays inside ${width}px: ${JSON.stringify(forgotPasswordBounds)}`);
+        }
         if (layout !== 'style2') {
-          const passwordToggle = page.getByRole('button', { name: '切换密码可见状态' });
+          const passwordToggle = page.locator('button[aria-controls="login-password"]');
           const passwordField = page.locator('input[autocomplete="current-password"]');
           const targetSize = await passwordToggle.evaluate((element) => {
             const rect = element.getBoundingClientRect();
@@ -289,13 +405,21 @@ async function runBrowserSuite(browser: import('playwright').Browser) {
           await passwordToggle.click();
           assert.equal(await passwordField.getAttribute('type'), previousType, `${layout}/${theme} password visibility control restores the masked field at ${width}px`);
         }
-        const interactiveBounds = await page.locator('input[autocomplete="username"], input[autocomplete="current-password"], button[aria-label="切换密码可见状态"], button[type="submit"]').evaluateAll((elements) => elements.map((element) => {
+        const interactiveBounds = await page.locator('input[autocomplete="username"], input[autocomplete="current-password"], button[aria-controls="login-password"], button[type="submit"]').evaluateAll((elements) => elements.map((element) => {
           const rect = element.getBoundingClientRect();
           return { left: rect.left, right: rect.right };
         }));
         assert.ok(interactiveBounds.every((bounds) => bounds.left >= 0 && bounds.right <= width), `${layout}/${theme} account, password, visibility, and submit controls stay inside ${width}px: ${JSON.stringify(interactiveBounds)}`);
         if (layout === 'style1' && theme === 'light' && width === 320) await page.screenshot({ path: '/tmp/xmt-login-style1-light-320.png', fullPage: true });
         if (layout === 'style3' && theme === 'dark' && width === 390) await page.screenshot({ path: '/tmp/xmt-login-style3-dark-390.png', fullPage: true });
+      }
+      if (layout === 'style3' && theme === 'light') {
+        const forgotPassword = page.getByRole('button', { name: '忘记密码？', exact: true });
+        const mutationsBefore = apiMutationRequests.length;
+        await forgotPassword.click();
+        const recoveryNotice = page.getByRole('status').filter({ hasText: '当前系统未接入找回密码流程，请联系管理员重置密码。' });
+        assert.equal(await recoveryNotice.isVisible(), true, 'forgot-password action explains the available account recovery path inline');
+        assert.equal(apiMutationRequests.length, mutationsBefore, 'forgot-password guidance does not submit a backend mutation');
       }
       await context.close();
     }

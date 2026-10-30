@@ -34,6 +34,46 @@ let deleteDelayMs = 0;
 const createRequestResults = new Map<string, { id: number; payload: { content: string; type: string; pinned: boolean } }>();
 const createRequestHistory: Array<{ requestId: string; payload: { content: string; type: string; pinned: boolean } }> = [];
 
+async function dropSessionStorageWrite(page: import('playwright').Page, key: string) {
+  await page.evaluate((markerKey) => {
+    const storage = window.sessionStorage;
+    const originalSetItem = Storage.prototype.setItem.bind(storage);
+    Object.defineProperty(storage, 'setItem', {
+      configurable: true,
+      value: (candidateKey: string, value: string) => {
+        if (candidateKey === markerKey) return;
+        originalSetItem(candidateKey, value);
+      },
+    });
+  }, key);
+}
+
+async function dropSessionStorageRemoval(page: import('playwright').Page, key: string) {
+  await page.evaluate((markerKey) => {
+    const storage = window.sessionStorage;
+    const originalRemoveItem = Storage.prototype.removeItem.bind(storage);
+    Object.defineProperty(storage, 'removeItem', {
+      configurable: true,
+      value: (candidateKey: string) => {
+        if (candidateKey === markerKey) return;
+        originalRemoveItem(candidateKey);
+      },
+    });
+  }, key);
+}
+
+async function restoreSessionStorageWrite(page: import('playwright').Page) {
+  await page.evaluate(() => {
+    Reflect.deleteProperty(window.sessionStorage, 'setItem');
+  });
+}
+
+async function restoreSessionStorageRemoval(page: import('playwright').Page) {
+  await page.evaluate(() => {
+    Reflect.deleteProperty(window.sessionStorage, 'removeItem');
+  });
+}
+
 const app = express();
 app.use(express.json());
 app.get('/__qa', (_req, res) => res.type('html').send('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div><script type="module" src="/tests/browser/announcement-board-harness.tsx"></script></body></html>'));
@@ -188,12 +228,86 @@ try {
   await page.goto(`${base}/__qa`);
   await page.getByText('公告列表不可用，请重新加载后再查看。', { exact: true }).waitFor();
   assert.equal(await page.getByText('暂无公告', { exact: true }).count(), 0, 'a failed initial read must not be presented as an empty board');
-  await page.getByRole('button', { name: '重新加载列表', exact: true }).click();
+  const initialListRetry = page.getByRole('button', { name: '重新加载列表', exact: true });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const bounds = await initialListRetry.boundingBox();
+    assert.ok(bounds && bounds.height >= 40, `${width}px list retry meets the 40px touch target: ${JSON.stringify(bounds)}`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await initialListRetry.click();
   await page.getByText('保留的系统公告', { exact: true }).waitFor();
   assert.equal(listRequests, 2, 'initial error recovery is a read-only retry');
+  const retainedAnnouncementDelete = page.getByRole('button', { name: '删除公告：保留的系统公告', exact: true });
+  await page.setViewportSize({ width: 320, height: 844 });
+  const mobileAnnouncementDelete = await retainedAnnouncementDelete.evaluate((button) => ({
+    width: button.getBoundingClientRect().width,
+    height: button.getBoundingClientRect().height,
+    opacity: getComputedStyle(button).opacity,
+  }));
+  assert.ok(mobileAnnouncementDelete.width >= 40 && mobileAnnouncementDelete.height >= 40, `mobile delete action meets the 40×40px touch target: ${JSON.stringify(mobileAnnouncementDelete)}`);
+  assert.equal(mobileAnnouncementDelete.opacity, '1', 'mobile delete action stays visible without hover');
+  await page.setViewportSize({ width: 390, height: 844 });
 
-  await page.getByRole('button', { name: '添加公告' }).click();
-  await page.getByPlaceholder('输入公告内容...').fill('新公告隔离记录');
+  const addAnnouncementToggle = page.getByRole('button', { name: '添加公告', exact: true });
+  assert.equal(await addAnnouncementToggle.getAttribute('aria-expanded'), 'false', 'the announcement form starts collapsed');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const bounds = await addAnnouncementToggle.boundingBox();
+    assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40, `${width}px add-announcement toggle meets the 40×40px touch target: ${JSON.stringify(bounds)}`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await addAnnouncementToggle.click();
+  const closeAnnouncementFormToggle = page.getByRole('button', { name: '关闭公告表单', exact: true });
+  assert.equal(await closeAnnouncementFormToggle.getAttribute('aria-expanded'), 'true', 'opening the announcement form exposes its expanded state');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const bounds = await closeAnnouncementFormToggle.boundingBox();
+    assert.ok(bounds && bounds.width >= 40 && bounds.height >= 40, `${width}px close-announcement toggle meets the 40×40px touch target: ${JSON.stringify(bounds)}`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await closeAnnouncementFormToggle.click();
+  const reopenedAnnouncementToggle = page.getByRole('button', { name: '添加公告', exact: true });
+  assert.equal(await reopenedAnnouncementToggle.getAttribute('aria-expanded'), 'false', 'closing the announcement form exposes its collapsed state');
+  await reopenedAnnouncementToggle.click();
+  const reopenedAnnouncementFormToggle = page.getByRole('button', { name: '关闭公告表单', exact: true });
+  assert.equal(await reopenedAnnouncementFormToggle.getAttribute('aria-expanded'), 'true', 'the announcement form can be reopened with its expanded state');
+  const announcementContent = page.getByRole('textbox', { name: '公告内容', exact: true });
+  assert.equal(await announcementContent.count(), 1, 'the new-announcement textarea has its visible accessible label');
+  assert.equal(await announcementContent.getAttribute('id'), 'announcement-content', 'the announcement textarea has a stable id');
+  assert.equal(await announcementContent.getAttribute('name'), 'content', 'the announcement textarea has a stable name');
+  const announcementFormControls = [
+    page.getByRole('button', { name: '便签', exact: true }),
+    page.getByRole('button', { name: '公告', exact: true }),
+    page.getByRole('button', { name: '重要', exact: true }),
+    page.getByRole('button', { name: '置顶', exact: true }),
+    page.getByRole('button', { name: '发布', exact: true }),
+  ];
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const control of announcementFormControls) {
+      const bounds = await control.boundingBox();
+      assert.ok(bounds && bounds.height >= 40, `${width}px announcement control meets the 40px touch target: ${JSON.stringify(bounds)}`);
+    }
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await announcementContent.fill('取消时不应发布的隔离草稿');
+  await reopenedAnnouncementFormToggle.click();
+  assert.equal(await createRequests, 0, 'closing the new-announcement form sends no create request');
+  await page.getByRole('button', { name: '添加公告', exact: true }).click();
+  const reopenedAnnouncementContent = page.getByRole('textbox', { name: '公告内容', exact: true });
+  await reopenedAnnouncementContent.fill('恢复记录静默丢写时不得发布');
+  await dropSessionStorageWrite(page, 'xmt:announcement-create-pending:v1:actor:901');
+  await page.getByRole('button', { name: '发布', exact: true }).click();
+  await page.getByText('无法保存公告恢复编号，本次没有发送发布请求；请刷新页面后重试。', { exact: true }).waitFor();
+  assert.equal(createRequests, 0, 'a silently dropped create recovery marker prevents the announcement POST');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:announcement-create-pending:v1:actor:901')), null, 'a failed create pre-write leaves no falsely verified recovery marker');
+  await restoreSessionStorageWrite(page);
+  await page.reload();
+  await page.getByText('保留的系统公告', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '添加公告', exact: true }).click();
+  const createAfterStorageRecovery = page.getByRole('textbox', { name: '公告内容', exact: true });
+  await createAfterStorageRecovery.fill('新公告隔离记录');
   await page.evaluate(async () => {
     await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ createDelayMs: 220, failNextList: true }) });
   });
@@ -208,6 +322,20 @@ try {
   await page.getByText('新公告隔离记录', { exact: true }).waitFor();
   assert.equal(listRequests, postCreateReadCount + 1, 'create recovery only reloads the list');
   assert.equal(createRequests, 1, 'read-only recovery never repeats the confirmed create');
+
+  await page.getByRole('button', { name: '添加公告', exact: true }).click();
+  await page.getByRole('textbox', { name: '公告内容', exact: true }).fill('恢复编号清理静默失败');
+  await dropSessionStorageRemoval(page, 'xmt:announcement-create-pending:v1:actor:901');
+  await page.getByRole('button', { name: '发布', exact: true }).click();
+  await page.getByText('公告已确认发布，但本地恢复记录暂时无法清理；操作仍保持锁定，请稍后重新核实。', { exact: true }).waitFor();
+  assert.equal(createRequests, 2, 'a confirmed announcement is created once when local recovery-marker cleanup silently fails');
+  assert(await page.evaluate(() => sessionStorage.getItem('xmt:announcement-create-pending:v1:actor:901')), 'a silently retained recovery marker keeps the create operation locked');
+  await restoreSessionStorageRemoval(page);
+  await page.reload();
+  await page.getByText('公告已发布。', { exact: true }).waitFor();
+  assert.equal(createRequests, 2, 'refresh clears the retained marker by read-only status verification without repeating the POST');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:announcement-create-pending:v1:actor:901')), null, 'verified read-only recovery clears the retained marker');
+  await page.getByText('恢复编号清理静默失败', { exact: true }).waitFor();
 
   const createdDeleteButton = page.getByRole('button', { name: '删除公告：新公告隔离记录' });
   await createdDeleteButton.click();
@@ -269,7 +397,14 @@ try {
   await page.reload();
   await page.getByText('暂时无法核实公告删除状态；公告写入已锁定，只能重新核实，请勿重复删除。', { exact: true }).waitFor();
   assert.equal(deleteRequests, deletesBeforeRefreshRecovery + 1, 'refresh recovery performs only GETs');
-  await page.getByRole('button', { name: '重新核实公告删除状态', exact: true }).click();
+  const verifyDeleteButton = page.getByRole('button', { name: '重新核实公告删除状态', exact: true });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const bounds = await verifyDeleteButton.boundingBox();
+    assert.ok(bounds && bounds.height >= 40, `${width}px delete verification meets the 40px touch target: ${JSON.stringify(bounds)}`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await verifyDeleteButton.click();
   await page.getByText('只读核实发现该公告当前已不存在；无法确认是否由本次删除完成，未重发删除请求。', { exact: true }).waitFor();
   assert.equal(deleteRequests, deletesBeforeRefreshRecovery + 1, 'manual verification after refresh remains read-only');
   assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:announcement-delete-pending:v1:actor:901')), null, 'confirmed absent target clears its recovery marker');
@@ -283,7 +418,14 @@ try {
     await fetch('/__qa/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ failNextCreateResponse: true, failNextStatus: true }) });
   });
   await page.getByRole('button', { name: '发布', exact: true }).click();
-  await page.getByText('暂时无法核实公告创建状态；公告操作已锁定，请稍后重新核实，不要重复发布。', { exact: true }).waitFor();
+  await page.getByText('暂时无法核实公告创建状态；操作已锁定，请稍后重新核实，不要重复发布。', { exact: true }).waitFor();
+  const verifyCreateButton = page.getByRole('button', { name: '重新核实发布状态', exact: true });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const bounds = await verifyCreateButton.boundingBox();
+    assert.ok(bounds && bounds.height >= 40, `${width}px create verification meets the 40px touch target: ${JSON.stringify(bounds)}`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(createRequests, writesBeforeLostResponse + 1, 'an ambiguous response never automatically retries the create');
   assert.equal(statusRequests, statusReadsBeforeLostResponse + 1, 'ambiguous response is followed by one read-only verification');
   assert.equal(insertedCreateCount, insertedBeforeLostResponse + 1, 'fixture committed exactly one announcement before losing the response');
@@ -306,8 +448,15 @@ try {
   await page.getByRole('button', { name: '发布', exact: true }).click();
   await page.getByRole('button', { name: '确认未创建，使用原编号重试', exact: true }).waitFor();
   assert.equal(createRequestHistory.length, retryHistoryStart + 1, 'not_found does not retry automatically');
+  const explicitCreateRetry = page.getByRole('button', { name: '确认未创建，使用原编号重试', exact: true });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const bounds = await explicitCreateRetry.boundingBox();
+    assert.ok(bounds && bounds.height >= 40, `${width}px explicit create retry meets the 40px touch target: ${JSON.stringify(bounds)}`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
   const firstAttempt = createRequestHistory[retryHistoryStart];
-  await page.getByRole('button', { name: '确认未创建，使用原编号重试', exact: true }).click();
+  await explicitCreateRetry.click();
   await page.getByText('公告已发布。', { exact: true }).waitFor();
   assert.equal(createRequestHistory.length, retryHistoryStart + 2, 'one explicit retry issues one additional POST');
   assert.equal(createRequestHistory[retryHistoryStart + 1].requestId, firstAttempt.requestId, 'explicit retry preserves the original request ID');

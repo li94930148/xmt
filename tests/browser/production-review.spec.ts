@@ -20,21 +20,11 @@ assert.equal(productionStatusLabel('future_status'), '状态待确认', 'unknown
 assert.equal(productionStatusLabel(null), '状态待确认', 'missing production status should use a neutral label');
 const user = { id: 91, username: 'review-qa', role: 'admin', name: '审阅验收', enabled: true, force_change_password: false };
 const productionId = 77;
+const alternateProductionId = 78;
 const topicId = 78;
 let fixturePermissions: string[] = [];
 let productionCanEdit = true;
 let exposeHistoryFixture = false;
-function parseContrastColor(raw: string): number[] | null {
-  const value = raw.trim();
-  if (value.startsWith('#')) {
-    const hex = value.slice(1);
-    const expanded = hex.length === 3 ? hex.split('').map((part) => part + part).join('') : hex;
-    if (expanded.length !== 6) return null;
-    return [0, 2, 4].map((offset) => Number.parseInt(expanded.slice(offset, offset + 2), 16));
-  }
-  const channels = value.match(/[\d.]+/g)?.map(Number) || [];
-  return channels.length >= 3 ? channels.slice(0, 3) : null;
-}
 function relativeLuminance(rgb: number[]) {
   const channels = rgb.map((value) => value / 255 <= 0.03928 ? value / 255 / 12.92 : ((value / 255 + 0.055) / 1.055) ** 2.4);
   return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
@@ -99,6 +89,71 @@ async function renderedTextContrastRatio(locator: import('playwright').Locator) 
   const surface = relativeLuminance(background);
   return (Math.max(text, surface) + 0.05) / (Math.min(text, surface) + 0.05);
 }
+
+async function renderedGradientTextContrastRatios(locator: import('playwright').Locator) {
+  const styles = await locator.evaluate((element) => {
+    const ancestors: Element[] = [];
+    for (let current: Element | null = element; current && current !== document.documentElement; current = current.parentElement) ancestors.push(current);
+    ancestors.reverse();
+    return {
+      foreground: getComputedStyle(element).color,
+      backgroundImage: getComputedStyle(element).backgroundImage,
+      opacity: ancestors.reduce((value, ancestor) => value * Number(getComputedStyle(ancestor).opacity || 1), 1),
+      backgrounds: ancestors.map((ancestor) => {
+        const style = getComputedStyle(ancestor);
+        return { color: style.backgroundColor, opacity: Number(style.opacity || 1) };
+      }),
+    };
+  });
+  let background = [255, 255, 255];
+  let opacity = 1;
+  for (const layer of styles.backgrounds) {
+    opacity *= layer.opacity;
+    const color = parseLayerColor(layer.color);
+    if (!color) continue;
+    const alpha = color.alpha * opacity;
+    background = color.rgb.map((channel, index) => channel * alpha + background[index] * (1 - alpha));
+  }
+  const foreground = parseLayerColor(styles.foreground);
+  if (!foreground) return [];
+  const gradientColors = [...styles.backgroundImage.matchAll(/color\(srgb[^)]*\)|rgba?\([^)]*\)/g)]
+    .map((match) => parseLayerColor(match[0]))
+    .filter((color): color is NonNullable<ReturnType<typeof parseLayerColor>> => color !== null);
+  const surfaces = gradientColors.length ? gradientColors : [{ rgb: background, alpha: 1 }];
+  return surfaces.map((surface) => {
+    const renderedSurface = surface.rgb.map((channel, index) => channel * surface.alpha + background[index] * (1 - surface.alpha));
+    const foregroundOpacity = foreground.alpha * styles.opacity;
+    const renderedForeground = foreground.rgb.map((channel, index) => channel * foregroundOpacity + renderedSurface[index] * (1 - foregroundOpacity));
+    const text = relativeLuminance(renderedForeground);
+    const surfaceLuminance = relativeLuminance(renderedSurface);
+    return (Math.max(text, surfaceLuminance) + 0.05) / (Math.min(text, surfaceLuminance) + 0.05);
+  });
+}
+
+async function suppressRecoveryStorageWrite(page: import('playwright').Page, targetKey: string) {
+  await page.evaluate((key) => {
+    const original = Storage.prototype.setItem;
+    Object.defineProperty(window, '__xmtOriginalSessionSetItem', { configurable: true, value: original });
+    Object.defineProperty(Storage.prototype, 'setItem', {
+      configurable: true,
+      value(this: Storage, itemKey: string, value: string) {
+        if (itemKey === key) return;
+        return original.call(this, itemKey, value);
+      },
+    });
+  }, targetKey);
+}
+
+async function restoreRecoveryStorageWrite(page: import('playwright').Page) {
+  await page.evaluate(() => {
+    const target = window as Window & { __xmtOriginalSessionSetItem?: typeof Storage.prototype.setItem };
+    const original = target.__xmtOriginalSessionSetItem;
+    if (original) {
+      Object.defineProperty(Storage.prototype, 'setItem', { configurable: true, writable: true, value: original });
+      delete target.__xmtOriginalSessionSetItem;
+    }
+  });
+}
 async function setViewportAtBrowserZoom(
   page: import('playwright').Page,
   physicalViewport: { width: number; height: number },
@@ -137,6 +192,8 @@ let productionHistoryReadAttempts = 0;
 let failNextProductionHistoryRead = false;
 let productionSaveAttempts = 0;
 let productionSaveFailuresRemaining = 0;
+let failNextProductionSaveAfterCommit = false;
+let replaceContentBeforeNextProductionSaveFailure: string | null = null;
 let productionReviewAttempts = 0;
 let productionReviewRequestContent = '';
 let failNextProductionReview = false;
@@ -157,6 +214,8 @@ let releaseReviewThreadCreate: (() => void) | null = null;
 const reviewThreadRequests = new Map<string, { actorId: number; productionId: number; threadId: number; fingerprint: string }>();
 let reviewReplyAttempts = 0;
 let reviewReplyStatusReadAttempts = 0;
+let alternateReviewThreadReadAttempts = 0;
+let failNextAlternateReviewThreadRead = false;
 const reviewReplyRequestIds: string[] = [];
 let failNextReviewReply = false;
 let failNextReviewReplyAfterCommit = false;
@@ -189,6 +248,9 @@ let collaborationUpdateCount = 0;
 let rejectedCollaborationUpdateCount = 0;
 let exposeCollaboratorColorFixture = false;
 let failNextMaterialDraftUpdate = false;
+let failNextMaterialDraftUpdateAfterCommit = false;
+let conflictNextMaterialDraftUpdate = false;
+let materialDraftUpdateAttempts = 0;
 let materialDraftRevision = 0;
 let materialDraftContent = '<p></p>';
 let failNextMaterialDraftRead = false;
@@ -205,10 +267,13 @@ app.use('/api', (req, _res, next) => {
   next();
 });
 app.get('/__qa', (req, res) => {
+  if (req.query.tocFixture === '1') {
+    content = '<h1>目录触控一级标题</h1><p>拉开目录标题间距的示例段落。</p><p>这段示例文字让标题位置测试保持稳定。</p><p>隔离页面只使用合成的审阅内容。</p><p>这些段落不触发真实业务写入。</p><p>确保滚动到一级标题时二级标题仍在当前阅读位置之外。</p><h2>目录触控二级标题</h2><p>第一段文字需要审阅。</p><p>追加合成内容以便隔离页面能滚动。</p><p>当前标题状态跟随可见阅读位置。</p><p>这里只用于浏览器验收。</p><p>不发送任何真实正文更新。</p><p>段落继续扩展页面高度。</p><p>确保第二个标题仍可定位和访问。</p><p>测试夹具不会保存这些内容。</p><p>补充末尾内容用于模拟较长文章。</p><p>辅助内容只为验证页面滚动。</p><p>标题导航不会更新稿件正文。</p><p>夹具内容不会写入服务端。</p><p>此段增加可滚动余量。</p><p>继续确认当前阅读标题。</p><p>最后一段为隔离测试内容。</p><p>浏览器只读取合成稿件。</p><p>这段文字不影响正式业务。</p><p>页面底部留出足够的滚动距离。</p>';
+  }
   const theme = req.query.theme === 'light' ? 'light' : 'dark';
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','review-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/production/content/${productionId}');</script>`);
 });
-app.get('/__qa/state', (_req, res) => res.json({ content, savedContents, threads, productionStatus, productionVersion, productionDetailReadAttempts, productionHistoryReadAttempts, productionSaveAttempts, productionReviewAttempts, productionReviewRequestContent, reviewThreadCreateAttempts, reviewThreadStatusReadAttempts, reviewThreadRequestIds, reviewReplyAttempts, reviewReplyStatusReadAttempts, reviewReplyRequestIds, reviewStatusAttempts, reviewStatusStatusReadAttempts, reviewStatusRequestIds, productionStatusUpdateAttempts, productionStatusUpdateContent, productionVersionSaveAttempts, productionVersionSaveContent, productionDeleteAttempts, productionExists, shootingListReadAttempts, topicListReadAttempts, topicDetailReadAttempts, apiMutationAttempts, collaborationUpdateCount, rejectedCollaborationUpdateCount }));
+app.get('/__qa/state', (_req, res) => res.json({ content, savedContents, threads, productionStatus, productionVersion, productionDetailReadAttempts, productionHistoryReadAttempts, productionSaveAttempts, productionReviewAttempts, productionReviewRequestContent, reviewThreadCreateAttempts, reviewThreadStatusReadAttempts, reviewThreadRequestIds, reviewReplyAttempts, reviewReplyStatusReadAttempts, alternateReviewThreadReadAttempts, reviewReplyRequestIds, reviewStatusAttempts, reviewStatusStatusReadAttempts, reviewStatusRequestIds, productionStatusUpdateAttempts, productionStatusUpdateContent, productionVersionSaveAttempts, productionVersionSaveContent, productionDeleteAttempts, productionExists, shootingListReadAttempts, topicListReadAttempts, topicDetailReadAttempts, apiMutationAttempts, collaborationUpdateCount, rejectedCollaborationUpdateCount }));
 app.post('/__qa/reset-review-fixture', (_req, res) => {
   user.role = 'admin';
   fixturePermissions = [];
@@ -226,6 +291,8 @@ app.post('/__qa/reset-review-fixture', (_req, res) => {
   failNextProductionHistoryRead = false;
   productionSaveAttempts = 0;
   productionSaveFailuresRemaining = 0;
+  failNextProductionSaveAfterCommit = false;
+  replaceContentBeforeNextProductionSaveFailure = null;
   productionReviewAttempts = 0;
   productionReviewRequestContent = '';
   failNextProductionReview = false;
@@ -248,6 +315,8 @@ app.post('/__qa/reset-review-fixture', (_req, res) => {
   reviewThreadCreateGate = null;
   reviewReplyAttempts = 0;
   reviewReplyStatusReadAttempts = 0;
+  alternateReviewThreadReadAttempts = 0;
+  failNextAlternateReviewThreadRead = false;
   reviewReplyRequestIds.length = 0;
   failNextReviewReply = false;
   failNextReviewReplyAfterCommit = false;
@@ -283,6 +352,23 @@ app.post('/__qa/reset-review-fixture', (_req, res) => {
   nextReplyId = 1;
   return res.json({ ok: true });
 });
+app.post('/__qa/seed-review-reply-scope-thread', (_req, res) => {
+  threads.length = 0;
+  nextThreadId = 2;
+  nextReplyId = 1;
+  threads.push({
+    id: 1, production_id: productionId, version: 'v1.0', kind: 'comment',
+    anchor_quote: '第一段', anchor_context: '第一段文字需要审阅。', anchor_from: 0, anchor_to: 3,
+    summary: '切换稿件时仍应隔离回复结果。', proposed_text: null, status: 'open',
+    author_id: user.id, author_name: user.name, reviewed_by: null, reviewer_name: null,
+    created_at: '2026-09-30 09:10:00', updated_at: '2026-09-30 09:10:00', replies: [],
+  });
+  return res.json({ ok: true });
+});
+app.post('/__qa/fail-next-alternate-review-thread-read', (_req, res) => {
+  failNextAlternateReviewThreadRead = true;
+  return res.json({ ok: true });
+});
 app.post('/__qa/set-readonly-mode/:mode', (req, res) => {
   user.role = 'director';
   fixturePermissions = req.params.mode === 'missing-update' ? ['production:view'] : ['production:view', 'production:update'];
@@ -310,6 +396,19 @@ app.post('/__qa/fail-next-production-history-read', (_req, res) => {
 });
 app.post('/__qa/fail-next-production-saves', (_req, res) => {
   productionSaveFailuresRemaining = 2;
+  return res.json({ ok: true });
+});
+app.post('/__qa/fail-next-production-save', (_req, res) => {
+  productionSaveFailuresRemaining = 1;
+  return res.json({ ok: true });
+});
+app.post('/__qa/fail-next-production-save-after-commit', (_req, res) => {
+  failNextProductionSaveAfterCommit = true;
+  return res.json({ ok: true });
+});
+app.post('/__qa/change-content-before-next-save-failure', (req, res) => {
+  replaceContentBeforeNextProductionSaveFailure = String(req.body.content || '');
+  productionSaveFailuresRemaining = 1;
   return res.json({ ok: true });
 });
 app.post('/__qa/fail-next-production-version-save', (_req, res) => {
@@ -428,6 +527,18 @@ app.post('/__qa/fail-next-material-draft-update', (_req, res) => {
   failNextMaterialDraftUpdate = true;
   return res.json({ ok: true });
 });
+app.post('/__qa/fail-next-material-draft-update-after-commit', (_req, res) => {
+  failNextMaterialDraftUpdateAfterCommit = true;
+  return res.json({ ok: true });
+});
+app.post('/__qa/conflict-next-material-draft-update', (_req, res) => {
+  conflictNextMaterialDraftUpdate = true;
+  return res.json({ ok: true });
+});
+app.post('/__qa/fail-next-material-draft-read', (_req, res) => {
+  failNextMaterialDraftRead = true;
+  return res.json({ ok: true });
+});
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.get('/api/permissions/my', (_req, res) => res.json(fixturePermissions));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
@@ -436,6 +547,7 @@ app.get('/api/topics', (_req, res) => {
   topicListReadAttempts += 1;
   return res.json({ success: true, data: [], pagination: { total: 1, page: 1, limit: 10 } });
 });
+app.get('/api/workflow/production', (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 20 }));
 app.get('/api/workflow/shooting', (_req, res) => {
   shootingListReadAttempts += 1;
   return res.json({ data: [], total: 0, page: 1, limit: 50 });
@@ -464,6 +576,15 @@ app.get(`/api/workflow/production/${productionId}`, async (_req, res) => {
     operator_id: user.id, operator_name: user.name, can_edit: productionCanEdit, created_at: '2026-09-29 09:00:00', updated_at: '2026-09-29 09:00:00',
   });
 });
+app.get(`/api/workflow/production/${alternateProductionId}`, (_req, res) => res.json({
+  id: alternateProductionId, topic_id: topicId, topic_title: '另一隔离稿件', version: 'v1.0', status: 'draft',
+  content: '<p>另一条仅供范围切换回归使用的合成稿件。</p>',
+  contentMarkdown: '<p>另一条仅供范围切换回归使用的合成稿件。</p>',
+  content_markdown: '<p>另一条仅供范围切换回归使用的合成稿件。</p>',
+  content_json: '<p>另一条仅供范围切换回归使用的合成稿件。</p>',
+  operator_id: user.id, operator_name: user.name, can_edit: true,
+  created_at: '2026-09-30 09:00:00', updated_at: '2026-09-30 09:00:00',
+}));
 app.get(`/api/workflow/production/${productionId}/history`, (_req, res) => {
   productionHistoryReadAttempts += 1;
   if (failNextProductionHistoryRead) {
@@ -477,6 +598,7 @@ app.get(`/api/workflow/production/${productionId}/history`, (_req, res) => {
   }] : [];
   return res.json({ data, total: data.length, page: 1, limit: 20 });
 });
+app.get(`/api/workflow/production/${alternateProductionId}/history`, (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 20 }));
 app.get(`/api/productions/${productionId}/material-draft`, async (_req, res) => {
   const gate = materialDraftReadGate;
   materialDraftReadGate = null;
@@ -489,7 +611,18 @@ app.get(`/api/productions/${productionId}/material-draft`, async (_req, res) => 
   }
   return res.json({ data: draft });
 });
+app.get(`/api/productions/${alternateProductionId}/material-draft`, (_req, res) => res.json({ data: {
+  production_id: alternateProductionId, content_html: '<p></p>', revision: 1,
+  created_by: user.id, updated_by: user.id, created_at: null, updated_at: null,
+} }));
 app.put(`/api/productions/${productionId}/material-draft`, (req, res) => {
+  materialDraftUpdateAttempts += 1;
+  if (conflictNextMaterialDraftUpdate) {
+    conflictNextMaterialDraftUpdate = false;
+    materialDraftContent = '<p>另一位编辑已保存的服务端版本。</p>';
+    materialDraftRevision += 1;
+    return res.status(503).json({ message: '隔离测试模拟并发更新后保存响应丢失' });
+  }
   if (failNextMaterialDraftUpdate) {
     failNextMaterialDraftUpdate = false;
     return res.status(503).json({ message: '隔离测试模拟创作资料保存失败' });
@@ -498,6 +631,10 @@ app.put(`/api/productions/${productionId}/material-draft`, (req, res) => {
   materialDraftContent = String(req.body.content_html);
   materialDraftWrites.push(materialDraftContent);
   materialDraftRevision += 1;
+  if (failNextMaterialDraftUpdateAfterCommit) {
+    failNextMaterialDraftUpdateAfterCommit = false;
+    return res.status(503).json({ message: '隔离测试模拟提交成功但响应丢失' });
+  }
   return res.json({ data: {
     production_id: productionId, content_html: req.body.content_html, revision: materialDraftRevision,
     created_by: user.id, updated_by: user.id, created_at: null, updated_at: '2026-10-08 10:00:00',
@@ -536,6 +673,10 @@ app.put(`/api/workflow/production/${productionId}`, async (req, res) => {
     if (gate) await gate;
     if (productionSaveFailuresRemaining > 0) {
       productionSaveFailuresRemaining -= 1;
+      if (replaceContentBeforeNextProductionSaveFailure !== null) {
+        content = replaceContentBeforeNextProductionSaveFailure;
+        replaceContentBeforeNextProductionSaveFailure = null;
+      }
       return res.status(503).json({ message: '隔离测试模拟正文保存失败' });
     }
     if (req.body.status === 'draft') {
@@ -566,6 +707,10 @@ app.put(`/api/workflow/production/${productionId}`, async (req, res) => {
   }
   content = String(req.body.content ?? content);
   savedContents.push(content);
+  if (failNextProductionSaveAfterCommit && req.body.status !== 'review') {
+    failNextProductionSaveAfterCommit = false;
+    return res.status(503).json({ message: '隔离测试模拟正文已保存但响应丢失' });
+  }
   if (failAfterCommit) return res.status(503).json({ message: '隔离测试模拟服务端已提交但响应丢失' });
   return res.json({ message: '保存成功', version: productionVersion });
 });
@@ -612,6 +757,14 @@ app.get(`/api/workflow/production/${productionId}/review-threads/requests/:reque
   return res.json({ status: 'applied', threadId: request.threadId });
 });
 app.get(`/api/workflow/production/${productionId}/review-threads`, (_req, res) => res.json({ data: threads }));
+app.get(`/api/workflow/production/${alternateProductionId}/review-threads`, (_req, res) => {
+  alternateReviewThreadReadAttempts += 1;
+  if (failNextAlternateReviewThreadRead) {
+    failNextAlternateReviewThreadRead = false;
+    return res.status(503).json({ message: '隔离另一稿件的批注读取失败' });
+  }
+  return res.json({ data: [] });
+});
 app.get(`/api/workflow/production/${productionId}/review-threads/:threadId/replies/requests/:requestId`, (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   reviewReplyStatusReadAttempts += 1;
@@ -823,7 +976,10 @@ try {
   let productionDetailReturn = page.getByRole('button', { name: '返回创作管理', exact: true });
   let productionTopicLinks = page.getByRole('button', { name: '协作审阅稿件', exact: true });
   let productionHistorySidebarToggle = page.locator('button[title="收起版本历史"]').last();
+  const productionHistoryToolbarToggle = page.locator('button[title="收起版本历史"]').first();
   assert.equal(await productionHistorySidebarToggle.getAttribute('aria-label'), '收起版本历史', 'history sidebar toggle exposes its current action to assistive technology');
+  assert.equal(await productionHistoryToolbarToggle.getAttribute('aria-expanded'), 'true', 'the production toolbar exposes the expanded history state');
+  assert.equal(await productionHistorySidebarToggle.getAttribute('aria-expanded'), 'true', 'the history sidebar exposes the expanded state');
   for (const viewport of [
     { width: 320, height: 812 },
     { width: 390, height: 844 },
@@ -848,9 +1004,103 @@ try {
   await page.setViewportSize({ width: 1440, height: 960 });
 
   await page.getByRole('button', { name: '收起版本历史', exact: true }).last().click();
+  const productionHistoryToggles = page.locator('button[title="收起版本历史"], button[title="展开版本历史"]');
+  assert.equal(await productionHistoryToggles.count(), 2, 'the toolbar and sidebar provide two controls for one history panel');
+  assert.equal(await productionHistoryToggles.nth(0).getAttribute('aria-expanded'), 'false', 'the toolbar reports the collapsed history state after sidebar activation');
+  assert.equal(await productionHistoryToggles.nth(1).getAttribute('aria-expanded'), 'false', 'the sidebar reports the collapsed history state after activation');
   await page.getByRole('button', { name: '展开版本历史', exact: true }).last().waitFor();
   await page.getByRole('button', { name: '展开版本历史', exact: true }).last().click();
+  assert.equal(await productionHistoryToggles.nth(0).getAttribute('aria-expanded'), 'true', 'the toolbar reports the expanded history state after reopening');
+  assert.equal(await productionHistoryToggles.nth(1).getAttribute('aria-expanded'), 'true', 'the sidebar reports the expanded history state after reopening');
   await page.getByRole('button', { name: '收起版本历史', exact: true }).last().waitFor();
+
+  const focusModeStateBefore = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  const focusModeEditor = page.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).first();
+  const visibleEditorToolbarCount = () => page.locator('.editor-toolbar').evaluateAll((toolbars) => toolbars.filter((toolbar) => toolbar.getClientRects().length > 0).length);
+  const focusModeTextBefore = await focusModeEditor.innerText();
+  await page.getByRole('button', { name: '专注写作', exact: true }).click();
+  await page.getByRole('button', { name: '退出专注', exact: true }).waitFor();
+  assert.equal(await page.getByRole('navigation', { name: '面包屑', exact: true }).count(), 0, 'focus mode hides the breadcrumb navigation');
+  assert.equal(await page.getByRole('button', { name: '打开消息中心', exact: true }).count(), 0, 'focus mode hides the global top bar');
+  assert.equal(await visibleEditorToolbarCount(), 0, 'focus mode hides editor formatting controls');
+  assert.equal(
+    await page.getByRole('button', { name: '收起版本历史', exact: true }).count()
+      + await page.getByRole('button', { name: '展开版本历史', exact: true }).count(),
+    0,
+    'focus mode removes version-history controls from the accessible interface',
+  );
+  assert.equal(await focusModeEditor.innerText(), focusModeTextBefore, 'entering focus mode preserves the manuscript text');
+  await page.getByRole('button', { name: '退出专注', exact: true }).click();
+  await page.getByRole('button', { name: '专注写作', exact: true }).waitFor();
+  assert.equal(await page.getByRole('navigation', { name: '面包屑', exact: true }).count(), 1, 'leaving focus mode restores breadcrumb navigation');
+  assert.ok(await visibleEditorToolbarCount() > 0, 'leaving focus mode restores editor formatting controls');
+  assert.equal(
+    await page.getByRole('button', { name: '收起版本历史', exact: true }).count()
+      + await page.getByRole('button', { name: '展开版本历史', exact: true }).count(),
+    2,
+    'leaving focus mode restores both version-history controls',
+  );
+  assert.equal(await focusModeEditor.innerText(), focusModeTextBefore, 'leaving focus mode preserves the manuscript text');
+  const focusModeStateAfter = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.deepEqual({
+    apiMutationAttempts: focusModeStateAfter.apiMutationAttempts,
+    productionSaveAttempts: focusModeStateAfter.productionSaveAttempts,
+    productionVersionSaveAttempts: focusModeStateAfter.productionVersionSaveAttempts,
+    productionReviewAttempts: focusModeStateAfter.productionReviewAttempts,
+    productionStatusUpdateAttempts: focusModeStateAfter.productionStatusUpdateAttempts,
+    productionDeleteAttempts: focusModeStateAfter.productionDeleteAttempts,
+    savedContents: focusModeStateAfter.savedContents.length,
+  }, {
+    apiMutationAttempts: focusModeStateBefore.apiMutationAttempts,
+    productionSaveAttempts: focusModeStateBefore.productionSaveAttempts,
+    productionVersionSaveAttempts: focusModeStateBefore.productionVersionSaveAttempts,
+    productionReviewAttempts: focusModeStateBefore.productionReviewAttempts,
+    productionStatusUpdateAttempts: focusModeStateBefore.productionStatusUpdateAttempts,
+    productionDeleteAttempts: focusModeStateBefore.productionDeleteAttempts,
+    savedContents: focusModeStateBefore.savedContents.length,
+  }, 'entering and leaving focus mode performs no manuscript or workflow writes');
+
+  const foreignLegacyTransitionKey = `xmt:production-transition-recovery:${productionId}`;
+  await page.evaluate(({ key, foreignUserId, targetId }) => {
+    sessionStorage.setItem(key, JSON.stringify({
+      version: 1,
+      userId: foreignUserId,
+      productionId: targetId,
+      operation: 'review-submit',
+      previousStatus: 'draft',
+      targetStatus: 'review',
+      contentFingerprint: '0'.repeat(64),
+      phase: 'uncertain',
+    }));
+  }, { key: foreignLegacyTransitionKey, foreignUserId: user.id + 1, targetId: productionId });
+  await page.reload();
+  await page.getByRole('button', { name: '提交审核', exact: true }).first().waitFor();
+  assert.equal(JSON.parse(await page.evaluate((key) => sessionStorage.getItem(key) || 'null', foreignLegacyTransitionKey))?.userId, user.id + 1, 'a legacy transition marker owned by another account is preserved and never adopted');
+  assert.equal(await page.getByTestId('production-status-transition-verify').count(), 0, 'a foreign account recovery marker does not trigger read-back under the current account');
+  await page.evaluate((key) => sessionStorage.removeItem(key), foreignLegacyTransitionKey);
+
+  const transitionStorageKey = `xmt:production-transition-recovery:v1:user:${user.id}:production:${productionId}`;
+  const transitionStateBeforeStorageDrop = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  await page.evaluate((key) => {
+    const typedWindow = window as Window & { __xmtOriginalStorageSetItem?: typeof Storage.prototype.setItem };
+    if (!typedWindow.__xmtOriginalStorageSetItem) typedWindow.__xmtOriginalStorageSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(storageKey: string, value: string) {
+      if (this === window.sessionStorage && storageKey === key) return;
+      return typedWindow.__xmtOriginalStorageSetItem?.call(this, storageKey, value);
+    };
+  }, transitionStorageKey);
+  await page.getByRole('button', { name: '提交审核', exact: true }).first().click();
+  await page.getByText('浏览器暂时无法保存本次状态核实标记，操作未发送；请检查浏览器存储空间后重试。', { exact: true }).waitFor();
+  assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), transitionStorageKey), null, 'a silent recovery-marker drop is detected before review submission');
+  const transitionStateAfterStorageDrop = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  for (const key of ['productionSaveAttempts', 'productionVersionSaveAttempts', 'productionReviewAttempts', 'productionStatusUpdateAttempts', 'productionDeleteAttempts', 'apiMutationAttempts'] as const) {
+    assert.equal(transitionStateAfterStorageDrop[key], transitionStateBeforeStorageDrop[key], `an unverified transition marker sends no business write (${key})`);
+  }
+  await page.evaluate(() => {
+    const typedWindow = window as Window & { __xmtOriginalStorageSetItem?: typeof Storage.prototype.setItem };
+    if (typedWindow.__xmtOriginalStorageSetItem) Storage.prototype.setItem = typedWindow.__xmtOriginalStorageSetItem;
+    delete typedWindow.__xmtOriginalStorageSetItem;
+  });
 
   await page.request.post(`${base}/__qa/fail-next-production-review-after-commit`);
   expectedReview503ConsoleErrors += 1;
@@ -864,7 +1114,7 @@ try {
   let transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionStatus, 'review', 'a review that committed before a 503 is reconciled from the server');
   assert.equal(transitionRecoveryState.productionReviewAttempts, 1, 'ambiguous review completion is never automatically resubmitted');
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), null, 'confirmed review completion clears its local recovery marker');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), null, 'confirmed review completion clears its local recovery marker');
 
   await page.request.post(`${base}/__qa/reset-review-fixture`);
   await page.reload();
@@ -883,7 +1133,7 @@ try {
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionReviewAttempts, 1, 'an unchanged review is not automatically retried');
   assert.equal(await page.locator('.ProseMirror').last().getAttribute('contenteditable'), 'false', 'an unresolved review status keeps the editor read-only');
-  assert.equal(JSON.parse(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77') || 'null'))?.phase, 'ready', 'the verified unchanged state stores an explicit-retry marker');
+  assert.equal(JSON.parse(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77') || 'null'))?.phase, 'ready', 'the verified unchanged state stores an explicit-retry marker');
   const confirmedReviewRetryWrite = page.waitForResponse((response) => response.request().method() === 'PUT'
     && response.url().endsWith(`/api/workflow/production/${productionId}`) && response.status() === 200);
   await confirmReviewRetry.click();
@@ -891,7 +1141,7 @@ try {
   await page.getByText('审核中', { exact: true }).first().waitFor();
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionReviewAttempts, 2, 'the review is sent again only after the user confirms');
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), null, 'successful explicit retry clears the recovery marker');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), null, 'successful explicit retry clears the recovery marker');
 
   await page.request.post(`${base}/__qa/reset-review-fixture`);
   await page.reload();
@@ -906,10 +1156,10 @@ try {
   await page.getByRole('button', { name: '提交审核', exact: true }).first().click();
   await Promise.all([reviewWriteWithFailedReadback, failedTransitionReadback]);
   await page.getByTestId('production-status-transition-verify').waitFor();
-  assert.ok(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), 'a failed readback preserves the local recovery marker');
+  assert.ok(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), 'a failed readback preserves the local recovery marker');
   await page.reload();
   await page.getByText('审核中', { exact: true }).first().waitFor();
-  await page.waitForFunction(() => sessionStorage.getItem('xmt:production-transition-recovery:77') === null);
+  await page.waitForFunction(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77') === null);
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionStatus, 'review', 'reload performs a read-only reconciliation from the persisted marker');
   assert.equal(transitionRecoveryState.productionReviewAttempts, 1, 'reload recovery never repeats the ambiguous review PUT');
@@ -929,7 +1179,7 @@ try {
   await page.getByText('草稿', { exact: true }).first().waitFor();
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionStatusUpdateAttempts, 1, 'an applied status transition is reconciled without a second PUT');
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), null, 'confirmed status completion clears its recovery marker');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), null, 'confirmed status completion clears its recovery marker');
 
   await page.request.post(`${base}/__qa/reset-review-fixture`);
   await page.reload();
@@ -946,7 +1196,7 @@ try {
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionVersion, 'v1.1', 'a minor version saved before a 503 is adopted from the server');
   assert.equal(transitionRecoveryState.productionVersionSaveAttempts, 1, 'an ambiguous version save is never automatically repeated');
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), null, 'confirmed version creation clears its recovery marker');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), null, 'confirmed version creation clears its recovery marker');
 
   await page.request.post(`${base}/__qa/reset-review-fixture`);
   await page.reload();
@@ -973,7 +1223,7 @@ try {
   await page.getByText('v1.1', { exact: true }).first().waitFor();
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionVersionSaveAttempts, 2, 'a version is created again only after the user confirms');
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), null, 'successful explicit version retry clears the recovery marker');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), null, 'successful explicit version retry clears the recovery marker');
 
   await page.request.post(`${base}/__qa/reset-review-fixture`);
   await page.reload();
@@ -988,12 +1238,56 @@ try {
   await page.getByRole('button', { name: '小修保存', exact: true }).click();
   await Promise.all([versionWriteWithFailedReadback, failedVersionReadback]);
   await page.getByTestId('production-status-transition-verify').waitFor();
-  assert.ok(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), 'failed version readback preserves the local recovery marker');
+  assert.ok(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), 'failed version readback preserves the local recovery marker');
   await page.reload();
   await page.getByText('v1.1', { exact: true }).first().waitFor();
-  await page.waitForFunction(() => sessionStorage.getItem('xmt:production-transition-recovery:77') === null);
+  await page.waitForFunction(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77') === null);
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionVersionSaveAttempts, 1, 'reload recovery does not duplicate the version creation');
+
+  await page.request.post(`${base}/__qa/reset-review-fixture`);
+  await page.goto(`${base}/__qa`);
+  await page.locator('button[title="删除创作记录"]').waitFor();
+  await page.request.post(`${base}/__qa/hold-next-production-save`);
+  await page.request.post(`${base}/__qa/fail-next-production-save`);
+  expectedReview503ConsoleErrors += 1;
+  const pendingDeleteFlush = page.waitForRequest((request) => request.method() === 'PUT'
+    && request.url().endsWith(`/api/workflow/production/${productionId}`));
+  const failedDeleteFlush = page.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`) && response.status() === 503);
+  const deleteFlushEditor = page.locator('.ProseMirror').last();
+  await deleteFlushEditor.click();
+  await deleteFlushEditor.press('End');
+  await deleteFlushEditor.pressSequentially('删除前正文保存未确认', { delay: 1 });
+  await pendingDeleteFlush;
+  await page.locator('button[title="删除创作记录"]').click();
+  await page.getByRole('button', { name: '确认删除', exact: true }).click();
+  await page.request.post(`${base}/__qa/release-production-save`);
+  await failedDeleteFlush;
+  await page.getByTestId('production-autosave-recovery').waitFor();
+  await page.getByRole('button', { name: '确认删除', exact: true }).waitFor({ state: 'visible' });
+  let deleteFlushState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(deleteFlushState.productionDeleteAttempts, 0, 'an unconfirmed manuscript flush does not send DELETE');
+  assert.equal(deleteFlushState.productionSaveAttempts, 1, 'the pending save fails once before deletion is reconsidered');
+  assert.equal(deleteFlushState.productionExists, true, 'the record remains available while its manuscript save is unresolved');
+
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  const confirmedDeleteFlushRetry = page.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`) && response.status() === 200);
+  await page.getByTestId('production-autosave-confirm-retry').click();
+  await confirmedDeleteFlushRetry;
+  await page.getByTestId('production-autosave-recovery').waitFor({ state: 'detached' });
+  deleteFlushState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(deleteFlushState.productionSaveAttempts, 2, 'only the explicit autosave retry confirms the manuscript before deletion');
+  assert.match(deleteFlushState.content, /删除前正文保存未确认/);
+  assert.equal(deleteFlushState.productionDeleteAttempts, 0, 'recovering the manuscript does not implicitly confirm deletion');
+
+  await page.locator('button[title="删除创作记录"]').click();
+  await page.getByRole('button', { name: '确认删除', exact: true }).click();
+  await page.waitForURL('**/production');
+  deleteFlushState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(deleteFlushState.productionDeleteAttempts, 1, 'a second explicit confirmation sends exactly one DELETE after the manuscript is synced');
+  assert.equal(deleteFlushState.productionExists, false, 'the explicitly confirmed deletion succeeds after manuscript recovery');
 
   await page.request.post(`${base}/__qa/reset-review-fixture`);
   await page.goto(`${base}/__qa`);
@@ -1012,7 +1306,7 @@ try {
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionExists, false, 'a committed deletion is confirmed from the not-found readback');
   assert.equal(transitionRecoveryState.productionDeleteAttempts, 1, 'a committed deletion is never repeated after a lost response');
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), null, 'confirmed deletion clears its recovery marker');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), null, 'confirmed deletion clears its recovery marker');
 
   await page.request.post(`${base}/__qa/reset-review-fixture`);
   await page.goto(`${base}/__qa`);
@@ -1040,7 +1334,7 @@ try {
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionExists, false, 'the explicitly confirmed retry deletes the unchanged record');
   assert.equal(transitionRecoveryState.productionDeleteAttempts, 2, 'the second delete is sent only after the user confirms');
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), null, 'successful explicit delete retry clears its marker');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), null, 'successful explicit delete retry clears its marker');
 
   await page.request.post(`${base}/__qa/reset-review-fixture`);
   await page.goto(`${base}/__qa`);
@@ -1056,11 +1350,11 @@ try {
   await page.getByRole('button', { name: '确认删除', exact: true }).click();
   await Promise.all([deleteWithFailedReadback, failedDeleteReadback]);
   await page.getByTestId('production-status-transition-verify').waitFor();
-  assert.ok(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:77')), 'a failed delete readback preserves the recovery marker');
+  assert.ok(await page.evaluate(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77')), 'a failed delete readback preserves the recovery marker');
   expectedProduction404ConsoleErrors += 1;
   await page.reload();
   await page.waitForURL('**/production');
-  await page.waitForFunction(() => sessionStorage.getItem('xmt:production-transition-recovery:77') === null);
+  await page.waitForFunction(() => sessionStorage.getItem('xmt:production-transition-recovery:v1:user:91:production:77') === null);
   transitionRecoveryState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(transitionRecoveryState.productionExists, false, 'reload recovery confirms the deleted record from a read-only 404');
   assert.equal(transitionRecoveryState.productionDeleteAttempts, 1, 'reload recovery does not repeat the delete request');
@@ -1251,20 +1545,41 @@ try {
   const submitReviewButtons = page.getByRole('button', { name: '提交审核', exact: true });
   const submitReviewTop = submitReviewButtons.first();
   const submitReviewPanel = submitReviewButtons.last();
-  const flushedDraftSaveFailure = page.waitForResponse((response) => response.request().method() === 'PUT'
-    && response.url().endsWith(`/api/workflow/production/${productionId}`)
-    && response.status() === 503);
-  await submitReviewTop.click();
-  await flushedDraftSaveFailure;
-  await page.getByText('正文保存未确认，请检查编辑器提示并重试后再提交审核。', { exact: true }).waitFor();
+  const autosaveRecovery = page.getByTestId('production-autosave-recovery');
+  await autosaveRecovery.waitFor();
   const editorsAfterFailedFlush = await page.locator('.ProseMirror').allInnerTexts();
   assert.match(await mainDraftEditor.innerText(), /正文保护验证/, `a failed submit flush keeps the edited manuscript in the live editor; editors=${JSON.stringify(editorsAfterFailedFlush)}`);
   let reviewState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(reviewState.productionStatus, 'draft', 'failed review submission keeps the manuscript in draft');
-  assert.equal(await submitReviewTop.isEnabled(), true, 'failed review submission can be retried from the primary action');
-  assert.equal(await submitReviewPanel.isEnabled(), true, 'failed review submission can also be retried from the version panel');
+  assert.equal(await submitReviewTop.isEnabled(), false, 'review stays locked until the autosave result is resolved');
+  assert.equal(await submitReviewPanel.isEnabled(), false, 'the version panel cannot bypass autosave recovery');
   assert.equal(reviewState.productionReviewAttempts, 0, 'unconfirmed autosave blocks the review mutation entirely');
-  assert.ok(reviewState.productionSaveAttempts >= 2, 'submitting retries the failed autosave before refusing to review');
+  assert.equal(reviewState.productionSaveAttempts, 1, 'the failed autosave is not silently replayed');
+  await page.waitForTimeout(3000);
+  reviewState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(reviewState.productionSaveAttempts, 1, 'time and editor flushes do not replay an unresolved autosave');
+
+  const confirmAutosaveRetry = page.getByTestId('production-autosave-confirm-retry');
+  const explicitAutosaveFailure = page.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 503);
+  await confirmAutosaveRetry.click();
+  await explicitAutosaveFailure;
+  await autosaveRecovery.waitFor();
+  await confirmAutosaveRetry.waitFor({ state: 'visible' });
+  reviewState = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(reviewState.productionSaveAttempts, 2, 'only explicit confirmation sends the second autosave attempt');
+  assert.equal(reviewState.productionReviewAttempts, 0, 'review remains blocked while the confirmed retry is still unsaved');
+
+  const explicitAutosaveSuccess = page.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 200);
+  await confirmAutosaveRetry.waitFor({ state: 'visible' });
+  await confirmAutosaveRetry.click();
+  await explicitAutosaveSuccess;
+  await autosaveRecovery.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => fetch('/__qa/state').then((response) => response.json()).then((state) => state.productionSaveAttempts === 3));
+  assert.equal(await submitReviewTop.isEnabled(), true, 'review becomes available after the explicit autosave succeeds');
 
   await page.request.post(`${base}/__qa/fail-next-production-review`);
   const failedReviewResponse = page.waitForResponse((response) => response.request().method() === 'PUT'
@@ -1586,11 +1901,62 @@ try {
     void dialog.dismiss();
   });
   toolbarPage.on('pageerror', (error) => toolbarErrors.push(error.message));
-  toolbarPage.on('console', (message) => { if (message.type() === 'error') toolbarErrors.push(message.text()); });
-  await toolbarPage.goto(`${base}/__qa`);
+  toolbarPage.on('console', (message) => {
+    if (message.type() === 'error' || (message.type() === 'warning' && !message.text().includes('You have Reduced Motion enabled'))) {
+      toolbarErrors.push(message.text());
+    }
+  });
+  await toolbarPage.goto(`${base}/__qa?tocFixture=1`);
   await toolbarPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
   const editorToolbar = toolbarPage.locator('.editor-toolbar').filter({ has: toolbarPage.locator('button[title^="格式刷"]') }).first();
   await editorToolbar.waitFor({ state: 'visible' });
+
+  const tocToolbarToggle = editorToolbar.locator('button[title="显示目录"]');
+  assert.equal(await tocToolbarToggle.getAttribute('aria-expanded'), 'false', 'the editor toolbar reports the table-of-contents panel as collapsed initially');
+  assert.equal(await toolbarPage.locator('.toc-panel').count(), 0, 'the table-of-contents panel is absent while collapsed');
+  await tocToolbarToggle.click();
+  const openTocToolbarToggle = editorToolbar.locator('button[title="隐藏目录"]');
+  assert.equal(await openTocToolbarToggle.getAttribute('aria-expanded'), 'true', 'the editor toolbar reports the table-of-contents panel as expanded');
+  const tocPanel = toolbarPage.locator('.toc-panel');
+  await tocPanel.waitFor({ state: 'visible' });
+  const tocHeader = tocPanel.locator('button[aria-expanded]').first();
+  const tocParentCollapse = tocPanel.getByRole('button', { name: '收起目录触控一级标题下级标题', exact: true });
+  const tocParentExpand = tocPanel.getByRole('button', { name: '展开目录触控一级标题下级标题', exact: true });
+  const tocParentTitle = tocPanel.getByRole('button', { name: '目录触控一级标题', exact: true });
+  const tocChildTitle = tocPanel.getByRole('button', { name: '目录触控二级标题', exact: true });
+  await tocParentCollapse.waitFor();
+  await tocChildTitle.waitFor();
+  for (const [label, control] of [
+    ['目录开合', tocHeader],
+    ['目录分组折叠', tocParentCollapse],
+    ['一级标题跳转', tocParentTitle],
+    ['二级标题跳转', tocChildTitle],
+  ] as const) {
+    await assertMinimumTapTarget(control, `editor TOC ${label}`);
+  }
+  assert.ok(await toolbarPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+    'editor TOC view has no horizontal overflow');
+  await tocParentTitle.click();
+  assert.equal(await tocParentTitle.getAttribute('aria-current'), 'location', 'the TOC identifies the heading at the current reading location');
+  assert.equal(await tocPanel.locator('button[aria-current="location"]').count(), 1, 'only one TOC heading is announced as the current reading location');
+  await tocChildTitle.click();
+  assert.equal(await tocChildTitle.getAttribute('aria-current'), 'location', 'following a child heading moves the current reading location');
+  assert.equal(await tocParentTitle.getAttribute('aria-current'), null, 'the previous heading is no longer marked as current');
+  assert.equal(await tocPanel.locator('button[aria-current="location"]').count(), 1, 'the TOC keeps exactly one current heading after navigation');
+  await tocParentCollapse.click();
+  assert.equal(await tocParentExpand.getAttribute('aria-expanded'), 'false', 'the TOC parent disclosure reports its collapsed state');
+  assert.equal(await tocChildTitle.count(), 0, 'collapsing a TOC parent hides its child heading');
+  await tocParentExpand.click();
+  await tocChildTitle.waitFor();
+  assert.equal(await tocParentCollapse.getAttribute('aria-expanded'), 'true', 'reopening the TOC parent restores its expanded state');
+  await tocHeader.click();
+  assert.equal(await tocHeader.getAttribute('aria-expanded'), 'false', 'the TOC list header exposes its collapsed state');
+  await tocHeader.click();
+  assert.equal(await tocHeader.getAttribute('aria-expanded'), 'true', 'the TOC list header exposes its restored expanded state');
+  await toolbarPage.setViewportSize({ width: 1440, height: 960 });
+  await openTocToolbarToggle.click();
+  assert.equal(await editorToolbar.locator('button[title="显示目录"]').getAttribute('aria-expanded'), 'false', 'the editor toolbar reports the table-of-contents panel as collapsed after closing');
+  assert.equal(await toolbarPage.locator('.toc-panel').count(), 0, 'closing the table-of-contents panel removes it from the page');
 
   const findReplaceTrigger = toolbarPage.getByRole('button', { name: '查找替换', exact: true }).last();
   const findReplacePanel = toolbarPage.getByRole('search', { name: '编辑器查找替换' });
@@ -1711,15 +2077,7 @@ try {
     const topicLink = themePage.getByRole('button', { name: '协作审阅稿件', exact: true }).first();
     await topicLink.hover();
     await themePage.waitForTimeout(350);
-    const colors = await topicLink.evaluate((element) => ({
-      foreground: getComputedStyle(element).color,
-      surface: getComputedStyle(document.documentElement).getPropertyValue('--xmt-surface'),
-    }));
-    const foreground = parseContrastColor(colors.foreground);
-    const surface = parseContrastColor(colors.surface);
-    const ratio = foreground && surface
-      ? (Math.max(relativeLuminance(foreground), relativeLuminance(surface)) + 0.05) / (Math.min(relativeLuminance(foreground), relativeLuminance(surface)) + 0.05)
-      : 0;
+    const ratio = await renderedTextContrastRatio(topicLink);
     assert.ok(ratio >= 4.5, `关联选题链接在 ${theme} 主题悬停时对比度应至少 4.5:1，实际 ${ratio.toFixed(2)}:1`);
 
     await themePage.getByRole('button', { name: '添加资料', exact: true }).click();
@@ -1736,6 +2094,60 @@ try {
     assert.equal(savedContents.length, 0, 'theme review never inserts a resource or edits the isolated manuscript');
   }
   await themeContext.close();
+
+  const errorStateContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const errorStatePage = await errorStateContext.newPage();
+  errorStatePage.setDefaultTimeout(5000);
+  for (const viewport of [
+    { width: 1440, height: 960, label: 'desktop' },
+    { width: 390, height: 844, label: 'mobile' },
+  ]) {
+    await errorStatePage.setViewportSize(viewport);
+    for (const theme of ['light', 'dark'] as const) {
+      await errorStatePage.request.post(`${base}/__qa/reset-review-fixture`);
+      const beforeReadFailure = await errorStatePage.request.get(`${base}/__qa/state`).then((response) => response.json());
+      await errorStatePage.request.post(`${base}/__qa/fail-next-production-detail-read`);
+      await errorStatePage.goto(`${base}/__qa?theme=${theme}`);
+      const errorTitle = errorStatePage.getByRole('heading', { name: '暂时无法读取创作详情', exact: true });
+      await errorTitle.waitFor();
+      const errorDescription = errorStatePage.getByRole('alert').getByText(/隔离测试模拟创作详情读取失败/);
+      const retryDetail = errorStatePage.getByRole('button', { name: '重新读取创作详情', exact: true });
+      await errorDescription.waitFor();
+      assert.equal(await errorStatePage.getByRole('heading', { name: '创作记录不存在', exact: true }).count(), 0,
+        `${viewport.label} ${theme} temporary read failure is not presented as a missing record`);
+      assert.equal(await errorStatePage.getByRole('alert').count(), 1,
+        `${viewport.label} ${theme} initial read failure has one in-page announcement and no duplicate toast`);
+      for (const [label, locator] of [
+        ['错误标题', errorTitle],
+        ['错误说明', errorDescription],
+      ] as const) {
+        const contrast = await renderedTextContrastRatio(locator);
+        assert.ok(contrast >= 4.5, `${viewport.label} ${theme} ${label} contrast is at least 4.5:1; actual ${contrast.toFixed(2)}:1`);
+      }
+      const retryContrasts = await renderedGradientTextContrastRatios(retryDetail);
+      assert.ok(retryContrasts.length > 0 && Math.min(...retryContrasts) >= 4.5,
+        `${viewport.label} ${theme} retry button text has at least 4.5:1 contrast over every gradient stop; actual ${retryContrasts.map((ratio) => ratio.toFixed(2)).join('/')}:1`);
+      assert.ok(await errorStatePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth
+        && document.body.scrollWidth <= innerWidth), `${viewport.label} ${theme} ${viewport.width}px error state has no horizontal overflow`);
+
+      await retryDetail.click();
+      if (viewport.width < 768) {
+        await errorStatePage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).waitFor();
+      } else {
+        await errorStatePage.getByRole('heading', { name: '协作审阅稿件', exact: true }).waitFor();
+      }
+      assert.equal(await errorStatePage.getByRole('alert').count(), 0,
+        `${viewport.label} ${theme} successful explicit retry clears the unavailable state`);
+      const afterRecovery = await errorStatePage.request.get(`${base}/__qa/state`).then((response) => response.json());
+      assert.equal(afterRecovery.productionDetailReadAttempts, beforeReadFailure.productionDetailReadAttempts + 2,
+        `${viewport.label} ${theme} error recovery performs one failed detail GET and one explicit retry GET`);
+      assert.equal(afterRecovery.apiMutationAttempts, beforeReadFailure.apiMutationAttempts,
+        `${viewport.label} ${theme} detail read failure and retry do not send business write requests`);
+      assert.equal(afterRecovery.productionReviewAttempts, beforeReadFailure.productionReviewAttempts,
+        `${viewport.label} ${theme} detail read failure and retry do not submit a review`);
+    }
+  }
+  await errorStateContext.close();
 
   const toolbarZoomViewport = await setViewportAtBrowserZoom(toolbarPage, { width: 1024, height: 900 }, 1.25);
   await toolbarPage.waitForTimeout(100);
@@ -1794,7 +2206,7 @@ try {
   const scrollingMoreMenu = toolbarPage.locator('.editor-toolbar button[title="更多操作"]').last();
   await scrollingMoreMenu.scrollIntoViewIfNeeded();
   await scrollingMoreMenu.click();
-  const scrollingMoreMenuPopup = toolbarPage.locator('.editor-toolbar div.absolute.z-50').filter({ hasText: '批注' }).last();
+  const scrollingMoreMenuPopup = toolbarPage.locator('.editor-toolbar div.absolute.z-editor-menu').filter({ hasText: '批注' }).last();
   await scrollingMoreMenuPopup.waitFor({ state: 'visible' });
   await toolbarPage.evaluate(() => {
     const scroller = Array.from(document.querySelectorAll('div')).find((element) => element.classList.contains('md:overflow-y-auto'));
@@ -1811,6 +2223,21 @@ try {
     { trigger: 'button[title="高亮颜色"]', menuText: '高亮颜色', name: '高亮颜色' },
     { trigger: 'button[title="更多操作"]', menuText: '左对齐', name: '更多操作' },
   ];
+  const assertEditorMenuLayer = async (menu: import('playwright').Locator, label: string) => {
+    const layers = await menu.evaluate((element) => {
+      const root = getComputedStyle(document.documentElement);
+      return {
+        actual: Number.parseInt(getComputedStyle(element).zIndex, 10),
+        editorMenu: Number.parseInt(root.getPropertyValue('--xmt-z-editor-menu'), 10),
+        command: Number.parseInt(root.getPropertyValue('--xmt-z-command'), 10),
+        modal: Number.parseInt(root.getPropertyValue('--xmt-z-modal'), 10),
+      };
+    });
+    assert.equal(layers.actual, layers.editorMenu, `${label} uses the shared editor menu z-index token: ${JSON.stringify(layers)}`);
+    assert.ok(layers.editorMenu > layers.command && layers.editorMenu > layers.modal,
+      `${label} stays above command and modal layers: ${JSON.stringify(layers)}`);
+  };
+  const editorMenuWriteBaseline = await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json());
   for (const { viewport, zoom, label } of [
     { viewport: { width: 1024, height: 600 }, zoom: 1.25, label: '1024x600 at 125% zoom' },
     { viewport: { width: 320, height: 812 }, zoom: 1, label: '320x812' },
@@ -1818,9 +2245,12 @@ try {
     await setViewportAtBrowserZoom(toolbarPage, viewport, zoom);
     for (const { trigger: triggerSelector, menuText, name } of dropdownCases) {
       const trigger = toolbarPage.locator(triggerSelector).last();
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false', `${name} dropdown starts collapsed`);
       await trigger.click();
-      const menu = toolbarPage.locator('.editor-toolbar div.absolute.z-50').filter({ hasText: menuText }).last();
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'true', `${name} dropdown reports its expanded state`);
+      const menu = toolbarPage.locator('.editor-toolbar div.absolute.z-editor-menu').filter({ hasText: menuText }).last();
       await menu.waitFor({ state: 'visible' });
+      await assertEditorMenuLayer(menu, `${name} toolbar menu`);
       const geometry = await menu.evaluate((element) => {
         const rect = element.getBoundingClientRect();
         const triggerRect = element.parentElement?.querySelector('button')?.getBoundingClientRect();
@@ -1862,7 +2292,29 @@ try {
           `all ${name} swatches remain clickable above the navigation sidebar in the ${label} CSS viewport: ${JSON.stringify(swatchTargets)}`);
       }
       await trigger.click();
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false', `${name} dropdown reports its collapsed state after closing`);
     }
+  }
+  const editorMenuWriteState = await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  for (const key of ['productionSaveAttempts', 'productionVersionSaveAttempts', 'productionReviewAttempts', 'productionStatusUpdateAttempts', 'reviewThreadCreateAttempts', 'reviewReplyAttempts', 'reviewStatusAttempts', 'productionDeleteAttempts', 'apiMutationAttempts', 'savedContents'] as const) {
+    assert.deepEqual(editorMenuWriteState[key], editorMenuWriteBaseline[key], `opening and closing editor menus does not write business data (${key})`);
+  }
+
+  const floatingMenuEditor = toolbarPage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).first();
+  const firstFloatingMenuParagraph = floatingMenuEditor.locator('p').filter({ hasText: '第一段文字需要审阅。' }).first();
+  await firstFloatingMenuParagraph.click({ position: { x: 1, y: 1 } });
+  await toolbarPage.keyboard.press('Home');
+  const floatingInsertTrigger = toolbarPage.getByRole('button', { name: '插入', exact: true });
+  await floatingInsertTrigger.waitFor({ state: 'visible' });
+  await floatingInsertTrigger.click();
+  const floatingInsertMenu = toolbarPage.locator('div.absolute.z-editor-menu').filter({ hasText: '插入内容' }).last();
+  await floatingInsertMenu.waitFor({ state: 'visible' });
+  await assertEditorMenuLayer(floatingInsertMenu, 'FloatingMenu insert submenu');
+  await floatingInsertTrigger.click();
+
+  const floatingMenuWriteState = await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  for (const key of ['productionSaveAttempts', 'productionVersionSaveAttempts', 'productionReviewAttempts', 'productionStatusUpdateAttempts', 'reviewThreadCreateAttempts', 'reviewReplyAttempts', 'reviewStatusAttempts', 'productionDeleteAttempts', 'apiMutationAttempts', 'savedContents'] as const) {
+    assert.deepEqual(floatingMenuWriteState[key], editorMenuWriteBaseline[key], `opening and closing the FloatingMenu submenu does not write business data (${key})`);
   }
 
   await toolbarPage.setViewportSize({ width: 1440, height: 960 });
@@ -1881,15 +2333,19 @@ try {
       { triggerTitle: '高亮颜色', panelTitle: '高亮颜色' },
     ]) {
       const trigger = toolbarPage.locator(`.editor-toolbar button[title="${triggerTitle}"]`).last();
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false', `${theme} ${panelTitle} toolbar picker starts collapsed`);
       await trigger.click();
-      const popover = toolbarPage.locator('.editor-toolbar div.absolute.z-50').filter({ hasText: panelTitle }).last();
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'true', `${theme} ${panelTitle} toolbar picker reports expanded state`);
+      const popover = toolbarPage.locator('.editor-toolbar div.absolute.z-editor-menu').filter({ hasText: panelTitle }).last();
       await popover.waitFor({ state: 'visible' });
+      await assertEditorMenuLayer(popover, `${theme} ${panelTitle} toolbar palette`);
       const label = popover.getByText(panelTitle, { exact: true });
       const labelClass = await label.getAttribute('class');
       const contrast = await renderedTextContrastRatio(label);
       assert.ok(labelClass?.includes('text-studio-text-secondary'), `${theme} ${panelTitle} toolbar title uses the shared Studio secondary-text token`);
       assert.ok(contrast >= 4.5, `${theme} ${panelTitle} toolbar title meets 4.5:1 contrast; actual ${contrast.toFixed(2)}:1`);
       await trigger.click();
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false', `${theme} ${panelTitle} toolbar picker returns to collapsed state`);
     }
   }
 
@@ -1954,8 +2410,9 @@ try {
       assert.ok(hoverContrast >= 4.5, `${theme} BubbleMenu hover icon contrast stays at least 4.5:1; actual ${hoverContrast.toFixed(2)}:1`);
       const colorTrigger = menu.locator('button[title="文字颜色"]');
       await colorTrigger.click();
-      const colorPopover = responsiveBubblePage.locator('.z-editor-menu div.absolute.z-50').filter({ hasText: '文字颜色' }).last();
+      const colorPopover = responsiveBubblePage.locator('.z-editor-menu div.absolute.z-editor-menu').filter({ hasText: '文字颜色' }).last();
       await colorPopover.waitFor({ state: 'visible' });
+      await assertEditorMenuLayer(colorPopover, `${theme} BubbleMenu text color palette`);
       const colorPopoverGeometry = await colorPopover.evaluate((element) => {
         const rect = element.getBoundingClientRect();
         return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight };
@@ -1973,8 +2430,9 @@ try {
       await colorTrigger.click();
       const highlightTrigger = menu.locator('button[title="高亮"]');
       await highlightTrigger.click();
-      const highlightPopover = responsiveBubblePage.locator('.z-editor-menu div.absolute.z-50').filter({ hasText: '高亮颜色' }).last();
+      const highlightPopover = responsiveBubblePage.locator('.z-editor-menu div.absolute.z-editor-menu').filter({ hasText: '高亮颜色' }).last();
       await highlightPopover.waitFor({ state: 'visible' });
+      await assertEditorMenuLayer(highlightPopover, `${theme} BubbleMenu highlight palette`);
       const highlightPopoverGeometry = await highlightPopover.evaluate((element) => {
         const rect = element.getBoundingClientRect();
         return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight };
@@ -1999,6 +2457,59 @@ try {
   assert.equal(responsiveBubbleStateAfter.content, responsiveBubbleStateBefore.content, 'BubbleMenu responsive checks do not modify manuscript content');
   await responsiveBubbleContext.close();
 
+  const tabletTouchContext = await browser.newContext({
+    viewport: { width: 768, height: 1024 },
+    isMobile: true,
+    hasTouch: true,
+    reducedMotion: 'reduce',
+  });
+  const tabletTouchPage = await tabletTouchContext.newPage();
+  tabletTouchPage.setDefaultTimeout(5000);
+  const tabletTouchStateBefore = await tabletTouchPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  await tabletTouchPage.goto(`${base}/__qa?theme=light`);
+  assert.equal(await tabletTouchPage.evaluate(() => matchMedia('(any-pointer: coarse)').matches), true, '768px tablet context exposes a coarse pointer');
+  const tabletTouchEditor = tabletTouchPage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅。' }).first();
+  await tabletTouchEditor.waitFor({ state: 'visible' });
+  await tabletTouchPage.getByText('当前没有协作者正在编辑正文。', { exact: true }).waitFor();
+  const tabletTouchParagraph = tabletTouchEditor.locator('p').filter({ hasText: '第一段文字需要审阅。' }).first();
+  await tabletTouchParagraph.scrollIntoViewIfNeeded();
+  await tabletTouchParagraph.click({ position: { x: 1, y: 1 } });
+  await tabletTouchPage.keyboard.press('Home');
+  for (let index = 0; index < '第一段文字需要审阅。'.length; index += 1) await tabletTouchPage.keyboard.press('Shift+ArrowRight');
+  const tabletTouchMenu = tabletTouchPage.locator('.z-editor-menu');
+  await tabletTouchMenu.waitFor({ state: 'visible' });
+  for (const { triggerTitle, groupName } of [
+    { triggerTitle: '文字颜色', groupName: '文字颜色选项' },
+    { triggerTitle: '高亮', groupName: '高亮颜色选项' },
+  ]) {
+    await tabletTouchMenu.locator(`button[title="${triggerTitle}"]`).tap();
+    const group = tabletTouchPage.getByRole('group', { name: groupName });
+    await group.waitFor({ state: 'visible' });
+    const swatchSizes = await group.locator('button').evaluateAll((elements) => elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    }));
+    assert.equal(swatchSizes.length, 8, `768px coarse-pointer ${groupName} keeps all eight choices`);
+    assert.ok(swatchSizes.every((size) => size.width >= 40 && size.height >= 40),
+      `768px coarse-pointer ${groupName} swatches remain at least 40x40px: ${JSON.stringify(swatchSizes)}`);
+    const paletteGeometry = await group.evaluate((element) => {
+      const rect = element.parentElement?.getBoundingClientRect();
+      return rect ? { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom } : null;
+    });
+    assert.ok(paletteGeometry
+      && paletteGeometry.x >= 0
+      && paletteGeometry.y >= 0
+      && paletteGeometry.right <= 768
+      && paletteGeometry.bottom <= 1024,
+    `768px coarse-pointer ${groupName} palette stays in the viewport: ${JSON.stringify(paletteGeometry)}`);
+  }
+  assert.ok(await tabletTouchPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth),
+    '768px coarse-pointer BubbleMenu interactions do not introduce horizontal page overflow');
+  const tabletTouchStateAfter = await tabletTouchPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.deepEqual(tabletTouchStateAfter.savedContents, tabletTouchStateBefore.savedContents, '768px coarse-pointer palette checks do not save the manuscript');
+  assert.equal(tabletTouchStateAfter.content, tabletTouchStateBefore.content, '768px coarse-pointer palette checks do not modify manuscript content');
+  await tabletTouchContext.close();
+
   await selectToolbarParagraph(bubbleEditor);
   assert.equal(await toolbarPage.evaluate(() => window.getSelection()?.toString()), '第一段文字需要审阅。');
   for (const { triggerTitle, panelTitle } of [
@@ -2007,6 +2518,7 @@ try {
   ]) {
     const trigger = toolbarPage.locator(`button[title="${triggerTitle}"]`).last();
     await trigger.waitFor({ state: 'visible' });
+      assert.equal(await trigger.getAttribute('aria-expanded'), 'false', `${triggerTitle} BubbleMenu picker starts collapsed`);
     await trigger.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'center' }));
     const triggerBounds = await trigger.boundingBox();
     const triggerViewport = await toolbarPage.evaluate(() => ({ width: innerWidth, height: innerHeight }));
@@ -2017,7 +2529,8 @@ try {
       && triggerBounds.y + triggerBounds.height <= triggerViewport.height,
     `${triggerTitle} bubble trigger is inside the viewport before click: ${JSON.stringify({ bounds: triggerBounds, viewport: triggerViewport })}`);
     await trigger.click();
-    const popover = trigger.locator('xpath=..').locator('div.absolute.z-50').filter({ hasText: panelTitle }).last();
+    assert.equal(await trigger.getAttribute('aria-expanded'), 'true', `${triggerTitle} BubbleMenu picker reports expanded state`);
+    const popover = trigger.locator('xpath=..').locator('div.absolute.z-editor-menu').filter({ hasText: panelTitle }).last();
     await popover.waitFor({ state: 'visible' });
     const geometry = await popover.evaluate((element) => {
       const rect = element.getBoundingClientRect();
@@ -2037,6 +2550,7 @@ try {
       assert.ok(scrolledGeometry.x >= -1 && scrolledGeometry.right <= scrolledGeometry.viewportWidth + 1 && scrolledGeometry.y >= -1 && scrolledGeometry.bottom <= scrolledGeometry.viewportHeight + 1, `open highlighter remains visible while its selection scrolls: ${JSON.stringify(scrolledGeometry)}`);
     }
     await trigger.click();
+    assert.equal(await trigger.getAttribute('aria-expanded'), 'false', `${triggerTitle} BubbleMenu picker reports collapsed state after closing`);
   }
 
   await toolbarPage.goto(`${base}/__qa?theme=dark`);
@@ -2060,7 +2574,7 @@ try {
       && triggerBounds.y + triggerBounds.height <= triggerViewport.height,
     `${triggerTitle} dark bubble trigger is inside the viewport before click: ${JSON.stringify({ bounds: triggerBounds, viewport: triggerViewport })}`);
     await trigger.click();
-    const popover = trigger.locator('xpath=..').locator('div.absolute.z-50').filter({ hasText: panelTitle }).last();
+    const popover = trigger.locator('xpath=..').locator('div.absolute.z-editor-menu').filter({ hasText: panelTitle }).last();
     await popover.waitFor({ state: 'visible' });
     const labelContrast = await renderedTextContrastRatio(popover.getByText(panelTitle, { exact: true }));
     assert.ok(labelContrast >= 4.5, `${panelTitle} bubble popover label meets 4.5:1 contrast in dark theme; actual ${labelContrast.toFixed(2)}:1`);
@@ -2070,8 +2584,10 @@ try {
   const exportZoomViewport = await setViewportAtBrowserZoom(toolbarPage, { width: 1920, height: 600 }, 1.25);
   const exportTrigger = toolbarPage.locator('button[title="导出"]');
   await exportTrigger.waitFor({ state: 'visible' });
+  assert.equal(await exportTrigger.getAttribute('aria-expanded'), 'false', 'the export dropdown starts collapsed');
   await exportTrigger.click();
-  const exportMenu = toolbarPage.locator('.editor-toolbar div.absolute.z-50').filter({ hasText: '导出 Markdown' }).last();
+  assert.equal(await exportTrigger.getAttribute('aria-expanded'), 'true', 'the export dropdown reports its expanded state');
+  const exportMenu = toolbarPage.locator('.editor-toolbar div.absolute.z-editor-menu').filter({ hasText: '导出 Markdown' }).last();
   await exportMenu.waitFor({ state: 'visible' });
   const exportGeometry = await exportMenu.evaluate((element) => {
     const rect = element.getBoundingClientRect();
@@ -2081,6 +2597,7 @@ try {
   assert.ok(exportGeometry.x >= -1 && exportGeometry.right <= exportGeometry.viewportWidth + 1 && exportGeometry.y >= -1 && exportGeometry.bottom <= exportGeometry.viewportHeight + 1, `export menu stays in the effective ${exportZoomViewport.width}x${exportZoomViewport.height} CSS viewport for 1920x600 at 125% zoom: ${JSON.stringify(exportGeometry)}`);
   assert.ok(exportGeometry.bottom <= (exportGeometry.triggerTop ?? 0) + 1 || exportGeometry.y >= (exportGeometry.triggerBottom ?? 0) - 1, `export menu stays adjacent to its trigger: ${JSON.stringify(exportGeometry)}`);
   await exportTrigger.click();
+  assert.equal(await exportTrigger.getAttribute('aria-expanded'), 'false', 'the export dropdown reports its collapsed state after closing');
 
   await toolbarPage.setViewportSize({ width: 1440, height: 960 });
   await toolbarPage.goto(`${base}/__qa?theme=light`);
@@ -2091,6 +2608,16 @@ try {
   await contextEditor.click({ button: 'right', position: { x: 300, y: 42 } });
   const contextMenu = toolbarPage.getByTestId('editor-context-menu');
   await contextMenu.waitFor({ state: 'visible' });
+  const assertContextMenuTouchTargets = async (label: string) => {
+    const targets = contextMenu.locator('button[role="menuitem"]:visible');
+    const sizes = await targets.evaluateAll((elements) => elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { label: element.getAttribute('aria-label') || element.textContent?.trim(), width: rect.width, height: rect.height };
+    }));
+    assert.ok(sizes.length >= 15 && sizes.every((size) => size.width >= 40 && size.height >= 40),
+      `${label} visible context-menu controls meet the 40x40px touch target: ${JSON.stringify(sizes)}`);
+  };
+  await assertContextMenuTouchTargets('390px');
   assert.equal(await contextMenu.evaluate((menu) => menu.parentElement === document.body), true, 'editor context menu escapes transformed and clipping glass panels');
   await toolbarPage.evaluate(() => document.documentElement.style.setProperty('--xmt-z-editor-menu', '450'));
   assert.equal(await contextMenu.evaluate((element) => getComputedStyle(element).zIndex), '450', 'editor menus consume the shared layer token');
@@ -2106,6 +2633,14 @@ try {
   await contextMenu.getByText('文字颜色', { exact: true }).hover();
   const contextColorSubmenu = contextMenu.getByTestId('editor-context-color-submenu');
   await contextColorSubmenu.waitFor({ state: 'visible' });
+  await assertContextMenuTouchTargets('390px with text-color submenu');
+  const textColorSwatchSizes = await contextColorSubmenu.locator('button[title]').evaluateAll((elements) => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { label: element.getAttribute('title'), width: rect.width, height: rect.height };
+  }));
+  assert.equal(textColorSwatchSizes.length, 8, 'text color palette keeps all eight choices');
+  assert.ok(textColorSwatchSizes.every((size) => size.width >= 40 && size.height >= 40),
+    `text color choices meet the 40x40px touch target: ${JSON.stringify(textColorSwatchSizes)}`);
   const submenuGeometry = await contextColorSubmenu.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return { side: element.getAttribute('data-side'), x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight };
@@ -2120,6 +2655,87 @@ try {
   await toolbarPage.keyboard.press('Escape');
   await contextMenu.waitFor({ state: 'hidden' });
 
+  await contextEditor.click({ button: 'right', position: { x: 112, y: 42 } });
+  await contextMenu.waitFor({ state: 'visible' });
+  const narrowDesktopMenuBeforeResize = await contextMenu.evaluate((menu) => ({
+    width: innerWidth,
+    side: menu.querySelector('[data-testid="editor-context-color-submenu"]')?.getAttribute('data-side'),
+    left: menu.getBoundingClientRect().left,
+  }));
+  assert.equal(narrowDesktopMenuBeforeResize.side, 'left', `390px menu reserves space for its submenu: ${JSON.stringify(narrowDesktopMenuBeforeResize)}`);
+  assert.ok(narrowDesktopMenuBeforeResize.left >= 168, `390px menu leaves enough room for a full-width submenu: ${JSON.stringify(narrowDesktopMenuBeforeResize)}`);
+  await contextMenu.getByText('文字颜色', { exact: true }).hover();
+  const resizedColorSubmenu = contextMenu.getByTestId('editor-context-color-submenu');
+  const narrowSubmenuBeforeResize = await resizedColorSubmenu.evaluate((submenu) => {
+    const bounds = submenu.getBoundingClientRect();
+    return { width: innerWidth, side: submenu.getAttribute('data-side'), left: bounds.left, right: bounds.right };
+  });
+  assert.equal(narrowSubmenuBeforeResize.side, 'left');
+  assert.ok(narrowSubmenuBeforeResize.left >= 0 && narrowSubmenuBeforeResize.right <= narrowSubmenuBeforeResize.width,
+    `390px submenu stays fully inside its viewport: ${JSON.stringify(narrowSubmenuBeforeResize)}`);
+  await toolbarPage.setViewportSize({ width: 500, height: 844 });
+  const widenedSubmenuGeometry = await resizedColorSubmenu.evaluate((submenu) => {
+    const bounds = submenu.getBoundingClientRect();
+    const menuBounds = submenu.parentElement?.getBoundingClientRect();
+    return { width: innerWidth, side: submenu.getAttribute('data-side'), left: bounds.left, right: bounds.right, menuLeft: menuBounds?.left };
+  });
+  assert.equal(widenedSubmenuGeometry.side, 'right', `submenu direction updates after widening the viewport: ${JSON.stringify(widenedSubmenuGeometry)}`);
+  assert.ok(widenedSubmenuGeometry.left >= 0 && widenedSubmenuGeometry.right <= widenedSubmenuGeometry.width,
+    `open submenu stays inside a widened viewport: ${JSON.stringify(widenedSubmenuGeometry)}`);
+  await toolbarPage.setViewportSize({ width: 390, height: 844 });
+  const narrowedSubmenuAfterResize = await resizedColorSubmenu.evaluate((submenu) => {
+    const bounds = submenu.getBoundingClientRect();
+    return { width: innerWidth, side: submenu.getAttribute('data-side'), left: bounds.left, right: bounds.right };
+  });
+  assert.equal(narrowedSubmenuAfterResize.side, 'left', `submenu direction returns after narrowing the viewport: ${JSON.stringify(narrowedSubmenuAfterResize)}`);
+  assert.ok(narrowedSubmenuAfterResize.left >= 0 && narrowedSubmenuAfterResize.right <= narrowedSubmenuAfterResize.width,
+    `open submenu stays inside a narrowed viewport: ${JSON.stringify(narrowedSubmenuAfterResize)}`);
+  await toolbarPage.keyboard.press('Escape');
+  await resizedColorSubmenu.waitFor({ state: 'hidden' });
+  await toolbarPage.keyboard.press('Escape');
+  await contextMenu.waitFor({ state: 'hidden' });
+
+  await contextEditor.click({ button: 'right', position: { x: 300, y: 42 } });
+  await contextMenu.waitFor({ state: 'visible' });
+  await contextMenu.locator('button[role="menuitem"]').first().focus();
+  for (let index = 0; index < 7; index += 1) await toolbarPage.keyboard.press('ArrowDown');
+  const leftOpeningTrigger = contextMenu.getByRole('menuitem', { name: '文字颜色', exact: true });
+  assert.equal(await contextMenu.getByTestId('editor-context-color-submenu').getAttribute('data-side'), 'left', 'right-edge keyboard scenario opens the submenu to the left');
+  await toolbarPage.keyboard.press('ArrowLeft');
+  const leftOpeningChoice = contextMenu.getByRole('menuitem', { name: '文字颜色：默认' });
+  await leftOpeningChoice.waitFor({ state: 'visible' });
+  assert.equal(await leftOpeningChoice.evaluate((button) => button === document.activeElement), true, 'ArrowLeft enters a submenu that opens to the left');
+  await toolbarPage.keyboard.press('ArrowRight');
+  assert.equal(await leftOpeningTrigger.evaluate((button) => button === document.activeElement), true, 'ArrowRight closes the left-opening submenu and restores its trigger focus');
+  await toolbarPage.keyboard.press('Escape');
+  await contextMenu.waitFor({ state: 'hidden' });
+
+  await toolbarPage.setViewportSize({ width: 320, height: 844 });
+  await contextEditor.click({ button: 'right', position: { x: 240, y: 42 } });
+  await contextMenu.waitFor({ state: 'visible' });
+  await assertContextMenuTouchTargets('320px');
+  const compactContextMenuBounds = await contextMenu.boundingBox();
+  assert.ok(compactContextMenuBounds
+    && compactContextMenuBounds.x >= 0
+    && compactContextMenuBounds.y >= 0
+    && compactContextMenuBounds.x + compactContextMenuBounds.width <= 320
+    && compactContextMenuBounds.y + compactContextMenuBounds.height <= 844,
+  `right-click menu stays inside the 320x844 viewport: ${JSON.stringify(compactContextMenuBounds)}`);
+  await contextMenu.getByText('文字颜色', { exact: true }).click();
+  await contextColorSubmenu.waitFor({ state: 'visible' });
+  const compactColorSubmenuBounds = await contextColorSubmenu.boundingBox();
+  assert.ok(compactColorSubmenuBounds
+    && compactColorSubmenuBounds.x >= 0
+    && compactColorSubmenuBounds.x + compactColorSubmenuBounds.width <= 320
+    && compactColorSubmenuBounds.y >= 0
+    && compactColorSubmenuBounds.y + compactColorSubmenuBounds.height <= 844,
+  `color submenu stays inside the 320x844 viewport: ${JSON.stringify(compactColorSubmenuBounds)}`);
+  await assertContextMenuTouchTargets('320px with text-color submenu');
+  await toolbarPage.keyboard.press('Escape');
+  await contextColorSubmenu.waitFor({ state: 'hidden' });
+  await toolbarPage.keyboard.press('Escape');
+  await contextMenu.waitFor({ state: 'hidden' });
+
   await toolbarPage.setViewportSize({ width: 1440, height: 960 });
   await toolbarPage.goto(`${base}/__qa?theme=dark`);
   await toolbarPage.getByRole('heading', { name: '批注与修改建议' }).waitFor();
@@ -2130,6 +2746,14 @@ try {
   await contextMenu.getByText('高亮颜色', { exact: true }).hover();
   const contextHighlightSubmenu = contextMenu.getByTestId('editor-context-highlight-submenu');
   await contextHighlightSubmenu.waitFor({ state: 'visible' });
+  await assertContextMenuTouchTargets('390px with highlight-color submenu');
+  const highlightSwatchSizes = await contextHighlightSubmenu.locator('button[title]').evaluateAll((elements) => elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return { label: element.getAttribute('title'), width: rect.width, height: rect.height };
+  }));
+  assert.equal(highlightSwatchSizes.length, 8, 'highlight palette keeps all eight choices');
+  assert.ok(highlightSwatchSizes.every((size) => size.width >= 40 && size.height >= 40),
+    `highlight choices meet the 40x40px touch target: ${JSON.stringify(highlightSwatchSizes)}`);
   const highlightGeometry = await contextHighlightSubmenu.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return { side: element.getAttribute('data-side'), x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight };
@@ -2144,47 +2768,131 @@ try {
   await toolbarPage.keyboard.press('Escape');
   await contextMenu.waitFor({ state: 'hidden' });
 
+  await toolbarPage.setViewportSize({ width: 819, height: 480 });
+  await contextEditor.evaluate((editor) => editor.scrollIntoView({ block: 'center', inline: 'nearest' }));
+  await contextEditor.click({ button: 'right', position: { x: 112, y: 42 } });
+  await contextMenu.waitFor({ state: 'visible' });
+  const zoomedContextScroll = contextMenu.locator('div.overflow-y-auto').first();
+  const zoomedContextScrollGeometry = await zoomedContextScroll.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    menuOverflow: getComputedStyle(element.parentElement!).overflow,
+  }));
+  assert.ok(zoomedContextScrollGeometry.scrollHeight > zoomedContextScrollGeometry.clientHeight,
+    `the context menu keeps its options in a scrollable region at the 125%-equivalent viewport: ${JSON.stringify(zoomedContextScrollGeometry)}`);
+  assert.equal(zoomedContextScrollGeometry.menuOverflow, 'visible', 'the outer menu allows submenus to escape the scrolling region');
+  await contextMenu.getByText('文字颜色', { exact: true }).hover();
+  const zoomedColorSubmenu = contextMenu.getByTestId('editor-context-color-submenu');
+  await zoomedColorSubmenu.waitFor({ state: 'visible' });
+  const zoomedSubmenuGeometry = await zoomedColorSubmenu.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      x: bounds.x,
+      y: bounds.y,
+      right: bounds.right,
+      bottom: bounds.bottom,
+      viewportWidth: innerWidth,
+      viewportHeight: innerHeight,
+      parentOverflow: getComputedStyle(element.parentElement!).overflow,
+    };
+  });
+  assert.ok(zoomedSubmenuGeometry.x >= 0
+    && zoomedSubmenuGeometry.y >= 0
+    && zoomedSubmenuGeometry.right <= zoomedSubmenuGeometry.viewportWidth
+    && zoomedSubmenuGeometry.bottom <= zoomedSubmenuGeometry.viewportHeight,
+  `the text-color submenu remains visible outside the scroll region at the 125%-equivalent viewport: ${JSON.stringify(zoomedSubmenuGeometry)}`);
+  assert.equal(zoomedSubmenuGeometry.parentOverflow, 'visible', 'the submenu is attached to the unclipped outer menu');
+  await toolbarPage.screenshot({ path: '/tmp/xmt-editor-context-submenu-high-zoom.png' });
+  await toolbarPage.keyboard.press('Escape');
+  await zoomedColorSubmenu.waitFor({ state: 'hidden' });
+  await toolbarPage.mouse.move(0, 0);
+  await toolbarPage.keyboard.press('End');
+  const zoomedLastItem = await contextMenu.getByRole('menuitem', { name: /删除选中/ }).evaluate((item) => {
+    const bounds = item.getBoundingClientRect();
+    return { text: item.textContent?.trim(), top: bounds.top, bottom: bounds.bottom, viewportHeight: innerHeight };
+  });
+  assert.ok(zoomedLastItem.top >= 0 && zoomedLastItem.bottom <= zoomedLastItem.viewportHeight,
+    `keyboard navigation scrolls the final context-menu option into view at the 125%-equivalent viewport: ${JSON.stringify(zoomedLastItem)}`);
+  await toolbarPage.keyboard.press('Escape');
+  await contextMenu.waitFor({ state: 'hidden' });
+  await toolbarPage.setViewportSize({ width: 1440, height: 960 });
+
   const contextKeyboardEditor = toolbarPage.locator('.ProseMirror').filter({ hasText: '第一段文字需要审阅' }).first();
   const contextKeyboardBefore = await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json());
   await contextKeyboardEditor.focus();
   await toolbarPage.keyboard.press('Shift+F10');
   await contextMenu.waitFor({ state: 'visible' });
+  assert.equal(await contextMenu.getAttribute('aria-label'), '编辑器上下文菜单', 'the keyboard context menu has a descriptive accessible name');
   const initialKeyboardFocus = await contextMenu.evaluate((menu) => (menu.ownerDocument.activeElement as HTMLElement | null)?.textContent?.trim());
-  assert.ok(initialKeyboardFocus?.includes('粘贴'), `keyboard context-menu invocation moves focus into the menu: ${initialKeyboardFocus}`);
+  assert.ok(initialKeyboardFocus?.includes('复制'), `keyboard context-menu invocation focuses the first menu item, including when disabled: ${initialKeyboardFocus}`);
   await toolbarPage.mouse.move(0, 0);
-  for (let index = 0; index < 5; index += 1) await toolbarPage.keyboard.press('Tab');
-  const textColorTrigger = contextMenu.getByRole('button', { name: '文字颜色', exact: true });
-  assert.equal(await textColorTrigger.getAttribute('aria-expanded'), 'true', 'tabbing to the text-color button opens its accessible color group');
+  for (let index = 0; index < 7; index += 1) await toolbarPage.keyboard.press('ArrowDown');
+  const textColorTrigger = contextMenu.getByRole('menuitem', { name: '文字颜色', exact: true });
+  assert.equal(await textColorTrigger.getAttribute('aria-expanded'), 'true', 'ArrowDown reaches the text-color submenu trigger');
   const textColorPanel = contextMenu.getByTestId('editor-context-color-submenu');
   await textColorPanel.waitFor({ state: 'visible' });
   await toolbarPage.keyboard.press('ArrowRight');
-  const defaultTextColor = contextMenu.getByRole('button', { name: '文字颜色：默认' });
+  const defaultTextColor = contextMenu.getByRole('menuitem', { name: '文字颜色：默认' });
   await defaultTextColor.waitFor({ state: 'visible' });
   assert.equal(await defaultTextColor.evaluate((button) => button === document.activeElement), true, 'ArrowRight moves focus into the text-color choices');
   await toolbarPage.keyboard.press('Escape');
   assert.equal(await textColorTrigger.getAttribute('aria-expanded'), 'false', 'Escape closes the focused text-color group');
   assert.equal(await textColorTrigger.evaluate((button) => button === document.activeElement), true, 'closing the color group restores focus to its trigger');
   await toolbarPage.keyboard.press('Tab');
-  const highlightColorTrigger = contextMenu.getByRole('button', { name: '高亮颜色', exact: true });
-  assert.equal(await highlightColorTrigger.evaluate((button) => button === document.activeElement), true, 'the next keyboard stop after the closed palette is the highlight button');
-  assert.equal(await highlightColorTrigger.getAttribute('aria-expanded'), 'true', 'the highlight button exposes its expanded state when focused');
-  await toolbarPage.keyboard.press('ArrowRight');
-  const firstHighlightColor = contextMenu.getByRole('button', { name: '高亮颜色：黄色' });
-  await firstHighlightColor.waitFor({ state: 'visible' });
-  assert.equal(await firstHighlightColor.evaluate((button) => button === document.activeElement), true, 'ArrowRight moves focus into the highlight choices');
-  await toolbarPage.keyboard.press('Escape');
-  assert.equal(await highlightColorTrigger.evaluate((button) => button === document.activeElement), true, 'closing the highlight group restores focus to its trigger');
-  await toolbarPage.keyboard.press('Escape');
   await contextMenu.waitFor({ state: 'hidden' });
-  assert.equal(await contextKeyboardEditor.evaluate((editor) => editor === document.activeElement), true, 'Escape from the context menu restores focus to the editor');
+  assert.equal(await toolbarPage.evaluate(() => document.activeElement?.closest('[role="menu"]') === null), true, 'Tab exits and dismisses the composite context menu');
   await contextKeyboardEditor.focus();
   await toolbarPage.keyboard.press('ContextMenu');
   await contextMenu.waitFor({ state: 'visible' });
   const contextKeyFocus = await contextMenu.evaluate((menu) => (menu.ownerDocument.activeElement as HTMLElement | null)?.textContent?.trim());
-  assert.ok(contextKeyFocus?.includes('粘贴'), `ContextMenu key opens the menu and moves focus into it: ${contextKeyFocus}`);
+  assert.ok(contextKeyFocus?.includes('复制'), `ContextMenu key opens the menu and moves focus into it: ${contextKeyFocus}`);
   await toolbarPage.keyboard.press('Escape');
   await contextMenu.waitFor({ state: 'hidden' });
   assert.equal(await contextKeyboardEditor.evaluate((editor) => editor === document.activeElement), true, 'Escape after the ContextMenu key restores focus to the editor');
+
+  await toolbarPage.setViewportSize({ width: 320, height: 568 });
+  await contextKeyboardEditor.focus();
+  await toolbarPage.keyboard.press('Shift+F10');
+  await contextMenu.waitFor({ state: 'visible' });
+  await toolbarPage.setViewportSize({ width: 320, height: 400 });
+  const resizedKeyboardMenuGeometry = await contextMenu.evaluate((menu) => {
+    const bounds = menu.getBoundingClientRect();
+    return { viewportWidth: innerWidth, viewportHeight: innerHeight, left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom };
+  });
+  assert.ok(resizedKeyboardMenuGeometry.left >= 0
+    && resizedKeyboardMenuGeometry.top >= 0
+    && resizedKeyboardMenuGeometry.right <= resizedKeyboardMenuGeometry.viewportWidth
+    && resizedKeyboardMenuGeometry.bottom <= resizedKeyboardMenuGeometry.viewportHeight,
+  `an open context menu repositions inside the resized viewport: ${JSON.stringify(resizedKeyboardMenuGeometry)}`);
+  await toolbarPage.setViewportSize({ width: 320, height: 568 });
+  await toolbarPage.keyboard.press('End');
+  const compactKeyboardMenuGeometry = await contextMenu.evaluate((menu) => {
+    const menuBounds = menu.getBoundingClientRect();
+    const active = menu.ownerDocument.activeElement as HTMLElement | null;
+    const activeBounds = active?.getBoundingClientRect();
+    return {
+      viewportHeight: innerHeight,
+      menuTop: menuBounds.top,
+      menuBottom: menuBounds.bottom,
+      menuHeight: menuBounds.height,
+      menuClientHeight: menu.clientHeight,
+      menuScrollHeight: menu.scrollHeight,
+      activeName: active?.textContent?.trim(),
+      activeTop: activeBounds?.top,
+      activeBottom: activeBounds?.bottom,
+    };
+  });
+  assert.ok(compactKeyboardMenuGeometry.menuTop >= 0
+    && compactKeyboardMenuGeometry.menuBottom <= compactKeyboardMenuGeometry.viewportHeight
+    && compactKeyboardMenuGeometry.menuScrollHeight > compactKeyboardMenuGeometry.menuClientHeight,
+  `short viewport keeps the context menu scrollable and inside the screen: ${JSON.stringify(compactKeyboardMenuGeometry)}`);
+  assert.ok(compactKeyboardMenuGeometry.activeName?.includes('删除选中')
+    && (compactKeyboardMenuGeometry.activeTop ?? -1) >= compactKeyboardMenuGeometry.menuTop
+    && (compactKeyboardMenuGeometry.activeBottom ?? Infinity) <= compactKeyboardMenuGeometry.menuBottom,
+  `keyboard End scrolls the final menu item into view: ${JSON.stringify(compactKeyboardMenuGeometry)}`);
+  await toolbarPage.keyboard.press('Escape');
+  await contextMenu.waitFor({ state: 'hidden' });
+
   const contextKeyboardAfter = await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.equal(contextKeyboardAfter.content, contextKeyboardBefore.content, 'keyboard navigation leaves the manuscript content unchanged');
   assert.equal(contextKeyboardAfter.apiMutationAttempts, contextKeyboardBefore.apiMutationAttempts, 'keyboard navigation sends no business write requests');
@@ -2200,7 +2908,7 @@ try {
   const imagePromptBefore = await toolbarPage.request.get(`${base}/__qa/state`).then((response) => response.json());
   const commentEditorToolbar = toolbarPage.locator('.editor-toolbar').filter({ has: toolbarPage.locator('button[title^="格式刷"]') }).last();
   await commentEditorToolbar.locator('button[title="更多操作"]').click();
-  const imageMenu = toolbarPage.locator('.editor-toolbar div.absolute.z-50').filter({ hasText: '图片' }).last();
+  const imageMenu = toolbarPage.locator('.editor-toolbar div.absolute.z-editor-menu').filter({ hasText: '图片' }).last();
   await imageMenu.getByRole('button', { name: '图片', exact: true }).click();
   const imagePrompt = toolbarPage.getByRole('dialog', { name: '插入图片' });
   await imagePrompt.waitFor({ state: 'visible' });
@@ -2215,7 +2923,7 @@ try {
 
   await selectToolbarParagraph(commentEditor);
   await commentEditorToolbar.locator('button[title="更多操作"]').click();
-  const linkMenu = toolbarPage.locator('.editor-toolbar div.absolute.z-50').filter({ hasText: '链接' }).last();
+  const linkMenu = toolbarPage.locator('.editor-toolbar div.absolute.z-editor-menu').filter({ hasText: '链接' }).last();
   await linkMenu.getByRole('button', { name: '链接', exact: true }).click();
   const linkPrompt = toolbarPage.getByRole('dialog', { name: '插入链接' });
   await linkPrompt.waitFor({ state: 'visible' });
@@ -2368,7 +3076,7 @@ try {
   await page.request.post(`${base}/__qa/release-review-thread-create`);
   await createThreadResponse;
   await page.getByText('请补充这段的依据。').waitFor();
-  const replyInput = page.getByLabel('回复内容').first();
+  const replyInput = page.getByRole('textbox', { name: '回复批注：请补充这段的依据。', exact: true });
   const replyButton = page.getByRole('button', { name: /^(回复|使用原编号安全重试|重新核实结果)$/ });
   await replyInput.fill('我会补充来源说明。');
   await page.request.post(`${base}/__qa/fail-next-review-reply`);
@@ -2411,7 +3119,7 @@ try {
   assert.notEqual(await page.evaluate((key) => sessionStorage.getItem(key), replyRecoveryStorageKey), null, 'an unverified reply keeps its same-request recovery marker across refresh');
   await page.reload();
   await page.getByText('需要恢复核实的回复。').waitFor();
-  const replyInputAfterRecovery = page.getByLabel('回复内容').first();
+  const replyInputAfterRecovery = page.getByRole('textbox', { name: '回复批注：请补充这段的依据。', exact: true });
   await page.waitForFunction(async ({ previousStatusReads, storageKey }: { previousStatusReads: number; storageKey: string }) => {
     const state = await (await fetch('/__qa/state')).json();
     return state.reviewReplyStatusReadAttempts > previousStatusReads && sessionStorage.getItem(storageKey) === null;
@@ -2427,6 +3135,11 @@ try {
   await page.getByLabel('修改理由').fill('让表达更直接。');
   await page.getByRole('button', { name: '提交', exact: true }).click();
   await page.getByText('让表达更直接。').waitFor();
+  const commentReplyField = page.getByRole('textbox', { name: '回复批注：请补充这段的依据。', exact: true });
+  const suggestionReplyField = page.getByRole('textbox', { name: '回复修改建议：让表达更直接。', exact: true });
+  assert.equal(await commentReplyField.count(), 1, 'the comment reply field includes its thread summary in the accessible name');
+  assert.equal(await suggestionReplyField.count(), 1, 'the suggestion reply field includes its thread summary in the accessible name');
+  assert.equal(await page.getByRole('textbox', { name: '回复内容', exact: true }).count(), 0, 'reply fields no longer share the generic accessible name');
   await page.request.post(`${base}/__qa/hold-next-production-save`);
   const suggestionSaveResponse = page.waitForResponse((response) => response.request().method() === 'PUT'
     && response.url().endsWith(`/api/workflow/production/${productionId}`)
@@ -2592,6 +3305,13 @@ try {
   await mobilePage.getByLabel('批注内容').fill('移动端已可发起批注');
   await mobilePage.getByRole('button', { name: '提交', exact: true }).click();
   await mobilePage.getByText('移动端已可发起批注').waitFor();
+  const replyAttemptsBeforeNameCheck = await mobilePage.request.get(`${base}/__qa/state`).then((response) => response.json()).then((state) => state.reviewReplyAttempts);
+  const originalMobileReplyField = mobilePage.getByRole('textbox', { name: '回复批注：请补充这段的依据。', exact: true });
+  const newMobileReplyField = mobilePage.getByRole('textbox', { name: '回复批注：移动端已可发起批注', exact: true });
+  assert.equal(await originalMobileReplyField.count(), 1, 'the existing mobile comment reply field retains its own accessible name');
+  assert.equal(await newMobileReplyField.count(), 1, 'the new mobile comment reply field is distinguished by its summary');
+  assert.equal(await mobilePage.request.get(`${base}/__qa/state`).then((response) => response.json()).then((state) => state.reviewReplyAttempts), replyAttemptsBeforeNameCheck,
+    'checking mobile reply field names performs no reply write');
   await mobilePage.request.post(`${base}/__qa/fail-next-collaboration-update`);
   await mobileEditor.click();
   await mobileEditor.press('End');
@@ -2706,18 +3426,171 @@ try {
   await materialEditor.click();
   await materialEditor.press('End');
   await materialEditor.pressSequentially('资料保存失败重试验收');
-  await materialPanel.getByText('保存失败', { exact: true }).waitFor();
-  const retryMaterialSave = materialPanel.getByRole('button', { name: '重试', exact: true });
+  await materialPanel.getByText('结果未记录', { exact: true }).waitFor();
+  const retryMaterialSave = materialPanel.getByRole('button', { name: '确认未记录，重试保存', exact: true });
   assert.ok((await retryMaterialSave.getAttribute('class'))?.includes('text-studio-cyan-contrast'), 'material draft retry uses the contrast-safe cyan text token');
   assert.ok(await textContrastRatio(retryMaterialSave) >= 4.5, 'light-theme material draft retry text contrast is at least 4.5:1');
   await materialPanel.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
   await materialPanel.screenshot({ path: '/tmp/xmt-material-draft-retry-light.png' });
+  const attemptsBeforeExplicitRetry = materialDraftUpdateAttempts;
   await retryMaterialSave.click();
   await materialPanel.getByText('已保存', { exact: true }).waitFor();
   assert.equal(materialDraftRevision, 1, 'retry should recover the isolated material draft and save once');
+  assert.equal(materialDraftUpdateAttempts, attemptsBeforeExplicitRetry + 1, 'the unchanged server baseline is retried only after the user clicks');
+
+  await materialPage.request.post(`${base}/__qa/fail-next-material-draft-update-after-commit`);
+  await materialEditor.click();
+  await materialEditor.press('End');
+  await materialEditor.pressSequentially('响应丢失后已提交');
+  await materialPanel.getByText('已保存', { exact: true }).waitFor();
+  assert.equal(materialDraftRevision, 2, 'readback confirms the committed target revision');
+  assert.equal(materialDraftUpdateAttempts, attemptsBeforeExplicitRetry + 2, 'a committed request with a lost response is never automatically resent');
+  assert.equal(materialDraftWrites.length, 2, 'lost-response recovery does not duplicate the committed draft content');
+
+  await materialPage.request.post(`${base}/__qa/fail-next-material-draft-update`);
+  await materialPage.request.post(`${base}/__qa/fail-next-material-draft-read`);
+  await materialEditor.click();
+  await materialEditor.press('End');
+  await materialEditor.pressSequentially('回读失败保留编辑');
+  await materialPanel.getByText('结果暂未确认', { exact: true }).waitFor();
+  assert.equal(await materialEditor.getAttribute('contenteditable'), 'false', 'an unconfirmed result locks further edits while preserving the local text');
+  const attemptsBeforeReadOnlyRecheck = materialDraftUpdateAttempts;
+  await materialPanel.getByRole('button', { name: '只读重新核实', exact: true }).click();
+  await materialPanel.getByText('结果未记录', { exact: true }).waitFor();
+  assert.equal(materialDraftUpdateAttempts, attemptsBeforeReadOnlyRecheck, 'a read-only recheck never resends the failed write');
+  await materialPanel.getByRole('button', { name: '确认未记录，重试保存', exact: true }).click();
+  await materialPanel.getByText('已保存', { exact: true }).waitFor();
+  assert.equal(materialDraftUpdateAttempts, attemptsBeforeReadOnlyRecheck + 1, 'retry after confirmed no-commit is explicit');
+
+  await materialPage.request.post(`${base}/__qa/conflict-next-material-draft-update`);
+  await materialEditor.click();
+  await materialEditor.press('End');
+  await materialEditor.pressSequentially('本地内容遇到并发更新');
+  await materialPanel.getByText('服务端已有更新', { exact: true }).waitFor();
+  assert.match(await materialEditor.innerText(), /本地内容遇到并发更新/, 'a changed server baseline does not replace the local draft');
+  const attemptsBeforeConflictRecheck = materialDraftUpdateAttempts;
+  await materialPanel.getByRole('button', { name: '只读重新核实', exact: true }).click();
+  await materialPanel.getByText('服务端已有更新', { exact: true }).waitFor();
+  assert.equal(materialDraftUpdateAttempts, attemptsBeforeConflictRecheck, 'a third-party revision remains read-only and is never automatically overwritten');
+  const conflictedMaterialText = await materialEditor.innerText();
+  await materialContext.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
+  await materialPage.getByRole('button', { name: '返回创作管理', exact: true }).click();
+  const materialLeaveDialog = materialPage.getByRole('dialog', { name: '创作资料尚有本地修改' });
+  await materialLeaveDialog.waitFor();
+  await materialLeaveDialog.getByRole('button', { name: '复制本地文字', exact: true }).click();
+  assert.equal(await materialPage.evaluate(() => navigator.clipboard.readText()), conflictedMaterialText, 'the leave prompt copies the preserved local material draft as plain text');
+  await materialLeaveDialog.getByRole('button', { name: '继续留在此页', exact: true }).click();
+  assert.equal(materialPage.url(), `${base}/production/content/${productionId}`, 'canceling the leave prompt keeps the current editor open');
+  assert.equal(await materialEditor.innerText(), conflictedMaterialText, 'canceling the leave prompt preserves the local material text');
+  assert.equal(materialDraftUpdateAttempts, attemptsBeforeConflictRecheck, 'copying and canceling the leave prompt do not write the server draft');
+  await materialPage.getByRole('button', { name: '返回创作管理', exact: true }).click();
+  const discardMaterialDialog = materialPage.getByRole('dialog', { name: '创作资料尚有本地修改' });
+  await discardMaterialDialog.waitFor();
+  await discardMaterialDialog.getByRole('button', { name: '放弃资料并离开', exact: true }).click();
+  await materialPage.waitForURL(`${base}/production`);
+  await materialPage.getByText('共 0 条 · 第 1 / 1 页', { exact: true }).waitFor();
+  assert.equal(materialDraftUpdateAttempts, attemptsBeforeConflictRecheck, 'explicitly discarding the local draft leaves the concurrent server version untouched');
   assert.deepEqual(materialErrors, [], 'material draft failure and retry should not cause browser errors');
   await materialContext.close();
   }
+
+  materialDraftContent = '<p>服务器原始内容。</p>';
+  materialDraftRevision = 10;
+  materialDraftWrites.length = 0;
+  const materialRecoveryContext = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+  const materialRecoveryPage = await materialRecoveryContext.newPage();
+  const materialRecoveryErrors: string[] = [];
+  materialRecoveryPage.on('pageerror', (error) => materialRecoveryErrors.push(error.message));
+  materialRecoveryPage.setDefaultTimeout(10000);
+  await materialRecoveryPage.goto(`${base}/__qa?theme=light`);
+  await materialRecoveryPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+  const materialRecoveryPanel = materialRecoveryPage.getByTestId('production-resources-panel');
+  await materialRecoveryPanel.getByText('已保存', { exact: true }).waitFor();
+  const materialRecoveryEditor = materialRecoveryPanel.locator('.ProseMirror').first();
+  const materialRecoveryStorageKey = `xmt:safe-draft:v1:user:${user.id}:production-material:${productionId}:v1`;
+  const localMaterialRecovery = {
+    version: 1,
+    productionId,
+    contentHtml: '<p>刷新后找回的本机修改。</p>',
+    baselineContentHtml: '<p>服务器原始内容。</p>',
+    baselineRevision: 10,
+  };
+  const writesBeforeMaterialRecovery = materialDraftUpdateAttempts;
+  await materialRecoveryPage.evaluate(({ key, value }) => {
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }));
+  }, { key: materialRecoveryStorageKey, value: localMaterialRecovery });
+  await materialRecoveryPage.reload();
+  await materialRecoveryPanel.getByText('本机草稿待恢复', { exact: true }).waitFor();
+  assert.match(await materialRecoveryEditor.innerText(), /刷新后找回的本机修改/, 'a matching server baseline restores the saved local material text');
+  assert.equal(await materialRecoveryEditor.getAttribute('contenteditable'), 'false', 'recovered local changes remain read-only until the user chooses to save');
+  assert.equal(materialDraftUpdateAttempts, writesBeforeMaterialRecovery, 'refresh recovery never writes automatically');
+  await materialRecoveryPage.reload();
+  await materialRecoveryPanel.getByText('本机草稿待恢复', { exact: true }).waitFor();
+  assert.equal(materialDraftUpdateAttempts, writesBeforeMaterialRecovery, 'repeated refreshes preserve the local copy without retrying a write');
+  const materialRecoveryAction = materialRecoveryPanel.getByRole('button', { name: '恢复并保存本机草稿', exact: true });
+  const getMaterialRecoveryActionGeometry = () => materialRecoveryAction.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const panelRect = button.closest('[data-testid="production-resources-panel"]')?.getBoundingClientRect();
+    return {
+      width: rect.width,
+      height: rect.height,
+      visible: rect.width > 0 && rect.height > 0,
+      insidePanel: Boolean(panelRect && rect.left >= panelRect.left && rect.right <= panelRect.right),
+      viewportWidth: document.documentElement.clientWidth,
+      documentWidth: document.documentElement.scrollWidth,
+    };
+  });
+  const materialRecoveryActionSize = await getMaterialRecoveryActionGeometry();
+  assert.ok(materialRecoveryActionSize.height >= 40, `material draft recovery keeps the shared 40px button height: ${JSON.stringify(materialRecoveryActionSize)}`);
+  assert.ok(materialRecoveryActionSize.visible && materialRecoveryActionSize.insidePanel, 'the recovery action remains visible inside its panel while awaiting explicit confirmation');
+  await materialRecoveryPage.setViewportSize({ width: 1024, height: 900 });
+  const narrowMaterialRecoveryActionSize = await getMaterialRecoveryActionGeometry();
+  assert.ok(narrowMaterialRecoveryActionSize.height >= 40, `the recovery action keeps its touch target at narrow desktop width: ${JSON.stringify(narrowMaterialRecoveryActionSize)}`);
+  assert.ok(narrowMaterialRecoveryActionSize.insidePanel, 'the narrow desktop recovery action stays inside the resource panel');
+  assert.ok(narrowMaterialRecoveryActionSize.documentWidth <= narrowMaterialRecoveryActionSize.viewportWidth, 'the narrow desktop layout has no horizontal overflow');
+  await materialRecoveryPage.setViewportSize({ width: 1440, height: 900 });
+  await materialRecoveryPanel.getByRole('button', { name: '恢复并保存本机草稿', exact: true }).click();
+  await materialRecoveryPanel.getByText('已保存', { exact: true }).waitFor();
+  assert.equal(materialDraftUpdateAttempts, writesBeforeMaterialRecovery + 1, 'saving a recovered draft requires one explicit user action');
+  assert.equal(materialDraftContent, localMaterialRecovery.contentHtml, 'explicit recovery saves the recovered text against the unchanged revision');
+  assert.equal(await materialRecoveryPage.evaluate((key) => localStorage.getItem(key), materialRecoveryStorageKey), null, 'a server-confirmed save clears the local recovery copy');
+  await materialRecoveryPage.reload();
+  await materialRecoveryPanel.getByText('已保存', { exact: true }).waitFor();
+  assert.match(await materialRecoveryEditor.innerText(), /刷新后找回的本机修改/, 'a confirmed server save remains visible after the recovery copy is cleared');
+  assert.equal(materialDraftUpdateAttempts, writesBeforeMaterialRecovery + 1, 'a confirmed save is not duplicated after refresh');
+
+  materialDraftContent = '<p>服务端并发更新。</p>';
+  materialDraftRevision = 12;
+  const writesBeforeMaterialConflict = materialDraftUpdateAttempts;
+  const conflictedLocalDraft = {
+    ...localMaterialRecovery,
+    contentHtml: '<p>并发时仍要保留的本机修改。</p>',
+  };
+  await materialRecoveryPage.evaluate(({ key, value }) => {
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }));
+  }, { key: materialRecoveryStorageKey, value: conflictedLocalDraft });
+  await materialRecoveryPage.reload();
+  await materialRecoveryPanel.getByText('服务端已有更新', { exact: true }).waitFor();
+  assert.match(await materialRecoveryEditor.innerText(), /并发时仍要保留的本机修改/, 'a concurrent server revision does not replace the recovered local copy');
+  assert.equal(await materialRecoveryEditor.getAttribute('contenteditable'), 'false', 'conflicting local content stays locked until the user chooses a version');
+  assert.equal(materialDraftUpdateAttempts, writesBeforeMaterialConflict, 'a concurrent server revision never triggers an automatic overwrite');
+  await materialRecoveryPanel.getByRole('button', { name: '采用服务器版本并舍弃本机修改', exact: true }).click();
+  await materialRecoveryPanel.getByText('已保存', { exact: true }).waitFor();
+  assert.match(await materialRecoveryEditor.innerText(), /服务端并发更新/, 'the explicit server-version action loads the latest confirmed server content');
+  assert.equal(await materialRecoveryPage.evaluate((key) => localStorage.getItem(key), materialRecoveryStorageKey), null, 'choosing the server version clears the discarded local copy');
+  assert.equal(materialDraftUpdateAttempts, writesBeforeMaterialConflict, 'choosing the server version performs no draft write');
+
+  const otherAccountStorageKey = `xmt:safe-draft:v1:user:${user.id + 1}:production-material:${productionId}:v1`;
+  await materialRecoveryPage.evaluate(({ key, value }) => {
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }));
+  }, { key: otherAccountStorageKey, value: conflictedLocalDraft });
+  await materialRecoveryPage.reload();
+  await materialRecoveryPanel.getByText('已保存', { exact: true }).waitFor();
+  assert.match(await materialRecoveryEditor.innerText(), /服务端并发更新/, 'a local draft belonging to another account is never shown');
+  assert.equal(await materialRecoveryPage.evaluate((key) => localStorage.getItem(key) !== null, otherAccountStorageKey), true, 'the current account neither reads nor clears another account local storage');
+  assert.equal(materialDraftUpdateAttempts, writesBeforeMaterialConflict, 'account-isolation recovery is read-only');
+  assert.deepEqual(materialRecoveryErrors, [], 'material recovery does not produce browser runtime errors');
+  await materialRecoveryContext.close();
 
   materialDraftContent = '<p>原有资料：保留记录。</p>';
   materialDraftRevision = 7;
@@ -2946,6 +3819,14 @@ try {
     await readOnlyPage.goto(`${base}/__qa?theme=light`);
     await readOnlyPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
     if (scenario.versionUrl) await readOnlyPage.goto(`${base}${scenario.versionUrl}`);
+    if (scenario.versionUrl) {
+      const versionRecordGroup = readOnlyPage.getByRole('group', { name: '版本记录', exact: true });
+      assert.equal(await versionRecordGroup.count(), 1, 'the version choices are exposed in a group named by their heading');
+      const historicalVersionEntry = versionRecordGroup.getByRole('button', { name: /v1\.0/ });
+      const currentVersionEntry = versionRecordGroup.getByRole('button', { name: /v2\.0/ });
+      assert.equal(await historicalVersionEntry.getAttribute('aria-pressed'), 'true', 'the requested historical version is exposed as selected');
+      assert.equal(await currentVersionEntry.getAttribute('aria-pressed'), 'false', 'the current version is exposed as unselected while previewing history');
+    }
     const reason = readOnlyPage.getByTestId('production-readonly-reason');
     await reason.getByText(scenario.expectedReason, { exact: false }).waitFor();
     const preview = readOnlyPage.locator('.production-preview .ProseMirror').first();
@@ -2965,6 +3846,17 @@ try {
     assert.equal(readOnlyState.productionSaveAttempts, 0, `${scenario.mode} does not save the manuscript in the background`);
     assert.equal(readOnlyState.productionVersionSaveAttempts, 0, `${scenario.mode} does not create a version`);
     assert.equal(readOnlyState.productionReviewAttempts, 0, `${scenario.mode} does not submit for review`);
+    if (scenario.versionUrl) {
+      const versionRecordGroup = readOnlyPage.getByRole('group', { name: '版本记录', exact: true });
+      const historicalVersionEntry = versionRecordGroup.getByRole('button', { name: /v1\.0/ });
+      const currentVersionEntry = versionRecordGroup.getByRole('button', { name: /v2\.0/ });
+      await currentVersionEntry.focus();
+      await readOnlyPage.keyboard.press('Enter');
+      assert.equal(await currentVersionEntry.getAttribute('aria-pressed'), 'true', 'the current version can be selected using the keyboard');
+      assert.equal(await historicalVersionEntry.getAttribute('aria-pressed'), 'false', 'keyboard selection leaves only the current version pressed');
+      const stateAfterKeyboardSelection = await readOnlyPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+      assert.equal(stateAfterKeyboardSelection.apiMutationAttempts, 0, 'keyboard version selection does not write business data');
+    }
     await readOnlyContext.close();
   }
 
@@ -2985,7 +3877,270 @@ try {
   assert.equal(await supersededPage.getByRole('button', { name: '另开新版', exact: true }).count(), 0,
     'a superseded collaboration version does not expose version writes');
   await supersededContext.close();
+
+  await fixtureControl.post(`${base}/__qa/reset-review-fixture`);
+  const autosaveRecoveryContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const autosaveRecoveryPage = await autosaveRecoveryContext.newPage();
+  autosaveRecoveryPage.setDefaultTimeout(10000);
+  await autosaveRecoveryPage.goto(`${base}/__qa?theme=light`);
+  await autosaveRecoveryPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+  const autosaveRecoveryEditor = autosaveRecoveryPage.locator('.ProseMirror').last();
+
+  await fixtureControl.post(`${base}/__qa/fail-next-production-save-after-commit`);
+  const committedAutosaveResponseLost = autosaveRecoveryPage.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 503);
+  await autosaveRecoveryEditor.click();
+  await autosaveRecoveryEditor.press('End');
+  await autosaveRecoveryEditor.pressSequentially('响应丢失后已落库', { delay: 1 });
+  await committedAutosaveResponseLost;
+  await autosaveRecoveryPage.waitForFunction(() => fetch('/__qa/state').then((response) => response.json())
+    .then((state) => state.content.includes('响应丢失后已落库') && state.productionSaveAttempts === 1));
+  assert.equal(await autosaveRecoveryPage.getByTestId('production-autosave-recovery').count(), 0,
+    'a read-back confirming the target content resolves a lost response without another write');
+  assert.equal(await autosaveRecoveryPage.evaluate(() => localStorage.getItem('xmt:safe-draft:v1:user:91:production:77')), null,
+    'a confirmed matching local draft is cleared');
+
+  await fixtureControl.post(`${base}/__qa/reset-review-fixture`);
+  await autosaveRecoveryPage.goto(`${base}/__qa?theme=light`);
+  await autosaveRecoveryPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+  await fixtureControl.post(`${base}/__qa/fail-next-production-save`);
+  const uncommittedAutosaveResponse = autosaveRecoveryPage.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 503);
+  await autosaveRecoveryEditor.click();
+  await autosaveRecoveryEditor.press('End');
+  await autosaveRecoveryEditor.pressSequentially('等待明确重试', { delay: 1 });
+  await uncommittedAutosaveResponse;
+  await autosaveRecoveryPage.getByTestId('production-autosave-confirm-retry').waitFor({ state: 'visible' });
+  for (const { width, height, theme } of [
+    { width: 320, height: 812, theme: 'light' },
+    { width: 390, height: 844, theme: 'dark' },
+  ] as const) {
+    await autosaveRecoveryPage.setViewportSize({ width, height });
+    if (theme === 'dark') await autosaveRecoveryPage.getByRole('button', { name: '切换主题', exact: true }).click();
+    const recoveryBanner = autosaveRecoveryPage.getByTestId('production-autosave-recovery');
+    const explicitRetry = autosaveRecoveryPage.getByTestId('production-autosave-confirm-retry');
+    await recoveryBanner.waitFor({ state: 'visible' });
+    await autosaveRecoveryPage.getByText('系统没有自动重试。确认后才会再次保存本机草稿。', { exact: false }).waitFor();
+    await explicitRetry.scrollIntoViewIfNeeded();
+    const recoveryGeometry = await recoveryBanner.evaluate((banner) => {
+      const button = banner.querySelector<HTMLElement>('[data-testid="production-autosave-confirm-retry"]');
+      if (!button) throw new Error('Expected the explicit autosave retry button inside its recovery banner');
+      const bannerRect = banner.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      return {
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        documentWidth: document.documentElement.scrollWidth,
+        banner: { left: bannerRect.left, right: bannerRect.right, width: bannerRect.width },
+        button: { left: buttonRect.left, right: buttonRect.right, top: buttonRect.top, bottom: buttonRect.bottom, width: buttonRect.width, height: buttonRect.height },
+      };
+    });
+    assert.ok(recoveryGeometry.documentWidth <= width, `${theme} ${width}px autosave recovery has no horizontal overflow: ${JSON.stringify(recoveryGeometry)}`);
+    assert.ok(recoveryGeometry.banner.left >= 0 && recoveryGeometry.banner.right <= width,
+      `${theme} ${width}px autosave recovery banner stays in the viewport: ${JSON.stringify(recoveryGeometry)}`);
+    assert.ok(recoveryGeometry.button.left >= 0 && recoveryGeometry.button.right <= width
+      && recoveryGeometry.button.top >= 0 && recoveryGeometry.button.bottom <= height && recoveryGeometry.button.height >= 40,
+      `${theme} ${width}px explicit retry button stays visible and has a usable target: ${JSON.stringify(recoveryGeometry)}`);
+    await explicitRetry.focus();
+    assert.equal(await explicitRetry.evaluate((button) => document.activeElement === button), true,
+      `${theme} ${width}px explicit retry button remains keyboard focusable`);
+    const layoutState = await autosaveRecoveryPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+    assert.equal(layoutState.productionSaveAttempts, 1, `${theme} ${width}px responsive inspection does not retry the unresolved save`);
+  }
+  let autosaveRecoveryState = await autosaveRecoveryPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(autosaveRecoveryState.productionSaveAttempts, 1, 'an uncommitted request is not retried automatically');
+  assert.equal(autosaveRecoveryState.content, '<p>第一段文字需要审阅。</p>', 'the server remains on its original manuscript until explicit retry');
+  await autosaveRecoveryPage.reload();
+  await autosaveRecoveryPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+  await autosaveRecoveryPage.getByTestId('production-autosave-confirm-retry').waitFor({ state: 'visible' });
+  autosaveRecoveryState = await autosaveRecoveryPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(autosaveRecoveryState.productionSaveAttempts, 1, 'reload read-back recovers the marker without replaying the PUT');
+  const explicitAutosaveRetry = autosaveRecoveryPage.getByTestId('production-autosave-confirm-retry');
+  const explicitAutosaveCommitted = autosaveRecoveryPage.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 200);
+  await explicitAutosaveRetry.click();
+  await explicitAutosaveCommitted;
+  await autosaveRecoveryPage.getByTestId('production-autosave-recovery').waitFor({ state: 'detached' });
+  autosaveRecoveryState = await autosaveRecoveryPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(autosaveRecoveryState.productionSaveAttempts, 2, 'only the explicit retry adds a second PUT');
+  assert.match(autosaveRecoveryState.content, /等待明确重试/);
+
+  await fixtureControl.post(`${base}/__qa/reset-review-fixture`);
+  await autosaveRecoveryPage.goto(`${base}/__qa?theme=light`);
+  await autosaveRecoveryPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+  const collaboratorContent = '<p>另一位协作者刚保存的正文。</p>';
+  await fixtureControl.post(`${base}/__qa/change-content-before-next-save-failure`, { data: { content: collaboratorContent } });
+  const conflictedAutosaveResponse = autosaveRecoveryPage.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 503);
+  await autosaveRecoveryEditor.click();
+  await autosaveRecoveryEditor.press('End');
+  await autosaveRecoveryEditor.pressSequentially('作者本机修改保留', { delay: 1 });
+  await conflictedAutosaveResponse;
+  const autosaveConflict = autosaveRecoveryPage.getByTestId('production-autosave-conflict');
+  await autosaveConflict.waitFor();
+  await autosaveConflict.getByText('另一位协作者刚保存的正文。', { exact: false }).waitFor();
+  const serverPreview = autosaveRecoveryPage.locator('.production-preview .ProseMirror').first();
+  await serverPreview.getByText('另一位协作者刚保存的正文。', { exact: false }).waitFor();
+  assert.equal(await serverPreview.getAttribute('contenteditable'), 'false', 'the editor displays the server manuscript as a read-only preview');
+  await autosaveConflict.locator('details').getByText('作者本机修改保留', { exact: false }).waitFor();
+  autosaveRecoveryState = await autosaveRecoveryPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(autosaveRecoveryState.content, collaboratorContent, 'the collaborator content remains authoritative before explicit restore');
+  assert.equal(autosaveRecoveryState.productionSaveAttempts, 1, 'conflict detection does not issue a second PUT');
+  const restoreConflictDraft = autosaveRecoveryPage.getByTestId('production-autosave-restore-conflict');
+  const restoredConflictResponse = autosaveRecoveryPage.waitForResponse((response) => response.request().method() === 'PUT'
+    && response.url().endsWith(`/api/workflow/production/${productionId}`)
+    && response.status() === 200);
+  await restoreConflictDraft.click();
+  await restoredConflictResponse;
+  await autosaveRecoveryPage.getByTestId('production-autosave-conflict').waitFor({ state: 'detached' });
+  autosaveRecoveryState = await autosaveRecoveryPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(autosaveRecoveryState.productionSaveAttempts, 2, 'the local draft overwrites the collaborator text only after explicit restore');
+  assert.match(autosaveRecoveryState.content, /作者本机修改保留/);
+  await autosaveRecoveryContext.close();
+
   await readOnlyControlContext.close();
+
+  await fixtureControl.post(`${base}/__qa/reset-review-fixture`);
+  const recoveryMarkerContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const recoveryMarkerPage = await recoveryMarkerContext.newPage();
+  recoveryMarkerPage.setDefaultTimeout(10000);
+  await recoveryMarkerPage.goto(`${base}/__qa?theme=light`);
+  await recoveryMarkerPage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+  const markerParagraph = recoveryMarkerPage.locator('.ProseMirror p').filter({ hasText: '第一段文字需要审阅。' }).first();
+  await markerParagraph.click({ position: { x: 1, y: 1 } });
+  await recoveryMarkerPage.keyboard.press('Home');
+  for (let index = 0; index < 3; index += 1) await recoveryMarkerPage.keyboard.press('Shift+ArrowRight');
+  await recoveryMarkerPage.waitForFunction(() => window.getSelection()?.toString() === '第一段');
+  await recoveryMarkerPage.getByRole('button', { name: '给选中文字加批注' }).click();
+
+  const threadMarkerKey = `xmt:production-review-thread:v1:${user.id}:${productionId}`;
+  const threadInput = recoveryMarkerPage.getByLabel('批注内容');
+  await threadInput.fill('恢复凭证静默丢写时不应创建批注。');
+  const beforeThreadMarkerFailure = await recoveryMarkerPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  await suppressRecoveryStorageWrite(recoveryMarkerPage, threadMarkerKey);
+  await recoveryMarkerPage.getByRole('button', { name: '提交', exact: true }).click();
+  await recoveryMarkerPage.getByText('本机无法保存批注恢复记录，未发送请求。请检查浏览器存储后重试。', { exact: true }).waitFor();
+  assert.equal(await threadInput.inputValue(), '恢复凭证静默丢写时不应创建批注。', 'thread draft remains intact when its recovery marker is silently dropped');
+  assert.equal(await recoveryMarkerPage.evaluate((key) => sessionStorage.getItem(key), threadMarkerKey), null, 'a silently dropped thread marker remains absent');
+  assert.equal((await recoveryMarkerPage.request.get(`${base}/__qa/state`).then((response) => response.json())).reviewThreadCreateAttempts,
+    beforeThreadMarkerFailure.reviewThreadCreateAttempts, 'thread creation is not sent without a confirmed marker');
+  await restoreRecoveryStorageWrite(recoveryMarkerPage);
+  await recoveryMarkerPage.getByRole('button', { name: '提交', exact: true }).click();
+  await recoveryMarkerPage.getByText('恢复凭证静默丢写时不应创建批注。', { exact: true }).waitFor();
+
+  const replyMarkerKey = `xmt:production-review-reply:v1:${user.id}:${productionId}:1`;
+  const replyMarkerInput = recoveryMarkerPage.getByRole('textbox', { name: '回复批注：恢复凭证静默丢写时不应创建批注。', exact: true });
+  await replyMarkerInput.fill('恢复凭证静默丢写时不应创建回复。');
+  const beforeReplyMarkerFailure = await recoveryMarkerPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  await suppressRecoveryStorageWrite(recoveryMarkerPage, replyMarkerKey);
+  await recoveryMarkerPage.getByRole('button', { name: '回复', exact: true }).click();
+  await recoveryMarkerPage.getByText('本机无法保存回复恢复记录，未发送回复。请检查浏览器存储后重试。', { exact: true }).waitFor();
+  assert.equal(await replyMarkerInput.inputValue(), '恢复凭证静默丢写时不应创建回复。', 'reply draft remains intact when its recovery marker is silently dropped');
+  assert.equal(await recoveryMarkerPage.evaluate((key) => sessionStorage.getItem(key), replyMarkerKey), null, 'a silently dropped reply marker remains absent');
+  assert.equal((await recoveryMarkerPage.request.get(`${base}/__qa/state`).then((response) => response.json())).reviewReplyAttempts,
+    beforeReplyMarkerFailure.reviewReplyAttempts, 'reply is not sent without a confirmed marker');
+  await restoreRecoveryStorageWrite(recoveryMarkerPage);
+  await recoveryMarkerPage.getByRole('button', { name: '回复', exact: true }).click();
+  await recoveryMarkerPage.getByText('恢复凭证静默丢写时不应创建回复。', { exact: true }).waitFor();
+
+  const statusMarkerKey = `xmt:production-review-status:v1:${user.id}:${productionId}:1`;
+  const beforeStatusMarkerFailure = await recoveryMarkerPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  await suppressRecoveryStorageWrite(recoveryMarkerPage, statusMarkerKey);
+  await recoveryMarkerPage.getByRole('button', { name: '结束讨论', exact: true }).click();
+  await recoveryMarkerPage.getByText('本机无法保存状态恢复记录，未提交处理结果。请检查浏览器存储后重试。', { exact: true }).waitFor();
+  assert.equal(await recoveryMarkerPage.evaluate((key) => sessionStorage.getItem(key), statusMarkerKey), null, 'a silently dropped status marker remains absent');
+  const stateAfterStatusMarkerFailure = await recoveryMarkerPage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(stateAfterStatusMarkerFailure.reviewStatusAttempts, beforeStatusMarkerFailure.reviewStatusAttempts, 'status is not changed without a confirmed marker');
+  assert.equal(stateAfterStatusMarkerFailure.threads[0].status, 'open', 'discussion remains open when its recovery marker is silently dropped');
+  await restoreRecoveryStorageWrite(recoveryMarkerPage);
+  await recoveryMarkerPage.getByRole('button', { name: '结束讨论', exact: true }).click();
+  await recoveryMarkerPage.getByText('已结束', { exact: true }).waitFor();
+  await recoveryMarkerContext.close();
+
+  await fixtureControl.post(`${base}/__qa/reset-review-fixture`);
+  await fixtureControl.post(`${base}/__qa/seed-review-reply-scope-thread`);
+  const replyScopeContext = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const replyScopePage = await replyScopeContext.newPage();
+  replyScopePage.setDefaultTimeout(10000);
+  await replyScopePage.goto(`${base}/__qa?theme=light`);
+  await replyScopePage.getByRole('heading', { name: '协作审阅稿件' }).waitFor();
+  await replyScopePage.getByText('切换稿件时仍应隔离回复结果。').waitFor();
+
+  const alternateErrorMessage = '另一稿件的批注读取失败，请点击刷新后重试。';
+  const scopeReplyInput = replyScopePage.getByRole('textbox', { name: '回复批注：切换稿件时仍应隔离回复结果。', exact: true });
+  await scopeReplyInput.fill('旧稿成功回复不得清除新稿提示。');
+  await replyScopePage.request.post(`${base}/__qa/hold-next-review-reply`);
+  const firstScopeReplyResponse = replyScopePage.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url().endsWith(`/api/workflow/production/${productionId}/review-threads/1/replies`));
+  await replyScopePage.getByRole('button', { name: '回复', exact: true }).click();
+  await replyScopePage.getByRole('button', { name: '正在回复…', exact: true }).waitFor();
+  await replyScopePage.waitForFunction(async () => (await fetch('/__qa/state').then((response) => response.json())).reviewReplyAttempts === 1);
+  await replyScopePage.request.post(`${base}/__qa/fail-next-alternate-review-thread-read`);
+  await replyScopePage.evaluate((path) => {
+    window.history.pushState({}, '', path);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, `/production/content/${alternateProductionId}`);
+  await replyScopePage.getByRole('heading', { name: '另一隔离稿件' }).waitFor();
+  await replyScopePage.getByText(alternateErrorMessage, { exact: true }).waitFor();
+  await replyScopePage.request.post(`${base}/__qa/release-review-reply`);
+  assert.equal((await firstScopeReplyResponse).status(), 201, 'the original reply succeeds after navigation to another production');
+  await replyScopePage.waitForFunction(() => {
+    const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('给选中文字加批注'));
+    return Boolean(button && !(button as HTMLButtonElement).disabled);
+  });
+  await replyScopePage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  assert.equal(await replyScopePage.getByText(alternateErrorMessage, { exact: true }).count(), 1,
+    'a confirmed reply from the prior production does not clear the current production read error');
+  let replyScopeState = await replyScopePage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(replyScopeState.alternateReviewThreadReadAttempts, 1, 'the prior successful reply does not refresh the new production thread list');
+  assert.equal(replyScopeState.reviewReplyAttempts, 1, 'navigation during a pending reply does not replay the POST');
+  assert.equal(await replyScopePage.evaluate((key) => sessionStorage.getItem(key), `xmt:production-review-reply:v1:${user.id}:${productionId}:1`), null,
+    'a confirmed stale reply clears only its original production recovery marker');
+
+  await replyScopePage.evaluate((path) => {
+    window.history.pushState({}, '', path);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, `/production/content/${productionId}`);
+  await replyScopePage.getByText('旧稿成功回复不得清除新稿提示。').waitFor();
+  await scopeReplyInput.fill('旧稿结果核实失败不得覆盖新稿提示。');
+  await replyScopePage.request.post(`${base}/__qa/fail-next-review-reply-after-commit`);
+  await replyScopePage.request.post(`${base}/__qa/fail-next-review-reply-status-read`);
+  await replyScopePage.request.post(`${base}/__qa/hold-next-review-reply`);
+  const secondScopeReplyResponse = replyScopePage.waitForResponse((response) => response.request().method() === 'POST'
+    && response.url().endsWith(`/api/workflow/production/${productionId}/review-threads/1/replies`));
+  await replyScopePage.getByRole('button', { name: '回复', exact: true }).click();
+  await replyScopePage.getByRole('button', { name: '正在回复…', exact: true }).waitFor();
+  await replyScopePage.waitForFunction(async () => (await fetch('/__qa/state').then((response) => response.json())).reviewReplyAttempts === 2);
+  await replyScopePage.request.post(`${base}/__qa/fail-next-alternate-review-thread-read`);
+  await replyScopePage.evaluate((path) => {
+    window.history.pushState({}, '', path);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, `/production/content/${alternateProductionId}`);
+  await replyScopePage.getByRole('heading', { name: '另一隔离稿件' }).waitFor();
+  await replyScopePage.getByText(alternateErrorMessage, { exact: true }).waitFor();
+  await replyScopePage.request.post(`${base}/__qa/release-review-reply`);
+  assert.equal((await secondScopeReplyResponse).status(), 503, 'the original committed reply loses its HTTP response after navigation');
+  await replyScopePage.waitForFunction(() => {
+    const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('给选中文字加批注'));
+    return Boolean(button && !(button as HTMLButtonElement).disabled);
+  });
+  await replyScopePage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  assert.equal(await replyScopePage.getByText(alternateErrorMessage, { exact: true }).count(), 1,
+    'an old reply verification failure does not replace the current production error');
+  replyScopeState = await replyScopePage.request.get(`${base}/__qa/state`).then((response) => response.json());
+  assert.equal(replyScopeState.alternateReviewThreadReadAttempts, 2, 'an uncertain old reply does not refresh the new production thread list');
+  assert.equal(replyScopeState.reviewReplyStatusReadAttempts, 0, 'a stale failed response does not issue a status read under the new view');
+  assert.equal(replyScopeState.reviewReplyAttempts, 2, 'each original reply request is sent exactly once across navigation');
+  assert.equal(replyScopeState.threads[0].replies.filter((reply: { content: string }) => reply.content === '旧稿结果核实失败不得覆盖新稿提示。').length, 1,
+    'the committed old-production reply remains stored exactly once while its marker is preserved for later recovery');
+  assert.notEqual(await replyScopePage.evaluate((key) => sessionStorage.getItem(key), `xmt:production-review-reply:v1:${user.id}:${productionId}:1`), null,
+    'the unverified old-production reply keeps its actor-and-production-scoped marker');
+  await replyScopeContext.close();
+  await fixtureControl.post(`${base}/__qa/reset-review-fixture`);
 
   console.log(`${process.env.XMT_MATERIAL_PROTECTION_QA_ONLY === '1' ? 'Material protection' : 'Production review'} browser test passed: materials require a confirmed draft and ready editor, preserve content through read/reference failures, and insert once with protected in-flight controls; expected reduced-motion notices: ${expectedReducedMotionWarnings}.`);
 } catch (error) {

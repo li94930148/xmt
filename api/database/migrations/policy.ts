@@ -92,4 +92,10 @@ export const migrationPolicies: Readonly<Record<string, MigrationPolicy>> = {
   '065': 'SAFE_EXPAND',
   // Anonymous feedback submit receipts are additive and are deleted with their feedback row.
   '066': 'SAFE_EXPAND',
+  // The nullable source topic ID is additive; legacy snapshots remain unlinked instead of inferred.
+  '067': 'SAFE_EXPAND',
+  // Nullable history provenance is additive; existing versions remain unassigned rather than backfilled.
+  '068': 'SAFE_EXPAND',
+  // Official daily observations append alongside the existing materialized projection; legacy binaries ignore the new table.
+  '069': 'SAFE_EXPAND',
 };

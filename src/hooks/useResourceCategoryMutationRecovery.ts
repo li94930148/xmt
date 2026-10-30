@@ -10,6 +10,7 @@ import {
   type ResourceCategory,
 } from '../api/resourceCenter';
 import { useAuthStore } from '../store';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import {
   clearResourceCategoryMutationRecovery,
   createResourceCategoryMutationFingerprint,
@@ -116,7 +117,8 @@ export function useResourceCategoryMutationRecovery(
     } catch (cause) {
       if (!isCurrent(recovery.actorId, generation)) return;
       setPendingFor(recovery.actorId, generation, { recovery, phase: 'confirmed_read_failed', confirmedState });
-      setMessage(`服务端已确认分类操作成功，但列表刷新失败；请只重试读取，不要重复写入。${cause instanceof Error ? ` ${cause.message}` : ''}`);
+      const detail = getUserFacingErrorMessage(cause, '系统暂时无法读取分类列表。');
+      setMessage(`服务端已确认分类操作成功，但列表刷新失败；请只重试读取，不要重复写入。${detail}`);
     }
   }, [isCurrent, setPendingFor]);
 
@@ -151,7 +153,8 @@ export function useResourceCategoryMutationRecovery(
     } catch (cause) {
       if (!isCurrent(recovery.actorId, generation)) return;
       setPendingFor(recovery.actorId, generation, { recovery, phase: 'uncertain' });
-      setMessage(`暂时无法核实分类操作结果；恢复编号已保留，请只读重新核实，不要重复操作。${cause instanceof Error ? ` ${cause.message}` : ''}`);
+      const detail = getUserFacingErrorMessage(cause, '系统暂时无法读取操作回执。');
+      setMessage(`暂时无法核实分类操作结果；恢复编号已保留，请只读重新核实，不要重复操作。${detail}`);
     } finally {
       operationsRef.current.delete(operationKey);
     }
@@ -181,14 +184,16 @@ export function useResourceCategoryMutationRecovery(
       if (!isCurrent(recovery.actorId, generation)) return;
       if (definiteRejection(cause)) {
         const rejectedRecovery = { ...recovery, rejectionStatus: cause.status };
-        persistResourceCategoryMutationRejection(rejectedRecovery);
+        const rejectionPersisted = persistResourceCategoryMutationRejection(rejectedRecovery);
         if (clearResourceCategoryMutationRecovery(recovery.actorId, recovery.requestId)) {
           setPendingFor(recovery.actorId, generation, null);
-          setError(cause.message);
+          setError(getUserFacingErrorMessage(cause, '服务器已拒绝分类操作，请检查权限、内容或当前分类状态。'));
           setMessage('');
         } else {
           setPendingFor(recovery.actorId, generation, { recovery: rejectedRecovery, phase: 'rejected_cleanup_failed' });
-          setMessage(`服务器已明确拒绝这次分类操作；本机恢复记录暂未清理。${cause.message}`);
+          const persistenceDetail = rejectionPersisted ? '' : '本机暂未能保存拒绝状态。';
+          const detail = getUserFacingErrorMessage(cause, '请检查权限、分类内容或当前状态。');
+          setMessage(`服务器已明确拒绝这次分类操作；${persistenceDetail}恢复记录暂未清理。${detail}`);
         }
       } else {
         await verifyRecovery(recovery, generation);
@@ -257,7 +262,9 @@ export function useResourceCategoryMutationRecovery(
       await executeRecovery(recovery, generation);
       return true;
     } catch (cause) {
-      if (isCurrent(actorId, generation)) setError(cause instanceof Error ? cause.message : '无法安全准备分类操作；本次未提交修改。');
+      if (isCurrent(actorId, generation)) {
+        setError(getUserFacingErrorMessage(cause, '无法安全准备分类操作；本次未提交修改。'));
+      }
       return false;
     }
   }, [actorId, executeRecovery, invalidRecovery, isCurrent, libraryType, open, readyActorId, setPendingFor, storageUnavailable]);

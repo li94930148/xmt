@@ -20,6 +20,7 @@ import {
   savePendingAnonymousFeedbackSubmission,
   type PendingAnonymousFeedbackSubmission,
 } from '../features/anonymous-feedback/submissionRecovery';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 
 const types: Array<{ value: AnonymousFeedbackType; label: string }> = [
   { value: 'feature', label: '功能建议' },
@@ -42,6 +43,7 @@ export default function AnonymousFeedbackModal({
 }) {
   const [feedback, setFeedback] = useState<PublicAnonymousFeedback[]>([]);
   const [loading, setLoading] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [type, setType] = useState<AnonymousFeedbackType | ''>('');
   const [content, setContent] = useState('');
   const [needReply, setNeedReply] = useState(false);
@@ -59,17 +61,21 @@ export default function AnonymousFeedbackModal({
   const loadFeedback = useCallback(async () => {
     const requestSequence = ++feedbackRequestSequenceRef.current;
     setLoading(true);
+    setFeedbackError(null);
     try {
       const nextFeedback = await getPublicAnonymousFeedback();
-      if (requestSequence === feedbackRequestSequenceRef.current) setFeedback(nextFeedback);
+      if (requestSequence === feedbackRequestSequenceRef.current) {
+        setFeedback(nextFeedback);
+        setFeedbackError(null);
+      }
     } catch (error) {
       if (requestSequence === feedbackRequestSequenceRef.current) {
-        addNotification({ title: '加载失败', message: error instanceof Error ? error.message : '无法获取意见列表', type: 'error' });
+        setFeedbackError(getUserFacingErrorMessage(error, '意见列表加载失败，请检查连接后重试。'));
       }
     } finally {
       if (requestSequence === feedbackRequestSequenceRef.current) setLoading(false);
     }
-  }, [addNotification]);
+  }, []);
 
   const completeSubmission = useCallback(async () => {
     try {
@@ -89,7 +95,11 @@ export default function AnonymousFeedbackModal({
     try {
       await onSubmittedRef.current?.();
     } catch (error) {
-      addNotification({ title: '意见已提交，页面暂未刷新', message: error instanceof Error ? error.message : '稍后可重新加载列表', type: 'warning' });
+      addNotification({
+        title: '意见已提交，页面暂未刷新',
+        message: getUserFacingErrorMessage(error, '稍后可重新加载意见列表。'),
+        type: 'warning',
+      });
     }
   }, [addNotification, loadFeedback]);
 
@@ -106,7 +116,7 @@ export default function AnonymousFeedbackModal({
       if (state === 'conflict') setRecoveryError('服务器记录与当前恢复内容不一致。为避免重复提交，内容已锁定；请联系管理员核对。');
     } catch (error) {
       setRecoveryState('unavailable');
-      setRecoveryError(error instanceof Error ? error.message : '暂时无法核实意见提交结果');
+      setRecoveryError(getUserFacingErrorMessage(error, '暂时无法核实意见提交结果'));
     }
   }, [completeSubmission]);
 
@@ -294,8 +304,16 @@ export default function AnonymousFeedbackModal({
             <h3 className="text-sm font-semibold text-studio-text-primary">大家的意见</h3>
             <span className="text-xs text-studio-text-muted">共 {feedback.length} 条</span>
           </div>
+          {feedbackError ? (
+            <div role="alert" aria-live="assertive" className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-card border border-studio-coral/30 bg-studio-coral/10 p-3 text-sm text-studio-coral-contrast">
+              <p className="min-w-0 flex-1">{feedbackError}</p>
+              <ActionButton variant="ghost" onClick={() => void loadFeedback()} disabled={loading} aria-busy={loading} className="min-h-10 whitespace-normal">
+                {loading ? '重新加载中…' : '重新加载意见'}
+              </ActionButton>
+            </div>
+          ) : null}
           <div className="max-h-64 overflow-y-auto rounded-card border border-studio-border-soft bg-studio-surface-soft">
-            {loading ? <LoadingState type="inline" text="正在加载意见..." className="p-5" /> : feedback.length > 0 ? (
+            {loading && feedback.length === 0 ? <LoadingState type="inline" text="正在加载意见..." className="p-5" /> : feedback.length > 0 ? (
               <div className="divide-y divide-studio-border-soft">
                 {feedback.map((item) => (
                   <article key={item.id} className="p-4">
@@ -313,7 +331,7 @@ export default function AnonymousFeedbackModal({
                   </article>
                 ))}
               </div>
-            ) : (
+            ) : feedbackError ? null : (
               <div className="flex flex-col items-center px-4 py-8 text-center">
                 <MessageSquareText className="h-6 w-6 text-studio-text-muted" />
                 <p className="mt-3 text-sm font-medium text-studio-text-secondary">还没有意见</p>
@@ -326,16 +344,16 @@ export default function AnonymousFeedbackModal({
         <section className="border-t border-studio-border-soft pt-5">
           <h3 className="mb-4 text-sm font-semibold text-studio-text-primary">提出新意见</h3>
           <div className="space-y-4">
-            <label className="block text-sm font-medium text-studio-text-secondary">
-              意见类型 <span className="text-studio-coral-contrast">*</span>
-              <select value={type} onChange={(event) => setType(event.target.value as AnonymousFeedbackType)} className="xmt-field mt-2 w-full">
+            <label htmlFor="anonymous-feedback-type" className="block text-sm font-medium text-studio-text-secondary">
+              意见类型 <span aria-hidden="true" className="text-studio-coral-contrast">*</span>
+              <select id="anonymous-feedback-type" name="type" required value={type} onChange={(event) => setType(event.target.value as AnonymousFeedbackType)} className="xmt-field mt-2 w-full">
                 <option value="">请选择意见类型</option>
                 {types.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </label>
-            <label className="block text-sm font-medium text-studio-text-secondary">
-              意见内容 <span className="text-studio-coral-contrast">*</span>
-              <textarea value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={4} placeholder="请输入你的想法..." className="xmt-field mt-2 w-full resize-y" />
+            <label htmlFor="anonymous-feedback-content" className="block text-sm font-medium text-studio-text-secondary">
+              意见内容 <span aria-hidden="true" className="text-studio-coral-contrast">*</span>
+              <textarea id="anonymous-feedback-content" name="content" required value={content} onChange={(event) => setContent(event.target.value)} maxLength={2000} rows={4} placeholder="请输入你的想法..." className="xmt-field mt-2 w-full resize-y" />
               <span className="mt-1 block text-right text-xs text-studio-text-muted">{content.length}/2000</span>
             </label>
             <label className="flex cursor-pointer items-center gap-3 text-sm text-studio-text-secondary">

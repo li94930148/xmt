@@ -122,6 +122,11 @@ export function resolveContentEditorSaveStrategy(
 /** Lifecycle and persistence commands exposed by a future editor runtime. */
 export interface ContentEditorRuntimeHandle {
   scheduleSave(content: string, revision: number): void;
+  getRevisions?(): { latestRevision: number; persistedRevision: number };
+  /** Confirms matching queued/failed autosave content after a business read-back. */
+  confirmPersistedContent?(content: string): boolean;
+  /** Discards queued/failed autosave content after the caller has preserved it elsewhere. */
+  discardPendingSaves?(): boolean;
   /** Optional until the manual controller is implemented in the next Runtime phase. */
   manualSave?(content: string, revision: number): Promise<ManualSaveResult>;
   flush(options?: AutosaveFlushOptions): Promise<AutosaveFlushResult>;

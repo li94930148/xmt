@@ -44,7 +44,7 @@ export default function UpdateNotification({ onClose, onGoToChangelog }: UpdateN
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-button text-studio-text-muted transition-colors hover:bg-studio-surface-soft hover:text-studio-text-primary"
+            className="xmt-btn xmt-btn-ghost h-10 w-10 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-studio-primary focus-visible:outline-offset-2"
             aria-label="关闭更新提示"
             title="关闭更新提示"
           >

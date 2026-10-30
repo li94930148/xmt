@@ -11,6 +11,7 @@ import DailyReportSummaryForm from '../components/daily-report/DailyReportSummar
 import DailyReportTeamBoard from '../components/daily-report/DailyReportTeamBoard';
 import DailyReportSummaryArchive from '../components/daily-report/DailyReportSummaryArchive';
 import DailyReportDetailDrawer from '../components/daily-report/DailyReportDetailDrawer';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { ReactBitsPageScene } from '../features/reactbits-appearance/slots/ReactBitsPageScene';
 import { ReactBitsHeadingSlot } from '../features/reactbits-appearance/slots/ReactBitsHeadingSlot';
 import { ReactBitsNavigationSlot } from '../features/reactbits-appearance/slots/ReactBitsNavigationSlot';
@@ -218,7 +219,9 @@ function DailyReportSession({ userId }: { userId: number | null }) {
   const persistDraftRecovery = useCallback((value: DraftSaveRecovery) => {
     try {
       if (!recoveryKey) return false;
-      window.sessionStorage.setItem(recoveryKey, JSON.stringify(value));
+      const serialized = JSON.stringify(value);
+      window.sessionStorage.setItem(recoveryKey, serialized);
+      if (window.sessionStorage.getItem(recoveryKey) !== serialized) return false;
     } catch {
       return false;
     }
@@ -228,9 +231,16 @@ function DailyReportSession({ userId }: { userId: number | null }) {
   }, [recoveryKey]);
 
   const clearDraftRecovery = useCallback(() => {
-    try { if (recoveryKey) window.sessionStorage.removeItem(recoveryKey); } catch { /* best-effort cleanup; the next read still verifies before any write */ }
+    try {
+      if (!recoveryKey) return false;
+      window.sessionStorage.removeItem(recoveryKey);
+      if (window.sessionStorage.getItem(recoveryKey) !== null) return false;
+    } catch {
+      return false;
+    }
     draftRecoveryRef.current = null;
     setDraftRecovery(null);
+    return true;
   }, [recoveryKey]);
 
   const setDraftRecoveryPhase = useCallback((phase: DraftSaveRecovery['phase'], lastError?: string) => {
@@ -276,9 +286,12 @@ function DailyReportSession({ userId }: { userId: number | null }) {
   }, [reconcileDraftRecovery]);
 
   const updateItems = useCallback((nextItems: DailyReportItem[]) => {
-    if (draftRecoveryRef.current?.phase === 'saved') clearDraftRecovery();
+    if (draftRecoveryRef.current?.phase === 'saved' && !clearDraftRecovery()) {
+      addNotification({ title: '日报暂未修改', message: '本机恢复记录未能清除，当前修改未应用。请检查浏览器存储后重试。', type: 'error' });
+      return;
+    }
     setItems(nextItems);
-  }, [clearDraftRecovery]);
+  }, [addNotification, clearDraftRecovery]);
 
   const loadMine = useCallback(async () => {
     if (submitInFlight.current) return;
@@ -294,10 +307,10 @@ function DailyReportSession({ userId }: { userId: number | null }) {
     catch (error) {
       if (isCurrentRequest()) {
         if (draftRecoveryRef.current) {
-          setDraftRecoveryPhase('pending', error instanceof Error ? error.message : '只读核实失败');
+          setDraftRecoveryPhase('pending', getUserFacingErrorMessage(error, '日报草稿状态暂时无法核实，请稍后重试。'));
           setMineError('');
           setItems(draftRecoveryRef.current.payload.items.map((item) => ({ ...item })));
-        } else setMineError(error instanceof Error ? error.message : '加载日报失败');
+        } else setMineError(getUserFacingErrorMessage(error, '日报暂时无法加载，请稍后重试。'));
       }
     }
     finally { if (isCurrentRequest()) setLoading(false); }
@@ -312,7 +325,7 @@ function DailyReportSession({ userId }: { userId: number | null }) {
       setTeamReports(result.reports);
       setTeamReportsQueryKey(teamQueryKey);
     }
-    catch (error) { if (requestId === teamRequestSequenceRef.current) setTeamError(error instanceof Error ? error.message : '加载团队日报失败'); }
+    catch (error) { if (requestId === teamRequestSequenceRef.current) setTeamError(getUserFacingErrorMessage(error, '团队日报暂时无法加载，请稍后重试。')); }
     finally { if (requestId === teamRequestSequenceRef.current) setTeamLoading(false); }
   }, [canViewTeam, teamDate, teamQueryKey, teamStatus]);
 
@@ -332,7 +345,7 @@ function DailyReportSession({ userId }: { userId: number | null }) {
       applyDraftReadResult(result);
     } catch (error) {
       if (useAuthStore.getState().user?.id === userId) {
-        const message = error instanceof Error ? error.message : '只读核实失败';
+        const message = getUserFacingErrorMessage(error, '日报草稿状态暂时无法核实，请稍后重试。');
         setDraftRecoveryPhase('pending', message);
         const recovery = draftRecoveryRef.current;
         if (recovery) setItems(recovery.payload.items.map((item) => ({ ...item })));
@@ -346,10 +359,14 @@ function DailyReportSession({ userId }: { userId: number | null }) {
   const handleDraftWriteFailure = async (error: unknown) => {
     const recovery = draftRecoveryRef.current;
     if (!recovery) return;
-    const message = error instanceof Error ? error.message : '保存日报草稿失败';
+    const message = getUserFacingErrorMessage(error, '日报草稿保存失败，请检查后重试。');
     if (isKnownPreWriteRejection(error)) {
-      clearDraftRecovery();
       setItems(recovery.payload.items.map((item) => ({ ...item })));
+      if (!clearDraftRecovery()) {
+        setDraftRecoveryPhase('pending', '服务端拒绝了本次草稿写入，但本机恢复记录未能清除；请只读重新核实。');
+        addNotification({ title: '草稿恢复记录未清除', message: `${message} 本机恢复记录仍保留，确认前不会再次提交。`, type: 'error' });
+        return;
+      }
       addNotification({ title: '提交日报失败', message, type: 'error' });
       return;
     }
@@ -361,7 +378,7 @@ function DailyReportSession({ userId }: { userId: number | null }) {
       applyDraftReadResult(result);
     } catch (readError) {
       if (useAuthStore.getState().user?.id !== userId) return;
-      const readMessage = readError instanceof Error ? readError.message : '只读核实失败';
+      const readMessage = getUserFacingErrorMessage(readError, '当前日报状态暂时无法读取，请稍后重新核实。');
       setDraftRecoveryPhase('pending', `${message}；只读核实失败：${readMessage}`);
       setMineError('');
       setItems(recovery.payload.items.map((item) => ({ ...item })));
@@ -396,7 +413,7 @@ function DailyReportSession({ userId }: { userId: number | null }) {
       }
     } catch (error) {
       if (useAuthStore.getState().user?.id === userId) {
-        const message = error instanceof Error ? error.message : '读取失败';
+        const message = getUserFacingErrorMessage(error, '日报提交结果暂时无法确认，请重新核实状态。');
         setSubmissionNeedsVerification(true);
         setSubmissionNotice(`提交结果仍无法确认：${message}。请稍后重新核实状态；确认前不要重复提交。`);
       }
@@ -429,7 +446,12 @@ function DailyReportSession({ userId }: { userId: number | null }) {
           return;
         }
         savedDraft = report;
-        clearDraftRecovery();
+        if (!clearDraftRecovery()) {
+          const message = '本机恢复记录未能清除，日报暂未提交。请检查浏览器存储后重试。';
+          setSubmissionNotice(message);
+          addNotification({ title: '日报暂未提交', message, type: 'error' });
+          return;
+        }
       } else {
         const payload: SaveDailyReportDraftPayload = {
           reportDate,
@@ -455,8 +477,19 @@ function DailyReportSession({ userId }: { userId: number | null }) {
         }
         try {
           savedDraft = await saveDailyReportDraft(payload);
-          clearDraftRecovery();
           setReport(savedDraft);
+          if (!clearDraftRecovery()) {
+            const confirmedRecovery = { ...recovery, phase: 'saved' as const, lastError: '' };
+            if (!persistDraftRecovery(confirmedRecovery)) {
+              draftRecoveryRef.current = confirmedRecovery;
+              setDraftRecovery(confirmedRecovery);
+            }
+            setItems(normalizeItems(savedDraft));
+            const message = '日报草稿已保存，但本机恢复记录未能清除，因此本次尚未提交。请检查浏览器存储后重试。';
+            setSubmissionNotice(message);
+            addNotification({ title: '草稿已保存，日报暂未提交', message, type: 'error' });
+            return;
+          }
         } catch (error) {
           await handleDraftWriteFailure(error);
           return;
@@ -470,7 +503,7 @@ function DailyReportSession({ userId }: { userId: number | null }) {
         setSubmissionNeedsVerification(false);
         addNotification({ title: '提交成功', message: '今日日报已提交。', type: 'success' });
       } catch (error) {
-      const message = error instanceof Error ? error.message : '日报未提交，请重试。';
+      const message = getUserFacingErrorMessage(error, '日报提交结果暂时无法确认，请先核实状态。');
         setReport(savedDraft);
         try {
           const current = await getMyDailyReport(reportDate);
@@ -493,7 +526,7 @@ function DailyReportSession({ userId }: { userId: number | null }) {
           }
         } catch (readError) {
           if (useAuthStore.getState().user?.id !== userId) return;
-          const readMessage = readError instanceof Error ? readError.message : '读取失败';
+          const readMessage = getUserFacingErrorMessage(readError, '当前日报状态暂时无法读取，请重新核实。');
           setItems(normalizeItems(savedDraft));
           setSubmissionNeedsVerification(true);
           setSubmissionNotice(`日报草稿已保存，但提交结果无法确认：${message}；读取当前状态也失败（${readMessage}）。请重试读取状态，确认前不要重复提交。`);
@@ -530,8 +563,8 @@ function DailyReportSession({ userId }: { userId: number | null }) {
 
   return <ReactBitsPageScene page="dailyReport"><PageShell>
     <PageHeader title={<ReactBitsHeadingSlot>日报</ReactBitsHeadingSlot>} description="记录每天的工作、计划和需要协调的事项。" actions={<ActionButton disabled={submitting || verifyingSubmission || verifyingDraft} onClick={() => tab === 'mine' ? draftSaveLocked ? void verifyDraftSave() : submissionNeedsVerification ? void verifySubmission() : void loadMine() : tab === 'team' ? void loadTeam() : undefined}><RefreshCw className="h-4 w-4" />{verifyingDraft || verifyingSubmission ? '核实中' : draftSaveLocked ? '核实草稿' : submissionNeedsVerification ? '核实状态' : '刷新'}</ActionButton>} />
-    <ReactBitsNavigationSlot semantic="page-tabs"><GlassPanel className="p-2"><div className="flex flex-wrap gap-2">{tabs.filter((item) => item.visible).map((item) => { const Icon = item.icon; return <button key={item.key} type="button" onClick={() => setTab(item.key)} className={`inline-flex items-center gap-2 rounded-button px-4 py-2.5 text-sm font-semibold ${tab === item.key ? 'bg-studio-primary-button text-white shadow-glow-primary' : 'text-studio-text-secondary hover:bg-studio-surface-soft'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></GlassPanel></ReactBitsNavigationSlot>
-    {tab === 'mine' ? <ReactBitsRevealSlot className="block"><ReactBitsCardSlot semantic="report-card" className="space-y-5"><GlassPanel className="flex flex-wrap items-center gap-4 p-5"><label className="block"><span className="mb-2 block text-sm text-studio-text-muted">记录类型</span><select value={entryType} onChange={(event) => setEntryType(event.target.value as EntryType)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary"><option value="daily">日报</option><option value="monthly">月报</option><option value="yearly">年报</option></select></label>{entryType === 'daily' ? <span aria-hidden={loading} className="text-sm text-studio-text-muted">{loading ? '加载中...' : report ? '今日日报' : '今天还没有日报'}</span> : <span className="text-sm text-studio-text-muted">填写并提交个人{entryType === 'monthly' ? '月报' : '年报'}</span>}</GlassPanel>{entryType === 'daily' ? mineError ? <ErrorState title="日报加载失败" description={mineError} onRetry={() => void loadMine()} /> : loading ? <GlassPanel className="p-6 text-center text-sm text-studio-text-muted"><p role="status" aria-live="polite" aria-atomic="true">正在加载今日日报…</p></GlassPanel> : <>
+    <ReactBitsNavigationSlot semantic="page-tabs" aria-label="日报视图"><GlassPanel className="p-2"><div className="flex flex-wrap gap-2">{tabs.filter((item) => item.visible).map((item) => { const Icon = item.icon; return <button key={item.key} type="button" aria-pressed={tab === item.key} onClick={() => setTab(item.key)} className={`inline-flex items-center gap-2 rounded-button px-4 py-2.5 text-sm font-semibold ${tab === item.key ? 'bg-studio-primary-button text-white shadow-glow-primary' : 'text-studio-text-secondary hover:bg-studio-surface-soft'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</div></GlassPanel></ReactBitsNavigationSlot>
+    {tab === 'mine' ? <ReactBitsRevealSlot className="block"><ReactBitsCardSlot semantic="report-card" className="space-y-5"><GlassPanel className="flex flex-wrap items-center gap-4 p-5"><label className="block"><span className="mb-2 block text-sm text-studio-text-muted">记录类型</span><select id="daily-report-entry-type" name="entry_type" value={entryType} onChange={(event) => setEntryType(event.target.value as EntryType)} className="rounded-button border border-studio-border-soft bg-studio-surface px-3 py-2 text-sm text-studio-text-primary"><option value="daily">日报</option><option value="monthly">月报</option><option value="yearly">年报</option></select></label>{entryType === 'daily' ? <span aria-hidden={loading} className="text-sm text-studio-text-muted">{loading ? '加载中...' : report ? '今日日报' : '今天还没有日报'}</span> : <span className="text-sm text-studio-text-muted">填写并提交个人{entryType === 'monthly' ? '月报' : '年报'}</span>}</GlassPanel>{entryType === 'daily' ? mineError ? <ErrorState title="日报加载失败" description={mineError} onRetry={() => void loadMine()} /> : loading ? <GlassPanel className="p-6 text-center text-sm text-studio-text-muted"><p role="status" aria-live="polite" aria-atomic="true">正在加载今日日报…</p></GlassPanel> : <>
       {draftRecovery && draftRecoveryNotice ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-studio-amber/30 bg-studio-amber/10 px-4 py-3 text-sm leading-6 text-studio-amber-contrast"><span>{draftRecoveryNotice}</span><div className="flex flex-wrap gap-2">{draftRecovery.phase === 'safe-retry' ? <ActionButton disabled={submitting || verifyingDraft || !canSubmitDaily} onClick={() => void retrySameDraft()}>{submitting ? '正在安全重试…' : '同载荷安全重试'}</ActionButton> : null}{draftRecovery.phase !== 'saved' ? <ActionButton disabled={submitting || verifyingDraft} onClick={() => void verifyDraftSave()}>{verifyingDraft ? '正在核实…' : '重新核实草稿状态'}</ActionButton> : null}</div></div> : null}
       {submissionNotice ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-studio-amber/30 bg-studio-amber/10 px-4 py-3 text-sm leading-6 text-studio-amber-contrast"><span>{submissionNotice}</span>{submissionNeedsVerification ? <ActionButton disabled={verifyingSubmission} onClick={() => void verifySubmission()}>{verifyingSubmission ? '正在核实…' : '重新核实日报状态'}</ActionButton> : null}</div> : null}
       {permissionsLoading ? <GlassPanel className="p-6 text-center text-sm text-studio-text-secondary">正在确认日报权限…</GlassPanel> : !report && !canSubmitDaily && !draftRecovery ? <GlassPanel className="p-5"><EmptyState icon={FileClock} title="当前没有日报记录" description="当前账号未开通填写日报权限；已有日报仍可查看。" /></GlassPanel> : <DailyReportComposer status={composerLocked ? null : report?.status || 'draft'} canEdit={canSubmitDaily} items={items} submitting={submitting} submissionLocked={composerLocked} busyLabel={verifyingDraft || verifyingSubmission ? '核实中' : undefined} onItemsChange={updateItems} onSubmit={() => void submit()} />}

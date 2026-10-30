@@ -6,7 +6,7 @@ import path from 'node:path';
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xmt-retro-audit-atomic-'));
 process.env.XMT_DB_PATH = path.join(directory, 'retro-audit-atomic.db');
 
-const { initDatabase, closeDatabase } = await import('../../api/database/db.js');
+const { db, initDatabase, closeDatabase } = await import('../../api/database/db.js');
 const { execute, executeInsert, queryOne } = await import('../../api/database/utils.js');
 const {
   archiveRetrospective,
@@ -83,6 +83,81 @@ try {
   await removeAuditRejection('snapshot_replace');
   await generateRetrospectiveSnapshot(admin, retroId, { mode: 'replace' } as never);
   assert.equal(await auditCount(retroId, 'snapshot_replace'), 1);
+
+  const racingRetro = await createRetrospective(admin, {
+    title: '发布与快照并发隔离复盘', periodStart: '2026-09-08', periodEnd: '2026-09-14', scopeType: 'team',
+  } as never);
+  const racingRetroId = Number(racingRetro.retrospective.id);
+  await execute(
+    `INSERT INTO retro_metric_snapshots (retro_id,metric_key,metric_name,value_num,captured_at) VALUES(?,?,?,?,?)`,
+    [racingRetroId, 'sentinel', '发布前快照', 321, '2026-09-15T00:00:00.000Z'],
+  );
+
+  const snapshotQuery = 'SELECT COUNT(*) AS count FROM topics WHERE date(created_at) BETWEEN ? AND ?';
+  const originalExecute = db.execute.bind(db);
+  let resumeSnapshotCalculation!: () => void;
+  let announcePausedSnapshot!: () => void;
+  const resumeSignal = new Promise<void>((resolve) => { resumeSnapshotCalculation = resolve; });
+  const pausedSignal = new Promise<void>((resolve) => { announcePausedSnapshot = resolve; });
+  let pauseFirstSnapshotQuery = true;
+  const databaseClient = db as unknown as Record<string, unknown>;
+  const originalExecuteDescriptor = Object.getOwnPropertyDescriptor(db, 'execute');
+  Object.defineProperty(db, 'execute', {
+    configurable: true,
+    writable: true,
+    value: async (statement: unknown) => {
+      const result = await originalExecute(statement as never);
+      if (pauseFirstSnapshotQuery
+        && statement !== null
+        && typeof statement === 'object'
+        && 'sql' in statement
+        && statement.sql === snapshotQuery) {
+        pauseFirstSnapshotQuery = false;
+        announcePausedSnapshot();
+        await resumeSignal;
+      }
+      return result;
+    },
+  });
+  let snapshotPromise: Promise<unknown> | undefined;
+  try {
+    snapshotPromise = generateRetrospectiveSnapshot(admin, racingRetroId, { mode: 'replace' } as never);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      pausedSignal,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('snapshot calculation did not reach the controlled race barrier')), 5000);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+
+    const publishedDuringSnapshot = await publishRetrospective(admin, racingRetroId);
+    assert.equal(publishedDuringSnapshot.retrospective.status, 'published', 'the independent publish request succeeds while snapshot metrics are being calculated');
+    resumeSnapshotCalculation();
+    await assert.rejects(snapshotPromise, (error: unknown) => Boolean(error
+      && typeof error === 'object'
+      && (error as { statusCode?: number }).statusCode === 409
+      && (error as { code?: string }).code === 'RETRO_CHANGED'), 'the stale snapshot replacement returns the service 409 conflict');
+  } finally {
+    resumeSnapshotCalculation();
+    if (snapshotPromise) await snapshotPromise.catch(() => undefined);
+    if (originalExecuteDescriptor) Object.defineProperty(db, 'execute', originalExecuteDescriptor);
+    else Reflect.deleteProperty(databaseClient, 'execute');
+  }
+  assert.deepEqual(
+    await queryOne<{ status: string; version: number }>('SELECT status,version FROM retrospectives WHERE id=?', [racingRetroId]),
+    { status: 'published', version: 2 },
+    'the concurrent snapshot request cannot change the published retrospective',
+  );
+  assert.deepEqual(
+    await queryOne<{ metric_key: string; metric_name: string; value_num: number }>(
+      'SELECT metric_key,metric_name,value_num FROM retro_metric_snapshots WHERE retro_id=?', [racingRetroId],
+    ),
+    { metric_key: 'sentinel', metric_name: '发布前快照', value_num: 321 },
+    'a rejected snapshot replacement preserves the exact pre-publish snapshot',
+  );
+  assert.equal(await auditCount(racingRetroId, 'snapshot_replace'), 0, 'a rejected replacement adds no snapshot audit');
+  assert.equal(await auditCount(racingRetroId, 'publish'), 1, 'the successful publish audit remains recorded');
 
   await rejectAudit('action_create');
   await assert.rejects(createRetroAction(admin, retroId, { title: '不应出现的行动项' } as never));

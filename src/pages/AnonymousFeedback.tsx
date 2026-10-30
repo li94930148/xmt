@@ -3,6 +3,7 @@ import { Inbox, MessageSquareText, Plus } from 'lucide-react';
 import AnonymousFeedbackModal from '../components/AnonymousFeedbackModal';
 import { getPublicAnonymousFeedback, type AnonymousFeedbackType, type PublicAnonymousFeedback } from '../api/anonymousFeedback';
 import { useAppStore } from '../store';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { formatBeijingDate } from '../lib/utils';
 import { ActionButton, EmptyState, GlassPanel, PageHeader, PageShell, StatusPill } from '../components/studio';
 import LoadingState from '../components/common/LoadingState';
@@ -32,7 +33,7 @@ export default function AnonymousFeedbackPage() {
       if (requestSequence === listRequestSequenceRef.current) setItems(nextItems);
     } catch (error) {
       if (requestSequence === listRequestSequenceRef.current) {
-        addNotification({ title: '加载失败', message: error instanceof Error ? error.message : '无法获取公开意见', type: 'error' });
+        addNotification({ title: '加载失败', message: getUserFacingErrorMessage(error, '公开意见暂时无法加载，请检查连接后重试。'), type: 'error' });
       }
     } finally {
       if (requestSequence === listRequestSequenceRef.current) setLoading(false);

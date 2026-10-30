@@ -32,10 +32,12 @@ import {
   StudioSkeletonCard,
 } from '../components/studio';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { orderHomeTasks, type HomeTaskCategory } from '../lib/homeTaskOrdering';
 import { getPlatformLabel } from '../platform/platform-labels';
 import { getProductionVersionRoomId } from '../collaboration/core/events';
 import { ProductionDraftSaveStatus } from '../components/editor/ProductionDraftSaveStatus';
+import HomeCrossModuleOverview from '../components/home/HomeCrossModuleOverview';
 
 type Tone = 'primary' | 'cyan' | 'violet' | 'coral' | 'amber' | 'success' | 'muted';
 
@@ -81,6 +83,21 @@ type StageConfig = {
 type HomeCreatorMetricsState =
   | { userId: number; status: 'loading' | 'empty' | 'error' }
   | { userId: number; status: 'ready'; data: DouyinDashboardData };
+
+type HomeActivityState = {
+  userId: number | null;
+  role: string | undefined;
+  token: string | null;
+  data: HomeActivitySummary | null;
+  error: string;
+  loading: boolean;
+};
+
+type HomeDashboardIdentity = {
+  userId: number | null;
+  role: string | undefined;
+  token: string | null;
+};
 
 const topicStatusText: Record<TopicStatus, string> = {
   pending: '待审核',
@@ -131,9 +148,8 @@ export default function Home() {
   const [inspirations, setInspirations] = useState<Inspiration[]>([]);
   const [inspirationTotal, setInspirationTotal] = useState<number | null>(null);
   const [attention, setAttention] = useState<HomeAttentionSummary | null>(null);
-  const [recentActivity, setRecentActivity] = useState<HomeActivitySummary | null>(null);
-  const [recentActivityError, setRecentActivityError] = useState('');
-  const [recentActivityLoading, setRecentActivityLoading] = useState(true);
+  const [dashboardIdentity, setDashboardIdentity] = useState<HomeDashboardIdentity>({ userId: null, role: undefined, token: null });
+  const [recentActivityState, setRecentActivityState] = useState<HomeActivityState>({ userId: null, role: undefined, token: null, data: null, error: '', loading: true });
   const [recentActivityReload, setRecentActivityReload] = useState(0);
   const [creatorMetricsState, setCreatorMetricsState] = useState<HomeCreatorMetricsState>({ userId: -1, status: 'loading' });
   const [creatorMetricsReload, setCreatorMetricsReload] = useState(0);
@@ -145,8 +161,12 @@ export default function Home() {
   const [showChanges, setShowChanges] = useState(true);
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.token);
   const currentUserId = user?.id;
   const { loading: permissionsLoading, hasPermission } = usePermission();
+  const dashboardMatchesCurrentIdentity = dashboardIdentity.userId === (currentUserId ?? null)
+    && dashboardIdentity.role === user?.role
+    && dashboardIdentity.token === token;
   const canCreateTopic = !permissionsLoading && hasPermission('topic:create');
   const canWriteProduction = !permissionsLoading && hasPermission('production:update');
   const canViewCreatorMetrics = !permissionsLoading && hasPermission('creator:data:view');
@@ -156,9 +176,14 @@ export default function Home() {
   useEffect(() => {
     if (!user || permissionsLoading) return;
 
+    const requestIdentity: HomeDashboardIdentity = { userId: user.id, role: user.role, token };
     let cancelled = false;
     const fetchDashboard = async () => {
       setLoading(true);
+      setDashboardIdentity({ userId: null, role: undefined, token: null });
+      setInspirations([]);
+      setInspirationTotal(null);
+      setAttention(null);
       setLoadIssues([]);
       setAttentionError('');
       setAttentionLoading(true);
@@ -171,41 +196,66 @@ export default function Home() {
       const [ideaResult, attentionResult] = requests;
       const failedSections = ideaResult.status === 'rejected' ? ['灵感池'] : [];
       if (attentionResult.status === 'fulfilled' && !attentionResult.value.retrospectives.available) failedSections.push('复盘');
+      if (attentionResult.status === 'fulfilled' && !attentionResult.value.my_retro_actions.available) failedSections.push('复盘行动项');
 
       setInspirations(ideaResult.status === 'fulfilled' ? ideaResult.value.data : []);
       setInspirationTotal(ideaResult.status === 'fulfilled' ? ideaResult.value.total : null);
       if (attentionResult.status === 'fulfilled') setAttention(attentionResult.value);
-      else setAttentionError(attentionResult.reason instanceof Error ? attentionResult.reason.message : '工作台摘要暂时无法读取，请重试。');
+      else {
+        setAttention(null);
+        setAttentionError(getUserFacingErrorMessage(attentionResult.reason, '工作台摘要暂时无法读取，请重试。'));
+      }
       setAttentionLoading(false);
 
       setLoadIssues(failedSections);
+      setDashboardIdentity(requestIdentity);
       setLoading(false);
     };
 
     void fetchDashboard();
     return () => { cancelled = true; };
-  }, [dashboardReload, permissionsLoading, user]);
+  }, [dashboardReload, permissionsLoading, token, user]);
 
   useEffect(() => {
-    if (!user || permissionsLoading) return;
+    if (!user) {
+      setRecentActivityState({ userId: null, role: undefined, token: null, data: null, error: '', loading: true });
+      return;
+    }
+    if (permissionsLoading) return;
 
+    const requestUserId = user.id;
+    const requestRole = user.role;
+    const requestToken = token;
     let cancelled = false;
-    setRecentActivityLoading(true);
-    setRecentActivityError('');
+    setRecentActivityState((current) => ({
+      userId: requestUserId,
+      role: requestRole,
+      token: requestToken,
+      data: current.userId === requestUserId && current.role === requestRole && current.token === requestToken ? current.data : null,
+      error: '',
+      loading: true,
+    }));
     getHomeActivity()
       .then((summary) => {
-        if (!cancelled) setRecentActivity(summary);
+        if (!cancelled) setRecentActivityState((current) => current.userId === requestUserId && current.role === requestRole && current.token === requestToken
+          ? { ...current, data: summary, error: '' }
+          : current);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setRecentActivityError(error instanceof Error ? error.message : '最近变化暂时无法读取，请重试。');
+        const message = getUserFacingErrorMessage(error, '最近变化暂时无法读取，请重试。');
+        setRecentActivityState((current) => current.userId === requestUserId && current.role === requestRole && current.token === requestToken
+          ? { ...current, error: message }
+          : current);
       })
       .finally(() => {
-        if (!cancelled) setRecentActivityLoading(false);
+        if (!cancelled) setRecentActivityState((current) => current.userId === requestUserId && current.role === requestRole && current.token === requestToken
+          ? { ...current, loading: false }
+          : current);
       });
 
     return () => { cancelled = true; };
-  }, [permissionsLoading, recentActivityReload, user]);
+  }, [permissionsLoading, recentActivityReload, token, user]);
 
   useEffect(() => {
     if (currentUserId === undefined || permissionsLoading) return;
@@ -317,6 +367,18 @@ export default function Home() {
         saveDocId: getProductionVersionRoomId(item.id, String(item.version)),
     }));
 
+    (attention?.my_retro_actions.tasks || []).forEach((item) => result.push({
+      id: `retro-action-${item.id}`,
+      category: 'retro-action',
+      title: '复盘行动项',
+      context: item.title,
+      meta: `${item.retro_title} · ${item.status === 'doing' ? '进行中' : '待处理'} · ${item.due_date ? `截止 ${formatBeijingDate(item.due_date)}` : '未设置截止日期'}`,
+      path: `/retrospectives/${item.retro_id}`,
+      action: '去处理',
+      tone: 'violet',
+      icon: CheckCircle2,
+    }));
+
     if (hasPermission('workflow:publishing')) {
       (attention?.today_publishing.tasks || []).forEach((item) => result.push({
         id: `today-publishing-${item.id}`,
@@ -350,29 +412,49 @@ export default function Home() {
   if (isManagementRole && actionableMessages.count > 0) taskDescription += ` · 待处理消息 ${actionableMessages.count} 条`;
   if (isManagementRole && attention?.sync_anomalies.total) taskDescription += ` · 同步异常 ${attention.sync_anomalies.total} 个账号`;
   if (attention?.production_reviews.available && attention.production_reviews.total > 0) taskDescription += ` · 待审稿件 ${attention.production_reviews.total} 篇（按现有权限范围）`;
+  if (attention?.my_retro_actions.available && attention.my_retro_actions.total > 0) taskDescription += ` · 我的复盘行动项 ${attention.my_retro_actions.total} 项`;
 
   const reloadAttention = async () => {
+    const requestIdentity: HomeDashboardIdentity = { userId: user?.id ?? null, role: user?.role, token };
+    const isRequestCurrent = () => {
+      const currentAuth = useAuthStore.getState();
+      return currentAuth.user?.id === requestIdentity.userId
+        && currentAuth.user?.role === requestIdentity.role
+        && currentAuth.token === requestIdentity.token;
+    };
+    if (!user || !isRequestCurrent()) return;
+
     setAttentionLoading(true);
     setAttentionError('');
     try {
       const summary = await getHomeAttention();
+      if (!isRequestCurrent()) return;
       setAttention(summary);
       setLoadIssues((current) => {
-        const remaining = current.filter((section) => section !== '复盘');
-        return summary.retrospectives.available ? remaining : [...remaining, '复盘'];
+        const remaining = current.filter((section) => section !== '复盘' && section !== '复盘行动项');
+        if (!summary.retrospectives.available) remaining.push('复盘');
+        if (!summary.my_retro_actions.available) remaining.push('复盘行动项');
+        return remaining;
       });
     } catch (error) {
-      setAttentionError(error instanceof Error ? error.message : '工作台摘要暂时无法读取，请重试。');
+      if (!isRequestCurrent()) return;
+      setAttentionError(getUserFacingErrorMessage(error, '工作台摘要暂时无法读取，请重试。'));
     } finally {
-      setAttentionLoading(false);
+      if (isRequestCurrent()) setAttentionLoading(false);
     }
   };
   const attentionTopics = attention?.topics || [];
   const attentionTotal = attention?.counts.total ?? null;
   const taskSourcesUnavailable = Boolean(attentionError)
+    || Boolean(attention && !attention.my_retro_actions.available)
     || Boolean(isManagementRole && actionableMessages.error);
   const taskSourcesLoading = Boolean(isManagementRole && actionableMessages.loading && !actionableMessages.messages.length && actionableMessages.count === 0);
-  const recentChanges = useMemo<ChangeItem[]>(() => (recentActivity?.events || []).map((event) => ({
+  const currentRecentActivity = recentActivityState.userId === (currentUserId ?? null)
+    && recentActivityState.role === user?.role
+    && recentActivityState.token === token
+    ? recentActivityState
+    : { userId: currentUserId ?? null, role: user?.role, token, data: null, error: '', loading: true };
+  const recentChanges = useMemo<ChangeItem[]>(() => (currentRecentActivity.data?.events || []).map((event) => ({
     id: event.id,
     type: event.label,
     title: event.title,
@@ -380,7 +462,7 @@ export default function Home() {
     time: event.occurred_at,
     path: event.path,
     tone: event.kind === 'version' ? 'cyan' : event.kind === 'review' ? 'violet' : event.kind === 'reply' ? 'primary' : 'amber',
-  })), [recentActivity]);
+  })), [currentRecentActivity.data]);
   const currentCreatorMetrics = canViewCreatorMetrics && creatorMetricsState.userId === user?.id
     ? creatorMetricsState
     : null;
@@ -403,7 +485,7 @@ export default function Home() {
     })) : [] },
   ];
 
-  if (loading) {
+  if (loading || permissionsLoading || !dashboardMatchesCurrentIdentity) {
     return <PageShell><span className="sr-only" role="status" aria-live="polite" aria-atomic="true">正在加载工作台…</span><StudioSkeletonCard /><div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]"><StudioSkeletonCard /><StudioSkeletonCard /></div><StudioSkeletonCard /></PageShell>;
   }
 
@@ -433,7 +515,16 @@ export default function Home() {
         </GlassPanel>
 
         <GlassPanel>
-          <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4"><div><h2 className="text-base font-semibold text-studio-text-primary">{attention?.scope === 'all-visible-content' || isManagementRole ? '团队选题关注' : '我的选题关注'}</h2><p className="mt-1 text-xs text-studio-text-muted">{attention ? `逾期 ${attention.counts.overdue} · 阶段超过 2 天 ${attention.counts.stalled} · 截止临近 ${attention.counts.due_soon}${attention.counts.stage_time_unknown > 0 ? ` · 阶段时间待确认 ${attention.counts.stage_time_unknown}` : ''}` : '逾期、长时间未推进或即将截止的内容'}</p></div><StatusPill tone={attentionTotal === null ? 'muted' : attentionTotal > 0 ? 'coral' : attention?.counts.stage_time_unknown ? 'amber' : 'success'}>{attentionTotal ?? '—'}</StatusPill></div>
+          <div className="flex items-center justify-between border-b border-studio-border-soft px-5 py-4"><div><h2 className="text-base font-semibold text-studio-text-primary">{isManagementRole ? '团队工作概览' : attention?.scope === 'all-visible-content' ? '团队选题关注' : '我的选题关注'}</h2><p className="mt-1 text-xs text-studio-text-muted">{isManagementRole ? '选题、审核、发布、同步和待办消息' : attention ? `逾期 ${attention.counts.overdue} · 阶段超过 2 天 ${attention.counts.stalled} · 截止临近 ${attention.counts.due_soon}${attention.counts.stage_time_unknown > 0 ? ` · 阶段时间待确认 ${attention.counts.stage_time_unknown}` : ''}` : '逾期、长时间未推进或即将截止的内容'}</p></div>{isManagementRole ? null : <StatusPill tone={attentionTotal === null ? 'muted' : attentionTotal > 0 ? 'coral' : attention?.counts.stage_time_unknown ? 'amber' : 'success'}>{attentionTotal ?? '—'}</StatusPill>}</div>
+          {isManagementRole ? <HomeCrossModuleOverview
+            summary={attention}
+            isManagementRole
+            hasTopicAudit={!permissionsLoading && hasPermission('topic:audit')}
+            hasPublishingAccess={!permissionsLoading && hasPermission('workflow:publishing')}
+            actionableMessageCount={!actionableMessages.loading && !actionableMessages.error ? actionableMessages.count : null}
+            onNavigate={(path) => navigate(path)}
+          /> : null}
+          {isManagementRole ? <div className="flex items-center justify-between px-5 pt-3"><h3 className="text-sm font-semibold text-studio-text-primary">选题卡点</h3><StatusPill tone={attentionTotal === null ? 'muted' : attentionTotal > 0 ? 'coral' : attention?.counts.stage_time_unknown ? 'amber' : 'success'}>{attentionTotal ?? '—'}</StatusPill></div> : null}
           {attentionError ? <div className="flex flex-wrap items-center justify-between gap-3 p-4" role="alert"><p className="text-sm text-studio-coral-contrast">{attentionError}</p><ActionButton variant="ghost" disabled={attentionLoading} onClick={() => void reloadAttention()}>{attentionLoading ? '正在重试…' : '重新加载'}</ActionButton></div> : attentionLoading ? <p className="p-4 text-sm text-studio-text-muted" role="status">正在整理需要关注的内容…</p> : attentionTopics.length > 0 ? <div className="space-y-2 p-3">{attentionTopics.map((topic) => {
             const reason = topic.is_overdue
               ? `已超过截止时间 · ${formatBeijingDate(topic.deadline)}`
@@ -447,22 +538,41 @@ export default function Home() {
 
       <GlassPanel className="overflow-visible">
         <div className="border-b border-studio-border-soft px-5 py-4"><h2 className="text-base font-semibold text-studio-text-primary">内容流</h2><p className="mt-1 text-xs text-studio-text-muted">从灵感到复盘，一眼看清每个阶段</p></div>
-        <div className="overflow-x-auto p-4"><div className="grid min-w-[1050px] grid-cols-7 gap-2">{stages.map((stage, index) => <div key={stage.id} className="relative min-w-0">{index < stages.length - 1 ? <ChevronRight className="absolute -right-3 top-7 z-10 h-4 w-4 text-studio-text-muted" /> : null}<button type="button" onClick={() => navigate(stage.path)} className="h-full w-full rounded-card border border-studio-border-soft bg-studio-surface-soft/45 p-3 text-left transition hover:-translate-y-0.5 hover:border-studio-border-active hover:bg-studio-surface-elevated/65"><div className="flex items-center justify-between gap-2"><div className={`flex h-8 w-8 items-center justify-center rounded-button ${stageToneClasses[stage.tone]}`}><stage.icon className="h-4 w-4" /></div><span className="xmt-data-number text-xl font-semibold text-studio-text-primary">{stage.count ?? '—'}</span></div><p className="mt-3 text-sm font-semibold text-studio-text-primary">{stage.label}</p><div className="mt-3 space-y-2">{stage.count === null ? <p className="text-xs text-studio-coral-contrast">暂时无法读取，请重试</p> : stage.items.length > 0 ? stage.items.map((item, itemIndex) => <div key={`${item.title}-${itemIndex}`}><p className="line-clamp-2 text-xs leading-snug text-studio-text-secondary">{item.title}</p>{item.detail ? <p className="line-clamp-2 text-[10px] leading-snug text-studio-text-secondary">{item.detail}</p> : null}{item.stageEnteredAt !== undefined ? <p className="line-clamp-2 text-[10px] leading-snug text-studio-text-secondary">{formatStageElapsed(item.stageEnteredAt)}</p> : null}</div>) : <p className="text-xs text-studio-text-secondary">当前没有内容</p>}</div></button></div>)}</div></div>
+        <div className="overflow-x-auto p-4"><div className="grid min-w-[1050px] grid-cols-7 gap-2">{stages.map((stage, index) => <div key={stage.id} className="relative min-w-0">{index < stages.length - 1 ? <ChevronRight className="absolute -right-3 top-7 z-10 h-4 w-4 text-studio-text-muted" /> : null}<button type="button" onClick={() => navigate(stage.path)} className="h-full w-full rounded-card border border-studio-border-soft bg-studio-surface-soft/45 p-3 text-left transition hover:-translate-y-0.5 hover:border-studio-border-active hover:bg-studio-surface-elevated/65"><div className="flex items-center justify-between gap-2"><div className={`flex h-8 w-8 items-center justify-center rounded-button ${stageToneClasses[stage.tone]}`}><stage.icon className="h-4 w-4" /></div><span className="xmt-data-number text-xl font-semibold text-studio-text-primary">{stage.count ?? '—'}</span></div><p className="mt-3 text-sm font-semibold text-studio-text-primary">{stage.label}</p><div className="mt-3 space-y-2">{stage.count === null ? <p className="text-xs text-studio-coral-contrast">暂时无法读取</p> : stage.items.length > 0 ? stage.items.map((item, itemIndex) => <div key={`${item.title}-${itemIndex}`}><p className="line-clamp-2 text-xs leading-snug text-studio-text-secondary">{item.title}</p>{item.detail ? <p className="line-clamp-2 text-[10px] leading-snug text-studio-text-secondary">{item.detail}</p> : null}{item.stageEnteredAt !== undefined ? <p className="line-clamp-2 text-[10px] leading-snug text-studio-text-secondary">{formatStageElapsed(item.stageEnteredAt)}</p> : null}</div>) : <p className="text-xs text-studio-text-secondary">当前没有内容</p>}</div></button></div>)}</div></div>
       </GlassPanel>
 
       <GlassPanel>
         <div className="flex items-center justify-between gap-3 px-5 py-4">
-          <button type="button" onClick={() => setShowChanges((current) => !current)} className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left">
-            <div><h2 className="text-base font-semibold text-studio-text-primary">最近变化</h2><p className="mt-1 text-xs text-studio-text-muted">可追溯的稿件版本、批注和选题阶段变化</p></div>
-            {showChanges ? <ChevronDown className="h-5 w-5 shrink-0 text-studio-text-muted" /> : <ChevronRight className="h-5 w-5 shrink-0 text-studio-text-muted" />}
-          </button>
-          {recentActivity && !recentActivityLoading && !recentActivityError ? (
+          <div className="min-w-0 flex-1">
+            <h2 id="home-recent-changes-title" className="text-base font-semibold text-studio-text-primary">最近变化</h2>
+            <p className="mt-1 text-xs text-studio-text-muted">可追溯的稿件版本、批注和选题阶段变化</p>
+          </div>
+          <ActionButton
+            type="button"
+            variant="ghost"
+            aria-label={showChanges ? '收起最近变化' : '展开最近变化'}
+            aria-expanded={showChanges}
+            aria-controls="home-recent-changes-content"
+            onClick={() => setShowChanges((current) => !current)}
+            className="min-h-10 shrink-0 gap-2 px-3"
+          >
+            <span>{showChanges ? '收起' : '展开'}</span>
+            {showChanges ? <ChevronDown aria-hidden="true" className="h-5 w-5" /> : <ChevronRight aria-hidden="true" className="h-5 w-5" />}
+          </ActionButton>
+          {currentRecentActivity.data && !currentRecentActivity.loading && !currentRecentActivity.error ? (
             <ActionButton aria-label="刷新最近变化" variant="ghost" onClick={() => setRecentActivityReload((current) => current + 1)}>刷新</ActionButton>
           ) : null}
         </div>
       {hasPermission('workflow:publishing') && (attention?.today_publishing.total || 0) > tasks.filter((task) => task.category === 'publishing').length ? <p className="-mt-3 text-xs text-studio-text-muted">今日待发布 {attention?.today_publishing.total} 项，当前任务区显示其中优先事项。</p> : null}
 
-      {showChanges ? <div className="border-t border-studio-border-soft">
+      <div
+        id="home-recent-changes-content"
+        role="region"
+        aria-labelledby="home-recent-changes-title"
+        hidden={!showChanges}
+        className={showChanges ? 'border-t border-studio-border-soft' : undefined}
+      >
+      {showChanges ? <>
         {currentCreatorMetrics?.status === 'loading' ? <p className="px-5 py-3 text-xs text-studio-text-muted" role="status">正在读取可用的抖音数据…</p> : null}
         {currentCreatorMetrics?.status === 'error' ? <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3" role="alert"><p className="text-sm text-studio-coral-contrast">运营数据暂时无法读取，请重试。</p><ActionButton variant="ghost" onClick={() => setCreatorMetricsReload((current) => current + 1)}>重试运营数据</ActionButton></div> : null}
         {hasCreatorMetric && currentCreatorData ? <section aria-label="近 7 天播放与粉丝数据" className="border-b border-studio-border-soft px-5 py-4">
@@ -483,13 +593,14 @@ export default function Home() {
           </p>
         </section> : null}
         <div className="divide-y divide-studio-border-soft">
-          {recentActivityError ? <div className="flex flex-wrap items-center justify-between gap-3 p-4" role="alert"><div><p className="text-sm text-studio-coral-contrast">{recentActivityError}</p>{recentActivity ? <p className="mt-1 text-xs text-studio-text-secondary">仍显示最近一次成功读取的数据，可能不是最新。</p> : null}</div><ActionButton variant="ghost" disabled={recentActivityLoading} onClick={() => setRecentActivityReload((current) => current + 1)}>{recentActivityLoading ? '正在重试…' : '重新加载'}</ActionButton></div> : null}
-          {recentActivityLoading && !recentActivity ? <p className="p-5 text-sm text-studio-text-muted" role="status">正在读取最近变化…</p> : null}
-          {recentActivityLoading && recentActivity ? <p className="p-4 text-sm text-studio-text-muted" role="status">正在更新最近变化；上次成功读取的内容仍可查看。</p> : null}
-          {recentActivity && recentChanges.length > 0 ? recentChanges.map((change) => <button key={change.id} type="button" onClick={() => navigate(change.path)} className="grid w-full gap-2 px-5 py-3 text-left transition hover:bg-studio-surface-soft/55 sm:grid-cols-[110px_minmax(0,1fr)_minmax(0,1fr)_150px] sm:items-center"><StatusPill className="justify-self-start" tone={change.tone}>{change.type}</StatusPill><span className="truncate text-sm font-medium text-studio-text-primary">{change.title}</span><span className="truncate text-sm text-studio-text-secondary">{change.detail}</span><span className="text-xs text-studio-text-muted sm:text-right">{formatBeijingTime(change.time)}</span></button>) : null}
-          {recentActivity && recentChanges.length === 0 && !recentActivityError && !recentActivityLoading ? <EmptyState title="还没有最近变化" description="有新的稿件版本、批注或选题阶段变化后会显示在这里。" /> : null}
+          {currentRecentActivity.error ? <div className="flex flex-wrap items-center justify-between gap-3 p-4" role="alert"><div><p className="text-sm text-studio-coral-contrast">{currentRecentActivity.error}</p>{currentRecentActivity.data ? <p className="mt-1 text-xs text-studio-text-secondary">仍显示最近一次成功读取的数据，可能不是最新。</p> : null}</div><ActionButton variant="ghost" disabled={currentRecentActivity.loading} onClick={() => setRecentActivityReload((current) => current + 1)}>{currentRecentActivity.loading ? '正在重试…' : '重新加载'}</ActionButton></div> : null}
+          {currentRecentActivity.loading && !currentRecentActivity.data ? <p className="p-5 text-sm text-studio-text-muted" role="status">正在读取最近变化…</p> : null}
+          {currentRecentActivity.loading && currentRecentActivity.data ? <p className="p-4 text-sm text-studio-text-muted" role="status">正在更新最近变化；上次成功读取的内容仍可查看。</p> : null}
+          {currentRecentActivity.data && recentChanges.length > 0 ? recentChanges.map((change) => <button key={change.id} type="button" onClick={() => navigate(change.path)} className="grid w-full gap-2 px-5 py-3 text-left transition hover:bg-studio-surface-soft/55 sm:grid-cols-[110px_minmax(0,1fr)_minmax(0,1fr)_150px] sm:items-center"><StatusPill className="justify-self-start" tone={change.tone}>{change.type}</StatusPill><span className="truncate text-sm font-medium text-studio-text-primary">{change.title}</span><span className="truncate text-sm text-studio-text-secondary">{change.detail}</span><span className="text-xs text-studio-text-muted sm:text-right">{formatBeijingTime(change.time)}</span></button>) : null}
+          {currentRecentActivity.data && recentChanges.length === 0 && !currentRecentActivity.error && !currentRecentActivity.loading ? <EmptyState title="还没有最近变化" description="有新的稿件版本、批注或选题阶段变化后会显示在这里。" /> : null}
         </div>
-      </div> : null}
+      </> : null}
+      </div>
       </GlassPanel>
     </PageShell>
   );

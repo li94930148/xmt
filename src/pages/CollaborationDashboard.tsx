@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import {
   Activity,
   AlertTriangle,
@@ -94,7 +95,7 @@ export default function CollaborationDashboard() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className={`text-xs tracking-[0.24em] ${styles.textMuted}`}>协作控制台</p>
-            <h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>协作控制台</h1>
+            <PageHeading className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>协作控制台</PageHeading>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
             <ContentDocumentPicker
@@ -124,7 +125,8 @@ export default function CollaborationDashboard() {
             type="checkbox"
             checked={humanReadableMode}
             onChange={(event) => setHumanReadableMode(event.target.checked)}
-            className="h-5 w-5 accent-blue-600"
+            className="h-5 w-5"
+            style={{ accentColor: 'var(--xmt-primary)' }}
           />
         </label>
       </div>

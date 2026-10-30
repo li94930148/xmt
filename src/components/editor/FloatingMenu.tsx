@@ -150,6 +150,9 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
       {/* + 按钮 */}
       <div className="relative" ref={insertRef}>
         <button
+          type="button"
+          aria-label="插入"
+          aria-expanded={showInsertMenu}
           onClick={() => { setShowInsertMenu(!showInsertMenu); setShowBlockMenu(false); }}
           className={`p-1 rounded-md transition-colors ${
             showInsertMenu
@@ -161,7 +164,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
           <Plus className="w-4 h-4" />
         </button>
         {showInsertMenu && (
-          <div className={`absolute left-full top-0 ml-1 z-50 w-48 rounded-lg shadow-xl border py-1 ${menuBg}`}>
+          <div className={`absolute left-full top-0 ml-1 z-editor-menu w-48 rounded-lg shadow-xl border py-1 ${menuBg}`}>
             <div className={`px-3 py-1.5 text-xs font-medium ${isDark ? 'text-studio-text-muted' : 'text-studio-text-muted'}`}>插入内容</div>
             <button onClick={() => handleInsert(() => editor.chain().focus().setParagraph().run())} className={menuBtnClass}>
               <Type className="w-4 h-4" /> 正文
@@ -204,6 +207,9 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
       {/* ⋮⋮ 按钮 */}
       <div className="relative" ref={blockRef}>
         <button
+          type="button"
+          aria-label="块操作"
+          aria-expanded={showBlockMenu}
           onClick={() => { setShowBlockMenu(!showBlockMenu); setShowInsertMenu(false); }}
           className={`p-1 rounded-md transition-colors ${
             showBlockMenu
@@ -215,7 +221,7 @@ export default function FloatingMenuBar({ editor }: FloatingMenuProps) {
           <GripVertical className="w-4 h-4" />
         </button>
         {showBlockMenu && (
-          <div className={`absolute left-full top-0 ml-1 z-50 w-40 rounded-lg shadow-xl border py-1 ${menuBg}`}>
+          <div className={`absolute left-full top-0 ml-1 z-editor-menu w-40 rounded-lg shadow-xl border py-1 ${menuBg}`}>
             <button onClick={copyBlock} className={menuBtnClass}>
               <Copy className="w-4 h-4" /> 复制块
             </button>

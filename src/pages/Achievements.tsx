@@ -1,17 +1,19 @@
-﻿import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useAppStore } from '../store';
+﻿import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import PageHeading from '@/components/common/PageHeading';
+import { useAppStore, useAuthStore } from '../store';
 import { ErrorState, LoadingState } from '../components/common';
 import {
   getAchievements, getMyAchievements, getAchievementProgress,
   getAchievementStats, getLeaderboard, getRecentAchievements,
   checkAchievements, seedAchievements
 } from '../api';
-import type { Achievement, AchievementStats, AchievementProgress, LeaderboardEntry, RecentAchievement } from '../api/achievements';
+import { AchievementApiError, type Achievement, type AchievementStats, type AchievementProgress, type LeaderboardEntry, type RecentAchievement } from '../api/achievements';
 import { useThemeStyles } from '../hooks/useThemeStyles';
 import { usePermission } from '../hooks/usePermission';
 import { RarityBadge, PointBadge } from '../components/Badge';
 import { ACHIEVEMENT_CATEGORIES, ACHIEVEMENT_RARITIES, ACHIEVEMENT_LEVELS } from '../constants';
 import { formatBeijingDate } from '../lib/utils';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import {
   Trophy, Award, Star, Sparkles, Lock, CheckCircle, RefreshCw,
   TrendingUp, Users, Crown, Zap
@@ -19,6 +21,20 @@ import {
 
 type TabKey = 'all' | 'earned' | 'locked';
 type ViewMode = 'grid' | 'leaderboard' | 'feed';
+type SeedRecovery = {
+  actorId: number;
+  kind: 'unknown' | 'not_found';
+  message: string;
+};
+
+const transientSeedStatuses = new Set([408, 425, 429]);
+
+function isDefinitiveSeedRejection(error: unknown): error is AchievementApiError {
+  return error instanceof AchievementApiError
+    && error.status >= 400
+    && error.status < 500
+    && !transientSeedStatuses.has(error.status);
+}
 
 export default function Achievements() {
   const [allAchievements, setAllAchievements] = useState<Achievement[]>([]);
@@ -31,6 +47,8 @@ export default function Achievements() {
   const [loadError, setLoadError] = useState(false);
   const [checking, setChecking] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [seedRecovery, setSeedRecovery] = useState<SeedRecovery | null>(null);
+  const [seedVerificationBusy, setSeedVerificationBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -39,6 +57,8 @@ export default function Achievements() {
   const styles = useThemeStyles();
   const { hasPermission } = usePermission();
   const canManageAchievements = hasPermission('system:achievement');
+  const seedMutationLockRef = useRef(false);
+  const seedVerificationLockRef = useRef(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -108,21 +128,107 @@ export default function Achievements() {
       }
       fetchData();
     } catch (error) {
-      appStore.addNotification({ title: '检查失败', message: (error as Error).message, type: 'error' });
+      appStore.addNotification({
+        title: '检查失败',
+        message: getUserFacingErrorMessage(error, '检查新成就暂时失败，请稍后重试。'),
+        type: 'error',
+      });
     } finally {
       setChecking(false);
     }
   };
 
+  async function verifySeedRecovery(recovery: SeedRecovery) {
+    if (seedVerificationLockRef.current) return;
+    if (Number(useAuthStore.getState().user?.id) !== recovery.actorId) {
+      setSeedRecovery({
+        ...recovery,
+        kind: 'unknown',
+        message: '登录账号已变化；请切回发起初始化的账号后再只读核实。',
+      });
+      return;
+    }
+
+    seedVerificationLockRef.current = true;
+    setSeedVerificationBusy(true);
+    setSeedRecovery({
+      ...recovery,
+      kind: 'unknown',
+      message: '正在只读核实预设成就初始化结果；核实期间不会再次提交。',
+    });
+    try {
+      const definitions = await getAchievements(undefined, undefined, { cache: 'no-store' });
+      if (!Array.isArray(definitions)) throw new Error('成就列表格式异常');
+      if (Number(useAuthStore.getState().user?.id) !== recovery.actorId) {
+        setSeedRecovery({
+          ...recovery,
+          kind: 'unknown',
+          message: '登录账号已变化；请切回发起初始化的账号后再只读核实。',
+        });
+        return;
+      }
+
+      if (definitions.length > 0) {
+        setAllAchievements(definitions);
+        setSeedRecovery(null);
+        appStore.addNotification({
+          title: '初始化结果已核实',
+          message: '只读核实确认服务器当前已有预设成就内容，页面已同步；未重复提交。',
+          type: 'success',
+        });
+        return;
+      }
+
+      setSeedRecovery({
+        actorId: recovery.actorId,
+        kind: 'not_found',
+        message: '只读核实确认服务器当前成就列表为空；确认后可显式重试初始化。',
+      });
+    } catch {
+      setSeedRecovery({
+        actorId: recovery.actorId,
+        kind: 'unknown',
+        message: '暂时无法核实预设成就初始化结果；写入已锁定，请只读重新核实。',
+      });
+    } finally {
+      seedVerificationLockRef.current = false;
+      setSeedVerificationBusy(false);
+    }
+  }
+
   const handleSeed = async () => {
+    if (seedMutationLockRef.current || (seedRecovery && seedRecovery.kind !== 'not_found')) return;
+    const actorId = Number(useAuthStore.getState().user?.id);
+    if (!Number.isSafeInteger(actorId) || actorId <= 0) {
+      appStore.addNotification({ title: '初始化失败', message: '登录状态尚未确认，请重新登录后重试。', type: 'error' });
+      return;
+    }
+
+    seedMutationLockRef.current = true;
     setSeeding(true);
+    setSeedRecovery(null);
     try {
       const result = await seedAchievements();
       appStore.addNotification({ title: '初始化完成', message: result.message, type: 'success' });
-      fetchData();
+      await fetchData();
     } catch (error) {
-      appStore.addNotification({ title: '初始化失败', message: (error as Error).message, type: 'error' });
+      if (!isDefinitiveSeedRejection(error)) {
+        const recovery: SeedRecovery = {
+          actorId,
+          kind: 'unknown',
+          message: '预设成就初始化结果尚未确认，正在只读核实；核实前不会再次提交。',
+        };
+        setSeedRecovery(recovery);
+        await verifySeedRecovery(recovery);
+        return;
+      }
+      appStore.addNotification({
+        title: '初始化失败',
+        message: getUserFacingErrorMessage(error, '启用预设成就暂时失败，请稍后重试。'),
+        type: 'error',
+      });
     } finally {
+      seedMutationLockRef.current = false;
       setSeeding(false);
     }
   };
@@ -150,11 +256,11 @@ export default function Achievements() {
       {/* 头部 */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className={styles.pageTitle}>成就系统</h1>
+          <PageHeading className={styles.pageTitle}>成就系统</PageHeading>
           <p className={`${styles.subtitle} mt-1`}>完成任务解锁成就，展示你的工作成果</p>
         </div>
         <div className="flex items-center gap-2">
-          {canManageAchievements && allAchievements.length === 0 && (
+          {canManageAchievements && allAchievements.length === 0 && !seedRecovery && (
             <button
               onClick={handleSeed}
               disabled={seeding}
@@ -184,6 +290,36 @@ export default function Achievements() {
           )}
         </div>
       </div>
+
+      {seedRecovery ? (
+        <div
+          data-testid="achievement-seed-recovery"
+          role={seedRecovery.kind === 'unknown' ? 'alert' : 'status'}
+          className={`flex flex-col gap-3 rounded-xl border p-4 ${styles.border} ${styles.card}`}
+        >
+          <p className={styles.textSecondary}>{seedRecovery.message}</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void verifySeedRecovery(seedRecovery)}
+              disabled={seedVerificationBusy || seeding}
+              className={`px-4 py-2 ${styles.buttonSecondary} rounded-xl disabled:opacity-50`}
+            >
+              {seedVerificationBusy ? '正在只读核实…' : '只读重新核实'}
+            </button>
+            {seedRecovery.kind === 'not_found' ? (
+              <button
+                type="button"
+                onClick={() => void handleSeed()}
+                disabled={seeding || seedVerificationBusy}
+                className={`px-4 py-2 ${styles.buttonPrimary} rounded-xl disabled:opacity-50`}
+              >
+                {seeding ? '正在初始化…' : '明确重试初始化'}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {/* 等级 & 统计卡片 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -317,7 +453,7 @@ export default function Achievements() {
           <div role="group" aria-label="成就视图" className={`flex items-center gap-1 p-1 rounded-lg ${styles.bgTertiary}`}>
             <button
               onClick={() => setViewMode('grid')}
-              className={`p-2 rounded-md transition-colors ${viewMode === 'grid' ? `${styles.bgCard} ${styles.textPrimary}` : styles.textMuted}`}
+              className={`min-h-10 min-w-10 p-2 rounded-md transition-colors ${viewMode === 'grid' ? `${styles.bgCard} ${styles.textPrimary}` : styles.textMuted}`}
               aria-label="卡片视图"
               aria-pressed={viewMode === 'grid'}
               title="卡片视图"
@@ -326,7 +462,7 @@ export default function Achievements() {
             </button>
             <button
               onClick={() => setViewMode('leaderboard')}
-              className={`p-2 rounded-md transition-colors ${viewMode === 'leaderboard' ? `${styles.bgCard} ${styles.textPrimary}` : styles.textMuted}`}
+              className={`min-h-10 min-w-10 p-2 rounded-md transition-colors ${viewMode === 'leaderboard' ? `${styles.bgCard} ${styles.textPrimary}` : styles.textMuted}`}
               aria-label="排行榜"
               aria-pressed={viewMode === 'leaderboard'}
               title="排行榜"
@@ -335,7 +471,7 @@ export default function Achievements() {
             </button>
             <button
               onClick={() => setViewMode('feed')}
-              className={`p-2 rounded-md transition-colors ${viewMode === 'feed' ? `${styles.bgCard} ${styles.textPrimary}` : styles.textMuted}`}
+              className={`min-h-10 min-w-10 p-2 rounded-md transition-colors ${viewMode === 'feed' ? `${styles.bgCard} ${styles.textPrimary}` : styles.textMuted}`}
               aria-label="动态"
               aria-pressed={viewMode === 'feed'}
               title="动态"

@@ -53,7 +53,7 @@ export default function CreatorProfileCard({
         onContactClick={onViewWorks}
         enableTilt
         enableMobileTilt={false}
-        behindGlowColor="rgba(14, 165, 233, 0.38)"
+        behindGlowColor="rgb(var(--xmt-cyan-rgb) / 0.38)"
         behindGlowSize="58%"
       />
       <div className="min-w-0">

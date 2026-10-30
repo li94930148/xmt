@@ -165,6 +165,7 @@ export default function EditorLeaveFailureDialog({
       description={view.description}
       size="sm"
       closeOnOverlayClick={!isBusy}
+      closeOnEscape={!isBusy}
       footer={
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <button

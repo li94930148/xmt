@@ -8,6 +8,7 @@ import { useNetworkState } from '@/platform/network';
 import { readSafeDraftValue, userSafeDraftKey, writeSafeDraft } from '@/platform/safe-draft';
 import { getMobileMessageCategory } from '@/platform/message-category';
 import ErrorState from '@/components/common/ErrorState';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 type Filter = 'all' | 'unread' | 'workflow' | 'collaboration' | 'system';
 const PAGE_SIZE = 20;
@@ -54,7 +55,10 @@ function readBulkReadRecovery(actorId: number | null | undefined): StoredBulkRea
 function persistBulkReadRecovery(recovery: StoredBulkReadRecovery) {
   if (typeof window === 'undefined') throw new Error('当前环境无法安全保存批量已读请求编号');
   try {
-    window.sessionStorage.setItem(bulkReadRecoveryStorageKey(recovery.actorId), JSON.stringify(recovery));
+    const key = bulkReadRecoveryStorageKey(recovery.actorId);
+    const serialized = JSON.stringify(recovery);
+    window.sessionStorage.setItem(key, serialized);
+    if (window.sessionStorage.getItem(key) !== serialized) throw new Error('恢复编号未能完整保存');
   } catch {
     throw new Error('当前浏览器无法安全保存批量已读请求编号');
   }
@@ -118,6 +122,7 @@ export default function MobileMessages() {
   const networkState = useNetworkState();
   const markingIds = userId == null ? emptyMessageIds : markingIdsByActor.get(userId) ?? emptyMessageIds;
   const markingAll = userId != null && markingAllActorIds.has(userId);
+  const verifyingSingleMessageRead = verifyingSingleMessageReadActors.has(userId ?? -1);
   const currentSingleMessageReadVerification = userId == null ? null : singleMessageReadVerificationByActor.get(userId) ?? null;
   const currentBulkReadRecovery = useMemo(() => bulkReadRecovery?.actorId === userId
     ? bulkReadRecovery : readBulkReadRecovery(userId), [bulkReadRecovery, userId]);
@@ -175,7 +180,7 @@ export default function MobileMessages() {
           : '刷新消息失败；当前已加载内容仍保留，可重试。'));
       } else {
         setItems([]);
-        setLoadError(error instanceof Error ? error.message : '加载消息失败，请重试。');
+        setLoadError(getUserFacingErrorMessage(error, '加载消息失败，请检查连接后重试。'));
       }
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
@@ -298,7 +303,9 @@ export default function MobileMessages() {
       setUnreadSummary({ actorId: requestActorId, count: result.summary.unread });
       setUnread(result.summary.unread);
     } catch (error) {
-      if (requestId === requestIdRef.current && useAuthStore.getState().user?.id === requestActorId) setLoadMoreError(error instanceof Error ? error.message : '加载更多消息失败，请重试。');
+      if (requestId === requestIdRef.current && useAuthStore.getState().user?.id === requestActorId) {
+        setLoadMoreError(getUserFacingErrorMessage(error, '加载更多消息失败，请检查连接后重试。'));
+      }
     } finally {
       if (requestId === requestIdRef.current && useAuthStore.getState().user?.id === requestActorId) setLoadingMore(false);
     }
@@ -356,7 +363,7 @@ export default function MobileMessages() {
       setNotice('服务器已确认消息仍未读；没有自动重试。再次点击消息可明确重试。');
     } catch (error) {
       if (useAuthStore.getState().user?.id !== actorId) return;
-      const reason = error instanceof Error ? error.message : '暂时无法核实消息状态';
+      const reason = getUserFacingErrorMessage(error, '暂时无法核实消息状态');
       setSingleMessageReadVerification(actorId, { ...recovery, error: reason });
       setNotice('暂时无法核实这条消息；核实前不会再次提交。点击“只读核实”可重试查询。');
     } finally {
@@ -407,7 +414,7 @@ export default function MobileMessages() {
         setNotice('标记已读失败；服务器已确认消息仍未读，没有自动重试。再次点击消息可明确重试。');
       } catch (verificationError) {
         if (useAuthStore.getState().user?.id !== requestActorId) return;
-        const reason = verificationError instanceof Error ? verificationError.message : '暂时无法核实消息状态';
+        const reason = getUserFacingErrorMessage(verificationError, '暂时无法核实消息状态');
         setSingleMessageReadVerification(requestActorId, { message: item, error: reason });
         setNotice('暂时无法核实这条消息；核实前不会再次提交。点击“只读核实”可重试查询。');
       }
@@ -448,7 +455,7 @@ export default function MobileMessages() {
         persistBulkReadRecovery(recovery);
         setBulkReadRecovery(recovery);
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : '无法安全保存批量已读请求编号，请检查浏览器会话存储后重试。');
+        setNotice(getUserFacingErrorMessage(error, '无法安全保存批量已读请求编号，请检查浏览器会话存储后重试。'));
         return;
       }
     }
@@ -492,21 +499,23 @@ export default function MobileMessages() {
 
   const safeExplicitRetry = currentBulkReadRecovery !== null && currentBulkReadRecoveryState?.phase === 'not_found';
   const bulkReadLocked = bulkReadNeedsVerification && !safeExplicitRetry;
+  const checkingBulkRead = currentBulkReadRecoveryState?.phase === 'checking';
+  const refreshBusy = loading || checkingBulkRead;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-studio-text-muted">{unreadCount === null ? '未读数暂不可用' : `未读 ${unreadCount} 条`}</p>
+        <p className="text-sm text-studio-text-muted">{unreadCount === null ? loading ? '正在读取未读数…' : '未读数暂不可用' : `未读 ${unreadCount} 条`}</p>
         <div className="flex items-center gap-3">
-          <button type="button" disabled={loading || markingAll || currentBulkReadRecoveryState?.phase === 'checking' || currentBulkReadRecoveryState?.phase === 'submitting'} onClick={refreshMessages} className="min-h-11 text-sm text-studio-cyan-contrast disabled:opacity-50">{currentBulkReadRecovery ? '只读核实' : '刷新'}</button>
-          <button type="button" disabled={loading || loadingMore || networkState !== 'online' || markingAll || bulkReadLocked || currentSingleMessageReadVerification !== null || markingIds.size > 0 || (!safeExplicitRetry && (unreadCount === null || unreadCount === 0))} onClick={() => void markAll()} className="inline-flex min-h-11 items-center gap-2 text-sm text-studio-cyan-contrast disabled:opacity-50">
+          <button type="button" aria-busy={refreshBusy} disabled={loading || markingAll || checkingBulkRead || currentBulkReadRecoveryState?.phase === 'submitting'} onClick={refreshMessages} className="min-h-11 text-sm text-studio-cyan-contrast disabled:opacity-50">{checkingBulkRead ? '核实中…' : loading ? '刷新中…' : currentBulkReadRecovery ? '只读核实' : '刷新'}</button>
+          <button type="button" aria-busy={markingAll} disabled={loading || loadingMore || networkState !== 'online' || markingAll || bulkReadLocked || currentSingleMessageReadVerification !== null || markingIds.size > 0 || (!safeExplicitRetry && (unreadCount === null || unreadCount === 0))} onClick={() => void markAll()} className="inline-flex min-h-11 items-center gap-2 text-sm text-studio-cyan-contrast disabled:opacity-50">
             <CheckCheck className="h-4 w-4" />{markingAll ? '处理中…' : currentBulkReadRecovery && currentBulkReadRecoveryState?.phase === 'not_found' ? '确认重试全部已读' : currentBulkReadRecovery ? '结果待核实' : '全部已读'}
           </button>
         </div>
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div role="group" aria-label="消息筛选" className="flex flex-wrap gap-2">
         {([['all', '全部'], ['unread', '未读'], ['workflow', '工作流'], ['collaboration', '协作'], ['system', '系统']] as const).map(([key, label]) => (
-            <button type="button" key={key} disabled={markingAll} onClick={() => setFilter(key)} className={`min-h-10 shrink-0 rounded-full px-4 text-sm disabled:opacity-50 ${filter === key ? 'bg-studio-primary-button text-white' : 'border border-studio-border-soft text-studio-text-secondary'}`}>
+            <button type="button" key={key} aria-pressed={filter === key} disabled={markingAll} onClick={() => setFilter(key)} className={`min-h-10 shrink-0 rounded-full px-4 text-sm disabled:opacity-50 ${filter === key ? 'bg-studio-primary-button text-white' : 'border border-studio-border-soft text-studio-text-secondary'}`}>
             {label}
           </button>
         ))}
@@ -516,17 +525,18 @@ export default function MobileMessages() {
           <p>《{currentSingleMessageReadVerification.message.title}》的已读状态暂时无法确认。只读核实前不会再次提交。{currentSingleMessageReadVerification.error ? ` ${currentSingleMessageReadVerification.error}` : ''}</p>
           <button
             type="button"
-            disabled={verifyingSingleMessageReadActors.has(userId ?? -1)}
+            aria-busy={verifyingSingleMessageRead}
+            disabled={verifyingSingleMessageRead}
             onClick={() => void verifyPendingSingleMessageRead()}
             className="min-h-11 self-start rounded-xl border border-studio-border-soft px-4 text-studio-text-secondary disabled:opacity-50"
           >
-            {verifyingSingleMessageReadActors.has(userId ?? -1) ? '核实中…' : '只读核实'}
+            {verifyingSingleMessageRead ? '核实中…' : '只读核实'}
           </button>
         </div>
       ) : null}
       {notice ? <p role="status" className="text-sm text-studio-text-secondary">{notice}</p> : null}
       {loadError && items.length === 0 ? (
-        <ErrorState className="min-h-0 py-2" title="消息加载失败" description={loadError} actionText="重试加载" onRetry={() => void load()} />
+        <ErrorState announcementRole="alert" className="min-h-0 py-2" title="消息加载失败" description={loadError} actionText="重试加载" onRetry={() => void load()} />
       ) : null}
       {loading && items.length === 0 ? <p role="status" aria-live="polite" className="text-sm text-studio-text-muted">正在同步消息…</p> : null}
       {!loadError && !loading && visible.length === 0 ? (
@@ -540,7 +550,7 @@ export default function MobileMessages() {
       {visible.length > 0 ? (
         <div className="space-y-2">
           {visible.map((item) => (
-            <button type="button" key={item.id} disabled={loading || loadingMore || markingAll || bulkReadNeedsVerification || markingIds.has(item.id) || (!item.read && (markingIds.size > 0 || currentSingleMessageReadVerification !== null))} onClick={() => void markRead(item)} className={`w-full rounded-2xl border p-4 text-left disabled:opacity-70 ${item.read ? 'border-studio-border-soft bg-studio-surface' : 'border-studio-primary/35 bg-studio-primary/[0.08]'}`}>
+            <button type="button" key={item.id} aria-busy={markingIds.has(item.id)} disabled={loading || loadingMore || markingAll || bulkReadNeedsVerification || markingIds.has(item.id) || (!item.read && (markingIds.size > 0 || currentSingleMessageReadVerification !== null))} onClick={() => void markRead(item)} className={`w-full rounded-2xl border p-4 text-left disabled:opacity-70 ${item.read ? 'border-studio-border-soft bg-studio-surface' : 'border-studio-primary/35 bg-studio-primary/[0.08]'}`}>
               <div className="flex gap-3">
                 <Bell className="mt-0.5 h-5 w-5 shrink-0 text-studio-cyan" />
                 <div className="min-w-0">

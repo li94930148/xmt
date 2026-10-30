@@ -14,6 +14,7 @@ import type {
   TopicActivityWrite,
   TopicHistoryWrite,
   TopicListFilter,
+  TopicMessageWrite,
   TopicRepository,
   TopicCreateRequestRecord,
   TopicTransaction,
@@ -193,6 +194,10 @@ function transactionAdapter(tx: DatabaseTransaction): TopicTransaction {
       'INSERT INTO activity_log (user_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)',
       [input.userId, input.action, input.target, input.detail, activityLogTimestamp()],
     ).then(() => undefined),
+    addMessage: (input: TopicMessageWrite) => tx.executeInsert(
+      `INSERT INTO messages (user_id, title, content, type, link, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      [input.userId, input.title, input.content, input.type, input.link ?? null, beijingNow()],
+    ),
     productionExists: (topicId) => tx.queryOne('SELECT id FROM production WHERE topic_id = ?', [topicId]).then(Boolean),
     createInitialProduction: async (input: InitialProductionRecord) => {
       if (input.content !== input.originOutlineSnapshot) {

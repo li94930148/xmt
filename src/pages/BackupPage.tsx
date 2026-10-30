@@ -3,6 +3,7 @@ import { Archive, Clock, Database, Download, HardDrive, RefreshCw, Shield, Trian
 import { downloadInventoryBackup, getBackupInventory, type BackupInventory } from '../api/backup';
 import { ActionButton, EmptyState, ErrorState, GlassPanel, LoadingState, MetricCard, PageHeader, PageShell, StatusPill } from '../components/studio';
 import { formatBeijingDate } from '../lib/utils';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { useAppStore } from '../store';
 import { useBackupCreateRecovery } from '../hooks/useBackupCreateRecovery';
 
@@ -34,7 +35,7 @@ export default function BackupPage() {
       return { status: 'loaded', requestId };
     } catch (cause) {
       if (requestId !== inventoryRequestGenerationRef.current) return { status: 'stale', requestId };
-      setError(cause instanceof Error ? cause.message : '服务器备份清单加载失败');
+      setError(getUserFacingErrorMessage(cause, '服务器备份清单暂时无法读取，请检查连接后重试。'));
       return { status: 'failed', requestId };
     } finally {
       if (requestId === inventoryRequestGenerationRef.current) setLoading(false);
@@ -75,7 +76,11 @@ export default function BackupPage() {
       await downloadInventoryBackup(source, name);
       appStore.addNotification({ title: '开始下载', message: name, type: 'success' });
     } catch (cause) {
-      appStore.addNotification({ title: '下载失败', message: cause instanceof Error ? cause.message : '下载失败', type: 'error' });
+      appStore.addNotification({
+        title: '下载失败',
+        message: getUserFacingErrorMessage(cause, '备份文件下载失败，请检查连接后重试。'),
+        type: 'error',
+      });
     }
   };
 

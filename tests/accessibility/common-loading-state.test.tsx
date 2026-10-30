@@ -6,6 +6,7 @@ import RetroList from '../../src/components/retrospectives/RetroList';
 import MyRetroActionsPanel from '../../src/components/retrospectives/MyRetroActionsPanel';
 import RetroDailyRiskPanel from '../../src/components/retrospectives/RetroDailyRiskPanel';
 import RetroMetricSnapshotPanel from '../../src/components/retrospectives/RetroMetricSnapshotPanel';
+import DailyReportArchiveList from '../../src/components/daily-report/DailyReportArchiveList';
 import { StudioSkeletonCard, StudioSkeletonList, StudioSkeletonTable } from '../../src/components/studio/Skeleton';
 
 const variants = ['table', 'inline', 'page', 'section'] as const;
@@ -86,3 +87,26 @@ for (const Skeleton of [StudioSkeletonCard, StudioSkeletonList, StudioSkeletonTa
 }
 
 console.log('Studio skeleton accessibility tests passed for card, list, and table variants');
+
+const dailyArchiveMarkup = renderToStaticMarkup(React.createElement(DailyReportArchiveList, {
+  start: '2026-10-01',
+  end: '2026-10-29',
+  reports: [],
+  loading: false,
+  canFilterUser: true,
+  users: [],
+  selectedUserId: '',
+  onStartChange: () => undefined,
+  onEndChange: () => undefined,
+  onUserChange: () => undefined,
+  onSearch: () => undefined,
+  onView: () => undefined,
+}));
+assert.match(dailyArchiveMarkup, /<label[^>]*for="daily-report-archive-user-filter"[^>]*>成员<\/label>/, 'member filter has a programmatic accessible label');
+assert.match(dailyArchiveMarkup, /<select[^>]*id="daily-report-archive-user-filter"[^>]*name="user_id"/, 'member filter has stable field identifiers');
+assert.match(dailyArchiveMarkup, /<label[^>]*for="daily-report-archive-start-date"[^>]*>开始日期<\/label>/, 'archive start date has a programmatic accessible label');
+assert.match(dailyArchiveMarkup, /<input[^>]*id="daily-report-archive-start-date"[^>]*name="start_date"[^>]*type="date"/, 'archive start date has a stable field identifier');
+assert.match(dailyArchiveMarkup, /<label[^>]*for="daily-report-archive-end-date"[^>]*>结束日期<\/label>/, 'archive end date has a programmatic accessible label');
+assert.match(dailyArchiveMarkup, /<input[^>]*id="daily-report-archive-end-date"[^>]*name="end_date"[^>]*type="date"/, 'archive end date has a stable field identifier');
+
+console.log('Daily report archive filters expose labeled, stable controls');

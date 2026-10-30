@@ -4,6 +4,7 @@ import type {
   RetrospectiveScopeType,
   RetrospectiveStatus,
 } from '../../api/retrospectives';
+import { getUserFacingErrorMessage } from '../../lib/userFacingError';
 
 export const retroCategoryLabels: Record<RetroTemplateCategory, string> = {
   weekly: '周复盘',
@@ -66,11 +67,13 @@ export function formatDateTime(value?: string | null) {
 }
 
 export function toFriendlyRetroError(error: unknown) {
-  const err = error as Error & { status?: number; code?: string };
-  if (err.status === 401) return '登录已失效，请重新登录';
-  if (err.status === 403) return '当前账号没有执行此操作的权限';
-  if (err.status === 404) return '复盘记录不存在或已不可访问';
-  if (err.status === 409 || err.code === 'VERSION_CONFLICT') return '复盘已被更新，请刷新后再编辑';
-  if (err.status === 400) return err.message || '请求参数不正确';
-  return err.message || '服务暂时不可用，请稍后重试';
+  const err = typeof error === 'object' && error !== null ? error as Error & { status?: number; code?: string } : null;
+  if (err?.status === 401) return '登录已失效，请重新登录';
+  if (err?.status === 403) return '当前账号没有执行此操作的权限';
+  if (err?.status === 404) return '复盘记录不存在或已不可访问';
+  if (err?.status === 409 || err?.code === 'VERSION_CONFLICT') return '复盘已被更新，请刷新后再编辑';
+  if (err?.status === 400) {
+    return getUserFacingErrorMessage({ message: err.message }, '请求信息不正确，请检查后重试');
+  }
+  return getUserFacingErrorMessage({ message: err?.message }, '复盘操作暂时无法完成，请稍后重试');
 }

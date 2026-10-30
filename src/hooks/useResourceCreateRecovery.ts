@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createResourceCenterResource, getResourceCreateRequestStatus, ResourceCenterApiError } from '../api/resourceCenter';
 import { useAuthStore } from '../store';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import {
   clearResourceCreateRecovery,
   createResourceCreateRequestId,
@@ -108,7 +109,8 @@ export function useResourceCreateRecovery(open: boolean, actorIdValue: number | 
     } catch (error) {
       if (!isCurrentActorScope(recovery.actorId, generation)) return;
       updatePending(recovery.actorId, generation, { recovery, phase: 'uncertain' });
-      updateMessage(recovery.actorId, generation, `${error instanceof Error ? error.message : '暂时无法核实资料创建结果'}。恢复信息已保留；请只读重新核实，不要重新创建。`);
+      const message = getUserFacingErrorMessage(error, '暂时无法核实资料创建结果');
+      updateMessage(recovery.actorId, generation, `${message}。恢复信息已保留；请只读重新核实，不要重新创建。`);
     } finally {
       operationsRef.current.delete(operationKey);
     }
@@ -192,7 +194,7 @@ export function useResourceCreateRecovery(open: boolean, actorIdValue: number | 
       recovery = { version: 1, actorId, requestId: createResourceCreateRequestId(), payload };
       persistResourceCreateRecovery(recovery);
     } catch (error) {
-      updateMessage(actorId, generation, error instanceof Error ? error.message : '无法保存资料创建恢复信息；本次未提交。');
+      updateMessage(actorId, generation, getUserFacingErrorMessage(error, '无法保存资料创建恢复信息；本次未提交。'));
       return;
     }
     updatePending(actorId, generation, { recovery, phase: 'checking' });

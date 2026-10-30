@@ -21,6 +21,7 @@ export default function ProductionMaterialHistorySnapshot({ version, snapshotHtm
         <div className="max-h-[560px] overflow-y-auto overflow-x-hidden bg-[var(--editor-bg)]">
           <ContentEditor
             key={version}
+            ariaLabel="历史版本资料正文"
             value={materialContent}
             readOnly
             mode="readonly"

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { Clock3, FileClock, GitBranch, RefreshCw, UserRound } from 'lucide-react';
 import { getProductionById, getProductionHistory, getShootingById } from '../api/workflow';
 import ContentDocumentPicker from '../components/ContentDocumentPicker';
@@ -166,7 +167,7 @@ export default function ContentTimelineView() {
     <div className="mx-auto max-w-[1200px] space-y-5 pb-12">
       <header className={`${styles.bgSecondary} border ${styles.border} rounded-2xl p-5`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div><p className={`text-xs font-medium ${styles.textMuted}`}>内容生产记录</p><h1 className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>内容动态</h1><p className={`mt-2 text-sm ${styles.textMuted}`}>按时间查看这篇内容的编辑、保存和版本变化</p></div>
+          <div><p className={`text-xs font-medium ${styles.textMuted}`}>内容生产记录</p><PageHeading className={`mt-1 text-2xl font-bold ${styles.textPrimary}`}>内容动态</PageHeading><p className={`mt-2 text-sm ${styles.textMuted}`}>按时间查看这篇内容的编辑、保存和版本变化</p></div>
           <div className="flex w-full gap-2 lg:w-auto">
             <ContentDocumentPicker value={input} onChange={setInput} onPick={chooseDocument} className={`h-10 min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm lg:w-80 ${styles.bgInput} ${styles.borderInput} ${styles.textPrimary}`} />
             <button type="button" onClick={applyInput} disabled={loading} aria-busy={loading} className="xmt-btn xmt-btn-primary h-10 px-4 py-2 text-sm font-medium text-white"><RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`}/>查看</button>

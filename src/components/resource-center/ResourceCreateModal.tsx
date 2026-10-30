@@ -4,6 +4,7 @@ import { type LibraryType, type ResourceCategory } from '@/api/resourceCenter';
 import { useAuthStore } from '@/store';
 import { useResourceCreateRecovery } from '@/hooks/useResourceCreateRecovery';
 import type { ResourceCreateRecovery } from '@/utils/resourceCreateRecovery';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 interface ResourceCreateModalProps {
   open: boolean;
@@ -107,7 +108,7 @@ export default function ResourceCreateModal({ open, libraryType, categories, onC
         visibility,
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '创建资料失败');
+      setError(getUserFacingErrorMessage(caught, '资料暂时无法创建，请检查权限和内容后重试。'));
     } finally {
       submitLockRef.current = false;
       setSubmitting(false);

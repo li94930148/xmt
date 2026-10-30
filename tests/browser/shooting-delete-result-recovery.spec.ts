@@ -207,6 +207,37 @@ if (process.env.XMT_SHOOTING_DELETE_RECOVERY_QA_SERVE === '1') {
       await page.getByRole('button', { name: '完成', exact: true }).click();
       await page.getByRole('dialog').getByRole('button', { name: '确认完成' }).click();
     };
+    const suppressRecoveryStorageWrite = async (key: string) => page.evaluate((targetKey) => {
+      const typedWindow = window as Window & { __xmtOriginalStorageSetItem?: typeof Storage.prototype.setItem };
+      if (!typedWindow.__xmtOriginalStorageSetItem) typedWindow.__xmtOriginalStorageSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function setItem(storageKey: string, value: string) {
+        if (this === window.sessionStorage && storageKey === targetKey) return;
+        return typedWindow.__xmtOriginalStorageSetItem?.call(this, storageKey, value);
+      };
+    }, key);
+    const restoreRecoveryStorageWrite = async () => page.evaluate(() => {
+      const typedWindow = window as Window & { __xmtOriginalStorageSetItem?: typeof Storage.prototype.setItem };
+      if (typedWindow.__xmtOriginalStorageSetItem) Storage.prototype.setItem = typedWindow.__xmtOriginalStorageSetItem;
+      delete typedWindow.__xmtOriginalStorageSetItem;
+    });
+
+    await openFixture('still-exists');
+    const deleteRecoveryKey = `xmt:shooting-delete-pending:v1:user:${user.id}`;
+    await suppressRecoveryStorageWrite(deleteRecoveryKey);
+    await confirmDelete();
+    await page.getByText('制作计划删除恢复信息未能完整保存，本次未发送删除请求', { exact: true }).waitFor();
+    assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), deleteRecoveryKey), null, 'a silent delete-recovery write drop leaves no marker');
+    assert.deepEqual(await readState(), { deleteWrites: 0, completionWrites: 0, detailReads: 0, rows: [{ id: shooting.id, status: shooting.status }] }, 'delete is not sent until its recovery marker is confirmed');
+    await restoreRecoveryStorageWrite();
+
+    await openFixture('completion-still-in-progress');
+    const completionRecoveryKey = `xmt:shooting-completion-pending:v1:user:${user.id}`;
+    await suppressRecoveryStorageWrite(completionRecoveryKey);
+    await confirmComplete();
+    await page.getByText('成片完成恢复信息未能完整保存，本次未发送状态更新', { exact: true }).waitFor();
+    assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), completionRecoveryKey), null, 'a silent completion-recovery write drop leaves no marker');
+    assert.deepEqual(await readState(), { deleteWrites: 0, completionWrites: 0, detailReads: 0, rows: [{ id: shooting.id, status: shooting.status }] }, 'completion is not sent until its recovery marker is confirmed');
+    await restoreRecoveryStorageWrite();
 
     // The PUT took effect but its response was ambiguous: the read-back confirms completion without a retry.
     await openFixture('completion-applied-after-error');

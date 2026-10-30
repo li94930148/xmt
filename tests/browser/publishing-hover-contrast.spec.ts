@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const user = { id: 96, username: 'publishing-contrast-qa', role: 'admin', name: '发布对比度验收', enabled: true, force_change_password: false };
+const switchedUser = { id: 97, username: 'publishing-contrast-qa-b', role: 'admin', name: '发布对比度验收 B', enabled: true, force_change_password: false };
 const publishing = {
   id: 961,
   topic_id: 962,
@@ -272,7 +273,7 @@ app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
   return res.type('html').send(`<script>localStorage.setItem('xmt_user',${JSON.stringify(JSON.stringify(user))});localStorage.setItem('xmt_token','publishing-contrast-fixture');localStorage.setItem('xmt_theme',${JSON.stringify(theme)});localStorage.setItem('xmt_last_version_seen',${JSON.stringify(version)});location.replace('/publishing');</script>`);
 });
-app.get('/api/auth/me', (_req, res) => res.json(user));
+app.get('/api/auth/me', (req, res) => res.json(String(req.headers.authorization || '').includes('fixture-user-97') ? switchedUser : user));
 app.get('/api/permissions/my', (_req, res) => res.json(['*']));
 app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
@@ -1107,6 +1108,41 @@ try {
   const unchangedScript = await page.request.get(`${base}/__qa/state`).then((response) => response.json());
   assert.ok(String(unchangedScript.publishingScriptContent).includes('异步成功稿'), 'read-only verification preserves the last server-confirmed script');
   assert.ok(!String(unchangedScript.publishingScriptContent).includes('未提交保留稿'), 'the unsaved text is not presented as server-confirmed');
+
+  const actorScopedDeleteKey = `xmt:publishing-delete-pending:v1:user:${user.id}`;
+  const actorScopedDeleteMarker = { id: publishing.id, userId: user.id, title: publishing.topic_title, page: 1 };
+  const detailReadsBeforeAccountSwitch = publishingDetailRequests;
+  const deleteWritesBeforeAccountSwitch = publishingDeleteRequests;
+  await page.evaluate(({ key, marker, switchedUser }) => {
+    sessionStorage.setItem(key, JSON.stringify(marker));
+    localStorage.setItem('xmt_token', 'publishing-contrast-fixture-user-97');
+    localStorage.setItem('xmt_user', JSON.stringify(switchedUser));
+  }, { key: actorScopedDeleteKey, marker: actorScopedDeleteMarker, switchedUser });
+  await page.reload();
+  await page.getByRole('heading', { name: '发布管理' }).waitFor();
+  assert.equal(publishingDetailRequests, detailReadsBeforeAccountSwitch, 'another account does not read back a deletion marker owned by the previous account');
+  assert.equal(publishingDeleteRequests, deleteWritesBeforeAccountSwitch, 'switching accounts never repeats or clears the previous account deletion');
+  assert.deepEqual(await page.evaluate((key) => JSON.parse(sessionStorage.getItem(key) || 'null'), actorScopedDeleteKey), actorScopedDeleteMarker, 'the previous account deletion marker remains intact after account switch');
+  assert.equal(await page.getByRole('button', { name: '添加发布记录' }).first().isEnabled(), true, 'a different account can use its own publishing state while the first account marker stays isolated');
+
+  await page.evaluate((originalUser) => {
+    localStorage.setItem('xmt_token', 'publishing-contrast-fixture');
+    localStorage.setItem('xmt_user', JSON.stringify(originalUser));
+  }, user);
+  await page.reload();
+  await page.getByRole('heading', { name: '发布管理' }).waitFor();
+  await page.waitForFunction((key) => sessionStorage.getItem(key) === null, actorScopedDeleteKey);
+  assert.equal(publishingDetailRequests, detailReadsBeforeAccountSwitch + 1, 'the original account alone performs a read-only status check after switching back');
+  assert.equal(publishingDeleteRequests, deleteWritesBeforeAccountSwitch, 'the original account recovery also never repeats DELETE');
+
+  const detailReadsBeforeMalformedRecovery = publishingDetailRequests;
+  await page.evaluate((key) => sessionStorage.setItem(key, '{malformed'), actorScopedDeleteKey);
+  await page.reload();
+  await page.getByRole('alert').filter({ hasText: '删除恢复信息格式异常' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '添加发布记录' }).first().isDisabled(), true, 'a malformed delete marker locks publishing writes');
+  assert.equal(await page.getByRole('button', { name: `编辑发布记录 ${publishing.topic_title}` }).isDisabled(), true, 'a malformed delete marker also locks row editing');
+  assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), actorScopedDeleteKey), '{malformed', 'a malformed marker is preserved for explicit recovery instead of being silently deleted');
+  assert.equal(publishingDetailRequests, detailReadsBeforeMalformedRecovery, 'a malformed marker does not trigger a read under an unverified identity');
 
   assert.deepEqual(errors, [], 'publishing light/dark contrast fixture renders without browser errors');
   assert.equal(expectedHttpNotFoundResponses.length, 1, 'the only publishing-detail 404 is the read-only check confirming a deleted record');

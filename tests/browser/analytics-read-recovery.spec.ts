@@ -497,6 +497,7 @@ try {
 
   await page.goto(`${base}/__qa`);
   await page.getByRole('heading', { name: '数据复盘', exact: true }).waitFor();
+  await page.getByText('按单条发布记录汇总作品累计表现；抖音官方导出优先，手工数据仅补缺并标明来源。', { exact: true }).waitFor();
   await assertPageHeadingsAndCopyContrast(page);
   const identity = await page.evaluate(() => ({
     path: window.location.pathname,
@@ -565,9 +566,12 @@ try {
 
   await page.goto(`${base}/export`);
   await page.getByRole('heading', { name: '报告中心', exact: true }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '日报', exact: true }).count(), 0, 'report-only permission does not expose unavailable daily-report shortcuts');
-  assert.equal(await page.getByRole('button', { name: '周报', exact: true }).getAttribute('aria-pressed'), 'true', 'the active report tab is exposed as pressed');
-  assert.equal(await page.getByRole('button', { name: '导出', exact: true }).getAttribute('aria-pressed'), 'false', 'the inactive report tab is exposed as unpressed');
+  const reportViewGroup = page.getByRole('group', { name: '报告中心视图', exact: true });
+  await reportViewGroup.waitFor();
+  assert.equal(await reportViewGroup.getByRole('button').count(), 2, 'the named report-view group contains only options available to this account');
+  assert.equal(await reportViewGroup.getByRole('button', { name: '日报', exact: true }).count(), 0, 'report-only permission does not expose unavailable daily-report shortcuts');
+  assert.equal(await reportViewGroup.getByRole('button', { name: '周报', exact: true }).getAttribute('aria-pressed'), 'true', 'the active report tab is exposed as pressed inside its named group');
+  assert.equal(await reportViewGroup.getByRole('button', { name: '导出', exact: true }).getAttribute('aria-pressed'), 'false', 'the inactive report tab is exposed as unpressed inside its named group');
   await page.getByRole('button', { name: '周报', exact: true }).click();
   await page.getByRole('heading', { name: '周报生成', exact: true }).waitFor();
   await assertPageHeadingsAndCopyContrast(page);
@@ -622,8 +626,21 @@ try {
   assert.equal(await page.locator('textarea[aria-hidden="true"]').count(), 0, 'the temporary fallback textarea is removed after a successful copy');
 
   await page.getByRole('button', { name: '导出', exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: '导出', exact: true }).getAttribute('aria-pressed'), 'true', 'switching tabs updates the pressed state');
-  assert.equal(await page.getByRole('button', { name: '周报', exact: true }).getAttribute('aria-pressed'), 'false', 'the former active tab is announced as unpressed');
+  assert.equal(await reportViewGroup.getByRole('button', { name: '导出', exact: true }).getAttribute('aria-pressed'), 'true', 'switching report views updates the selected state inside the named group');
+  assert.equal(await reportViewGroup.getByRole('button', { name: '周报', exact: true }).getAttribute('aria-pressed'), 'false', 'the former report view is announced as unselected inside the named group');
+  const exportTypeGroup = page.getByRole('group', { name: '导出类型', exact: true });
+  await exportTypeGroup.waitFor();
+  const topicExportType = exportTypeGroup.getByRole('button', { name: /选题数据/ });
+  const analyticsExportType = exportTypeGroup.getByRole('button', { name: /数据分析/ });
+  assert.equal(await topicExportType.getAttribute('aria-pressed'), 'true', 'the selected topic-export option is exposed as pressed');
+  assert.equal(await analyticsExportType.getAttribute('aria-pressed'), 'false', 'the unselected analytics-export option is exposed as unpressed');
+  const exportReadsBeforeTypeSwitch = { topics: topicsExportReads, analytics: analyticsExportReads };
+  await analyticsExportType.click();
+  assert.equal(await analyticsExportType.getAttribute('aria-pressed'), 'true', 'selecting analytics updates the pressed state inside the named group');
+  assert.equal(await topicExportType.getAttribute('aria-pressed'), 'false', 'the former topic option is no longer pressed');
+  await topicExportType.click();
+  assert.equal(await topicExportType.getAttribute('aria-pressed'), 'true', 'the topic option can be selected again before export');
+  assert.deepEqual({ topics: topicsExportReads, analytics: analyticsExportReads }, exportReadsBeforeTypeSwitch, 'switching export types changes selection only and does not start an export request');
   await assertPageHeadingsAndCopyContrast(page);
   await page.evaluate(async () => { await fetch('/__qa/fail-next-topics-export', { method: 'POST' }); });
   await page.getByRole('button', { name: '开始导出', exact: true }).dblclick({ delay: 50 });

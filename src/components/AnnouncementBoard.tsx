@@ -10,6 +10,7 @@ import type { Announcement } from '../types';
 import { formatBeijingDate } from '../lib/utils';
 import { GlassPanel } from './studio';
 import { parseStoredBjt } from '@shared/time';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 
 type AnnouncementCreatePayload = { content: string; type: string; pinned: boolean };
 type PendingAnnouncementCreate = {
@@ -46,8 +47,10 @@ function parsePendingCreate(raw: string, actorId: number): PendingAnnouncementCr
 
 function storePendingCreate(marker: PendingAnnouncementCreate): boolean {
   try {
-    sessionStorage.setItem(pendingCreateStorageKey(marker.actorId), JSON.stringify(marker));
-    return true;
+    const key = pendingCreateStorageKey(marker.actorId);
+    const serialized = JSON.stringify(marker);
+    sessionStorage.setItem(key, serialized);
+    return sessionStorage.getItem(key) === serialized;
   } catch {
     return false;
   }
@@ -55,8 +58,9 @@ function storePendingCreate(marker: PendingAnnouncementCreate): boolean {
 
 function removePendingCreate(actorId: number): boolean {
   try {
-    sessionStorage.removeItem(pendingCreateStorageKey(actorId));
-    return true;
+    const key = pendingCreateStorageKey(actorId);
+    sessionStorage.removeItem(key);
+    return sessionStorage.getItem(key) === null;
   } catch {
     return false;
   }
@@ -149,7 +153,7 @@ export default function AnnouncementBoard() {
       setLoadError('');
       return true;
     } catch (err) {
-      setLoadError((err as Error).message || '公告列表暂时无法读取。');
+      setLoadError(getUserFacingErrorMessage(err, '公告列表暂时无法读取，请检查连接后重试。'));
       return false;
     } finally {
       readLockRef.current = false;
@@ -514,7 +518,7 @@ export default function AnnouncementBoard() {
         if (markerCleared) {
           setPendingDelete(null);
           setPendingDeleteState(null);
-          const message = (err as Error).message || '删除公告失败，请重试。';
+          const message = getUserFacingErrorMessage(err, '删除公告失败，请检查后重试。');
           setFeedback(message);
           addNotification({ title: '删除失败', message, type: 'error' });
         } else {
@@ -545,7 +549,7 @@ export default function AnnouncementBoard() {
       : pendingCreateState === 'conflict'
         ? '请求编号与其他请求冲突，公告操作已锁定；请联系管理员核实。'
         : pendingCreateState === 'unknown'
-          ? '暂时无法核实公告创建状态；公告操作已锁定，请稍后重新核实，不要重复发布。'
+          ? feedback || '暂时无法核实公告创建状态；公告操作已锁定，请稍后重新核实，不要重复发布。'
           : '';
 
   return (
@@ -562,9 +566,10 @@ export default function AnnouncementBoard() {
             type="button"
             onClick={() => setShowForm(!showForm)}
             disabled={writeControlsLocked || !loaded || loading}
-            className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-button border border-studio-border-soft bg-studio-surface-soft text-studio-text-muted transition-colors hover:border-studio-border-active hover:bg-studio-surface-elevated hover:text-studio-text-primary disabled:opacity-50"
+            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-button border border-studio-border-soft bg-studio-surface-soft text-studio-text-muted transition-colors hover:border-studio-border-active hover:bg-studio-surface-elevated hover:text-studio-text-primary disabled:opacity-50"
             title="添加公告"
             aria-label={showForm ? '关闭公告表单' : '添加公告'}
+            aria-expanded={showForm}
           >
             {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
           </button>
@@ -577,11 +582,11 @@ export default function AnnouncementBoard() {
             {pendingCreateMessage || '公告创建结果待核实；操作暂时锁定。'}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            <button type="button" onClick={() => void handleVerifyCreate()} disabled={mutationBusy} className="xmt-btn xmt-btn-secondary min-h-9 px-3 text-xs disabled:opacity-50">
+            <button type="button" onClick={() => void handleVerifyCreate()} disabled={mutationBusy} className="xmt-btn xmt-btn-secondary min-h-10 px-3 text-xs disabled:opacity-50">
               {verifyingCreate ? '正在核实…' : '重新核实发布状态'}
             </button>
             {pendingCreateState === 'not_found' && canManageAnnouncements ? (
-              <button type="button" onClick={() => void handleRetryUncommittedCreate()} disabled={mutationBusy} className="xmt-btn xmt-btn-primary min-h-9 px-3 text-xs disabled:opacity-50">
+              <button type="button" onClick={() => void handleRetryUncommittedCreate()} disabled={mutationBusy} className="xmt-btn xmt-btn-primary min-h-10 px-3 text-xs disabled:opacity-50">
                 {submitting ? '正在安全重试…' : '确认未创建，使用原编号重试'}
               </button>
             ) : null}
@@ -594,7 +599,7 @@ export default function AnnouncementBoard() {
               ? '正在只读核实公告删除状态；公告写入暂时锁定，不会自动重发。'
               : feedback || '公告删除结果待核实；公告写入已锁定，请勿重复删除。'}
           </p>
-          <button type="button" onClick={() => void handleVerifyDelete()} disabled={mutationBusy} className="xmt-btn xmt-btn-secondary mt-2 min-h-9 px-3 text-xs disabled:opacity-50">
+          <button type="button" onClick={() => void handleVerifyDelete()} disabled={mutationBusy} className="xmt-btn xmt-btn-secondary mt-2 min-h-10 px-3 text-xs disabled:opacity-50">
             {verifyingDelete ? '正在核实…' : '重新核实公告删除状态'}
           </button>
         </div>
@@ -608,7 +613,10 @@ export default function AnnouncementBoard() {
 
       {showForm && (
         <div className="mb-4 rounded-card border border-studio-border-soft bg-studio-surface-soft p-4">
+          <label htmlFor="announcement-content" className="mb-1.5 block text-sm font-medium text-studio-text-secondary">公告内容</label>
           <textarea
+            id="announcement-content"
+            name="content"
             value={newContent}
             onChange={(e) => setNewContent(e.target.value)}
             disabled={writeControlsLocked}
@@ -627,7 +635,7 @@ export default function AnnouncementBoard() {
                   aria-pressed={newType === t}
                   disabled={writeControlsLocked}
                   onClick={() => setNewType(t)}
-                  className={`inline-flex min-h-8 items-center gap-1.5 rounded-button border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-button border px-3 py-1.5 text-xs font-medium transition-colors ${
                     newType === t
                       ? `${theme === 'dark' ? cfg.bgDark : cfg.bgLight} ${cfg.border}`
                       : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-muted hover:bg-studio-surface-elevated hover:text-studio-text-primary'
@@ -644,7 +652,7 @@ export default function AnnouncementBoard() {
               aria-pressed={newPinned}
               disabled={writeControlsLocked}
               onClick={() => setNewPinned(!newPinned)}
-              className={`inline-flex min-h-8 items-center gap-1 rounded-button border px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`inline-flex min-h-10 items-center gap-1 rounded-button border px-3 py-1.5 text-xs font-medium transition-colors ${
                 newPinned
                   ? `bg-studio-amber/10 border-studio-amber/30 text-studio-amber-contrast`
                   : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-muted hover:bg-studio-surface-elevated hover:text-studio-text-primary'
@@ -658,7 +666,7 @@ export default function AnnouncementBoard() {
               type="button"
               onClick={handleCreate}
               disabled={!newContent.trim() || writeControlsLocked || loading || !loaded || Boolean(loadError)}
-              className="inline-flex min-h-8 items-center justify-center rounded-button border border-studio-primary/40 px-4 py-1.5 text-xs font-semibold text-white transition-all xmt-btn-primary disabled:pointer-events-none disabled:opacity-40"
+              className="inline-flex min-h-10 items-center justify-center rounded-button border border-studio-primary/40 px-4 py-1.5 text-xs font-semibold text-white transition-all xmt-btn-primary disabled:pointer-events-none disabled:opacity-40"
             >
               {submitting ? '发布中...' : '发布'}
             </button>
@@ -671,7 +679,7 @@ export default function AnnouncementBoard() {
           {feedback && !activePendingCreate && !activePendingDelete && recoveryStorage !== 'unavailable' ? <p role={feedback.includes('失败') || feedback.includes('无法') || feedback.includes('锁定') ? 'alert' : 'status'} className="text-sm text-studio-text-secondary">{feedback}</p> : null}
           {loadError && !pendingConfirmation ? <p className="mt-1 text-sm text-studio-text-muted">公告列表暂时无法读取：{loadError}</p> : null}
           {loadError ? (
-            <button type="button" disabled={loading} onClick={() => void handleRetryList()} className="xmt-btn xmt-btn-secondary mt-2 min-h-9 px-3 text-xs disabled:opacity-50">
+            <button type="button" disabled={loading} onClick={() => void handleRetryList()} className="xmt-btn xmt-btn-secondary mt-2 min-h-10 px-3 text-xs disabled:opacity-50">
               {loading ? '正在重新加载…' : '重新加载列表'}
             </button>
           ) : null}
@@ -724,11 +732,11 @@ export default function AnnouncementBoard() {
                       type="button"
                       disabled={writeControlsLocked || loading}
                       onClick={() => { setDeleteConfirmationMessage(''); setDeleteCandidate(item); }}
-                      className="rounded p-1 text-studio-coral-contrast opacity-0 transition-opacity hover:bg-studio-coral-soft group-hover:opacity-100 focus:opacity-100 disabled:opacity-40"
+                      className="xmt-btn xmt-btn-ghost h-10 w-10 min-w-10 shrink-0 !p-0 text-studio-coral-contrast opacity-100 transition-opacity hover:!bg-studio-coral-soft hover:!text-studio-coral-contrast sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 sm:group-focus-within:opacity-100 disabled:opacity-40"
                       title="删除"
                       aria-label={`删除公告：${item.content.slice(0, 32)}`}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   ) : null}
                 </div>

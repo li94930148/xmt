@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import XMTCard from '../../design-system/components/XMTCard';
 import { AnimatedNumber } from '../../design-system';
@@ -13,7 +14,7 @@ export default function MetricCard({
   trend,
 }: {
   title: string;
-  value: string | number;
+  value: ReactNode;
   unit?: string;
   icon: LucideIcon;
   tone?: 'primary' | 'cyan' | 'violet' | 'coral' | 'amber' | 'success';

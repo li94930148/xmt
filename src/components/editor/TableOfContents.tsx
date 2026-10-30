@@ -56,7 +56,7 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
   useEffect(() => {
     if (!editor || items.length === 0) return;
 
-    const findScrollContainer = (): HTMLElement | null => {
+    const findScrollContainer = (): HTMLElement => {
       const editorDom = editor.view.dom;
       let el: HTMLElement | null = editorDom.parentElement;
       while (el) {
@@ -70,15 +70,16 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
     scrollContainerRef.current = container;
 
     const handleScroll = () => {
-      const editorDom = editor.view.dom;
-      const editorRect = editorDom.getBoundingClientRect();
       let currentActive: string | null = null;
+      const scrollRootTop = container === document.documentElement
+        ? 0
+        : container.getBoundingClientRect().top + container.clientTop;
 
       for (const item of items) {
         try {
           const coords = editor.view.coordsAtPos(item.pos);
-          // 标题顶部在编辑器可视区域内，且在编辑器顶部偏上位置
-          if (coords.top - editorRect.top <= 120) {
+          // 高亮滚动容器顶部附近最后经过的标题，避免用编辑器外框抵消页面滚动。
+          if (coords.top - scrollRootTop <= 120) {
             currentActive = item.id;
           }
         } catch { /* pos might be invalid */ }
@@ -97,16 +98,17 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
 
   const scrollToHeading = (pos: number, id: string) => {
     if (!editor) return;
-    editor.chain().focus().setTextSelection(pos).run();
+    const textPosition = pos + 1;
+    editor.chain().focus().setTextSelection(textPosition).run();
     try {
-      const coords = editor.view.coordsAtPos(pos);
-      const editorDom = editor.view.dom;
-      const editorRect = editorDom.getBoundingClientRect();
-      const container = scrollContainerRef.current;
+      const coords = editor.view.coordsAtPos(textPosition);
+      const container = scrollContainerRef.current ?? document.documentElement;
       if (container && coords) {
-        const scrollTop = container?.scrollTop ?? 0;
-        const targetTop = coords.top - editorRect.top + scrollTop - 80;
-        container?.scrollTo({ top: targetTop, behavior: 'smooth' });
+        const scrollRootTop = container === document.documentElement
+          ? 0
+          : container.getBoundingClientRect().top + container.clientTop;
+        const targetTop = coords.top - scrollRootTop + container.scrollTop - 80;
+        container.scrollTo({ top: targetTop, behavior: 'smooth' });
       }
     } catch { /* ignore */ }
     setActiveId(id);
@@ -125,7 +127,9 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
 
   if (!editor || items.length === 0) return null;
 
-  const visibleItems = items.filter(isItemVisible);
+  const visibleItems = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => isItemVisible(item));
 
   const indentClass = (level: number) => {
     switch (level) {
@@ -149,8 +153,10 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
     <div className={`${className || ''}`}>
       {/* TOC 标题栏 */}
       <button
+        type="button"
+        aria-expanded={panelOpen}
         onClick={() => setPanelOpen(!panelOpen)}
-        className="flex w-full items-center gap-2 border-b border-studio-border-soft px-3 py-2 text-left text-sm font-medium text-studio-text-secondary transition-colors hover:bg-studio-surface-soft hover:text-studio-text-primary"
+        className="flex min-h-10 w-full items-center gap-2 border-b border-studio-border-soft px-3 py-2 text-left text-sm font-medium text-studio-text-secondary transition-colors hover:bg-studio-surface-soft hover:text-studio-text-primary"
       >
         <List className="w-4 h-4" />
         <span>目录</span>
@@ -160,9 +166,9 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
 
       {panelOpen && (
         <div className="max-h-[calc(100vh-300px)] overflow-y-auto bg-studio-surface py-1">
-          {visibleItems.map((item, idx) => {
+          {visibleItems.map(({ item, index }) => {
             // 检查是否有子标题
-            const nextItem = visibleItems[idx + 1];
+            const nextItem = items[index + 1];
             const hasChildren = nextItem && nextItem.level > item.level;
             const isCollapsed = collapsed[item.level];
             const isActive = activeId === item.id;
@@ -171,15 +177,19 @@ export default function TableOfContents({ editor, className }: TableOfContentsPr
               <div key={item.id} className={`group flex items-center ${indentClass(item.level)} ${item.level === 1 ? 'mt-1' : ''}`}>
                 {hasChildren && item.level < 4 && (
                   <button
+                    type="button"
+                    aria-label={`${isCollapsed ? '展开' : '收起'}${item.text}下级标题`}
+                    aria-expanded={!isCollapsed}
                     onClick={(e) => { e.stopPropagation(); toggleCollapse(item.level); }}
-                    className="mr-1 rounded p-0.5 text-studio-text-muted transition-colors hover:bg-studio-surface-elevated hover:text-studio-text-primary"
+                    className="mr-1 inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded p-0.5 text-studio-text-muted transition-colors hover:bg-studio-surface-elevated hover:text-studio-text-primary"
                   >
                     {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   </button>
                 )}
                 <button
                   onClick={() => scrollToHeading(item.pos, item.id)}
-                  className={`flex-1 text-left py-1.5 px-2 rounded text-sm truncate transition-all ${levelFontSize(item.level)} ${
+                  aria-current={isActive ? 'location' : undefined}
+                  className={`flex min-h-10 min-w-0 flex-1 items-center text-left py-1.5 px-2 rounded text-sm truncate transition-all ${levelFontSize(item.level)} ${
                     isActive
                       ? 'border-l-2 border-studio-primary bg-studio-primary/12 text-studio-primary-contrast'
                       : 'text-studio-text-secondary hover:bg-studio-surface-soft hover:text-studio-text-primary'

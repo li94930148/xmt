@@ -68,6 +68,49 @@ function testDoesNotMutateDocumentData() {
   assert.ok(!css.includes('span[style*="color: red"]'), '禁止按具体文档颜色硬编码处理');
 }
 
+function testToolbarToggleButtonsExposePressedState() {
+  const toolbar = read('src/components/editor/Toolbar.tsx');
+  const basicStart = toolbar.indexOf("if (variant === 'basic')");
+  const coreStart = toolbar.indexOf('// 核心工具按钮（始终显示）');
+  const moreMenuStart = toolbar.indexOf('// 折叠到"更多"菜单的按钮');
+  const renderStart = toolbar.indexOf('return (', moreMenuStart);
+  assert.ok(basicStart >= 0 && coreStart > basicStart && moreMenuStart > coreStart && renderStart > moreMenuStart, '需要可识别的 basic/full 工具栏边界');
+
+  const basicToolbar = toolbar.slice(basicStart, coreStart);
+  const fullToolbar = toolbar.slice(coreStart, renderStart);
+  const assertPressedState = (section: string, state: string, label: string) => {
+    const escaped = state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(
+      section,
+      new RegExp(`className=\\{btnClass\\(${escaped}\\)\\}[^>]*aria-pressed=\\{${escaped}\\}`),
+      `${label}需将 aria-pressed 绑定到当前 editor.isActive 状态`,
+    );
+  };
+
+  for (const mark of ['bold', 'italic', 'underline']) {
+    assertPressedState(basicToolbar, `editor.isActive('${mark}')`, `基础工具栏 ${mark}`);
+    assertPressedState(fullToolbar, `editor.isActive('${mark}')`, `完整工具栏 ${mark}`);
+  }
+  for (const list of ['bulletList', 'orderedList']) {
+    assertPressedState(basicToolbar, `editor.isActive('${list}')`, `基础工具栏 ${list}`);
+  }
+  for (const mark of ['strike', 'blockquote', 'codeBlock', 'taskList']) {
+    assertPressedState(fullToolbar, `editor.isActive('${mark}')`, `完整工具栏 ${mark}`);
+  }
+  for (const alignment of ['left', 'center', 'right', 'justify']) {
+    assertPressedState(fullToolbar, `editor.isActive({ textAlign: '${alignment}' })`, `完整工具栏 ${alignment} 对齐`);
+  }
+
+  const indentToolbarButton = toolbar.split('\n').find((line) => line.includes('onClick={toggleFirstLineIndent}'));
+  assert.ok(indentToolbarButton?.includes('aria-pressed={isTextIndentActive()}'), '完整工具栏首行缩进需报告当前切换状态');
+  const indentMenuButton = toolbar.split('\n').find((line) => line.includes('toggleFirstLineIndent(); setShowMoreMenu(false);'));
+  assert.ok(indentMenuButton?.includes('aria-pressed={isTextIndentActive()}'), '更多菜单首行缩进需报告当前切换状态');
+
+  const linkCommands = toolbar.split('\n').filter((line) => line.includes('setLink()'));
+  assert.ok(linkCommands.length >= 2, 'basic/full 工具栏都应覆盖打开链接对话框的命令');
+  assert.ok(linkCommands.every((line) => !line.includes('aria-pressed')), '打开链接对话框的命令不应声明 toggle 状态');
+}
+
 function contrastRatio(background: string, foreground: string) {
   const luminance = (color: string) => {
     const channels = color.match(/[\da-f]{2}/gi)?.map((channel) => Number.parseInt(channel, 16) / 255);
@@ -91,5 +134,6 @@ testIndexCssUsesGlobalAndEditorSelection();
 testTiptapInjectedStylesCoverSelection();
 testBubbleMenuKeepsSelectionFocus();
 testDoesNotMutateDocumentData();
+testToolbarToggleButtonsExposePressedState();
 
 console.log('selection-style-contract tests passed');

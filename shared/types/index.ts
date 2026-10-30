@@ -114,6 +114,7 @@ export interface Production {
   origin_source_type?: 'topic_outline' | null;
   origin_source_content_snapshot?: string | null;
   origin_source_outline_version?: string | null;
+  origin_source_topic_id?: number | null;
   origin_captured_at?: string | null;
   created_at: string;
   updated_at: string;

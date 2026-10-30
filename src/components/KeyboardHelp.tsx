@@ -1,5 +1,5 @@
 import { useThemeStyles } from '../hooks/useThemeStyles';
-import { X } from 'lucide-react';
+import BaseModal from './common/BaseModal';
 
 interface KeyboardHelpProps {
   isOpen: boolean;
@@ -15,55 +15,38 @@ const shortcuts = [
 export default function KeyboardHelp({ isOpen, onClose }: KeyboardHelpProps) {
   const styles = useThemeStyles();
 
-  if (!isOpen) return null;
-
   return (
-    <div className="xmt-overlay xmt-overlay-center" onClick={onClose}>
-      <div
-        className={`${styles.modal} studio-sheen xmt-panel-enter w-full max-w-md mx-4 rounded-panel border border-studio-border-soft p-6 shadow-floating`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h2 className={`text-lg font-bold ${styles.textPrimary}`}>键盘快捷键</h2>
-          <button
-            onClick={onClose}
-            className={`p-1.5 rounded-lg ${styles.hoverBg} transition-colors`}
+    <BaseModal open={isOpen} onClose={onClose} title="键盘快捷键" size="sm" closeOnEscape>
+      <div className="space-y-3">
+        {shortcuts.map((shortcut, index) => (
+          <div
+            key={index}
+            className={`flex items-center justify-between py-2.5 px-3 rounded-lg ${
+              styles.isDark ? 'bg-studio-surface-soft' : 'bg-studio-surface-soft'
+            }`}
           >
-            <X className={`w-4 h-4 ${styles.textMuted}`} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          {shortcuts.map((shortcut, index) => (
-            <div
-              key={index}
-              className={`flex items-center justify-between py-2.5 px-3 rounded-lg ${
-                styles.isDark ? 'bg-studio-surface-soft' : 'bg-studio-surface-soft'
-              }`}
-            >
-              <span className={`text-sm ${styles.textPrimary}`}>{shortcut.description}</span>
-              <div className="flex items-center gap-1">
-                {shortcut.keys.map((key, ki) => (
-                  <span key={ki}>
-                    <kbd
-                      className={`px-2 py-1 text-xs font-mono rounded-md ${styles.bgTertiary} ${styles.textSecondary} border ${styles.border}`}
-                    >
-                      {key}
-                    </kbd>
-                    {ki < shortcut.keys.length - 1 && (
-                      <span className={`mx-0.5 text-xs ${styles.textMuted}`}>+</span>
-                    )}
-                  </span>
-                ))}
-              </div>
+            <span className={`text-sm ${styles.textPrimary}`}>{shortcut.description}</span>
+            <div className="flex items-center gap-1">
+              {shortcut.keys.map((key, ki) => (
+                <span key={ki}>
+                  <kbd
+                    className={`px-2 py-1 text-xs font-mono rounded-md ${styles.bgTertiary} ${styles.textSecondary} border ${styles.border}`}
+                  >
+                    {key}
+                  </kbd>
+                  {ki < shortcut.keys.length - 1 && (
+                    <span className={`mx-0.5 text-xs ${styles.textMuted}`}>+</span>
+                  )}
+                </span>
+              ))}
             </div>
-          ))}
-        </div>
-
-        <p className={`text-xs ${styles.textMuted} mt-4 text-center`}>
-          在任意页面按下对应快捷键即可触发
-        </p>
+          </div>
+        ))}
       </div>
-    </div>
+
+      <p className={`text-xs ${styles.textMuted} mt-4 text-center`}>
+        在任意页面按下对应快捷键即可触发
+      </p>
+    </BaseModal>
   );
 }

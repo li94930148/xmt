@@ -12,6 +12,7 @@ interface ErrorStateProps {
   onRetry?: () => void;
   variant?: ErrorVariant;
   className?: string;
+  announcementRole?: 'alert' | 'status';
 }
 
 const variantMap: Record<
@@ -45,6 +46,7 @@ export default function ErrorState({
   onRetry,
   variant = 'error',
   className = '',
+  announcementRole = variant === 'notFound' ? 'status' : 'alert',
 }: ErrorStateProps) {
   const styles = useThemeStyles();
 
@@ -68,12 +70,14 @@ export default function ErrorState({
         <div className={`mx-auto flex h-16 w-16 items-center justify-center rounded-3xl ${config.iconClass}`}>
           <Icon className="h-7 w-7" />
         </div>
-        <h2 className={`mt-5 text-xl font-semibold ${styles.textPrimary}`}>
-          {title || config.defaultTitle}
-        </h2>
-        <p className={`mx-auto mt-3 max-w-md text-sm leading-7 ${styles.textSecondary}`}>
-          {description || config.defaultDescription}
-        </p>
+        <div role={announcementRole} aria-atomic={announcementRole === 'alert' ? true : undefined} className="mt-5">
+          <h2 className={`text-xl font-semibold ${styles.textPrimary}`}>
+            {title || config.defaultTitle}
+          </h2>
+          <p className={`mx-auto mt-3 max-w-md text-sm leading-7 ${styles.textSecondary}`}>
+            {description || config.defaultDescription}
+          </p>
+        </div>
         {onRetry ? (
           <button
             type="button"

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import PageHeading from '@/components/common/PageHeading';
 import {
   ArrowLeft,
   Clock,
@@ -15,6 +16,8 @@ import {
   type DouyinWorkDetailData,
 } from "@/api/creatorCenter";
 import CreatorCoverImage from "@/components/common/CreatorCoverImage";
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
+import { formatBeijingDate } from '@/lib/utils';
 import {
   LineChart,
   LoadingState,
@@ -39,7 +42,7 @@ export default function CreatorWorkDetail() {
       const result = await getDouyinWorkReview(id, accountUid, signal);
       if (!signal?.aborted) setData(result);
     } catch (cause) {
-      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "作品复盘加载失败");
+      if (!signal?.aborted) setError(getUserFacingErrorMessage(cause, '作品详情暂时无法加载，请检查连接后重试。'));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -63,7 +66,7 @@ export default function CreatorWorkDetail() {
       </button>
       <section role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-coral/30 bg-studio-coral/10 p-5 text-sm text-studio-coral-contrast sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="font-semibold">作品复盘暂不可用</h1>
+          <PageHeading className="font-semibold">作品复盘暂不可用</PageHeading>
           <p className="mt-1">{error}。可以重新读取；不会修改作品或复盘数据。</p>
         </div>
         <button
@@ -108,9 +111,9 @@ export default function CreatorWorkDetail() {
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start gap-3">
-            <h1 className="min-w-0 flex-1 text-2xl font-semibold">
+            <PageHeading className="min-w-0 flex-1 text-2xl font-semibold">
               {work.title}
-            </h1>
+            </PageHeading>
             {performance.is_viral ? (
               <span className="rounded-lg bg-studio-coral/10 px-3 py-1 text-sm font-medium text-studio-coral-contrast">
                 爆款
@@ -230,7 +233,7 @@ export default function CreatorWorkDetail() {
           title="播放曲线"
           description={`${data.snapshots.length} 个历史快照`}
         >
-          <LineChart values={data.snapshots.map((row) => row.play_count)} ariaLabel={`播放曲线，${data.snapshots.length} 个历史快照`} />
+          <LineChart values={data.snapshots.map((row) => row.play_count)} dataPoints={data.snapshots.map((row) => ({ label: formatBeijingDate(row.snapshot_time), value: row.play_count }))} ariaLabel={`播放曲线，${data.snapshots.length} 个历史快照`} />
           {data.snapshots.length < 2 ? (
             <p className="mt-3 text-sm text-studio-text-secondary">
               至少完成两次同步后才能形成增长曲线。
@@ -238,7 +241,7 @@ export default function CreatorWorkDetail() {
           ) : null}
         </Panel>
         <Panel title="互动曲线" description="点赞、评论、分享与收藏之和">
-          <LineChart values={interactions} color="var(--xmt-coral)" ariaLabel={`互动曲线，${data.snapshots.length} 个历史快照`} />
+          <LineChart values={interactions} dataPoints={data.snapshots.map((row, index) => ({ label: formatBeijingDate(row.snapshot_time), value: interactions[index] }))} color="var(--xmt-coral)" ariaLabel={`互动曲线，${data.snapshots.length} 个历史快照`} />
           {data.snapshots.length < 2 ? (
             <p className="mt-3 text-sm text-studio-text-secondary">
               当前只有一个真实快照，不生成推测趋势。

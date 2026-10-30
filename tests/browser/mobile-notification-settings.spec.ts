@@ -25,6 +25,10 @@ app.post('/__qa/options', (req, res) => {
   if (typeof req.body?.failNextSave === 'string') failNextSave = req.body.failNextSave || null;
   res.json({ ready: true });
 });
+app.post('/__qa/fail-next-read', (_req, res) => {
+  failNextRead = '通知偏好暂时无法读取，请重试。';
+  res.json({ ready: true });
+});
 app.get('/api/notifications/preferences', (_req, res) => {
   preferenceReadRequests += 1;
   if (failNextRead) {
@@ -172,6 +176,23 @@ try {
   assert.equal(saveRequests, 5, 'read-only recovery never sends another PUT');
 
   await toggle.click();
+  dropNextSaveResponseAfterCommit = true;
+  failNextRead = '通知偏好核实暂时不可用。';
+  await save.click();
+  await page.getByRole('button', { name: '只读重新核实', exact: true }).waitFor();
+  assert.equal(saveRequests, 6, 'the ambiguous save is sent once before reload');
+  assert.equal(await page.evaluate(() => Object.keys(sessionStorage).some((key) => key.startsWith('xmt:notification-preferences-recovery:'))), true, 'the pending account-scoped recovery marker survives before reload');
+  const readsBeforeRecoveryReload = preferenceReadRequests;
+  await page.reload();
+  await page.getByRole('heading', { name: '消息通知偏好' }).waitFor();
+  await page.getByText('已核实通知偏好已保存。', { exact: true }).waitFor();
+  assert.equal(persistedPreferences[0]?.enabled, true, 'reloading after an unverified save shows the server-confirmed value');
+  assert.equal(saveRequests, 6, 'reload recovery never repeats the preference PUT');
+  assert.equal(preferenceReadRequests, readsBeforeRecoveryReload + 2, 'reload recovery uses the settings read and a separate verification GET');
+  assert.equal(await page.evaluate(() => Object.keys(sessionStorage).some((key) => key.startsWith('xmt:notification-preferences-recovery:'))), false, 'a confirmed reload recovery clears only its resolved marker');
+  assert.equal(await page.getByRole('button', { name: /审核结果/ }).getAttribute('aria-pressed'), 'true', 'the selected state matches the confirmed value after reload');
+
+  await toggle.click();
   const warnsOnDirtyUnload = await page.evaluate(() => {
     const event = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(event);
@@ -181,7 +202,7 @@ try {
   await back.click();
   const leaveDialog = page.getByRole('dialog');
   await leaveDialog.getByRole('heading', { name: '通知偏好尚未保存' }).waitFor();
-  assert.equal(saveRequests, 5, 'attempting to leave a dirty page does not save automatically');
+  assert.equal(saveRequests, 6, 'attempting to leave a dirty page does not save automatically');
   await leaveDialog.getByRole('button', { name: '继续编辑' }).click();
   assert.equal(await toggle.getAttribute('aria-pressed'), 'true', 'canceling navigation keeps the unsaved preference selection');
 
@@ -196,7 +217,7 @@ try {
   await saveDuringLeave;
   saveDelayMs = 0;
   await page.getByText('通知偏好已保存。', { exact: true }).waitFor();
-  assert.equal(saveRequests, 6, 'the in-flight save completes exactly once');
+  assert.equal(saveRequests, 7, 'the in-flight save completes exactly once');
 
   await toggle.click();
   await back.click();
@@ -204,17 +225,60 @@ try {
   await discardDialog.getByRole('heading', { name: '通知偏好尚未保存' }).waitFor();
   await discardDialog.getByRole('button', { name: '离开并放弃本页更改' }).click();
   await page.getByRole('heading', { name: '个人设置夹具' }).waitFor();
-  assert.equal(saveRequests, 6, 'explicitly discarding local preference edits does not send a PUT');
+  assert.equal(saveRequests, 7, 'explicitly leaving local preference edits does not send a PUT');
   await page.getByRole('button', { name: '返回通知偏好夹具' }).click();
   await page.getByRole('heading', { name: '消息通知偏好' }).waitFor();
   await page.getByRole('button', { name: /审核结果/ }).waitFor();
-  assert.equal(await page.getByRole('button', { name: /审核结果/ }).getAttribute('aria-pressed'), 'true', 'reopening reloads the server-confirmed preference instead of the discarded local draft');
-  assert.equal(expectedSaveRequestFailures.length, 2, 'both injected response losses are observed');
-  assert.equal(expectedSaveConsoleErrors.length, 2, 'both injected response losses are expected browser errors');
-  assert.equal(expectedHttpErrors.length, 2, 'the expected HTTP errors are the failed save and failed verification GET');
+  assert.equal(await page.getByRole('button', { name: /审核结果/ }).getAttribute('aria-pressed'), 'false', 'reopening reloads the server-confirmed preference instead of the discarded local draft');
+  assert.equal(expectedSaveRequestFailures.length, 3, 'all injected response losses are observed');
+  assert.equal(expectedSaveConsoleErrors.length, 3, 'all injected response losses are expected browser errors');
+  assert.equal(expectedHttpErrors.length, 3, 'the expected HTTP errors are the failed save and two failed verification GETs');
   assert.deepEqual(errors, [], 'mobile notification settings have no browser runtime errors');
+
+  const transportFailurePage = await context.newPage();
+  await transportFailurePage.setViewportSize({ width: 390, height: 844 });
+  const transportPageErrors: string[] = [];
+  transportFailurePage.on('pageerror', (error) => transportPageErrors.push(error.message));
+  await transportFailurePage.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    const state = { calls: [] as string[], failed: false };
+    (window as Window & { __mobileNotificationReadQa?: typeof state }).__mobileNotificationReadQa = state;
+    window.fetch = async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/api/notifications/preferences') && (init?.method ?? 'GET') === 'GET') {
+        state.calls.push('GET');
+        if (!state.failed) {
+          state.failed = true;
+          throw new TypeError('Failed to fetch');
+        }
+      }
+      return originalFetch(input, init);
+    };
+  });
+  await transportFailurePage.goto(`${base}/__qa`);
+  await transportFailurePage.getByText('通知偏好加载失败，请检查连接后重试。', { exact: true }).waitFor();
+  const readFailureAlert = transportFailurePage.getByRole('alert');
+  await readFailureAlert.getByRole('heading', { name: '通知偏好未能加载', exact: true }).waitFor();
+  await readFailureAlert.getByText('通知偏好加载失败，请检查连接后重试。', { exact: true }).waitFor();
+  assert.equal(await readFailureAlert.getByRole('button').count(), 0, 'the retry action remains separate from the live error message');
+  assert.equal(await transportFailurePage.getByText(/Failed to fetch/i).count(), 0, 'mobile notification reads hide raw browser transport errors');
+  await transportFailurePage.getByRole('button', { name: '重试', exact: true }).click();
+  await transportFailurePage.getByRole('button', { name: /审核结果/ }).waitFor();
+  const recoveredReadCalls = await transportFailurePage.evaluate(() => (window as Window & { __mobileNotificationReadQa?: { calls: string[] } }).__mobileNotificationReadQa?.calls ?? []);
+  assert.deepEqual(recoveredReadCalls, ['GET', 'GET'], 'notification retry performs only the explicit second read');
+  assert.deepEqual(transportPageErrors, [], 'notification read failure and retry render without application errors');
+  const serverFailurePage = await context.newPage();
+  await serverFailurePage.request.post(`${base}/__qa/fail-next-read`);
+  await serverFailurePage.goto(`${base}/__qa`);
+  const serverReadFailureAlert = serverFailurePage.getByRole('alert');
+  await serverReadFailureAlert.getByRole('heading', { name: '通知偏好未能加载', exact: true }).waitFor();
+  await serverReadFailureAlert.getByText('通知偏好暂时无法读取，请重试。', { exact: true }).waitFor();
+  assert.equal(await serverReadFailureAlert.getByRole('button').count(), 0, 'the retry control remains outside the announced error copy');
+  await serverFailurePage.getByRole('button', { name: '重试', exact: true }).click();
+  await serverFailurePage.getByRole('button', { name: /审核结果/ }).waitFor();
+  await serverFailurePage.close();
   await context.close();
-  console.log('Mobile notification settings browser test passed: 390px, duplicate protection, uncertain-result read-back, explicit conflict resolution and no automatic retries.');
+  console.log('Mobile notification settings browser test passed: 390px, duplicate protection, uncertain-result recovery across reload, explicit conflict resolution and no automatic retries.');
 } finally {
   await browser.close();
   await vite.close();

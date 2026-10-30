@@ -66,7 +66,11 @@ async function assertResponsiveLayout(page: Page, width: number, height: number,
 }
 
 async function assertSelectedSidebarItem(page: Page, label: string) {
-  const item = page.getByRole('complementary').getByRole('navigation').getByRole('button', { name: label, exact: true });
+  const navigation = page.getByRole('complementary').getByRole('navigation');
+  const currentItems = navigation.locator('[aria-current="page"]');
+  assert.equal(await currentItems.count(), 1, `${label} route has exactly one current sidebar item`);
+  const item = navigation.getByRole('button', { name: label, exact: true });
+  assert.equal(await item.getAttribute('aria-current'), 'page', `${label} is announced as the current page`);
   const className = await item.getAttribute('class');
   assert.ok(className?.includes('border-studio-border-active'), `${label} is selected in the desktop sidebar`);
 }
@@ -197,6 +201,12 @@ try {
       await page.waitForURL(`${base}/asset-center`);
     }
   }
+  await page.getByRole('button', { name: '收起侧边栏', exact: true }).click();
+  const collapsedCurrentSection = page.getByRole('complementary').getByRole('navigation')
+    .getByRole('button', { name: '资料与资产，当前视图：素材归档', exact: true });
+  assert.equal(await collapsedCurrentSection.getAttribute('aria-expanded'), 'false', 'a collapsed sidebar announces the current page in its section control');
+  await page.getByRole('button', { name: '展开侧边栏', exact: true }).click();
+  await assertSelectedSidebarItem(page, '素材归档');
   assert.equal((await page.evaluate(async () => (await (await fetch('/__qa/state')).json()).resourceMutations)), 0, 'opening any library remains read-only');
   assert.deepEqual(errors, [], 'responsive and navigation checks produce no unexpected browser errors');
   console.log('Asset center test passed: partial reads recover explicitly, library cards remain responsive in light/dark themes, keyboard focus is visible, all four library routes return to the overview without overflow at 390/320px, and desktop navigation state matches every library without writes.');

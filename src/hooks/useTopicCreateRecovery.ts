@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createTopic, getTopicCreateRequestStatus, TopicApiError } from '../api/topics';
 import { useAuthStore } from '../store';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import {
   clearTopicCreateRecovery,
   createTopicCreateRequestId,
@@ -118,7 +119,7 @@ export function useTopicCreateRecovery(
     } catch (error) {
       if (!isCurrentActorScope(recovery.actorId, generation)) return;
       updatePending(recovery.actorId, generation, { recovery, phase: 'uncertain' });
-      const reason = error instanceof Error ? error.message : '暂时无法核实选题创建结果';
+      const reason = getUserFacingErrorMessage(error, '暂时无法核实选题创建结果');
       updateMessage(recovery.actorId, generation, recovery.rejectionStatus !== undefined
         ? `${rejectionMessage(recovery.rejectionStatus)} 状态查询失败（${reason}），当前仍锁定；请稍后只读重新核实。`
         : `${reason}。请求编号和原表单已保留；请只读重新核实，不要另行提报。`);
@@ -208,7 +209,7 @@ export function useTopicCreateRecovery(
       };
       persistTopicCreateRecovery(recovery);
     } catch (error) {
-      updateMessage(actorId, generation, error instanceof Error ? error.message : '无法保存选题恢复信息；本次未提交。');
+      updateMessage(actorId, generation, getUserFacingErrorMessage(error, '无法保存选题恢复信息；本次未提交。'));
       return;
     }
     updatePending(actorId, generation, { recovery, phase: 'checking' });

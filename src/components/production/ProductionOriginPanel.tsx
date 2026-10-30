@@ -30,7 +30,7 @@ export default function ProductionOriginPanel({ sourceType, sourceSnapshot, sour
               {sourceTopicId ? (
                 <Link
                   to={`/topics/${sourceTopicId}?outlineVersion=${encodeURIComponent(sourceOutlineVersion)}`}
-                  className="inline-flex min-h-8 items-center gap-1 text-xs font-semibold text-studio-cyan-contrast underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring"
+                  className="inline-flex min-h-10 items-center gap-1 rounded-button px-2 text-xs font-semibold text-studio-cyan-contrast underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-focus-ring"
                 >
                   查看来源大纲版本
                   <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />

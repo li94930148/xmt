@@ -10,11 +10,13 @@ const version = JSON.parse(readFileSync(new URL('../../package.json', import.met
 const user = { id: 95, username: 'pomodoro-theme-qa', name: '番茄钟主题验收', role: 'admin', enabled: true, force_change_password: false };
 const unexpectedWrites: string[] = [];
 let failNextStats = false;
+let failNextRanking = false;
 
 const app = express();
 app.get('/__qa', (request, response) => {
   const theme = request.query.theme === 'light' ? 'light' : 'dark';
   failNextStats = request.query.failStats === '1';
+  failNextRanking = request.query.failRanking === '1';
   response.type('html').send(`<script>
     localStorage.setItem('xmt_user', ${JSON.stringify(JSON.stringify(user))});
     localStorage.setItem('xmt_token', 'pomodoro-theme-fixture');
@@ -33,7 +35,13 @@ app.get('/api/pomodoro/stats', (_request, response) => {
   }
   return response.json({ today: 0, week: 0, totalMinutes: 0 });
 });
-app.get('/api/pomodoro/ranking', (_request, response) => response.json({ data: [] }));
+app.get('/api/pomodoro/ranking', (_request, response) => {
+  if (failNextRanking) {
+    failNextRanking = false;
+    return response.status(503).json({ message: '隔离验收模拟排行榜读取失败，请重试' });
+  }
+  return response.json({ data: [] });
+});
 app.use('/api', (request, response) => {
   if (request.method !== 'GET' && request.method !== 'HEAD') unexpectedWrites.push(`${request.method} ${request.path}`);
   response.status(404).json({ message: '未配置的隔离验收 API' });
@@ -88,7 +96,7 @@ try {
         if (message.text().includes('server responded with a status of 503')) expected503ConsoleErrors.push(`${theme}/${width}: ${message.text()}`);
         else errors.push(`${theme}/${width}: ${message.text()}`);
       });
-      await page.goto(`${base}/__qa?theme=${theme}${width === 320 ? '&failStats=1' : ''}`);
+      await page.goto(`${base}/__qa?theme=${theme}${width === 320 ? '&failStats=1&failRanking=1' : ''}`);
       await page.getByRole('heading', { name: '番茄钟', exact: true }).waitFor();
       await page.getByRole('heading', { name: '专注排行榜', exact: true }).waitFor();
 
@@ -99,6 +107,13 @@ try {
       const resetBounds = await resetButton.boundingBox();
       assert.ok(resetBounds && resetBounds.width >= 40 && resetBounds.height >= 40, `${theme}/${width}px full timer reset target is at least 40x40px: ${JSON.stringify(resetBounds)}`);
       if (width === 320) {
+        const rankingRetry = page.getByRole('button', { name: '重试', exact: true });
+        await rankingRetry.waitFor({ state: 'visible' });
+        const rankingRetryBounds = await rankingRetry.boundingBox();
+        assert.ok(rankingRetryBounds && rankingRetryBounds.width >= 40 && rankingRetryBounds.height >= 40, `${theme}/${width}px ranking retry target is at least 40x40px: ${JSON.stringify(rankingRetryBounds)}`);
+        await rankingRetry.click();
+        await rankingRetry.waitFor({ state: 'hidden' });
+
         const statsRetry = page.getByRole('button', { name: /统计加载失败/ });
         await statsRetry.waitFor({ state: 'visible' });
         const statsRetryBounds = await statsRetry.boundingBox();
@@ -109,7 +124,7 @@ try {
         assert.equal(await page.getByText('25:00', { exact: true }).count(), 1, `${theme}/${width}px reset restores the ready timer state`);
         await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
         const mobileReachability = await page.evaluate(() => {
-          const heading = [...document.querySelectorAll('h3')].find((item) => item.textContent?.trim() === '专注排行榜');
+          const heading = [...document.querySelectorAll('h2')].find((item) => item.textContent?.trim() === '专注排行榜');
           const panel = heading?.parentElement?.parentElement;
           const navigation = document.querySelector('[aria-label="移动主导航"]');
           if (!panel || !navigation) return null;
@@ -178,7 +193,7 @@ try {
     await compactPage.close();
   }
   assert.deepEqual(unexpectedWrites, [], 'theme and responsive checks issue no business writes');
-  assert.equal(expected503ConsoleErrors.length, 4, 'the four deliberately injected mobile stats failures are isolated and retryable');
+  assert.equal(expected503ConsoleErrors.length, 6, 'the deliberately injected mobile stats and leaderboard failures are isolated and retryable');
   assert.deepEqual(errors, [], `pomodoro theme and responsive rendering has no browser errors: ${errors.join(' | ')}`);
   console.log('Pomodoro amber contrast and responsive browser checks passed.');
 } finally {

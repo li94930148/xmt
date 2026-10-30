@@ -10,12 +10,17 @@ import { BaseModal, ErrorState, LoadingState } from '@/components/common';
 import ContentEditor, { type EditorCommandHandle } from '@/components/ContentEditor';
 import { EmptyState, GlassPanel, SearchBar } from '@/components/studio';
 import { useAppStore, useAuthStore } from '@/store';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
+import { clearSafeDraft, readSafeDraftValue, writeSafeDraft } from '@/platform/safe-draft';
 import {
   buildMaterialInsertionHtml,
   canPersistMaterialDraft,
   clampMaterialWorkspaceHeight,
   DEFAULT_MATERIAL_WORKSPACE_HEIGHT,
+  isProductionMaterialRecoveryDraft,
   materialWorkspaceStorageKey,
+  productionMaterialDraftStorageKey,
+  type ProductionMaterialRecoveryDraft,
 } from './materialWorkspace';
 import { getResourceUsageLabel, MAX_REFERENCE_EXCERPT_CHARS, referencedResourceIds, resourceIncludesExcerpt, type ResourceReference } from './resourceReference';
 
@@ -35,13 +40,39 @@ type SearchResult = {
   category: ResourceCategory | null;
 };
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'failed';
+type SaveRecoveryPhase = 'checking' | 'unconfirmed' | 'retryable' | 'conflict' | 'followup' | 'restored';
+type SaveRecovery = {
+  phase: SaveRecoveryPhase;
+  content: string;
+  generation: number;
+  baselineContent: string;
+  baselineRevision: number;
+};
+type MaterialDraftLeaveState = { pending: boolean; canDiscard: boolean };
+type MaterialDraftLeaveActions = { discard: () => boolean; copy: () => Promise<boolean> };
 
-export default function ProductionResourcesPanel({ productionId, canManage, manuscriptHtml, referenceReady, onInsertReference }: {
+function mayHaveCommitted(error: unknown) {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status !== 'number' || status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
+function isMaterialDraft(value: unknown, productionId: number): value is { production_id: number; content_html: string; revision: number } {
+  if (!value || typeof value !== 'object') return false;
+  const draft = value as Record<string, unknown>;
+  return draft.production_id === productionId
+    && typeof draft.content_html === 'string'
+    && Number.isSafeInteger(draft.revision)
+    && Number(draft.revision) >= 0;
+}
+
+export default function ProductionResourcesPanel({ productionId, canManage, manuscriptHtml, referenceReady, onInsertReference, onLeaveStateChange, onRegisterLeaveActions }: {
   productionId: number;
   canManage: boolean;
   manuscriptHtml: string;
   referenceReady: boolean;
   onInsertReference: (resource: ResourceReference, excerpt?: string) => boolean;
+  onLeaveStateChange?: (state: MaterialDraftLeaveState) => void;
+  onRegisterLeaveActions?: (actions: MaterialDraftLeaveActions | null) => void;
 }) {
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
@@ -54,7 +85,10 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
   const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editorReady, setEditorReady] = useState(false);
+  const [editorResetSequence, setEditorResetSequence] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [saveRecovery, setSaveRecovery] = useState<SaveRecovery | null>(null);
+  const [localDraftStorageFailed, setLocalDraftStorageFailed] = useState(false);
   const userId = useAuthStore((state) => state.user?.id || 0);
   const addNotification = useAppStore((state) => state.addNotification);
   const mountedRef = useRef(true);
@@ -68,16 +102,45 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
   const saveQueuedRef = useRef(false);
   const generationRef = useRef(0);
   const revisionRef = useRef(0);
+  const savedContentRef = useRef('');
   const contentRef = useRef('');
   const hasUnsavedRef = useRef(false);
+  const saveRecoveryRef = useRef<SaveRecovery | null>(null);
+  const unlockRecoveryOnNextEditorReadyRef = useRef(false);
   const saveLatestRef = useRef<() => Promise<void>>(async () => undefined);
   const editorHandleRef = useRef<EditorCommandHandle | null>(null);
   const dragRef = useRef<{ y: number; height: number } | null>(null);
   const workspaceHeightRef = useRef(DEFAULT_MATERIAL_WORKSPACE_HEIGHT);
   const storageKey = useMemo(() => materialWorkspaceStorageKey(userId), [userId]);
+  const materialDraftStorageKey = useMemo(() => productionMaterialDraftStorageKey(userId, productionId), [productionId, userId]);
   const [workspaceHeight, setWorkspaceHeight] = useState(DEFAULT_MATERIAL_WORKSPACE_HEIGHT);
   const materialDraftResourceIds = useMemo(() => pickerOpen ? referencedResourceIds(content) : new Set<number>(), [content, pickerOpen]);
   const manuscriptResourceIds = useMemo(() => pickerOpen ? referencedResourceIds(manuscriptHtml) : new Set<number>(), [manuscriptHtml, pickerOpen]);
+
+  const assignSaveRecovery = useCallback((recovery: SaveRecovery | null) => {
+    saveRecoveryRef.current = recovery;
+    if (mountedRef.current) setSaveRecovery(recovery);
+  }, []);
+
+  const persistLocalDraft = useCallback((draftContent: string, baselineContent = savedContentRef.current, baselineRevision = revisionRef.current) => {
+    if (!materialDraftStorageKey || !canPersistMaterialDraft(canManageRef.current)) return true;
+    const saved = writeSafeDraft<ProductionMaterialRecoveryDraft>(materialDraftStorageKey, {
+      version: 1,
+      productionId,
+      contentHtml: draftContent,
+      baselineContentHtml: baselineContent,
+      baselineRevision,
+    });
+    if (mountedRef.current) setLocalDraftStorageFailed(!saved);
+    return saved;
+  }, [materialDraftStorageKey, productionId]);
+
+  const clearPersistedLocalDraft = useCallback(() => {
+    if (!materialDraftStorageKey) return true;
+    const cleared = clearSafeDraft(materialDraftStorageKey);
+    if (cleared && mountedRef.current) setLocalDraftStorageFailed(false);
+    return cleared;
+  }, [materialDraftStorageKey]);
 
   const load = useCallback(async () => {
     if (addingRef.current || savingRef.current || hasUnsavedRef.current) return;
@@ -88,21 +151,94 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
     try {
       const draft = await getProductionMaterialDraft(productionId);
       if (!mountedRef.current || sequence !== loadSequenceRef.current) return;
-      contentRef.current = draft.content_html;
+      savedContentRef.current = draft.content_html;
       revisionRef.current = draft.revision;
       generationRef.current = 0;
-      hasUnsavedRef.current = false;
-      setContent(draft.content_html);
-      setSaveState('saved');
+      setLocalDraftStorageFailed(false);
+      const localDraft = canPersistMaterialDraft(canManageRef.current) && materialDraftStorageKey
+        ? readSafeDraftValue<unknown>(materialDraftStorageKey)
+        : null;
+      if (isProductionMaterialRecoveryDraft(localDraft, productionId)) {
+        if (localDraft.contentHtml === draft.content_html || localDraft.contentHtml === localDraft.baselineContentHtml) {
+          clearPersistedLocalDraft();
+          contentRef.current = draft.content_html;
+          hasUnsavedRef.current = false;
+          assignSaveRecovery(null);
+          setSaveState('saved');
+          setContent(draft.content_html);
+        } else {
+          contentRef.current = localDraft.contentHtml;
+          hasUnsavedRef.current = true;
+          generationRef.current = 1;
+          const unchangedBaseline = localDraft.baselineRevision === draft.revision
+            && localDraft.baselineContentHtml === draft.content_html;
+          assignSaveRecovery({
+            phase: unchangedBaseline ? 'restored' : 'conflict',
+            content: localDraft.contentHtml,
+            generation: generationRef.current,
+            baselineContent: localDraft.baselineContentHtml,
+            baselineRevision: localDraft.baselineRevision,
+          });
+          setSaveState('failed');
+          setContent(localDraft.contentHtml);
+        }
+      } else {
+        if (localDraft !== null && canPersistMaterialDraft(canManageRef.current) && materialDraftStorageKey) clearPersistedLocalDraft();
+        contentRef.current = draft.content_html;
+        hasUnsavedRef.current = false;
+        assignSaveRecovery(null);
+        setSaveState('saved');
+        setContent(draft.content_html);
+      }
       draftReadyRef.current = true;
     } catch {
       if (mountedRef.current && sequence === loadSequenceRef.current) setFailed(true);
     } finally {
       if (mountedRef.current && sequence === loadSequenceRef.current) setLoading(false);
     }
-  }, [productionId]);
+  }, [assignSaveRecovery, clearPersistedLocalDraft, materialDraftStorageKey, productionId]);
+
+  const verifySaveRecovery = useCallback(async (attempt: SaveRecovery) => {
+    const checking = { ...attempt, phase: 'checking' as const };
+    assignSaveRecovery(checking);
+    try {
+      const draft = await getProductionMaterialDraft(productionId);
+      if (!mountedRef.current || saveRecoveryRef.current !== checking) return;
+      if (!isMaterialDraft(draft, productionId)) throw new Error('服务端返回的创作资料草稿信息不完整');
+
+      revisionRef.current = draft.revision;
+      savedContentRef.current = draft.content_html;
+      if (draft.revision > attempt.baselineRevision && draft.content_html === attempt.content) {
+        if (contentRef.current === draft.content_html) {
+          hasUnsavedRef.current = false;
+          clearPersistedLocalDraft();
+          assignSaveRecovery(null);
+          setSaveState('saved');
+        } else {
+          hasUnsavedRef.current = true;
+          persistLocalDraft(contentRef.current, draft.content_html, draft.revision);
+          assignSaveRecovery({ ...attempt, phase: 'followup' });
+          setSaveState('failed');
+        }
+        return;
+      }
+
+      if (draft.revision === attempt.baselineRevision && draft.content_html === attempt.baselineContent) {
+        assignSaveRecovery({ ...attempt, phase: 'retryable' });
+      } else {
+        hasUnsavedRef.current = contentRef.current !== draft.content_html;
+        assignSaveRecovery({ ...attempt, phase: 'conflict' });
+      }
+      setSaveState('failed');
+    } catch {
+      if (!mountedRef.current || saveRecoveryRef.current !== checking) return;
+      assignSaveRecovery({ ...attempt, phase: 'unconfirmed' });
+      setSaveState('failed');
+    }
+  }, [assignSaveRecovery, clearPersistedLocalDraft, persistLocalDraft, productionId]);
 
   const saveLatest = useCallback(async () => {
+    if (saveRecoveryRef.current) return;
     if (!canPersistMaterialDraft(canManage)) {
       hasUnsavedRef.current = false;
       saveQueuedRef.current = false;
@@ -118,6 +254,8 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
         saveQueuedRef.current = false;
         const generation = generationRef.current;
         const snapshot = contentRef.current;
+        const baselineContent = savedContentRef.current;
+        const baselineRevision = revisionRef.current;
         if (mountedRef.current) setSaveState('saving');
         try {
           const updated = await updateProductionMaterialDraft(productionId, {
@@ -125,35 +263,91 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
             revision: revisionRef.current,
           });
           revisionRef.current = updated.revision;
+          savedContentRef.current = updated.content_html;
           if (generation === generationRef.current) {
             hasUnsavedRef.current = false;
+            clearPersistedLocalDraft();
             if (mountedRef.current) setSaveState('saved');
           } else {
+            persistLocalDraft(contentRef.current, updated.content_html, updated.revision);
             saveQueuedRef.current = true;
           }
         } catch (error) {
           if (!mountedRef.current) return;
           setSaveState('failed');
-          addNotification({ title: '创作资料保存失败', message: (error as Error).message, type: 'error' });
+          saveQueuedRef.current = false;
+          if (mayHaveCommitted(error)) {
+            const attempt: SaveRecovery = { phase: 'checking', content: snapshot, generation, baselineContent, baselineRevision };
+            assignSaveRecovery(attempt);
+            addNotification({ title: '创作资料保存结果待核实', message: '正在只读核对服务端版本，期间不会自动重发。', type: 'info' });
+            await verifySaveRecovery(attempt);
+          } else {
+            addNotification({ title: '创作资料保存失败', message: getUserFacingErrorMessage(error, '创作资料暂时无法保存，请检查网络或权限后重试。'), type: 'error' });
+          }
           return;
         }
       } while (saveQueuedRef.current);
     } finally {
       savingRef.current = false;
     }
-  }, [addNotification, canManage, productionId]);
+  }, [addNotification, assignSaveRecovery, canManage, clearPersistedLocalDraft, persistLocalDraft, productionId, verifySaveRecovery]);
 
   const scheduleSave = useCallback((nextContent: string) => {
-    if (!canPersistMaterialDraft(canManage) || !draftReadyRef.current) return;
+    if (!canPersistMaterialDraft(canManage) || !draftReadyRef.current || saveRecoveryRef.current) return;
+    if (!savingRef.current && nextContent === savedContentRef.current) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+      contentRef.current = nextContent;
+      generationRef.current += 1;
+      hasUnsavedRef.current = false;
+      saveQueuedRef.current = false;
+      clearPersistedLocalDraft();
+      setSaveState('saved');
+      return;
+    }
     if (!contentRef.current.trim() && nextContent === '<p></p>') return;
     contentRef.current = nextContent;
     generationRef.current += 1;
     hasUnsavedRef.current = true;
+    persistLocalDraft(nextContent);
     setContent(nextContent);
     setSaveState('dirty');
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void saveLatest(), 800);
-  }, [canManage, saveLatest]);
+  }, [canManage, clearPersistedLocalDraft, persistLocalDraft, saveLatest]);
+
+  const handleRecoveryAction = useCallback(() => {
+    const recovery = saveRecoveryRef.current;
+    if (!recovery || recovery.phase === 'checking' || !canManageRef.current) return;
+    if (recovery.phase === 'unconfirmed' || recovery.phase === 'conflict') {
+      void verifySaveRecovery(recovery);
+      return;
+    }
+    assignSaveRecovery(null);
+    hasUnsavedRef.current = contentRef.current !== savedContentRef.current;
+    setSaveState(hasUnsavedRef.current ? 'dirty' : 'saved');
+    if (hasUnsavedRef.current) void saveLatestRef.current();
+  }, [assignSaveRecovery, verifySaveRecovery]);
+
+  const discardRecoveredDraft = useCallback(() => {
+    const recovery = saveRecoveryRef.current;
+    if (!recovery || recovery.phase === 'checking' || recovery.phase === 'unconfirmed' || !canManageRef.current) return;
+    if (!clearPersistedLocalDraft()) {
+      addNotification({ title: '本机草稿仍未清除', message: '浏览器存储当前不可用，已保留本机内容。请先复制内容或恢复存储后重试。', type: 'error' });
+      return;
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    const serverContent = savedContentRef.current;
+    contentRef.current = serverContent;
+    generationRef.current += 1;
+    hasUnsavedRef.current = false;
+    saveQueuedRef.current = false;
+    unlockRecoveryOnNextEditorReadyRef.current = true;
+    setEditorResetSequence((current) => current + 1);
+    setContent(serverContent);
+    setSaveState('saved');
+  }, [addNotification, clearPersistedLocalDraft]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { saveLatestRef.current = saveLatest; }, [saveLatest]);
@@ -200,14 +394,14 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
       setResults(response.data);
     } catch (error) {
       if (!mountedRef.current) return;
-      addNotification({ title: '搜索失败', message: (error as Error).message, type: 'error' });
+      addNotification({ title: '搜索失败', message: getUserFacingErrorMessage(error, '暂时无法搜索资料，请稍后重试。'), type: 'error' });
     } finally {
       if (mountedRef.current) setSearching(false);
     }
   };
 
   const openPicker = (excerpt: string | null) => {
-    if (!canManageRef.current || !draftReadyRef.current || !editorHandleRef.current || addingRef.current) return;
+    if (!canManageRef.current || saveRecoveryRef.current || !draftReadyRef.current || !editorHandleRef.current || addingRef.current) return;
     setSelectedExcerpt(excerpt);
     setSelectedIds([]);
     setPickerOpen(true);
@@ -233,7 +427,7 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
   };
 
   const addSelected = async (destination: 'draft' | 'manuscript' | 'excerpt') => {
-    if (addingRef.current || !canManageRef.current || !draftReadyRef.current || !editorHandleRef.current || searching) return;
+    if (addingRef.current || saveRecoveryRef.current || !canManageRef.current || !draftReadyRef.current || !editorHandleRef.current || searching) return;
     if (selectedIds.length === 0 || (destination !== 'draft' && selectedIds.length !== 1)) return;
     addingRef.current = true;
     setAdding(true);
@@ -274,7 +468,7 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
       setSelectedExcerpt(null);
     } catch (error) {
       if (!mountedRef.current) return;
-      addNotification({ title: '插入失败', message: (error as Error).message, type: 'error' });
+      addNotification({ title: '插入失败', message: getUserFacingErrorMessage(error, '资料暂时无法插入，请检查权限或稿件状态后重试。'), type: 'error' });
     } finally {
       addingRef.current = false;
       if (mountedRef.current) setAdding(false);
@@ -307,11 +501,61 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
   };
 
   const workspaceReady = !loading && !failed && editorReady;
-  const saveLabel = loading ? '正在读取…' : failed ? '尚未读取' : !editorReady ? '正在准备…' : saveState === 'failed' ? '保存失败' : saveState === 'saved' || saveState === 'idle' ? '已保存' : '保存中';
+  const workspaceEditable = workspaceReady && !saveRecovery;
+  const saveLabel = loading ? '正在读取…' : failed ? '尚未读取' : !editorReady ? '正在准备…'
+    : saveRecovery?.phase === 'checking' ? '正在核实保存结果…'
+      : saveRecovery?.phase === 'unconfirmed' ? '结果暂未确认'
+        : saveRecovery?.phase === 'retryable' ? '结果未记录'
+          : saveRecovery?.phase === 'conflict' ? '服务端已有更新'
+            : saveRecovery?.phase === 'followup' ? '上次已保存，有新改动待保存'
+              : saveRecovery?.phase === 'restored' ? '本机草稿待恢复'
+              : saveState === 'failed' ? '保存失败' : saveState === 'saved' || saveState === 'idle' ? '已保存' : '保存中';
+  const recoveryActionLabel = saveRecovery?.phase === 'checking' ? '正在核实…'
+    : saveRecovery?.phase === 'retryable' ? '确认未记录，重试保存'
+      : saveRecovery?.phase === 'followup' ? '保存后续修改'
+        : saveRecovery?.phase === 'restored' ? '恢复并保存本机草稿' : '只读重新核实';
   const setEditorHandle = useCallback((handle: EditorCommandHandle | null) => {
     editorHandleRef.current = handle;
     setEditorReady(Boolean(handle));
+    if (handle && unlockRecoveryOnNextEditorReadyRef.current) {
+      unlockRecoveryOnNextEditorReadyRef.current = false;
+      assignSaveRecovery(null);
+    }
+  }, [assignSaveRecovery]);
+  const discardLocalDraftForLeave = useCallback(() => {
+    if (savingRef.current || saveRecoveryRef.current?.phase === 'checking') return false;
+    if (!clearPersistedLocalDraft()) {
+      addNotification({ title: '本机草稿仍未清除', message: '浏览器存储当前不可用，已保留本机内容；请复制内容后重试。', type: 'error' });
+      return false;
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    hasUnsavedRef.current = false;
+    saveQueuedRef.current = false;
+    assignSaveRecovery(null);
+    setSaveState('saved');
+    return true;
+  }, [addNotification, assignSaveRecovery, clearPersistedLocalDraft]);
+  const copyLocalDraft = useCallback(async () => {
+    const parsed = new DOMParser().parseFromString(contentRef.current, 'text/html');
+    const text = parsed.body.innerText || parsed.body.textContent || '';
+    if (!text.trim()) return false;
+    await navigator.clipboard.writeText(text);
+    return true;
   }, []);
+
+  useEffect(() => {
+    const pending = hasUnsavedRef.current;
+    onLeaveStateChange?.({
+      pending,
+      canDiscard: pending && !savingRef.current && saveRecoveryRef.current?.phase !== 'checking',
+    });
+  }, [content, onLeaveStateChange, saveRecovery, saveState]);
+  useEffect(() => {
+    if (!onRegisterLeaveActions) return undefined;
+    onRegisterLeaveActions({ discard: discardLocalDraftForLeave, copy: copyLocalDraft });
+    return () => onRegisterLeaveActions(null);
+  }, [copyLocalDraft, discardLocalDraftForLeave, onRegisterLeaveActions]);
 
   return <>
     <GlassPanel data-testid="production-resources-panel" className="relative flex min-w-0 flex-col overflow-hidden" style={{ height: workspaceHeight }}>
@@ -320,25 +564,35 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-3">
               <h2 className="text-sm font-semibold text-studio-text-primary">创作资料</h2>
-              <span className={`text-xs ${saveState === 'failed' ? 'text-studio-coral-contrast' : 'text-studio-text-muted'}`}>{saveLabel}</span>
+              <span className={`text-xs ${saveState === 'failed' || saveRecovery ? 'text-studio-coral-contrast' : 'text-studio-text-muted'}`} role={saveRecovery ? 'status' : undefined}>{saveLabel}</span>
             </div>
             <p className="mt-1 max-w-2xl text-xs leading-5 text-studio-text-secondary">
               这是独立保存的资料草稿，不会自动修改正式正文；“加入草稿”和“引用到正文”是两项独立操作。原资料更新或移入回收站后，已复制内容仍会保留；回收的资料可能无法打开。
             </p>
           </div>
-          {canManage && saveState === 'failed' ? <button type="button" onClick={() => void saveLatest()} className="xmt-btn xmt-btn-ghost min-h-7 px-2 py-1 text-xs text-studio-cyan-contrast underline-offset-2 hover:underline">重试</button> : null}
+          {canManage && saveRecovery ? <button type="button" onClick={handleRecoveryAction} disabled={saveRecovery.phase === 'checking'} className="xmt-btn xmt-btn-ghost px-2 py-1 text-xs text-studio-cyan-contrast underline-offset-2 hover:underline">{recoveryActionLabel}</button>
+            : canManage && saveState === 'failed' ? <span className="text-xs text-studio-text-muted">请先处理保存错误</span> : null}
+          {saveRecovery?.phase === 'retryable' ? <span className="text-xs text-studio-text-secondary">已核实服务端仍是原版本；点击按钮后才会再次保存。</span> : null}
+          {saveRecovery?.phase === 'conflict' ? <span className="text-xs text-studio-text-secondary">本地编辑已保留，服务端基线已更新；不会自动覆盖。</span> : null}
+          {saveRecovery?.phase === 'unconfirmed' ? <span className="text-xs text-studio-text-secondary">核实请求失败；当前仅可重新核实，不会重发保存。</span> : null}
+          {saveRecovery?.phase === 'followup' ? <span className="text-xs text-studio-text-secondary">上次内容已保存；后续编辑仍留在本地。</span> : null}
+          {saveRecovery?.phase === 'restored' ? <span className="text-xs text-studio-text-secondary">已找回上次未完成的本机修改；服务端仍是原版本，选择恢复后才会保存。</span> : null}
+          {localDraftStorageFailed ? <span role="status" className="text-xs text-studio-coral-contrast">本机恢复副本未能保存，刷新或关闭页面可能丢失这次修改。</span> : null}
         </div>
         {canManage ? <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={quoteSelectedExcerpt} disabled={!referenceReady || !workspaceReady || adding} className="xmt-btn xmt-btn-ghost">引用选中片段</button>
-          <button type="button" onClick={() => openPicker(null)} disabled={!workspaceReady || adding} className="xmt-btn xmt-btn-primary"><Link2 className="h-4 w-4" />添加资料</button>
+          {saveRecovery && ['restored', 'retryable', 'conflict', 'followup'].includes(saveRecovery.phase) ? <button type="button" onClick={discardRecoveredDraft} className="xmt-btn xmt-btn-ghost">采用服务器版本并舍弃本机修改</button> : null}
+          <button type="button" onClick={quoteSelectedExcerpt} disabled={!referenceReady || !workspaceEditable || adding} className="xmt-btn xmt-btn-ghost">引用选中片段</button>
+          <button type="button" onClick={() => openPicker(null)} disabled={!workspaceEditable || adding} className="xmt-btn xmt-btn-primary"><Link2 className="h-4 w-4" />添加资料</button>
         </div> : null}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--editor-bg)] pb-5">
         {loading ? <div className="p-4"><LoadingState type="table" rows={2} /></div> : failed ? <div className="p-4"><ErrorState onRetry={() => void load()} /></div> : <ContentEditor
+          key={`${productionId}:${editorResetSequence}`}
+          ariaLabel="创作资料正文"
           value={content}
           onChange={scheduleSave}
-          readOnly={!canManage}
+          readOnly={!canManage || Boolean(saveRecovery)}
           mode="rich"
           immersive
           toolbarVariant="basic"
@@ -414,8 +668,8 @@ export default function ProductionResourcesPanel({ productionId, canManage, manu
       </div>
       <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-studio-border-soft pt-4">
         <button type="button" disabled={adding} onClick={closePicker} className="xmt-btn xmt-btn-ghost">取消</button>
-        <button type="button" disabled={adding || searching || !workspaceReady || selectedIds.length === 0} onClick={() => void addSelected('draft')} className="xmt-btn xmt-btn-ghost">{adding ? '插入中…' : `加入资料草稿（${selectedIds.length}）`}</button>
-        <button type="button" disabled={adding || searching || !workspaceReady || selectedIds.length !== 1 || !referenceReady} onClick={() => void addSelected(selectedExcerpt ? 'excerpt' : 'manuscript')} className="xmt-btn xmt-btn-primary">{selectedExcerpt ? '引用选中片段' : '引用到正文'}</button>
+        <button type="button" disabled={adding || searching || !workspaceEditable || selectedIds.length === 0} onClick={() => void addSelected('draft')} className="xmt-btn xmt-btn-ghost">{adding ? '插入中…' : `加入资料草稿（${selectedIds.length}）`}</button>
+        <button type="button" disabled={adding || searching || !workspaceEditable || selectedIds.length !== 1 || !referenceReady} onClick={() => void addSelected(selectedExcerpt ? 'excerpt' : 'manuscript')} className="xmt-btn xmt-btn-primary">{selectedExcerpt ? '引用选中片段' : '引用到正文'}</button>
       </div>
     </BaseModal>
   </>;

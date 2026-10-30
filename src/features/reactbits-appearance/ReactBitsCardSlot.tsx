@@ -17,5 +17,5 @@ export function ReactBitsCardSlot({ children, semantic, className = '' }: { chil
   // stacked panels, so give that surface one full-width flow wrapper instead
   // of letting the panels become flex-row siblings on wide screens.
   if (supported === 'glass') return <GlassSurface className={className} width="100%" height="auto" borderRadius={16} backgroundOpacity={0.14}>{semantic === 'report-card' ? <div className={`w-full ${className}`}>{children}</div> : children}</GlassSurface>;
-  return <SpotlightCard className={className} spotlightColor="rgba(77, 214, 255, 0.18)">{children}</SpotlightCard>;
+  return <SpotlightCard className={className} spotlightColor="rgb(var(--xmt-cyan-rgb) / 0.18)">{children}</SpotlightCard>;
 }

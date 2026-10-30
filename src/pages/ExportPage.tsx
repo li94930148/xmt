@@ -8,6 +8,7 @@ import { useAppStore } from '../store';
 import { getCurrentBeijingDateString } from '../lib/utils';
 import { ActionButton, GlassPanel, PageHeader, PageShell } from '../components/studio';
 import { usePermission } from '../hooks/usePermission';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 
 type ReportTab = 'daily' | 'weekly' | 'export';
 
@@ -46,7 +47,7 @@ export default function ExportPage() {
       setExportFeedback({ kind: 'success', message: `${filename} 已开始下载。` });
       addNotification({ title: '文件已生成', message: `${filename} 已开始下载。`, type: 'success' });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '数据导出暂时失败，请检查连接后重试。';
+      const message = getUserFacingErrorMessage(error, '数据导出暂时失败，请检查连接后重试。');
       setExportFeedback({ kind: 'error', message });
       addNotification({ title: '导出失败', message, type: 'error' });
     } finally {
@@ -66,7 +67,7 @@ export default function ExportPage() {
       <PageHeader title="报告中心" description="统一查看周报与数据导出；日报和周期总结沿用既有工作流。" />
 
       <GlassPanel className="p-2">
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div role="group" aria-label="报告中心视图" className="grid gap-2 sm:grid-cols-3">
           {tabs.filter((tab) => tab.id !== 'daily' || dailyLinks.length > 0).map((tab) => {
             const Icon = tab.icon;
             const isActive = displayedTab === tab.id;

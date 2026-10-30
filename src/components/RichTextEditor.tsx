@@ -3,7 +3,7 @@
  * 旧版兼容富文本编辑器，仅用于历史内容或未迁移页面兼容。
  * 新业务统一优先使用 src/components/editor/Editor.tsx。
  */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback, type ElementType } from 'react';
 import { useAppStore } from '../store';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
 import { emitClientLog } from '../observability/client-logger';
@@ -26,6 +26,7 @@ interface RichTextEditorProps {
   onChange: (value: string) => void;
   readOnly?: boolean;
   placeholder?: string;
+  ariaLabel?: string;
 }
 
 interface Annotation {
@@ -34,6 +35,38 @@ interface Annotation {
   comment: string;
   createdAt: Date;
 }
+
+type LegacySelectionFormatting = {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strike: boolean;
+  alignLeft: boolean;
+  alignCenter: boolean;
+  alignRight: boolean;
+  alignJustify: boolean;
+  bulletList: boolean;
+  orderedList: boolean;
+  indent: boolean;
+  textColor: string;
+  backgroundColor: string;
+};
+
+const EMPTY_SELECTION_FORMATTING: LegacySelectionFormatting = {
+  bold: false,
+  italic: false,
+  underline: false,
+  strike: false,
+  alignLeft: false,
+  alignCenter: false,
+  alignRight: false,
+  alignJustify: false,
+  bulletList: false,
+  orderedList: false,
+  indent: false,
+  textColor: '',
+  backgroundColor: '',
+};
 
 const textColors = [
   { color: 'var(--editor-fg)', label: '默认' },
@@ -259,7 +292,7 @@ const ensureDefaultStyles = (html: string): string => {
   return result;
 };
 
-export default function RichTextEditor({ value, onChange, readOnly = false, placeholder }: RichTextEditorProps) {
+export default function RichTextEditor({ value, onChange, readOnly = false, placeholder, ariaLabel }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(100);
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
@@ -271,11 +304,72 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedText, setSelectedText] = useState<string>('');
   const [selectedRange, setSelectedRange] = useState<Range | null>(null);
+  const [selectionFormatting, setSelectionFormatting] = useState<LegacySelectionFormatting>(EMPTY_SELECTION_FORMATTING);
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [showAnnotationPanel, setShowAnnotationPanel] = useState(true);
   
   const appStore = useAppStore();
   const isDark = appStore.theme === 'dark';
+
+  const readSelectionFormatting = useCallback((): LegacySelectionFormatting => {
+    const root = editorRef.current;
+    const selection = window.getSelection();
+    if (!root || !selection || selection.isCollapsed || !selection.rangeCount) return EMPTY_SELECTION_FORMATTING;
+    const anchor = selection.anchorNode;
+    if (!anchor || !root.contains(anchor)) return EMPTY_SELECTION_FORMATTING;
+    const element = anchor.nodeType === Node.ELEMENT_NODE ? anchor as HTMLElement : anchor.parentElement;
+    if (!element) return EMPTY_SELECTION_FORMATTING;
+    const style = window.getComputedStyle(element);
+    const weight = Number.parseInt(style.fontWeight, 10);
+    const decoration = `${style.textDecorationLine} ${style.textDecoration}`;
+    const list = element.closest('ul, ol');
+    const block = element.closest('p, div, li, h1, h2, h3, h4, h5, h6, blockquote') as HTMLElement | null;
+    const blockStyle = block ? window.getComputedStyle(block) : style;
+    const resolveColor = (property: 'color' | 'backgroundColor', value: string) => {
+      const probe = document.createElement('span');
+      probe.style[property] = value;
+      document.body.append(probe);
+      const resolved = window.getComputedStyle(probe)[property];
+      probe.remove();
+      return resolved;
+    };
+    const textColor = style.color;
+    let backgroundColor = 'rgba(0, 0, 0, 0)';
+    let current: HTMLElement | null = element;
+    while (current && root.contains(current)) {
+      const color = window.getComputedStyle(current).backgroundColor;
+      if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
+        backgroundColor = color;
+        break;
+      }
+      current = current.parentElement;
+    }
+    const activeTextColor = textColors.find((item) => {
+      const expected = item.color === 'var(--editor-fg)' ? window.getComputedStyle(root).color : resolveColor('color', item.color);
+      return expected === textColor;
+    })?.color || '';
+    const activeBackgroundColor = bgColors.find((item) => resolveColor('backgroundColor', item.color) === backgroundColor)?.color || '';
+    const textAlign = blockStyle.textAlign;
+    return {
+      bold: weight >= 600 || style.fontWeight === 'bold',
+      italic: style.fontStyle === 'italic' || style.fontStyle === 'oblique',
+      underline: decoration.includes('underline'),
+      strike: decoration.includes('line-through'),
+      alignLeft: textAlign === 'left' || textAlign === 'start',
+      alignCenter: textAlign === 'center',
+      alignRight: textAlign === 'right' || textAlign === 'end',
+      alignJustify: textAlign === 'justify',
+      bulletList: list?.tagName === 'UL',
+      orderedList: list?.tagName === 'OL',
+      indent: blockStyle.textIndent !== '0px' && blockStyle.textIndent !== '' || (Number.parseFloat(blockStyle.paddingLeft) || 0) > 0,
+      textColor: activeTextColor,
+      backgroundColor: activeBackgroundColor,
+    };
+  }, []);
+  const syncSelectionFormatting = useCallback(() => {
+    const next = readSelectionFormatting();
+    setSelectionFormatting((current) => Object.keys(next).every((key) => current[key as keyof LegacySelectionFormatting] === next[key as keyof LegacySelectionFormatting]) ? current : next);
+  }, [readSelectionFormatting]);
 
   useEffect(() => {
     if (editorRef.current && value !== editorRef.current.innerHTML) {
@@ -332,6 +426,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
   useEffect(() => {
     const handleSelectionChange = () => {
       const selection = window.getSelection();
+      syncSelectionFormatting();
       if (!selection || selection.isCollapsed) {
         removeHighlightSelected();
         return;
@@ -387,13 +482,14 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
       document.removeEventListener('selectionchange', handleSelectionChange);
       removeHighlightSelected();
     };
-  }, []);
+  }, [syncSelectionFormatting]);
 
   const handleInput = () => {
     if (!editorRef.current) return;
     let html = editorRef.current.innerHTML;
     html = ensureDefaultStyles(html);
     onChange(html);
+    syncSelectionFormatting();
   };
 
   /**
@@ -795,7 +891,7 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
     }
   };
 
-  const toolbarButtons = [
+  const toolbarButtons: Array<{ icon?: ElementType; action?: () => void; title?: string; ariaLabel?: string; pressed?: boolean; divider?: boolean }> = [
     { 
       icon: Undo, 
       action: () => { document.execCommand('undo'); }, 
@@ -810,54 +906,68 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
     { 
       icon: Bold, 
       action: () => applyStyleToSelection('font-weight', 'bold'), 
-      title: '加粗 (Ctrl+B)' 
+      title: '加粗 (Ctrl+B)',
+      ariaLabel: '加粗',
+      pressed: selectionFormatting.bold,
     },
     { 
       icon: Italic, 
       action: () => applyStyleToSelection('font-style', 'italic'), 
-      title: '斜体 (Ctrl+I)' 
+      title: '斜体 (Ctrl+I)',
+      ariaLabel: '斜体',
+      pressed: selectionFormatting.italic,
     },
     { 
       icon: Underline, 
       action: () => applyStyleToSelection('text-decoration', 'underline'), 
-      title: '下划线 (Ctrl+U)' 
+      title: '下划线 (Ctrl+U)',
+      ariaLabel: '下划线',
+      pressed: selectionFormatting.underline,
     },
     { 
       icon: Strikethrough, 
       action: () => applyStyleToSelection('text-decoration', 'line-through'), 
-      title: '删除线' 
+      title: '删除线',
+      ariaLabel: '删除线',
+      pressed: selectionFormatting.strike,
     },
     { divider: true },
     { 
       icon: AlignLeft, 
       action: () => { document.execCommand('justifyLeft'); }, 
-      title: '左对齐' 
+      title: '左对齐',
+      pressed: selectionFormatting.alignLeft,
     },
     { 
       icon: AlignCenter, 
       action: () => { document.execCommand('justifyCenter'); }, 
-      title: '居中' 
+      title: '居中',
+      pressed: selectionFormatting.alignCenter,
     },
     { 
       icon: AlignRight, 
       action: () => { document.execCommand('justifyRight'); }, 
-      title: '右对齐' 
+      title: '右对齐',
+      pressed: selectionFormatting.alignRight,
     },
     { 
       icon: AlignJustify, 
       action: () => { document.execCommand('justifyFull'); }, 
-      title: '两端对齐' 
+      title: '两端对齐',
+      pressed: selectionFormatting.alignJustify,
     },
     { divider: true },
     { 
       icon: List, 
       action: () => { document.execCommand('insertUnorderedList'); }, 
-      title: '无序列表' 
+      title: '无序列表',
+      pressed: selectionFormatting.bulletList,
     },
     { 
       icon: ListOrdered, 
       action: () => { document.execCommand('insertOrderedList'); }, 
-      title: '有序列表' 
+      title: '有序列表',
+      pressed: selectionFormatting.orderedList,
     },
     { divider: true },
     { 
@@ -928,7 +1038,8 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
 
         handleInput();
       }, 
-      title: '首行缩进' 
+      title: '首行缩进',
+      pressed: selectionFormatting.indent,
     },
   ];
 
@@ -965,8 +1076,11 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
                 <button
                   key={index}
                   onClick={btn.action}
+                  onMouseDown={(event) => event.preventDefault()}
                   className={`p-2 rounded transition-colors ${toolbarButtonClass}`}
                   title={btn.title}
+                  aria-label={btn.ariaLabel || btn.title}
+                  aria-pressed={typeof btn.pressed === 'boolean' ? btn.pressed : undefined}
                 >
                   <Icon className={`w-4 h-4 text-studio-text-secondary`} />
                 </button>
@@ -977,6 +1091,9 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
             
             <div className="relative mr-1 font-size-button">
               <button
+                type="button"
+                aria-label="字体大小"
+                aria-expanded={showFontSizePicker}
                 onClick={() => {
                   setShowFontSizePicker(!showFontSizePicker);
                   setShowTextColorPicker(false);
@@ -1010,6 +1127,10 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
 
             <div className="relative mr-1 color-picker-button">
               <button
+                type="button"
+                aria-label="文字颜色"
+                aria-expanded={showTextColorPicker}
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   setShowTextColorPicker(!showTextColorPicker);
                   setShowBgColorPicker(false);
@@ -1022,10 +1143,14 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
               </button>
               {showTextColorPicker && (
                 <div className={`color-picker-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg border z-50 min-w-[140px] ${dropdownClass}`}>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div role="group" aria-label="文字颜色选项" className="grid grid-cols-3 gap-2">
                     {textColors.map((item) => (
                       <button
+                        type="button"
                         key={item.color}
+                        aria-label={`${item.label}文字颜色`}
+                        aria-pressed={selectionFormatting.textColor === item.color}
+                        onMouseDown={(event) => event.preventDefault()}
                         onClick={() => handleTextColor(item.color)}
                         className="w-8 h-8 rounded border border-[var(--editor-border)] hover:scale-110 transition-transform"
                         style={{ backgroundColor: item.color }}
@@ -1039,6 +1164,10 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
 
             <div className="relative color-picker-button">
               <button
+                type="button"
+                aria-label="背景颜色"
+                aria-expanded={showBgColorPicker}
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   setShowBgColorPicker(!showBgColorPicker);
                   setShowTextColorPicker(false);
@@ -1051,10 +1180,14 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
               </button>
               {showBgColorPicker && (
                 <div className={`color-picker-dropdown absolute top-full left-0 mt-1 p-2 rounded-lg border z-50 min-w-[140px] ${dropdownClass}`}>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div role="group" aria-label="背景颜色选项" className="grid grid-cols-3 gap-2">
                     {bgColors.map((item) => (
                       <button
+                        type="button"
                         key={item.color}
+                        aria-label={item.label}
+                        aria-pressed={selectionFormatting.backgroundColor === item.color}
+                        onMouseDown={(event) => event.preventDefault()}
                         onClick={() => handleBgColor(item.color)}
                         className="w-8 h-8 rounded border border-[var(--editor-border)] hover:scale-110 transition-transform"
                         style={{ backgroundColor: item.color }}
@@ -1109,6 +1242,10 @@ export default function RichTextEditor({ value, onChange, readOnly = false, plac
         <div 
           ref={editorRef}
           contentEditable={!readOnly}
+          role="textbox"
+          aria-label={ariaLabel?.trim() || (readOnly ? '只读正文' : '正文编辑区')}
+          aria-multiline="true"
+          aria-readonly={readOnly ? 'true' : undefined}
           onInput={handleInput}
           onKeyDown={handleKeyDown}
           onDrop={handleDrop}

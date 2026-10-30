@@ -6,6 +6,7 @@ import { promoteInspiration } from '../api/inspirations';
 import type { Inspiration } from '../api/inspirations';
 import { Loader2, RotateCw, Sparkles, ArrowRight } from 'lucide-react';
 import LoadingState from './common/LoadingState';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 
 export default function TopicSpinner() {
   const [inspirations, setInspirations] = useState<Inspiration[]>([]);
@@ -27,7 +28,7 @@ export default function TopicSpinner() {
       const result = await getInspirations({ limit: 50 });
       setInspirations(result.data || []);
     } catch (error) {
-      appStore.addNotification({ title: '获取灵感失败', message: (error as Error).message, type: 'error' });
+      appStore.addNotification({ title: '获取灵感失败', message: getUserFacingErrorMessage(error, '灵感暂时无法加载，请检查连接后重试。'), type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -59,7 +60,7 @@ export default function TopicSpinner() {
       fetchInspirations();
       setSelectedIndex(null);
     } catch (error) {
-      appStore.addNotification({ title: '转换失败', message: (error as Error).message, type: 'error' });
+      appStore.addNotification({ title: '转换失败', message: getUserFacingErrorMessage(error, '灵感暂时无法转换为选题，请检查连接后重试。'), type: 'error' });
     } finally {
       setPromoting(false);
     }

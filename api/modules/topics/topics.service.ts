@@ -105,11 +105,14 @@ export type TopicMessage = {
   link: string;
 };
 
+export type PersistedTopicMessage = TopicMessage & { id: number };
+
 export type TopicServiceDependencies = {
   repository: TopicRepository;
   policy: TopicPolicy;
   resolveCreatorTopicSuggestionSource?: (actor: TopicActor, source: NonNullable<LegacyCreateTopicInput['creator_suggestion_source']>) => Promise<CreatorTopicSuggestionLinkRecord>;
   notify(message: TopicMessage): void;
+  pushNotification?(message: PersistedTopicMessage): void;
   broadcast(room: string, event: string, data: unknown): void;
 };
 
@@ -286,7 +289,25 @@ export class TopicService {
       throw new TopicServiceError('TOPIC_INVALID_TRANSITION', `当前状态「${STATUS_TEXT[oldStatus]}」不允许执行审核操作`);
     }
 
-    const auditedTopic = await this.dependencies.repository.withTransaction(async (tx) => {
+    const statusText = input.status === 'approved' ? '审核通过' : '审核驳回';
+    const auditNotifications: TopicMessage[] = [{
+      userId: Number(topic.creator_id),
+      title: `选题${statusText}`,
+      content: `您的选题「${topic.title}」已${statusText}${input.comment ? `，备注：${input.comment}` : ''}`,
+      type: input.status === 'approved' ? 'success' : 'error',
+      link: `/topics/${id}`,
+    }];
+    if (input.assignee_id) {
+      auditNotifications.push({
+        userId: input.assignee_id,
+        title: '新任务指派',
+        content: `您被指派负责选题「${topic.title}」`,
+        type: 'info',
+        link: `/topics/${id}`,
+      });
+    }
+
+    const auditResult = await this.dependencies.repository.withTransaction(async (tx) => {
       const updated = await tx.updateTopicIfStatus(id, oldStatus, {
         status: input.status,
         ...(input.assignee_id ? { assignee_id: input.assignee_id } : {}),
@@ -318,31 +339,25 @@ export class TopicService {
       }
       const detail = await tx.findDetailById(id);
       if (!detail) throw new TopicServiceError('TOPIC_NOT_FOUND', '选题不存在');
-      return detail;
+      const persistedNotifications: PersistedTopicMessage[] = [];
+      for (const notification of auditNotifications) {
+        persistedNotifications.push({ ...notification, id: await tx.addMessage(notification) });
+      }
+      return { topic: detail, notifications: persistedNotifications };
     });
 
-    const statusText = input.status === 'approved' ? '审核通过' : '审核驳回';
-    this.dependencies.notify({
-      userId: Number(topic.creator_id),
-      title: `选题${statusText}`,
-      content: `您的选题「${topic.title}」已${statusText}${input.comment ? `，备注：${input.comment}` : ''}`,
-      type: input.status === 'approved' ? 'success' : 'error',
-      link: `/topics/${id}`,
-    });
-    if (input.assignee_id) {
-      this.dependencies.notify({
-        userId: input.assignee_id,
-        title: '新任务指派',
-        content: `您被指派负责选题「${topic.title}」`,
-        type: 'info',
-        link: `/topics/${id}`,
-      });
+    for (const notification of auditResult.notifications) {
+      try {
+        this.dependencies.pushNotification?.(notification);
+      } catch (error) {
+        warnOptionalTopicEffect('topic.audit_notification_push_failed', error);
+      }
     }
     this.dependencies.broadcast('topics', 'topic:audited', {
       id: String(id),
       status: input.status,
       assignee_id: input.assignee_id,
-      topic: auditedTopic,
+      topic: auditResult.topic,
     });
   }
 

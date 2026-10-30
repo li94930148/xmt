@@ -745,10 +745,24 @@ router.delete('/resources/:id', requirePermission('resource:delete'), async (req
     const resource = await requireScopedResource(req, res);
     if (!resource) return;
     if (!await canModifyResource(resource, req.user)) return res.status(403).json({ message: '无权删除该资料' });
-    await runInTransaction(async (tx) => {
-      await tx.execute(`UPDATE resources SET status='deleted', deleted_at=datetime('now','+8 hours'), updated_by=?, updated_at=datetime('now','+8 hours') WHERE id=?`, [req.user!.id, resource.id]);
+    const outcome = await runInTransaction(async (tx) => {
+      const changed = await tx.execute(
+        `UPDATE resources
+         SET status='deleted', deleted_at=datetime('now','+8 hours'), updated_by=?, updated_at=datetime('now','+8 hours')
+         WHERE id=? AND COALESCE(status,'published') <> 'deleted' AND deleted_at IS NULL`,
+        [req.user!.id, resource.id],
+      );
+      if (changed !== 1) {
+        const current = await tx.queryOne<{ status: string | null; deleted_at: string | null }>(
+          'SELECT status,deleted_at FROM resources WHERE id=?',
+          [resource.id],
+        );
+        return current && (current.status === 'deleted' || current.deleted_at) ? 'already-deleted' : 'missing';
+      }
       await recordResourceAuditInTransaction(tx, Number(resource.id), req.user!.id, 'delete', { previous_status: resource.status });
+      return 'deleted';
     });
+    if (outcome === 'missing') return res.status(404).json({ message: '资料不存在或无权访问' });
     res.json({ message: '资料已移入回收状态' });
   } catch (error) { sendSafeServerError(res, '删除资料失败', 'resource-center:delete', error); }
 });
@@ -758,10 +772,27 @@ router.post('/resources/:id/restore', requirePermission('resource:delete'), asyn
     const resource = await requireScopedResource(req, res);
     if (!resource) return;
     if (!await canModifyResource(resource, req.user)) return res.status(403).json({ message: '无权恢复该资料' });
-    await runInTransaction(async (tx) => {
-      await tx.execute(`UPDATE resources SET status='published', deleted_at=NULL, updated_by=?, updated_at=datetime('now','+8 hours') WHERE id=?`, [req.user!.id, resource.id]);
+    const outcome = await runInTransaction(async (tx) => {
+      const changed = await tx.execute(
+        `UPDATE resources
+         SET status='published', deleted_at=NULL, updated_by=?, updated_at=datetime('now','+8 hours')
+         WHERE id=? AND (COALESCE(status,'published')='deleted' OR deleted_at IS NOT NULL)`,
+        [req.user!.id, resource.id],
+      );
+      if (changed !== 1) {
+        const current = await tx.queryOne<{ status: string | null; deleted_at: string | null }>(
+          'SELECT status,deleted_at FROM resources WHERE id=?',
+          [resource.id],
+        );
+        if (!current) return 'missing';
+        if (current.status === 'deleted' || current.deleted_at) return 'missing';
+        return current.status == null || current.status === 'published' ? 'already-restored' : 'invalid-state';
+      }
       await recordResourceAuditInTransaction(tx, Number(resource.id), req.user!.id, 'restore', { previous_status: resource.status });
+      return 'restored';
     });
+    if (outcome === 'missing') return res.status(404).json({ message: '待恢复资料不存在或无权访问' });
+    if (outcome === 'invalid-state') return res.status(409).json({ message: '当前资料状态无法恢复' });
     res.json({ message: '资料已恢复' });
   } catch (error) { sendSafeServerError(res, '恢复资料失败', 'resource-center:restore', error); }
 });

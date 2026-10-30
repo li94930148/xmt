@@ -9,7 +9,7 @@ process.env.XMT_DB_PATH = path.join(tempDirectory, 'topics.test.db');
 process.env.JWT_SECRET = 'topics-test-secret';
 
 const { initDatabase, closeDatabase } = await import('../../api/database/db.js');
-const { execute, executeInsert, queryOne } = await import('../../api/database/utils.js');
+const { execute, executeInsert, queryAll, queryOne } = await import('../../api/database/utils.js');
 const { SqliteTopicRepository } = await import('../../api/modules/topics/topics.sqlite-repository.js');
 const { TopicService } = await import('../../api/modules/topics/topics.service.js');
 const { TopicServiceError } = await import('../../api/modules/topics/topics.types.js');
@@ -145,6 +145,118 @@ async function repositoryTests() {
   await repository.deleteTopic(auditTopicId);
   await repository.deleteTopic(repairTopicId);
 }
+
+async function auditNotificationAtomicityTests() {
+  const assigneeId = await executeInsert(
+    `INSERT INTO users (username, password, email, role, name, enabled, force_change_password)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ['topic-audit-notification-assignee', 'unused', 'topic-assignee@example.invalid', 'member', 'Topic Assignee', 1, 0],
+  );
+  const topicId = await executeInsert(
+    `INSERT INTO topics (title, description, platform, creator_id, assignee_id, status, outline)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ['审核通知持久化回归', '', 'douyin', testUserId, assigneeId, 'pending', '隔离审核大纲'],
+  );
+  const pushes: Array<{ id: number; userId: number; title: string; content: string; type: string; link: string }> = [];
+  const messageRowsVisibleWhenPushed: Promise<boolean>[] = [];
+  const auditedBroadcasts: unknown[] = [];
+  const service = new TopicService({
+    repository,
+    policy: currentTopicPolicy,
+    notify: () => assert.fail('audit notifications must not use the non-transactional message helper'),
+    pushNotification: (message) => {
+      pushes.push(message);
+      messageRowsVisibleWhenPushed.push(queryOne<{ id: number }>('SELECT id FROM messages WHERE id=?', [message.id]).then(Boolean));
+    },
+    broadcast: (_room, event, data) => { if (event === 'topic:audited') auditedBroadcasts.push(data); },
+  });
+  const auditInput = { status: 'approved' as const, comment: '通过评审', assignee_id: assigneeId };
+  await execute(`CREATE TRIGGER fail_topic_audit_message BEFORE INSERT ON messages
+    WHEN NEW.title = '新任务指派'
+    BEGIN SELECT RAISE(ABORT, 'topic audit notification persistence blocked'); END`);
+  await assert.rejects(() => service.auditTopic({ id: testUserId, role: 'admin' }, topicId, auditInput));
+  await execute('DROP TRIGGER fail_topic_audit_message');
+
+  assert.equal((await repository.findById(topicId))?.status, 'pending', 'failed audit notification persistence rolls back the status transition');
+  assert.equal(Number((await queryOne<{ total: number }>(
+    `SELECT COUNT(*) AS total FROM topic_history WHERE topic_id=? AND action IN ('approved','rejected')`, [topicId],
+  ))?.total), 0, 'failed audit notification persistence rolls back history');
+  assert.equal(Number((await queryOne<{ total: number }>(
+    'SELECT COUNT(*) AS total FROM activity_log WHERE detail=?', [`审核选题 ${topicId}: 通过`],
+  ))?.total), 0, 'failed audit notification persistence rolls back the activity record');
+  assert.equal(Number((await queryOne<{ total: number }>(
+    'SELECT COUNT(*) AS total FROM production WHERE topic_id=?', [topicId],
+  ))?.total), 0, 'failed audit notification persistence rolls back the initial production record');
+  assert.equal(Number((await queryOne<{ total: number }>(
+    'SELECT COUNT(*) AS total FROM messages WHERE link=?', [`/topics/${topicId}`],
+  ))?.total), 0, 'failed audit notification persistence leaves no partial message rows');
+  assert.deepEqual(pushes, [], 'failed audit does not send a realtime notification');
+  assert.deepEqual(auditedBroadcasts, [], 'failed audit is not broadcast as committed');
+
+  await service.auditTopic({ id: testUserId, role: 'admin' }, topicId, auditInput);
+  const rows = await queryAll<{
+    id: number; user_id: number; title: string; content: string; type: string; link: string;
+  }>('SELECT id,user_id,title,content,type,link FROM messages WHERE link=? ORDER BY id', [`/topics/${topicId}`]);
+  assert.deepEqual(rows.map(({ user_id, title, content, type, link }) => ({ user_id, title, content, type, link })), [
+    {
+      user_id: testUserId,
+      title: '选题审核通过',
+      content: '您的选题「审核通知持久化回归」已审核通过，备注：通过评审',
+      type: 'success',
+      link: `/topics/${topicId}`,
+    },
+    {
+      user_id: assigneeId,
+      title: '新任务指派',
+      content: '您被指派负责选题「审核通知持久化回归」',
+      type: 'info',
+      link: `/topics/${topicId}`,
+    },
+  ], 'approval and assignee notifications are persisted with the audit transaction');
+  assert.deepEqual(pushes.map(({ userId, title }) => ({ userId, title })), [
+    { userId: testUserId, title: '选题审核通过' },
+    { userId: assigneeId, title: '新任务指派' },
+  ], 'realtime notifications are pushed after transaction commit to the same recipients');
+  assert.deepEqual(await Promise.all(messageRowsVisibleWhenPushed), [true, true], 'persisted message rows are already readable when realtime push occurs');
+  assert.equal(auditedBroadcasts.length, 1, 'a successful audit is broadcast once');
+
+  await assert.rejects(
+    () => service.auditTopic({ id: testUserId, role: 'admin' }, topicId, auditInput),
+    (error: unknown) => error instanceof TopicServiceError && error.code === 'TOPIC_INVALID_TRANSITION',
+    'repeating a committed approval does not create duplicate notifications',
+  );
+  assert.equal(Number((await queryOne<{ total: number }>(
+    'SELECT COUNT(*) AS total FROM messages WHERE link=?', [`/topics/${topicId}`],
+  ))?.total), 2, 'a repeated approval leaves the two original notification rows unchanged');
+  assert.equal(pushes.length, 2, 'a repeated approval does not push duplicate notifications');
+  await repository.deleteTopic(topicId);
+
+  const pushFailureTopicId = await executeInsert(
+    `INSERT INTO topics (title, description, platform, creator_id, status)
+     VALUES (?, ?, ?, ?, ?)`,
+    ['推送失败后保留审核通知', '', 'douyin', testUserId, 'pending'],
+  );
+  const pushFailureBroadcasts: unknown[] = [];
+  const pushFailureService = new TopicService({
+    repository,
+    policy: currentTopicPolicy,
+    notify: () => assert.fail('audit notifications must not use the non-transactional message helper'),
+    pushNotification: () => { throw new Error('isolated realtime push failure'); },
+    broadcast: (_room, event, data) => { if (event === 'topic:audited') pushFailureBroadcasts.push(data); },
+  });
+  await pushFailureService.auditTopic(
+    { id: testUserId, role: 'admin' },
+    pushFailureTopicId,
+    { status: 'rejected', comment: '补充依据后再提报' },
+  );
+  assert.equal((await repository.findById(pushFailureTopicId))?.status, 'rejected', 'realtime push failure does not reverse a committed audit');
+  assert.equal(Number((await queryOne<{ total: number }>(
+    'SELECT COUNT(*) AS total FROM messages WHERE link=?', [`/topics/${pushFailureTopicId}`],
+  ))?.total), 1, 'realtime push failure leaves the committed notification available in the inbox');
+  assert.equal(pushFailureBroadcasts.length, 1, 'realtime push failure does not prevent the committed audit broadcast');
+  await repository.deleteTopic(pushFailureTopicId);
+}
+
 type FakeTopic = {
   id: number;
   title: string;
@@ -176,6 +288,7 @@ function fakeRepository(topic: FakeTopic | null = null) {
       updateTopicIfStatus: async () => true,
       addHistory: async () => undefined,
       addActivity: async () => undefined,
+      addMessage: async () => nextId++,
       productionExists: async () => false,
       createInitialProduction: async () => undefined,
       shootingExists: async () => false,
@@ -258,6 +371,12 @@ async function apiTests() {
      VALUES (?, ?, ?, ?, ?)`,
     ['API 契约', 'legacy/v1', 'douyin', testUserId, 'pending'],
   );
+  const auditViewerId = await executeInsert(
+    `INSERT INTO users (username, password, email, role, name, enabled, force_change_password)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ['topic-audit-viewer', 'unused', 'topic-audit-viewer@example.invalid', 'member', 'Topic Audit Viewer', 1, 0],
+  );
+  await execute('INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE code = ?', [auditViewerId, 'member']);
   await executeInsert(
     `INSERT INTO topics (title, description, platform, creator_id, assignee_id, status)
      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -274,6 +393,12 @@ async function apiTests() {
     repository,
     policy: currentTopicPolicy,
     notify: (message) => notifications.push(message),
+    pushNotification: (message) => notifications.push({
+      userId: message.userId,
+      title: message.title,
+      content: message.content,
+      link: message.link,
+    }),
     broadcast: (room, event, data) => broadcasts.push({ room, event, data }),
   });
   const controller = new TopicController(service);
@@ -499,6 +624,14 @@ async function apiTests() {
     assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id = ?', [topicId]))?.status, 'pending');
     assert.equal(Number((await queryOne<{ total: number }>('SELECT COUNT(*) AS total FROM production WHERE topic_id = ?', [topicId]))?.total), 0);
 
+    const forbiddenAudit = await fetch(`http://127.0.0.1:${address.port}/api/topics/${topicId}/audit`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${signToken({ userId: auditViewerId })}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected', comment: '无审核权限不得写入' }),
+    });
+    assert.equal(forbiddenAudit.status, 403, 'audit recovery does not bypass the existing topic:audit permission');
+    assert.equal((await queryOne<{ status: string }>('SELECT status FROM topics WHERE id = ?', [topicId]))?.status, 'pending');
+
     const notificationsBeforeAudit = notifications.length;
     const auditResponse = await fetch(`http://127.0.0.1:${address.port}/api/topics/${topicId}/audit`, {
       method: 'POST',
@@ -513,6 +646,12 @@ async function apiTests() {
     );
     assert.equal(topicAfterAudit?.status, 'rejected');
     assert.deepEqual(history, { action: 'rejected', comment: '请补充拍摄依据' });
+    const auditReadback = await fetch(`http://127.0.0.1:${address.port}/api/topics/${topicId}`, { headers });
+    assert.equal(auditReadback.status, 200);
+    const readbackPayload = await auditReadback.json() as { data?: { status?: string; history?: Array<{ id: number; action: string; comment: string; operator_id: number }> } };
+    assert.equal(readbackPayload.data?.status, 'rejected');
+    assert.ok(readbackPayload.data?.history?.some((entry) => entry.id > 0 && entry.action === 'rejected'
+      && entry.comment === '请补充拍摄依据' && entry.operator_id === testUserId), 'existing detail GET supplies the history fields needed for read-only audit recovery');
     assert.equal(notifications.length, notificationsBeforeAudit + 1);
     assert.match(notifications.at(-1)?.title ?? '', /驳回/);
     assert.match(notifications.at(-1)?.content ?? '', /请补充拍摄依据/);
@@ -739,6 +878,7 @@ async function outlineVersionServiceTests() {
 
 try {
   await repositoryTests();
+  await auditNotificationAtomicityTests();
   await serviceTests();
   await apiTests();
   await staleStatusTests();

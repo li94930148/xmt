@@ -10,6 +10,7 @@ import {
   FileText,
   MessageSquare,
   Package,
+  RefreshCw,
   Send,
   Trash2,
   User,
@@ -25,11 +26,21 @@ import PlatformBadge from '../components/studio/PlatformBadge';
 import SearchBar from '../components/studio/SearchBar';
 import StatusPill from '../components/studio/StatusPill';
 import StudioEmptyState from '../components/studio/EmptyState';
+import { findUniqueArchiveScriptSourceSnapshot } from '../components/resource-center/findUniqueArchiveScriptSourceSnapshot';
 import { useDebounce } from '../hooks/useDebounce';
 import { usePermission } from '../hooks/usePermission';
 import { formatBeijingDate, formatBeijingTime } from '../lib/utils';
-import { useAppStore } from '../store';
+import { productionSourceSnapshotHref } from '../lib/productionSourceSnapshot';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
+import { useAppStore, useAuthStore } from '../store';
 import { normalizeLegacyEditorHtmlTheme } from '../utils/editorTheme';
+import {
+  clearPublishedArchiveDeleteRecovery,
+  createPublishedArchiveDeleteRequestId,
+  persistPublishedArchiveDeleteRecovery,
+  readPublishedArchiveDeleteRecovery,
+  type PublishedArchiveDeleteRecovery,
+} from '../utils/publishedArchiveDeleteRecovery';
 import { sanitizeHtml } from '../utils/sanitizeHtml';
 
 interface ArchiveItem {
@@ -105,8 +116,21 @@ interface ArchiveDetail {
   };
 }
 
+type ArchiveDeleteRecoveryStatus = 'loading' | 'ready' | 'checking' | 'unknown' | 'present' | 'blocked';
+
+function isArchiveDetailNotFound(error: unknown) {
+  return Boolean(error && typeof error === 'object' && 'status' in error && (error as { status?: unknown }).status === 404);
+}
+
+function getResourceHttpStatus(error: unknown) {
+  return error && typeof error === 'object' && 'status' in error
+    ? Number((error as { status?: unknown }).status) || 0
+    : 0;
+}
+
 interface ArchiveScriptSource {
   topic_id: number;
+  source_topic_id?: number;
   production_id: number | null;
   version: string | null;
   state: 'none' | 'unavailable' | 'unrecorded' | 'derived' | 'inherited';
@@ -136,6 +160,7 @@ interface PublishedRecordSnapshot {
   status?: string;
   publish_time?: string | null;
   analytics?: AnalyticsSnapshot | null;
+  script_source?: ArchiveScriptSource;
 }
 
 // Older archive payloads only have singular publishing/analytics fields; normalize them for display without rewriting stored data.
@@ -165,6 +190,81 @@ function DetailTabEmptyState({
   return <StudioEmptyState icon={Archive} title={title} description={description} />;
 }
 
+function ArchivedScriptSourceItem({
+  label,
+  source,
+  snapshots,
+  topicId,
+  canViewProduction,
+}: {
+  label: string;
+  source?: ArchiveScriptSource;
+  snapshots: ArchiveScriptSourceSnapshot[];
+  topicId?: number;
+  canViewProduction: boolean;
+}) {
+  if (!source) {
+    return <p className="text-sm text-studio-text-secondary">{label}：该归档未记录来源关系；不根据当前稿件推断。</p>;
+  }
+
+  const stateLabels: Record<ArchiveScriptSource['state'], string> = {
+    derived: '来源已记录',
+    inherited: '沿用创作正文',
+    unavailable: '来源版本当前不可用',
+    unrecorded: '该版本的来源未记录；不根据当前稿件推断',
+    none: '未记录独立剧本来源',
+  };
+  const hasRecordedReference = (source.state === 'derived' || source.state === 'inherited')
+    && Number.isSafeInteger(source.production_id)
+    && Number(source.production_id) > 0
+    && Boolean(source.version);
+  const belongsToArchiveTopic = Number.isSafeInteger(topicId) && source.topic_id === topicId;
+  const validReference = hasRecordedReference && belongsToArchiveTopic;
+  const crossTopicSource = validReference && source.source_topic_id !== undefined && source.source_topic_id !== topicId;
+  const snapshot = validReference && !crossTopicSource ? findUniqueArchiveScriptSourceSnapshot(snapshots, source) : undefined;
+
+  return (
+    <div className="min-w-0 rounded-card border border-studio-border-soft bg-studio-surface-soft p-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-sm font-medium text-studio-text-primary">{label}</span>
+        <span className="text-sm text-studio-text-secondary">{stateLabels[source.state]}</span>
+        {source.production_id && source.version ? (
+          <span className="text-xs text-studio-text-muted">创作稿 #{source.production_id} · {source.version}</span>
+        ) : null}
+        {validReference && canViewProduction && productionSourceSnapshotHref(source.production_id, source.version) ? (
+          <Link
+            to={productionSourceSnapshotHref(source.production_id, source.version)!}
+            state={{ mobileReturnTo: '/asset-center/published-archives' }}
+            className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-studio-cyan-contrast"
+            aria-label={label.startsWith('发布记录 #')
+              ? `查看${label}的来源创作稿 ${source.version}`
+              : `查看${label}来源创作稿 ${source.version}`}
+          >
+            查看来源创作稿 <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
+        ) : validReference ? (
+          <span className="text-xs text-studio-text-muted">可查看归档快照；打开原稿需要创作稿查看权限</span>
+        ) : hasRecordedReference && !belongsToArchiveTopic ? (
+          <span role="alert" className="text-xs text-studio-coral-contrast">来源选题与当前归档不一致，已隐藏来源内容</span>
+        ) : null}
+      </div>
+      {crossTopicSource ? <p className="mt-2 text-xs text-studio-coral-contrast" role="status">来源选题与当前归档不同，正文未复制进归档；打开原稿仍需来源选题访问权限。</p> : null}
+      {validReference && snapshot ? (
+        <details className="mt-2">
+          <summary className="min-h-10 cursor-pointer py-2 text-sm font-medium text-studio-text-secondary">查看归档保存的来源正文</summary>
+          <div
+            className="editor-content-preview prose prose-sm mt-2 max-w-none rounded-card border border-studio-border-soft bg-studio-surface p-4 text-studio-text-secondary"
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(snapshot.content)) }}
+          />
+        </details>
+      ) : null}
+      {validReference && !crossTopicSource && !snapshot ? (
+        <p className="mt-2 text-xs text-studio-text-muted">归档中没有唯一匹配的来源正文快照；正文已隐藏。</p>
+      ) : null}
+    </div>
+  );
+}
+
 function ArchivedScriptSources({
   sources,
   snapshots,
@@ -189,14 +289,6 @@ function ArchivedScriptSources({
     { key: 'shooting' as const, label: '成片剧本' },
     { key: 'publishing' as const, label: '发布剧本' },
   ];
-  const stateLabels: Record<ArchiveScriptSource['state'], string> = {
-    derived: '来源已记录',
-    inherited: '沿用创作正文',
-    unavailable: '来源版本当前不可用',
-    unrecorded: '该版本的来源未记录；不根据当前稿件推断',
-    none: '未记录独立剧本来源',
-  };
-
   return (
     <GlassPanel className="space-y-3 p-4" data-testid="archive-script-sources">
       <div>
@@ -205,53 +297,15 @@ function ArchivedScriptSources({
       </div>
       {items.map(({ key, label }) => {
         const source = sources[key];
-        if (!source) {
-          return <p key={key} className="text-sm text-studio-text-secondary">{label}：该归档未记录来源关系。</p>;
-        }
-        const hasRecordedReference = (source.state === 'derived' || source.state === 'inherited')
-          && Number.isSafeInteger(source.production_id)
-          && Number(source.production_id) > 0
-          && Boolean(source.version);
-        const belongsToArchiveTopic = Number.isSafeInteger(topicId) && source.topic_id === topicId;
-        const validReference = hasRecordedReference && belongsToArchiveTopic;
-        const snapshot = validReference
-          ? snapshots.find((item) => item.topic_id === source.topic_id
-            && item.production_id === source.production_id
-            && item.version === source.version)
-          : undefined;
-
         return (
-          <div key={key} className="min-w-0 rounded-card border border-studio-border-soft bg-studio-surface-soft p-3">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="text-sm font-medium text-studio-text-primary">{label}</span>
-              <span className="text-sm text-studio-text-secondary">{stateLabels[source.state]}</span>
-              {source.production_id && source.version ? (
-                <span className="text-xs text-studio-text-muted">创作稿 #{source.production_id} · {source.version}</span>
-              ) : null}
-              {validReference && canViewProduction ? (
-                <Link
-                  to={`/production/${source.production_id}?version=${encodeURIComponent(source.version!)}`}
-                  className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-studio-cyan-contrast"
-                  aria-label={`查看${label}来源创作稿 ${source.version}`}
-                >
-                  查看来源创作稿 <ExternalLink className="h-3.5 w-3.5" />
-                </Link>
-              ) : validReference ? (
-                <span className="text-xs text-studio-text-muted">可查看归档快照；打开原稿需要创作稿查看权限</span>
-              ) : hasRecordedReference && !belongsToArchiveTopic ? (
-                <span role="alert" className="text-xs text-studio-coral-contrast">来源选题与当前归档不一致，已隐藏来源内容</span>
-              ) : null}
-            </div>
-            {validReference && snapshot ? (
-              <details className="mt-2">
-                <summary className="min-h-10 cursor-pointer py-2 text-sm font-medium text-studio-text-secondary">查看归档保存的来源正文</summary>
-                <div
-                  className="editor-content-preview prose prose-sm mt-2 max-w-none rounded-card border border-studio-border-soft bg-studio-surface p-4 text-studio-text-secondary"
-                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(normalizeLegacyEditorHtmlTheme(snapshot.content)) }}
-                />
-              </details>
-            ) : null}
-          </div>
+          <ArchivedScriptSourceItem
+            key={key}
+            label={label}
+            source={source}
+            snapshots={snapshots}
+            topicId={topicId}
+            canViewProduction={canViewProduction}
+          />
         );
       })}
     </GlassPanel>
@@ -260,11 +314,13 @@ function ArchivedScriptSources({
 
 export default function Resources() {
   const addNotification = useAppStore((state) => state.addNotification);
+  const actorId = useAuthStore((state) => Number(state.user?.id) || 0);
   const { hasPermission } = usePermission();
   const canDeleteArchive = hasPermission('resource:delete');
   const canViewProduction = hasPermission('production:view');
   const canViewTopic = hasPermission('topic:view');
   const [archives, setArchives] = useState<ArchiveItem[]>([]);
+  const archiveRowsRef = useRef<ArchiveItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
@@ -276,7 +332,12 @@ export default function Resources() {
   const [activeTab, setActiveTab] = useState<'script' | 'shooting' | 'publishing' | 'history'>('publishing');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteRecovery, setDeleteRecovery] = useState<PublishedArchiveDeleteRecovery | null>(null);
+  const [deleteRecoveryStatus, setDeleteRecoveryStatus] = useState<ArchiveDeleteRecoveryStatus>('loading');
+  const [deleteRecoveryMessage, setDeleteRecoveryMessage] = useState('');
   const deleteLockRef = useRef(false);
+  const deleteRecoverySequenceRef = useRef(0);
+  const lastRecoveryLoadActorRef = useRef<number | null>(null);
 
   const debouncedSearch = useDebounce(searchTerm, 400);
 
@@ -285,11 +346,12 @@ export default function Resources() {
     setArchiveListError(null);
     try {
       const result = await getArchives({ search: debouncedSearch, page, limit: 12 });
+      archiveRowsRef.current = result.data;
       setArchives(result.data);
       setTotal(result.total);
       setHasLoadedArchiveList(true);
     } catch (error) {
-      setArchiveListError(error instanceof Error ? error.message : '获取归档列表失败');
+      setArchiveListError(getUserFacingErrorMessage(error, '获取归档列表失败，请检查连接后重试。'));
     } finally {
       setLoading(false);
     }
@@ -299,7 +361,139 @@ export default function Resources() {
     void fetchArchives();
   }, [fetchArchives]);
 
+  const verifyArchiveDelete = useCallback(async (recovery: PublishedArchiveDeleteRecovery, lockAlreadyHeld = false, forceSelect = false) => {
+    if (!lockAlreadyHeld && deleteLockRef.current) return;
+    if (!lockAlreadyHeld) deleteLockRef.current = true;
+    const sequence = deleteRecoverySequenceRef.current;
+    const isCurrent = () => sequence === deleteRecoverySequenceRef.current
+      && Number(useAuthStore.getState().user?.id) === recovery.actorId;
+    setDeleting(true);
+    setDeleteRecovery(recovery);
+    setDeleteRecoveryStatus('checking');
+    setDeleteRecoveryMessage('正在只读核实这条归档的当前状态；核实期间不会再次发送删除请求。');
+    try {
+      const detail = await getArchiveDetail(recovery.archiveId);
+      if (!isCurrent()) return;
+      setSelectedArchive((current) => forceSelect || !current || current.id === recovery.archiveId ? detail : current);
+      setShowDeleteModal(false);
+      setDeleteRecoveryStatus('present');
+      setDeleteRecoveryMessage('服务器确认这条归档当前仍存在。上次删除结果未确认，系统没有再次发送删除请求；如仍要删除，请重新打开确认框并明确确认。');
+      addNotification({
+        title: '归档仍存在',
+        message: '只读核实已完成，没有重复发送删除请求。',
+        type: 'info',
+      });
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (isArchiveDetailNotFound(error)) {
+        const existed = archiveRowsRef.current.some((archive) => archive.id === recovery.archiveId);
+        if (existed) setTotal((count) => Math.max(0, count - 1));
+        archiveRowsRef.current = archiveRowsRef.current.filter((archive) => archive.id !== recovery.archiveId);
+        setArchives(archiveRowsRef.current);
+        setSelectedArchive((current) => current?.id === recovery.archiveId ? null : current);
+        setShowDeleteModal(false);
+        if (clearPublishedArchiveDeleteRecovery(recovery)) {
+          setDeleteRecovery(null);
+          setDeleteRecoveryStatus('ready');
+          setDeleteRecoveryMessage('服务器确认该归档当前不存在；没有再次发送删除请求。');
+          addNotification({
+            title: '归档状态已核实',
+            message: '服务器确认该归档当前不存在；没有再次发送删除请求。',
+            type: 'success',
+          });
+        } else {
+          setDeleteRecoveryStatus('blocked');
+          setDeleteRecoveryMessage('服务器确认归档当前不存在，但本机未能清除恢复标记。请重试只读核实；在标记安全清除前，删除操作保持锁定。');
+          addNotification({
+            title: '恢复标记仍待清理',
+            message: '归档当前不存在，但本机未能清除恢复标记；删除操作保持锁定。',
+            type: 'error',
+          });
+        }
+        return;
+      }
+      setDeleteRecoveryStatus('unknown');
+      setDeleteRecoveryMessage(`暂时无法确认上次删除结果。${getUserFacingErrorMessage(error, '请稍后重试只读核实。')}未自动重发删除请求。`);
+      setShowDeleteModal(false);
+      addNotification({
+        title: '归档状态待核实',
+        message: '只读核实未完成；删除操作保持锁定，系统没有再次发送删除请求。',
+        type: 'error',
+      });
+    } finally {
+      if (isCurrent()) setDeleting(false);
+      if (!lockAlreadyHeld) deleteLockRef.current = false;
+    }
+  }, [addNotification]);
+
+  const reloadDeleteRecovery = useCallback(() => {
+    if (actorId <= 0) {
+      setDeleteRecoveryStatus('blocked');
+      setDeleteRecoveryMessage('当前账号信息不可用，无法安全读取归档删除恢复状态；删除操作保持锁定。');
+      return;
+    }
+    const stored = readPublishedArchiveDeleteRecovery(actorId);
+    if (stored.state === 'none') {
+      setDeleteRecovery(null);
+      setDeleteRecoveryStatus('ready');
+      setDeleteRecoveryMessage('');
+      return;
+    }
+    if (stored.state === 'valid') {
+      setDeleteRecovery(stored.recovery);
+      void verifyArchiveDelete(stored.recovery);
+      return;
+    }
+    setDeleteRecovery(null);
+    setDeleteRecoveryStatus('blocked');
+    setDeleteRecoveryMessage(stored.state === 'invalid'
+      ? '本机存在无法识别的归档删除恢复信息。为避免覆盖未知结果，删除操作保持锁定。'
+      : '当前浏览器无法安全读取归档删除恢复信息。恢复状态可读取前，删除操作保持锁定。');
+  }, [actorId, verifyArchiveDelete]);
+
+  useEffect(() => {
+    if (lastRecoveryLoadActorRef.current === actorId) return;
+    lastRecoveryLoadActorRef.current = actorId;
+    deleteRecoverySequenceRef.current += 1;
+    deleteLockRef.current = false;
+    setDeleting(false);
+    setDeleteRecovery(null);
+    setDeleteRecoveryStatus('loading');
+    setDeleteRecoveryMessage('正在检查当前账号的归档删除恢复状态。');
+    setSelectedArchive(null);
+    setShowDeleteModal(false);
+    if (actorId <= 0) {
+      setDeleteRecoveryStatus('blocked');
+      setDeleteRecoveryMessage('当前账号信息不可用，无法安全读取归档删除恢复状态；删除操作保持锁定。');
+      return;
+    }
+    const stored = readPublishedArchiveDeleteRecovery(actorId);
+    if (stored.state === 'none') {
+      setDeleteRecoveryStatus('ready');
+      setDeleteRecoveryMessage('');
+    } else if (stored.state === 'valid') {
+      setDeleteRecovery(stored.recovery);
+      void verifyArchiveDelete(stored.recovery);
+    } else {
+      setDeleteRecoveryStatus('blocked');
+      setDeleteRecoveryMessage(stored.state === 'invalid'
+        ? '本机存在无法识别的归档删除恢复信息。为避免覆盖未知结果，删除操作保持锁定。'
+        : '当前浏览器无法安全读取归档删除恢复信息。恢复状态可读取前，删除操作保持锁定。');
+    }
+  }, [actorId, verifyArchiveDelete]);
+
+  useEffect(() => {
+    if (!deleteRecovery || deleteRecoveryStatus !== 'checking') return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [deleteRecovery, deleteRecoveryStatus]);
+
   const handleViewDetail = async (id: number) => {
+    if (deleteRecoveryStatus === 'ready' && !deleteRecovery) setDeleteRecoveryMessage('');
     setDetailLoading(true);
     try {
       const detail = await getArchiveDetail(id);
@@ -308,7 +502,7 @@ export default function Resources() {
     } catch (error) {
       addNotification({
         title: '获取详情失败',
-        message: (error as Error).message,
+        message: getUserFacingErrorMessage(error, '获取归档详情失败，请检查连接后重试。'),
         type: 'error',
       });
     } finally {
@@ -317,35 +511,148 @@ export default function Resources() {
   };
 
   const handleDelete = async () => {
-    if (!selectedArchive || deleteLockRef.current) {
+    if (!selectedArchive || !canDeleteArchive || deleteLockRef.current || actorId <= 0 || deleting) {
       return;
     }
 
     const targetId = selectedArchive.id;
+    const retryingSameArchive = deleteRecoveryStatus === 'present'
+      && deleteRecovery?.actorId === actorId
+      && deleteRecovery.archiveId === targetId;
+    if (deleteRecoveryStatus !== 'ready' && !retryingSameArchive) return;
     deleteLockRef.current = true;
     setDeleting(true);
+    const sequence = deleteRecoverySequenceRef.current;
+    let recovery = deleteRecovery;
+    let deleteRequestSent = false;
     try {
+      if (!recovery || !retryingSameArchive) {
+        recovery = {
+          version: 1,
+          actorId,
+          archiveId: targetId,
+          requestId: createPublishedArchiveDeleteRequestId(),
+        };
+      }
+      persistPublishedArchiveDeleteRecovery(recovery);
+      setDeleteRecovery(recovery);
+      setDeleteRecoveryStatus('checking');
+      setDeleteRecoveryMessage('删除请求已发送，正在等待服务端结果。若连接中断，将只读核实，不会自动重复发送。');
+      deleteRequestSent = true;
       await deleteResource(targetId);
+      if (Number(useAuthStore.getState().user?.id) !== recovery.actorId) return;
+      const markerCleared = clearPublishedArchiveDeleteRecovery(recovery);
       addNotification({
         title: '删除成功',
         message: '归档已删除',
         type: 'success',
       });
-      setArchives((current) => current.filter((archive) => archive.id !== targetId));
-      setTotal((current) => Math.max(0, current - 1));
+      const wasListed = archiveRowsRef.current.some((archive) => archive.id === targetId);
+      archiveRowsRef.current = archiveRowsRef.current.filter((archive) => archive.id !== targetId);
+      setArchives(archiveRowsRef.current);
+      if (wasListed) setTotal((current) => Math.max(0, current - 1));
       setSelectedArchive(null);
       setShowDeleteModal(false);
+      if (markerCleared) {
+        setDeleteRecovery(null);
+        setDeleteRecoveryStatus('ready');
+        setDeleteRecoveryMessage('');
+      } else {
+        setDeleteRecoveryStatus('blocked');
+        setDeleteRecoveryMessage('服务端已确认删除，但本机恢复标记未能清除。请重试只读核实；清理完成前，其他归档删除保持锁定。');
+      }
     } catch (error) {
-      addNotification({
-        title: '删除失败',
-        message: (error as Error).message,
-        type: 'error',
-      });
+      if (!deleteRequestSent) {
+        const stored = readPublishedArchiveDeleteRecovery(actorId);
+        if (stored.state === 'valid') {
+          recovery = stored.recovery;
+          setDeleteRecovery(recovery);
+          setDeleteRecoveryStatus('checking');
+          setDeleteRecoveryMessage('此前已有归档删除恢复信息，正在只读核实；本次没有发送新的删除请求。');
+          await verifyArchiveDelete(recovery, true);
+        } else if (stored.state === 'none') {
+          setDeleteRecovery(null);
+          setDeleteRecoveryStatus('ready');
+          setDeleteRecoveryMessage('');
+          addNotification({
+            title: '删除前检查失败',
+            message: getUserFacingErrorMessage(error, '未能安全保存删除恢复信息，本次未发送删除请求。'),
+            type: 'error',
+          });
+        } else {
+          setDeleteRecovery(null);
+          setDeleteRecoveryStatus('blocked');
+          setDeleteRecoveryMessage('本机删除恢复信息暂时无法安全读取；本次未发送删除请求，删除操作保持锁定。');
+          addNotification({
+            title: '删除前检查失败',
+            message: '本机删除恢复信息暂时无法安全读取；本次未发送删除请求，删除操作保持锁定。',
+            type: 'error',
+          });
+        }
+      } else if ([401, 403].includes(getResourceHttpStatus(error)) && recovery) {
+        const markerCleared = clearPublishedArchiveDeleteRecovery(recovery);
+        if (markerCleared) {
+          setDeleteRecovery(null);
+          setDeleteRecoveryStatus('ready');
+          setDeleteRecoveryMessage('服务端明确拒绝了删除请求；归档仍保留，本次没有再次发送删除请求。');
+        } else {
+          setDeleteRecoveryStatus('blocked');
+          setDeleteRecoveryMessage('服务端明确拒绝了删除请求；归档仍保留，但本机恢复标记未能清除，删除操作保持锁定。');
+        }
+        setShowDeleteModal(false);
+        addNotification({
+          title: '删除未执行',
+          message: getUserFacingErrorMessage(error, '服务端拒绝了删除请求，归档仍保留。'),
+          type: 'error',
+        });
+      } else if (recovery) {
+        await verifyArchiveDelete(recovery, true);
+      } else {
+        addNotification({
+          title: '删除结果待核实',
+          message: '未能安全读取删除恢复信息；本次删除结果尚不确定，操作保持锁定。',
+          type: 'error',
+        });
+        setDeleteRecoveryStatus('blocked');
+      }
     } finally {
-      deleteLockRef.current = false;
-      setDeleting(false);
+      if (sequence === deleteRecoverySequenceRef.current && Number(useAuthStore.getState().user?.id) === actorId) {
+        deleteLockRef.current = false;
+        setDeleting(false);
+      }
     }
   };
+
+  const deleteRecoveryNotice = deleteRecoveryStatus === 'ready' && !deleteRecoveryMessage
+    ? null
+    : (
+      <div
+        role={deleteRecoveryStatus === 'checking' || deleteRecoveryStatus === 'loading' ? 'status' : 'alert'}
+        aria-live={deleteRecoveryStatus === 'checking' || deleteRecoveryStatus === 'loading' ? 'polite' : 'assertive'}
+        className="flex flex-col gap-3 rounded-button border border-studio-amber/25 bg-studio-amber/10 px-4 py-3 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between"
+      >
+        <span>{deleteRecoveryMessage || '归档删除状态正在恢复。'}</span>
+        {deleteRecoveryStatus === 'unknown' || deleteRecoveryStatus === 'blocked' ? (
+          <ActionButton type="button" variant="secondary" disabled={deleting} onClick={deleteRecoveryStatus === 'blocked' && !deleteRecovery ? reloadDeleteRecovery : () => deleteRecovery && void verifyArchiveDelete(deleteRecovery)}>
+            <RefreshCw className="h-4 w-4" />
+            {deleting ? '正在核实…' : deleteRecoveryStatus === 'blocked' && !deleteRecovery ? '重新读取恢复状态' : '只读核实归档状态'}
+          </ActionButton>
+        ) : null}
+        {deleteRecoveryStatus === 'present' && deleteRecovery && selectedArchive?.id !== deleteRecovery.archiveId ? (
+          <ActionButton type="button" variant="secondary" disabled={deleting} onClick={() => void verifyArchiveDelete(deleteRecovery, false, true)}>
+            <RefreshCw className="h-4 w-4" />
+            {deleting ? '正在核实…' : `打开待核实归档 #${deleteRecovery.archiveId}`}
+          </ActionButton>
+        ) : null}
+      </div>
+    );
+  const canConfirmArchiveDelete = Boolean(selectedArchive)
+    && canDeleteArchive
+    && !deleting
+    && ((deleteRecoveryStatus === 'ready' && !deleteRecovery)
+      || (deleteRecoveryStatus === 'present'
+        && deleteRecovery?.actorId === actorId
+        && deleteRecovery.archiveId === selectedArchive?.id));
 
   if (selectedArchive) {
     const archive = selectedArchive.archive;
@@ -371,6 +678,8 @@ export default function Resources() {
               {canDeleteArchive ? <button
                 type="button"
                 onClick={() => setShowDeleteModal(true)}
+                disabled={!canConfirmArchiveDelete}
+                title={!canConfirmArchiveDelete ? '请先完成当前归档删除状态核实' : undefined}
                 className="inline-flex min-h-10 items-center gap-2 rounded-button border border-studio-coral/30 bg-studio-coral/10 px-4 py-2.5 text-sm font-semibold text-studio-coral-contrast transition hover:bg-studio-coral/15"
               >
                 <Trash2 className="h-4 w-4" />
@@ -379,6 +688,8 @@ export default function Resources() {
             </div>
           }
         />
+
+        {deleteRecoveryNotice}
 
         <GlassPanel className="p-5">
           <div className="flex flex-wrap items-center gap-3">
@@ -541,7 +852,11 @@ export default function Resources() {
                           { label: '评论', value: recordAnalytics?.comments },
                         ];
                         return (
-                          <GlassPanel key={record.publishing_id || `${record.platform}-${record.publish_time || index}`} className="min-w-0 space-y-4 p-4">
+                          <GlassPanel
+                            key={record.publishing_id || `${record.platform}-${record.publish_time || index}`}
+                            data-testid={record.publishing_id ? `published-record-card-${record.publishing_id}` : undefined}
+                            className="min-w-0 space-y-4 p-4"
+                          >
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <PlatformBadge platform={getArchivePlatformLabel(record.platform)} />
                               <StatusPill tone={record.status === 'published' ? 'success' : 'amber'}>{record.status === 'published' ? '已发布' : record.status || '-'}</StatusPill>
@@ -558,6 +873,13 @@ export default function Resources() {
                                 </div>
                               ))}
                             </div>
+                            <ArchivedScriptSourceItem
+                              label={`发布记录 #${record.publishing_id ?? index + 1}`}
+                              source={record.script_source}
+                              snapshots={archive.script_source_snapshots || []}
+                              topicId={topic?.id}
+                              canViewProduction={canViewProduction}
+                            />
                             <div className="flex flex-wrap items-center gap-4">
                               {record.url ? <a href={record.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-studio-cyan-contrast">打开发布链接 <ExternalLink className="h-3.5 w-3.5" /></a> : null}
                               {record.publishing_id ? <Link to={`/publishing/${record.publishing_id}`} className="inline-flex min-h-10 items-center text-sm font-medium text-studio-cyan-contrast">查看发布记录 #{record.publishing_id}</Link> : null}
@@ -607,6 +929,7 @@ export default function Resources() {
           onCancel={() => setShowDeleteModal(false)}
           onConfirm={handleDelete}
           loading={deleting}
+          confirmDisabled={!canConfirmArchiveDelete}
           variant="danger"
           title="确认删除"
           confirmText="确认删除"
@@ -631,6 +954,8 @@ export default function Resources() {
           </div>
         }
       />
+
+      {deleteRecoveryNotice}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="总归档" value={hasLoadedArchiveList ? total : '—'} icon={Archive} tone="primary" />
@@ -675,7 +1000,7 @@ export default function Resources() {
             >
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h3 className="line-clamp-2 text-base font-semibold text-studio-text-primary group-hover:text-studio-cyan">{item.name}</h3>
+                  <h3 className="line-clamp-2 text-base font-semibold text-studio-text-primary group-hover:text-studio-cyan-contrast">{item.name}</h3>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {(item.publishedPlatforms?.length ? item.publishedPlatforms : item.platform ? [item.platform] : []).map((platform) => <PlatformBadge key={platform} platform={getArchivePlatformLabel(platform)} />)}
                   </div>

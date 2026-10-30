@@ -4,11 +4,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { getDouyinWorks, type DouyinWork } from '@/api/creatorCenter';
 import { EmptyState, LoadingState, PageHeader, Panel, formatDate, formatNumber } from './shared';
 import CreatorCoverImage from '@/components/common/CreatorCoverImage';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 const sortOptions = [['score', '表现评分'], ['latest', '最新发布'], ['plays', '最高播放'], ['interactions', '最高互动率'], ['likes', '最高点赞']] as const;
 
 function WorkThumbnail({ work }: { work: DouyinWork }) {
-  return <CreatorCoverImage work={work} className="h-14 w-20 shrink-0 rounded-lg object-cover" />;
+  return <CreatorCoverImage work={work} decorative className="h-14 w-20 shrink-0 rounded-lg object-cover" />;
 }
 
 export default function CreatorWorks({ reviewMode = false }: { reviewMode?: boolean }) {
@@ -37,7 +38,7 @@ export default function CreatorWorks({ reviewMode = false }: { reviewMode?: bool
       setHasMore(page.has_more);
       setFailedCursor(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '抖音作品库加载失败');
+      setError(getUserFacingErrorMessage(cause, '抖音作品暂时无法加载，请检查连接后重试。'));
       setFailedCursor(cursor ?? null);
     } finally {
       if (append) setLoadingMore(false);

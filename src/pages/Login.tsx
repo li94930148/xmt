@@ -2,14 +2,21 @@ import { FormEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo,
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff } from 'lucide-react';
 import { changePassword, getPublicSystemSettings, login } from '../api';
-import { mobileLogin } from '../api/auth';
+import { LoginError, mobileLogin, PasswordChangeRequestError } from '../api/auth';
 import { notifyNativeTokenIssued } from '@/auth/native/native-auth-runtime';
 import { getNativeEndpointConfigurationError, isAndroid } from '@/platform/runtime';
 import { nativeRefreshCredentials, nativeUserProfile } from '@/auth/native/secure-credentials';
-import { LoginError } from '../api/auth';
 import { completeWebLogin, completeWebLoginRedirect } from '../auth/web/web-auth-runtime';
 import { useAppStore, useAuthStore } from '../store';
 import { loadRememberedCredentials, persistRememberedCredentials } from '../utils/rememberedCredentials';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
+import { clearMobilePasswordChangeRecovery } from '@/lib/mobilePasswordChangeRecovery';
+import {
+  clearDesktopPasswordChangeRecovery,
+  clearDesktopPasswordChangeRecoveryAfterSuccessfulLogin,
+  createDesktopPasswordChangeRecoveryRequestId,
+  persistDesktopPasswordChangeRecovery,
+} from '@/lib/desktopPasswordChangeRecovery';
 import {
   applyDocumentBranding,
   defaultSystemSettings,
@@ -80,6 +87,8 @@ function ChangePasswordModal({
   newPwd,
   confirmPwd,
   loading,
+  outcomeUnknown,
+  errorMessage,
   returnFocusRef,
   onOldPwdChange,
   onNewPwdChange,
@@ -92,6 +101,8 @@ function ChangePasswordModal({
   newPwd: string;
   confirmPwd: string;
   loading: boolean;
+  outcomeUnknown: boolean;
+  errorMessage: string;
   returnFocusRef: { current: HTMLElement | null };
   onOldPwdChange: (value: string) => void;
   onNewPwdChange: (value: string) => void;
@@ -153,7 +164,14 @@ function ChangePasswordModal({
 
   return (
     <div ref={dialogRef} className="xmt-overlay xmt-overlay-center px-4" role="dialog" aria-modal="true" aria-labelledby="first-login-password-title" tabIndex={-1}>
-      <div data-testid="first-login-password-panel" className="w-full max-w-md rounded-panel border border-studio-border-soft bg-studio-surface p-8 text-studio-text-primary shadow-modal">
+      <form
+        data-testid="first-login-password-panel"
+        className="w-full max-w-md rounded-panel border border-studio-border-soft bg-studio-surface p-8 text-studio-text-primary shadow-modal"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onConfirm();
+        }}
+      >
         <p className="text-xs uppercase tracking-[0.28em] text-studio-text-secondary">首次登录</p>
         <h3 id="first-login-password-title" className="mt-3 text-2xl font-semibold">请先修改初始密码</h3>
         <p className="mt-3 text-sm leading-6 text-studio-text-secondary">
@@ -161,22 +179,37 @@ function ChangePasswordModal({
         </p>
 
         <div className="mt-6 space-y-4">
+          <label htmlFor="first-login-current-password" className="sr-only">当前密码</label>
           <input
+            id="first-login-current-password"
+            name="currentPassword"
+            autoComplete="current-password"
             type="password"
+            disabled={loading || outcomeUnknown}
             value={oldPwd}
             onChange={(event) => onOldPwdChange(event.target.value)}
             className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary outline-none placeholder:text-studio-text-secondary focus:border-studio-border-active"
             placeholder="当前密码"
           />
+          <label htmlFor="first-login-new-password" className="sr-only">新密码</label>
           <input
+            id="first-login-new-password"
+            name="newPassword"
+            autoComplete="new-password"
             type="password"
+            disabled={loading || outcomeUnknown}
             value={newPwd}
             onChange={(event) => onNewPwdChange(event.target.value)}
             className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary outline-none placeholder:text-studio-text-secondary focus:border-studio-border-active"
             placeholder="新密码（至少 6 位）"
           />
+          <label htmlFor="first-login-confirm-password" className="sr-only">确认新密码</label>
           <input
+            id="first-login-confirm-password"
+            name="confirmPassword"
+            autoComplete="new-password"
             type="password"
+            disabled={loading || outcomeUnknown}
             value={confirmPwd}
             onChange={(event) => onConfirmPwdChange(event.target.value)}
             className="h-12 w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 text-studio-text-primary outline-none placeholder:text-studio-text-secondary focus:border-studio-border-active"
@@ -184,22 +217,30 @@ function ChangePasswordModal({
           />
         </div>
 
+        {errorMessage ? (
+          <p role="alert" className="mt-4 text-sm leading-6 text-studio-danger-contrast">
+            {errorMessage}
+          </p>
+        ) : null}
+
         <div className="mt-6 flex justify-end gap-3">
           <button
+            type="button"
             onClick={onCancel}
+            disabled={loading}
             className="xmt-btn xmt-btn-secondary rounded-button border-studio-border-soft px-4 py-2 text-sm text-studio-text-secondary transition hover:bg-studio-surface-soft"
           >
             退出登录
           </button>
           <button
-            onClick={onConfirm}
-            disabled={loading}
+            type="submit"
+            disabled={loading || outcomeUnknown}
             className="xmt-btn xmt-btn-primary rounded-button border-transparent px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {loading ? '保存中...' : '更新密码'}
+            {loading ? '保存中...' : outcomeUnknown ? '结果待核实' : '更新密码'}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
@@ -244,6 +285,8 @@ type LoginFormProps = {
   showPassword: boolean;
   loading: boolean;
   errorMessage: string;
+  infoMessage: string;
+  successMessage: string;
   welcomeTitle: string;
   welcomeMessage: string;
   onUsernameChange: (value: string) => void;
@@ -262,6 +305,8 @@ function LoginForm({
   showPassword,
   loading,
   errorMessage,
+  infoMessage,
+  successMessage,
   welcomeTitle,
   welcomeMessage,
   onUsernameChange,
@@ -277,7 +322,7 @@ function LoginForm({
     : 'border-studio-border-soft bg-studio-surface-soft text-studio-text-primary placeholder:text-studio-text-secondary';
   const labelClass = dark ? 'text-studio-text-secondary' : 'text-studio-text-muted';
   const helperClass = dark ? 'text-studio-text-secondary' : 'text-studio-text-muted';
-  const linkClass = dark ? 'text-studio-primary-contrast hover:text-studio-primary' : 'text-studio-primary hover:opacity-80';
+  const linkClass = dark ? 'text-studio-primary-contrast hover:text-studio-primary' : 'text-studio-primary hover:text-studio-primary-contrast';
   const buttonClass = dark
     ? 'xmt-btn-primary text-white'
     : 'bg-studio-primary-button text-white hover:opacity-92';
@@ -295,6 +340,16 @@ function LoginForm({
           {errorMessage}
         </div>
       )}
+      {infoMessage ? (
+        <p role="status" className="mb-5 rounded-xl border border-studio-primary/25 bg-studio-primary-soft px-4 py-3 text-sm leading-6 text-studio-text-secondary">
+          {infoMessage}
+        </p>
+      ) : null}
+      {successMessage ? (
+        <p role="status" className="mb-5 rounded-xl border border-studio-success/25 bg-studio-success-soft px-4 py-3 text-sm leading-6 text-studio-success-contrast">
+          {successMessage}
+        </p>
+      ) : null}
 
       <form onSubmit={onSubmit} className="space-y-5">
         <div>
@@ -325,7 +380,9 @@ function LoginForm({
               type="button"
               onClick={onTogglePassword}
               className={`absolute right-4 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-studio-primary focus-visible:outline-offset-2 ${dark ? 'text-studio-text-secondary hover:text-studio-text-secondary' : 'text-studio-text-secondary hover:text-studio-text-muted'}`}
-              aria-label="切换密码可见状态"
+              aria-controls="login-password"
+              aria-label={showPassword ? '隐藏密码' : '显示密码'}
+              aria-pressed={showPassword}
             >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
@@ -333,7 +390,7 @@ function LoginForm({
         </div>
 
         <div className="flex items-center justify-between pt-1">
-          <label className={`flex cursor-pointer items-center gap-2.5 text-sm ${helperClass}`}>
+          <label className={`flex min-h-10 cursor-pointer items-center gap-2.5 rounded-lg px-2 text-sm ${helperClass}`}>
             <input
               type="checkbox"
               checked={remember}
@@ -342,7 +399,7 @@ function LoginForm({
             />
             记住密码
           </label>
-          <button type="button" onClick={onForgotPassword} className={`text-sm transition-colors ${linkClass}`}>
+          <button type="button" onClick={onForgotPassword} className={`min-h-11 px-2 text-sm transition-colors ${linkClass}`}>
             忘记密码？
           </button>
         </div>
@@ -407,12 +464,18 @@ export default function Login() {
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [changePwdLoading, setChangePwdLoading] = useState(false);
+  const [changePwdError, setChangePwdError] = useState('');
+  const [passwordOutcomeUnknown, setPasswordOutcomeUnknown] = useState(false);
   // A packaged Android build may be opened before its API endpoint is supplied.
   // Show the actionable configuration issue in the login shell instead of failing
   // during application bootstrap and leaving a blank native screen.
   const [errorMessage, setErrorMessage] = useState(() => getNativeEndpointConfigurationError() || '');
+  const [forgotPasswordMessage, setForgotPasswordMessage] = useState('');
+  const [loginSuccessMessage, setLoginSuccessMessage] = useState('');
   const loginRequestInFlight = useRef(false);
   const changePasswordFlowPending = useRef(false);
+  const passwordOutcomeUnknownRef = useRef(false);
+  const passwordChangeInFlightRef = useRef(false);
   const changePasswordReturnFocusRef = useRef<HTMLElement | null>(null);
   const loginBackgroundRef = useRef<HTMLDivElement>(null);
 
@@ -511,6 +574,8 @@ export default function Login() {
 
     const submittedFrom = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     loginRequestInFlight.current = true;
+    setForgotPasswordMessage('');
+    setLoginSuccessMessage('');
     setLoading(true);
     try {
       const result = isAndroid() ? await mobileLogin(username.trim(), password) : await login(username.trim(), password);
@@ -518,6 +583,9 @@ export default function Login() {
       if (mustChangePassword) {
         changePasswordFlowPending.current = true;
         changePasswordReturnFocusRef.current = submittedFrom;
+        passwordOutcomeUnknownRef.current = false;
+        setPasswordOutcomeUnknown(false);
+        setChangePwdError('');
       }
       if (isAndroid()) {
         await nativeRefreshCredentials.set((result as typeof result & { refreshToken: string }).refreshToken);
@@ -529,19 +597,47 @@ export default function Login() {
       } else {
         authStore.login(result.user, result.accessToken, { persist: remember ? 'local' : 'session' });
       }
+      clearMobilePasswordChangeRecovery(Number(result.user.id));
+      const desktopPasswordRecoveryCleared = clearDesktopPasswordChangeRecoveryAfterSuccessfulLogin(Number(result.user.id));
+      if (!desktopPasswordRecoveryCleared) {
+        appStore.addNotification({
+          title: '密码恢复记录待核实',
+          message: '登录已成功，但本机密码修改恢复记录暂时无法清除。请重新登录后再次核实；密码修改入口会保持锁定。',
+          type: 'error',
+        });
+      }
       if (mustChangePassword) {
+        if (!desktopPasswordRecoveryCleared) {
+          passwordOutcomeUnknownRef.current = true;
+          setPasswordOutcomeUnknown(true);
+          setChangePwdError('本机密码修改恢复记录无法核实清除。为避免重复修改，密码表单已锁定；请退出并重新登录后再次核实。');
+        }
         setOldPwd(password);
         setNewPwd('');
         setConfirmPwd('');
-        setShowChangePassword(true);
       }
+      let rememberedCredentialsReady = true;
       try {
-        await persistRememberedCredentials(remember, username.trim(), password);
+        if (mustChangePassword) {
+          // Never leave the initial password as a remembered credential while it is being replaced.
+          await persistRememberedCredentials(false, '', '');
+        } else {
+          await persistRememberedCredentials(remember, username.trim(), password);
+        }
       } catch {
+        rememberedCredentialsReady = false;
         // Remembering credentials is optional and must not invalidate a completed login.
       }
 
-      if (mustChangePassword) return;
+      if (mustChangePassword) {
+        setChangePwdError(!desktopPasswordRecoveryCleared
+          ? '本机密码修改恢复记录无法核实清除。为避免重复修改，密码表单已锁定；请退出并重新登录后再次核实。'
+          : rememberedCredentialsReady
+            ? ''
+            : '本机之前保存的登录信息暂时无法清理，请修改后手动核对登录密码。');
+        setShowChangePassword(true);
+        return;
+      }
 
       appStore.addNotification({
         title: '登录成功',
@@ -564,34 +660,82 @@ export default function Login() {
   }, [appStore, authStore, location.state, navigate, password, remember, username]);
 
   const handleForgotPassword = useCallback(() => {
-    appStore.addNotification({
-      title: '忘记密码',
-      message: '当前系统未接入找回密码流程，请联系管理员重置密码。',
-      type: 'info',
-    });
-  }, [appStore]);
+    setForgotPasswordMessage('当前系统未接入找回密码流程，请联系管理员重置密码。');
+  }, []);
 
   const handleChangePassword = async () => {
+    if (passwordChangeInFlightRef.current || passwordOutcomeUnknownRef.current) return;
     if (newPwd.length < 6) {
-      appStore.addNotification({ title: '修改失败', message: '新密码至少需要 6 位', type: 'error' });
+      setChangePwdError('新密码至少需要 6 位。');
       return;
     }
 
     if (newPwd !== confirmPwd) {
-      appStore.addNotification({ title: '修改失败', message: '两次输入的新密码不一致', type: 'error' });
+      setChangePwdError('两次输入的新密码不一致。');
       return;
     }
 
+    const actorId = Number(authStore.user?.id);
+    if (!Number.isSafeInteger(actorId) || actorId <= 0) {
+      setChangePwdError('当前账号无法确认，密码修改请求未发送。请重新登录后再试。');
+      return;
+    }
+    let marker;
+    try {
+      marker = { version: 1 as const, actorId, requestId: createDesktopPasswordChangeRecoveryRequestId() };
+    } catch (error) {
+      setChangePwdError(getUserFacingErrorMessage(error, '密码恢复编号无法创建，修改请求未发送。'));
+      return;
+    }
+    if (!persistDesktopPasswordChangeRecovery(marker)) {
+      setChangePwdError('本机密码恢复信息未能可靠保存，修改请求未发送。请检查浏览器存储后重试。');
+      return;
+    }
+
+    passwordChangeInFlightRef.current = true;
+    setChangePwdError('');
     setChangePwdLoading(true);
     try {
       await changePassword(oldPwd, newPwd);
-      await persistRememberedCredentials(remember, username.trim(), newPwd);
+      if (!clearDesktopPasswordChangeRecovery(marker)) {
+        passwordOutcomeUnknownRef.current = true;
+        setPasswordOutcomeUnknown(true);
+        setOldPwd('');
+        setNewPwd('');
+        setConfirmPwd('');
+        setPassword('');
+        setRemember(false);
+        const recoveryError = '服务器已确认密码修改，但本机恢复记录未能清除。请重新登录；成功登录后系统会再次核实并清除该记录。';
+        setChangePwdError(recoveryError);
+        setErrorMessage(recoveryError);
+        appStore.addNotification({ title: '密码状态待处理', message: recoveryError, type: 'error' });
+        try { await persistRememberedCredentials(false, '', ''); } catch { /* keep the confirmed password outcome separate from remembered credentials */ }
+        authStore.logout();
+        setShowChangePassword(false);
+        return;
+      }
+      let rememberedPasswordUpdated = true;
+      try {
+        await persistRememberedCredentials(remember, username.trim(), newPwd);
+      } catch {
+        rememberedPasswordUpdated = false;
+        try {
+          await persistRememberedCredentials(false, '', '');
+        } catch {
+          // The server-confirmed password change must still complete the logout flow.
+        }
+      }
       changePasswordFlowPending.current = false;
       appStore.addNotification({
-        title: '修改成功',
-        message: '密码已更新，请重新登录',
-        type: 'success',
+        title: rememberedPasswordUpdated ? '修改成功' : '密码已更新',
+        message: rememberedPasswordUpdated
+          ? '密码已更新，请重新登录'
+          : '密码已更新，请重新登录；本页暂时保留新密码，记住的登录信息未能同步。',
+        type: rememberedPasswordUpdated ? 'success' : 'info',
       });
+      setLoginSuccessMessage(rememberedPasswordUpdated
+        ? ''
+        : '密码已更新，请重新登录。本页暂时保留新密码供本次登录使用；记住的登录信息未能同步。');
       authStore.logout();
       setShowChangePassword(false);
       setPassword(newPwd);
@@ -599,8 +743,43 @@ export default function Login() {
       setNewPwd('');
       setConfirmPwd('');
     } catch (error) {
-      appStore.addNotification({ title: '修改失败', message: (error as Error).message, type: 'error' });
+      const status = error instanceof PasswordChangeRequestError ? error.status : null;
+      const message = error instanceof Error ? error.message : '';
+      const definitelyRejected = status === 400
+        || status === 404
+        || status === 429
+        || (status === 401 && message === '旧密码错误');
+      if (definitelyRejected) {
+        if (!clearDesktopPasswordChangeRecovery(marker)) {
+          passwordOutcomeUnknownRef.current = true;
+          setPasswordOutcomeUnknown(true);
+          setOldPwd('');
+          setNewPwd('');
+          setConfirmPwd('');
+          setPassword('');
+          setRemember(false);
+          setChangePwdError('服务器已拒绝本次密码修改，但本机恢复记录未能清除。请退出并重新登录后继续。');
+          return;
+        }
+        setChangePwdError(getUserFacingErrorMessage(error, '修改密码失败，请检查当前密码和新密码后重试。'));
+      } else {
+        passwordOutcomeUnknownRef.current = true;
+        setPasswordOutcomeUnknown(true);
+        setOldPwd('');
+        setNewPwd('');
+        setConfirmPwd('');
+        setPassword('');
+        setRemember(false);
+        let recoveryMessage = '密码修改结果尚未确认。为避免重复修改，密码输入与提交已锁定；请退出登录后手动尝试使用新密码登录。';
+        try {
+          await persistRememberedCredentials(false, '', '');
+        } catch {
+          recoveryMessage += ' 浏览器中已保存的账号信息可能无法自动清理，请登录时手动核对密码。';
+        }
+        setChangePwdError(recoveryMessage);
+      }
     } finally {
+      passwordChangeInFlightRef.current = false;
       setChangePwdLoading(false);
     }
   };
@@ -619,16 +798,22 @@ export default function Login() {
     showPassword,
     loading,
     errorMessage,
+    infoMessage: forgotPasswordMessage,
+    successMessage: loginSuccessMessage,
     welcomeTitle,
     welcomeMessage,
     onUsernameChange: (value: string) => {
       setUsername(value);
+      if (forgotPasswordMessage) setForgotPasswordMessage('');
+      if (loginSuccessMessage) setLoginSuccessMessage('');
       if (errorMessage) {
         setErrorMessage('');
       }
     },
     onPasswordChange: (value: string) => {
       setPassword(value);
+      if (forgotPasswordMessage) setForgotPasswordMessage('');
+      if (loginSuccessMessage) setLoginSuccessMessage('');
       if (errorMessage) {
         setErrorMessage('');
       }
@@ -773,7 +958,7 @@ export default function Login() {
                       <div className="h-3 w-3 bg-studio-primary" />
                     </div>
                     <div className="h-px w-16 bg-studio-primary/[0.06]0" />
-                    <span className="text-studio-primary/80 text-xs tracking-[0.3em] uppercase font-medium">STR.2025</span>
+                    <span className="text-studio-primary-contrast text-xs tracking-[0.3em] uppercase font-medium">STR.2025</span>
                   </div>
                 </div>
 
@@ -806,8 +991,8 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="w-full lg:w-[45%] flex items-center justify-center relative">
-              <div className="absolute left-0 right-0 top-8 text-center lg:hidden">
+            <div className="w-full lg:w-[45%] flex flex-col lg:flex-row items-center justify-center relative">
+              <div data-testid="login-mobile-brand" className="mb-8 mt-8 text-center lg:hidden">
                 <h1 className="text-3xl font-extralight tracking-tight text-studio-text-primary">岚曜</h1>
                 <p className="mt-1 text-xs uppercase tracking-[0.3em] text-studio-text-muted">新媒体协作管理系统</p>
               </div>
@@ -823,6 +1008,11 @@ export default function Login() {
                     {errorMessage}
                   </div>
                 )}
+                {loginSuccessMessage ? (
+                  <p role="status" className="mb-6 rounded border border-studio-success/25 bg-studio-success-soft px-4 py-3 text-sm leading-6 text-studio-success-contrast">
+                    {loginSuccessMessage}
+                  </p>
+                ) : null}
 
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div className="group">
@@ -837,6 +1027,7 @@ export default function Login() {
                           if (errorMessage) {
                             setErrorMessage('');
                           }
+                          if (loginSuccessMessage) setLoginSuccessMessage('');
                         }}
                         className="w-full border-b border-studio-border-soft bg-transparent pb-3 text-base text-studio-text-primary placeholder-studio-text-muted transition-colors duration-500 focus:border-studio-border-active focus:outline-none"
                         placeholder="输入用户名"
@@ -859,6 +1050,7 @@ export default function Login() {
                           if (errorMessage) {
                             setErrorMessage('');
                           }
+                          if (loginSuccessMessage) setLoginSuccessMessage('');
                         }}
                         className="w-full border-b border-studio-border-soft bg-transparent pb-3 pr-10 text-base text-studio-text-primary placeholder-studio-text-muted transition-colors duration-500 focus:border-studio-border-active focus:outline-none"
                         placeholder="输入密码"
@@ -869,7 +1061,9 @@ export default function Login() {
                         type="button"
                         onClick={() => setShowPassword((prev) => !prev)}
                         className="absolute right-0 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-studio-text-muted transition-colors hover:text-studio-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-studio-primary focus-visible:outline-offset-2"
-                        aria-label="切换密码可见状态"
+                        aria-controls="login-password"
+                        aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                        aria-pressed={showPassword}
                       >
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
@@ -878,7 +1072,7 @@ export default function Login() {
                   </div>
 
                   <div className="flex items-center gap-2 pt-1">
-                    <label className="flex cursor-pointer items-center gap-2 text-xs tracking-wider text-studio-text-secondary transition-colors hover:text-studio-text-primary">
+                    <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs tracking-wider text-studio-text-secondary transition-colors hover:text-studio-text-primary">
                       <input
                         type="checkbox"
                         id="remember"
@@ -930,6 +1124,7 @@ export default function Login() {
     errorMessage,
     handleSubmit,
     layout,
+    loginSuccessMessage,
     loading,
     mounted,
     password,
@@ -954,13 +1149,21 @@ export default function Login() {
         oldPwd={oldPwd}
         newPwd={newPwd}
         confirmPwd={confirmPwd}
-        loading={changePwdLoading}
+        loading={changePwdLoading || loading}
+        outcomeUnknown={passwordOutcomeUnknown}
+        errorMessage={changePwdError}
         returnFocusRef={changePasswordReturnFocusRef}
-        onOldPwdChange={setOldPwd}
-        onNewPwdChange={setNewPwd}
-        onConfirmPwdChange={setConfirmPwd}
+        onOldPwdChange={(value) => { setOldPwd(value); if (!passwordOutcomeUnknownRef.current) setChangePwdError(''); }}
+        onNewPwdChange={(value) => { setNewPwd(value); if (!passwordOutcomeUnknownRef.current) setChangePwdError(''); }}
+        onConfirmPwdChange={(value) => { setConfirmPwd(value); if (!passwordOutcomeUnknownRef.current) setChangePwdError(''); }}
         onCancel={() => {
           changePasswordFlowPending.current = false;
+          passwordOutcomeUnknownRef.current = false;
+          setPasswordOutcomeUnknown(false);
+          setChangePwdError('');
+          setOldPwd('');
+          setNewPwd('');
+          setConfirmPwd('');
           authStore.logout();
           setShowChangePassword(false);
         }}

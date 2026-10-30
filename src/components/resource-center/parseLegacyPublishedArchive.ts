@@ -27,6 +27,7 @@ export interface PublishedArchiveSnapshot {
     status?: string;
     publishTime?: string;
     url?: string;
+    scriptSource?: ArchiveScriptSource | null;
     analytics?: {
       dataDate?: string;
       views?: number;
@@ -35,6 +36,22 @@ export interface PublishedArchiveSnapshot {
       comments?: number;
     } | null;
   }>;
+  scriptSourceSnapshots: ArchiveScriptSourceSnapshot[];
+}
+
+export interface ArchiveScriptSource {
+  topicId: number;
+  sourceTopicId?: number;
+  productionId: number | null;
+  version: string | null;
+  state: 'none' | 'unavailable' | 'unrecorded' | 'derived' | 'inherited';
+}
+
+export interface ArchiveScriptSourceSnapshot {
+  topicId: number;
+  productionId: number;
+  version: string;
+  content: string;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -45,6 +62,7 @@ const archivePathPattern = /^archive\/topic-[1-9]\d*$/;
 const metricFields = ['views', 'likes', 'shares', 'comments'] as const;
 const INVALID_ANALYTICS = Symbol('invalid-analytics');
 const INVALID_STRING = Symbol('invalid-string');
+const INVALID_SOURCE_ID = Symbol('invalid-source-id');
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -60,6 +78,55 @@ function optionalPositiveId(record: JsonRecord, field: string): number | undefin
   const value = record[field];
   if (value === undefined || value === null) return value;
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function nullableSourceId(record: JsonRecord, field: string): number | null | undefined | typeof INVALID_SOURCE_ID {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : INVALID_SOURCE_ID;
+}
+
+function parseArchiveScriptSource(value: unknown): ArchiveScriptSource | null | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return null;
+  const topicId = optionalPositiveId(value, 'topic_id');
+  const productionId = nullableSourceId(value, 'production_id');
+  const sourceTopicId = nullableSourceId(value, 'source_topic_id');
+  const version = optionalString(value, 'version');
+  const state = value.state;
+  if (topicId === undefined || topicId === null || productionId === undefined || productionId === INVALID_SOURCE_ID
+    || sourceTopicId === INVALID_SOURCE_ID || (value.source_topic_id !== undefined && sourceTopicId === null)
+    || version === INVALID_STRING || (version !== null && version !== undefined && typeof version !== 'string')
+    || !['none', 'unavailable', 'unrecorded', 'derived', 'inherited'].includes(String(state))) return null;
+  const normalizedVersion = version ?? null;
+  if (state === 'derived' || state === 'inherited') {
+    if (productionId === null || !normalizedVersion?.trim()) return null;
+  } else if (state === 'none' || state === 'unrecorded') {
+    if (productionId !== null || normalizedVersion !== null) return null;
+  }
+  return {
+    topicId,
+    ...(typeof sourceTopicId === 'number' ? { sourceTopicId } : {}),
+    productionId,
+    version: normalizedVersion,
+    state: state as ArchiveScriptSource['state'],
+  };
+}
+
+function parseArchiveScriptSourceSnapshots(value: unknown): ArchiveScriptSourceSnapshot[] {
+  if (!Array.isArray(value)) return [];
+  const snapshots: ArchiveScriptSourceSnapshot[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const topicId = optionalPositiveId(item, 'topic_id');
+    const productionId = optionalPositiveId(item, 'production_id');
+    const version = optionalString(item, 'version');
+    const content = optionalString(item, 'content');
+    if (!topicId || !productionId || typeof version !== 'string' || !version.trim() || typeof content !== 'string') continue;
+    snapshots.push({ topicId, productionId, version, content });
+  }
+  return snapshots;
 }
 
 function parseAnalytics(value: unknown): PublishedArchiveSnapshot['publishedRecords'][number]['analytics'] | undefined | typeof INVALID_ANALYTICS {
@@ -87,6 +154,7 @@ function parsePublishedRecord(value: unknown): PublishedArchiveSnapshot['publish
   const publishTime = optionalString(value, 'publish_time');
   const url = optionalString(value, 'url');
   const analytics = parseAnalytics(value.analytics);
+  const scriptSource = parseArchiveScriptSource(value.script_source);
   if (platform === INVALID_STRING || publishingId === null || status === INVALID_STRING
     || publishTime === INVALID_STRING || url === INVALID_STRING || analytics === INVALID_ANALYTICS) return null;
   const normalizedPlatform = platform?.trim();
@@ -97,6 +165,7 @@ function parsePublishedRecord(value: unknown): PublishedArchiveSnapshot['publish
     ...(status === undefined ? {} : { status }),
     ...(publishTime === undefined ? {} : { publishTime }),
     ...(url === undefined ? {} : { url }),
+    ...(value.script_source === undefined ? {} : { scriptSource }),
     ...(analytics === undefined ? {} : { analytics }),
   };
 }
@@ -206,6 +275,7 @@ export function parseLegacyPublishedArchive(input: {
       ...(script === undefined ? {} : { script }),
       shootingComments,
       publishedRecords,
+      scriptSourceSnapshots: parseArchiveScriptSourceSnapshots(value.script_source_snapshots),
     },
   };
 }

@@ -8,6 +8,7 @@ import { useNetworkState } from '@/platform/network';
 import { resolveMobileDeepLink } from '@/platform/deep-link';
 import { mobileFallbackReturnPath, mobileNavigationPath } from '@/platform/mobile-layout';
 import { observeAppHeaderHeight } from '@/lib/app-header-offset';
+import { MobileShellProvider } from './MobileShellContext';
 
 const tabs = [
   { path: '/', label: '首页', icon: Home },
@@ -19,6 +20,8 @@ const tabs = [
 
 export function MobileShell({ user, unreadCount, onLogout }: { user: User | null; unreadCount: number; onLogout: () => void }) {
   const shellRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const previousPathnameRef = useRef<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const current = useMemo(() => tabs.find((tab) => tab.path === mobileNavigationPath(location.pathname)), [location.pathname]);
@@ -55,6 +58,28 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
   }, [location.pathname, navigate]);
 
   useEffect(() => {
+    const previousPathname = previousPathnameRef.current;
+    previousPathnameRef.current = location.pathname;
+    const pathnameChanged = previousPathname !== null && previousPathname !== location.pathname;
+    const mountedAfterClientNavigation = previousPathname === null && location.key !== 'default';
+    if (!pathnameChanged && !mountedAfterClientNavigation) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const main = mainRef.current;
+      if (!main) return;
+
+      const pageHeading = main.querySelector<HTMLElement>('[data-mobile-page-heading]')
+        ?? Array.from(main.querySelectorAll<HTMLElement>('h1')).find((heading) => heading.getClientRects().length > 0);
+      const headerHeading = shellRef.current?.querySelector<HTMLElement>('header h1');
+      const target = pageHeading ?? (headerHeading?.getClientRects().length ? headerHeading : main);
+      if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+      target.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.key, location.pathname]);
+
+  useEffect(() => {
     const onDeepLink = (event: Event) => {
       const path = resolveMobileDeepLink((event as CustomEvent<{ url?: string }>).detail?.url ?? '');
       if (path) navigate(path);
@@ -63,7 +88,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
     return () => window.removeEventListener('xmt-deep-link', onDeepLink);
   }, [navigate]);
 
-  return <div ref={shellRef} className="min-h-dvh bg-studio-bg text-theme-text" style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
+  return <MobileShellProvider><div ref={shellRef} className="min-h-dvh bg-studio-bg text-theme-text" style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
     <header className="sticky top-0 z-sticky flex min-h-14 items-center justify-between border-b border-studio-border-soft bg-studio-surface/95 px-4 backdrop-blur">
       <div className="flex min-w-0 items-center gap-2">
         {!isRoot && <button type="button" aria-label={`返回${returnLabel}`} onClick={() => navigate(returnPath)} className="xmt-btn xmt-btn-ghost h-11 w-11 shrink-0 p-2"><ArrowLeft className="h-5 w-5" /></button>}
@@ -72,7 +97,7 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
       <button onClick={onLogout} aria-label="退出登录" className="flex h-11 w-11 items-center justify-center rounded-xl text-studio-text-secondary"><LogOut className="h-5 w-5" /></button>
     </header>
     {networkState !== 'online' ? <div role="status" className="border-b border-studio-amber/30 bg-studio-amber/10 px-4 py-2 text-center text-xs text-studio-amber-contrast">{networkState === 'offline' ? '网络不可用，正在使用本地内容与草稿。' : networkState === 'poor_network' ? '网络较弱，草稿会保存在本机；请确认后再提交。' : '网络已恢复，正在重新连接。'}</div> : null}
-    <main className="min-h-[calc(100dvh-8.5rem)] px-4 py-4 pb-28" style={{ fontSize: 'var(--system-font-size)' }}>
+    <main ref={mainRef} tabIndex={-1} aria-label={`${sectionLabel}内容`} className="min-h-[calc(100dvh-8.5rem)] px-4 py-4 pb-28" style={{ fontSize: 'var(--system-font-size)' }}>
       <div className="mx-auto w-full max-w-xl"><Outlet /></div>
     </main>
     <nav aria-label="移动主导航" className="fixed inset-x-0 bottom-0 z-sticky flex border-t border-studio-border-soft bg-studio-surface/95 px-2 pt-2 backdrop-blur" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 8px)', paddingLeft: 'max(env(safe-area-inset-left), 8px)', paddingRight: 'max(env(safe-area-inset-right), 8px)' }}>
@@ -85,5 +110,5 @@ export function MobileShell({ user, unreadCount, onLogout }: { user: User | null
       })}
     </nav>
     <div className="sr-only">当前用户：{user?.name ?? '未知'}</div>
-  </div>;
+  </div></MobileShellProvider>;
 }

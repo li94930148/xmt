@@ -11,14 +11,18 @@ function getAuthHeader(): Record<string, string> {
 export type { Achievement, AchievementStats, AchievementProgress, LeaderboardEntry, RecentAchievement };
 
 // 获取所有成就定义
-export async function getAchievements(category?: string, rarity?: string): Promise<Achievement[]> {
+export async function getAchievements(
+  category?: string,
+  rarity?: string,
+  options?: { cache?: RequestCache },
+): Promise<Achievement[]> {
   const params = new URLSearchParams();
   if (category && category !== 'all') params.set('category', category);
   if (rarity && rarity !== 'all') params.set('rarity', rarity);
   const qs = params.toString();
   const url = `${BASE_URL}/achievements${qs ? '?' + qs : ''}`;
 
-  const response = await fetch(url, { headers: getAuthHeader() });
+  const response = await fetch(url, { headers: getAuthHeader(), ...(options?.cache ? { cache: options.cache } : {}) });
   if (!response.ok) throw new Error('获取成就列表失败');
   const json = await response.json();
   return json.data || json;
@@ -110,6 +114,13 @@ export async function seedAchievements(): Promise<{ message: string }> {
     method: 'POST',
     headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
   });
-  if (!response.ok) throw new Error('初始化成就失败');
+  if (!response.ok) throw new AchievementApiError('初始化成就失败', response.status);
   return response.json();
+}
+
+export class AchievementApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'AchievementApiError';
+  }
 }

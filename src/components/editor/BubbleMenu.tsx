@@ -156,16 +156,16 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
       style={{ minWidth: 0, maxWidth: 'calc(100vw - 16px)' }}
     >
       {/* 文字格式 */}
-      <button onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} onMouseDown={keepEditorSelection} title="加粗">
+      <button type="button" aria-label="加粗" aria-pressed={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} onMouseDown={keepEditorSelection} title="加粗">
         <Bold className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} onMouseDown={keepEditorSelection} title="斜体">
+      <button type="button" aria-label="斜体" aria-pressed={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} onMouseDown={keepEditorSelection} title="斜体">
         <Italic className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} onMouseDown={keepEditorSelection} title="下划线">
+      <button type="button" aria-label="下划线" aria-pressed={editor.isActive('underline')} onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} onMouseDown={keepEditorSelection} title="下划线">
         <Underline className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => editor.chain().focus().toggleStrike().run()} className={btnClass(editor.isActive('strike'))} onMouseDown={keepEditorSelection} title="删除线">
+      <button type="button" aria-label="删除线" aria-pressed={editor.isActive('strike')} onClick={() => editor.chain().focus().toggleStrike().run()} className={btnClass(editor.isActive('strike'))} onMouseDown={keepEditorSelection} title="删除线">
         <Strikethrough className="w-3.5 h-3.5" />
       </button>
 
@@ -173,23 +173,23 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
 
       {/* 文字颜色 */}
       <div className="relative" ref={textColorRef}>
-        <button onMouseDown={keepEditorSelection} onClick={() => { setShowTextColor(!showTextColor); setShowHighlight(false); }} className={`${btnClass()} flex items-center gap-0.5`} title="文字颜色">
+        <button type="button" aria-label="文字颜色" aria-expanded={showTextColor} onMouseDown={keepEditorSelection} onClick={() => { setShowTextColor(!showTextColor); setShowHighlight(false); }} className={`${btnClass()} flex items-center gap-0.5`} title="文字颜色">
           <Type className="w-3.5 h-3.5" />
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
         {showTextColor && (
           <div
             ref={textColorPopoverRef}
-            className={`absolute ${textColorLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} right-0 left-auto translate-x-0 z-50 p-3 rounded-lg shadow-xl border sm:left-1/2 sm:right-auto sm:-translate-x-1/2 ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
+            className={`absolute ${textColorLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} right-0 left-auto translate-x-0 z-editor-menu p-3 rounded-lg shadow-xl border sm:left-1/2 sm:right-auto sm:-translate-x-1/2 ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
             style={{ minWidth: '216px', maxHeight: `${textColorLayout.maxHeight}px`, maxWidth: 'calc(100vw - 16px)', overflowY: 'auto' }}
           >
             <div className="mb-2 text-xs font-medium text-studio-text-secondary">文字颜色</div>
-            <div className="grid grid-cols-4 gap-2.5">
+            <div role="group" aria-label="文字颜色选项" className="grid grid-cols-4 gap-2.5">
               {TEXT_COLORS.map((c) => (
-                <button key={c.value || 'default'} onClick={() => handleTextColor(c.value)}
-                  className="h-10 w-10 rounded-lg border-2 transition-all hover:scale-110 flex items-center justify-center sm:h-8 sm:w-8"
+                <button type="button" key={c.value || 'default'} aria-label={`${c.name}文字颜色`} aria-pressed={c.value ? editor.isActive('textStyle', { color: c.value }) : !editor.getAttributes('textStyle').color} onClick={() => handleTextColor(c.value)}
+                  className="h-10 w-10 rounded-lg border-2 transition-all hover:scale-110 flex items-center justify-center sm:h-8 sm:w-8 [@media(any-pointer:coarse)]:!h-10 [@media(any-pointer:coarse)]:!w-10"
                   style={{ borderColor: 'var(--xmt-border-soft)' }} title={c.name}>
-                  <span className="font-bold text-sm" style={{ color: c.value || 'var(--editor-fg)' }}>A</span>
+                  <span aria-hidden="true" className="font-bold text-sm" style={{ color: c.value || 'var(--editor-fg)' }}>A</span>
                 </button>
               ))}
             </div>
@@ -199,27 +199,27 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
 
       {/* 高亮颜色 */}
       <div className="relative" ref={highlightRef}>
-        <button onMouseDown={keepEditorSelection} onClick={() => { setShowHighlight(!showHighlight); setShowTextColor(false); }} className={`${btnClass(editor.isActive('highlight'))} flex items-center gap-0.5`} title="高亮">
+        <button type="button" aria-label="高亮颜色" aria-expanded={showHighlight} onMouseDown={keepEditorSelection} onClick={() => { setShowHighlight(!showHighlight); setShowTextColor(false); }} className={`${btnClass(editor.isActive('highlight'))} flex items-center gap-0.5`} title="高亮">
           <Highlighter className="w-3.5 h-3.5" />
           <ChevronDown className="w-2.5 h-2.5" />
         </button>
         {showHighlight && (
           <div
             ref={highlightPopoverRef}
-            className={`absolute ${highlightLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} right-0 left-auto translate-x-0 z-50 p-3 rounded-lg shadow-xl border sm:left-1/2 sm:right-auto sm:-translate-x-1/2 ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
+            className={`absolute ${highlightLayout.placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'} right-0 left-auto translate-x-0 z-editor-menu p-3 rounded-lg shadow-xl border sm:left-1/2 sm:right-auto sm:-translate-x-1/2 ${isDark ? 'bg-studio-surface-soft border-studio-border-soft' : 'bg-studio-surface-glass border-studio-border-soft'}`}
             style={{ minWidth: '216px', maxHeight: `${highlightLayout.maxHeight}px`, maxWidth: 'calc(100vw - 16px)', overflowY: 'auto' }}
           >
             <div className="mb-2 text-xs font-medium text-studio-text-secondary">高亮颜色</div>
-            <div className="grid grid-cols-4 gap-2.5 mb-1">
+            <div role="group" aria-label="高亮颜色选项" className="grid grid-cols-4 gap-2.5 mb-1">
               {HIGHLIGHT_COLORS.map((c) => (
-                <button key={c.value} onClick={() => handleHighlight(c.value)}
-                  className="h-10 w-10 rounded-lg border-2 transition-all hover:scale-110 sm:h-8 sm:w-8"
+                <button type="button" key={c.value} aria-label={`${c.name}高亮颜色`} aria-pressed={editor.isActive('highlight', { color: c.value })} onClick={() => handleHighlight(c.value)}
+                  className="h-10 w-10 rounded-lg border-2 transition-all hover:scale-110 sm:h-8 sm:w-8 [@media(any-pointer:coarse)]:!h-10 [@media(any-pointer:coarse)]:!w-10"
                   style={{ backgroundColor: c.bg, borderColor: editor.isActive('highlight', { color: c.value }) ? 'var(--xmt-primary)' : 'transparent' }}
                   title={c.name} />
               ))}
             </div>
             {editor.isActive('highlight') && (
-              <button onClick={() => { editor.chain().focus().unsetHighlight().run(); setShowHighlight(false); }}
+              <button type="button" aria-label="取消高亮" onClick={() => { editor.chain().focus().unsetHighlight().run(); setShowHighlight(false); }}
                 className={`min-h-10 w-full text-xs py-1 rounded flex items-center justify-center gap-1 ${isDark ? 'text-studio-text-secondary hover:bg-studio-surface-soft' : 'text-studio-text-muted hover:bg-studio-surface-soft'}`}>
                 <X className="w-3 h-3" /> 取消高亮
               </button>
@@ -231,17 +231,17 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
       {divider}
 
       {/* 链接 */}
-      <button onClick={() => void setLink()} className={btnClass(editor.isActive('link'))} title="链接">
+      <button type="button" aria-label="链接" aria-pressed={editor.isActive('link')} onClick={() => void setLink()} className={btnClass(editor.isActive('link'))} title="链接">
         <LinkIcon className="w-3.5 h-3.5" />
       </button>
 
       {/* 代码 */}
-      <button onClick={() => editor.chain().focus().toggleCode().run()} className={btnClass(editor.isActive('code'))} onMouseDown={keepEditorSelection} title="行内代码">
+      <button type="button" aria-label="行内代码" aria-pressed={editor.isActive('code')} onClick={() => editor.chain().focus().toggleCode().run()} className={btnClass(editor.isActive('code'))} onMouseDown={keepEditorSelection} title="行内代码">
         <Code className="w-3.5 h-3.5" />
       </button>
 
       {/* 引用 */}
-      <button onClick={() => editor.chain().focus().toggleBlockquote().run()} className={btnClass(editor.isActive('blockquote'))} onMouseDown={keepEditorSelection} title="引用">
+      <button type="button" aria-label="引用" aria-pressed={editor.isActive('blockquote')} onClick={() => editor.chain().focus().toggleBlockquote().run()} className={btnClass(editor.isActive('blockquote'))} onMouseDown={keepEditorSelection} title="引用">
         <Quote className="w-3.5 h-3.5" />
       </button>
 
@@ -250,7 +250,7 @@ export default function BubbleMenuBar({ editor, onAddComment, contextMenuOpen = 
       {/* 标题切换 H1-H4 */}
       <div className="flex items-center gap-0.5">
         {[1, 2, 3, 4].map((level) => (
-          <button key={level} onClick={() => setHeading(level as 1 | 2 | 3 | 4)}
+          <button type="button" key={level} aria-label={`标题${level}`} aria-pressed={editor.isActive('heading', { level })} onClick={() => setHeading(level as 1 | 2 | 3 | 4)}
             className={`${btnClass(editor.isActive('heading', { level }))} text-xs font-semibold px-1.5`}
             title={`标题${level}`}>
             H{level}

@@ -30,7 +30,7 @@ export default function SummaryArchiveDetailModal({ kind, record, onClose }: { k
   const period = monthly ? `${(record as MonthlyRecord | null)?.year ?? ''} 年 ${(record as MonthlyRecord | null)?.month ?? ''} 月` : `${record?.year ?? ''} 年`;
   const author = record?.user_name || record?.username || '成员';
 
-  return <BaseModal open={Boolean(record)} onClose={onClose} title={monthly ? '月报详情' : '年报详情'} description={`${author} · ${period}`} size="xl">
+  return <BaseModal open={Boolean(record)} onClose={onClose} title={monthly ? '月报详情' : '年报详情'} description={`${author} · ${period}`} size="xl" closeOnEscape>
     <dl className="grid gap-3 rounded-card border border-studio-border-soft bg-studio-surface-soft p-4 text-sm sm:grid-cols-2">
       <div><dt className="text-studio-text-muted">提交人</dt><dd className="mt-1 font-medium text-studio-text-primary">{author}</dd></div>
       <div><dt className="text-studio-text-muted">所属期间</dt><dd className="mt-1 font-medium text-studio-text-primary">{period}</dd></div>

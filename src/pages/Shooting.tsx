@@ -13,6 +13,7 @@ import StageProgress, { type StageItem } from '../components/studio/StageProgres
 import StatusPill, { type StatusTone } from '../components/studio/StatusPill';
 import StudioEmptyState from '../components/studio/EmptyState';
 import TaskFlowCard from '../components/studio/TaskFlowCard';
+import { getUserFacingErrorMessage } from '../lib/userFacingError';
 import { formatBeijingDate } from '../lib/utils';
 import { useAppStore, useAuthStore } from '../store';
 import { Shooting as ShootingType, Topic } from '../types';
@@ -51,9 +52,16 @@ type PendingShootingCreateVerification = {
   userId: number;
   payload: ShootingCreatePayload;
   page: number;
-  status: 'uncertain' | 'ready' | 'checking';
+  status: 'uncertain' | 'ready' | 'checking' | 'blocked';
   readError: string | null;
 };
+
+class ShootingCreateRecoveryMarkerError extends Error {
+  constructor(message: string, readonly cleanupFailed: boolean) {
+    super(message);
+    this.name = 'ShootingCreateRecoveryMarkerError';
+  }
+}
 
 function shootingDeleteVerificationKey(userId: number | undefined) {
   return userId ? `xmt:shooting-delete-pending:v1:user:${userId}` : null;
@@ -65,6 +73,69 @@ function shootingCompletionVerificationKey(userId: number | undefined) {
 
 function shootingCreateVerificationKey(userId: number | undefined) {
   return userId ? `xmt:shooting-create-pending:v1:user:${userId}` : null;
+}
+
+function shootingCreateBlockedVerificationKey(userId: number | undefined) {
+  return userId ? `xmt:shooting-create-blocked:v1:user:${userId}` : null;
+}
+
+function shootingCreateContentFingerprint(pending: PendingShootingCreateVerification) {
+  const serialized = JSON.stringify({
+    clientRequestId: pending.clientRequestId,
+    userId: pending.userId,
+    payload: pending.payload,
+    page: pending.page,
+    status: pending.status,
+  });
+  let hash = 2166136261;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash = Math.imul(hash ^ serialized.charCodeAt(index), 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function parsePendingShootingCreateVerification(raw: string | null, userId: number): PendingShootingCreateVerification | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<PendingShootingCreateVerification> & { contentFingerprint?: unknown };
+    const payload = value?.payload as Partial<ShootingCreatePayload> | undefined;
+    if (!value || value.userId !== userId || typeof value.clientRequestId !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.clientRequestId)
+      || !payload || !Number.isSafeInteger(payload.topic_id) || Number(payload.topic_id) <= 0
+      || (payload.plan_date !== undefined && typeof payload.plan_date !== 'string')
+      || (payload.location !== undefined && typeof payload.location !== 'string')
+      || (payload.equipment !== undefined && typeof payload.equipment !== 'string')
+      || (payload.status !== undefined && !['planned', 'in_progress', 'completed', 'cancelled', 'pending'].includes(payload.status))
+      || !Number.isSafeInteger(value.page) || Number(value.page) <= 0) return null;
+    const pending: PendingShootingCreateVerification = {
+      clientRequestId: value.clientRequestId,
+      userId,
+      payload: {
+        topic_id: Number(payload.topic_id),
+        ...(payload.plan_date === undefined ? {} : { plan_date: payload.plan_date }),
+        ...(payload.location === undefined ? {} : { location: payload.location }),
+        ...(payload.equipment === undefined ? {} : { equipment: payload.equipment }),
+        ...(payload.status === undefined ? {} : { status: payload.status }),
+      },
+      page: Number(value.page),
+      status: value.status === 'blocked' ? 'blocked' : value.status === 'ready' ? 'ready' : 'uncertain',
+      readError: null,
+    };
+    const hasFingerprint = value.contentFingerprint !== undefined;
+    const fingerprintMismatch = hasFingerprint
+      && (typeof value.contentFingerprint !== 'string'
+        || value.contentFingerprint !== shootingCreateContentFingerprint(pending));
+    if (value.status === 'blocked' || fingerprintMismatch) {
+      return {
+        ...pending,
+        status: 'blocked',
+        readError: '本次创建请求未发送，但恢复记录完整性无法确认；创建操作已锁定。请重新清理恢复记录后，再重新填写并提交。',
+      };
+    }
+    return pending;
+  } catch {
+    return null;
+  }
 }
 
 function loadPendingShootingDeleteVerification(userId: number | undefined): PendingShootingDeleteVerification | null {
@@ -95,34 +166,51 @@ function loadPendingShootingCompletionVerification(userId: number | undefined): 
   }
 }
 
+function persistPendingShootingDeleteVerification(userId: number | undefined, pending: PendingShootingDeleteVerification) {
+  const key = shootingDeleteVerificationKey(userId);
+  if (!key || typeof window === 'undefined') throw new Error('当前登录身份尚未确认，无法安全保存删除恢复信息');
+  const serialized = JSON.stringify({ id: pending.id, topicTitle: pending.topicTitle, page: pending.page });
+  window.sessionStorage.setItem(key, serialized);
+  if (window.sessionStorage.getItem(key) !== serialized) {
+    throw new Error('制作计划删除恢复信息未能完整保存，本次未发送删除请求');
+  }
+}
+
+function persistPendingShootingCompletionVerification(userId: number | undefined, pending: PendingShootingCompletionVerification) {
+  const key = shootingCompletionVerificationKey(userId);
+  if (!key || typeof window === 'undefined') throw new Error('当前登录身份尚未确认，无法安全保存完成恢复信息');
+  const serialized = JSON.stringify({ id: pending.id, topicTitle: pending.topicTitle, page: pending.page });
+  window.sessionStorage.setItem(key, serialized);
+  if (window.sessionStorage.getItem(key) !== serialized) {
+    throw new Error('成片完成恢复信息未能完整保存，本次未发送状态更新');
+  }
+}
+
+function removeStoredShootingVerification(userId: number | undefined, action: 'delete' | 'completion', shootingId: number) {
+  const key = action === 'delete' ? shootingDeleteVerificationKey(userId) : shootingCompletionVerificationKey(userId);
+  if (!key || typeof window === 'undefined') return;
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(key) || 'null') as { id?: unknown } | null;
+    if (value?.id === shootingId) window.sessionStorage.removeItem(key);
+  } catch {
+    // A stale marker is safe: reopening the page performs a read-only status check.
+  }
+}
+
 function loadPendingShootingCreateVerification(userId: number | undefined): PendingShootingCreateVerification | null {
   const key = shootingCreateVerificationKey(userId);
   if (!key || userId === undefined || typeof window === 'undefined') return null;
+  const blockedKey = shootingCreateBlockedVerificationKey(userId);
+  if (blockedKey) {
+    try {
+      const blocked = parsePendingShootingCreateVerification(window.localStorage.getItem(blockedKey), userId);
+      if (blocked?.status === 'blocked') return blocked;
+    } catch {
+      // The session marker below remains the primary recovery source.
+    }
+  }
   try {
-    const value = JSON.parse(sessionStorage.getItem(key) || 'null') as Partial<PendingShootingCreateVerification> | null;
-    const payload = value?.payload as Partial<ShootingCreatePayload> | undefined;
-    if (!value || value.userId !== userId || typeof value.clientRequestId !== 'string'
-      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.clientRequestId)
-      || !payload || !Number.isSafeInteger(payload.topic_id) || Number(payload.topic_id) <= 0
-      || (payload.plan_date !== undefined && typeof payload.plan_date !== 'string')
-      || (payload.location !== undefined && typeof payload.location !== 'string')
-      || (payload.equipment !== undefined && typeof payload.equipment !== 'string')
-      || (payload.status !== undefined && !['planned', 'in_progress', 'completed', 'cancelled', 'pending'].includes(payload.status))
-      || !Number.isSafeInteger(value.page) || Number(value.page) <= 0) return null;
-    return {
-      clientRequestId: value.clientRequestId,
-      userId,
-      payload: {
-        topic_id: Number(payload.topic_id),
-        ...(payload.plan_date === undefined ? {} : { plan_date: payload.plan_date }),
-        ...(payload.location === undefined ? {} : { location: payload.location }),
-        ...(payload.equipment === undefined ? {} : { equipment: payload.equipment }),
-        ...(payload.status === undefined ? {} : { status: payload.status }),
-      },
-      page: Number(value.page),
-      status: value.status === 'ready' ? 'ready' : 'uncertain',
-      readError: null,
-    };
+    return parsePendingShootingCreateVerification(window.sessionStorage.getItem(key), userId);
   } catch {
     return null;
   }
@@ -131,27 +219,109 @@ function loadPendingShootingCreateVerification(userId: number | undefined): Pend
 function persistPendingShootingCreateVerification(pending: PendingShootingCreateVerification) {
   const key = shootingCreateVerificationKey(pending.userId);
   if (!key || typeof window === 'undefined') throw new Error('当前账号尚未确认，无法安全保存恢复状态');
-  sessionStorage.setItem(key, JSON.stringify({
+  const marker = {
     clientRequestId: pending.clientRequestId,
     userId: pending.userId,
     payload: pending.payload,
     page: pending.page,
     status: pending.status,
-  }));
-  const stored = loadPendingShootingCreateVerification(pending.userId);
-  if (!stored || stored.clientRequestId !== pending.clientRequestId || stored.userId !== pending.userId) {
-    throw new Error('制作计划恢复状态未能保存，本次未发送创建请求');
+    readError: pending.readError,
+  } satisfies PendingShootingCreateVerification;
+  const serialized = JSON.stringify({ ...marker, contentFingerprint: shootingCreateContentFingerprint(marker) });
+  try {
+    window.sessionStorage.setItem(key, serialized);
+  } catch {
+    // A read-back below determines whether the marker nevertheless reached storage.
   }
+  let currentRaw: string | null | undefined;
+  try {
+    currentRaw = window.sessionStorage.getItem(key);
+  } catch {
+    currentRaw = undefined;
+  }
+  if (currentRaw === serialized) return;
+
+  let sameRequestMarker = false;
+  let cleanupVerified = currentRaw === null;
+  if (currentRaw) {
+    try {
+      const current = JSON.parse(currentRaw) as { clientRequestId?: unknown } | null;
+      sameRequestMarker = current?.clientRequestId === pending.clientRequestId;
+    } catch {
+      sameRequestMarker = false;
+    }
+    if (sameRequestMarker) {
+      try {
+        window.sessionStorage.removeItem(key);
+        cleanupVerified = window.sessionStorage.getItem(key) === null;
+      } catch {
+        cleanupVerified = false;
+      }
+    }
+  }
+  if (cleanupVerified) {
+    throw new ShootingCreateRecoveryMarkerError('制作计划恢复状态未能完整保存，本次未发送创建请求。请检查后重新提交。', false);
+  }
+
+  const blockedMarker: PendingShootingCreateVerification = {
+    ...pending,
+    status: 'blocked',
+    readError: '本次创建请求未发送，但恢复记录完整性无法确认；创建操作已锁定。请重新清理恢复记录后，再重新填写并提交。',
+  };
+  const blockedSerialized = JSON.stringify({
+    clientRequestId: blockedMarker.clientRequestId,
+    userId: blockedMarker.userId,
+    payload: blockedMarker.payload,
+    page: blockedMarker.page,
+    status: blockedMarker.status,
+    contentFingerprint: shootingCreateContentFingerprint(blockedMarker),
+  });
+  if (sameRequestMarker) {
+    try {
+      window.sessionStorage.setItem(key, blockedSerialized);
+    } catch {
+      // The separate local marker below still provides a reload lock when available.
+    }
+  }
+  const blockedKey = shootingCreateBlockedVerificationKey(pending.userId);
+  if (blockedKey) {
+    try {
+      window.localStorage.setItem(blockedKey, blockedSerialized);
+      if (window.localStorage.getItem(blockedKey) === blockedSerialized) {
+        throw new ShootingCreateRecoveryMarkerError(blockedMarker.readError || '创建恢复记录清理未能确认，操作已锁定。', true);
+      }
+    } catch (error) {
+      if (error instanceof ShootingCreateRecoveryMarkerError) throw error;
+      // The in-memory lock remains active; the session marker carries its fingerprint for reload recovery.
+    }
+  }
+  throw new ShootingCreateRecoveryMarkerError(blockedMarker.readError || '创建恢复记录清理未能确认，操作已锁定。', true);
 }
 
 function removeStoredShootingCreateVerification(userId: number, clientRequestId: string) {
   const key = shootingCreateVerificationKey(userId);
-  if (!key || typeof window === 'undefined') return;
+  const blockedKey = shootingCreateBlockedVerificationKey(userId);
+  if (!key || typeof window === 'undefined') return false;
   try {
-    const stored = JSON.parse(sessionStorage.getItem(key) || 'null') as { clientRequestId?: unknown } | null;
-    if (stored?.clientRequestId === clientRequestId) sessionStorage.removeItem(key);
+    const storedRaw = window.sessionStorage.getItem(key);
+    if (storedRaw !== null) {
+      const stored = JSON.parse(storedRaw) as { clientRequestId?: unknown } | null;
+      if (stored?.clientRequestId !== clientRequestId) return false;
+      window.sessionStorage.removeItem(key);
+      if (window.sessionStorage.getItem(key) !== null) return false;
+    }
+    if (blockedKey) {
+      const blockedRaw = window.localStorage.getItem(blockedKey);
+      if (blockedRaw !== null) {
+        const blocked = JSON.parse(blockedRaw) as { clientRequestId?: unknown } | null;
+        if (blocked?.clientRequestId !== clientRequestId) return false;
+        window.localStorage.removeItem(blockedKey);
+        if (window.localStorage.getItem(blockedKey) !== null) return false;
+      }
+    }
+    return true;
   } catch {
-    // Server-side idempotency keeps a subsequent read or retry safe if storage cleanup fails.
+    return false;
   }
 }
 
@@ -177,6 +347,16 @@ const initialFormData = {
   equipment: '',
   status: 'planned',
 };
+
+function shootingCreateFormData(payload: ShootingCreatePayload) {
+  return {
+    topic_id: String(payload.topic_id),
+    plan_date: payload.plan_date || '',
+    location: payload.location || '',
+    equipment: payload.equipment || '',
+    status: payload.status || 'planned',
+  };
+}
 
 const shootingStatusTone: Record<string, StatusTone> = {
   planned: 'amber',
@@ -296,7 +476,7 @@ export default function Shooting() {
       setRefreshNotice(null);
       return true;
     } catch (error) {
-      setLoadError((error as Error).message || '暂时无法读取制作计划');
+      setLoadError(getUserFacingErrorMessage(error, '暂时无法读取制作计划，请稍后重试。'));
       return false;
     } finally {
       setLoading(false);
@@ -362,12 +542,7 @@ export default function Shooting() {
     setDeleteVerificationNotice(null);
     try {
       const status = await getShootingDeleteStatus(pending.id);
-      const key = shootingDeleteVerificationKey(authUserId);
-      try {
-        if (key) sessionStorage.removeItem(key);
-      } catch {
-        // A confirmed read-back is authoritative even when this tab cannot clear its recovery marker.
-      }
+      removeStoredShootingVerification(authUserId, 'delete', pending.id);
       setPendingDeleteVerification(null);
       setPage(pending.page);
       if (status === 'deleted') {
@@ -376,17 +551,19 @@ export default function Shooting() {
         addNotification({ title: '删除已确认', message: `服务器确认“${pending.topicTitle}”已删除；未重复发送删除请求。`, type: 'success' });
         await refreshAfterConfirmedMutation('已只读核实制作计划删除', pending.page);
       } else {
+        const operationMessage = getUserFacingErrorMessage(operationError, '');
         setDeleteVerificationNotice(
-          `服务器确认“${pending.topicTitle}”仍存在；本次没有重复删除。请核对列表后，再由你决定是否重新发起删除。${operationError instanceof Error ? ` ${operationError.message}` : ''}`,
+          `服务器确认“${pending.topicTitle}”仍存在；本次没有重复删除。请核对列表后，再由你决定是否重新发起删除。${operationMessage ? ` ${operationMessage}` : ''}`,
         );
         const refreshed = await fetchData(pending.page);
         if (!refreshed) setDeleteVerificationNotice((current) => `${current || ''} 列表读取失败，可稍后重新加载。`);
       }
     } catch (error) {
-      const readError = error instanceof Error ? error.message : '读取失败';
+      const operationMessage = getUserFacingErrorMessage(operationError, '');
+      const readError = getUserFacingErrorMessage(error, '');
       setPendingDeleteVerification({
         ...pending,
-        readError: `删除请求未获确认${operationError instanceof Error ? `（${operationError.message}）` : ''}，制作计划状态也暂时无法读取${readError ? `（${readError}）` : ''}。请只读重试核实，不要重复删除。`,
+        readError: `删除请求未获确认${operationMessage ? `（${operationMessage}）` : ''}，制作计划状态也暂时无法读取${readError ? `（${readError}）` : ''}。请只读重试核实，不要重复删除。`,
       });
     } finally {
       deleteVerificationLockRef.current = false;
@@ -422,12 +599,7 @@ export default function Shooting() {
     setCompletionVerificationNotice(null);
     try {
       const status = await getShootingCompletionStatus(pending.id);
-      const key = shootingCompletionVerificationKey(authUserId);
-      try {
-        if (key) sessionStorage.removeItem(key);
-      } catch {
-        // A confirmed read-back is authoritative even when this tab cannot clear its recovery marker.
-      }
+      removeStoredShootingVerification(authUserId, 'completion', pending.id);
       setPendingCompletionVerification(null);
       setPage(pending.page);
       if (status.state === 'completed') {
@@ -443,17 +615,19 @@ export default function Shooting() {
         if (!refreshed) setCompletionVerificationNotice((current) => `${current || ''} 列表读取失败，可稍后重新加载。`);
       } else {
         setShootings((current) => current.map((item) => item.id === pending.id ? { ...item, status: status.status } : item));
+        const operationMessage = getUserFacingErrorMessage(operationError, '');
         setCompletionVerificationNotice(
-          `服务器确认“${pending.topicTitle}”当前状态为“${getWorkflowStatusLabel('shooting', status.status)}”；本次没有重复提交完成操作。请核对后，再由你决定是否重新确认。${operationError instanceof Error ? ` ${operationError.message}` : ''}`,
+          `服务器确认“${pending.topicTitle}”当前状态为“${getWorkflowStatusLabel('shooting', status.status)}”；本次没有重复提交完成操作。请核对后，再由你决定是否重新确认。${operationMessage ? ` ${operationMessage}` : ''}`,
         );
         const refreshed = await fetchData(pending.page);
         if (!refreshed) setCompletionVerificationNotice((current) => `${current || ''} 列表读取失败，可稍后重新加载。`);
       }
     } catch (error) {
-      const readError = error instanceof Error ? error.message : '读取失败';
+      const operationMessage = getUserFacingErrorMessage(operationError, '');
+      const readError = getUserFacingErrorMessage(error, '');
       setPendingCompletionVerification({
         ...pending,
-        readError: `完成操作结果未获确认${operationError instanceof Error ? `（${operationError.message}）` : ''}，制作计划状态也暂时无法读取${readError ? `（${readError}）` : ''}。请只读重试核实，不要重复提交完成操作。`,
+        readError: `完成操作结果未获确认${operationMessage ? `（${operationMessage}）` : ''}，制作计划状态也暂时无法读取${readError ? `（${readError}）` : ''}。请只读重试核实，不要重复提交完成操作。`,
       });
     } finally {
       completionVerificationLockRef.current = false;
@@ -515,11 +689,11 @@ export default function Shooting() {
         });
       }
     } catch (error) {
-      const readError = error instanceof Error ? error.message : '读取失败';
+      const readError = getUserFacingErrorMessage(error, '');
       setPendingCreateVerification({
         ...pending,
         status: 'uncertain',
-        readError: `制作计划创建结果尚未确认，状态读取失败（${readError}）。请只读核实，不要另建一条。`,
+        readError: `制作计划创建结果尚未确认，状态暂时无法读取${readError ? `（${readError}）` : ''}。请只读核实，不要另建一条。`,
       });
       setShowCreateModal(false);
       addNotification({
@@ -531,6 +705,7 @@ export default function Shooting() {
   }, [addNotification, finishShootingCreate]);
 
   const verifyPendingShootingCreate = useCallback(async (pending: PendingShootingCreateVerification) => {
+    if (pending.status === 'blocked') return;
     if (createVerificationLockRef.current || mutationLockRef.current) return;
     createVerificationLockRef.current = true;
     setCreateVerificationLoading(true);
@@ -544,7 +719,7 @@ export default function Shooting() {
   }, [resolvePendingShootingCreate]);
 
   const submitPendingShootingCreate = useCallback(async (pending: PendingShootingCreateVerification) => {
-    if (mutationLockRef.current || createVerificationLockRef.current || authUserId !== pending.userId) return;
+    if (pending.status === 'blocked' || mutationLockRef.current || createVerificationLockRef.current || authUserId !== pending.userId) return;
     mutationLockRef.current = true;
     setMutationLoading(true);
     const checking: PendingShootingCreateVerification = { ...pending, status: 'checking', readError: null };
@@ -558,26 +733,28 @@ export default function Shooting() {
         if (isDefinitiveShootingCreateRejection(error)) {
           removeStoredShootingCreateVerification(pending.userId, pending.clientRequestId);
           setPendingCreateVerification(null);
-          setFormData({
-            topic_id: String(pending.payload.topic_id),
-            plan_date: pending.payload.plan_date || '',
-            location: pending.payload.location || '',
-            equipment: pending.payload.equipment || '',
-            status: pending.payload.status || 'planned',
-          });
+          setFormData(shootingCreateFormData(pending.payload));
           setShowCreateModal(true);
-          addNotification({ title: '创建失败', message: (error as Error).message, type: 'error' });
+          addNotification({ title: '创建失败', message: getUserFacingErrorMessage(error, '制作计划创建失败，请检查后重试。'), type: 'error' });
         } else {
           await resolvePendingShootingCreate(checking);
         }
       }
     } catch (error) {
-      removeStoredShootingCreateVerification(pending.userId, pending.clientRequestId);
-      setPendingCreateVerification(null);
-      setShowCreateModal(true);
+      if (error instanceof ShootingCreateRecoveryMarkerError && error.cleanupFailed) {
+        setPendingCreateVerification({
+          ...pending,
+          status: 'blocked',
+          readError: getUserFacingErrorMessage(error, '本次创建请求未发送，但恢复记录清理未能确认；创建操作已锁定。请重试清理恢复记录。'),
+        });
+        setShowCreateModal(false);
+      } else {
+        setPendingCreateVerification(null);
+        setShowCreateModal(true);
+      }
       addNotification({
         title: '创建未发送',
-        message: error instanceof Error ? error.message : '恢复状态保存失败，请检查后重试。',
+        message: getUserFacingErrorMessage(error, '创建暂未发送，恢复状态保存失败，请检查后重试。'),
         type: 'error',
       });
     } finally {
@@ -631,16 +808,24 @@ export default function Shooting() {
       status: 'uncertain',
       readError: null,
     };
-    try {
-      persistPendingShootingCreateVerification(pending);
-      setPendingCreateVerification(pending);
-      restoredCreateVerificationStartedRef.current = true;
-      await submitPendingShootingCreate(pending);
-    } catch (error) {
-      removeStoredShootingCreateVerification(authUserId, pending.clientRequestId);
-      setPendingCreateVerification(null);
-      addNotification({ title: '创建未发送', message: error instanceof Error ? error.message : '恢复状态保存失败，请检查后重试。', type: 'error' });
+    restoredCreateVerificationStartedRef.current = true;
+    await submitPendingShootingCreate(pending);
+  };
+
+  const clearBlockedShootingCreateRecovery = async (pending: PendingShootingCreateVerification) => {
+    if (pending.status !== 'blocked' || mutationLockRef.current) return;
+    if (!removeStoredShootingCreateVerification(pending.userId, pending.clientRequestId)) {
+      setPendingCreateVerification({
+        ...pending,
+        readError: '恢复记录仍未能安全清理；创建操作继续锁定。请稍后重试清理，未发送的创建请求不会自动重试。',
+      });
+      return;
     }
+    initialPendingCreateVerificationRef.current = null;
+    setPendingCreateVerification(null);
+    setFormData(shootingCreateFormData(pending.payload));
+    setShowCreateModal(true);
+    addNotification({ title: '恢复记录已清理', message: '之前的创建请求未发送；原填写内容已恢复，请核对后再提交。', type: 'info' });
   };
 
   const handleDelete = async (id: number): Promise<boolean> => {
@@ -649,10 +834,23 @@ export default function Shooting() {
       addNotification({ title: '删除暂不可用', message: '当前登录身份尚未确认，请刷新后再试。', type: 'error' });
       return false;
     }
+    const pending = {
+      id,
+      topicTitle: shootings.find((item) => item.id === id)?.topic_title || '该制作计划',
+      page,
+      readError: null,
+    };
+    try {
+      persistPendingShootingDeleteVerification(authUserId, pending);
+    } catch (error) {
+      addNotification({ title: '删除未发送', message: getUserFacingErrorMessage(error, '无法安全保存删除恢复信息；本次没有发送删除请求。'), type: 'error' });
+      return false;
+    }
     mutationLockRef.current = true;
     setMutationLoading(true);
     try {
       await deleteShooting(id);
+      removeStoredShootingVerification(authUserId, 'delete', id);
 
       addNotification({
         title: '删除成功',
@@ -668,26 +866,15 @@ export default function Shooting() {
       return true;
     } catch (error) {
       if (!isDefinitiveShootingDeleteRejection(error)) {
-        const pending = {
-          id,
-          topicTitle: shootings.find((item) => item.id === id)?.topic_title || '该制作计划',
-          page,
-          readError: null,
-        };
-        const key = shootingDeleteVerificationKey(authUserId);
-        try {
-          if (key) sessionStorage.setItem(key, JSON.stringify({ id: pending.id, topicTitle: pending.topicTitle, page: pending.page }));
-        } catch {
-          // In-memory write locking remains active when session recovery is unavailable.
-        }
         restoredDeleteVerificationStartedRef.current = true;
         setConfirmAction(null);
         await verifyDeleteStatus(pending, error);
         return false;
       }
+      removeStoredShootingVerification(authUserId, 'delete', id);
       addNotification({
         title: '删除失败',
-        message: error instanceof Error ? error.message : '制作计划删除失败，请检查后重试。',
+        message: getUserFacingErrorMessage(error, '制作计划删除失败，请检查后重试。'),
         type: 'error',
       });
       return false;
@@ -704,6 +891,18 @@ export default function Shooting() {
       return false;
     }
     setCompletionVerificationNotice(null);
+    const pending = {
+      id: shooting.id,
+      topicTitle: shooting.topic_title || '该制作计划',
+      page,
+      readError: null,
+    };
+    try {
+      persistPendingShootingCompletionVerification(authUserId, pending);
+    } catch (error) {
+      addNotification({ title: '完成未发送', message: getUserFacingErrorMessage(error, '无法安全保存完成恢复信息；本次没有发送状态更新。'), type: 'error' });
+      return false;
+    }
     mutationLockRef.current = true;
     setMutationLoading(true);
     try {
@@ -711,6 +910,7 @@ export default function Shooting() {
         topic_id: shooting.topic_id,
         status: 'completed',
       });
+      removeStoredShootingVerification(authUserId, 'completion', shooting.id);
       addNotification({
         title: '完成成功',
         message: '服务端已确认成片制作完成，已流转到发布管理环节',
@@ -723,26 +923,15 @@ export default function Shooting() {
       return true;
     } catch (error) {
       if (!isDefinitiveShootingCompletionRejection(error)) {
-        const pending = {
-          id: shooting.id,
-          topicTitle: shooting.topic_title || '该制作计划',
-          page,
-          readError: null,
-        };
-        const key = shootingCompletionVerificationKey(authUserId);
-        try {
-          if (key) sessionStorage.setItem(key, JSON.stringify({ id: pending.id, topicTitle: pending.topicTitle, page: pending.page }));
-        } catch {
-          // In-memory write locking remains active when session recovery is unavailable.
-        }
         restoredCompletionVerificationStartedRef.current = true;
         setConfirmAction(null);
         await verifyCompletionStatus(pending, error);
         return false;
       }
+      removeStoredShootingVerification(authUserId, 'completion', shooting.id);
       addNotification({
         title: '操作失败',
-        message: (error as Error).message,
+        message: getUserFacingErrorMessage(error, '成片制作暂时无法完成，请稍后重试。'),
         type: 'error',
       });
       return false;
@@ -835,7 +1024,9 @@ export default function Shooting() {
       {pendingCreateVerification && pendingCreateVerification.userId === authUserId ? (
         <div role="alert" className="flex flex-col gap-3 rounded-xl border border-studio-amber/25 bg-studio-amber/10 p-4 text-sm text-studio-amber-contrast sm:flex-row sm:items-center sm:justify-between">
           <p className="min-w-0">
-            {pendingCreateVerification.status === 'ready'
+            {pendingCreateVerification.status === 'blocked'
+              ? pendingCreateVerification.readError || '创建请求未发送，但恢复记录无法安全清理；创建操作已锁定。'
+              : pendingCreateVerification.status === 'ready'
               ? '服务器暂未找到这条制作计划。原表单与请求编号已保留；只能使用同一编号安全重试，不能另建新请求。'
               : pendingCreateVerification.readError || '制作计划创建结果正在核实；核实完成前，成片制作页面的写入操作已暂停。'}
           </p>
@@ -844,13 +1035,17 @@ export default function Shooting() {
             variant="secondary"
             className="self-start sm:self-auto"
             disabled={mutationLoading || createVerificationLoading || pendingCreateVerification.status === 'checking'}
-            onClick={() => pendingCreateVerification.status === 'ready'
-              ? void submitPendingShootingCreate(pendingCreateVerification)
-              : void verifyPendingShootingCreate(pendingCreateVerification)}
+            onClick={() => pendingCreateVerification.status === 'blocked'
+              ? void clearBlockedShootingCreateRecovery(pendingCreateVerification)
+              : pendingCreateVerification.status === 'ready'
+                ? void submitPendingShootingCreate(pendingCreateVerification)
+                : void verifyPendingShootingCreate(pendingCreateVerification)}
           >
             {mutationLoading || createVerificationLoading
               ? '正在处理…'
-              : pendingCreateVerification.status === 'ready' ? '安全重试同一请求' : '只读核实创建状态'}
+              : pendingCreateVerification.status === 'blocked'
+                ? '重新清理恢复记录'
+                : pendingCreateVerification.status === 'ready' ? '安全重试同一请求' : '只读核实创建状态'}
           </ActionButton>
         </div>
       ) : null}
@@ -997,11 +1192,16 @@ export default function Shooting() {
       >
         <div className="space-y-4">
           <div>
-            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">关联选题 *</label>
+            <label htmlFor="shooting-create-topic-id" className="mb-2 block text-sm font-medium text-studio-text-secondary">
+              关联选题 <span aria-hidden="true">*</span>
+            </label>
             <select
+              id="shooting-create-topic-id"
+              name="topic_id"
+              required
               value={formData.topic_id}
               onChange={(event) => setFormData({ ...formData, topic_id: event.target.value })}
-              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             >
               <option value="">请选择选题</option>
               {topics.map((topic) => (
@@ -1013,43 +1213,51 @@ export default function Shooting() {
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">计划日期</label>
+            <label htmlFor="shooting-create-plan-date" className="mb-2 block text-sm font-medium text-studio-text-secondary">计划日期</label>
             <input
+              id="shooting-create-plan-date"
+              name="plan_date"
               type="date"
               value={formData.plan_date}
               onChange={(event) => setFormData({ ...formData, plan_date: event.target.value })}
-              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             />
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">拍摄地点</label>
+            <label htmlFor="shooting-create-location" className="mb-2 block text-sm font-medium text-studio-text-secondary">拍摄地点</label>
             <input
+              id="shooting-create-location"
+              name="location"
               type="text"
               value={formData.location}
               onChange={(event) => setFormData({ ...formData, location: event.target.value })}
-              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
               placeholder="请输入拍摄地点"
             />
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">设备清单</label>
+            <label htmlFor="shooting-create-equipment" className="mb-2 block text-sm font-medium text-studio-text-secondary">设备清单</label>
             <textarea
+              id="shooting-create-equipment"
+              name="equipment"
               value={formData.equipment}
               onChange={(event) => setFormData({ ...formData, equipment: event.target.value })}
               rows={2}
-              className="w-full resize-none rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
+              className="w-full resize-none rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
               placeholder="请输入设备清单"
             />
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-studio-text-secondary">状态</label>
+            <label htmlFor="shooting-create-status" className="mb-2 block text-sm font-medium text-studio-text-secondary">状态</label>
             <select
+              id="shooting-create-status"
+              name="status"
               value={formData.status}
               onChange={(event) => setFormData({ ...formData, status: event.target.value })}
-              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary outline-none focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
+              className="w-full rounded-button border border-studio-border-soft bg-studio-surface-soft px-4 py-2 text-studio-text-primary focus:border-studio-border-active focus:ring-2 focus:ring-studio-primary/20"
             >
               <option value="planned">计划中</option>
               <option value="in_progress">制作中</option>

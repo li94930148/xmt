@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import PageHeading from '@/components/common/PageHeading';
 import { Activity, Heart, MousePointer2, Play, RefreshCw, Sparkles, Users, type LucideIcon } from 'lucide-react';
 import { getCreatorCenterData, type CreatorCenterData } from '@/api/creatorCenter';
 import XMTCard from '@/design-system/components/XMTCard';
@@ -6,6 +7,7 @@ import StudioEmptyState from '@/components/studio/EmptyState';
 import CommonLoadingState from '@/components/common/LoadingState';
 import CommonErrorState from '@/components/common/ErrorState';
 import { formatBeijingTime } from '@/lib/utils';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 export type JsonRecord=Record<string,unknown>;
 export const asRecord=(value:unknown):JsonRecord=>value&&typeof value==='object'&&!Array.isArray(value)?value as JsonRecord:{};
@@ -15,16 +17,42 @@ export const formatPercent=(value:unknown)=>`${num(value).toFixed(2)}%`;
 export const formatDate=(value:unknown,full=false)=>value?formatBeijingTime(String(value),full?{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}:{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
 export const levelMeta={viral:{label:'爆款',className:'bg-studio-coral/12 text-studio-coral-contrast'},excellent:{label:'优秀',className:'bg-studio-success/12 text-studio-success-contrast'},normal:{label:'普通',className:'bg-studio-primary/12 text-studio-primary-contrast'},low:{label:'低效',className:'bg-studio-surface-soft/12 text-studio-text-secondary'}} as const;
 
-export function useCreatorData(){const[data,setData]=useState<CreatorCenterData|null>(null);const[loading,setLoading]=useState(true);const[error,setError]=useState('');const load=useCallback(async()=>{setLoading(true);setError('');try{setData(await getCreatorCenterData());}catch(cause){setError(cause instanceof Error?cause.message:'数据加载失败');}finally{setLoading(false);}},[]);useEffect(()=>{void load();},[load]);return{data,loading,error,load};}
+export function useCreatorData(){const[data,setData]=useState<CreatorCenterData|null>(null);const[loading,setLoading]=useState(true);const[error,setError]=useState('');const load=useCallback(async()=>{setLoading(true);setError('');try{setData(await getCreatorCenterData());}catch(cause){setError(getUserFacingErrorMessage(cause,'创作者中心数据暂时无法加载，请检查连接后重试。'));}finally{setLoading(false);}},[]);useEffect(()=>{void load();},[load]);return{data,loading,error,load};}
 export function PageHeader({title,description,loading,onRefresh,refreshLabel='重新读取',actions}:{title:string;description:string;loading?:boolean;onRefresh?:()=>void;refreshLabel?:string;actions?:ReactNode}){
   const [refreshStarted,setRefreshStarted]=useState(false);
   useEffect(()=>{if(!loading)setRefreshStarted(false);},[loading]);
-  return <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><h1 className="text-3xl font-semibold tracking-tight text-studio-text">{title}</h1><p className="mt-2 text-sm text-studio-text-secondary">{description}</p></div><div className="flex flex-wrap items-center gap-2">{actions}{onRefresh?<button type="button" onClick={()=>{setRefreshStarted(true);onRefresh();}} disabled={loading} aria-busy={Boolean(loading)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-studio-border bg-studio-card px-4 text-sm font-medium transition hover:border-studio-cyan/60 disabled:opacity-60"><RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading?'animate-spin motion-reduce:animate-none':''}`}/>{refreshLabel}</button>:null}{loading&&refreshStarted?<span role="status" aria-live="polite" aria-atomic="true" className="sr-only">正在重新读取{title}…</span>:null}</div></header>
+  return <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><PageHeading className="text-3xl font-semibold tracking-tight text-studio-text">{title}</PageHeading><p className="mt-2 text-sm text-studio-text-secondary">{description}</p></div><div className="flex flex-wrap items-center gap-2">{actions}{onRefresh?<button type="button" onClick={()=>{setRefreshStarted(true);onRefresh();}} disabled={loading} aria-busy={Boolean(loading)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-studio-border bg-studio-card px-4 text-sm font-medium transition hover:border-studio-cyan/60 disabled:opacity-60"><RefreshCw aria-hidden="true" className={`h-4 w-4 ${loading?'animate-spin motion-reduce:animate-none':''}`}/>{refreshLabel}</button>:null}{loading&&refreshStarted?<span role="status" aria-live="polite" aria-atomic="true" className="sr-only">正在重新读取{title}…</span>:null}</div></header>
 }
 export function Panel({title,description,children,className=''}:{title:string;description?:string;children:ReactNode;className?:string}){return <section className={`min-w-0 rounded-2xl border border-studio-border bg-studio-card p-5 ${className}`}><h2 className="font-semibold">{title}</h2>{description?<p className="mt-1 text-xs text-studio-text-secondary">{description}</p>:null}<div className="mt-5 min-w-0">{children}</div></section>}
 const accents={cyan:'bg-studio-cyan/10 text-studio-cyan-contrast',blue:'bg-studio-primary/10 text-studio-primary-contrast',rose:'bg-studio-coral/10 text-studio-coral-contrast',violet:'bg-studio-violet/10 text-studio-violet-contrast',emerald:'bg-studio-success/10 text-studio-success-contrast'};
 export function MetricCard({label,value,icon:Icon,accent='cyan',hint}:{label:string;value:unknown;icon:LucideIcon;accent?:keyof typeof accents;hint?:string}){return <XMTCard className="min-w-0 p-5"><div className="flex items-center justify-between"><span className="text-sm text-studio-text-secondary">{label}</span><span className={`grid h-9 w-9 place-items-center rounded-xl ${accents[accent]}`}><Icon className="h-4 w-4"/></span></div><p className="mt-5 min-h-9 truncate text-3xl font-semibold tracking-tight" title={String(value??'')}>{typeof value==='string'?value:formatNumber(value)}</p>{hint?<p className="mt-2 text-xs text-studio-text-secondary">{hint}</p>:null}</XMTCard>}
-export function LineChart({values,color='var(--xmt-cyan)',height='h-52',ariaLabel}:{values:number[];color?:string;height?:string;ariaLabel:string}){const safe=values.length>1?values:[values[0]||0,values[0]||0];const min=Math.min(...safe),max=Math.max(...safe),range=max-min||1;const points=safe.map((value,index)=>`${(index/(safe.length-1))*100},${94-((value-min)/range)*78}`).join(' ');return <div className={height}><svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label={ariaLabel}><path d={`M ${points} L 100 100 L 0 100 Z`} fill={color} opacity=".1"/><polyline points={points} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round"/></svg></div>}
+type LineChartDataPoint = { label: string; value: number | null };
+export function LineChart({values,dataPoints,color='var(--xmt-cyan)',height='h-52',ariaLabel,formatValue=formatNumber}:{values:number[];dataPoints?:LineChartDataPoint[];color?:string;height?:string;ariaLabel:string;formatValue?:(value:number)=>string}) {
+  const safeValues = values.map(value => Number.isFinite(value) ? value : 0);
+  const safe = safeValues.length > 1 ? safeValues : [safeValues[0] ?? 0, safeValues[0] ?? 0];
+  const min = Math.min(...safe);
+  const max = Math.max(...safe);
+  const range = max - min || 1;
+  const points = safe.map((value, index) => `${(index / (safe.length - 1)) * 100},${94 - ((value - min) / range) * 78}`).join(' ');
+  const rows = dataPoints ?? values.map((value, index) => ({ label: `第 ${index + 1} 个数据点`, value }));
+  return <div className={height}>
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label={ariaLabel}>
+      <path d={`M ${points} L 100 100 L 0 100 Z`} fill={color} opacity=".1" />
+      <polyline points={points} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+    </svg>
+    <div className="sr-only">
+      <table>
+        <caption>{ariaLabel}：日期与数值明细</caption>
+        <thead><tr><th scope="col">日期</th><th scope="col">数值</th></tr></thead>
+        <tbody>{rows.length > 0 ? rows.map((row, index) => {
+          const label = String(row.label ?? '').trim() || '日期未知';
+          const value = typeof row.value === 'number' && Number.isFinite(row.value) ? formatValue(row.value) : '暂无数据';
+          return <tr key={`${label}-${index}`}><th scope="row">{label}</th><td>{value}</td></tr>;
+        }) : <tr><td colSpan={2}>周期内暂无数据</td></tr>}</tbody>
+      </table>
+    </div>
+  </div>;
+}
 export function SegmentBar({items}:{items:Array<{label:string;value:number;color?:string}>}){const total=items.reduce((sum,item)=>sum+item.value,0)||1;return <div><div className="flex h-3 overflow-hidden rounded-full bg-studio-surface">{items.map((item,index)=><span key={item.label} style={{width:`${item.value/total*100}%`,backgroundColor:item.color||`hsl(${188+index*38} 75% 52%)`}}/>)}</div><div className="mt-4 grid gap-2 sm:grid-cols-2">{items.map((item,index)=><div key={item.label} className="flex items-center justify-between text-sm"><span className="flex items-center gap-2 text-studio-text-secondary"><i className="h-2.5 w-2.5 rounded-full" style={{backgroundColor:item.color||`hsl(${188+index*38} 75% 52%)`}}/>{item.label}</span><b>{formatNumber(item.value)}</b></div>)}</div></div>}
 export function AccountHeader({account}:{account:JsonRecord}){return <section className="flex items-center gap-4 rounded-2xl border border-studio-border bg-gradient-to-r from-studio-card to-studio-surface p-5">{account.avatar?<img src={String(account.avatar)} alt="账号头像" className="h-14 w-14 rounded-full object-cover ring-2 ring-studio-cyan/30"/>:<div className="grid h-14 w-14 place-items-center rounded-full bg-studio-cyan/10 text-studio-cyan-contrast"><Sparkles className="h-6 w-6"/></div>}<div className="min-w-0"><h2 className="truncate text-lg font-semibold">{String(account.nickname||account.account_name||'抖音账号')}</h2><p className="mt-1 text-sm text-studio-text-secondary">抖音 UID：{String(account.douyin_uid||account.account_id||account.platform_uid||'—')}</p></div><span className="ml-auto rounded-full bg-studio-success/10 px-3 py-1 text-xs font-medium text-studio-success-contrast">数据正常</span></section>}
 export function LoadingState(){return <CommonLoadingState type="page" text="正在读取创作者数据…" />}

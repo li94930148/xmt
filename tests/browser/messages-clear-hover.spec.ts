@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const user = { id: 96, username: 'messages-hover-qa', role: 'admin', name: '消息悬停验收', enabled: true, force_change_password: false };
+let fixtureUnreadCount = 1;
 const app = express();
 app.get('/__qa', (req, res) => {
   const theme = req.query.theme === 'dark' ? 'dark' : 'light';
@@ -15,10 +16,10 @@ app.get('/__qa', (req, res) => {
 });
 app.get('/api/auth/me', (_req, res) => res.json(user));
 app.get('/api/permissions/my', (_req, res) => res.json(['*']));
-app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: 0 }));
+app.get('/api/messages/unread', (_req, res) => res.json({ unreadCount: fixtureUnreadCount }));
 app.get('/api/messages', (_req, res) => res.json({
-  data: [], total: 0, page: 1, limit: 20,
-  summary: { total: 0, unread: 0, actionable: 0 },
+  data: [{ id: 97, title: '未读状态主题验收', content: '仅用于检查未读标记随主题变化。', read: false, type: 'info', created_at: '2026-10-30T08:00:00.000Z' }], total: 1, page: 1, limit: 20,
+  summary: { total: 1, unread: 1, actionable: 0 },
 }));
 app.get(['/api/system-settings', '/api/system-settings/public'], (_req, res) => res.json({}));
 app.use('/api', (_req, res) => res.json({ data: [], total: 0, page: 1, limit: 20 }));
@@ -89,6 +90,40 @@ try {
   for (const theme of ['light', 'dark'] as const) {
     await page.goto(`${base}/__qa?theme=${theme}`);
     await page.getByRole('heading', { name: '消息中心', exact: true }).waitFor();
+    const desktopFilterGroup = page.getByRole('group', { name: '消息筛选', exact: true });
+    assert.equal(await desktopFilterGroup.count(), 1, `${theme} desktop message filters expose a named group`);
+    assert.equal(await desktopFilterGroup.getByRole('button').count(), 4, `${theme} desktop message filter group contains all four desktop filters`);
+    assert.equal(await desktopFilterGroup.getByRole('button', { name: '全部', exact: true }).getAttribute('aria-pressed'), 'true', `${theme} desktop message filter group exposes the default selection`);
+    assert.equal(await page.getByRole('heading', { name: '未读状态主题验收', level: 2 }).count(), 1, `${theme} message titles follow the page heading level`);
+    const topbarMessagesButton = page.locator('header button[aria-label*="打开消息中心"]');
+    const visibleUnreadCount = await topbarMessagesButton.locator('span').innerText();
+    const messagesButtonName = await topbarMessagesButton.getAttribute('aria-label');
+    assert.ok(messagesButtonName?.includes(visibleUnreadCount), `${theme} message button name includes its visible unread count`);
+    const coralTokenChannels = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--xmt-coral-rgb').trim().split(/\s+/).map(Number));
+    const badgeGlow = async (locator: Locator) => locator.evaluate((element) => {
+      const boxShadow = getComputedStyle(element).boxShadow;
+      const color = [...boxShadow.matchAll(/rgba?\(([^)]+)\)/g)].at(-1)?.[1];
+      const channels = color?.split(/[\s,/]+/).filter(Boolean).slice(0, 3).map(Number) ?? [];
+      return { className: element.className, channels, boxShadow };
+    });
+    const topbarBadgeGlow = await badgeGlow(topbarMessagesButton.locator('span'));
+    const sidebarBadge = page.locator('aside button[title="消息中心"] span.relative > span.absolute');
+    assert.equal(await sidebarBadge.count(), 1, `${theme} sidebar exposes the unread message badge`);
+    const sidebarBadgeGlow = await badgeGlow(sidebarBadge);
+    assert.ok(topbarBadgeGlow.className.includes('shadow-glow-coral'), `${theme} topbar badge uses the shared coral glow token`);
+    assert.ok(sidebarBadgeGlow.className.includes('shadow-glow-coral'), `${theme} sidebar badge uses the shared coral glow token`);
+    assert.deepEqual(topbarBadgeGlow.channels, coralTokenChannels, `${theme} topbar badge glow follows the Studio coral color: ${topbarBadgeGlow.boxShadow}`);
+    assert.deepEqual(sidebarBadgeGlow.channels, coralTokenChannels, `${theme} sidebar badge glow follows the Studio coral color: ${sidebarBadgeGlow.boxShadow}`);
+    assert.equal(topbarBadgeGlow.boxShadow, sidebarBadgeGlow.boxShadow, `${theme} topbar and sidebar badge glows match`);
+    const unreadMessage = page.getByRole('button', { name: /未读状态主题验收/ });
+    const unreadAccent = await unreadMessage.evaluate((element) => {
+      const shadowColors = [...getComputedStyle(element).boxShadow.matchAll(/rgba?\(([^)]+)\)/g)];
+      const shadowColor = shadowColors.at(-1)?.[1];
+      const renderedChannels = shadowColor?.split(/[\s,/]+/).filter(Boolean).slice(0, 3).map(Number) ?? [];
+      const tokenChannels = getComputedStyle(document.documentElement).getPropertyValue('--xmt-cyan-rgb').trim().split(/\s+/).map(Number);
+      return { renderedChannels, tokenChannels, boxShadow: getComputedStyle(element).boxShadow };
+    });
+    assert.deepEqual(unreadAccent.renderedChannels, unreadAccent.tokenChannels, `${theme} unread accent follows the current Studio cyan token: ${unreadAccent.boxShadow}`);
     const countSummary = page.getByText(/^本页 \d+ 条，共 \d+ 条$/);
     assert.ok(await renderedContrast(countSummary) >= 4.5, `${theme} message count summary maintains at least 4.5:1 contrast`);
     const clearAction = page.getByRole('button', { name: '清空', exact: true });
@@ -116,12 +151,24 @@ try {
 
     await mobilePage.goto(`${base}/__qa?theme=${theme}`);
     await mobilePage.getByRole('heading', { name: '消息', exact: true }).waitFor();
-    await mobilePage.getByText('暂无消息', { exact: true }).waitFor();
+    const mobileUnreadMessage = mobilePage.getByRole('button', { name: /未读状态主题验收/ });
+    await mobileUnreadMessage.waitFor();
+    const mobileFilterGroup = mobilePage.getByRole('group', { name: '消息筛选', exact: true });
+    assert.equal(await mobileFilterGroup.count(), 1, `${theme} mobile message filters expose a named group`);
+    assert.equal(await mobileFilterGroup.getByRole('button').count(), 5, `${theme} mobile message filter group contains all five mobile filters`);
+    assert.equal(await mobileFilterGroup.getByRole('button', { name: '全部', exact: true }).getAttribute('aria-pressed'), 'true', `${theme} mobile message filter group exposes the default selection`);
     assert.equal(await mobilePage.getByRole('navigation', { name: '移动主导航' }).count(), 1, `${theme} 320px route uses the mobile message shell`);
     const mobileGeometry = await mobilePage.evaluate(() => ({ viewport: document.documentElement.clientWidth, pageWidth: document.documentElement.scrollWidth, mainWidth: document.querySelector('main')?.getBoundingClientRect().width ?? 0 }));
     assert.ok(mobileGeometry.pageWidth <= mobileGeometry.viewport + 1, `${theme} mobile messages page does not overflow horizontally: ${JSON.stringify(mobileGeometry)}`);
     assert.ok(mobileGeometry.mainWidth <= mobileGeometry.viewport, `${theme} mobile main content fits the viewport: ${JSON.stringify(mobileGeometry)}`);
   }
+
+  fixtureUnreadCount = 12;
+  await page.goto(`${base}/__qa?theme=light`);
+  await page.getByRole('heading', { name: '消息中心', exact: true }).waitFor();
+  const manyUnreadMessagesButton = page.locator('header button[aria-label*="打开消息中心"]');
+  assert.equal(await manyUnreadMessagesButton.locator('span').innerText(), '9+', 'topbar badge caps visible unread counts above nine');
+  assert.equal(await manyUnreadMessagesButton.getAttribute('aria-label'), '打开消息中心，未读 9+ 条，共 12 条', 'topbar accessible name includes both the visible capped badge and exact unread total');
 
   assert.deepEqual(mutations, [], 'hover verification must not submit or clear messages');
   assert.deepEqual(errors, [], 'message clear button hover renders without browser errors');
